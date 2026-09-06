@@ -19,8 +19,10 @@ from robosystems.models.extensions import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
 from robosystems.operations.roboledger.reports.statement_sets import (
   StatementStampError,
+  _stamp_facts_into_sets,
   retract_canonical_statement_sets,
   stamp_canonical_statement_sets,
+  to_cents_precision,
 )
 
 GRAPH_ID = "kg01234567890abcdef"
@@ -346,3 +348,42 @@ class TestRetractCanonicalSets:
     assert "factset_type = 'report'" in sql
     assert "report_id IS NULL" in sql
     assert "scenario_id IS NULL" in sql
+
+
+class TestStampRoundsToCents:
+  """Every value stamped through ``_stamp_facts_into_sets`` is dollars derived
+  from integer cents, so it persists at cents precision — the float tail a
+  subtotal picks up in the pivot (``52585 + 5400.02`` → ``57985.020000000004``)
+  never reaches ``facts.value`` and so never reaches a published file."""
+
+  def _stamp_one(self, value: float) -> float:
+    session = MagicMock()
+    fact = SimpleNamespace(
+      element_id="el_assets",
+      value=value,
+      period_start=date(2025, 12, 31),
+      period_end=date(2025, 12, 31),
+      period_type="instant",
+    )
+    _stamp_facts_into_sets(
+      session,
+      SimpleNamespace(facts=[fact]),
+      "ent_1",
+      {"el_assets": ["struct_bs"]},
+      {"struct_bs": "fs_bs"},
+    )
+    (row,) = [call.args[0] for call in session.add.call_args_list]
+    assert row.unit == "USD"
+    return row.value
+
+  def test_a_float_summed_subtotal_persists_as_cents(self):
+    assert self._stamp_one(52585 + 5400.02) == 57985.02
+    assert self._stamp_one(0.1 + 0.2) == 0.3
+
+  def test_negative_and_whole_amounts_are_untouched(self):
+    assert self._stamp_one(-7385.02) == -7385.02
+    assert self._stamp_one(148_000_000.0) == 148_000_000.0
+
+  def test_helper_is_the_ledgers_precision(self):
+    assert to_cents_precision(6085.000000000004) == 6085.0
+    assert to_cents_precision(1.005) in (1.0, 1.01)  # binary rounding, never a tail
