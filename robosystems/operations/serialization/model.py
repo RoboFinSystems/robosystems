@@ -142,6 +142,12 @@ def markdown_to_html(text: str) -> str:
 
 
 def network_role(link: BundleLinkbaseLink) -> str:
+  """The role a link's network lives in — minted from the structure when unset.
+
+  A structure's presentation and calculation links share its role by
+  construction (the producer binds calc arcs to the rendered network), so the
+  minted role is the same for both and xbrlkit puts them in one group.
+  """
   return link.role_uri or f"{MINTED_ROLE_BASE}/{link.structure_id}"
 
 
@@ -169,6 +175,14 @@ def network_definition(
 
 
 def _filing(bundle: StatementBundle, concepts: dict[str, Concept]) -> FilingMeta:
+  """The model's filing header, with xbrlkit's SEC-shaped fields repurposed.
+
+  ``accession`` carries the report id and ``cik`` the entity's own id: the
+  model names its identity fields after EDGAR's, and the scheme on the entity
+  (``_entity``) is what says they are not a CIK. Neutral names are xbrlkit's
+  to add (spec §11.3); the wire output already resolves under the platform's
+  scheme, so nothing downstream reads them as SEC identifiers.
+  """
   meta = bundle.report_meta
   report_id = report_identifier(bundle)
   return FilingMeta(
@@ -184,6 +198,8 @@ def _filing(bundle: StatementBundle, concepts: dict[str, Concept]) -> FilingMeta
 def _entity(bundle: StatementBundle) -> EntityIdentity:
   entity = bundle.entity
   return EntityIdentity(
+    # The entity's ULID in the field the model names ``cik``; ``scheme`` is
+    # what the emitters bind it under, so it never becomes ``cik:``.
     cik=entity.id,
     scheme=ENTITY_SCHEME,
     name=entity.name,
