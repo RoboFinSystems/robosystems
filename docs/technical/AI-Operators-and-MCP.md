@@ -12,7 +12,7 @@ Every graph is an MCP server, served over MCP's Streamable HTTP transport direct
 >
 > **API key:** `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp` — the graph is in the URL (`sec` for the public SEC repository, your graph id for a tenant graph; a subgraph id such as `kg…_dev` is just another URL). The key goes in the same `X-API-Key` header the REST API uses. Keys can be account-wide or **graph-scoped** — valid only for one graph and its subgraphs.
 
-The OAuth path is what the [Claude Connectors Directory](https://claude.com/docs/connectors) listing uses, and it works the same as a custom connector or from any OAuth-capable MCP client. Registration is automatic: clients with a hosted client-metadata document (Claude, Claude Code) are recognised from it; others register dynamically (RFC 7591). Access tokens are bound to the MCP URL, refresh tokens rotate, and every authorization is revocable — a password change or account deactivation revokes them all.
+The OAuth path is what the [Claude Connectors Directory](https://claude.com/docs/connectors) and [ChatGPT plugin directory](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) listings use, and it works the same as a custom connector or from any OAuth-capable MCP client. Registration is automatic: clients with a hosted client-metadata document (Claude, Claude Code) are recognised from it; others register dynamically (RFC 7591). Access tokens are bound to the MCP URL, refresh tokens rotate, and every authorization is revocable — a password change or account deactivation revokes them all.
 
 **Claude Code** — one command; `/mcp` then opens the browser for consent:
 
@@ -29,6 +29,8 @@ claude mcp add --transport http robosystems-sec \
 ```
 
 **Claude (claude.ai / Desktop)** — install from the Connectors Directory, or Settings → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp`; the dialog detects OAuth and the hosted client metadata on its own. Header-only clients (scripts, CI, editors without OAuth) put an API key in `X-API-Key` on a per-graph URL — the **MCP page** in the app (`/connect`) mints keys scoped to one graph for exactly that, and Claude's connector dialog accepts custom request headers too. Credentials never travel in the URL: the `?token=` connector URL was the bridge to OAuth and was retired once OAuth covered those clients. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
+
+**ChatGPT** — install the [RoboSystems plugin](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) from the ChatGPT plugin directory and pick a graph at sign-in. The directory version carries the SEC EDGAR read surface — statements, fact grids, read-only Cypher, filing text search. A RoboLedger graph connects through it too, with those same read tools. For the full RoboLedger toolset in ChatGPT — close, mapping, journal entries — add the server as a custom connector in developer mode (Settings → Connectors → Create) with `https://api.robosystems.ai/v1/mcp`; a custom connector serves every tool of the graph you pick at consent.
 
 **Cursor / VS Code** (`mcp.json`) — the OAuth URL (the editor runs the consent flow), or the per-graph URL with the header:
 
