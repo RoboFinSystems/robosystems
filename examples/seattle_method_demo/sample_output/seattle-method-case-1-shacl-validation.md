@@ -3,7 +3,7 @@
 ## Result: ✅ **Conforms to RoboSystems RDF Ontology v1**
 
 - **Bundle**: `seattle-method-case-1.jsonld`
-- **Graph triples**: 3,127
+- **Graph triples**: 3,181
 - **rs:Fact nodes**: 48
 - **rs:Association nodes**: 162
 - **rs:Element nodes**: 93

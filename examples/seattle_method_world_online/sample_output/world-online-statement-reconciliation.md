@@ -12,7 +12,7 @@ Our values are read from the **v2 graph-native bundle** (`world-online.jsonld` �
 | Anchor | Charlie (current) | Ours (current) | Δ | Charlie (prior) | Ours (prior) | |
 |---|---:|---:|---:|---:|---:|:---:|
 | Total Assets | $3,084,325.68 | $3,084,325.68 | $0.00 | $3,364,281.75 | $3,364,281.75 | ✓ |
-| Total Liabilities & Equity | $3,084,325.68 | $3,084,325.68 | $(0.00) | $3,364,281.75 | $3,364,281.75 | ✓ |
+| Total Liabilities & Equity | $3,084,325.68 | $3,084,325.68 | $0.00 | $3,364,281.75 | $3,364,281.75 | ✓ |
 | Net Income (Loss) | $(1,351,122.32) | $(1,351,122.32) | $0.00 | — | $(1,351,122.32) | ✓ |
 | Receivables | $2,035,468.27 | $2,035,468.27 | $0.00 | $1,231,338.47 | $1,231,338.47 | ✓ |
 | Property, Plant & Equipment | $1,245,567.16 | $1,245,567.16 | $0.00 | $1,266,995.32 | $1,266,995.32 | ✓ |
@@ -24,6 +24,6 @@ A ✓ means the rendered statement ties to Charlie's published reference for tha
 ## How to reproduce
 
 ```bash
-just demo-world-online                                 # full pipeline
-just demo-world-online-statement-reconcile             # this report only
+just demo-world-online                               # full pipeline
+just demo-world-online --step statement-reconcile    # this report only
 ```

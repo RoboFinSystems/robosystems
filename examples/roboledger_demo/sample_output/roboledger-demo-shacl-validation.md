@@ -3,7 +3,7 @@
 ## Result: ✅ **Conforms to RoboSystems RDF Ontology v1**
 
 - **Bundle**: `roboledger-demo.jsonld`
-- **Graph triples**: 3,050
+- **Graph triples**: 3,097
 - **rs:Fact nodes**: 41
 - **rs:Association nodes**: 162
 - **rs:Element nodes**: 93
