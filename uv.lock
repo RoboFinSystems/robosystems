@@ -3815,7 +3815,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.48.0,<1.0" },
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0,<1.0" },
     { name = "webauthn", specifier = ">=2.7.0,<3.0" },
-    { name = "xbrlkit", specifier = ">=0.6.0" },
+    { name = "xbrlkit", specifier = ">=0.7.2" },
     { name = "zstandard", specifier = ">=0.23,<1" },
 ]
 provides-extras = ["dev"]
@@ -4642,7 +4642,7 @@ wheels = [
 
 [[package]]
 name = "xbrlkit"
-version = "0.6.0"
+version = "0.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arelle-release" },
@@ -4654,9 +4654,9 @@ dependencies = [
     { name = "regex" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/77/75/1aa3c71b258f0e5560b7a191fc1c2644139d86217b20fed1aa6459cdf177/xbrlkit-0.6.0.tar.gz", hash = "sha256:995efb741de752d54e0623e645e86bf7abab9271b8a03f5da2080849f226b0e6", size = 1968198, upload-time = "2026-09-08T03:28:41.973Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/16/541516f7954bbc9b27c6f6aed2b9e46f2c6b075c2f9c7a92488e3a79195c/xbrlkit-0.7.2.tar.gz", hash = "sha256:4514903a1d8193eeef8d46b5d49aecb81f1ade72ddc4170b9f1c6e497ce9f7dd", size = 1998149, upload-time = "2026-09-08T05:49:48.773Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/31/42/8309bd2c1df6f1ba93992de5b2efbfceaadbe8b7e51ed546b14644484d26/xbrlkit-0.6.0-py3-none-any.whl", hash = "sha256:cbf8253232fa9c9e6a541753a6bc2fd2418c9d8fd25a83e5091988da7844f8f2", size = 1959598, upload-time = "2026-09-08T03:28:39.67Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/31/be3846f21f2b29e6ad15f852cc2a33dfc74f723a1859a105d05a37d26c39/xbrlkit-0.7.2-py3-none-any.whl", hash = "sha256:6c7e8f43f780f1ae3ae9ff188e1095b3d3e0dbb5e45f8203507f0b49ff013df4", size = 1993295, upload-time = "2026-09-08T05:49:46.984Z" },
 ]
 
 [[package]]
