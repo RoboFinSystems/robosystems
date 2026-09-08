@@ -1,6 +1,6 @@
 # The World Online — Cross-Taxonomy Reconciliation
 
-**Graph**: `kg19f310eb3b8272a718bd`  
+**Graph**: `kg1a07f3227a7878a9d882`  
 **Dataset**: Charlie Hoffman's *The World Online* — 22,288 GL lines, 3,389 journal entries, opening 12/31/2023 through 2028  
 **Source vocabulary**: `mini` (Seattle Method MINI 2026)  
 **Reference**: `SummaryOfTransactions.csv` (`StandardLineItem × StandardBusinessEvent` pivot)  
@@ -64,6 +64,6 @@ A double-entry GL must net to $0.00 across all accounts; the graph does. Charlie
 ## How to reproduce
 
 ```bash
-just demo-world-online                       # full pipeline
-just demo-world-online-reconcile <graph_id>  # this report only
+just demo-world-online                     # full pipeline
+just demo-world-online --step reconcile    # this report only
 ```

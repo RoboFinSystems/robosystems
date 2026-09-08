@@ -3,7 +3,7 @@
 ## Result: ✅ **Conforms to RoboSystems RDF Ontology v1**
 
 - **Bundle**: `coffee-roaster-demo.jsonld`
-- **Graph triples**: 3,937
+- **Graph triples**: 3,940
 - **rs:Fact nodes**: 90
 - **rs:Association nodes**: 177
 - **rs:Element nodes**: 101

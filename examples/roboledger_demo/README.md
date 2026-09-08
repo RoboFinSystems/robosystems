@@ -171,8 +171,8 @@ serialization flavors of the Report bundle via the published Python SDK
 | `output/roboledger-demo.zip` | XBRL 2.1 report package — `instance.xml` + `report.xsd` + presentation/calc/definition linkbases |
 
 `output/` is gitignored (each run stamps fresh graph/report IDs).
-Committed reference copies of both bundles live in
+Committed reference copies of the artifact set live in
 [`sample_output/`](sample_output/) so a reviewer can inspect a clean
 run without spinning up the platform — these are point-in-time
 snapshots, not synced every commit. Refresh with
-`cp output/roboledger-demo.{jsonld,zip} sample_output/`.
+`cp output/*.{md,jsonld,tavi.json,zip} sample_output/`.

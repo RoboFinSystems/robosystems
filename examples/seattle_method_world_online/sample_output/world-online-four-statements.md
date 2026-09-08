@@ -1,7 +1,7 @@
 # The World Online — Four-Statement Report (rs-gaap projection)
 
-**Graph**: `kg19f310eb3b8272a718bd`
-**Report**: `rpt_01KWRGZE0Q574X3Z17TK0T7F69` (published)
+**Graph**: `kg1a07f3227a7878a9d882`
+**Report**: `rpt_01M1ZK6QJ9JD5MVYDYHVYQB3J7` (published)
 **Period**: 2024-01-01 → 2028-12-31 (cumulative; opening balance 12/31/2023)
 **Dataset**: Charlie Hoffman's *The World Online* — 22,288 GL lines, 3,389 entries
 **Source vocabulary**: `mini` (Seattle Method MINI 2026)
@@ -39,7 +39,7 @@ number.
 - **Row count**: 16
 - **Unmapped elements**: 0
 
-| QName | Concept | Current (2024-01-01 → 2028-12-31) | Prior (2018-12-31 → 2023-12-31) |
+| QName | Concept | Current (2024-01-01 → 2028-12-31) | Prior (2019-01-01 → 2023-12-31) |
 |---|---|---: | ---:|
 | `rs-gaap:CashAndCashEquivalentsAtCarryingValue` |     Cash and Cash Equivalents, at Carrying Value | $(648,551.94) | $398,937.76 |
 | `rs-gaap:ReceivablesNetCurrent` |     Receivables, Net, Current | $2,035,468.27 | $1,231,338.47 |
@@ -67,7 +67,7 @@ number.
 - **Row count**: 12
 - **Unmapped elements**: 0
 
-| QName | Concept | Current (2024-01-01 → 2028-12-31) | Prior (2018-12-31 → 2023-12-31) |
+| QName | Concept | Current (2024-01-01 → 2028-12-31) | Prior (2019-01-01 → 2023-12-31) |
 |---|---|---: | ---:|
 | `rs-gaap:Revenues` |   **Revenues** | $2,604,048.36 | $0.00 |
 | `rs-gaap:CostOfGoodsAndServicesSold` |     Cost of Product and Service Sold | $886,041.18 | $0.00 |
@@ -88,18 +88,19 @@ number.
 
 - **Structure**: `rs-gaap — Cash Flow Statement — Indirect`
 - **Block type**: `cash_flow_statement`
-- **Row count**: 7
+- **Row count**: 8
 - **Unmapped elements**: 0
 
-| QName | Concept | Current (2024-01-01 → 2028-12-31) | Prior (2018-12-31 → 2023-12-31) |
-|---|---|---: | ---:|
-| `rs-gaap:NetIncomeLoss` |     Net Income (Loss) Attributable to Parent | $(1,351,122.32) | $0.00 |
-| `rs-gaap:DepreciationDepletionAndAmortization` |     Depreciation, Depletion and Amortization | $21,428.16 | $0.00 |
-| `rs-gaap:IncreaseDecreaseInAccountsReceivable` |     Increase (Decrease) in Accounts Receivable | $(804,129.80) | $0.00 |
-| `rs-gaap:IncreaseDecreaseInInventories` |     Increase (Decrease) in Inventories | $15,168.01 | $0.00 |
-| `rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet` |     Increase (Decrease) in Other Operating Assets and Liabilities, Net | $1,071,166.25 | $0.00 |
-| `rs-gaap:NetCashProvidedByUsedInOperatingActivities` |   **Cash Provided by (Used in) Operating Activity, Including Discontinued Operation** | $(1,047,489.70) | $0.00 |
-| `rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease` | **Cash and Cash Equivalents, Period Increase (Decrease)** | $(1,047,489.70) | $0.00 |
+| QName | Concept | Current (2024-01-01 → 2028-12-31) |
+|---|---|---:|
+| `rs-gaap:NetIncomeLoss` |     Net Income (Loss) Attributable to Parent | $(1,351,122.32) |
+| `rs-gaap:DepreciationDepletionAndAmortization` |     Depreciation, Depletion and Amortization | $21,428.16 |
+| `rs-gaap:IncreaseDecreaseInAccountsReceivable` |     Increase (Decrease) in Accounts Receivable | $(804,129.80) |
+| `rs-gaap:IncreaseDecreaseInInventories` |     Increase (Decrease) in Inventories | $15,168.01 |
+| `rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities` |     Increase (Decrease) in Accounts Payable and Accrued Liabilities | $1,094,102.89 |
+| `rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet` |     Increase (Decrease) in Other Operating Assets and Liabilities, Net | $(22,936.64) |
+| `rs-gaap:NetCashProvidedByUsedInOperatingActivities` |   **Cash Provided by (Used in) Operating Activity, Including Discontinued Operation** | $(1,047,489.70) |
+| `rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease` | **Cash and Cash Equivalents, Period Increase (Decrease)** | $(1,047,489.70) |
 
 ---
 
@@ -110,7 +111,7 @@ number.
 - **Row count**: 2
 - **Unmapped elements**: 0
 
-| QName | Concept | Current (2024-01-01 → 2028-12-31) | Prior (2018-12-31 → 2023-12-31) |
+| QName | Concept | Current (2024-01-01 → 2028-12-31) | Prior (2019-01-01 → 2023-12-31) |
 |---|---|---: | ---:|
 | `rs-gaap:NetIncomeLoss` |   Net Income (Loss) Attributable to Parent | $(1,351,122.32) | $0.00 |
 | `rs-gaap:StockholdersEquity` | **Stockholders' Equity Attributable to Parent** | $56,524.32 | $1,407,646.64 |
@@ -127,6 +128,6 @@ number.
 ### Reproduce
 
 ```bash
-just demo-world-online                         # full pipeline
-just demo-world-online-create-report kg19f310eb3b8272a718bd  # this report only
+just demo-world-online                        # full pipeline
+just demo-world-online --step create-report   # this report only
 ```

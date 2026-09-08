@@ -61,9 +61,9 @@ just demo-world-online --step statement-reconcile
 | `validate` | Validates the downloaded artifacts **on the host, container-free**: `output/world-online-xbrl-validation.md` (Arelle vs XBRL 2.1) + `output/world-online-shacl-validation.md` (pyshacl vs `frameworks/ontology/v1/shapes.ttl`). Reads the on-disk `.jsonld`/`.zip` we just received — no API/DB |
 
 Steps write to `output/` (gitignored — each run stamps fresh graph/report
-IDs, so committing it would churn). Committed reference copies of all
-five artifacts live in [`sample_output/`](sample_output/) for browsing
-without running the demo; refresh them with `cp output/*.{md,jsonld,zip} sample_output/`.
+IDs, so committing it would churn). Committed reference copies of the
+artifact set live in [`sample_output/`](sample_output/) for browsing
+without running the demo; refresh them with `cp output/*.{md,jsonld,tavi.json,zip} sample_output/`.
 
 ## Opening balances (the load-bearing design decision)
 

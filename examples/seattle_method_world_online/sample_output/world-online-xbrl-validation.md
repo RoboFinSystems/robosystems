@@ -2,9 +2,9 @@
 
 ## Result: ✅ **Valid XBRL 2.1**
 
-- **Package**: `world-online.zip` (13,834 bytes)
+- **Package**: `world-online.zip` (13,799 bytes)
 - **Files in zip**: 5 (`instance.xml, report-cal.xml, report-lab.xml, report-pre.xml, report.xsd`)
-- **Facts loaded by Arelle**: 50
+- **Facts loaded by Arelle**: 51
 - **Load errors**: 0
 - **Validation errors**: 0
 

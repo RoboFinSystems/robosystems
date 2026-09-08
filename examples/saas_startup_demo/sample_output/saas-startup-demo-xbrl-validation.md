@@ -2,9 +2,9 @@
 
 ## Result: ✅ **Valid XBRL 2.1**
 
-- **Package**: `saas-startup-demo.zip` (13,941 bytes)
+- **Package**: `saas-startup-demo.zip` (13,906 bytes)
 - **Files in zip**: 5 (`instance.xml, report-cal.xml, report-lab.xml, report-pre.xml, report.xsd`)
-- **Facts loaded by Arelle**: 68
+- **Facts loaded by Arelle**: 69
 - **Load errors**: 0
 - **Validation errors**: 0
 

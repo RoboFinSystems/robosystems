@@ -3,8 +3,8 @@
 ## Result: ✅ **Conforms to RoboSystems RDF Ontology v1**
 
 - **Bundle**: `saas-startup-demo.jsonld`
-- **Graph triples**: 3,786
-- **rs:Fact nodes**: 85
+- **Graph triples**: 3,801
+- **rs:Fact nodes**: 86
 - **rs:Association nodes**: 170
 - **rs:Element nodes**: 98
 - **SHACL shapes checked**: 8 (positive instance shapes + negative shapes banning the retired dialects)

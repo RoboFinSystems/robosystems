@@ -1,10 +1,10 @@
 # Seattle Method Cross-Taxonomy — Test Case 1: Four-Statement Report
 
-**Graph**: `kg19f310982ab9e45ea66e`
-**Report**: `rpt_01KWRGK66V55V8NY74RJVF8WPT` (published)
+**Graph**: `kg1a07f3179e825caf1125`
+**Report**: `rpt_01M1ZK36C0JBQ76S3K5YVW9TSX` (published)
 **Entity**: Lemonade Stand (Charlie Hoffman Test Case 1)
 **Period**: 2024-01-01 → 2024-03-31 (Current)
-**Comparative**: 2023-10-02 → 2023-12-31 (Prior — zero opening balances)
+**Comparative**: 2023-10-01 → 2023-12-31 (Prior — zero opening balances)
 **Dataset**: Charlie Hoffman's lemonade-stand 14-JE Q1 2024 fixture
 **Source vocabulary**: `mini` (Seattle Method MINI base taxonomy)
 **Render vocabulary**: `rs-gaap` (RoboSystems canonical reporting taxonomy)
@@ -74,7 +74,7 @@ The architectural piece that powers this lives in
 - **Row count**: 16
 - **Unmapped elements**: 0
 
-| QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-02 → 2023-12-31) |
+| QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-01 → 2023-12-31) |
 |---|---|---: | ---:|
 | `rs-gaap:CashAndCashEquivalentsAtCarryingValue` |     Cash and Cash Equivalents, at Carrying Value | $10,850.00 | $0.00 |
 | `rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings` |     Inventory, Net of Allowances, Customer Advances and Progress Billings | $2,700.00 | $0.00 |
@@ -102,7 +102,7 @@ The architectural piece that powers this lives in
 - **Row count**: 12
 - **Unmapped elements**: 0
 
-| QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-02 → 2023-12-31) |
+| QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-01 → 2023-12-31) |
 |---|---|---: | ---:|
 | `rs-gaap:Revenues` |   **Revenues** | $8,000.00 | $0.00 |
 | `rs-gaap:CostOfGoodsAndServicesSold` |     Cost of Product and Service Sold | $5,300.00 | $0.00 |
@@ -126,21 +126,21 @@ The architectural piece that powers this lives in
 - **Row count**: 13
 - **Unmapped elements**: 0
 
-| QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-02 → 2023-12-31) |
-|---|---|---: | ---:|
-| `rs-gaap:NetIncomeLoss` |     Net Income (Loss) Attributable to Parent | $2,050.00 | $0.00 |
-| `rs-gaap:DepreciationDepletionAndAmortization` |     Depreciation, Depletion and Amortization | $100.00 | $0.00 |
-| `rs-gaap:IncreaseDecreaseInInventories` |     Increase (Decrease) in Inventories | $(2,700.00) | $0.00 |
-| `rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet` |     Increase (Decrease) in Other Operating Assets and Liabilities, Net | $1,000.00 | $0.00 |
-| `rs-gaap:IncreaseDecreaseInAccruedLiabilities` |     Increase (Decrease) in Accrued Liabilities | $400.00 | $0.00 |
-| `rs-gaap:NetCashProvidedByUsedInOperatingActivities` |   **Cash Provided by (Used in) Operating Activity, Including Discontinued Operation** | $850.00 | $0.00 |
-| `rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment` |     Payments to Acquire Property, Plant, and Equipment | $(1,000.00) | $0.00 |
-| `rs-gaap:NetCashProvidedByUsedInInvestingActivities` |   **Cash Provided by (Used in) Investing Activity, Including Discontinued Operation** | $(1,000.00) | $0.00 |
-| `rs-gaap:ProceedsFromIssuanceOfCommonStock` |     Proceeds from Issuance of Common Stock | $10,000.00 | $0.00 |
-| `rs-gaap:ProceedsFromIssuanceOfLongTermDebt` |     Proceeds from Issuance of Long-Term Debt | $2,000.00 | $0.00 |
-| `rs-gaap:RepaymentsOfLongTermDebt` |     Repayments of Long-Term Debt | $(1,000.00) | $0.00 |
-| `rs-gaap:NetCashProvidedByUsedInFinancingActivities` |   **Cash Provided by (Used in) Financing Activity, Including Discontinued Operation** | $11,000.00 | $0.00 |
-| `rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease` | **Cash and Cash Equivalents, Period Increase (Decrease)** | $10,850.00 | $0.00 |
+| QName | Concept | Current (2024-01-01 → 2024-03-31) |
+|---|---|---:|
+| `rs-gaap:NetIncomeLoss` |     Net Income (Loss) Attributable to Parent | $2,050.00 |
+| `rs-gaap:DepreciationDepletionAndAmortization` |     Depreciation, Depletion and Amortization | $100.00 |
+| `rs-gaap:IncreaseDecreaseInInventories` |     Increase (Decrease) in Inventories | $(2,700.00) |
+| `rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities` |     Increase (Decrease) in Accounts Payable and Accrued Liabilities | $1,000.00 |
+| `rs-gaap:IncreaseDecreaseInAccruedLiabilities` |     Increase (Decrease) in Accrued Liabilities | $400.00 |
+| `rs-gaap:NetCashProvidedByUsedInOperatingActivities` |   **Cash Provided by (Used in) Operating Activity, Including Discontinued Operation** | $850.00 |
+| `rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment` |     Payments to Acquire Property, Plant, and Equipment | $(1,000.00) |
+| `rs-gaap:NetCashProvidedByUsedInInvestingActivities` |   **Cash Provided by (Used in) Investing Activity, Including Discontinued Operation** | $(1,000.00) |
+| `rs-gaap:ProceedsFromIssuanceOfCommonStock` |     Proceeds from Issuance of Common Stock | $10,000.00 |
+| `rs-gaap:ProceedsFromIssuanceOfLongTermDebt` |     Proceeds from Issuance of Long-Term Debt | $2,000.00 |
+| `rs-gaap:RepaymentsOfLongTermDebt` |     Repayments of Long-Term Debt | $(1,000.00) |
+| `rs-gaap:NetCashProvidedByUsedInFinancingActivities` |   **Cash Provided by (Used in) Financing Activity, Including Discontinued Operation** | $11,000.00 |
+| `rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease` | **Cash and Cash Equivalents, Period Increase (Decrease)** | $10,850.00 |
 
 ---
 
@@ -151,7 +151,7 @@ The architectural piece that powers this lives in
 - **Row count**: 3
 - **Unmapped elements**: 0
 
-| QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-02 → 2023-12-31) |
+| QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-01 → 2023-12-31) |
 |---|---|---: | ---:|
 | `rs-gaap:NetIncomeLoss` |   Net Income (Loss) Attributable to Parent | $2,050.00 | $0.00 |
 | `rs-gaap:ProceedsFromIssuanceOfCommonStock` |   Proceeds from Issuance of Common Stock | $10,000.00 | $0.00 |
@@ -161,12 +161,12 @@ The architectural piece that powers this lives in
 
 ## Provenance
 
-- **Report ID**: `rpt_01KWRGK66V55V8NY74RJVF8WPT`
-- **Graph**: `kg19f310982ab9e45ea66e`
+- **Report ID**: `rpt_01M1ZK36C0JBQ76S3K5YVW9TSX`
+- **Graph**: `kg1a07f3179e825caf1125`
 - **Taxonomy**: `rs-gaap` (resolved at create-report time)
-- **Mapping**: `struct_01KWRGK3C8KQYMMDGE4WRJ60K9`
-- **Created**: 2026-07-05T06:49:00.379806
-- **Last generated**: 2026-07-05T06:49:00.567243
+- **Mapping**: `struct_01M1ZK32S3E5JGEME2FW8VJBPC`
+- **Created**: 2026-09-08T04:05:52.129002
+- **Last generated**: 2026-09-08T04:05:52.305060
 
 ### How to reproduce
 
