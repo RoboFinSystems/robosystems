@@ -268,9 +268,9 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 - GitHub OIDC federation (no long-term AWS credentials)
 - Federated role restricted to `main` branch, `release/*` branches, and `v*` tags
-- Scoped to specific repositories (robosystems, robosystems-app, roboledger-app, roboinvestor-app, robosystems-holon-viewer)
+- Scoped to specific repositories (robosystems, robosystems-app, roboledger-app, roboinvestor-app, xbrlkit-viewer)
 - 1-hour maximum session duration
-- Permission scoping: ECR limited to `robosystems*`, S3 limited to `robosystems-*`
+- Permission scoping: ECR limited to `robosystems*`; S3 limited to `robosystems-*` for the backend role, and to the app and viewer static-asset bucket prefixes for the frontend role
 
 ### Infrastructure as Code
 

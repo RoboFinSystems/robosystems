@@ -404,10 +404,21 @@ class EnvConfig:
   ROBOLEDGER_URL = get_str_env("ROBOLEDGER_URL", "https://roboledger.ai")
   ROBOINVESTOR_URL = get_str_env("ROBOINVESTOR_URL", "https://roboinvestor.ai")
   ROBOSYSTEMS_URL = get_str_env("ROBOSYSTEMS_URL", "https://robosystems.ai")
-  # Holon Viewer origin — a static SPA with no app backend of its own; it
-  # participates in the CORS allowlist only. No CloudFormation plumbing: the
-  # env-aware default matches the managed deployments, and forks can override
-  # or leave it (an RFS-owned origin in a fork's allowlist is inert).
+  # xbrlkit viewer origin — a static SPA with no app backend of its own; it
+  # participates in the CORS allowlist only (Graph mode calls this API from
+  # the browser). No CloudFormation plumbing: the env-aware default matches
+  # the managed deployment, and forks can override or leave it (an RFS-owned
+  # origin in a fork's allowlist is inert).
+  VIEWER_URL = get_str_env(
+    "VIEWER_URL",
+    "https://staging.xbrlkit.com"
+    if ENVIRONMENT == "staging"
+    else "https://xbrlkit.com",
+  )
+  # The viewer's original host, served as an alias of the same deployment.
+  # Every `xbrlkit view` published before 0.10 opens it and names it as the
+  # only origin allowed to read the report it serves, so the alias — and this
+  # allowlist entry — stay for as long as those installs might.
   HOLON_URL = get_str_env(
     "HOLON_URL",
     "https://staging.holon.robosystems.ai"
@@ -1460,6 +1471,7 @@ class EnvConfig:
         cls.ROBOLEDGER_URL,
         cls.ROBOINVESTOR_URL,
         cls.ROBOSYSTEMS_URL,
+        cls.VIEWER_URL,
         cls.HOLON_URL,
       ):
         origin = _url_origin(url)

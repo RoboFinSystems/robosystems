@@ -249,9 +249,7 @@ class TestDocuments:
       "0000066740-25-000020": None,
     }
 
-    doc = build_company(
-      filer, filings, manifests, viewer_url="https://holon.robosystems.ai/"
-    )
+    doc = build_company(filer, filings, manifests, viewer_url="https://xbrlkit.com/")
 
     assert doc["ticker"] == "MMM"
     assert doc["cik"] == MMM
@@ -267,18 +265,15 @@ class TestDocuments:
     assert tenq["folder"] is None
     assert len(tenk["representations"]) == 3
     assert tenk["viewer"] == {
-      "holon": viewer_link("https://holon.robosystems.ai", holon_url),
-      "tavi": viewer_link("https://holon.robosystems.ai", tavi_url),
+      "holon": viewer_link("https://xbrlkit.com", holon_url),
+      "tavi": viewer_link("https://xbrlkit.com", tavi_url),
     }
     # The latest openable filing per form: the 10-Q has nothing to open.
     assert doc["latest"] == {"10-K": "0000066740-25-000006"}
 
   def test_viewer_link_encodes_the_url_parameter(self):
-    link = viewer_link("https://holon.robosystems.ai", "https://cdn/a/b/holon.jsonld")
-    assert (
-      link
-      == "https://holon.robosystems.ai/?url=https%3A%2F%2Fcdn%2Fa%2Fb%2Fholon.jsonld"
-    )
+    link = viewer_link("https://xbrlkit.com", "https://cdn/a/b/holon.jsonld")
+    assert link == "https://xbrlkit.com/?url=https%3A%2F%2Fcdn%2Fa%2Fb%2Fholon.jsonld"
 
   def test_build_index_sorts_by_ticker_with_the_newest_filing(self, corpus):
     entities, reports, links = corpus

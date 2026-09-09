@@ -39,10 +39,10 @@ Parameters:
     AllowedPattern: ^[a-zA-Z0-9._-]+$
     ConstraintDescription: Must be a valid GitHub repository name
 
-  GitHubHolonViewerRepoName:
+  GitHubViewerRepoName:
     Type: String
-    Default: robosystems-holon-viewer
-    Description: Holon viewer static SPA repository name
+    Default: xbrlkit-viewer
+    Description: xbrlkit viewer static SPA repository name
     AllowedPattern: ^[a-zA-Z0-9._-]+$
     ConstraintDescription: Must be a valid GitHub repository name
 
@@ -608,10 +608,10 @@ Resources:
                   - !Sub repo:${GitHubOrg}/${GitHubInvestorAppRepoName}:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}/${GitHubInvestorAppRepoName}:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}/${GitHubInvestorAppRepoName}:ref:refs/tags/v*
-                  # Holon viewer (static SPA → S3 + CloudFront)
-                  - !Sub repo:${GitHubOrg}/${GitHubHolonViewerRepoName}:ref:refs/heads/main
-                  - !Sub repo:${GitHubOrg}/${GitHubHolonViewerRepoName}:ref:refs/heads/release/*
-                  - !Sub repo:${GitHubOrg}/${GitHubHolonViewerRepoName}:ref:refs/tags/v*
+                  # xbrlkit viewer (static SPA → S3 + CloudFront)
+                  - !Sub repo:${GitHubOrg}/${GitHubViewerRepoName}:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}/${GitHubViewerRepoName}:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}/${GitHubViewerRepoName}:ref:refs/tags/v*
       Policies:
         - PolicyName: !Sub ${ServiceTag}FrontendDeploymentPolicy
           PolicyDocument:
@@ -619,7 +619,7 @@ Resources:
             Statement:
               # CloudFormation - mutations are pinned to the frontend stacks
               # (RoboSystemsApp*, RoboLedgerApp*, RoboInvestorApp*,
-              # RoboSystemsHolonViewer*, each with its S3 sibling). Reads stay
+              # XbrlkitViewer*, each with its S3 sibling). Reads stay
               # account-wide: the deploy workflows describe their own stacks
               # by name and the calls carry no resource ARN.
               - Sid: CloudFormationWrite
@@ -633,7 +633,7 @@ Resources:
                   - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/RoboSystemsApp*/*
                   - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/RoboLedgerApp*/*
                   - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/RoboInvestorApp*/*
-                  - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/RoboSystemsHolonViewer*/*
+                  - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/XbrlkitViewer*/*
               - Sid: CloudFormationRead
                 Effect: Allow
                 Action:
@@ -681,8 +681,8 @@ Resources:
                   - arn:aws:s3:::roboledger-app-*/*
                   - arn:aws:s3:::roboinvestor-app-*
                   - arn:aws:s3:::roboinvestor-app-*/*
-                  - arn:aws:s3:::robosystems-holon-viewer-*
-                  - arn:aws:s3:::robosystems-holon-viewer-*/*
+                  - arn:aws:s3:::xbrlkit-viewer-*
+                  - arn:aws:s3:::xbrlkit-viewer-*/*
               - Sid: S3Global
                 Effect: Allow
                 Action:

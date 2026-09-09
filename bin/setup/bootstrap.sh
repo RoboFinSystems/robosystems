@@ -430,7 +430,7 @@ deploy_github_oidc() {
     print_info "  - ${GITHUB_ORG}/robosystems-app"
     print_info "  - ${GITHUB_ORG}/roboledger-app"
     print_info "  - ${GITHUB_ORG}/roboinvestor-app"
-    print_info "  - ${GITHUB_ORG}/robosystems-holon-viewer"
+    print_info "  - ${GITHUB_ORG}/xbrlkit-viewer"
 
     # Branch patterns are hardcoded in the template: main, release/*, v* tags
     echo ""
@@ -699,7 +699,7 @@ configure_frontend_repos() {
 
     local repo_names="" key name
     for key in GitHubAppRepoName GitHubLedgerAppRepoName \
-        GitHubInvestorAppRepoName GitHubHolonViewerRepoName; do
+        GitHubInvestorAppRepoName GitHubViewerRepoName; do
         name=$(echo "$params" | jq -r --arg k "$key" \
             '.[] | select(.ParameterKey == $k) | .ParameterValue')
         if [ -n "$name" ] && [ "$name" != "null" ]; then

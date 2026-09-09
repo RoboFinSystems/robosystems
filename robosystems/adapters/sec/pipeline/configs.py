@@ -320,8 +320,8 @@ class SECFilingCatalogConfig(Config):
     default=16, description="Concurrent manifest reads from the public bucket"
   )
   viewer_url: str = Field(
-    default="https://holon.robosystems.ai",
-    description="The holon viewer the catalog's viewer links open",
+    default="https://xbrlkit.com",
+    description="The xbrlkit viewer the catalog's viewer links open",
   )
 
 
