@@ -120,11 +120,22 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                # Allow main, release branches, and version tags for backend repo only
+                # Allow main, release branches, and version tags for backend repo only.
+                # Each ref appears twice: GitHub's classic subject
+                # (repo:ORG/REPO:ref:…) and its immutable one
+                # (repo:ORG@ID/REPO@ID:ref:…), which GitHub issues for a
+                # repository after it is renamed and for repositories created
+                # after July 2026. Only GitHub can mint the ID-qualified form
+                # for this org and repo name, so accepting both narrows nothing
+                # — and a rename no longer locks the deploy out (2026-09-09,
+                # the viewer's rename did exactly that).
                 token.actions.githubusercontent.com:sub:
                   - !Sub repo:${GitHubOrg}/${GitHubRepoName}:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}/${GitHubRepoName}:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}/${GitHubRepoName}:ref:refs/tags/v*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubRepoName}@*:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}@*/${GitHubRepoName}@*:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubRepoName}@*:ref:refs/tags/v*
       Policies:
         - PolicyName: !Sub ${ServiceTag}DeploymentPolicy
           PolicyDocument:
@@ -594,24 +605,39 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
                 # Explicitly allow only these frontend repos
-                # If a repo isn't used, it simply won't assume this role
+                # If a repo isn't used, it simply won't assume this role.
+                # Classic and immutable subject forms for each ref — see the
+                # backend role above for why both.
                 token.actions.githubusercontent.com:sub:
                   # Primary dashboard frontend
                   - !Sub repo:${GitHubOrg}/${GitHubAppRepoName}:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}/${GitHubAppRepoName}:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}/${GitHubAppRepoName}:ref:refs/tags/v*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubAppRepoName}@*:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}@*/${GitHubAppRepoName}@*:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubAppRepoName}@*:ref:refs/tags/v*
                   # RoboLedger frontend
                   - !Sub repo:${GitHubOrg}/${GitHubLedgerAppRepoName}:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}/${GitHubLedgerAppRepoName}:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}/${GitHubLedgerAppRepoName}:ref:refs/tags/v*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubLedgerAppRepoName}@*:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}@*/${GitHubLedgerAppRepoName}@*:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubLedgerAppRepoName}@*:ref:refs/tags/v*
                   # RoboInvestor frontend
                   - !Sub repo:${GitHubOrg}/${GitHubInvestorAppRepoName}:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}/${GitHubInvestorAppRepoName}:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}/${GitHubInvestorAppRepoName}:ref:refs/tags/v*
-                  # xbrlkit viewer (static SPA → S3 + CloudFront)
+                  - !Sub repo:${GitHubOrg}@*/${GitHubInvestorAppRepoName}@*:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}@*/${GitHubInvestorAppRepoName}@*:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubInvestorAppRepoName}@*:ref:refs/tags/v*
+                  # xbrlkit viewer (static SPA → S3 + CloudFront) — renamed
+                  # 2026-09-09, so GitHub issues its immutable subject
                   - !Sub repo:${GitHubOrg}/${GitHubViewerRepoName}:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}/${GitHubViewerRepoName}:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}/${GitHubViewerRepoName}:ref:refs/tags/v*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubViewerRepoName}@*:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}@*/${GitHubViewerRepoName}@*:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubViewerRepoName}@*:ref:refs/tags/v*
       Policies:
         - PolicyName: !Sub ${ServiceTag}FrontendDeploymentPolicy
           PolicyDocument:
