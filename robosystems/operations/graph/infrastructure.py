@@ -407,10 +407,13 @@ class InstanceMonitor:
     when the instance reappears. Reconciling from on-disk truth is the
     follow-up, not this sweep.
 
-    Shared repositories are exempt from the orphan check — their rows are
-    bookkeeping, not routing, and their master is deliberately parked to zero
-    between ingestion runs. An exempt row that still carries a stamp from
-    before this rule is cleared on the next sweep.
+    Shared repositories and rows already marked ``deleted`` are exempt from
+    the orphan check — neither is routing. A shared repository's master is
+    deliberately parked to zero between ingestion runs; a deleted graph's
+    instance is recycled long before the row ages out, so counting it means
+    every fleet replacement pages for ``STALE_GRAPH_DAYS`` and then heals
+    itself. An exempt row that still carries a stamp from before these rules
+    is cleared on the next sweep.
     """
     logger.info("Starting graph registry cleanup")
 
@@ -481,9 +484,16 @@ class InstanceMonitor:
         # legitimately absent most of the day; counting that as drift pages
         # every night for a healthy fleet. Same predicate the router uses, so
         # the two can never disagree about which graphs this applies to.
+        # A row already marked deleted is not routing either: it is waiting
+        # out ``STALE_GRAPH_DAYS`` above, and the instance it names was
+        # released with the graph and recycled by the ASG well inside that
+        # window. Counting it turns every fleet replacement into a page that
+        # clears itself a week later, on an alarm whose whole meaning is
+        # "a live graph's routing is stale".
         instance_missing = (
           bool(instance_id)
           and instance_id not in valid_instances
+          and status != "deleted"
           and not is_shared_repository_or_subgraph(graph_id)
         )
         already_marked = item.get("instance_missing_since") is not None

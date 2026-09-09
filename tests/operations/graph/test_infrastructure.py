@@ -554,6 +554,95 @@ class TestCleanupStaleGraphs:
     assert metric["MetricData"][0]["Value"] == 1
 
   @pytest.mark.unit
+  def test_recently_deleted_graph_is_not_orphaned(self, monitor):
+    """A deleted row inside the retention window is not routing: its instance
+    was released with the graph and recycled by the ASG. Counting it made
+    every fleet replacement page for a week and then heal itself."""
+    graph_table = _make_dynamo_table(
+      items=[
+        {
+          "graph_id": "kg_deleted",
+          "status": "deleted",
+          "deleted_at": (datetime.now(UTC) - timedelta(days=2)).isoformat(),
+          "instance_id": "i-recycled000000001",
+        },
+      ]
+    )
+    instance_table = _make_dynamo_table(items=[])
+    monitor._dynamodb.Table.side_effect = lambda name: (
+      graph_table if name == "test-graph" else instance_table
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.orphaned_count == 0
+    assert result.removed_count == 0
+    graph_table.update_item.assert_not_called()
+    graph_table.delete_item.assert_not_called()
+    metric = monitor._cloudwatch.put_metric_data.call_args.kwargs
+    assert metric["MetricData"][0]["Value"] == 0
+
+  @pytest.mark.unit
+  def test_deleted_graph_marker_from_before_the_exemption_is_cleared(self, monitor):
+    """A row stamped while it was still live, then deleted, drops the marker
+    rather than carrying it until the row ages out."""
+    graph_table = _make_dynamo_table(
+      items=[
+        {
+          "graph_id": "kg_deleted",
+          "status": "deleted",
+          "deleted_at": (datetime.now(UTC) - timedelta(days=2)).isoformat(),
+          "instance_id": "i-recycled000000001",
+          "instance_missing_since": "2026-09-02T03:01:26+00:00",
+        },
+      ]
+    )
+    instance_table = _make_dynamo_table(items=[])
+    monitor._dynamodb.Table.side_effect = lambda name: (
+      graph_table if name == "test-graph" else instance_table
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.orphaned_count == 0
+    assert result.updated_count == 1
+    update = graph_table.update_item.call_args.kwargs
+    assert update["Key"] == {"graph_id": "kg_deleted"}
+    assert update["UpdateExpression"] == "REMOVE instance_missing_since"
+
+  @pytest.mark.unit
+  def test_live_graph_is_still_orphaned_alongside_a_deleted_row(self, monitor):
+    """The exemption is scoped to deleted rows — a live graph swept at the
+    same time is still marked and counted."""
+    graph_table = _make_dynamo_table(
+      items=[
+        {
+          "graph_id": "kg_deleted",
+          "status": "deleted",
+          "deleted_at": (datetime.now(UTC) - timedelta(days=2)).isoformat(),
+          "instance_id": "i-recycled000000001",
+        },
+        {
+          "graph_id": "kg_orphan",
+          "status": "active",
+          "instance_id": "i-doesnotexist00001",
+        },
+      ]
+    )
+    instance_table = _make_dynamo_table(items=[])
+    monitor._dynamodb.Table.side_effect = lambda name: (
+      graph_table if name == "test-graph" else instance_table
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.orphaned_count == 1
+    update = graph_table.update_item.call_args.kwargs
+    assert update["Key"] == {"graph_id": "kg_orphan"}
+    metric = monitor._cloudwatch.put_metric_data.call_args.kwargs
+    assert metric["MetricData"][0]["Value"] == 1
+
+  @pytest.mark.unit
   def test_exception_sets_error_message(self, monitor):
     """Top-level exception is captured in error_message."""
     monitor._dynamodb.Table.side_effect = Exception("scan failed")
