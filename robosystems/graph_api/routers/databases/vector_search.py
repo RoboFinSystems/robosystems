@@ -5,7 +5,8 @@ Two backends via the `backend` field:
 
   - **hnsw** — the live path. LadybugDB-native HNSW index on a materialized
     table. Built here (the materialize path calls build with backend='hnsw')
-    but *searched in Cypher* via CALL QUERY_VECTOR_INDEX, not the /search route.
+    but *searched in Cypher* via CALL QUERY_VECTOR_INDEX, not the /search
+    route, which rejects backend='hnsw' and says so.
 
   - **lance** — no live consumer today. LanceDB IVF-PQ built from a DuckDB
     staging query, plus a tar.gz export. It is the IVF-PQ foundation for the
@@ -20,7 +21,7 @@ Endpoints:
     Build vector index (lance: from DuckDB query, hnsw: on materialized table)
 
   POST /databases/{graph_id}/tables/{table_name}/vector/search
-    Query by embedding similarity
+    Query by embedding similarity (lance only)
 
   POST /databases/{graph_id}/tables/{table_name}/vector/export
     Package lance index as tar.gz for S3 publish (lance only)
@@ -111,7 +112,8 @@ class VectorSearchRequest(BaseModel):
 
   backend: Literal["lance", "hnsw"] = Field(
     default="lance",
-    description="Vector backend to search.",
+    description="Vector backend to search. Only 'lance' is searchable here; "
+    "'hnsw' is rejected with a pointer to CALL QUERY_VECTOR_INDEX.",
   )
   embedding: list[float] = Field(
     ...,
@@ -127,10 +129,6 @@ class VectorSearchRequest(BaseModel):
   select: list[str] | None = Field(
     default=None,
     description="Columns to include in results. If omitted, returns all non-vector columns.",
-  )
-  column: str = Field(
-    default="embedding",
-    description="Embedding column name (hnsw only).",
   )
 
   class Config:
@@ -274,75 +272,6 @@ def _build_hnsw_index(
     "table_name": table_name,
     "row_count": row_count,
     "duration_ms": duration_ms,
-  }
-
-
-def _search_hnsw_index(
-  graph_id: str,
-  table_name: str,
-  embedding: list[float],
-  limit: int,
-  column: str = "embedding",
-  select_columns: list[str] | None = None,
-) -> dict:
-  """Search HNSW vector index via LadybugDB QUERY_VECTOR_INDEX."""
-  _validate_identifier(table_name, "table_name")
-  if select_columns:
-    for col in select_columns:
-      _validate_identifier(col, "column")
-
-  ladybug_service = _get_ladybug_service()
-  index_name = f"{table_name.lower()}_vec_index"
-  start = time.time()
-
-  vec_str = str(embedding)
-
-  if select_columns:
-    return_parts = [f"node.{col} AS {col}" for col in select_columns]
-  else:
-    return_parts = ["node"]
-  return_parts.append("distance")
-  return_clause = ", ".join(return_parts)
-
-  # Over-fetch then limit (HNSW returns approximate results)
-  fetch_limit = min(limit * 2, 200)
-
-  query = (
-    f"CALL QUERY_VECTOR_INDEX('{table_name}', '{index_name}', {vec_str}, {fetch_limit}) "
-    f"WITH node, distance "
-    f"RETURN {return_clause} "
-    f"ORDER BY distance LIMIT {limit}"
-  )
-
-  with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
-    try:
-      conn.execute("LOAD EXTENSION vector")
-    except Exception:
-      conn.execute("INSTALL vector")
-      conn.execute("LOAD EXTENSION vector")
-
-    result = conn.execute(query)
-
-    results = []
-    if hasattr(result, "get_as_list"):
-      rows = result.get_as_list()
-      if select_columns:
-        col_names = [*select_columns, "distance"]
-        for row in rows:
-          results.append(dict(zip(col_names, row, strict=False)))
-      else:
-        for row in rows:
-          if isinstance(row[0], dict):
-            entry = {**row[0], "distance": row[1]}
-          else:
-            entry = {"node": row[0], "distance": row[1]}
-          results.append(entry)
-
-  execution_time_ms = (time.time() - start) * 1000
-  return {
-    "results": results,
-    "total": len(results),
-    "execution_time_ms": execution_time_ms,
   }
 
 
@@ -542,45 +471,30 @@ async def vector_build(
 @router.post(
   "/{graph_id}/tables/{table_name}/vector/search",
   response_model=VectorSearchResponse,
-  summary="Search vector index by embedding similarity",
+  summary="Search LanceDB vector index by embedding similarity",
 )
 async def vector_search(
   graph_id: str,
   table_name: str,
   request: VectorSearchRequest,
 ) -> VectorSearchResponse:
-  """Search for similar rows by embedding vector.
+  """Search a LanceDB IVF-PQ index for similar rows (~5ms latency).
 
-  With backend='lance': queries LanceDB IVF-PQ index (~5ms latency).
-  With backend='hnsw': queries LadybugDB HNSW index via QUERY_VECTOR_INDEX.
+  HNSW indexes are not searchable here. They live inside the graph, so they
+  are queried in Cypher — ``CALL QUERY_VECTOR_INDEX(...)`` against the
+  ``/query`` endpoint — which composes with the rest of the traversal
+  instead of returning rows over a second, parallel surface.
   """
   if request.backend == "hnsw":
-    try:
-      result = await asyncio.to_thread(
-        _search_hnsw_index,
-        graph_id=graph_id,
-        table_name=table_name,
-        embedding=request.embedding,
-        limit=request.limit,
-        column=request.column,
-        select_columns=request.select,
-      )
-    except Exception as e:
-      if "doesn't have an index" in str(e) or "not found" in str(e).lower():
-        raise HTTPException(
-          status_code=status.HTTP_404_NOT_FOUND,
-          detail=f"No HNSW index found for {table_name}",
-        ) from e
-      logger.error(f"HNSW vector search failed: {e}", exc_info=True)
-      raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Vector search failed: {e}",
-      ) from e
-
-    return VectorSearchResponse(
-      results=result["results"],
-      total=result["total"],
-      execution_time_ms=result["execution_time_ms"],
+    index_name = f"{table_name.lower()}_vec_index"
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=(
+        "HNSW indexes are searched in Cypher, not over this route. Send "
+        f"CALL QUERY_VECTOR_INDEX('{table_name}', '{index_name}', $embedding, $k) "
+        "WITH node, distance RETURN node, distance ORDER BY distance "
+        f"to POST /databases/{graph_id}/query."
+      ),
     )
 
   # Lance backend

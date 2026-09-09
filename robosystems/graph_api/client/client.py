@@ -910,6 +910,9 @@ class GraphClient(BaseGraphClient):
     Serves from master or replica instances. The index must exist already —
     build it with :meth:`vector_build`. Each result carries the selected
     columns plus a ``distance``; ``select=None`` returns all columns.
+
+    LanceDB only. An HNSW index built by :meth:`build_vector_index` is
+    searched in Cypher with ``CALL QUERY_VECTOR_INDEX(...)``, not here.
     """
     json_data: dict[str, Any] = {"embedding": embedding, "limit": limit}
     if select is not None:

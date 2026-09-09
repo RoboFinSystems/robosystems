@@ -4,17 +4,21 @@ The LanceDB-backed endpoints are covered in `test_vector_search.py`; this
 file covers the LadybugDB/HNSW path, which interpolates table and column
 names straight into Cypher and therefore leans entirely on
 `_validate_identifier` to stay safe.
+
+Only the build half of that path lives here. HNSW indexes are searched in
+Cypher via CALL QUERY_VECTOR_INDEX, so the search route refuses them.
 """
 
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, status
+from fastapi.testclient import TestClient
 
+from robosystems.graph_api.app import create_app
 from robosystems.graph_api.routers.databases.vector_search import (
   _build_hnsw_index,
   _require_writer,
-  _search_hnsw_index,
   _validate_identifier,
 )
 
@@ -26,13 +30,6 @@ def _service_with(conn):
   service.db_manager.connection_pool.get_connection.return_value.__enter__.return_value = conn
   service.db_manager.rebuild_vector_index.return_value = True
   return service
-
-
-def _vector_query(conn):
-  """The QUERY_VECTOR_INDEX statement the search issued."""
-  return next(
-    c.args[0] for c in conn.execute.call_args_list if "QUERY_VECTOR_INDEX" in c.args[0]
-  )
 
 
 @pytest.mark.unit
@@ -157,115 +154,63 @@ class TestBuildHnswIndex:
 
 
 @pytest.mark.unit
-class TestSearchHnswIndex:
-  def _conn_returning(self, rows):
-    conn = MagicMock()
-    result = MagicMock()
-    result.get_as_list.return_value = rows
-    conn.execute.return_value = result
-    return conn
+class TestSearchRejectsHnsw:
+  """HNSW indexes live inside the graph and are searched in Cypher.
 
-  def test_maps_selected_columns_onto_results(self):
-    conn = self._conn_returning([["f1", "Revenue", 0.12], ["f2", "Cost", 0.30]])
-    service = _service_with(conn)
+  This route used to carry a second, parallel HNSW reader that silently
+  returned zero rows: it read results via ``get_as_list()``, a method the
+  engine does not have, behind a ``hasattr`` guard with no fallback. Nothing
+  called it — the client method never sends ``backend`` — so every search
+  answered 200 with an empty list. The reader is gone; the route now says
+  where to go instead.
+  """
 
-    with patch(f"{MODULE}._get_ladybug_service", return_value=service):
-      out = _search_hnsw_index(
-        "kg1", "Fact", [0.1, 0.2], limit=2, select_columns=["identifier", "label"]
+  @pytest.fixture
+  def client(self, monkeypatch):
+    monkeypatch.setenv("GRAPH_BACKEND_TYPE", "ladybug")
+    return TestClient(create_app())
+
+  def test_rejects_hnsw_backend_with_400(self, client):
+    response = client.post(
+      "/databases/kg1/tables/Fact/vector/search",
+      json={"backend": "hnsw", "embedding": [0.1] * 384, "limit": 10},
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+  def test_names_the_cypher_call_that_replaces_it(self, client):
+    """A caller who lands here needs the working query, not just a refusal."""
+    response = client.post(
+      "/databases/kg1/tables/FactSet/vector/search",
+      json={"backend": "hnsw", "embedding": [0.1] * 384},
+    )
+
+    detail = response.json()["detail"]
+    assert "QUERY_VECTOR_INDEX" in detail
+    assert "'FactSet', 'factset_vec_index'" in detail
+    assert "/databases/kg1/query" in detail
+
+  def test_never_silently_returns_an_empty_result_set(self, client):
+    """The regression this replaces: 200 OK with zero rows and no error."""
+    response = client.post(
+      "/databases/kg1/tables/Fact/vector/search",
+      json={"backend": "hnsw", "embedding": [0.1] * 384},
+    )
+
+    assert response.status_code != status.HTTP_200_OK
+    assert "results" not in response.json()
+
+  def test_lance_backend_is_still_served_here(self, client):
+    with patch(f"{MODULE}._get_lance_manager") as mock_manager:
+      mock_manager.return_value.search.return_value = {
+        "results": [{"id": "d1", "distance": 0.1}],
+        "total": 1,
+        "execution_time_ms": 4.5,
+      }
+      response = client.post(
+        "/databases/kg1/tables/Fact/vector/search",
+        json={"backend": "lance", "embedding": [0.1] * 384},
       )
 
-    assert out["total"] == 2
-    assert out["results"][0] == {
-      "identifier": "f1",
-      "label": "Revenue",
-      "distance": 0.12,
-    }
-
-  def test_flattens_node_dicts_when_no_columns_selected(self):
-    conn = self._conn_returning([[{"identifier": "f1", "value": 10}, 0.12]])
-    service = _service_with(conn)
-
-    with patch(f"{MODULE}._get_ladybug_service", return_value=service):
-      out = _search_hnsw_index("kg1", "Fact", [0.1], limit=5)
-
-    assert out["results"][0] == {"identifier": "f1", "value": 10, "distance": 0.12}
-
-  def test_keeps_scalar_nodes_under_a_node_key(self):
-    conn = self._conn_returning([["opaque", 0.5]])
-    service = _service_with(conn)
-
-    with patch(f"{MODULE}._get_ladybug_service", return_value=service):
-      out = _search_hnsw_index("kg1", "Fact", [0.1], limit=5)
-
-    assert out["results"][0] == {"node": "opaque", "distance": 0.5}
-
-  def test_over_fetches_then_applies_the_caller_limit(self):
-    """HNSW is approximate, so the query over-fetches and re-sorts; the
-    over-fetch is capped so a large limit can't blow up the scan."""
-    conn = self._conn_returning([])
-    service = _service_with(conn)
-
-    with patch(f"{MODULE}._get_ladybug_service", return_value=service):
-      _search_hnsw_index("kg1", "Fact", [0.1], limit=10)
-
-    query = _vector_query(conn)
-    assert "20)" in query, "should over-fetch 2x"
-    assert query.rstrip().endswith("LIMIT 10")
-
-  def test_over_fetch_is_capped_at_200(self):
-    conn = self._conn_returning([])
-    service = _service_with(conn)
-
-    with patch(f"{MODULE}._get_ladybug_service", return_value=service):
-      _search_hnsw_index("kg1", "Fact", [0.1], limit=150)
-
-    query = _vector_query(conn)
-    assert "200)" in query
-
-  def test_installs_vector_extension_when_load_fails(self):
-    conn = MagicMock()
-    calls = []
-
-    def execute(sql):
-      calls.append(sql)
-      if sql == "LOAD EXTENSION vector" and calls.count("LOAD EXTENSION vector") == 1:
-        raise RuntimeError("not installed")
-      return MagicMock(get_as_list=MagicMock(return_value=[]))
-
-    conn.execute.side_effect = execute
-    service = _service_with(conn)
-
-    with patch(f"{MODULE}._get_ladybug_service", return_value=service):
-      _search_hnsw_index("kg1", "Fact", [0.1], limit=5)
-
-    assert "INSTALL vector" in calls
-    assert calls.count("LOAD EXTENSION vector") == 2
-
-  def test_derives_index_name_from_table(self):
-    conn = self._conn_returning([])
-    service = _service_with(conn)
-
-    with patch(f"{MODULE}._get_ladybug_service", return_value=service):
-      _search_hnsw_index("kg1", "FactSet", [0.1], limit=5)
-
-    query = _vector_query(conn)
-    assert "'factset_vec_index'" in query
-
-  @pytest.mark.parametrize("bad", ["Fact; DELETE", "1Fact"])
-  def test_rejects_unsafe_table_name(self, bad):
-    with patch(f"{MODULE}._get_ladybug_service") as mock_service:
-      with pytest.raises(ValueError, match="Invalid table_name"):
-        _search_hnsw_index("kg1", bad, [0.1], limit=5)
-
-    mock_service.assert_not_called()
-
-  def test_rejects_unsafe_select_column(self):
-    """select_columns land in the RETURN clause -- a crafted value would let
-    a caller project arbitrary Cypher."""
-    with patch(f"{MODULE}._get_ladybug_service") as mock_service:
-      with pytest.raises(ValueError, match="Invalid column"):
-        _search_hnsw_index(
-          "kg1", "Fact", [0.1], limit=5, select_columns=["identifier", "x) RETURN 1 //"]
-        )
-
-    mock_service.assert_not_called()
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["total"] == 1
