@@ -29,10 +29,7 @@ from robosystems.operations.serialization.bundle import (
   ReportMeta,
   StatementBundle,
 )
-from robosystems.operations.serialization.rdf.holon import (
-  partition_report_graph,
-  serialize_to_holon_jsonld,
-)
+from robosystems.operations.serialization.rdf.holon import serialize_to_holon_jsonld
 from robosystems.operations.serialization.rdf.jsonld import (
   SERIALIZATION_VERSION,
   BundleValidationError,
@@ -388,14 +385,23 @@ class TestHolon:
         out[str(node["@id"]).rsplit("#", 1)[-1]] = node["@graph"]
     return out
 
-  def test_partition_places_facts_and_calc_arcs(self) -> None:
-    parts = partition_report_graph(build_graph(_bundle(with_arc=True)))
-    assert set(parts) == {"scene", "boundary", "projection"}
-    # The fact lands in scene; the calculation arc in boundary.
-    assert list(parts["scene"].subjects(RDF.type, RS.Fact))
-    assert list(parts["boundary"].subjects(RDF.type, RS.Association))
+  def _local_types(self, node: dict) -> set[str]:
+    types = node.get("@type", [])
+    if isinstance(types, str):
+      types = [types]
+    return {t.rsplit(":", 1)[-1] for t in types}
+
+  def test_facts_land_in_scene_and_calc_arcs_in_boundary(self) -> None:
+    named = self._named_graphs(serialize_to_holon_jsonld(_bundle(with_arc=True)))
+    assert set(named) == {"scene", "boundary", "projection"}
+    assert any("Fact" in self._local_types(n) for n in named["scene"])
+    assert any(
+      "Association" in self._local_types(n)
+      and n.get("associationType") == "calculation"
+      for n in named["boundary"]
+    )
     # Lineage is never emitted — a report is an aggregation of the books.
-    assert "lineage" not in parts
+    assert "lineage" not in named
 
   def test_serializes_dataset_form_with_three_named_graphs(self) -> None:
     holon = serialize_to_holon_jsonld(_bundle(with_arc=True))
@@ -403,19 +409,46 @@ class TestHolon:
     assert set(named) == {"scene", "boundary", "projection"}
     assert named["scene"], "scene graph is non-empty"
 
-  def test_holon_round_trips_losslessly(self) -> None:
-    from rdflib import Dataset
+  def test_named_graphs_hang_off_the_report_iri(self) -> None:
+    """The root is the flat bundle's report IRI — what a DataBook's ``graph:``
+    map and the holon viewer address — not xbrlkit's default (the accession)."""
+    import json
 
-    holon = serialize_to_holon_jsonld(_bundle(with_arc=True))
-    src = partition_report_graph(build_graph(_bundle(with_arc=True)))
-    ds = Dataset()
-    ds.parse(data=holon, format="json-ld")
-    rt = {
-      str(c.identifier).rsplit("#", 1)[-1]: len(list(c))
-      for c in ds.graphs()
-      if str(c.identifier) != "urn:x-rdflib:default" and len(list(c))
+    doc = json.loads(serialize_to_holon_jsonld(_bundle(with_arc=True)))
+    graph_ids = {
+      n["@id"] for n in doc["@graph"] if isinstance(n, dict) and "@graph" in n
     }
-    assert rt == {k: len(v) for k, v in src.items()}
+    assert graph_ids == {
+      f"https://robosystems.ai/report/rpt_test#{name}"
+      for name in ("scene", "boundary", "projection")
+    }
+
+  def test_every_arc_endpoint_is_declared(self) -> None:
+    """The regression: an element reached only by an arc used to be dropped.
+
+    The platform's own partition seeded the scene from facts alone, so a
+    presentation row with no fact behind it — an empty line, an abstract
+    header — had no ``rs:Element`` anywhere in the holon and rendered without
+    a label: 56 of 98 elements on the SaaS demo. ``AssetsCurrent`` here is
+    that case (an arc names it, no fact does).
+    """
+    named = self._named_graphs(serialize_to_holon_jsonld(_bundle(with_arc=True)))
+    nodes = [n for graph in named.values() for n in graph]
+    declared = {n["@id"] for n in nodes if "Element" in self._local_types(n)}
+    referenced = {n[k] for n in nodes for k in ("from", "to") if k in n}
+    assert referenced, "the fixture carries an arc"
+    assert referenced <= declared, sorted(referenced - declared)
+
+  def test_xbrlkit_reads_back_every_concept(self) -> None:
+    from xbrlkit.deserialize.holon import from_holon_json
+
+    bundle = _bundle(with_arc=True)
+    model = from_holon_json(serialize_to_holon_jsonld(bundle))
+    assert set(model.concepts) == {c.qname for c in bundle.schema_concepts}
+    assert [label.value for label in model.concepts["rs-gaap:Assets"].labels] == [
+      "Assets"
+    ]
+    assert len(model.facts) == 1
 
 
 # ── Non-numeric (text-block) fact arm ────────────────────────────────────

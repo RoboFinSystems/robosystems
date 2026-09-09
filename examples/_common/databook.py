@@ -37,10 +37,8 @@ from pathlib import Path
 import rdflib
 from rdflib import RDF, Graph, URIRef
 from rdflib.namespace import Namespace
-
-from robosystems.operations.serialization.rdf.holon import (
-  serialize_holon_jsonld_from_graph,
-)
+from xbrlkit.deserialize.holon import from_holon_json
+from xbrlkit.serialize import to_holon
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -559,11 +557,21 @@ def write_holon_jsonld(jsonld_path: Path, out_jsonld: Path) -> Path:
   ``<report>#scene`` / ``#boundary`` / ``#projection`` (``@id`` + nested
   ``@graph``), derived purely from the on-disk flat ``.jsonld``. This is the
   file the holon viewer picks up; JSON is native to the JSON API, so no ``.trig``
-  is required on the critical path. The partition is the shared
-  ``operations/serialization/rdf/holon.py`` logic — one source of truth."""
+  is required on the critical path. The flat bundle is read back into xbrlkit's
+  ``XbrlModel`` and written by the same ``to_holon`` the API's download flavor
+  and the SEC pipeline use — one partition, in one repo. The report id comes
+  from the bundle's ``rs:Report`` node, so the named-graph IRIs match the API's
+  holon for the same report."""
   g = rdflib.Graph().parse(str(jsonld_path), format="json-ld")
-  root = _root(g)
-  out_jsonld.write_text(serialize_holon_jsonld_from_graph(g, root))
+  report_id = str(_root(g)).rsplit("/", 1)[-1]
+  model = from_holon_json(jsonld_path.read_text())
+  # The flat bundle's Report node carries no accession, so the reader leaves
+  # the model's blank; the API's holon names the report by its id there, and
+  # this one should read back the same.
+  model = model.model_copy(
+    update={"filing": model.filing.model_copy(update={"accession": report_id})}
+  )
+  out_jsonld.write_text(to_holon(model, report_id=report_id))
   return out_jsonld
 
 
@@ -600,9 +608,7 @@ def write_databook(
 
   def _ib_sort_key(ib: URIRef) -> tuple[int, float, str, str]:
     struct = g.value(ib, RS.structure)
-    struct_order = (
-      g.value(struct, RS.structureOrder) if struct is not None else None
-    )
+    struct_order = g.value(struct, RS.structureOrder) if struct is not None else None
     return (
       _BLOCK_ORDER.get(str(g.value(ib, RS.blockType)), 99),
       # Disclosure notes tie on block order; rs:structureOrder (published
