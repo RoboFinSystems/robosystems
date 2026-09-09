@@ -21,6 +21,7 @@ from robosystems.graph_api.routers.databases.vector_search import (
   _require_writer,
   _validate_identifier,
 )
+from tests.graph_api.conftest import FakeQueryResult
 
 MODULE = "robosystems.graph_api.routers.databases.vector_search"
 
@@ -84,9 +85,7 @@ class TestRequireWriter:
 class TestBuildHnswIndex:
   def test_builds_and_reports_row_count(self):
     conn = MagicMock()
-    result = MagicMock()
-    result.get_as_list.return_value = [[1500]]
-    conn.execute.return_value = result
+    conn.execute.return_value = FakeQueryResult([[1500]])
     service = _service_with(conn)
 
     with patch(f"{MODULE}._get_ladybug_service", return_value=service):
@@ -102,7 +101,7 @@ class TestBuildHnswIndex:
     """Without the CHECKPOINT the index lives only in the WAL and is lost on
     the next engine restart."""
     conn = MagicMock()
-    conn.execute.return_value = MagicMock(get_as_list=MagicMock(return_value=[[0]]))
+    conn.execute.return_value = FakeQueryResult([[0]])
     service = _service_with(conn)
 
     with patch(f"{MODULE}._get_ladybug_service", return_value=service):
@@ -127,7 +126,7 @@ class TestBuildHnswIndex:
     def execute(sql):
       if sql.startswith("MATCH"):
         raise RuntimeError("count failed")
-      return MagicMock()
+      return FakeQueryResult()
 
     conn.execute.side_effect = execute
     service = _service_with(conn)

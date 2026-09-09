@@ -23,6 +23,7 @@ from robosystems.graph_api.routers.databases.tables.materialize import (
   _lbug_type_to_duck,
   checkpoint_with_retry,
 )
+from tests.graph_api.conftest import FakeQueryResult
 
 MODULE = "robosystems.graph_api.routers.databases.tables.materialize"
 
@@ -258,9 +259,7 @@ class TestReconciledSelect:
 class TestGetTargetColumns:
   def _service_returning(self, rows):
     conn = MagicMock()
-    result = MagicMock()
-    result.get_as_list.return_value = rows
-    conn.execute.return_value = result
+    conn.execute.return_value = FakeQueryResult(rows)
     service = MagicMock()
     service.db_manager.connection_pool.get_connection.return_value.__enter__.return_value = conn
     return service

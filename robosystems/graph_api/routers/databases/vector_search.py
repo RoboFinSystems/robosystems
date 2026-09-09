@@ -42,6 +42,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from robosystems.graph_api.core.ladybug.results import result_rows
 from robosystems.logger import logger
 
 router = APIRouter(prefix="/databases", tags=["Vector Index"])
@@ -258,7 +259,7 @@ def _build_hnsw_index(
 
     try:
       result = conn.execute(f"MATCH (n:{table_name}) RETURN COUNT(n)")
-      rows = result.get_as_list() if hasattr(result, "get_as_list") else list(result)
+      rows = result_rows(result)
       first = list(rows[0]) if rows else []
       row_count = int(first[0]) if first else 0
     except Exception:
@@ -311,11 +312,7 @@ async def vector_info(
         # are always explicit.
         try:
           info_result = conn.execute(f"CALL TABLE_INFO('{table_name}') RETURN *")
-          info_rows = (
-            info_result.get_as_list()
-            if hasattr(info_result, "get_as_list")
-            else list(info_result)
-          )
+          info_rows = result_rows(info_result)
           col_names = set()
           for row in info_rows:
             r = list(row) if not isinstance(row, (list, tuple)) else row
@@ -327,7 +324,7 @@ async def vector_info(
           return None
 
         result = conn.execute(f"MATCH (n:{table_name}) RETURN COUNT(n)")
-        rows = result.get_as_list() if hasattr(result, "get_as_list") else list(result)
+        rows = result_rows(result)
         first = list(rows[0]) if rows else []
         row_count = int(first[0]) if first else 0
 

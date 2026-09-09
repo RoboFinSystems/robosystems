@@ -50,3 +50,27 @@ def no_task_sse_poll_sleep(monkeypatch):
       return None
 
   monkeypatch.setattr(task_sse, "asyncio", _NoSleepAsyncio())
+
+
+class FakeQueryResult:
+  """A LadybugDB ``QueryResult`` with the surface the engine actually has.
+
+  Use this instead of ``MagicMock`` wherever code reads rows off a result.
+  A mock satisfies ``hasattr`` for every name and returns a truthy object
+  from every call, which is how a reader that branched on the non-existent
+  ``get_as_list`` passed its tests while returning zero rows in production
+  (PR #1368). ladybug 0.18.1 offers ``get_all``, ``rows_as_dict``,
+  ``get_as_arrow`` and the cursor pair below -- and no ``get_as_list``.
+  """
+
+  def __init__(self, rows=()):
+    self._rows = list(rows)
+    self._i = 0
+
+  def has_next(self):
+    return self._i < len(self._rows)
+
+  def get_next(self):
+    row = self._rows[self._i]
+    self._i += 1
+    return row
