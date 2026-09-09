@@ -285,7 +285,7 @@ The OIDC stack creates three roles:
 | Role | Repositories / Users | Permissions |
 |------|----------------------|-------------|
 | `RoboSystemsGitHubActionsRole` | `robosystems` | Full infrastructure |
-| `RoboSystemsGitHubActionsFrontendRole` | `robosystems-app`, `roboledger-app`, `roboinvestor-app`, `robosystems-holon-viewer` | Limited frontend |
+| `RoboSystemsGitHubActionsFrontendRole` | `robosystems-app`, `roboledger-app`, `roboinvestor-app`, `xbrlkit-viewer` | Limited frontend |
 | `RoboSystemsAppSuperAdminRole` | SSO users (via IAM Identity Center) | Application admin only (no infra) |
 
 The frontend repos hold no AWS access of their own. `just bootstrap` in the
