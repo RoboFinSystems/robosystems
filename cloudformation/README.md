@@ -118,7 +118,7 @@ Parameters are documented in each template — read the `Parameters:` block for 
 ### Bootstrap
 
 #### `bootstrap-oidc.yaml`
-**Purpose**: Enables passwordless GitHub Actions → AWS authentication using OIDC federation, for this repo and the three frontend app repos plus the holon viewer.
+**Purpose**: Enables passwordless GitHub Actions → AWS authentication using OIDC federation, for this repo and the three frontend app repos plus the xbrlkit viewer.
 
 **Deploy**: Locally with `just bootstrap` before any CI/CD workflows can run.
 

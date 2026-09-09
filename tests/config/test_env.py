@@ -250,6 +250,7 @@ def test_get_main_cors_origins_respects_environment(monkeypatch):
     "https://roboledger.ai",
     "https://roboinvestor.ai",
     "https://robosystems.ai",
+    "https://xbrlkit.com",
     "https://holon.robosystems.ai",
   ]
 
@@ -266,12 +267,16 @@ def test_get_main_cors_origins_respects_environment(monkeypatch):
     EnvConfig, "ROBOSYSTEMS_URL", "https://staging.robosystems.ai", raising=False
   )
   monkeypatch.setattr(
+    EnvConfig, "VIEWER_URL", "https://staging.xbrlkit.com", raising=False
+  )
+  monkeypatch.setattr(
     EnvConfig, "HOLON_URL", "https://staging.holon.robosystems.ai", raising=False
   )
   assert EnvConfig.get_main_cors_origins() == [
     "https://staging.roboledger.ai",
     "https://staging.roboinvestor.ai",
     "https://staging.robosystems.ai",
+    "https://staging.xbrlkit.com",
     "https://staging.holon.robosystems.ai",
   ]
 
@@ -293,11 +298,13 @@ def test_get_main_cors_origins_derives_fork_domain(monkeypatch):
   monkeypatch.setattr(
     EnvConfig, "ROBOSYSTEMS_URL", "https://tenant.robosystems.ai/", raising=False
   )
+  monkeypatch.setattr(EnvConfig, "VIEWER_URL", "https://xbrlkit.com", raising=False)
   monkeypatch.setattr(
     EnvConfig, "HOLON_URL", "https://holon.robosystems.ai", raising=False
   )
   assert EnvConfig.get_main_cors_origins() == [
     "https://tenant.robosystems.ai",
+    "https://xbrlkit.com",
     "https://holon.robosystems.ai",
   ]
 

@@ -52,7 +52,7 @@ The complete bootstrap process for a fresh deployment:
 │  Deploys cloudformation/bootstrap-oidc.yaml:                                │
 │    - Creates IAM OIDC Provider for GitHub                                   │
 │    - Backend role: trusts {GitHubOrg}/{backend repo} only                   │
-│    - Frontend role: trusts the three *-app repos + holon-viewer             │
+│    - Frontend role: trusts the three *-app repos + xbrlkit-viewer           │
 │    - Allowed refs (both roles): main, release/*, v* tags                    │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
