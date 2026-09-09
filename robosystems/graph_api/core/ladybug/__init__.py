@@ -4,6 +4,7 @@
 - ``LadybugConnectionPool`` — shared, thread-safe connections per database
 - ``LadybugDatabaseManager`` — database lifecycle and the blue-green swap
 - ``LadybugService`` — the query, health and metrics surface the routers use
+- ``result_rows`` — the one way to read rows out of a ``QueryResult``
 """
 
 from .config import get_database_memory_config
@@ -14,6 +15,7 @@ from .pool import (
   get_connection_pool,
   initialize_connection_pool,
 )
+from .results import result_rows
 from .service import (
   LadybugService,
   get_ladybug_service,
@@ -38,5 +40,6 @@ __all__ = [
   "get_ladybug_service",
   "init_ladybug_service",
   "initialize_connection_pool",
+  "result_rows",
   "validate_cypher_query",
 ]

@@ -17,6 +17,7 @@ from fastapi import status as http_status
 from robosystems.config import env
 from robosystems.graph_api.core.duckdb import quote_identifier
 from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.graph_api.core.ladybug.results import result_rows
 from robosystems.graph_api.models.fork import (
   ForkFromParentRequest,
   ForkFromParentResponse,
@@ -150,7 +151,7 @@ def _get_target_columns(
   try:
     with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
       result = conn.execute(f"CALL TABLE_INFO('{table_name}') RETURN *")
-      rows = result.get_as_list() if hasattr(result, "get_as_list") else list(result)
+      rows = result_rows(result)
       columns = []
       for row in rows:
         # TABLE_INFO returns: [index, name, type, default, isPrimaryKey]
