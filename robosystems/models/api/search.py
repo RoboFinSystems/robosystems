@@ -41,6 +41,13 @@ class SearchRequest(BaseModel):
   )
   size: int = Field(10, ge=1, le=50, description="Max results to return")
   offset: int = Field(0, ge=0, description="Pagination offset")
+  snippet_chars: int | None = Field(
+    None,
+    ge=80,
+    le=1500,
+    description="Approximate snippet budget per hit in characters; the default "
+    "is three highlight fragments of about 200",
+  )
 
 
 class SearchHit(BaseModel):

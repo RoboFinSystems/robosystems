@@ -442,3 +442,36 @@ class TestDeleteByAccession:
       {"term": {"source_type": "narrative_section"}},
       {"term": {"accession_number": "0000066740-25-000006"}},
     ]
+
+
+class TestSnippetBudget:
+  """snippet_chars sets how many standard fragments a hit may carry."""
+
+  def _highlight(self, client, mock_opensearch, **kwargs):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+    client.search("test", graph_id="sec", **kwargs)
+    return mock_opensearch.search.call_args.kwargs["body"]["highlight"]["fields"][
+      "content"
+    ]
+
+  def test_default_is_three_standard_fragments(self, client, mock_opensearch):
+    hl = self._highlight(client, mock_opensearch)
+    assert (hl["fragment_size"], hl["number_of_fragments"]) == (200, 3)
+
+  def test_budget_sets_fragment_count(self, client, mock_opensearch):
+    hl = self._highlight(client, mock_opensearch, snippet_chars=400)
+    assert (hl["fragment_size"], hl["number_of_fragments"]) == (200, 2)
+
+  def test_budget_below_a_fragment_shrinks_the_fragment(self, client, mock_opensearch):
+    hl = self._highlight(client, mock_opensearch, snippet_chars=120)
+    assert (hl["fragment_size"], hl["number_of_fragments"]) == (120, 1)
+
+  def test_hybrid_search_takes_the_same_budget(self, client, mock_opensearch):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+    client.search_hybrid(
+      "test", query_embedding=[0.1] * 384, graph_id="sec", snippet_chars=1000
+    )
+    hl = mock_opensearch.search.call_args.kwargs["body"]["highlight"]["fields"][
+      "content"
+    ]
+    assert (hl["fragment_size"], hl["number_of_fragments"]) == (200, 5)

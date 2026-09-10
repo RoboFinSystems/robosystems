@@ -17,6 +17,11 @@ from robosystems.logger import logger
 # Without this, BM25 scores (~10-40) drown out KNN cosine scores (~0-1).
 # The normalization processor maps both to [0,1] before combining.
 HYBRID_PIPELINE_NAME = "hybrid-search-pipeline"
+
+# A hit's snippet is highlight fragments joined with " ... ": the standard
+# shape is three of about 200 characters.
+HIGHLIGHT_FRAGMENT_SIZE = 200
+HIGHLIGHT_FRAGMENTS = 3
 HYBRID_PIPELINE_BODY: dict[str, Any] = {
   "description": "Normalizes and combines BM25 + KNN scores for hybrid search",
   "phase_results_processors": [
@@ -364,13 +369,24 @@ class OpenSearchClient:
     return filter_clauses
 
   @staticmethod
-  def _highlight_config() -> dict[str, Any]:
-    """Standard highlight configuration for search results."""
+  def _highlight_config(snippet_chars: int | None = None) -> dict[str, Any]:
+    """Highlight configuration for search results.
+
+    ``snippet_chars`` is an approximate per-hit budget: fragments stay at
+    the standard size and the budget sets how many of them a hit may carry,
+    so a smaller budget means fewer matches shown, not shorter ones. None
+    keeps the standard three fragments.
+    """
+    fragment_size = HIGHLIGHT_FRAGMENT_SIZE
+    fragments = HIGHLIGHT_FRAGMENTS
+    if snippet_chars is not None:
+      fragment_size = min(fragment_size, snippet_chars)
+      fragments = max(1, snippet_chars // fragment_size)
     return {
       "fields": {
         "content": {
-          "fragment_size": 200,
-          "number_of_fragments": 3,
+          "fragment_size": fragment_size,
+          "number_of_fragments": fragments,
           "pre_tags": [""],
           "post_tags": [""],
         }
@@ -384,6 +400,7 @@ class OpenSearchClient:
     filters: dict[str, Any] | None = None,
     size: int = 10,
     offset: int = 0,
+    snippet_chars: int | None = None,
   ) -> dict[str, Any]:
     """BM25 text search with mandatory graph_id filtering.
 
@@ -413,7 +430,7 @@ class OpenSearchClient:
           "filter": filter_clauses,
         }
       },
-      "highlight": self._highlight_config(),
+      "highlight": self._highlight_config(snippet_chars),
       "size": size,
       "from": offset,
       "_source": {
@@ -431,6 +448,7 @@ class OpenSearchClient:
     filters: dict[str, Any] | None = None,
     size: int = 10,
     offset: int = 0,
+    snippet_chars: int | None = None,
   ) -> dict[str, Any]:
     """Hybrid text + vector search with mandatory graph_id filtering.
 
@@ -507,7 +525,7 @@ class OpenSearchClient:
           ],
         }
       },
-      "highlight": self._highlight_config(),
+      "highlight": self._highlight_config(snippet_chars),
       "size": size,
       "from": offset,
       "_source": {

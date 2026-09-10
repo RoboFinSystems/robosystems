@@ -82,6 +82,7 @@ class SearchService:
         filters=filters if filters else None,
         size=request.size,
         offset=request.offset,
+        snippet_chars=request.snippet_chars,
       )
     else:
       result = self.client.search(
@@ -90,6 +91,7 @@ class SearchService:
         filters=filters if filters else None,
         size=request.size,
         offset=request.offset,
+        snippet_chars=request.snippet_chars,
       )
 
     hits = []
