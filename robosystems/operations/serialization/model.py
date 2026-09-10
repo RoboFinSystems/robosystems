@@ -265,6 +265,7 @@ def _fact(fact: BundleFact, concepts: dict[str, Concept]) -> XbrlFact:
       value_kind="text",
       is_nil=text is None,
       language=TEXT_LANGUAGE if is_text else None,
+      structure_id=fact.structure_id,
     )
   return XbrlFact(
     id=fact.id,
@@ -276,6 +277,7 @@ def _fact(fact: BundleFact, concepts: dict[str, Concept]) -> XbrlFact:
     numeric_value=fact.value,
     decimals=None if fact.decimals.upper() == "INF" else fact.decimals,
     value_kind="numeric",
+    structure_id=fact.structure_id,
   )
 
 
@@ -293,6 +295,14 @@ def _networks(bundle: StatementBundle) -> list[Network]:
     *(("presentation", link) for link in bundle.linkbases.presentation_links),
     *(("calculation", link) for link in bundle.linkbases.calculation_links),
   ]
+  # A fact's own fact set is its structure's. The structure's id and its fact
+  # set's travel on the network so the holon names them the way the flat
+  # bundle does — one structure, one IRI, in every projection of the report.
+  fact_set_by_structure: dict[str, str] = {
+    fact.structure_id: fact.fact_set_id
+    for fact in bundle.facts
+    if fact.structure_id and fact.fact_set_id
+  }
   for position, (kind, link) in enumerate(links):
     definition, documentation = network_definition(link, order)
     targets = {arc.to_qname for arc in link.arcs}
@@ -313,6 +323,8 @@ def _networks(bundle: StatementBundle) -> list[Network]:
       documentation=documentation,
       kind=kind,
       arcs=arcs,
+      structure_id=link.structure_id,
+      fact_set_id=fact_set_by_structure.get(link.structure_id),
     )
     keyed.append((definition, position, network))
   # The composed definitions sort by their code; a verbatim name sorts after
