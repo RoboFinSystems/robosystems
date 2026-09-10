@@ -124,14 +124,24 @@ Require `roboledger` in `schema_extensions`. These read LadybugDB (OLAP).
 |------|-------------|------------|
 | `get-example-queries` | Query patterns tailored to this graph's schema | — |
 | `resolve-element` | Map a concept ("revenue") to XBRL element qnames | manifest `has_semantic_enrichment=True` |
-| `financial-statement-analysis` | Graph-backed statement read with auto-resolve and dedup | — |
+| `financial-statement-analysis` | Graph-backed statement read with auto-resolve, dedup, and a period cap at the columns a filing presents | — |
 | `live-financial-statement` | Statement from the tenant's live OLTP ledger via CoA→GAAP mapping | tenant graphs only |
 | `build-fact-grid` | Cross-company comparison over canonical concepts | `FACT_GRID_ENABLED` |
 
 `financial-statement-analysis` resolves the latest relevant SEC filing when no
 `report_id` is given (ticker and form-code resolution live in
 `adapters/sec/mcp/report_resolver.py`), and deduplicates facts that appear in
-multiple filings as comparative periods.
+multiple filings as comparative periods. It answers with the columns a filing
+presents, not everything its hypercube holds: an annual form defaults the
+period filter to `annual` (a 10-K's statement hypercube also carries the
+quarterly figures from its notes), `periods` caps the distinct end dates kept
+(two for the balance sheet, three for the flow statements, newest first) and
+the result names the keys it kept and how many it cut, and fact rows carry no
+null fields and a `name` only when it is a label rather than the local part of
+`qname` (SEC rows repeat the qname there; a tenant's rs-gaap rows carry a
+readable label). The graph fetch always takes the query's full row budget so
+that `limit`, applied after the cap, can never hide a period from it; a fetch
+that hits the ceiling is flagged `rows_truncated`.
 
 ### Layer 2b — roboledger OLTP
 
