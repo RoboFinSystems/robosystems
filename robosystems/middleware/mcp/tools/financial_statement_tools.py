@@ -36,6 +36,78 @@ from robosystems.operations.roboledger.views import (
 
 from .base_tool import BaseTool
 
+# The columns a filing presents: two balance-sheet instants, three years of
+# each flow statement. Everything the hypercube holds beyond that — the
+# quarterly note data a 10-K carries, the equity roll-forward's opening
+# instants — is answered on request through ``periods``, not by default.
+PERIODS_DEFAULT_INSTANT = 2
+PERIODS_DEFAULT_DURATION = 3
+PERIODS_MAX = 100
+
+_PERIOD_KEY_FIELDS = ("start_date", "end_date", "period_type", "duration_type")
+
+
+def default_period_type(statement_type: str, form: str | None) -> str | None:
+  """The period filter to apply when the caller gave none.
+
+  A 10-K (or 20-F / 40-F) is filed on an annual cadence, yet its statement
+  hypercube also carries the quarterly figures from its notes — on a FY2024
+  10-K income statement, 8 of 11 period keys and more than half the rows.
+  Nobody asking for "the income statement" wants those, so an annual form
+  defaults to ``annual``. The balance sheet already defaults to instants in
+  the query; a 10-Q's quarter and year-to-date columns share end dates, so
+  the period cap alone bounds it and no filter is forced.
+  """
+  if statement_type == "balance_sheet":
+    return None
+  from robosystems.adapters.sec.mcp import ANNUAL_FORMS
+
+  if form in ANNUAL_FORMS:
+    return "annual"
+  return None
+
+
+def cap_periods(
+  rows: list[dict[str, Any]], periods: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+  """Keep the rows whose period ends on one of the ``periods`` newest end dates.
+
+  Returns the kept rows, the distinct period keys they span (newest first),
+  and how many older end dates were cut — so a caller that wants a longer
+  series knows to ask for one.
+  """
+  end_dates = sorted({str(r.get("end_date") or "") for r in rows}, reverse=True)
+  kept_dates = set(end_dates[:periods])
+  kept = [r for r in rows if str(r.get("end_date") or "") in kept_dates]
+  keys: list[dict[str, Any]] = []
+  seen: set[tuple[Any, ...]] = set()
+  for row in kept:
+    key = tuple(row.get(f) for f in _PERIOD_KEY_FIELDS)
+    if key in seen:
+      continue
+    seen.add(key)
+    keys.append({f: row.get(f) for f in _PERIOD_KEY_FIELDS if row.get(f) is not None})
+  keys.sort(
+    key=lambda k: (str(k.get("end_date") or ""), str(k.get("start_date") or "")),
+    reverse=True,
+  )
+  return kept, keys, max(0, len(end_dates) - periods)
+
+
+def compact_fact(row: dict[str, Any]) -> dict[str, Any]:
+  """A fact row as a model reads it: ``name`` is the local part of ``qname``
+  and null fields say nothing, so neither is carried."""
+  fact = {
+    "canonical_concept": row.get("canonical_concept"),
+    "qname": row.get("qname"),
+    "value": row.get("value"),
+    "start_date": row.get("start_date"),
+    "end_date": row.get("end_date"),
+    "period_type": row.get("period_type"),
+    "duration_type": row.get("duration_type"),
+  }
+  return {k: v for k, v in fact.items() if v is not None}
+
 
 class LiveFinancialStatementTool(BaseTool):
   """MCP tool: generate an ad-hoc OLTP-backed statement for a tenant graph."""
@@ -196,11 +268,18 @@ class FinancialStatementAnalysisTool(BaseTool):
   cash_flow_statement, equity_statement
 - `period_type` — annual (10-K/20-F/40-F, duration facts), quarterly (10-Q
   plus annuals for international filers, duration facts), or instant
-  (point-in-time facts; the balance-sheet default)
+  (point-in-time facts; the balance-sheet default). Unset on an annual form
+  it defaults to annual, so a 10-K's quarterly note figures stay out
+- `periods` — how many period end dates to keep, newest first (default
+  2 for the balance sheet, 3 for the flow statements — the columns a
+  filing presents). Raise it for a longer series
 - `ticker` / `report_id` — which one is required depends on the graph; see NOTES
 
 **RETURNS:**
-- Deduplicated facts (qname, name, value, end_date) ordered by end_date DESC
+- Deduplicated facts (canonical_concept, qname, value, start_date / end_date,
+  period_type, duration_type; null fields omitted) ordered by end_date DESC
+- `periods` — the period keys the facts span, newest first, and
+  `periods_omitted` when older end dates were cut by the cap
 - resolved_report info when auto-resolution was used
 - Dimensional/segment breakdowns are filtered out (consolidated totals only)
 """,
@@ -228,6 +307,10 @@ class FinancialStatementAnalysisTool(BaseTool):
             "type": "string",
             "description": "Filter by period type",
             "enum": ["annual", "quarterly", "instant"],
+          },
+          "periods": {
+            "type": "integer",
+            "description": "Period end dates to keep, newest first (default 2 for balance_sheet, 3 otherwise; max 100). Raise it for a longer series.",
           },
           "limit": {
             "type": "integer",
@@ -259,6 +342,12 @@ class FinancialStatementAnalysisTool(BaseTool):
     fiscal_year = arguments.get("fiscal_year")
     period_type = arguments.get("period_type")
     limit = max(1, min(int(arguments.get("limit", 1000)), 1000))
+    periods_default = (
+      PERIODS_DEFAULT_INSTANT
+      if statement_type == "balance_sheet"
+      else PERIODS_DEFAULT_DURATION
+    )
+    periods = max(1, min(int(arguments.get("periods") or periods_default), PERIODS_MAX))
 
     graph_id = self.client.graph_id
     is_shared = is_shared_repository_or_subgraph(graph_id)
@@ -302,6 +391,11 @@ class FinancialStatementAnalysisTool(BaseTool):
           ),
         }
 
+    if period_type is None:
+      period_type = default_period_type(
+        statement_type, resolved.get("form") if resolved else None
+      )
+
     rows: list[dict] = []
     if report_id or ticker:
       rows = await query_financial_statement(
@@ -313,29 +407,24 @@ class FinancialStatementAnalysisTool(BaseTool):
         limit=limit,
       )
 
-    deduped = deduplicate_facts(rows)[:limit]
-    facts = [
-      {
-        "canonical_concept": row.get("canonical_concept"),
-        "qname": row.get("qname"),
-        "name": row.get("name"),
-        "value": row.get("value"),
-        "start_date": row.get("start_date"),
-        "end_date": row.get("end_date"),
-        "period_type": row.get("period_type"),
-        "duration_type": row.get("duration_type"),
-      }
-      for row in deduped
-    ]
+    kept, period_keys, omitted = cap_periods(deduplicate_facts(rows), periods)
+    facts = [compact_fact(row) for row in kept[:limit]]
 
     result: dict[str, Any] = {
       "graph_id": graph_id,
       "statement_type": statement_type,
       "ticker": ticker,
       "report_id": report_id,
+      "periods": period_keys,
       "facts": facts,
       "fact_count": len(facts),
     }
+    if omitted:
+      result["periods_omitted"] = omitted
+      result["periods_tip"] = (
+        f"{omitted} earlier period end date(s) were cut by the cap of {periods}; "
+        "raise `periods` for a longer series."
+      )
 
     if resolved:
       result["resolved_report"] = {
