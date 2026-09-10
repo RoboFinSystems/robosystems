@@ -198,10 +198,18 @@ Gated by `SEMANTIC_SEARCH_ENABLED`.
 | `create-document` / `update-document` | no |
 
 Document management additionally skips shared repositories — SEC searches
-OpenSearch directly and has no Postgres document rows. `search-documents`
-results on iXBRL disclosures carry `xbrl_elements`, the XBRL fact tags in that
-section, which cross-reference into the graph via `resolve-element` or
-`read-graph-cypher`.
+OpenSearch directly and has no Postgres document rows.
+
+A tool result is context the model pays for on every later turn, so these two
+tools return less than the REST models they wrap (`search_tools.py`). A
+`search-documents` hit carries what a model needs to choose it — id, label,
+score, snippet (`snippet_chars`, default 400) — with null fields dropped and
+the filing fields hoisted to the result root when every hit shares them; the
+per-section `xbrl_elements` list is left to `get-document-section`, which
+carries it for the hit the model picked and cross-references into the graph
+via `resolve-element` or `read-graph-cypher`. `get-document-section` returns
+a window (`offset` + `length`, default 4,000, max 8,000) and a `next_offset`
+while more of the part follows, the same paging as xbrlkit's `read_text`.
 
 ### Layer 4 — graph lifecycle, subgraph writes, memory
 

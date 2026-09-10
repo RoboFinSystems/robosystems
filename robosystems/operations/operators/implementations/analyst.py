@@ -446,7 +446,7 @@ Reach for `read-graph-cypher` when no curated tool fits, or to drill into specif
         prompt += f"""
 NARRATIVE DISCLOSURES (qualitative filing text — NOT in the Cypher fact graph):
 - Questions about risk factors, MD&A, business description, legal proceedings, competition, or other management commentary are answered from filing TEXT, not the XBRL facts. Cypher can't surface this — use `search-documents` over filing sections{schema_skip_note}. It is keyword (BM25) search by default; pass `semantic=true` when the question is about meaning rather than a specific term, or when a keyword pass returns nothing useful.
-- `search-documents` returns ranked snippets, each with a document_id. Call `get-document-section` with that id to read the full section before you answer. When the question names a section, narrow with the section filter (e.g. item_1a for risk factors, item_7 for MD&A).
+- `search-documents` returns ranked snippets, each with a document_id. Call `get-document-section` with that id to read the section before you answer; it returns a window and a `next_offset` when more follows, so page on with `offset` rather than answering from a partial read. When the question names a section, narrow with the section filter (e.g. item_1a for risk factors, item_7 for MD&A).
 - A section may carry `xbrl_elements`; use `resolve-element` or `read-graph-cypher` to tie the narrative back to the reported numbers when the question needs both text and figures.
 """
       else:
@@ -455,7 +455,7 @@ NARRATIVE DISCLOSURES (qualitative filing text — NOT in the Cypher fact graph)
         prompt += f"""
 DOCUMENTS (qualitative written context — accounting policies, procedures, memos, notes — NOT in the Cypher fact graph):
 - Questions about this company's accounting policies, close procedures, memos, or other written context are answered from its uploaded DOCUMENTS, not the ledger facts. Cypher can't surface this — use `search-documents` over this graph's documents{schema_skip_note}. It is keyword (BM25) search by default; pass `semantic=true` when the question is about meaning rather than a specific term (a policy, a treatment, "how do we handle X"), or when a keyword pass returns nothing useful.
-- `search-documents` returns ranked snippets, each with a document_id. Call `get-document-section` with that id to read the full section before you answer.
+- `search-documents` returns ranked snippets, each with a document_id. Call `get-document-section` with that id to read the section before you answer; it returns a window and a `next_offset` when more follows, so page on with `offset` rather than answering from a partial read.
 - When a question needs both the written policy and the reported figures, combine the two: search for the text, then query the ledger with `read-graph-cypher`.
 """
     if has_memory:

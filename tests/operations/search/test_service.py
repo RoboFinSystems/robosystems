@@ -287,3 +287,15 @@ class TestSectionParts:
     assert (section.part, section.part_count) == (3, 6)
     assert section.parent_document_id == "a1b2c3d4e5f60718"
     assert section.next_document_id == "9e8d7c6b5a493827"
+
+
+class TestSnippetCharsPassThrough:
+  def test_request_budget_reaches_the_client(self, service, mock_client):
+    mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+    service.search_documents("sec", SearchRequest(query="x", snippet_chars=400))
+    assert mock_client.search.call_args.kwargs["snippet_chars"] == 400
+
+  def test_default_budget_is_none(self, service, mock_client):
+    mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+    service.search_documents("sec", SearchRequest(query="x"))
+    assert mock_client.search.call_args.kwargs["snippet_chars"] is None
