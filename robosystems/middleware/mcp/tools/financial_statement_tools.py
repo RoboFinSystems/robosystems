@@ -44,6 +44,13 @@ PERIODS_DEFAULT_INSTANT = 2
 PERIODS_DEFAULT_DURATION = 3
 PERIODS_MAX = 100
 
+# The raw-row budget handed to the statement query, independent of the
+# caller's ``limit``. The query fetches newest-first and the period cap runs
+# after it, so a row budget tied to ``limit`` would let a small limit hide
+# older periods from the cap with no ``periods_omitted`` to say so. The
+# query's own ceiling is 1,000; ``limit`` is applied after the cap instead.
+QUERY_ROW_CEILING = 1000
+
 _PERIOD_KEY_FIELDS = ("start_date", "end_date", "period_type", "duration_type")
 
 
@@ -95,11 +102,24 @@ def cap_periods(
 
 
 def compact_fact(row: dict[str, Any]) -> dict[str, Any]:
-  """A fact row as a model reads it: ``name`` is the local part of ``qname``
-  and null fields say nothing, so neither is carried."""
+  """A fact row as a model reads it: null fields say nothing and are dropped,
+  and ``name`` is carried only when it says more than ``qname`` does.
+
+  On SEC filings ``Element.name`` is the qname's local part
+  (``us-gaap:Assets`` / ``Assets``), pure repetition. On a tenant graph the
+  rs-gaap elements carry a label there (``rs-gaap:NonoperatingIncomeExpense``
+  / ``Nonoperating Income (Expense)``), which reads better than the qname
+  and stays. Nothing in the schema pins either shape, so the row is judged,
+  not the graph.
+  """
+  qname = row.get("qname") or ""
+  name = row.get("name")
+  if name == qname.rsplit(":", 1)[-1]:
+    name = None
   fact = {
     "canonical_concept": row.get("canonical_concept"),
-    "qname": row.get("qname"),
+    "qname": qname or None,
+    "name": name,
     "value": row.get("value"),
     "start_date": row.get("start_date"),
     "end_date": row.get("end_date"),
@@ -277,7 +297,8 @@ class FinancialStatementAnalysisTool(BaseTool):
 
 **RETURNS:**
 - Deduplicated facts (canonical_concept, qname, value, start_date / end_date,
-  period_type, duration_type; null fields omitted) ordered by end_date DESC
+  period_type, duration_type; null fields omitted; `name` only when it is a
+  label rather than the qname's local part) ordered by end_date DESC
 - `periods` — the period keys the facts span, newest first, and
   `periods_omitted` when older end dates were cut by the cap
 - resolved_report info when auto-resolution was used
@@ -314,7 +335,7 @@ class FinancialStatementAnalysisTool(BaseTool):
           },
           "limit": {
             "type": "integer",
-            "description": "Max fact rows returned (1-1000). Leave at the default for a whole statement; a lower cap cuts rows while subtotals still reflect the full set.",
+            "description": "Max fact rows returned (1-1000), applied after the period cap. Leave at the default for a whole statement; a lower cap cuts rows while subtotals still reflect the full set.",
             "default": 1000,
           },
         },
@@ -347,7 +368,12 @@ class FinancialStatementAnalysisTool(BaseTool):
       if statement_type == "balance_sheet"
       else PERIODS_DEFAULT_DURATION
     )
-    periods = max(1, min(int(arguments.get("periods") or periods_default), PERIODS_MAX))
+    periods_arg = arguments.get("periods")
+    periods = (
+      periods_default
+      if periods_arg is None
+      else max(1, min(int(periods_arg), PERIODS_MAX))
+    )
 
     graph_id = self.client.graph_id
     is_shared = is_shared_repository_or_subgraph(graph_id)
@@ -404,7 +430,7 @@ class FinancialStatementAnalysisTool(BaseTool):
         report_id=report_id,
         ticker=ticker,
         period_type=period_type,
-        limit=limit,
+        limit=QUERY_ROW_CEILING,
       )
 
     kept, period_keys, omitted = cap_periods(deduplicate_facts(rows), periods)
@@ -424,6 +450,15 @@ class FinancialStatementAnalysisTool(BaseTool):
       result["periods_tip"] = (
         f"{omitted} earlier period end date(s) were cut by the cap of {periods}; "
         "raise `periods` for a longer series."
+      )
+    if len(rows) >= QUERY_ROW_CEILING:
+      # The graph fetch is newest-first and hit its ceiling, so the oldest
+      # kept period may be incomplete and the cap cannot see past it.
+      result["rows_truncated"] = True
+      result["rows_tip"] = (
+        f"The graph fetch hit its {QUERY_ROW_CEILING}-row ceiling before the "
+        "cap ran; the oldest period kept may be incomplete. Narrow with "
+        "`period_type` or `report_id`."
       )
 
     if resolved:

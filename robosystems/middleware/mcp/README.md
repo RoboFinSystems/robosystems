@@ -137,7 +137,11 @@ period filter to `annual` (a 10-K's statement hypercube also carries the
 quarterly figures from its notes), `periods` caps the distinct end dates kept
 (two for the balance sheet, three for the flow statements, newest first) and
 the result names the keys it kept and how many it cut, and fact rows carry no
-`name` (the local part of `qname`) and no null fields.
+null fields and a `name` only when it is a label rather than the local part of
+`qname` (SEC rows repeat the qname there; a tenant's rs-gaap rows carry a
+readable label). The graph fetch always takes the query's full row budget so
+that `limit`, applied after the cap, can never hide a period from it; a fetch
+that hits the ceiling is flagged `rows_truncated`.
 
 ### Layer 2b — roboledger OLTP
 

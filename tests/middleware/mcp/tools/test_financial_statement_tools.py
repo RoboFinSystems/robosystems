@@ -20,6 +20,7 @@ from robosystems.middleware.mcp.tools.financial_statement_tools import (
   PERIODS_DEFAULT_DURATION,
   PERIODS_DEFAULT_INSTANT,
   PERIODS_MAX,
+  QUERY_ROW_CEILING,
   FinancialStatementAnalysisTool,
   LiveFinancialStatementTool,
   cap_periods,
@@ -505,6 +506,19 @@ class TestCapPeriods:
 
 class TestCompactFact:
   @pytest.mark.unit
+  def test_keeps_a_label_name_on_a_tenant_row(self):
+    """rs-gaap elements carry a readable label in ``name``; it says more
+    than the qname and stays."""
+    fact = compact_fact(
+      _row(
+        "rs-gaap:NonoperatingIncomeExpense",
+        "2026-12-31",
+        name="Nonoperating Income (Expense)",
+      )
+    )
+    assert fact["name"] == "Nonoperating Income (Expense)"
+
+  @pytest.mark.unit
   def test_drops_name_and_nulls(self):
     fact = compact_fact(
       _row(
@@ -639,3 +653,45 @@ class TestFinancialStatementAnalysisToolPeriods:
     assert result["fact_count"] == 5
     assert all(f["end_date"] != "2021-12-31" for f in result["facts"])
     assert result["periods_omitted"] == 1
+
+  @pytest.mark.unit
+  async def test_periods_zero_is_floored_not_defaulted(self):
+    tool = FinancialStatementAnalysisTool(_make_client("sec"))
+    rows = [_row("us-gaap:Revenues", f"{y}-12-31") for y in (2024, 2023, 2022)]
+    with _shared_repo_patches(_RESOLVED_10K, rows):
+      result = await tool.execute(
+        {"statement_type": "income_statement", "ticker": "MMM", "periods": 0}
+      )
+    assert result["fact_count"] == 1
+    assert result["periods_omitted"] == 2
+
+  @pytest.mark.unit
+  async def test_query_gets_the_full_row_budget_whatever_limit_is(self):
+    """The fetch is newest-first and the cap runs after it, so a caller's
+    small ``limit`` must not shrink what the cap can see."""
+    tool = FinancialStatementAnalysisTool(_make_client("sec"))
+    with _shared_repo_patches(_RESOLVED_10K, []) as mock_query:
+      await tool.execute(
+        {"statement_type": "income_statement", "ticker": "MMM", "limit": 5}
+      )
+    assert mock_query.call_args.kwargs["limit"] == QUERY_ROW_CEILING
+
+  @pytest.mark.unit
+  async def test_a_fetch_at_the_ceiling_is_flagged(self):
+    tool = FinancialStatementAnalysisTool(_make_client("sec"))
+    rows = [_row(f"us-gaap:Concept{i}", "2024-12-31") for i in range(QUERY_ROW_CEILING)]
+    with _shared_repo_patches(_RESOLVED_10K, rows):
+      result = await tool.execute(
+        {"statement_type": "income_statement", "ticker": "MMM"}
+      )
+    assert result["rows_truncated"] is True
+    assert "ceiling" in result["rows_tip"]
+
+  @pytest.mark.unit
+  async def test_a_fetch_under_the_ceiling_is_not_flagged(self):
+    tool = FinancialStatementAnalysisTool(_make_client("sec"))
+    with _shared_repo_patches(_RESOLVED_10K, [_row("us-gaap:Revenues", "2024-12-31")]):
+      result = await tool.execute(
+        {"statement_type": "income_statement", "ticker": "MMM"}
+      )
+    assert "rows_truncated" not in result
