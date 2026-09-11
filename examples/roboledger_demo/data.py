@@ -16,6 +16,10 @@ from __future__ import annotations
 
 from datetime import date
 
+from robosystems.operations.taxonomy_block.chart_templates.services import (
+  ACCOUNTS as ACCOUNTS,
+)
+
 # ---------------------------------------------------------------------------
 # Evergreen reference dates
 # ---------------------------------------------------------------------------
@@ -87,62 +91,7 @@ def get_month_date(start: date, offset: int, day: int = 1) -> date:
 # Chart of Accounts
 # ---------------------------------------------------------------------------
 
-ACCOUNTS = [
-  # code, name, classification, sub_classification, balance_type, parent_code
-  # Assets
-  ("1000", "Operating Checking", "asset", "cash_and_equivalents", "debit", None),
-  ("1100", "Accounts Receivable", "asset", "accounts_receivable", "debit", None),
-  ("1200", "Prepaid Insurance", "asset", "other_current_assets", "debit", None),
-  ("1210", "Prepaid Software", "asset", "other_current_assets", "debit", None),
-  ("1220", "Prepaid Cloud Hosting", "asset", "other_current_assets", "debit", None),
-  ("1300", "Computer Equipment", "asset", "fixed_assets", "debit", None),
-  ("1310", "Office Furniture", "asset", "fixed_assets", "debit", None),
-  ("1350", "Accumulated Depreciation", "asset", "fixed_assets", "credit", None),
-  # Liabilities
-  ("2000", "Accounts Payable", "liability", "accounts_payable", "credit", None),
-  (
-    "2100",
-    "Accrued Liabilities",
-    "liability",
-    "other_current_liabilities",
-    "credit",
-    None,
-  ),
-  (
-    "2200",
-    "Payroll Taxes Payable",
-    "liability",
-    "other_current_liabilities",
-    "credit",
-    None,
-  ),
-  # Equity
-  ("3000", "Owner's Equity", "equity", "equity", "credit", None),
-  ("3100", "Retained Earnings", "equity", "equity", "credit", None),
-  # Revenue
-  ("4000", "Consulting Revenue", "revenue", "operating_revenue", "credit", None),
-  ("4100", "Strategy Advisory Revenue", "revenue", "operating_revenue", "credit", None),
-  (
-    "4200",
-    "Implementation Services Revenue",
-    "revenue",
-    "operating_revenue",
-    "credit",
-    None,
-  ),
-  # Expenses
-  ("5000", "Salaries & Wages", "expense", "operating_expense", "debit", None),
-  ("5100", "Payroll Taxes", "expense", "operating_expense", "debit", None),
-  ("5200", "Health Insurance", "expense", "operating_expense", "debit", None),
-  ("6000", "Office Rent", "expense", "operating_expense", "debit", None),
-  ("6100", "Software Subscriptions", "expense", "operating_expense", "debit", None),
-  ("6200", "Cloud Hosting", "expense", "operating_expense", "debit", None),
-  ("6300", "Professional Development", "expense", "operating_expense", "debit", None),
-  ("6400", "Business Insurance", "expense", "operating_expense", "debit", None),
-  ("6500", "Office Supplies", "expense", "operating_expense", "debit", None),
-  ("6600", "Travel & Entertainment", "expense", "operating_expense", "debit", None),
-  ("7000", "Depreciation Expense", "expense", "operating_expense", "debit", None),
-]
+# ``ACCOUNTS`` is the shipped chart template — one copy, in core.
 
 
 # ---------------------------------------------------------------------------

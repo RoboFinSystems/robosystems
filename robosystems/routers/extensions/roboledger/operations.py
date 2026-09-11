@@ -117,6 +117,10 @@ from robosystems.models.api.extensions.blocked_source_graphs import (
   BlockSourceGraphResult,
   UnblockSourceGraphRequest,
 )
+from robosystems.models.api.extensions.chart_of_accounts import (
+  InitializeChartOfAccountsRequest,
+  InitializeChartOfAccountsResponse,
+)
 from robosystems.models.api.extensions.entity import (
   ChangeReportingStyleRequest,
   ChangeReportingStyleResponse,
@@ -291,6 +295,13 @@ from robosystems.operations.roboledger.commands.blocked_source_graphs import (
 )
 from robosystems.operations.roboledger.commands.blocked_source_graphs import (
   unblock_source_graph as cmd_unblock_source_graph,
+)
+from robosystems.operations.roboledger.commands.chart_of_accounts import (
+  ChartAlreadyExistsError,
+  ChartTemplateNotFoundError,
+)
+from robosystems.operations.roboledger.commands.chart_of_accounts import (
+  initialize_chart_of_accounts as cmd_initialize_chart_of_accounts,
 )
 from robosystems.operations.roboledger.commands.entity import (
   ParentEntityNotFoundError,
@@ -983,6 +994,38 @@ create_taxonomy_block_op = _registrar.register(
       NotImplementedError: 501,
     },
     mark_stale_reason="taxonomy_block_created",
+  )
+)
+
+initialize_chart_of_accounts_op = _registrar.register(
+  OperationSpec(
+    name="initialize-chart-of-accounts",
+    summary="Initialize Chart of Accounts",
+    description=(
+      "Create the graph's chart of accounts from a shipped template — the "
+      "fresh-company path to native books. Use when the graph has NO chart "
+      "(a QuickBooks-synced tenant never needs this: its chart arrives with "
+      "the sync and stays after a sever) and before connecting a bank feed, "
+      "which needs a chart to resolve against. Templates: `saas` "
+      "(subscription software), `services` (professional services), "
+      "`product` (inventory and COGS) — the `chartTemplates` GraphQL field "
+      "lists them with names and account counts. Creates the chart, its "
+      "`coa_mapping` structure and the template's CoA → rs-gaap mapping "
+      "associations in one transaction, with the equity rows mapped by the "
+      "entity's legal form (`entity_type`, defaulting to the graph's primary "
+      "entity). One-time: 409 once a chart exists — a chart is never "
+      "replaced. Customize afterwards with update-taxonomy-block; accounts "
+      "that carry activity are never deleted."
+    ),
+    command=cmd_initialize_chart_of_accounts,
+    request_model=InitializeChartOfAccountsRequest,
+    result_type=InitializeChartOfAccountsResponse,
+    business_event_type="ledger_initialize_chart_of_accounts",
+    error_map={
+      ChartAlreadyExistsError: 409,
+      ChartTemplateNotFoundError: 422,
+    },
+    mark_stale_reason="chart_of_accounts_initialized",
   )
 )
 

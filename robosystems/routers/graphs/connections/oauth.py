@@ -27,7 +27,11 @@ from robosystems.models.api.oauth import (
   OAuthInitResponse,
 )
 from robosystems.models.core import User
-from robosystems.operations.connection_service import ConnectionService
+from robosystems.operations.connection_service import (
+  ConnectionService,
+  ProviderConflictError,
+  assert_provider_compatible,
+)
 
 from .utils import provider_registry
 
@@ -75,6 +79,17 @@ async def init_oauth(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"OAuth not supported for provider: {provider}",
         code=ErrorCode.PROVIDER_ERROR,
+      )
+
+    # The callback can revive a soft-deleted connection, so the books guard
+    # runs here too (specs/ledger/native-accounting-cutover.md §2).
+    try:
+      assert_provider_compatible(graph_id, provider, db)
+    except ProviderConflictError as conflict:
+      raise create_error_response(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=conflict.message,
+        code=conflict.code,
       )
 
     # Get OAuth handler for provider

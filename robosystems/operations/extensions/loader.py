@@ -1901,6 +1901,16 @@ class OLTPLoader:
 
     return out
 
+  # Adopts whatever active chart_of_accounts taxonomy exists, or creates one.
+
+  # It never runs over natively-kept books: `assert_provider_compatible`
+
+  # (connection_service) refuses a synced GL on a graph that has any
+
+  # (specs/ledger/native-accounting-cutover.md §2), and a severed chart's
+
+  # elements leave the upsert key, so the backfill below cannot touch them.
+
   def _ensure_mapping_structure(
     self,
     graph_id: str,

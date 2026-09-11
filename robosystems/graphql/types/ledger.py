@@ -791,3 +791,19 @@ class MappedTrialBalanceRow:
 @pydantic_type(model=PydanticMappedTrialBalanceResponse, all_fields=True)
 class MappedTrialBalance:
   """Trial balance rolled up to reporting concepts via mapping associations."""
+
+
+# ── Chart templates ───────────────────────────────────────────────────────
+
+
+@strawberry.type(
+  description=(
+    "A shipped chart-of-accounts template for `initialize-chart-of-accounts` "
+    "— the fresh-company path to native books."
+  )
+)
+class ChartTemplate:
+  key: str
+  display_name: str
+  description: str
+  account_count: int

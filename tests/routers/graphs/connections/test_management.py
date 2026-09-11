@@ -117,7 +117,12 @@ class TestCreateConnection:
     """These tests use synthetic users with no GraphUser row, so the write-role
     + lifecycle gate would 403 before reaching handler logic. The deny path is
     covered in tests/routers/graphs/test_write_role_gates.py; bypass it here."""
-    with patch(f"{MANAGEMENT_MODULE}.require_graph_write_role"):
+    with (
+      patch(f"{MANAGEMENT_MODULE}.require_graph_write_role"),
+      # The books guard opens an extensions session; its matrix is covered in
+      # tests/operations/test_connection_service.py and its 409 below.
+      patch(f"{MANAGEMENT_MODULE}.assert_provider_compatible"),
+    ):
       yield
 
   @pytest.mark.unit
@@ -1311,3 +1316,229 @@ class TestExternalConnectionConfigValidation:
         quickbooks_config=QuickBooksConnectionConfig(),
         external_config=ExternalConnectionConfig(source_name="salesforce"),
       )
+
+
+# ---------------------------------------------------------------------------
+# Native and synced ledgers never mix — the books guard on create
+# ---------------------------------------------------------------------------
+
+
+class TestCreateConnectionBooksGuard:
+  @pytest.fixture(autouse=True)
+  def _bypass_write_role(self):
+    with patch(f"{MANAGEMENT_MODULE}.require_graph_write_role"):
+      yield
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_conflict_is_409_with_the_stable_code(self):
+    """A ProviderConflictError surfaces as 409 carrying its code, before any
+    connection row is created."""
+    from robosystems.operations.connection_service import ProviderConflictError
+
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_create_request(provider="quickbooks")
+    components = _make_robustness_components()
+
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.create_robustness_components",
+        return_value=components,
+      ),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_start"),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_failure"),
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
+      patch(
+        f"{MANAGEMENT_MODULE}.assert_provider_compatible",
+        side_effect=ProviderConflictError("NATIVE_BOOKS_PRESENT", "native books"),
+      ) as guard,
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.list_connections",
+        new_callable=AsyncMock,
+      ) as mock_list,
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      mock_registry.get_provider = MagicMock(return_value=MagicMock())
+      mock_registry.create_connection = AsyncMock()
+      await create_connection(
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "NATIVE_BOOKS_PRESENT"
+    assert exc_info.value.detail["detail"] == "native books"
+    guard.assert_called_once_with(GRAPH_ID, "quickbooks", mock_db)
+    mock_list.assert_not_awaited()
+    mock_registry.create_connection.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# delete_connection?disposition=sever — the native accounting cutover
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteConnectionSever:
+  @pytest.fixture(autouse=True)
+  def _grant_graph_admin(self):
+    with patch(
+      f"{MANAGEMENT_MODULE}.GraphUser.user_has_admin_access",
+      return_value=True,
+    ):
+      yield
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_sever_stamps_first_then_cleans_up_then_deletes_and_audits(self):
+    from robosystems.security.audit_logger import SecurityEventType
+
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    connection_dict = _make_connection_dict(provider="quickbooks")
+    order: list[str] = []
+
+    async def sever(*_args, **_kwargs):
+      order.append("sever")
+      return {
+        "connection_id": CONNECTION_ID,
+        "provider": "quickbooks",
+        "elements_severed": 29,
+      }
+
+    async def cleanup(*_args, **_kwargs):
+      order.append("cleanup")
+
+    async def delete(*_args, **_kwargs):
+      order.append("delete")
+      return True
+
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.sever_connection",
+        new_callable=AsyncMock,
+        side_effect=sever,
+      ) as mock_sever,
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.delete_connection",
+        new_callable=AsyncMock,
+        side_effect=delete,
+      ),
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
+      patch(f"{MANAGEMENT_MODULE}.SecurityAuditLogger.log_security_event") as audit,
+    ):
+      mock_registry.get_provider = MagicMock(return_value=MagicMock())
+      mock_registry.cleanup_connection = AsyncMock(side_effect=cleanup)
+
+      result = await delete_connection(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        disposition="sever",
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert order == ["sever", "cleanup", "delete"]
+    mock_sever.assert_awaited_once_with(CONNECTION_ID, USER_ID, GRAPH_ID)
+    assert result.success is True
+    assert result.data["disposition"] == "sever"
+    assert result.data["elements_severed"] == 29
+    audit.assert_called_once()
+    audit_kwargs = audit.call_args.kwargs
+    assert audit_kwargs["event_type"] == SecurityEventType.CONNECTION_SEVERED
+    assert audit_kwargs["user_id"] == USER_ID
+    assert audit_kwargs["details"]["connection_id"] == CONNECTION_ID
+    assert audit_kwargs["details"]["elements_severed"] == 29
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_sever_on_a_non_synced_provider_is_400_and_deletes_nothing(self):
+    from robosystems.operations.connection_service import SeverNotSupportedError
+
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    connection_dict = _make_connection_dict(provider="external", source_name="hubspot")
+
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.sever_connection",
+        new_callable=AsyncMock,
+        side_effect=SeverNotSupportedError("external"),
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.delete_connection",
+        new_callable=AsyncMock,
+      ) as mock_delete,
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
+      patch(f"{MANAGEMENT_MODULE}.SecurityAuditLogger.log_security_event") as audit,
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      mock_registry.cleanup_connection = AsyncMock()
+      await delete_connection(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        disposition="sever",
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert exc_info.value.status_code == 400
+    mock_registry.cleanup_connection.assert_not_awaited()
+    mock_delete.assert_not_awaited()
+    audit.assert_not_called()
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_plain_disconnect_never_severs(self):
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    connection_dict = _make_connection_dict(provider="quickbooks")
+
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.sever_connection",
+        new_callable=AsyncMock,
+      ) as mock_sever,
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.delete_connection",
+        new_callable=AsyncMock,
+        return_value=True,
+      ) as mock_delete,
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
+    ):
+      mock_registry.get_provider = MagicMock(return_value=MagicMock())
+      mock_registry.cleanup_connection = AsyncMock()
+
+      result = await delete_connection(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        disposition="disconnect",
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    mock_sever.assert_not_awaited()
+    mock_delete.assert_awaited_once()
+    assert result.data["disposition"] == "disconnect"
+    assert result.data["elements_severed"] is None

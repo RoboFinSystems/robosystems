@@ -16,7 +16,11 @@ from sqlalchemy.orm import Session
 
 from robosystems.database import SessionFactory
 from robosystems.logger import logger
-from robosystems.models.core.connection.connection import Connection
+from robosystems.models.core.connection.connection import (
+  Connection,
+  ConnectionStatus,
+  WritePolicy,
+)
 from robosystems.models.core.connection.connection_credentials import (
   ConnectionCredentials,
 )
@@ -280,7 +284,13 @@ class ConnectionService:
     tenant-side events/agents/elements scoped to its ``connection_id``
     stay attached. Re-OAuthing to the same QB realm later revives this
     row in place via the OAuth callback's reuse path
-    (`routers/graphs/connections/oauth.py`).
+    (`routers/graphs/connections/oauth.py`) — unless it was severed
+    (`sever_connection`), which is the one-way cutover to native books.
+
+    ``write_policy`` falls back to ``native`` on the way out: it describes
+    a graph with an *active* authoritative external GL, and after this
+    call there is none. `Connection.restore` re-applies the provider
+    default on revival.
 
     Pass `graph_id` (the authorized URL scope) so a guessed `connection_id`
     can't delete another graph's connection.
@@ -302,6 +312,9 @@ class ConnectionService:
       if cred:
         cred.deactivate(session)
 
+      if conn.write_policy != WritePolicy.NATIVE.value:
+        conn.write_policy = WritePolicy.NATIVE.value
+
       conn.soft_delete(session)
       logger.info(f"Soft-deleted connection {connection_id}")
       return True
@@ -309,6 +322,64 @@ class ConnectionService:
     except Exception:
       logger.error("Failed to delete connection %s", connection_id, exc_info=True)
       return False
+    finally:
+      if session_created:
+        session.close()
+
+  @staticmethod
+  async def sever_connection(
+    connection_id: str,
+    user_id: str,
+    graph_id: str | None = None,
+    db_session: Session | None = None,
+  ) -> dict[str, Any]:
+    """The native-accounting cutover for a synced-ledger connection.
+
+    Stamps the chart the provider created as native-owned on the graph
+    (`sever_synced_chart`), drops ``write_policy`` to ``native`` and marks
+    the row ``severed`` so a later re-OAuth never revives it. Does NOT
+    delete the row: the caller runs provider cleanup and
+    `delete_connection` afterwards, so a failed stamp leaves the
+    connection exactly as it was.
+
+    Raises `ConnectionNotFoundError` (also for a wrong graph scope) and
+    `SeverNotSupportedError` for providers that are not a synced GL.
+    """
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
+    try:
+      conn = Connection.get_by_id(connection_id, session)
+      if not conn or (graph_id and conn.graph_id != graph_id):
+        raise ConnectionNotFoundError(connection_id)
+
+      provider = (conn.provider or "").lower()
+      if provider not in SYNCED_LEDGER_PROVIDERS:
+        raise SeverNotSupportedError(provider)
+
+      from robosystems.db.extensions import extensions_session
+      from robosystems.operations.roboledger.commands.connections import (
+        sever_synced_chart,
+      )
+
+      target_graph_id = graph_id or conn.graph_id
+      with extensions_session(target_graph_id) as ext:
+        stamped = sever_synced_chart(ext, connection_id, source=provider)
+
+      conn.set_write_policy(session, WritePolicy.NATIVE.value)
+      conn.update_status(ConnectionStatus.SEVERED.value, session)
+      logger.info(
+        "Severed connection %s (%s) on graph %s: %d elements now native",
+        connection_id,
+        provider,
+        target_graph_id,
+        stamped,
+      )
+      return {
+        "connection_id": connection_id,
+        "provider": provider,
+        "elements_severed": stamped,
+      }
     finally:
       if session_created:
         session.close()
@@ -512,12 +583,119 @@ class ConnectionService:
         session.close()
 
 
+# ---------------------------------------------------------------------------
+# Provider compatibility — native and synced ledgers never mix
+# (specs/ledger/native-accounting-cutover.md §2).
+# ---------------------------------------------------------------------------
+
+# Providers that ARE the general ledger while connected: their chart is the
+# chart and their sync writes posted rows. A bank feed cannot sit beside one.
+SYNCED_LEDGER_PROVIDERS: frozenset[str] = frozenset({"quickbooks"})
+
+# Providers that capture bank activity into the inbox of natively-kept
+# books. They need a chart to resolve against and no synced GL in the way.
+BANK_FEED_PROVIDERS: frozenset[str] = frozenset({"mercury"})
+
+
+class ProviderConflictError(Exception):
+  """A provider cannot be connected given the books the graph keeps.
+
+  ``code`` is stable for clients: ``QUICKBOOKS_ACTIVE``, ``CHART_REQUIRED``,
+  ``NATIVE_BOOKS_PRESENT``.
+  """
+
+  def __init__(self, code: str, message: str) -> None:
+    super().__init__(message)
+    self.code = code
+    self.message = message
+
+
+def assert_provider_compatible(graph_id: str, provider: str, session: Session) -> None:
+  """Refuse a provider that would mix native and synced books.
+
+  - a bank feed while a synced GL is live → ``QUICKBOOKS_ACTIVE``;
+  - a bank feed on a graph with no chart of accounts → ``CHART_REQUIRED``;
+  - a synced GL over native books (posted line items on elements it did not
+    create, or a live bank feed) → ``NATIVE_BOOKS_PRESENT``.
+
+  Anything else (``external`` sources, a second SEC repo …) passes.
+  """
+  wanted = (provider or "").lower()
+  live = {
+    (c.provider or "").lower() for c in Connection.get_all_for_graph(graph_id, session)
+  }
+
+  if wanted in BANK_FEED_PROVIDERS:
+    blocking = sorted(live & SYNCED_LEDGER_PROVIDERS)
+    if blocking:
+      raise ProviderConflictError(
+        "QUICKBOOKS_ACTIVE",
+        f"Sever the {blocking[0]} connection first — a bank feed is native "
+        "accounting, and while it is connected the synced ledger is the "
+        "source of truth for bank transactions.",
+      )
+    if not _graph_has_chart(graph_id):
+      raise ProviderConflictError(
+        "CHART_REQUIRED",
+        "Initialize a chart of accounts first (from a template, or by "
+        "severing a synced QuickBooks connection to keep its chart).",
+      )
+    return
+
+  if wanted in SYNCED_LEDGER_PROVIDERS:
+    if live & BANK_FEED_PROVIDERS or _graph_has_native_books(
+      graph_id, synced_source=wanted
+    ):
+      raise ProviderConflictError(
+        "NATIVE_BOOKS_PRESENT",
+        "This graph keeps its books natively; a synced ledger cannot become "
+        "the source of truth over them.",
+      )
+
+
+def _graph_has_chart(graph_id: str) -> bool:
+  from robosystems.db.extensions import extensions_session
+  from robosystems.operations.roboledger.reads.books import graph_has_chart
+
+  try:
+    with extensions_session(graph_id) as ext:
+      return graph_has_chart(ext)
+  except RuntimeError:
+    # No extensions schema yet (never provisioned, or deprovisioned): there
+    # is no chart to resolve against.
+    return False
+
+
+def _graph_has_native_books(graph_id: str, *, synced_source: str) -> bool:
+  from robosystems.db.extensions import extensions_session
+  from robosystems.operations.roboledger.reads.books import (
+    graph_has_native_line_items,
+  )
+
+  try:
+    with extensions_session(graph_id) as ext:
+      return graph_has_native_line_items(ext, synced_source=synced_source)
+  except RuntimeError:
+    return False
+
+
 class ConnectionSyncError(Exception):
   """Base for connection-sync dispatch failures."""
 
 
 class ConnectionNotFoundError(ConnectionSyncError):
   """Connection missing, outside the graph scope, or not owned by the caller."""
+
+
+class SeverNotSupportedError(ConnectionSyncError):
+  """Only a synced-ledger connection (QuickBooks) can be severed."""
+
+  def __init__(self, provider: str) -> None:
+    super().__init__(
+      f"Only a synced ledger connection can be severed; {provider!r} is not one. "
+      "Disconnect it instead."
+    )
+    self.provider = provider
 
 
 class ProviderUnavailableError(ConnectionSyncError):

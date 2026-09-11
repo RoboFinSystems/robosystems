@@ -495,6 +495,30 @@ class TestDeleteConnection:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
+  async def test_delete_resets_write_policy_to_native(self):
+    """After a disconnect there is no active authoritative external GL, so
+    the row goes out as `native`; `Connection.restore` re-applies the
+    provider default on revival."""
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+    mock_conn.write_policy = "qb_authoritative"
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
+    ):
+      MockConn.get_by_id.return_value = mock_conn
+      MockCreds.get_by_connection_id.return_value = None
+
+      assert await ConnectionService.delete_connection(
+        connection_id="conn_1", user_id="usr_123", db_session=mock_session
+      )
+
+    assert mock_conn.write_policy == "native"
+    mock_conn.soft_delete.assert_called_once()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
   async def test_wrong_graph_returns_false(self):
     """A connection in a different graph must not be deletable by guessing
     its id from another graph's scope (IDOR guard)."""
@@ -1537,3 +1561,241 @@ class TestDispatchConnectionSync:
     release.assert_called_once()
     assert release.call_args.kwargs["lock_key"] == "qb_sync:conn_1"
     assert release.call_args.kwargs["lock_id"] == "lock_abc"
+
+
+# ---------------------------------------------------------------------------
+# Native and synced ledgers never mix — the provider guard
+# ---------------------------------------------------------------------------
+
+
+class TestProviderCompatibility:
+  """`assert_provider_compatible` — specs/ledger/native-accounting-cutover.md §2."""
+
+  @staticmethod
+  def _live(*providers: str) -> list:
+    return [_make_mock_connection(provider=p) for p in providers]
+
+  @pytest.mark.unit
+  def test_bank_feed_refused_while_quickbooks_is_live(self):
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._graph_has_chart", return_value=True) as has_chart,
+    ):
+      MockConn.get_all_for_graph.return_value = self._live("quickbooks", "external")
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible("kg_test", "mercury", MagicMock())
+
+    assert exc.value.code == "QUICKBOOKS_ACTIVE"
+    assert "quickbooks" in exc.value.message
+    has_chart.assert_not_called()
+
+  @pytest.mark.unit
+  def test_bank_feed_needs_a_chart(self):
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._graph_has_chart", return_value=False),
+    ):
+      MockConn.get_all_for_graph.return_value = []
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible("kg_test", "Mercury", MagicMock())
+
+    assert exc.value.code == "CHART_REQUIRED"
+
+  @pytest.mark.unit
+  def test_bank_feed_allowed_with_a_chart_and_no_synced_ledger(self):
+    from robosystems.operations.connection_service import assert_provider_compatible
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._graph_has_chart", return_value=True),
+    ):
+      MockConn.get_all_for_graph.return_value = self._live("external")
+      assert_provider_compatible("kg_test", "mercury", MagicMock())
+
+  @pytest.mark.unit
+  def test_quickbooks_refused_over_native_line_items(self):
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._graph_has_native_books", return_value=True) as native,
+    ):
+      MockConn.get_all_for_graph.return_value = []
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible("kg_test", "quickbooks", MagicMock())
+
+    assert exc.value.code == "NATIVE_BOOKS_PRESENT"
+    native.assert_called_once_with("kg_test", synced_source="quickbooks")
+
+  @pytest.mark.unit
+  def test_quickbooks_refused_beside_a_live_bank_feed(self):
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._graph_has_native_books", return_value=False) as native,
+    ):
+      MockConn.get_all_for_graph.return_value = self._live("mercury")
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible("kg_test", "quickbooks", MagicMock())
+
+    assert exc.value.code == "NATIVE_BOOKS_PRESENT"
+    native.assert_not_called()
+
+  @pytest.mark.unit
+  def test_quickbooks_allowed_on_a_fresh_graph(self):
+    from robosystems.operations.connection_service import assert_provider_compatible
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._graph_has_native_books", return_value=False),
+    ):
+      MockConn.get_all_for_graph.return_value = []
+      assert_provider_compatible("kg_test", "quickbooks", MagicMock())
+
+  @pytest.mark.unit
+  def test_other_providers_pass_without_touching_the_graph(self):
+    from robosystems.operations.connection_service import assert_provider_compatible
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._graph_has_chart") as has_chart,
+      patch(f"{MODULE}._graph_has_native_books") as native,
+    ):
+      MockConn.get_all_for_graph.return_value = self._live("quickbooks")
+      assert_provider_compatible("kg_test", "external", MagicMock())
+      assert_provider_compatible("kg_test", "sec", MagicMock())
+
+    has_chart.assert_not_called()
+    native.assert_not_called()
+
+  @pytest.mark.unit
+  def test_a_missing_extensions_schema_reads_as_no_books(self):
+    """A never-provisioned or deprovisioned graph has no chart (so a bank
+    feed is refused) and no native books (so QuickBooks is allowed)."""
+    from robosystems.operations.connection_service import (
+      _graph_has_chart,
+      _graph_has_native_books,
+    )
+
+    with patch(
+      "robosystems.db.extensions.extensions_session",
+      side_effect=RuntimeError("schema missing"),
+    ):
+      assert _graph_has_chart("kg_test") is False
+      assert _graph_has_native_books("kg_test", synced_source="quickbooks") is False
+
+
+# ---------------------------------------------------------------------------
+# sever_connection — the native accounting cutover
+# ---------------------------------------------------------------------------
+
+
+class TestSeverConnection:
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_sever_stamps_the_chart_then_marks_the_row(self):
+    mock_conn = _make_mock_connection(provider="quickbooks", graph_id="kg_test")
+    ext = MagicMock()
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch("robosystems.db.extensions.extensions_session") as ext_session,
+      patch(
+        "robosystems.operations.roboledger.commands.connections.sever_synced_chart",
+        return_value=7,
+      ) as stamp,
+    ):
+      MockConn.get_by_id.return_value = mock_conn
+      ext_session.return_value.__enter__.return_value = ext
+
+      result = await ConnectionService.sever_connection(
+        "conn_1", "usr_123", "kg_test", db_session=MagicMock()
+      )
+
+    ext_session.assert_called_once_with("kg_test")
+    stamp.assert_called_once_with(ext, "conn_1", source="quickbooks")
+    assert mock_conn.set_write_policy.call_args.args[1] == "native"
+    assert mock_conn.update_status.call_args.args[0] == "severed"
+    assert result == {
+      "connection_id": "conn_1",
+      "provider": "quickbooks",
+      "elements_severed": 7,
+    }
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_sever_refuses_a_provider_that_is_not_a_synced_ledger(self):
+    from robosystems.operations.connection_service import SeverNotSupportedError
+
+    mock_conn = _make_mock_connection(provider="external", graph_id="kg_test")
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(
+        "robosystems.operations.roboledger.commands.connections.sever_synced_chart"
+      ) as stamp,
+    ):
+      MockConn.get_by_id.return_value = mock_conn
+      with pytest.raises(SeverNotSupportedError):
+        await ConnectionService.sever_connection(
+          "conn_1", "usr_123", "kg_test", db_session=MagicMock()
+        )
+
+    stamp.assert_not_called()
+    mock_conn.update_status.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_sever_outside_the_graph_scope_is_not_found(self):
+    from robosystems.operations.connection_service import ConnectionNotFoundError
+
+    mock_conn = _make_mock_connection(provider="quickbooks", graph_id="kg_other")
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+      with pytest.raises(ConnectionNotFoundError):
+        await ConnectionService.sever_connection(
+          "conn_1", "usr_123", "kg_test", db_session=MagicMock()
+        )
+
+    mock_conn.update_status.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_a_failed_stamp_leaves_the_row_untouched(self):
+    mock_conn = _make_mock_connection(provider="quickbooks", graph_id="kg_test")
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch("robosystems.db.extensions.extensions_session") as ext_session,
+      patch(
+        "robosystems.operations.roboledger.commands.connections.sever_synced_chart",
+        side_effect=RuntimeError("boom"),
+      ),
+    ):
+      MockConn.get_by_id.return_value = mock_conn
+      ext_session.return_value.__enter__.return_value = MagicMock()
+      with pytest.raises(RuntimeError):
+        await ConnectionService.sever_connection(
+          "conn_1", "usr_123", "kg_test", db_session=MagicMock()
+        )
+
+    mock_conn.set_write_policy.assert_not_called()
+    mock_conn.update_status.assert_not_called()
