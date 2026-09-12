@@ -163,11 +163,8 @@ def _load_template(template_dir: Path) -> ChartTemplate:
       )
     )
   mappings_dir = version_dir / "mappings"
-  mapping_sets = [
-    _load_mapping_set(path)
-    for path in sorted(mappings_dir.glob("*.jsonld"))
-    if mappings_dir.exists()
-  ]
+  mapping_paths = sorted(mappings_dir.glob("*.jsonld")) if mappings_dir.exists() else []
+  mapping_sets = [_load_mapping_set(path) for path in mapping_paths]
   return ChartTemplate(
     key=key,
     display_name=str(chart["displayName"]),

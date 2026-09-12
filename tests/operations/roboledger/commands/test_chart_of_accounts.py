@@ -19,7 +19,6 @@ from robosystems.models.api.extensions.chart_of_accounts import (
 )
 from robosystems.operations.roboledger.commands.chart_of_accounts import (
   DEFAULT_CHART_NAME,
-  MAPPING_STRUCTURE_NAME,
   ChartAlreadyExistsError,
   ChartTemplateNotFoundError,
   initialize_chart_of_accounts,
@@ -126,7 +125,7 @@ class TestInitializeChartOfAccounts:
     assert [e.code for e in payload.elements] == [c for c, *_ in template.accounts]
     assert all(e.trait for e in payload.elements)
     assert [s.block_type for s in payload.structures] == ["coa_mapping"]
-    assert payload.structures[0].name == MAPPING_STRUCTURE_NAME
+    assert payload.structures[0].name == template.mappings["rs-gaap"].structure_name
     assert payload.metadata == {
       "template": "saas",
       "template_version": "v1",

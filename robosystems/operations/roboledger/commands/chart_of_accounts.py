@@ -58,8 +58,6 @@ from robosystems.operations.taxonomy_block.chart_templates import (
 )
 
 COA_TAXONOMY_TYPE = "chart_of_accounts"
-# The rs-gaap mapping set's structure name — the one every tenant has today.
-MAPPING_STRUCTURE_NAME = "CoA to US GAAP Mapping"
 DEFAULT_CHART_NAME = "Chart of Accounts"
 
 
