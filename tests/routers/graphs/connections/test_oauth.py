@@ -91,7 +91,12 @@ class TestInitOAuth:
     """These tests use synthetic users with no GraphUser row, so the write-role
     + lifecycle gate would 403 before reaching handler logic. The deny path is
     covered in tests/routers/graphs/test_write_role_gates.py; bypass it here."""
-    with patch(f"{OAUTH_MODULE}.require_graph_write_role"):
+    with (
+      patch(f"{OAUTH_MODULE}.require_graph_write_role"),
+      # The books guard opens an extensions session; its matrix lives in
+      # tests/operations/test_connection_service.py, its 409 below.
+      patch(f"{OAUTH_MODULE}.assert_provider_compatible"),
+    ):
       yield
 
   @pytest.mark.unit
@@ -1128,3 +1133,54 @@ class TestOAuthCallback:
     call_kwargs = mock_oauth_handler.store_tokens.call_args
     # user_id should be passed as keyword arg
     assert call_kwargs.kwargs.get("user_id") == "usr_specific_789"
+
+
+class TestInitOAuthBooksGuard:
+  """The callback can revive a soft-deleted connection, so the books guard
+  also runs at init — a QuickBooks re-OAuth over natively-kept books is
+  refused before any authorize URL is minted."""
+
+  @pytest.fixture(autouse=True)
+  def _bypass_write_role(self):
+    with patch(f"{OAUTH_MODULE}.require_graph_write_role"):
+      yield
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_conflict_is_409_before_the_authorize_url(self):
+    from robosystems.operations.connection_service import ProviderConflictError
+
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_oauth_init_request()
+    connection_dict = _make_connection_dict(provider="quickbooks")
+    mock_oauth_handler = MagicMock()
+
+    with (
+      patch(
+        f"{OAUTH_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+      patch(
+        f"{OAUTH_MODULE}.assert_provider_compatible",
+        side_effect=ProviderConflictError("NATIVE_BOOKS_PRESENT", "native books"),
+      ) as guard,
+      patch(
+        "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_handler",
+        mock_oauth_handler,
+      ),
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      await init_oauth(
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "NATIVE_BOOKS_PRESENT"
+    guard.assert_called_once_with(GRAPH_ID, "quickbooks", mock_db)
+    mock_oauth_handler.get_authorization_url.assert_not_called()

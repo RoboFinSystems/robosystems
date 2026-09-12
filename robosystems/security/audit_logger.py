@@ -68,6 +68,9 @@ class SecurityEventType(Enum):
   GRAPH_MEMBER_ADDED = "graph_member_added"
   GRAPH_MEMBER_ROLE_CHANGED = "graph_member_role_changed"
   GRAPH_MEMBER_REMOVED = "graph_member_removed"
+
+  # Connection lifecycle — the native accounting cutover
+  CONNECTION_SEVERED = "connection_severed"
   # Every authenticated request to the admin surface (SOC 2 CC6.1: privileged
   # access is restricted AND what it did is recorded). Evidence, not alerts:
   # no metric, like the membership and SCIM lifecycle events — the admin

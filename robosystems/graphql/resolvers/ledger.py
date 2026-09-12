@@ -38,6 +38,7 @@ from robosystems.graphql.types.ledger import (
   AccountTreeNode,
   Agent,
   BlockedSourceGraphList,
+  ChartTemplate,
   ClosingBookStructures,
   Element,
   ElementList,
@@ -128,6 +129,9 @@ from robosystems.operations.roboledger.reports.network_picker import (
   load_primary_reporting_style,
 )
 from robosystems.operations.roboledger.schedules import ScheduleService
+from robosystems.operations.taxonomy_block.chart_templates import (
+  list_templates as list_chart_templates,
+)
 
 # Services are stateless and cheap to keep as module-level singletons —
 # matches the router-level `_svc` pattern already in place.
@@ -799,6 +803,22 @@ class LedgerQuery:
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return PeriodCloseStatus.from_pydantic(response)
+
+  # ── Chart templates ─────────────────────────────────────────────────────
+
+  @strawberry.field
+  def chart_templates(self, info: Info[GraphQLContext, None]) -> list[ChartTemplate]:
+    """Shipped chart-of-accounts templates for `initialize-chart-of-accounts`."""
+    require_graph_id(info)
+    return [
+      ChartTemplate(
+        key=template.key,
+        display_name=template.display_name,
+        description=template.description,
+        account_count=template.account_count,
+      )
+      for template in list_chart_templates()
+    ]
 
   # ── Fiscal calendar ─────────────────────────────────────────────────────
 

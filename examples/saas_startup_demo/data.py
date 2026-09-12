@@ -37,6 +37,7 @@ from examples._scenario.engine import (
   trailing_year,
   validate,
 )
+from robosystems.operations.taxonomy_block.chart_templates.saas import ACCOUNTS
 
 MONTHS = 16
 
@@ -44,41 +45,7 @@ MONTHS = 16
 # Chart of Accounts — (code, name, trait, sub_classification, balance_type, description)
 # ---------------------------------------------------------------------------
 
-ACCOUNTS: list[tuple[str, str, str, str, str, str | None]] = [
-  # Assets
-  ("1000", "Cash", "asset", "cash_and_equivalents", "debit", None),
-  ("1100", "Accounts Receivable", "asset", "accounts_receivable", "debit", None),
-  ("1200", "Prepaid Software", "asset", "other_current_assets", "debit", None),
-  ("1210", "Prepaid Insurance", "asset", "other_current_assets", "debit", None),
-  ("1300", "Computer Equipment", "asset", "fixed_assets", "debit", None),
-  ("1350", "Accumulated Depreciation", "asset", "fixed_assets", "credit", None),
-  # Liabilities
-  ("2000", "Accounts Payable", "liability", "accounts_payable", "credit", None),
-  (
-    "2100",
-    "Accrued Liabilities",
-    "liability",
-    "other_current_liabilities",
-    "credit",
-    None,
-  ),
-  ("2300", "Deferred Revenue", "liability", "deferred_revenue", "credit", None),
-  # Equity
-  ("3000", "Paid-in Capital", "equity", "equity", "credit", None),
-  ("3100", "Accumulated Deficit", "equity", "equity", "credit", None),
-  # Revenue
-  ("4000", "Subscription Revenue", "revenue", "operating_revenue", "credit", None),
-  ("4100", "Professional Services", "revenue", "operating_revenue", "credit", None),
-  # Cost of revenue
-  ("5000", "Cost of Revenue", "expense", "cost_of_goods_sold", "debit", None),
-  # Operating expenses
-  ("6000", "Research & Development", "expense", "operating_expense", "debit", None),
-  ("6100", "Sales & Marketing", "expense", "operating_expense", "debit", None),
-  ("6200", "General & Administrative", "expense", "operating_expense", "debit", None),
-  ("6300", "Rent", "expense", "operating_expense", "debit", None),
-  ("6400", "Software & Tools", "expense", "operating_expense", "debit", None),
-  ("7000", "Depreciation Expense", "expense", "operating_expense", "debit", None),
-]
+# ``ACCOUNTS`` is the shipped chart template — one copy, in core.
 
 # B2B customer logos — annual contracts (prepaid) + onboarding services (net-30).
 LOGOS = [

@@ -3,6 +3,7 @@ Connection management endpoints (create, list, get, delete).
 """
 
 import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
@@ -28,7 +29,13 @@ from robosystems.models.api.graphs.connections import (
   SetWritePolicyRequest,
 )
 from robosystems.models.core import GraphUser, User
-from robosystems.operations.connection_service import ConnectionService
+from robosystems.operations.connection_service import (
+  ConnectionService,
+  ProviderConflictError,
+  SeverNotSupportedError,
+  assert_provider_compatible,
+)
+from robosystems.security.audit_logger import SecurityAuditLogger, SecurityEventType
 
 from .utils import (
   create_robustness_components,
@@ -121,6 +128,18 @@ async def create_connection(
       config = request.external_config
     # Validate provider is enabled before any database operations
     provider_registry.get_provider(request.provider)
+
+    # Native and synced ledgers never mix — a bank feed needs a chart and no
+    # live QuickBooks; QuickBooks cannot take over natively-kept books
+    # (specs/ledger/native-accounting-cutover.md §2).
+    try:
+      assert_provider_compatible(graph_id, request.provider, db)
+    except ProviderConflictError as conflict:
+      raise create_error_response(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=conflict.message,
+        code=conflict.code,
+      )
 
     # Prevent duplicate connections: one connection per provider per graph —
     # except 'external', where the identity is the source_name (a graph can
@@ -460,7 +479,13 @@ async def set_connection_write_policy(
   "/{connection_id}",
   response_model=SuccessResponse,
   summary="Delete Connection",
-  description="Removes the connection and revokes credentials. Imported data is preserved in the graph. Requires admin role.",
+  description=(
+    "Removes the connection and revokes credentials. Imported data is "
+    "preserved in the graph. Requires admin role. `disposition=sever` "
+    "(QuickBooks only) is the cutover to native books: the chart QuickBooks "
+    "created becomes the tenant's own and QuickBooks can never resume over "
+    "it; the default `disconnect` keeps the connection reconnectable."
+  ),
   operation_id="deleteConnection",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
@@ -469,6 +494,16 @@ async def delete_connection(
     ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   connection_id: str = Path(..., description="Connection identifier"),
+  disposition: Literal["disconnect", "sever"] = Query(
+    "disconnect",
+    description=(
+      "`disconnect` (default): soft-delete; a later re-OAuth to the same "
+      "realm revives the connection. `sever`: the native-accounting "
+      "cutover — QuickBooks only; the chart it created is stamped native-"
+      "owned, write_policy drops to native, and the connection is never "
+      "revived."
+    ),
+  ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
@@ -495,8 +530,37 @@ async def delete_connection(
         code=ErrorCode.NOT_FOUND,
       )
 
-    # Provider-specific cleanup BEFORE deletion (e.g., revoke OAuth tokens)
     provider = connection["provider"].lower()
+
+    # Sever first: stamping the chart is the one step that must not be lost
+    # if a later step fails. Nothing below it is destructive to the books.
+    elements_severed: int | None = None
+    if disposition == "sever":
+      try:
+        severed = await ConnectionService.sever_connection(
+          connection_id, current_user.id, graph_id
+        )
+      except SeverNotSupportedError as exc:
+        raise create_error_response(
+          status_code=status.HTTP_400_BAD_REQUEST,
+          detail=str(exc),
+          code=ErrorCode.INVALID_INPUT,
+        )
+      elements_severed = int(severed["elements_severed"])
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.CONNECTION_SEVERED,
+        user_id=str(current_user.id),
+        endpoint="/v1/graphs/{graph_id}/connections/{connection_id}",
+        details={
+          "graph_id": graph_id,
+          "connection_id": connection_id,
+          "provider": provider,
+          "elements_severed": elements_severed,
+        },
+        risk_level="medium",
+      )
+
+    # Provider-specific cleanup BEFORE deletion (e.g., revoke OAuth tokens)
     try:
       provider_registry.get_provider(provider)
       await provider_registry.cleanup_connection(provider, connection, graph_id)
@@ -524,7 +588,12 @@ async def delete_connection(
     return SuccessResponse(
       success=True,
       message=f"Connection {connection_id} deleted successfully",
-      data={"connection_id": connection_id, "provider": provider},
+      data={
+        "connection_id": connection_id,
+        "provider": provider,
+        "disposition": disposition,
+        "elements_severed": elements_severed,
+      },
     )
 
   except HTTPException:

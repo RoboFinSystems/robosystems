@@ -15,6 +15,11 @@ from .ar_ap import (
   OpenBalanceAggregate,
   OpenBalanceByAgent,
 )
+from .chart_of_accounts import (
+  ChartTemplateSummary,
+  InitializeChartOfAccountsRequest,
+  InitializeChartOfAccountsResponse,
+)
 from .closing_book import (
   ClosingBookCategory,
   ClosingBookItem,
@@ -91,6 +96,7 @@ __all__ = [
   "AnalyticalStatementFactRow",
   "BindTextBlockRequest",
   "BindTextBlockResponse",
+  "ChartTemplateSummary",
   "ClosingBookCategory",
   "ClosingBookItem",
   "ClosingBookStructuresResponse",
@@ -106,6 +112,8 @@ __all__ = [
   "HoldingResponse",
   "HoldingSecuritySummary",
   "HoldingsListResponse",
+  "InitializeChartOfAccountsRequest",
+  "InitializeChartOfAccountsResponse",
   "LedgerEntryResponse",
   "LedgerJournalEntryListResponse",
   "LedgerJournalEntryResponse",

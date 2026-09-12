@@ -26,6 +26,12 @@ class ConnectionStatus(str, Enum):
   longer valid (Intuit revoked / rotated past grace / scope insufficient)
   and the operator must re-OAuth. UI surfaces this as a "Reconnect" CTA
   rather than a generic "sync failed" message.
+
+  `SEVERED` is the native-accounting cutover: the tenant kept the chart the
+  synced provider created and went native. A severed row is soft-deleted
+  like any disconnect but is never revived by a later re-OAuth — the
+  provider cannot resume over books kept natively since
+  (``specs/ledger/native-accounting-cutover.md`` §3).
   """
 
   PENDING_OAUTH = "pending_oauth"
@@ -33,6 +39,7 @@ class ConnectionStatus(str, Enum):
   ERROR = "error"
   NEEDS_REAUTH = "needs_reauth"
   DISCONNECTED = "disconnected"
+  SEVERED = "severed"
 
 
 class WritePolicy(str, Enum):
@@ -315,7 +322,8 @@ class Connection(Model):
     Returns the most-recently-deleted soft-deleted connection matching
     the (graph_id, provider, realm_id) triple. Used by the OAuth
     callback to revive a prior connection rather than mint a new one
-    when the user reconnects to the same QB realm.
+    when the user reconnects to the same QB realm. A ``severed`` row is
+    never a candidate: the tenant went native on that chart.
     """
     return (
       session.query(cls)
@@ -324,6 +332,7 @@ class Connection(Model):
         cls.provider == provider,
         cls.realm_id == realm_id,
         cls.deleted_at.is_not(None),
+        cls.status != ConnectionStatus.SEVERED.value,
       )
       .order_by(cls.deleted_at.desc())
       .first()
@@ -477,9 +486,15 @@ class Connection(Model):
       raise
 
   def restore(self, session: Session) -> None:
-    """Revive a soft-deleted connection (re-OAuth reuse path)."""
+    """Revive a soft-deleted connection (re-OAuth reuse path).
+
+    Disconnect resets ``write_policy`` to ``native`` (no active
+    authoritative external GL); revival re-applies the provider default so
+    a reconnected QuickBooks is authoritative again from the first sync.
+    """
     self.deleted_at = None
     self.updated_at = datetime.now(UTC)
+    self.write_policy = default_write_policy_for_provider(self.provider)
     try:
       session.commit()
       session.refresh(self)

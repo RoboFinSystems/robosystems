@@ -22,6 +22,7 @@ class TestConnectionStatus:
     assert ConnectionStatus.ERROR == "error"
     assert ConnectionStatus.NEEDS_REAUTH == "needs_reauth"
     assert ConnectionStatus.DISCONNECTED == "disconnected"
+    assert ConnectionStatus.SEVERED == "severed"
 
   def test_is_string_enum(self):
     assert isinstance(ConnectionStatus.CONNECTED, str)
@@ -647,3 +648,69 @@ class TestConnectionToDictWithSoftDelete:
 
     assert "deleted_at" in result
     assert result["deleted_at"] is None
+
+
+@pytest.mark.unit
+class TestConnectionRestore:
+  def test_restore_clears_deleted_at_and_reapplies_provider_write_policy(self):
+    """Disconnect drops write_policy to native; revival re-applies the
+    provider default so a reconnected QuickBooks is authoritative again."""
+    session = MagicMock()
+    conn = Connection(
+      graph_id="kg_test",
+      user_id="usr_1",
+      provider="quickbooks",
+      write_policy="native",
+    )
+    conn.deleted_at = datetime.now(UTC)
+
+    conn.restore(session)
+
+    assert conn.deleted_at is None
+    assert conn.write_policy == "qb_authoritative"
+    session.commit.assert_called_once()
+
+  def test_restore_keeps_native_for_providers_without_an_external_gl(self):
+    session = MagicMock()
+    conn = Connection(
+      graph_id="kg_test", user_id="usr_1", provider="sec", write_policy="native"
+    )
+    conn.deleted_at = datetime.now(UTC)
+
+    conn.restore(session)
+
+    assert conn.write_policy == "native"
+
+
+@pytest.mark.unit
+class TestFindSoftDeletedForRealm:
+  def test_returns_most_recently_deleted_match(self):
+    session = MagicMock()
+    prior = MagicMock(spec=Connection)
+    session.query.return_value.filter.return_value.order_by.return_value.first.return_value = prior
+
+    result = Connection.find_soft_deleted_for_realm(
+      "kg_test", "quickbooks", "9341452700148642", session
+    )
+
+    assert result is prior
+
+  def test_a_severed_row_is_never_a_revival_candidate(self):
+    """The filter carries the severed exclusion — a tenant that went native
+    on that chart is not revived by a later re-OAuth."""
+    from sqlalchemy.dialects import postgresql
+
+    session = MagicMock()
+    Connection.find_soft_deleted_for_realm(
+      "kg_test", "quickbooks", "9341452700148642", session
+    )
+
+    clauses = session.query.return_value.filter.call_args.args
+    compiled = [
+      str(
+        c.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+      )
+      for c in clauses
+    ]
+    assert any("connections.deleted_at IS NOT NULL" in c for c in compiled)
+    assert any("connections.status != 'severed'" in c for c in compiled), compiled
