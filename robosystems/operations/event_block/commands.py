@@ -35,7 +35,6 @@ from robosystems.models.api.event_handler import (
   PreviewEventBlockResponse,
   TransactionPreview,
 )
-from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.dimension_junctions import (
   event_dimensions,
 )
@@ -56,7 +55,12 @@ from robosystems.operations.roboledger.reads.event_block import (
   _to_envelope,
 )
 
-from .engine import EngineValidationError, apply_handler, posting_date_for_event
+from .engine import (
+  EngineValidationError,
+  apply_handler,
+  posting_date_for_event,
+  resolve_agent_type,
+)
 from .python_handlers import get_python_handler
 from .python_handlers.types import HandlerMetadataValidationError
 from .registry import (
@@ -265,16 +269,6 @@ def _assert_retractable(session: Session, event: Event) -> None:
 # event is an idempotent no-op instead (see ``qb_external_id`` / status
 # checks in ``execute_event_block``), so it stays out of this set.
 _UNPUBLISHABLE_STATUSES = frozenset({"voided", "superseded"})
-
-
-def _resolve_agent_type(session: Session, agent_id: str | None) -> str | None:
-  """Load the counterparty's agent_type for DSL handler matching."""
-  if agent_id is None:
-    return None
-  agent = session.get(Agent, agent_id)
-  if agent is None:
-    return None
-  return agent.agent_type
 
 
 # Platform-emitted sources — always valid, no registration involved. Adapter
@@ -513,7 +507,7 @@ def create_event_block_in_session(
       return event, envelope
 
     # 2. Fall through to the DSL registry
-    agent_type = _resolve_agent_type(session, body.agent_id)
+    agent_type = resolve_agent_type(session, body.agent_id)
     handler = resolve_handler(
       session,
       event_type=body.event_type,
@@ -843,7 +837,7 @@ def preview_event_block(
   errors: list[str] = []
   matched_handler_response = None
   planned: list[TransactionPreview] = []
-  agent_type = _resolve_agent_type(session, body.agent_id)
+  agent_type = resolve_agent_type(session, body.agent_id)
 
   try:
     handler = resolve_handler(

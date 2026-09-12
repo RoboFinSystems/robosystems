@@ -45,12 +45,12 @@ from robosystems.models.api.event_block import CreateEventBlockRequest
 from robosystems.models.api.extensions.journal_entries import (
   JournalEntryLineItemInput,
 )
-from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.engine import (
   apply_handler,
   posting_date_for_event,
+  resolve_agent_type,
 )
 from robosystems.operations.event_block.registry import (
   HandlerAmbiguousError,
@@ -239,13 +239,6 @@ def _memo(event: Event) -> str:
   return (event.description or event.event_type or "Bank transaction")[:255]
 
 
-def _agent_type(session: Session, agent_id: str | None) -> str | None:
-  if agent_id is None:
-    return None
-  agent = session.get(Agent, agent_id)
-  return agent.agent_type if agent is not None else None
-
-
 def _apply_dsl_floor(session: Session, event: Event, created_by: str) -> HandlerResult:
   """An unclassified bank event posts through a matching tenant rule, if any."""
   try:
@@ -254,7 +247,7 @@ def _apply_dsl_floor(session: Session, event: Event, created_by: str) -> Handler
       event_type=event.event_type,
       event_category=event.event_category,
       source=event.source,
-      agent_type=_agent_type(session, event.agent_id),
+      agent_type=resolve_agent_type(session, event.agent_id),
       resource_type=event.resource_type,
       metadata=dict(event.metadata_ or {}),
     )

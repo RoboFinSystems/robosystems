@@ -12,6 +12,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy.orm import Session
 
+from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.event_handler import EventHandler
@@ -31,6 +32,19 @@ from .template import (
 
 class EngineValidationError(Exception):
   """Template produced invalid or unbalanced GL entries."""
+
+
+def resolve_agent_type(session: Session, agent_id: str | None) -> str | None:
+  """The counterparty's ``agent_type`` for DSL handler matching, or ``None``.
+
+  Shared by the capture path (``commands``) and the handlers that consult
+  the rule floor at commit (``python_handlers.bank_feed``): both sit above
+  this module, so the lookup lives here rather than in either.
+  """
+  if agent_id is None:
+    return None
+  agent = session.get(Agent, agent_id)
+  return agent.agent_type if agent is not None else None
 
 
 def posting_date_for_event(
