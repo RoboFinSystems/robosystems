@@ -1542,3 +1542,100 @@ class TestDeleteConnectionSever:
     mock_delete.assert_awaited_once()
     assert result.data["disposition"] == "disconnect"
     assert result.data["elements_severed"] is None
+
+
+# ---------------------------------------------------------------------------
+# Mercury — the config is routed and the guard runs
+# ---------------------------------------------------------------------------
+
+
+class TestCreateMercuryConnection:
+  @pytest.fixture(autouse=True)
+  def _bypass_write_role(self):
+    with patch(f"{MANAGEMENT_MODULE}.require_graph_write_role"):
+      yield
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_mercury_config_reaches_the_provider(self):
+    from datetime import date
+
+    from robosystems.models.api.graphs.connections import (
+      CreateConnectionRequest,
+      MercuryConnectionConfig,
+    )
+
+    request = CreateConnectionRequest(
+      provider="mercury",
+      mercury_config=MercuryConnectionConfig(since_date=date(2026, 1, 1)),
+    )
+    connection_dict = _make_connection_dict(provider="mercury", status="pending_oauth")
+    components = _make_robustness_components()
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.create_robustness_components", return_value=components
+      ),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_start"),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_success"),
+      patch(f"{MANAGEMENT_MODULE}.assert_provider_compatible") as guard,
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as registry,
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.list_connections",
+        new_callable=AsyncMock,
+        return_value=[],
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+    ):
+      registry.get_provider = MagicMock(return_value=MagicMock())
+      registry.create_connection = AsyncMock(return_value=CONNECTION_ID)
+      result = await create_connection(
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=_make_mock_user(),
+        db=MagicMock(),
+        _rate_limit=None,
+      )
+    assert result.provider == "mercury"
+    guard.assert_called_once()
+    assert guard.call_args.args[1] == "mercury"
+    config = registry.create_connection.call_args.args[2]
+    assert isinstance(config, MercuryConnectionConfig)
+    assert config.since_date == date(2026, 1, 1)
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_mercury_beside_quickbooks_is_409(self):
+    from robosystems.models.api.graphs.connections import CreateConnectionRequest
+    from robosystems.operations.connection_service import ProviderConflictError
+
+    components = _make_robustness_components()
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.create_robustness_components", return_value=components
+      ),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_start"),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_failure"),
+      patch(
+        f"{MANAGEMENT_MODULE}.assert_provider_compatible",
+        side_effect=ProviderConflictError(
+          "QUICKBOOKS_ACTIVE", "Sever QuickBooks first"
+        ),
+      ),
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as registry,
+    ):
+      registry.get_provider = MagicMock(return_value=MagicMock())
+      registry.create_connection = AsyncMock()
+      with pytest.raises(HTTPException) as excinfo:
+        await create_connection(
+          graph_id=GRAPH_ID,
+          request=CreateConnectionRequest(provider="mercury"),
+          current_user=_make_mock_user(),
+          db=MagicMock(),
+          _rate_limit=None,
+        )
+    assert excinfo.value.status_code == 409
+    registry.create_connection.assert_not_called()

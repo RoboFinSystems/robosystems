@@ -731,6 +731,25 @@ class EnvConfig:
     "CONNECTION_EXTERNAL_ENABLED",
     get_parameter_value("CONNECTION_EXTERNAL_ENABLED", "true").lower() == "true",
   )
+  # Mercury bank feed — the first bank-feed provider. A bank feed is native
+  # accounting (it needs a chart of accounts and no live QuickBooks). Off by
+  # default: it needs Mercury's partner OAuth client, and the production
+  # client sits behind Mercury's compliance review.
+  CONNECTION_MERCURY_ENABLED = get_bool_env(
+    "CONNECTION_MERCURY_ENABLED",
+    get_parameter_value("CONNECTION_MERCURY_ENABLED", "false").lower() == "true",
+  )
+  # The Mercury provider's `api_key` credential mode: a personal read-only
+  # token pasted at connect time instead of the partner OAuth client. For
+  # self-hosted and local deployments only (your token, your graph). Hosted
+  # production never turns this on — Mercury's terms bar third-party
+  # automated access without written permission, and the OAuth approval is
+  # that permission.
+  MERCURY_API_KEY_CONNECTIONS_ENABLED = get_bool_env(
+    "MERCURY_API_KEY_CONNECTIONS_ENABLED",
+    get_parameter_value("MERCURY_API_KEY_CONNECTIONS_ENABLED", "false").lower()
+    == "true",
+  )
 
   # Routes QB Reports API calls (JournalReport — our live GL posting source)
   # through Intuit's modernized "v2" reporting service via the
@@ -1088,6 +1107,12 @@ class EnvConfig:
     "INTUIT_REDIRECT_URI", "http://localhost:8000/auth/callback"
   )
   INTUIT_ENVIRONMENT = get_secret_value("INTUIT_ENVIRONMENT", "sandbox")
+
+  # Mercury (bank feed) — the partner OAuth client. Sandbox and production
+  # are separate clients on separate hosts; MERCURY_ENVIRONMENT picks the host.
+  MERCURY_CLIENT_ID = get_secret_value("MERCURY_CLIENT_ID", "")
+  MERCURY_CLIENT_SECRET = get_secret_value("MERCURY_CLIENT_SECRET", "")
+  MERCURY_ENVIRONMENT = get_secret_value("MERCURY_ENVIRONMENT", "sandbox")
 
   # SEC
   # SEC_GOV_USER_AGENT is a secret identity for API access

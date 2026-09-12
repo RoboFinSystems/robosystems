@@ -146,6 +146,15 @@ if env.CONNECTION_QUICKBOOKS_ENABLED:
 else:
   qb = _empty_pipeline
 
+if env.CONNECTION_MERCURY_ENABLED:
+  from robosystems.adapters.mercury.pipeline import (
+    get_dagster_components as mercury_pipeline,
+  )
+
+  mercury = mercury_pipeline()
+else:
+  mercury = _empty_pipeline
+
 if env.EXTENSIONS_ENABLED:
   from robosystems.dagster.jobs.extensions import (
     extensions_materialize_job as _ext_mat_job,
@@ -205,6 +214,7 @@ all_assets = [
   *sec["assets"],
   # Adapter: QuickBooks pipeline
   *qb["assets"],
+  *mercury["assets"],
 ]
 
 all_jobs = [
@@ -247,6 +257,7 @@ all_jobs = [
   *sec["jobs"],
   # Adapter: QuickBooks pipeline
   *qb["jobs"],
+  *mercury["jobs"],
   # Platform: Extensions materialization (OLTP → graph)
   *_extensions_jobs,
 ]

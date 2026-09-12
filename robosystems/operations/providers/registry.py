@@ -13,12 +13,18 @@ from ...config import env
 from ...middleware.otel.metrics import get_endpoint_metrics
 from ...models.api.graphs.connections import (
   ExternalConnectionConfig,
+  MercuryConnectionConfig,
   QuickBooksConnectionConfig,
 )
 from .external_provider import (
   cleanup_external_connection,
   create_external_connection,
   sync_external_connection,
+)
+from .mercury_provider import (
+  cleanup_mercury_connection,
+  create_mercury_connection,
+  sync_mercury_connection,
 )
 from .quickbooks_provider import (
   cleanup_quickbooks_connection,
@@ -78,6 +84,15 @@ class ProviderRegistry:
         "config_class": ExternalConnectionConfig,
       }
 
+    # Mercury bank feed — native accounting's first feed; see mercury_provider.py
+    if env.CONNECTION_MERCURY_ENABLED:
+      self._providers["mercury"] = {
+        "create": create_mercury_connection,
+        "sync": sync_mercury_connection,
+        "cleanup": cleanup_mercury_connection,
+        "config_class": MercuryConnectionConfig,
+      }
+
   def _record_feature_flag_status(self):
     """Emit the flag state once at construction, so dashboards can tell a
     disabled provider from a broken one."""
@@ -86,6 +101,7 @@ class ProviderRegistry:
       for provider, enabled in [
         ("quickbooks", env.CONNECTION_QUICKBOOKS_ENABLED),
         ("external", env.CONNECTION_EXTERNAL_ENABLED),
+        ("mercury", env.CONNECTION_MERCURY_ENABLED),
       ]:
         metrics.record_business_event(
           endpoint="provider_registry",
@@ -128,6 +144,11 @@ class ProviderRegistry:
         self._record_disabled_provider_request(provider_lower)
         raise ValueError(
           "External provider is not enabled. Please contact support to enable this connection type."
+        )
+      elif provider_lower == "mercury" and not env.CONNECTION_MERCURY_ENABLED:
+        self._record_disabled_provider_request(provider_lower)
+        raise ValueError(
+          "Mercury provider is not enabled. Please contact support to enable this connection type."
         )
       else:
         raise ValueError(f"Unknown provider type: {provider_type}")

@@ -14,16 +14,18 @@ from robosystems.operations.providers.types import SyncOutcome
 def _make_mock_env(
   quickbooks_enabled=True,
   external_enabled=False,
+  mercury_enabled=False,
 ):
   """Create a mock env object with connection feature flags.
 
-  ``external_enabled`` defaults False so the pre-external assertions
-  (empty registry, provider counts) stay literal; external-specific
-  tests opt in.
+  ``external_enabled`` and ``mercury_enabled`` default False so the
+  pre-external assertions (empty registry, provider counts) stay literal;
+  provider-specific tests opt in.
   """
   mock_env = Mock()
   mock_env.CONNECTION_QUICKBOOKS_ENABLED = quickbooks_enabled
   mock_env.CONNECTION_EXTERNAL_ENABLED = external_enabled
+  mock_env.CONNECTION_MERCURY_ENABLED = mercury_enabled
   # QuickBooks provider needs these
   mock_env.INTUIT_ENVIRONMENT = "sandbox"
   return mock_env
@@ -540,3 +542,28 @@ class TestProviderConfigClasses:
     assert (
       registry._providers["quickbooks"]["config_class"] is QuickBooksConnectionConfig
     )
+
+
+@pytest.mark.unit
+class TestMercuryProviderRegistration:
+  def test_mercury_registered_when_enabled(self):
+    from robosystems.models.api.graphs.connections import MercuryConnectionConfig
+    from robosystems.operations.providers.mercury_provider import (
+      cleanup_mercury_connection,
+      create_mercury_connection,
+      sync_mercury_connection,
+    )
+
+    registry = _build_registry(_make_mock_env(mercury_enabled=True))
+    entry = registry._providers["mercury"]
+    assert entry["create"] is create_mercury_connection
+    assert entry["sync"] is sync_mercury_connection
+    assert entry["cleanup"] is cleanup_mercury_connection
+    assert entry["config_class"] is MercuryConnectionConfig
+    assert registry.is_enabled("mercury")
+
+  def test_mercury_disabled_is_an_actionable_error(self):
+    with _registry_context(_make_mock_env(mercury_enabled=False)) as (registry, _):
+      assert not registry.is_enabled("mercury")
+      with pytest.raises(ValueError, match="Mercury provider is not enabled"):
+        registry.get_provider("mercury")

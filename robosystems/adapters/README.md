@@ -12,9 +12,9 @@ limits, endpoint access, and credit costs. The manifest is the single source of
 truth; `config/shared_repositories.py` collects manifests and exposes the query
 API used by billing, middleware, and operations.
 
-**Private adapters** (`quickbooks/`) integrate a per-user external service. They
-have a client and a Dagster ELT pipeline but no manifest, because they operate
-on individual user graphs rather than shared platform data.
+**Private adapters** (`quickbooks/`, `mercury/`) integrate a per-user external
+service. They have a client and a Dagster pipeline but no manifest, because they
+operate on individual user graphs rather than shared platform data.
 
 ## The manifest pattern
 
@@ -89,6 +89,38 @@ next CDC delta sync de-duplicates against the source. The close-review outbox
 surfaces `will_publish_to_qb` on the period-drafts read, so a user sees what
 closing a period will write to QuickBooks before committing.
 
+**Mercury** — the bank as a first-class source. A bank feed is native
+accounting: it captures every posted bank transaction into the ledger inbox of
+books the tenant keeps natively, with a Tier-0 account suggestion attached, and
+authors no chart, no elements and no GL rows. The provider guard
+(`operations/connection_service.py`) refuses it beside a live QuickBooks
+connection or on a graph with no chart of accounts.
+
+- `client/api.py` — `MercuryClient` over a `TokenSource`: the partner OAuth
+  client's rotating tokens (`ConnectionTokenSource`, which writes the rotated
+  refresh token back immediately and flips `needs_reauth` only on
+  `invalid_grant` / `invalid_scope` / `invalid_client`) or a personal read-only
+  key (`StaticToken`, self-hosted deployments only).
+- `pipeline/` — one Dagster asset, `mercury_feed` in job `mercury_sync` (`assets.py`): pull →
+  `accounts.py` (link or create one chart account per bank account, through the
+  TaxonomyBlock envelope) → `transform.py` (transactions → captured events;
+  internal transfers paired into one event; `tier0.py` hints from
+  `glAllocations`, the custom category and `mercuryCategory`) → `load.py`
+  (through `create_event_block_in_session`). Failures at every stage are
+  recorded on the connection; the job retries three times.
+
+```python
+from robosystems.adapters.mercury import MercuryClient
+from robosystems.adapters.mercury.client import StaticToken
+
+client = MercuryClient("https://api-sandbox.mercury.com/api/v1", StaticToken(token))
+transactions = client.transactions(since=date(2026, 1, 1))
+```
+
+Disconnect runs the deletion the partnership's data agreement promises
+(`purge_bank_feed`): captured feed rows are hard-deleted, Mercury payload keys
+are scrubbed from posted ones, and the credential bundle is emptied.
+
 ## Adapter structure
 
 1. **Client** — API connection and authentication
@@ -141,6 +173,7 @@ conflict:
 adapters/
 ├── sec/           # upstream maintains
 ├── quickbooks/    # upstream maintains
+├── mercury/       # upstream maintains
 └── custom_*/      # yours; upstream never touches
 ```
 

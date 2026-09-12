@@ -54,7 +54,7 @@ router = APIRouter()
   status_code=status.HTTP_201_CREATED,
   operation_id="createConnection",
   summary="Create Connection",
-  description="QuickBooks: returns an OAuth URL — complete the flow to activate. External: registers a source namespace for an integration that writes through the public API. One connection allowed per provider per graph, except 'external' which allows one per source_name.",
+  description="QuickBooks and Mercury: returns a pending connection — complete the OAuth flow to activate (Mercury may instead connect at once with a personal API token where the deployment allows it). External: registers a source namespace for an integration that writes through the public API. One connection allowed per provider per graph, except 'external' which allows one per source_name. A bank feed (Mercury) is refused (409) beside a live QuickBooks connection or on a graph with no chart of accounts.",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     409: {"description": "Connection already exists for this provider"},
@@ -126,6 +126,8 @@ async def create_connection(
       config = request.quickbooks_config
     elif request.provider == "external":
       config = request.external_config
+    elif request.provider == "mercury":
+      config = request.mercury_config
     # Validate provider is enabled before any database operations
     provider_registry.get_provider(request.provider)
 
