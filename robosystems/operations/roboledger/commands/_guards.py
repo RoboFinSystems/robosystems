@@ -8,13 +8,16 @@ opens) — they require DB access.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from robosystems.models.extensions import Element
 from robosystems.operations.locking import acquire_shared_period_fence
+from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 
 _LIBRARY_SEEDER = "library-seeder"
 
@@ -146,3 +149,50 @@ def assert_period_not_closed(session: Session, *posting_dates: date) -> None:
     row = _period_covering(session, posting_date)
     if row is not None and row.status == "closed":
       raise ClosedPeriodError(row.name, posting_date)
+
+
+class InactiveAccountError(ValueError):
+  """A line item names a retired (``is_active=false``) chart account.
+
+  Retiring an account keeps its history and closes it to new activity — the
+  QuickBooks meaning of "inactive". Reactivate it with
+  ``update-taxonomy-block`` (``elements_to_update[].is_active=true``) or pick
+  another account.
+  """
+
+  def __init__(self, accounts: list[tuple[str, str | None, str | None]]) -> None:
+    self.accounts = accounts
+    named = ", ".join(
+      f"{code or '?'} {name or ''}".strip() + f" ({element_id})"
+      for element_id, code, name in accounts
+    )
+    super().__init__(
+      f"Cannot post to inactive account(s): {named}. Reactivate the account "
+      "(update-taxonomy-block, is_active=true) or choose another one."
+    )
+
+
+def assert_accounts_postable(
+  session: Session, element_ids: Iterable[str], *, source: str | None = None
+) -> None:
+  """Raise `InactiveAccountError` if any line-item element is retired.
+
+  Applies to authored postings — manual entries, event handlers, bank feeds.
+  A synced ledger's own history is exempt: QuickBooks retires accounts
+  after they carry activity, and a full rebuild replays every historical
+  entry against them verbatim, so a ``source`` in `SEVERABLE_SOURCES`
+  passes through untouched.
+  """
+  if source and source.lower() in SEVERABLE_SOURCES:
+    return
+  ids = sorted({str(eid) for eid in element_ids if eid})
+  if not ids:
+    return
+  rows = session.execute(
+    select(Element.id, Element.code, Element.name).where(
+      Element.id.in_(ids), Element.is_active.is_(False)
+    )
+  ).all()
+  inactive = [(str(eid), code, name) for eid, code, name in rows]
+  if inactive:
+    raise InactiveAccountError(inactive)

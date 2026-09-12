@@ -423,6 +423,15 @@ class ElementUpdatePatch(BaseModel):
   code: str | None = None
   parent_ref: str | None = None
   metadata: dict[str, Any] | None = None
+  is_active: bool | None = Field(
+    None,
+    description=(
+      "Retire (`false`) or reactivate (`true`) a chart account. Retiring keeps "
+      "its history and hides it from account pickers and the chart tree, and "
+      "new line items on it are refused — the way to take an account with "
+      "activity out of use, since removal needs no facts and no line items."
+    ),
+  )
 
 
 class StructureUpdatePatch(BaseModel):

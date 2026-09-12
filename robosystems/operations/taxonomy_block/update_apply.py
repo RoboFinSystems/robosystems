@@ -306,6 +306,8 @@ def apply_elements_to_update(
       element.code = patch.code
     if patch.metadata is not None:
       element.metadata_ = dict(patch.metadata)
+    if patch.is_active is not None:
+      element.is_active = patch.is_active
     if patch.parent_ref is not None:
       if patch.parent_ref == "":
         element.parent_id = None
