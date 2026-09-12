@@ -46,6 +46,15 @@ MODULE = "robosystems.operations.roboledger.commands.journal_entries"
 _DATE = date(2026, 1, 15)
 
 
+@pytest.fixture(autouse=True)
+def _accounts_postable():
+  """The inactive-account guard reads Element rows; every test here runs on a
+  MagicMock session, so it is stubbed module-wide. `TestInactiveAccountGuard`
+  asserts what it is called with; `test_guards_accounts.py` tests the guard."""
+  with patch(f"{MODULE}.assert_accounts_postable") as guard:
+    yield guard
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -941,3 +950,89 @@ class TestProvenanceForSource:
     # The regression itself: before this, every branch returned
     # "manual_entry" and "what came from QuickBooks?" was unanswerable.
     assert provenance_for_source("quickbooks") != "manual_entry"
+
+
+# ── Inactive-account guard ─────────────────────────────────────────────
+
+
+@pytest.mark.unit
+class TestInactiveAccountGuard:
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
+  def test_create_checks_every_line_with_the_replay_source(
+    self, _mock_resolve, _mock_guard, _mock_resp, _accounts_postable
+  ):
+    """A synced ledger's replayed history is `posted` with its source; that
+    is the one shape whose source reaches the guard's exemption."""
+    session = MagicMock()
+    body = CreateJournalEntryRequest(
+      posting_date=_DATE,
+      memo="m",
+      line_items=_balanced_lines(),
+      source="quickbooks",
+      status="posted",
+    )
+    create_journal_entry(session, body, "usr_1")
+
+    _accounts_postable.assert_called_once()
+    args, kwargs = _accounts_postable.call_args
+    assert args[0] is session
+    assert sorted(args[1]) == ["elem_cash", "elem_revenue"]
+    assert kwargs == {"source": "quickbooks"}
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
+  def test_a_draft_naming_a_synced_source_is_still_authored(
+    self, _mock_resolve, _mock_guard, _mock_resp, _accounts_postable
+  ):
+    """Naming `source='quickbooks'` on a draft does not buy the replay
+    exemption — the source is dropped and the lines are checked."""
+    session = MagicMock()
+    body = CreateJournalEntryRequest(
+      posting_date=_DATE, memo="m", line_items=_balanced_lines(), source="quickbooks"
+    )
+    create_journal_entry(session, body, "usr_1")
+
+    _args, kwargs = _accounts_postable.call_args
+    assert kwargs == {"source": None}
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
+  def test_create_refuses_before_any_line_is_written(
+    self, _mock_resolve, _mock_guard, _accounts_postable
+  ):
+    from robosystems.operations.roboledger.commands._guards import (
+      InactiveAccountError,
+    )
+
+    _accounts_postable.side_effect = InactiveAccountError(
+      [("elem_cash", "1000", "Operating Checking")]
+    )
+    session = MagicMock()
+    body = CreateJournalEntryRequest(
+      posting_date=_DATE, memo="m", line_items=_balanced_lines()
+    )
+    with pytest.raises(InactiveAccountError, match="1000 Operating Checking"):
+      create_journal_entry(session, body, "usr_1")
+    session.add.assert_not_called()
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
+  @patch(f"{MODULE}.lock_by_id")
+  def test_update_checks_replacement_lines_as_authored(
+    self, mock_lock, _mock_resolve, _mock_guard, _mock_resp, _accounts_postable
+  ):
+    entry = _mock_entry(status="draft")
+    mock_lock.return_value = entry
+    session = _session_for_entry(entry)
+    session.query.return_value.filter.return_value.all.return_value = []
+    body = UpdateJournalEntryRequest(entry_id="entry_01", line_items=_balanced_lines())
+
+    update_journal_entry(session, body)
+
+    args, kwargs = _accounts_postable.call_args
+    assert sorted(args[1]) == ["elem_cash", "elem_revenue"]
+    assert kwargs == {}

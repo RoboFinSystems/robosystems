@@ -1037,6 +1037,11 @@ update_taxonomy_block_op = _registrar.register(
       "Incrementally mutate a taxonomy block via typed delta lists "
       "(elements/structures/associations/rules to add, update, remove). "
       "Dispatches by the target taxonomy's stored `taxonomy_type`. "
+      "For a chart of accounts: add, rename and reclassify accounts freely; "
+      "an account with facts or line items is never removed — retire it "
+      "with `elements_to_update[].is_active=false` (history stays, new "
+      "postings are refused, pickers hide it; `true` reactivates). Removal "
+      "and whole-chart delete work only with no activity. "
       "Library-origin block types (`reporting_standard`) surface 501. "
       "`reporting_extension` / `custom_ontology` authoring may be "
       "disabled per environment (TAXONOMY_AUTHORING_ENABLED) — "
@@ -1867,7 +1872,8 @@ update_journal_entry_op = _registrar.register(
       "must be corrected via "
       "`create-event-block(event_type='journal_entry_reversed')`. If "
       "line_items is provided, existing line items are replaced "
-      "atomically and the new set must balance."
+      "atomically, the new set must balance, and a line on a retired "
+      "(`is_active=false`) account is refused."
     ),
     command=cmd_update_journal_entry,
     request_model=UpdateJournalEntryRequest,

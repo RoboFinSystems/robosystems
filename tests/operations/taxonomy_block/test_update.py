@@ -703,3 +703,44 @@ class TestResolveForeignElementQnames:
     _resolve_foreign_element_qnames(session, qname_by_id, elements, associations)
 
     session.execute.assert_not_called()
+
+
+@pytest.mark.unit
+class TestApplyIsActive:
+  """``is_active`` on an element patch retires or reactivates the account in
+  place; an omitted field leaves it alone (the FiscalCalendar/QuickBooks
+  loader owns the column for synced charts, so a no-op patch must not
+  clobber it)."""
+
+  def _apply(self, patch_kwargs: dict, *, current: bool = True):
+    from robosystems.operations.taxonomy_block.update_apply import (
+      apply_elements_to_update,
+    )
+
+    element = MagicMock()
+    element.id = "elem_1"
+    element.qname = "coa:1000"
+    element.is_active = current
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = [element]
+    taxonomy = MagicMock()
+    taxonomy.id = "tax_1"
+    payload = UpdateTaxonomyBlockRequest(
+      taxonomy_id="tax_1",
+      elements_to_update=[ElementUpdatePatch(qname="coa:1000", **patch_kwargs)],
+    )
+    apply_elements_to_update(session, taxonomy, payload, "usr_1")
+    return element
+
+  def test_retires_an_account(self) -> None:
+    element = self._apply({"is_active": False})
+    assert element.is_active is False
+
+  def test_reactivates_an_account(self) -> None:
+    element = self._apply({"is_active": True}, current=False)
+    assert element.is_active is True
+
+  def test_omitted_leaves_the_flag_alone(self) -> None:
+    element = self._apply({"name": "Renamed"}, current=False)
+    assert element.is_active is False
+    assert element.name == "Renamed"

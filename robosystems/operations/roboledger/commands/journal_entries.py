@@ -55,6 +55,7 @@ from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.locking import RowLockedError, lock_by_id
 from robosystems.operations.roboledger.commands._guards import (
+  assert_accounts_postable,
   assert_period_not_closed,
 )
 
@@ -407,12 +408,23 @@ def create_journal_entry(
   Raises:
     `ClosedPeriodError` (422) if `posting_date` falls in a closed period.
     `UnbalancedJournalEntryError` (422) if total debits ≠ total credits.
+    `InactiveAccountError` (422) if a line names a retired account — except
+      for a synced ledger's own replayed history (`body.source` is a synced
+      provider and `status='posted'`, the shape the loader produces).
     `ValueError` (422) for invalid line items (negative amounts, missing
       element_id, both debit and credit set, etc.).
   """
   assert_period_not_closed(session, body.posting_date)
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
+  # A synced ledger's replayed history arrives `posted` (the loader stamps
+  # it so); a draft is authored whatever source it names, so only the
+  # posted shape carries the source into the guard's exemption.
+  assert_accounts_postable(
+    session,
+    (li["element_id"] for li in normalized),
+    source=body.source if body.status == "posted" else None,
+  )
 
   status = body.status
   now = datetime.now(UTC) if status == "posted" else None
@@ -533,6 +545,9 @@ def update_journal_entry(
       for li in replacement_lines
     ]
     normalized, _dr, _cr = validate_and_normalize_lines(new_line_inputs)
+    # A draft edit is authored, whatever the entry's provenance: retired
+    # accounts are closed to it.
+    assert_accounts_postable(session, (li["element_id"] for li in normalized))
 
     session.query(LineItem).filter(LineItem.entry_id == entry.id).delete(
       synchronize_session=False
