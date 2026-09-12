@@ -1616,14 +1616,18 @@ update_event_block_op = _registrar.register(
     name="update-event-block",
     summary="Update Event Block",
     description=(
-      "Apply a status transition (captured → committed | voided) and/or "
-      "field corrections (description, effective_at, metadata_patch) to an "
-      "existing event block. Only supplied fields are updated. When the "
-      "transition is captured/classified → committed, the registered "
-      "Python handler fires against the captured metadata to produce the "
-      "GL rows; errors from the handler (validation, element resolution, "
-      "closed period, unbalanced lines) surface as 422 here so the inbox "
-      "UI can display the failure reason without retry."
+      "Apply a status transition (captured → classified | committed | voided) "
+      "and/or field corrections (description, effective_at, metadata_patch) "
+      "to an existing event block. Only supplied fields are updated. "
+      "captured → classified records an account choice without posting — "
+      "for a bank-feed line, patch metadata.classified_element_id (or "
+      "accept_suggestion: true) in the same call. When the transition is "
+      "captured/classified → committed, the registered Python handler fires "
+      "against the captured metadata to produce the GL rows; a bank-feed "
+      "line with no account chosen and no matching rule is refused. Errors "
+      "from the handler (validation, element resolution, closed period, "
+      "unbalanced lines) surface as 422 here so the inbox UI can display "
+      "the failure reason without retry."
     ),
     command=cmd_update_event_block,
     request_model=UpdateEventBlockRequest,

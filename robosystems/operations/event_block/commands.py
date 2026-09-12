@@ -157,8 +157,14 @@ class DuplicateEventError(Exception):
 # What gates a retraction is `_assert_retractable`, which asks whether the
 # event's rows have landed — never which status it is being retracted from.
 # The table decides reachability; the guard decides safety.
+#
+# `captured → classified` is the inbox's "account chosen, awaiting post" — a
+# bank-feed line whose classification a person or Claude recorded without
+# posting it yet. Handlers set `classified` on their own at capture; the
+# transition is open to callers so the choice can be recorded ahead of the
+# commit that fires the handler.
 _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
-  "captured": frozenset({"committed", "voided", "superseded"}),
+  "captured": frozenset({"classified", "committed", "voided", "superseded"}),
   "classified": frozenset(
     {"committed", "pending", "fulfilled", "voided", "superseded"}
   ),
