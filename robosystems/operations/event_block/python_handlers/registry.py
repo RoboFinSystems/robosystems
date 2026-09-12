@@ -13,6 +13,7 @@ Adding a new handler:
 from __future__ import annotations
 
 from .asset_disposed import ASSET_DISPOSED_HANDLER
+from .bank_feed import BANK_FEED_HANDLERS
 from .bill_paid import BILL_PAID_HANDLER
 from .journal_entry_recorded import JOURNAL_ENTRY_RECORDED_HANDLER
 from .journal_entry_reversed import JOURNAL_ENTRY_REVERSED_HANDLER
@@ -49,6 +50,10 @@ EVENT_BLOCK_PYTHON_REGISTRY: dict[str, EventBlockPythonHandler] = {
   "credit_card_refund": JOURNAL_ENTRY_RECORDED_HANDLER,
   "deposit_received": JOURNAL_ENTRY_RECORDED_HANDLER,
   "inventory_adjusted": JOURNAL_ENTRY_RECORDED_HANDLER,
+  # Bank-feed events (Mercury): captured with a suggestion, posted only once
+  # classified — the handler builds the entry from the account choice and
+  # refuses an unclassified commit.
+  **BANK_FEED_HANDLERS,
 }
 
 

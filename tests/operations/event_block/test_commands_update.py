@@ -740,3 +740,60 @@ class TestLockContention:
       update_event_block(
         session, body, created_by="usr_test", graph_id="kg00000000000000aa"
       )
+
+
+class TestClassifyTransition:
+  """`captured → classified` records an account choice without posting."""
+
+  @pytest.fixture(autouse=True)
+  def _no_locks_or_fences(self):
+    with (
+      patch("robosystems.operations.event_block.commands.bounded_lock_wait"),
+      patch("robosystems.operations.event_block.commands.assert_period_not_closed"),
+    ):
+      yield
+
+  def test_captured_to_classified_patches_metadata_and_fires_nothing(self) -> None:
+    event = _event("evt_bank", status="captured")
+    event.event_type = "bank_transaction"
+    event.metadata_ = {"suggested_element_id": "elem_sugg", "connection_id": "conn_1"}
+    session = _session_with_events(event)
+    body = UpdateEventBlockRequest(
+      event_id="evt_bank",
+      transition_to="classified",
+      metadata_patch={
+        "classified_element_id": "elem_office",
+        "classified_by": "claude",
+      },
+    )
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.fire_handler_on_commit"
+      ) as fire,
+      patch("robosystems.operations.event_block.commands._validate_routed_connection"),
+    ):
+      envelope = update_event_block(session, body, "usr_1", graph_id="kg_test")
+    fire.assert_not_called()
+    assert event.status == "classified"
+    assert event.metadata_["classified_element_id"] == "elem_office"
+    assert event.metadata_["suggested_element_id"] == "elem_sugg"
+    assert envelope.status == "classified"
+
+  def test_classified_to_classified_is_not_a_transition(self) -> None:
+    """Re-classifying is a metadata patch with no transition, not a move."""
+    event = _event("evt_bank", status="classified")
+    session = _session_with_events(event)
+    body = UpdateEventBlockRequest(
+      event_id="evt_bank",
+      transition_to="classified",
+      metadata_patch={"classified_element_id": "elem_b"},
+    )
+    with pytest.raises(InvalidEventTransitionError):
+      update_event_block(session, body, "usr_1", graph_id="kg_test")
+
+  def test_committed_cannot_go_back_to_classified(self) -> None:
+    event = _event("evt_bank", status="committed")
+    session = _session_with_events(event)
+    body = UpdateEventBlockRequest(event_id="evt_bank", transition_to="classified")
+    with pytest.raises(InvalidEventTransitionError):
+      update_event_block(session, body, "usr_1", graph_id="kg_test")

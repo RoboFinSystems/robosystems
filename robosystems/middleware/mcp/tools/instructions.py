@@ -119,6 +119,44 @@ def build_instructions(
       )
     )
 
+  # The inbox loop for bank-feed lines: classify, then commit.
+  if has("update-event-block") and has("list-event-blocks"):
+    inbox_lines = [
+      "INBOX / BANK FEED",
+      (
+        "- A bank feed (Mercury) lands every posted transaction `captured` "
+        "with `metadata.suggested_element_id` + `suggested_account_name`; "
+        "nothing posts until it is classified. Find them → "
+        "`list-event-blocks(source='mercury', status='captured')`."
+      ),
+      (
+        "- Classify one → `update-event-block(event_id, "
+        "transition_to='classified', metadata_patch={classified_element_id, "
+        "classified_by: 'claude', basis})`. A split: `classified_allocations: "
+        "[{element_id, amount}]` summing to the amount. To take the "
+        "suggestion as-is: `metadata_patch={accept_suggestion: true}`."
+      ),
+      (
+        "- Post it → `transition_to='committed'` (a person, or you when "
+        "asked): the handler writes DR/CR against the linked bank account as "
+        "a draft that close posts. An unclassified bank line is refused at "
+        "commit — never force it. Internal transfers are pre-classified "
+        "(both bank legs known) and commit as they are."
+      ),
+    ]
+    if has("recall") and has("remember"):
+      inbox_lines.append(
+        "- `recall` the counterparty before deciding, and `remember` each "
+        "decision ('Stripe payouts → Subscription revenue') so the next line "
+        "from that counterparty classifies itself."
+      )
+    if has("preview-event-block"):
+      inbox_lines.append(
+        "- Unsure what a commit would write? `preview-event-block` shows the "
+        "planned entry."
+      )
+    sections.append(_block(*inbox_lines))
+
   # Reporting & analysis — only the bits that are live.
   report_bits: list[str] = []
   if has("live-financial-statement"):

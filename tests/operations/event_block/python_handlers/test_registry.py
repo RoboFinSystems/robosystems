@@ -115,7 +115,8 @@ def test_registry_has_expected_handlers() -> None:
   QB JournalReport surfaces when Purchase / Deposit / Credit Card Credit /
   Inventory Adjustment rows flow through. All share the
   journal_entry_recorded handler — the on-approve GL shape is identical;
-  the distinct keys let the inbox filter by source class."""
+  the distinct keys let the inbox filter by source class. The four bank-feed
+  types have their own handler (bank_feed.py)."""
   assert set(EVENT_BLOCK_PYTHON_REGISTRY.keys()) == {
     "asset_disposed",
     "schedule_created",
@@ -133,4 +134,26 @@ def test_registry_has_expected_handlers() -> None:
     "credit_card_refund",
     "deposit_received",
     "inventory_adjusted",
+    # Bank-feed lines (Mercury): posted from their classification.
+    "bank_transaction",
+    "bank_fee",
+    "external_transfer",
+    "internal_transfer",
   }
+
+
+def test_bank_feed_event_types_use_the_bank_handlers() -> None:
+  """A bank-feed line posts from its classification, never from the journal
+  shape — and an unclassified one is refused rather than landing empty."""
+  from robosystems.operations.event_block.python_handlers.bank_feed import (
+    BANK_FEED_HANDLERS,
+  )
+
+  for event_type in (
+    "bank_transaction",
+    "bank_fee",
+    "external_transfer",
+    "internal_transfer",
+  ):
+    assert get_python_handler(event_type) is BANK_FEED_HANDLERS[event_type]
+    assert get_python_handler(event_type) is not JOURNAL_ENTRY_RECORDED_HANDLER

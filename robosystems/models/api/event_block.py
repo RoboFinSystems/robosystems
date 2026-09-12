@@ -499,12 +499,13 @@ class UpdateEventBlockRequest(BaseModel):
 
   # Status transition
   transition_to: (
-    Literal["committed", "pending", "fulfilled", "voided", "superseded"] | None
+    Literal["classified", "committed", "pending", "fulfilled", "voided", "superseded"]
+    | None
   ) = Field(
     None,
     description=(
       "Status transition. Valid moves depend on current status: "
-      "captured → committed | voided | superseded; "
+      "captured → classified | committed | voided | superseded; "
       "classified → committed | pending | fulfilled | voided | superseded; "
       "committed → pending | fulfilled | voided | superseded; "
       "pending → fulfilled | voided | superseded; "
@@ -512,8 +513,11 @@ class UpdateEventBlockRequest(BaseModel):
       "is final and is refused from any status once the event's ledger "
       "rows have posted or it has published to QuickBooks — reverse the "
       "posted entries instead. "
-      "Note: classified and fulfilled are usually set by handlers, not by "
-      "callers, but the transition is allowed for corrections."
+      "captured → classified records an account choice without posting "
+      "(bank-feed lines: patch classified_element_id, or "
+      "accept_suggestion: true, in the same call); the later commit fires "
+      "the handler. Note: classified and fulfilled are otherwise set by "
+      "handlers, not by callers, but the transition is allowed for corrections."
     ),
   )
   superseded_by_id: str | None = Field(

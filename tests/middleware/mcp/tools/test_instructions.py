@@ -141,3 +141,37 @@ class TestInvariant:
     assert "get-graph-sync-status" not in out
     # but the orient line still works off the remaining tools
     assert "get-fiscal-calendar" in out
+
+
+class TestInboxRouting:
+  _INBOX = _LEDGER | {
+    "list-event-blocks",
+    "update-event-block",
+    "preview-event-block",
+    "recall",
+    "remember",
+  }
+
+  def _build(self, tools):
+    return build_instructions(
+      graph_id="kg1", tool_names=tools, is_shared_repo=False, read_only=False
+    )
+
+  def test_bank_feed_loop_present_with_the_write_tools(self) -> None:
+    out = self._build(self._INBOX)
+    assert "INBOX / BANK FEED" in out
+    assert "transition_to='classified'" in out
+    assert "accept_suggestion: true" in out
+    assert "refused at commit" in out
+    assert "`recall` the counterparty" in out
+    assert "`preview-event-block`" in out
+
+  def test_bank_feed_loop_absent_without_update_tool(self) -> None:
+    out = self._build(_LEDGER | {"list-event-blocks"})
+    assert "INBOX / BANK FEED" not in out
+
+  def test_memory_and_preview_lines_track_their_tools(self) -> None:
+    out = self._build(_LEDGER | {"list-event-blocks", "update-event-block"})
+    assert "INBOX / BANK FEED" in out
+    assert "`recall`" not in out
+    assert "`preview-event-block`" not in out
