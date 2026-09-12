@@ -98,6 +98,12 @@ def purge_bank_feed(
   deep link back to it; counterparties the feed created and nothing
   references are deleted; the link on the chart accounts the feed linked or
   created is cleared. Flushes; the caller commits.
+
+  Everything is scoped to ``connection_id``: events by the
+  ``metadata.connection_id`` the feed stamps on every row it captures, chart
+  links by the connection recorded in ``metadata.bank_feed``. The create path
+  allows one live connection per provider per graph, but a disconnect must
+  never reach past its own connection even if that ever changes.
   """
   from sqlalchemy import delete, select
 
@@ -107,7 +113,14 @@ def purge_bank_feed(
   )
 
   feed_events = list(
-    session.execute(select(Event).where(Event.source == source)).scalars().all()
+    session.execute(
+      select(Event).where(
+        Event.source == source,
+        Event.metadata_["connection_id"].astext == connection_id,
+      )
+    )
+    .scalars()
+    .all()
   )
   unposted_ids = [
     str(event.id) for event in feed_events if event.status in _UNPOSTED_STATUSES
@@ -151,7 +164,10 @@ def purge_bank_feed(
 
   linked = list(
     session.execute(
-      select(Element).where(Element.metadata_["bank_feed"]["provider"].astext == source)
+      select(Element).where(
+        Element.metadata_["bank_feed"]["provider"].astext == source,
+        Element.metadata_["bank_feed"]["connection_id"].astext == connection_id,
+      )
     )
     .scalars()
     .all()

@@ -162,6 +162,14 @@ class TestPurgeBankFeed:
     assert created.connection_id is None
     assert "bank_feed" not in linked.metadata_
     assert linked.external_source == "quickbooks" and linked.external_id == "qb_9"
+    selects = [
+      _compiled(s) for s in session.statements if _compiled(s).startswith("SELECT")
+    ]
+    # Every read is scoped to this connection, never to the provider alone.
+    assert "events.source = 'mercury'" in selects[0]
+    assert "(events.metadata ->> 'connection_id') = 'conn_1'" in selects[0]
+    assert "'bank_feed'" in selects[3] and "'provider') = 'mercury'" in selects[3]
+    assert "'connection_id') = 'conn_1'" in selects[3]
     deletes = [
       _compiled(s) for s in session.statements if _compiled(s).startswith("DELETE")
     ]
@@ -174,6 +182,18 @@ class TestPurgeBankFeed:
       for d in deletes
     )
     assert session.flushes == 2
+
+  def test_a_sibling_connections_rows_are_never_read(self):
+    """The queries carry the connection scope, so a second live feed on the
+    same graph (should the create path ever allow one) is untouched."""
+    session = _PurgeSession([], [], [], [])
+    purge_bank_feed(session, source="mercury", connection_id="conn_other")
+    selects = [
+      _compiled(s) for s in session.statements if _compiled(s).startswith("SELECT")
+    ]
+    assert all("conn_1" not in sql for sql in selects)
+    assert "(events.metadata ->> 'connection_id') = 'conn_other'" in selects[0]
+    assert "'connection_id') = 'conn_other'" in selects[3]
 
   def test_nothing_to_purge(self):
     session = _PurgeSession([], [], [], [])

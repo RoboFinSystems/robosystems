@@ -382,7 +382,14 @@ class MercuryClient:
       collected.extend(page)
       if len(page) < PAGE_SIZE:
         return collected
-      params["start_after"] = page[-1]["id"]
+      cursor = page[-1].get("id")
+      if not cursor:
+        raise MercuryAuthError(
+          "Mercury returned a transaction page whose last row has no id; "
+          "cannot continue paging",
+          recoverable=True,
+        )
+      params["start_after"] = cursor
 
   def close(self) -> None:
     if self._owns_http:

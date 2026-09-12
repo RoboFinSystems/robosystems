@@ -73,7 +73,7 @@ async def test_init_oauth_uses_the_mercury_handler():
       db=MagicMock(),
       _rate_limit=None,
     )
-  assert result.auth_url.startswith("https://oauth2-sandbox.mercury.com")
+  assert result.auth_url == "https://oauth2-sandbox.mercury.com/oauth2/auth?client_id=x"
   assert result.state == "state_1"
   handler.get_authorization_url.assert_called_once_with(
     connection_id=CONNECTION_ID,

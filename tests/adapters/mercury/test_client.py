@@ -92,6 +92,17 @@ class TestMercuryClient:
     assert "start_after" not in params_seen[0]
     assert params_seen[1]["start_after"] == "t499"
 
+  def test_full_page_without_an_id_stops_paging_cleanly(self):
+    from datetime import date
+
+    def handler(request):
+      return httpx.Response(
+        200, json={"transactions": [{"amount": 1} for _ in range(500)]}
+      )
+
+    with pytest.raises(MercuryAuthError, match="no id"):
+      _client(handler).transactions(date(2026, 1, 1))
+
   def test_429_honours_retry_after(self):
     calls = {"n": 0}
     slept = []
