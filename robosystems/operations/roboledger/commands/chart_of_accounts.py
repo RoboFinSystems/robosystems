@@ -1,22 +1,31 @@
 """Initialize a chart of accounts from a shipped template.
 
 The fresh-company half of the native accounting cutover
-(``specs/ledger/native-accounting-cutover.md`` §4). A QuickBooks-synced
-tenant never needs this — its chart arrives with the sync and stays the
-chart after a sever. A company with no chart initializes one here, once,
-and customizes it with ``update-taxonomy-block``.
+(``specs/ledger/native-accounting-cutover.md`` §4; the templates themselves
+are data — ``specs/taxonomy/chart-templates-as-data.md``). A
+QuickBooks-synced tenant never needs this — its chart arrives with the sync
+and stays the chart after a sever. A company with no chart initializes one
+here, once, and customizes it with ``update-taxonomy-block``.
 
-Two steps, one transaction: the Taxonomy Block envelope (chart + the
-``coa_mapping`` structure) through the declarative CoA handler, then the
-template's CoA → rs-gaap mapping associations resolved against the library.
-The handler resolves association refs only against envelope-local qnames,
-so the library targets are a second step — the demo runner does the same
-two steps over HTTP; here they are one unit of work.
+One transaction, in three steps: the Taxonomy Block envelope (the chart plus
+one ``coa_mapping`` structure per framework the template maps into and the
+tenant carries) through the declarative CoA handler; then, per framework,
+the template's mapping arcs resolved by qname against the tenant's library
+copy. The handler resolves association refs only against envelope-local
+qnames, so the library targets are a second step — the demo runner does the
+same two steps over HTTP; here they are one unit of work.
+
+A template is a stencil, not library content: the file is read, the chart
+is minted as tenant-owned ``coa:*`` elements, and the tenant owns it from
+then on. The op follows the graph's framework pin through the tenant's
+library copy — a mapping set applies when its framework's concepts are
+present — so a plural pin yields a chart mapped into every framework it
+carries, with no change here.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -41,11 +50,14 @@ from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
 from robosystems.operations.taxonomy_block.chart_of_accounts import (
   create as create_chart_block,
 )
-from robosystems.operations.taxonomy_block.chart_templates import get_template
-from robosystems.operations.taxonomy_block.chart_templates._forms import resolve_form
+from robosystems.operations.taxonomy_block.chart_templates import (
+  ChartTemplate,
+  MappingSet,
+  get_template,
+  resolve_form,
+)
 
 COA_TAXONOMY_TYPE = "chart_of_accounts"
-MAPPING_STRUCTURE_NAME = "CoA to US GAAP Mapping"
 DEFAULT_CHART_NAME = "Chart of Accounts"
 
 
@@ -67,7 +79,11 @@ class ChartTemplateNotFoundError(LookupError):
 
 
 def active_chart_id(session: Session) -> str | None:
-  """The graph's active ``chart_of_accounts`` taxonomy id, if any."""
+  """The graph's active ``chart_of_accounts`` taxonomy id, if any.
+
+  Any origin counts — QuickBooks-synced, taxonomy-block-authored, or
+  template-initialized. Initialize is one-time; a chart is never replaced.
+  """
   return session.execute(
     select(Taxonomy.id)
     .where(
@@ -94,6 +110,7 @@ def initialize_chart_of_accounts(
 
   entity_type = _resolve_entity_type(session, body.entity_type)
   name = (body.name or "").strip() or DEFAULT_CHART_NAME
+  applicable, skipped = _applicable_mapping_sets(session, template)
 
   payload = CreateTaxonomyBlockRequest(
     name=name,
@@ -120,29 +137,53 @@ def initialize_chart_of_accounts(
     ],
     structures=[
       TaxonomyBlockStructureRequest(
-        name=MAPPING_STRUCTURE_NAME,
+        name=mapping_set.structure_name,
         block_type="coa_mapping",
-        description="Maps the chart of accounts to rs-gaap reporting concepts.",
+        description=(
+          f"Maps the chart of accounts to {mapping_set.display_name} "
+          "reporting concepts."
+        ),
       )
+      for mapping_set in applicable
     ],
-    metadata={"template": template.key, "entity_type": entity_type},
+    metadata={
+      "template": template.key,
+      "template_version": template.path.name,
+      "entity_type": entity_type,
+      "frameworks": [mapping_set.framework for mapping_set in applicable],
+    },
   )
   taxonomy_id = create_chart_block(session, payload, created_by)
 
-  mappings_created, unresolved = _create_template_mappings(
-    session,
-    taxonomy_id=taxonomy_id,
-    mappings=template.mappings_for(entity_type),
-    created_by=created_by,
-  )
+  coa_rows = session.execute(
+    select(Element.code, Element.id).where(Element.taxonomy_id == taxonomy_id)
+  ).all()
+  coa_by_code: dict[str, str] = {str(code): str(eid) for code, eid in coa_rows}
+
+  mappings_created = 0
+  unresolved: list[str] = [
+    f"{mapping_set.framework}: not in this graph's library" for mapping_set in skipped
+  ]
+  for mapping_set in applicable:
+    created, misses = _create_mapping_set(
+      session,
+      taxonomy_id=taxonomy_id,
+      coa_by_code=coa_by_code,
+      mapping_set=mapping_set,
+      entity_type=entity_type,
+      created_by=created_by,
+    )
+    mappings_created += created
+    unresolved.extend(miss for miss in misses if miss not in unresolved)
 
   logger.info(
     "Initialized chart of accounts %s from template %s (%d elements, "
-    "%d mappings, %d unresolved)",
+    "%d mappings across %s, %d unresolved)",
     taxonomy_id,
     template.key,
     len(template.accounts),
     mappings_created,
+    [mapping_set.framework for mapping_set in applicable] or "no framework",
     len(unresolved),
   )
   return InitializeChartOfAccountsResponse(
@@ -152,14 +193,15 @@ def initialize_chart_of_accounts(
     entity_type=entity_type,
     elements_created=len(template.accounts),
     mappings_created=mappings_created,
+    frameworks=[mapping_set.framework for mapping_set in applicable],
     unresolved=unresolved,
   )
 
 
 def _resolve_entity_type(session: Session, requested: str | None) -> str:
   """The legal form the equity rows are mapped for — always one of the
-  forms `_forms.EQUITY_BY_FORM` knows, so the response and the taxonomy
-  metadata record what was actually applied rather than the request string."""
+  forms the templates know, so the response and the taxonomy metadata record
+  what was actually applied rather than the request string."""
   if requested and requested.strip():
     return resolve_form(requested)
   entity = resolve_parent_entity(session)
@@ -167,30 +209,47 @@ def _resolve_entity_type(session: Session, requested: str | None) -> str:
   return resolve_form(form)
 
 
-def _create_template_mappings(
+def _applicable_mapping_sets(
+  session: Session, template: ChartTemplate
+) -> tuple[list[MappingSet], list[MappingSet]]:
+  """Split the template's mapping sets by whether the tenant carries the
+  framework — its concepts are in the library copy (``Element.source``) —
+  in the template's declared order."""
+  applicable: list[MappingSet] = []
+  skipped: list[MappingSet] = []
+  for mapping_set in template.mappings.values():
+    present = bool(
+      session.execute(
+        select(exists().where(Element.source == mapping_set.framework))
+      ).scalar()
+    )
+    (applicable if present else skipped).append(mapping_set)
+  return applicable, skipped
+
+
+def _create_mapping_set(
   session: Session,
   *,
   taxonomy_id: str,
-  mappings: list[tuple[str, str]],
+  coa_by_code: dict[str, str],
+  mapping_set: MappingSet,
+  entity_type: str,
   created_by: str,
 ) -> tuple[int, list[str]]:
-  """Map the new chart's elements to the library; return (created, unresolved)."""
+  """Create one framework's mapping arcs; return (created, unresolved)."""
   structure_id = session.execute(
     select(Structure.id).where(
       Structure.taxonomy_id == taxonomy_id,
       Structure.block_type == "coa_mapping",
+      Structure.name == mapping_set.structure_name,
     )
   ).scalar_one()
 
-  coa_rows = session.execute(
-    select(Element.code, Element.id).where(Element.taxonomy_id == taxonomy_id)
-  ).all()
-  coa_by_code: dict[str, str] = {str(code): str(eid) for code, eid in coa_rows}
-
-  targets = sorted({qname for _code, qname in mappings})
+  arcs = mapping_set.arcs_for(entity_type)
+  targets = sorted({qname for _code, qname in arcs})
   library_rows = session.execute(
     select(Element.qname, Element.id).where(
-      Element.source == "rs-gaap", Element.qname.in_(targets)
+      Element.source == mapping_set.framework, Element.qname.in_(targets)
     )
   ).all()
   library_by_qname: dict[str, str] = {
@@ -199,7 +258,7 @@ def _create_template_mappings(
 
   created = 0
   unresolved: list[str] = []
-  for code, qname in mappings:
+  for code, qname in arcs:
     from_id = coa_by_code.get(code)
     to_id = library_by_qname.get(qname)
     if from_id is None:

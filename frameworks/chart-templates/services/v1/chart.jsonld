@@ -1,0 +1,220 @@
+{
+  "@context": {
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "rs": "https://robosystems.ai/vocab/",
+    "trait": "https://robosystems.ai/taxonomy/fac-traits/v1/",
+    "label": "rdfs:label",
+    "documentation": "rdfs:comment",
+    "code": "rs:code",
+    "subClassification": "rs:subClassification",
+    "balance": {
+      "@id": "xbrli:balance"
+    },
+    "hasTrait": {
+      "@id": "rs:hasTrait",
+      "@type": "@id"
+    },
+    "accounts": {
+      "@id": "rs:account",
+      "@container": "@list"
+    }
+  },
+  "@id": "chart-templates:services/v1",
+  "@type": "rs:ChartTemplate",
+  "key": "services",
+  "ordinal": 1,
+  "displayName": "Professional services",
+  "description": "Consulting, advisory and implementation revenue; payroll-led operating expenses; no inventory and no cost of goods sold. Cash, AR, prepaids, equipment, payroll liabilities.",
+  "accounts": [
+    {
+      "code": "1000",
+      "label": "Operating Checking",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "cash_and_equivalents",
+      "balance": "debit"
+    },
+    {
+      "code": "1100",
+      "label": "Accounts Receivable",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "accounts_receivable",
+      "balance": "debit"
+    },
+    {
+      "code": "1200",
+      "label": "Prepaid Insurance",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "other_current_assets",
+      "balance": "debit"
+    },
+    {
+      "code": "1210",
+      "label": "Prepaid Software",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "other_current_assets",
+      "balance": "debit"
+    },
+    {
+      "code": "1220",
+      "label": "Prepaid Cloud Hosting",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "other_current_assets",
+      "balance": "debit"
+    },
+    {
+      "code": "1300",
+      "label": "Computer Equipment",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "fixed_assets",
+      "balance": "debit"
+    },
+    {
+      "code": "1310",
+      "label": "Office Furniture",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "fixed_assets",
+      "balance": "debit"
+    },
+    {
+      "code": "1350",
+      "label": "Accumulated Depreciation",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "fixed_assets",
+      "balance": "credit"
+    },
+    {
+      "code": "2000",
+      "label": "Accounts Payable",
+      "hasTrait": "trait:elementsOfFinancialStatements/liability",
+      "subClassification": "accounts_payable",
+      "balance": "credit"
+    },
+    {
+      "code": "2100",
+      "label": "Accrued Liabilities",
+      "hasTrait": "trait:elementsOfFinancialStatements/liability",
+      "subClassification": "other_current_liabilities",
+      "balance": "credit"
+    },
+    {
+      "code": "2200",
+      "label": "Payroll Taxes Payable",
+      "hasTrait": "trait:elementsOfFinancialStatements/liability",
+      "subClassification": "other_current_liabilities",
+      "balance": "credit"
+    },
+    {
+      "code": "3000",
+      "label": "Owner's Equity",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit"
+    },
+    {
+      "code": "3100",
+      "label": "Retained Earnings",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit"
+    },
+    {
+      "code": "4000",
+      "label": "Consulting Revenue",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "operating_revenue",
+      "balance": "credit"
+    },
+    {
+      "code": "4100",
+      "label": "Strategy Advisory Revenue",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "operating_revenue",
+      "balance": "credit"
+    },
+    {
+      "code": "4200",
+      "label": "Implementation Services Revenue",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "operating_revenue",
+      "balance": "credit"
+    },
+    {
+      "code": "5000",
+      "label": "Salaries & Wages",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "5100",
+      "label": "Payroll Taxes",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "5200",
+      "label": "Health Insurance",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6000",
+      "label": "Office Rent",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6100",
+      "label": "Software Subscriptions",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6200",
+      "label": "Cloud Hosting",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6300",
+      "label": "Professional Development",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6400",
+      "label": "Business Insurance",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6500",
+      "label": "Office Supplies",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6600",
+      "label": "Travel & Entertainment",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "7000",
+      "label": "Depreciation Expense",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    }
+  ]
+}

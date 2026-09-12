@@ -37,7 +37,7 @@ from examples._scenario.engine import (
   trailing_year,
   validate,
 )
-from robosystems.operations.taxonomy_block.chart_templates.saas import ACCOUNTS
+from robosystems.operations.taxonomy_block.chart_templates import CHART_TEMPLATES
 
 MONTHS = 16
 
@@ -45,7 +45,9 @@ MONTHS = 16
 # Chart of Accounts — (code, name, trait, sub_classification, balance_type, description)
 # ---------------------------------------------------------------------------
 
-# ``ACCOUNTS`` is the shipped chart template — one copy, in core.
+# ``ACCOUNTS`` is the shipped chart template — one copy, read from
+# ``frameworks/chart-templates/saas/v1/chart.jsonld``.
+ACCOUNTS = CHART_TEMPLATES["saas"].accounts
 
 # B2B customer logos — annual contracts (prepaid) + onboarding services (net-30).
 LOGOS = [

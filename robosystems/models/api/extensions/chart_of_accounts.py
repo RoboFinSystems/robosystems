@@ -78,10 +78,21 @@ class InitializeChartOfAccountsResponse(BaseModel):
   )
   elements_created: int
   mappings_created: int
+  frameworks: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Frameworks the chart was mapped into — each template mapping set "
+      "whose framework this graph's library carries (rs-gaap today; every "
+      "framework in the graph's pin once it is plural)."
+    ),
+  )
   unresolved: list[str] = Field(
     default_factory=list,
     description=(
-      "rs-gaap qnames the template maps to that the library did not "
-      "resolve; the accounts exist and can be mapped by hand. Non-fatal."
+      "What could not be mapped, never fatal — the accounts exist and can "
+      "be mapped by hand: a target qname the framework's library copy did "
+      "not resolve, `<framework>: not in this graph's library` for a "
+      "template mapping set whose framework this graph does not carry, or "
+      "a template row naming an account it does not declare."
     ),
   )
