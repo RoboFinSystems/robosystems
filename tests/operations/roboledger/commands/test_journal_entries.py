@@ -960,12 +960,18 @@ class TestInactiveAccountGuard:
   @patch(f"{MODULE}._entry_to_response")
   @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
-  def test_create_checks_every_line_with_the_entry_source(
+  def test_create_checks_every_line_with_the_replay_source(
     self, _mock_resolve, _mock_guard, _mock_resp, _accounts_postable
   ):
+    """A synced ledger's replayed history is `posted` with its source; that
+    is the one shape whose source reaches the guard's exemption."""
     session = MagicMock()
     body = CreateJournalEntryRequest(
-      posting_date=_DATE, memo="m", line_items=_balanced_lines(), source="quickbooks"
+      posting_date=_DATE,
+      memo="m",
+      line_items=_balanced_lines(),
+      source="quickbooks",
+      status="posted",
     )
     create_journal_entry(session, body, "usr_1")
 
@@ -974,6 +980,23 @@ class TestInactiveAccountGuard:
     assert args[0] is session
     assert sorted(args[1]) == ["elem_cash", "elem_revenue"]
     assert kwargs == {"source": "quickbooks"}
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
+  def test_a_draft_naming_a_synced_source_is_still_authored(
+    self, _mock_resolve, _mock_guard, _mock_resp, _accounts_postable
+  ):
+    """Naming `source='quickbooks'` on a draft does not buy the replay
+    exemption — the source is dropped and the lines are checked."""
+    session = MagicMock()
+    body = CreateJournalEntryRequest(
+      posting_date=_DATE, memo="m", line_items=_balanced_lines(), source="quickbooks"
+    )
+    create_journal_entry(session, body, "usr_1")
+
+    _args, kwargs = _accounts_postable.call_args
+    assert kwargs == {"source": None}
 
   @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)

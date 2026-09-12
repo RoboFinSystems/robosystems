@@ -181,7 +181,11 @@ def assert_accounts_postable(
   A synced ledger's own history is exempt: QuickBooks retires accounts
   after they carry activity, and a full rebuild replays every historical
   entry against them verbatim, so a ``source`` in `SEVERABLE_SOURCES`
-  passes through untouched.
+  passes through untouched. Callers pass ``source`` only for the replay
+  shape (the loader posts history as ``status='posted'``); a draft that
+  merely names a synced source is authored and is checked. A tenant can
+  still hand-author a posted event under its own live QuickBooks source —
+  that is its own graph and its own books, accepted as in scope.
   """
   if source and source.lower() in SEVERABLE_SOURCES:
     return

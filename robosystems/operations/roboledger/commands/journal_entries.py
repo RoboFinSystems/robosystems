@@ -409,15 +409,21 @@ def create_journal_entry(
     `ClosedPeriodError` (422) if `posting_date` falls in a closed period.
     `UnbalancedJournalEntryError` (422) if total debits ≠ total credits.
     `InactiveAccountError` (422) if a line names a retired account — except
-      for a synced ledger's own replayed history (`body.source`).
+      for a synced ledger's own replayed history (`body.source` is a synced
+      provider and `status='posted'`, the shape the loader produces).
     `ValueError` (422) for invalid line items (negative amounts, missing
       element_id, both debit and credit set, etc.).
   """
   assert_period_not_closed(session, body.posting_date)
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
+  # A synced ledger's replayed history arrives `posted` (the loader stamps
+  # it so); a draft is authored whatever source it names, so only the
+  # posted shape carries the source into the guard's exemption.
   assert_accounts_postable(
-    session, (li["element_id"] for li in normalized), source=body.source
+    session,
+    (li["element_id"] for li in normalized),
+    source=body.source if body.status == "posted" else None,
   )
 
   status = body.status
