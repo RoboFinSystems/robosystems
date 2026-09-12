@@ -71,6 +71,12 @@ class SecurityEventType(Enum):
 
   # Connection lifecycle — the native accounting cutover
   CONNECTION_SEVERED = "connection_severed"
+  # Bank-feed lifecycle — the records a bank partnership's data agreement
+  # asks for: the customer's consent on connect (who, which organization,
+  # which credential and scope) and the deletion on disconnect (what was
+  # purged). Evidence, not alerts.
+  BANK_FEED_CONSENT_GRANTED = "bank_feed_consent_granted"
+  BANK_FEED_PURGED = "bank_feed_purged"
   # Every authenticated request to the admin surface (SOC 2 CC6.1: privileged
   # access is restricted AND what it did is recorded). Evidence, not alerts:
   # no metric, like the membership and SCIM lifecycle events — the admin

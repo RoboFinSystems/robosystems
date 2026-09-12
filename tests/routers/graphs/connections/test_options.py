@@ -27,11 +27,15 @@ def _make_mock_user(user_id: str = USER_ID):
 def _make_mock_env(
   quickbooks_enabled: bool = True,
   external_enabled: bool = True,
+  mercury_enabled: bool = False,
+  mercury_api_key_enabled: bool = False,
 ):
   """Create a mock env object with connection feature flags."""
   mock_env = MagicMock()
   mock_env.CONNECTION_QUICKBOOKS_ENABLED = quickbooks_enabled
   mock_env.CONNECTION_EXTERNAL_ENABLED = external_enabled
+  mock_env.CONNECTION_MERCURY_ENABLED = mercury_enabled
+  mock_env.MERCURY_API_KEY_CONNECTIONS_ENABLED = mercury_api_key_enabled
   return mock_env
 
 
@@ -333,3 +337,63 @@ class TestGetConnectionOptions:
     external = next(p for p in result.providers if p.provider == "external")
     assert external.auth_type == "none"
     assert external.required_config == ["source_name"]
+
+
+# ---------------------------------------------------------------------------
+# Mercury — the bank feed, and its flag-gated api_key mode
+# ---------------------------------------------------------------------------
+
+
+class TestMercuryOption:
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_mercury_absent_when_disabled(self):
+    mock_env = _make_mock_env(mercury_enabled=False)
+    with patch(f"{OPTIONS_MODULE}.env", mock_env):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID, current_user=_make_mock_user(), _rate_limit=None
+      )
+    assert "mercury" not in [p.provider for p in result.providers]
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_mercury_oauth_only_on_hosted(self):
+    mock_env = _make_mock_env(mercury_enabled=True, mercury_api_key_enabled=False)
+    with patch(f"{OPTIONS_MODULE}.env", mock_env):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID, current_user=_make_mock_user(), _rate_limit=None
+      )
+    mercury = next(p for p in result.providers if p.provider == "mercury")
+    assert mercury.auth_type == "oauth"
+    assert mercury.required_config == []
+    assert "api_key" not in mercury.optional_config
+    assert "since_date" in mercury.optional_config
+    assert "API token" not in (mercury.auth_flow or "")
+    assert result.total_providers == 3
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_mercury_advertises_api_key_mode_when_allowed(self):
+    mock_env = _make_mock_env(mercury_enabled=True, mercury_api_key_enabled=True)
+    with patch(f"{OPTIONS_MODULE}.env", mock_env):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID, current_user=_make_mock_user(), _rate_limit=None
+      )
+    mercury = next(p for p in result.providers if p.provider == "mercury")
+    assert "api_key" in mercury.optional_config
+    assert "API token" in (mercury.auth_flow or "")
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_mercury_links_the_partner_page(self):
+    from robosystems.routers.graphs.connections.options import MERCURY_PARTNER_URL
+
+    mock_env = _make_mock_env(mercury_enabled=True)
+    with patch(f"{OPTIONS_MODULE}.env", mock_env):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID, current_user=_make_mock_user(), _rate_limit=None
+      )
+    mercury = next(p for p in result.providers if p.provider == "mercury")
+    assert MERCURY_PARTNER_URL == "https://mercury.com/partner/robosystems"
+    assert mercury.documentation_url == MERCURY_PARTNER_URL
+    assert MERCURY_PARTNER_URL in (mercury.setup_instructions or "")

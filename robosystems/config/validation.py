@@ -128,6 +128,10 @@ class EnvValidator:
       # LadybugDB database
       "LBUG_DATABASE_PATH": "LadybugDB database storage",
     }
+    # The Mercury bank feed is off by default; its client only matters when on
+    if getattr(env_config, "CONNECTION_MERCURY_ENABLED", False):
+      feature_vars["MERCURY_CLIENT_ID"] = "Mercury OAuth"
+      feature_vars["MERCURY_CLIENT_SECRET"] = "Mercury OAuth"
 
     # Only check GRAPH_API_URL in dev/local environments
     if env_config.ENVIRONMENT in ["dev", "local"]:
@@ -396,6 +400,7 @@ class EnvValidator:
       "debug": env_config.DEBUG,
       "features": {
         "quickbooks": bool(env_config.INTUIT_CLIENT_ID),
+        "mercury": bool(getattr(env_config, "MERCURY_CLIENT_ID", "")),
         "sec": True,  # Always available
       },
       "database": {

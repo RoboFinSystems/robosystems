@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 # Provider types
-ProviderType = Literal["quickbooks", "external"]
+ProviderType = Literal["quickbooks", "external", "mercury"]
 
 # Source names an external connection can never claim: platform-emitted
 # values, platform adapter providers (current and reserved), and the
@@ -17,6 +17,7 @@ RESERVED_SOURCE_NAMES = frozenset(
     "system",
     "schedule",
     "quickbooks",
+    "mercury",
     "xero",
     "plaid",
     "sec",
@@ -43,6 +44,38 @@ class QuickBooksConnectionConfig(BaseModel):
   # Config will be populated after OAuth completion
   realm_id: str | None = Field(None, description="QuickBooks Realm ID")
   refresh_token: str | None = Field(None, description="OAuth refresh token")
+
+
+class MercuryConnectionConfig(BaseModel):
+  """Mercury bank-feed connection configuration.
+
+  A bank feed is native accounting: the graph must already have a chart of
+  accounts and no live QuickBooks connection. Over OAuth (the hosted
+  default) the connection is created ``pending_oauth`` and activated by the
+  callback. ``api_key`` — a personal **read-only** Mercury token — connects
+  at once without a browser round-trip, but only on deployments that turn
+  on ``MERCURY_API_KEY_CONNECTIONS_ENABLED`` (self-hosted and local); the
+  hosted product refuses it.
+  """
+
+  since_date: date | None = Field(
+    None,
+    description=(
+      "First day of the backfill (ISO 8601). Defaults to 1 January of last "
+      "year. Incremental syncs never look back before it."
+    ),
+  )
+  include_treasury: bool = Field(
+    True, description="Capture treasury-account activity alongside checking/savings."
+  )
+  api_key: str | None = Field(
+    None,
+    min_length=8,
+    description=(
+      "A personal read-only Mercury API token, for deployments that allow "
+      "the api_key credential mode. Omit to connect over OAuth."
+    ),
+  )
 
 
 class ExternalConnectionConfig(BaseModel):
@@ -86,6 +119,7 @@ class CreateConnectionRequest(ConnectionBase):
 
   quickbooks_config: QuickBooksConnectionConfig | None = None
   external_config: ExternalConnectionConfig | None = None
+  mercury_config: MercuryConnectionConfig | None = None
 
   @field_validator("entity_id")
   @classmethod
@@ -98,14 +132,25 @@ class CreateConnectionRequest(ConnectionBase):
       raise ValueError("entity_id is required for QuickBooks connections")
     return v
 
-  @field_validator("quickbooks_config", "external_config")
+  @field_validator("quickbooks_config", "external_config", "mercury_config")
   @classmethod
   def validate_provider_config(
     cls,
-    v: QuickBooksConnectionConfig | ExternalConnectionConfig | None,
+    v: QuickBooksConnectionConfig
+    | ExternalConnectionConfig
+    | MercuryConnectionConfig
+    | None,
     info: ValidationInfo,
-  ) -> QuickBooksConnectionConfig | ExternalConnectionConfig | None:
-    """Ensure only the matching provider config is provided."""
+  ) -> (
+    QuickBooksConnectionConfig
+    | ExternalConnectionConfig
+    | MercuryConnectionConfig
+    | None
+  ):
+    """Ensure only the matching provider config is provided.
+
+    Every config is optional for Mercury — the defaults are the OAuth
+    connection with the default backfill window."""
     provider = info.data.get("provider")
     field_name = info.field_name
     if field_name is None:
@@ -114,11 +159,13 @@ class CreateConnectionRequest(ConnectionBase):
     field_to_provider = {
       "quickbooks_config": "quickbooks",
       "external_config": "external",
+      "mercury_config": "mercury",
     }
+    optional_for = {"mercury"}
 
     expected_provider = field_to_provider.get(field_name)
 
-    if provider == expected_provider and v is None:
+    if provider == expected_provider and v is None and provider not in optional_for:
       raise ValueError(f"{field_name} is required for {provider} connections")
     elif provider != expected_provider and v is not None:
       raise ValueError(

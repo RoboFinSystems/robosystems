@@ -37,6 +37,116 @@ from .utils import provider_registry
 
 router = APIRouter()
 
+# Providers that authorize over OAuth. The handler is looked up per call so a
+# test can patch the provider module's singleton.
+OAUTH_PROVIDERS = frozenset({"quickbooks", "mercury"})
+
+
+def _oauth_handler_for(provider: str):
+  if provider == "mercury":
+    from robosystems.operations.providers.mercury_provider import (
+      mercury_oauth_handler,
+    )
+
+    return mercury_oauth_handler
+  from robosystems.operations.providers.quickbooks_provider import (
+    quickbooks_oauth_handler,
+  )
+
+  return quickbooks_oauth_handler
+
+
+async def _complete_mercury_oauth(
+  *,
+  graph_id: str,
+  connection: dict,
+  connection_id: str,
+  code: str,
+  redirect_uri: str,
+  current_user: User,
+  db: Session,
+) -> dict:
+  """Finish a Mercury consent: exchange, store, record, validate, sync.
+
+  Mercury has no realm and no revival path — a disconnected feed is purged
+  (the partnership's deletion protocol) and a reconnect is a new row. The
+  connect-time sync config was parked in the pending row's credential
+  bundle; it rides into the token bundle as provider data. The consent is
+  written to the security audit log: the record the data agreement asks
+  for (who connected which organization, over which scope, when).
+  """
+  from robosystems.models.core import ConnectionCredentials
+  from robosystems.operations.providers.mercury_provider import (
+    mercury_oauth_handler,
+    mercury_oauth_provider,
+    record_bank_feed_consent,
+  )
+
+  tokens = await mercury_oauth_handler.exchange_code_for_tokens(code, redirect_uri)
+
+  existing = ConnectionCredentials.get_by_connection_id(connection_id, db)
+  parked = existing.get_credentials() if existing else {}
+  provider_data = mercury_oauth_provider.extract_provider_data(
+    {"sync_config": parked.get("sync_config") or {}}
+  )
+  mercury_oauth_handler.store_tokens(
+    connection_id, tokens, provider_data, db, user_id=str(current_user.id)
+  )
+
+  info = await mercury_oauth_provider.get_entity_info(tokens["access_token"])
+  if not info:
+    raise create_error_response(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Failed to validate Mercury connection",
+      code=ErrorCode.PROVIDER_ERROR,
+    )
+  organization = info.get("legal_business_name")
+
+  metadata = connection.get("metadata") or {}
+  metadata.update(
+    {
+      "status": "connected",
+      "entity_name": organization,
+      "institution_name": "Mercury",
+      "last_auth": datetime.now(UTC).isoformat(),
+    }
+  )
+  await ConnectionService.update(
+    connection_id=connection_id,
+    user_id=str(current_user.id),
+    metadata=metadata,
+    status="connected",
+    graph_id=graph_id,
+    db_session=db,
+  )
+
+  record_bank_feed_consent(
+    graph_id=graph_id,
+    connection_id=connection_id,
+    user_id=str(current_user.id),
+    auth_mode="oauth",
+    scope=tokens.get("scope"),
+    organization=organization,
+  )
+
+  # The first sync after consent backfills from the connect-time start date;
+  # a later re-consent on the same row keeps the incremental window.
+  is_first_sync = (connection.get("metadata") or {}).get("last_sync") is None
+  outcome = await provider_registry.sync_connection(
+    "mercury", connection, {"full_rebuild": True} if is_first_sync else None, graph_id
+  )
+  logger.info(
+    "Auto-sync initiated for Mercury connection: task_id=%s (first_sync=%s)",
+    outcome.task_id,
+    is_first_sync,
+  )
+  return {
+    "success": True,
+    "message": "Mercury connection established successfully",
+    "connection_id": connection_id,
+    "auto_sync_task_id": outcome.task_id,
+  }
+
 
 @router.post(
   "/oauth/init",
@@ -73,8 +183,7 @@ async def init_oauth(
 
     provider = connection["provider"].lower()
 
-    # Only QuickBooks supports OAuth currently
-    if provider != "quickbooks":
+    if provider not in OAUTH_PROVIDERS:
       raise create_error_response(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"OAuth not supported for provider: {provider}",
@@ -92,13 +201,8 @@ async def init_oauth(
         code=conflict.code,
       )
 
-    # Get OAuth handler for provider
-    from robosystems.operations.providers.quickbooks_provider import (
-      quickbooks_oauth_handler,
-    )
-
     # Generate authorization URL
-    auth_url, state = quickbooks_oauth_handler.get_authorization_url(
+    auth_url, state = _oauth_handler_for(provider).get_authorization_url(
       connection_id=request.connection_id,
       user_id=str(current_user.id),
       redirect_uri=request.redirect_uri,
@@ -339,6 +443,16 @@ async def oauth_callback(
           detail="Failed to validate QuickBooks connection",
           code=ErrorCode.PROVIDER_ERROR,
         )
+    elif provider.lower() == "mercury":
+      return await _complete_mercury_oauth(
+        graph_id=graph_id,
+        connection=connection,
+        connection_id=connection_id,
+        code=request.code,
+        redirect_uri=redirect_uri,
+        current_user=current_user,
+        db=db,
+      )
     else:
       raise create_error_response(
         status_code=status.HTTP_400_BAD_REQUEST,
