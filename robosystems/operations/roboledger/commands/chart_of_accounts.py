@@ -42,11 +42,11 @@ from robosystems.operations.taxonomy_block.chart_of_accounts import (
   create as create_chart_block,
 )
 from robosystems.operations.taxonomy_block.chart_templates import get_template
+from robosystems.operations.taxonomy_block.chart_templates._forms import resolve_form
 
 COA_TAXONOMY_TYPE = "chart_of_accounts"
 MAPPING_STRUCTURE_NAME = "CoA to US GAAP Mapping"
 DEFAULT_CHART_NAME = "Chart of Accounts"
-DEFAULT_ENTITY_TYPE = "corporation"
 
 
 class ChartAlreadyExistsError(ValueError):
@@ -157,11 +157,14 @@ def initialize_chart_of_accounts(
 
 
 def _resolve_entity_type(session: Session, requested: str | None) -> str:
+  """The legal form the equity rows are mapped for — always one of the
+  forms `_forms.EQUITY_BY_FORM` knows, so the response and the taxonomy
+  metadata record what was actually applied rather than the request string."""
   if requested and requested.strip():
-    return requested.strip().lower()
+    return resolve_form(requested)
   entity = resolve_parent_entity(session)
   form = getattr(entity, "entity_type", None) if entity is not None else None
-  return (form or DEFAULT_ENTITY_TYPE).strip().lower()
+  return resolve_form(form)
 
 
 def _create_template_mappings(

@@ -35,6 +35,7 @@ from robosystems.operations.taxonomy_block.chart_templates import (
 from robosystems.operations.taxonomy_block.chart_templates._forms import (
   EQUITY_BY_FORM,
   EQUITY_CODES,
+  resolve_form,
 )
 
 RS_GAAP_SOURCE = (
@@ -108,6 +109,13 @@ class TestRegistry:
       )
       assert len(mapped_codes) == len(set(mapped_codes)), (key, form, "duplicate")
       assert set(EQUITY_CODES) <= set(mapped_codes), (key, form, "equity unmapped")
+
+  def test_resolve_form_normalises_and_falls_back(self) -> None:
+    assert resolve_form(" LLC ") == "llc"
+    assert resolve_form("Partnership") == "partnership"
+    assert resolve_form("sole-prop") == "corporation"
+    assert resolve_form("") == "corporation"
+    assert resolve_form(None) == "corporation"
 
   def test_equity_forms_swap_only_the_equity_rows(self) -> None:
     template = CHART_TEMPLATES["saas"]

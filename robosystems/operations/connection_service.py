@@ -9,9 +9,11 @@ kernel shared by the REST sync endpoint and the `sync-connection` MCP
 tool, so both surfaces validate, lock, and dispatch identically.
 """
 
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from robosystems.database import SessionFactory
@@ -24,6 +26,7 @@ from robosystems.models.core.connection.connection import (
 from robosystems.models.core.connection.connection_credentials import (
   ConnectionCredentials,
 )
+from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 
 # System user ID for internal operations (Dagster, background tasks)
 SYSTEM_USER_ID = "system"
@@ -590,7 +593,9 @@ class ConnectionService:
 
 # Providers that ARE the general ledger while connected: their chart is the
 # chart and their sync writes posted rows. A bank feed cannot sit beside one.
-SYNCED_LEDGER_PROVIDERS: frozenset[str] = frozenset({"quickbooks"})
+# The same set is what `sever_synced_chart` can stamp — a synced ledger is by
+# definition the thing a cutover severs — so there is one definition.
+SYNCED_LEDGER_PROVIDERS: frozenset[str] = SEVERABLE_SOURCES
 
 # Providers that capture bank activity into the inbox of natively-kept
 # books. They need a chart to resolve against and no synced GL in the way.
@@ -654,29 +659,41 @@ def assert_provider_compatible(graph_id: str, provider: str, session: Session) -
 
 
 def _graph_has_chart(graph_id: str) -> bool:
-  from robosystems.db.extensions import extensions_session
   from robosystems.operations.roboledger.reads.books import graph_has_chart
 
-  try:
-    with extensions_session(graph_id) as ext:
-      return graph_has_chart(ext)
-  except RuntimeError:
-    # No extensions schema yet (never provisioned, or deprovisioned): there
-    # is no chart to resolve against.
-    return False
+  return _probe_books(graph_id, graph_has_chart)
 
 
 def _graph_has_native_books(graph_id: str, *, synced_source: str) -> bool:
-  from robosystems.db.extensions import extensions_session
   from robosystems.operations.roboledger.reads.books import (
     graph_has_native_line_items,
   )
 
+  return _probe_books(
+    graph_id, lambda ext: graph_has_native_line_items(ext, synced_source=synced_source)
+  )
+
+
+def _probe_books(graph_id: str, predicate: Callable[[Session], bool]) -> bool:
+  """Run a books predicate on the graph's extensions schema.
+
+  A graph with no tenant schema — never provisioned (subgraphs get theirs
+  lazily from the loader's first sync), or already torn down — has no chart
+  and no books, and reads as ``False``. `extensions_session` fails closed on
+  that case with ``invalid_schema_name`` (SQLSTATE 3F000), which SQLAlchemy
+  raises as `ProgrammingError`; every other programming error is a fault and
+  surfaces.
+  """
+  from robosystems.db.extensions import extensions_session
+  from robosystems.middleware.extensions import is_schema_missing
+
   try:
     with extensions_session(graph_id) as ext:
-      return graph_has_native_line_items(ext, synced_source=synced_source)
-  except RuntimeError:
-    return False
+      return predicate(ext)
+  except ProgrammingError as exc:
+    if is_schema_missing(exc):
+      return False
+    raise
 
 
 class ConnectionSyncError(Exception):

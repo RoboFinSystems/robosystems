@@ -26,14 +26,23 @@ EQUITY_BY_FORM: dict[str, list[tuple[str, str]]] = {
 }
 
 
+DEFAULT_FORM = "corporation"
+
+
+def resolve_form(entity_type: str | None) -> str:
+  """The legal form the equity rows are mapped for.
+
+  Unknown or empty forms resolve to ``corporation`` — this is the value a
+  caller should record and report, not the raw request string.
+  """
+  form = (entity_type or "").strip().lower()
+  return form if form in EQUITY_BY_FORM else DEFAULT_FORM
+
+
 def form_aware(
   mappings: list[tuple[str, str]], entity_type: str | None
 ) -> list[tuple[str, str]]:
-  """``mappings`` with the equity rows swapped for the entity's legal form.
-
-  Unknown or empty forms fall back to the corporation rows.
-  """
-  form = (entity_type or "corporation").strip().lower()
-  equity = EQUITY_BY_FORM.get(form, EQUITY_BY_FORM["corporation"])
+  """``mappings`` with the equity rows swapped for the entity's legal form."""
+  equity = EQUITY_BY_FORM[resolve_form(entity_type)]
   base = [m for m in mappings if m[0] not in EQUITY_CODES]
   return base + equity

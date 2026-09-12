@@ -1688,18 +1688,54 @@ class TestProviderCompatibility:
   @pytest.mark.unit
   def test_a_missing_extensions_schema_reads_as_no_books(self):
     """A never-provisioned or deprovisioned graph has no chart (so a bank
-    feed is refused) and no native books (so QuickBooks is allowed)."""
+    feed is refused) and no native books (so QuickBooks is allowed).
+
+    `extensions_session` fails closed on a missing tenant schema with
+    ``invalid_schema_name`` (3F000) on the first statement — a
+    `ProgrammingError`, not a `RuntimeError` — so that is what the probe
+    must absorb."""
+    from sqlalchemy.exc import ProgrammingError
+
     from robosystems.operations.connection_service import (
       _graph_has_chart,
       _graph_has_native_books,
     )
 
+    missing = ProgrammingError(
+      "DO $$ BEGIN ... END $$",
+      {},
+      Exception('tenant schema "kg_test" does not exist'),
+    )
+    session_cm = MagicMock()
+    session_cm.__enter__.side_effect = missing
+
     with patch(
       "robosystems.db.extensions.extensions_session",
-      side_effect=RuntimeError("schema missing"),
+      return_value=session_cm,
     ):
       assert _graph_has_chart("kg_test") is False
       assert _graph_has_native_books("kg_test", synced_source="quickbooks") is False
+
+  @pytest.mark.unit
+  def test_any_other_programming_error_surfaces(self):
+    """Only the missing-schema case reads as "no books"; a SQL fault or a
+    migration that has not reached the tenant must not be translated into a
+    silently-allowed provider."""
+    from sqlalchemy.exc import ProgrammingError
+
+    from robosystems.operations.connection_service import _graph_has_chart
+
+    fault = ProgrammingError(
+      "SELECT ...", {}, Exception('column "is_active" does not exist')
+    )
+    session_cm = MagicMock()
+    session_cm.__enter__.side_effect = fault
+
+    with (
+      patch("robosystems.db.extensions.extensions_session", return_value=session_cm),
+      pytest.raises(ProgrammingError),
+    ):
+      _graph_has_chart("kg_test")
 
 
 # ---------------------------------------------------------------------------

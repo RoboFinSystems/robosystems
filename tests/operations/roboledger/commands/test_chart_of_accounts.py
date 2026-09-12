@@ -157,6 +157,21 @@ class TestInitializeChartOfAccounts:
     assert response.entity_type == "partnership"
     self.entity.assert_not_called()
 
+  def test_unknown_entity_type_reports_the_form_actually_used(self) -> None:
+    """An unrecognised legal form maps the corporation equity rows; the
+    response and the chart's metadata say so instead of echoing the input."""
+    session = _session_for("saas")
+
+    response = initialize_chart_of_accounts(
+      session,
+      InitializeChartOfAccountsRequest(template="saas", entity_type="sole-prop"),
+      "usr_1",
+    )
+
+    assert response.entity_type == "corporation"
+    payload = self.create.call_args.args[1]
+    assert payload.metadata["entity_type"] == "corporation"
+
   def test_library_misses_are_reported_not_fatal(self) -> None:
     missing = "rs-gaap:DeferredRevenueCurrent"
     session = _session_for("saas", library_misses={missing})
