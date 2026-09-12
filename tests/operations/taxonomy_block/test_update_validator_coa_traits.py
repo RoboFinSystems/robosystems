@@ -138,3 +138,81 @@ class TestCoaUpdateProjectionTraits:
     flagged = [i for i in issues if i.code == "coa_missing_classification"]
     assert len(flagged) == 1
     assert flagged[0].context["element_qname"] == "rl:MysteryAccount"
+
+
+@pytest.fixture()
+def mapped_coa_taxonomy(ext_session, coa_taxonomy):
+  """The chart above, mapped into a library concept the way a template
+  initialization or the MappingOperator maps it: a ``coa_mapping`` structure
+  on the chart whose arc lands on an element of another taxonomy."""
+  from robosystems.models.extensions import Association, Structure
+
+  library = Taxonomy(name="rs-gaap v1", taxonomy_type="reporting_standard")
+  ext_session.add(library)
+  ext_session.flush()
+  concept = Element(
+    name="Rent Expense",
+    qname="rs-gaap:RentExpense",
+    balance_type="debit",
+    period_type="duration",
+    taxonomy_id=library.id,
+    source="rs-gaap",
+  )
+  ext_session.add(concept)
+  ext_session.flush()
+
+  mapping = Structure(
+    name="rs-gaap mapping", block_type="coa_mapping", taxonomy_id=coa_taxonomy.id
+  )
+  ext_session.add(mapping)
+  ext_session.flush()
+  rent = ext_session.query(Element).filter_by(qname="rl:RentExpense").one()
+  ext_session.add(
+    Association(
+      structure_id=mapping.id,
+      from_element_id=rent.id,
+      to_element_id=concept.id,
+      association_type="mapping",
+    )
+  )
+  ext_session.flush()
+  return coa_taxonomy
+
+
+class TestCoaUpdateProjectionMappingArcs:
+  """A mapped chart must stay editable.
+
+  The projection re-runs the create phases over the chart's existing
+  associations. A chart's mapping arcs land on library concepts the
+  envelope can never resolve (a chart has no parent taxonomy), so before
+  the fix every update on a template-initialized or auto-mapped chart
+  failed reference resolution with one ``phantom_to_ref`` per arc.
+  """
+
+  def test_add_account_on_a_mapped_chart_passes(self, ext_session, mapped_coa_taxonomy):
+    payload = UpdateTaxonomyBlockRequest(
+      taxonomy_id=str(mapped_coa_taxonomy.id),
+      elements_to_add=[
+        TaxonomyBlockElementRequest(
+          qname="rl:MercuryChecking",
+          name="Mercury Checking",
+          trait="asset",
+          balance_type="debit",
+          period_type="instant",
+          code="1010",
+        )
+      ],
+    )
+
+    issues = validate_update_envelope(ext_session, mapped_coa_taxonomy, payload)
+
+    phantom = [i for i in issues if i.code in ("phantom_to_ref", "phantom_from_ref")]
+    assert phantom == [], f"library-bound mapping arcs must not be projected: {phantom}"
+    assert issues == []
+
+  def test_rename_on_a_mapped_chart_passes(self, ext_session, mapped_coa_taxonomy):
+    payload = UpdateTaxonomyBlockRequest(
+      taxonomy_id=str(mapped_coa_taxonomy.id),
+      elements_to_update=[ElementUpdatePatch(qname="rl:Cash", name="Operating cash")],
+    )
+    assert validate_update_envelope(ext_session, mapped_coa_taxonomy, payload) == []

@@ -204,11 +204,27 @@ def validate_update_envelope(
     )
   virtual_structures.extend(payload.structures_to_add)
 
+  # Arcs that leave the taxonomy — a chart's mapping arcs into the rs-gaap
+  # library, or any block's arc to a concept it does not own — are created
+  # by the mapping commands, not by an envelope, and the create validator
+  # can only resolve a foreign endpoint through a *parent* taxonomy
+  # (``_load_library_qnames``). Projecting them for an unparented block
+  # would report every one as a phantom and refuse any update on a chart
+  # that has ever been mapped. They are left out of the projection; the
+  # mapping commands own their integrity.
+  current_element_ids = {str(e.id) for e in current_elements}
+  resolves_foreign = taxonomy.parent_taxonomy_id is not None
+
   virtual_associations: list[TaxonomyBlockAssociationRequest] = []
   for a in current_associations:
     if a.id in associations_to_remove_ids:
       continue
     if a.structure_id in structures_to_remove:
+      continue
+    if not resolves_foreign and (
+      str(a.from_element_id) not in current_element_ids
+      or str(a.to_element_id) not in current_element_ids
+    ):
       continue
     if (
       str(a.from_element_id) in missing_qname_element_ids
