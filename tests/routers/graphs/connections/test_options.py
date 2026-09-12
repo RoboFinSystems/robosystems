@@ -382,3 +382,18 @@ class TestMercuryOption:
     mercury = next(p for p in result.providers if p.provider == "mercury")
     assert "api_key" in mercury.optional_config
     assert "API token" in (mercury.auth_flow or "")
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_mercury_links_the_partner_page(self):
+    from robosystems.routers.graphs.connections.options import MERCURY_PARTNER_URL
+
+    mock_env = _make_mock_env(mercury_enabled=True)
+    with patch(f"{OPTIONS_MODULE}.env", mock_env):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID, current_user=_make_mock_user(), _rate_limit=None
+      )
+    mercury = next(p for p in result.providers if p.provider == "mercury")
+    assert MERCURY_PARTNER_URL == "https://mercury.com/partner/robosystems"
+    assert mercury.documentation_url == MERCURY_PARTNER_URL
+    assert MERCURY_PARTNER_URL in (mercury.setup_instructions or "")

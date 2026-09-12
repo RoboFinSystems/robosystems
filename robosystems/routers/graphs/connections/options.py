@@ -17,6 +17,11 @@ from robosystems.models.core import User
 
 router = APIRouter()
 
+# RoboSystems' Mercury partner page — the referral link that came with the
+# OAuth partnership. The customer-facing front door for "open a Mercury
+# account", so it is what the catalog links to.
+MERCURY_PARTNER_URL = "https://mercury.com/partner/robosystems"
+
 
 @router.get(
   "/options",
@@ -108,9 +113,11 @@ async def get_connection_options(
           "Initialize a chart of accounts first (or sever a QuickBooks "
           "connection to keep its chart), then click 'Connect' and log in "
           "to Mercury to authorize this organization. Each bank account is "
-          "linked to a chart account by name, or one is added for it."
+          "linked to a chart account by name, or one is added for it. "
+          "Not banking with Mercury yet? Open an account through our partner "
+          f"page: {MERCURY_PARTNER_URL}"
         ),
-        documentation_url="https://docs.mercury.com/docs/integrations-with-oauth2",
+        documentation_url=MERCURY_PARTNER_URL,
       )
     )
 
