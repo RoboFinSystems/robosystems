@@ -114,8 +114,16 @@ def load_feed(
   report.skipped = result.skipped
   report.classification = result.classification
   report.resolved = result.resolved
-  if result.events:
-    report.earliest_occurred_at = str(result.events[0]["occurred_at"])
+  # The earliest *plausible* posting: a feed can carry a placeholder date
+  # (the sandbox posts transactions dated year 1), and the calendar
+  # bootstrap must not open the books there.
+  sane = [
+    str(event["occurred_at"])
+    for event in result.events
+    if str(event["occurred_at"])[:4] >= "1990"
+  ]
+  if sane:
+    report.earliest_occurred_at = min(sane)
 
   existing = _existing_events(
     session, source, [str(event["external_id"]) for event in result.events]
