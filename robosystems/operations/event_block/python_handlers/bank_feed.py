@@ -215,10 +215,24 @@ def _journal_metadata(
     line_items=lines,
     status="draft",
     connection_id=connection_id,
-    # A bank line is evidence of the bank's own record; it is never
-    # published to a source system, whatever the connection's policy.
     publish_to_source=False,
   )
+
+
+def _pin_to_local_lane(event: Event) -> None:
+  """A bank line is evidence of the bank's own record; it is never published
+  to a source system, whatever the connection's policy.
+
+  Close decides the write-back lane from the *persisted* event's
+  ``metadata.publish_to_source`` (``qb_writeback.writeback_source_clause``),
+  not from anything a handler passes along, so the pin has to land on the
+  row. Today ``source='mercury'`` is outside the write-back sources anyway;
+  the explicit flag keeps that true if the source list ever widens.
+  """
+  metadata = dict(event.metadata_ or {})
+  if metadata.get("publish_to_source") is not False:
+    metadata["publish_to_source"] = False
+    event.metadata_ = metadata
 
 
 def _memo(event: Event) -> str:
@@ -286,8 +300,10 @@ def dispatch(
     metadata=metadata,
   )
   if lines is None:
+    _pin_to_local_lane(event)
     return _apply_dsl_floor(session, event, created_by)
 
+  _pin_to_local_lane(event)
   journal = _journal_metadata(
     posting_date=posting_date_for_event(
       effective_at=event.effective_at, occurred_at=event.occurred_at

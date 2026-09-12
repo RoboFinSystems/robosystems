@@ -243,7 +243,9 @@ class TestDispatch:
     _session, _event_arg, journal_meta, created_by = journal.call_args.args
     assert created_by == "usr_1"
     assert journal_meta.status == "draft"
-    assert journal_meta.publish_to_source is False
+    # The pin close reads is the persisted event's own metadata.
+    assert event.metadata_["publish_to_source"] is False
+    assert event.metadata_["connection_id"] == "conn_1"
     assert journal_meta.connection_id == "conn_1"
     assert journal_meta.memo == "Staples (card)"
     assert journal_meta.posting_date.isoformat() == "2026-03-14"
@@ -302,6 +304,33 @@ class TestDispatch:
     apply.assert_called_once_with(session, event, rule, created_by="usr_1")
     assert result.transaction_ids == ["txn_rule"]
     assert result.entry_ids == ["je_rule"]
+
+  def test_rule_posted_line_is_pinned_to_the_local_lane_too(self):
+    event = _event(metadata={"connection_id": "conn_1"})
+    session = MagicMock()
+    session.get.return_value = None
+    session.execute.return_value.all.return_value = []
+    txn = MagicMock()
+    txn.id = "txn_rule"
+    with (
+      patch(f"{MODULE}.resolve_handler", return_value=MagicMock(name="rule")),
+      patch(f"{MODULE}.apply_handler", return_value=[txn]),
+    ):
+      dispatch(session, event, BankFeedMetadata(), "usr_1")
+    assert event.metadata_["publish_to_source"] is False
+
+  def test_pin_is_idempotent_on_the_metadata_dict(self):
+    from robosystems.operations.event_block.python_handlers.bank_feed import (
+      _pin_to_local_lane,
+    )
+
+    event = _event(metadata={"publish_to_source": False, "k": 1})
+    before = event.metadata_
+    _pin_to_local_lane(event)
+    assert event.metadata_ is before  # untouched when already pinned
+    event.metadata_ = {"k": 1}
+    _pin_to_local_lane(event)
+    assert event.metadata_ == {"k": 1, "publish_to_source": False}
 
   def test_handlers_registered_for_every_bank_event_type(self):
     from robosystems.operations.event_block.python_handlers.registry import (
