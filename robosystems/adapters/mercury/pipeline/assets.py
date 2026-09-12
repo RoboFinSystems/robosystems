@@ -327,12 +327,8 @@ def _bootstrap_fiscal_calendar_if_needed(
         context.log.info("Fiscal calendar already initialized; skipping bootstrap")
         return
       current = current_month_period()
-      first_period = (
-        earliest_occurred_at[:7]
-        if earliest_occurred_at and len(earliest_occurred_at) >= 7
-        else None
-      )
-      if first_period and first_period < current:
+      first_period = _first_period(earliest_occurred_at, current)
+      if first_period is not None:
         closed_through = previous_period(first_period)
       else:
         closed_through = previous_period(previous_period(current))
@@ -361,6 +357,23 @@ def _bootstrap_fiscal_calendar_if_needed(
     context.log.info("Fiscal calendar already initialized (race); skipping bootstrap")
   except Exception as exc:
     context.log.warning(f"Failed to bootstrap fiscal calendar (non-fatal): {exc}")
+
+
+# The earliest month the books can open at. A feed can carry a placeholder
+# date (the Mercury sandbox posts transactions dated year 1); a calendar
+# opened there would seed thousands of periods, or fail on year 0.
+EARLIEST_BOOKS_PERIOD = "1990-01"
+
+
+def _first_period(earliest_occurred_at: str | None, current: str) -> str | None:
+  """The first posted month, or ``None`` when it is missing, in the future,
+  or implausibly early."""
+  if not earliest_occurred_at or len(earliest_occurred_at) < 7:
+    return None
+  period = earliest_occurred_at[:7]
+  if not (EARLIEST_BOOKS_PERIOD <= period < current):
+    return None
+  return period
 
 
 def _mark_graph_stale(

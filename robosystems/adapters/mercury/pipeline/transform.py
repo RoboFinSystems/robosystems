@@ -289,12 +289,25 @@ def transform(
   return result
 
 
+# Mercury's sandbox posts some transactions with a placeholder ``postedAt`` of
+# year 1. A date that early is not a posting date; ``createdAt`` stands in.
+_PLACEHOLDER_DATE_CEILING = "1990"
+
+
+def _posted_at(txn: dict[str, Any]) -> str | None:
+  posted = txn.get("postedAt")
+  if posted and str(posted)[:4] >= _PLACEHOLDER_DATE_CEILING:
+    return str(posted)
+  created = txn.get("createdAt")
+  return str(created) if created else None
+
+
 def _day(txn: dict[str, Any]) -> str:
-  return str(txn.get("postedAt") or txn.get("createdAt") or "")[:10]
+  return (_posted_at(txn) or "")[:10]
 
 
 def _when(txn: dict[str, Any]) -> str:
-  return str(txn.get("postedAt") or txn.get("createdAt"))
+  return str(_posted_at(txn))
 
 
 def _suggest(txn: dict[str, Any]) -> tuple[AccountHint | None, str]:

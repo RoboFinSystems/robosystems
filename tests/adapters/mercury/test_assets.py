@@ -11,6 +11,7 @@ from dagster import MaterializeResult, build_asset_context
 from robosystems.adapters.mercury.pipeline.assets import (
   MercurySyncConfig,
   _bootstrap_fiscal_calendar_if_needed,
+  _first_period,
   _since_date,
   default_backfill_start,
   get_dagster_components,
@@ -56,6 +57,23 @@ class TestSinceDate:
     assert _since_date(
       cfg, {"since_date": late_start}, datetime.now(UTC)
     ) == date.fromisoformat(late_start)
+
+
+@pytest.mark.unit
+class TestFirstPeriod:
+  def test_plausible_first_month_opens_the_books_there(self):
+    assert _first_period("2026-03-14T15:04:05Z", "2026-09") == "2026-03"
+
+  def test_placeholder_year_one_is_ignored(self):
+    assert _first_period("0001-01-01T00:00:00Z", "2026-09") is None
+
+  def test_future_or_current_month_is_ignored(self):
+    assert _first_period("2026-09-01T00:00:00Z", "2026-09") is None
+    assert _first_period("2027-01-01T00:00:00Z", "2026-09") is None
+
+  def test_missing_or_short_is_ignored(self):
+    assert _first_period(None, "2026-09") is None
+    assert _first_period("2026", "2026-09") is None
 
 
 @pytest.mark.unit

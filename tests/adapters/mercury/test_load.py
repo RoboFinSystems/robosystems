@@ -99,6 +99,24 @@ class TestLoadFeed:
     assert session.nested == 9
     assert report.earliest_occurred_at == "2026-03-14T15:04:05Z"
 
+  def test_earliest_posting_ignores_placeholder_dates(self):
+    session = _Session()
+    raw = raw_pull()
+    raw["transactions"][0]["postedAt"] = "0001-01-01T00:00:00Z"
+    raw["transactions"][0]["createdAt"] = None
+    with patch(f"{MODULE}.create_event_block_in_session"):
+      report = load_feed(
+        session,
+        graph_id="kg_test",
+        connection_id="conn_1",
+        created_by="usr_1",
+        source="mercury",
+        raw=raw,
+        account_elements=ELEMENTS,
+        chart=ChartIndex(),
+      )
+    assert report.earliest_occurred_at == "2026-03-14T15:04:05Z"
+
   def test_agent_ids_flow_into_events(self):
     session = _Session(existing_agents=[("cp_stripe", "agt_existing")])
     report, create = _run(session)

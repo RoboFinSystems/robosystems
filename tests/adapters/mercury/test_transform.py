@@ -212,6 +212,19 @@ class TestTransform:
     assert result.resolved["resolved"] == 0
     assert result.resolved["hint_only"] >= 4
 
+  def test_placeholder_posted_at_falls_back_to_created_at(self):
+    raw = raw_pull()
+    raw["transactions"][0]["postedAt"] = "0001-01-01T00:00:00Z"
+    raw["transactions"][0]["createdAt"] = "2026-03-14T12:00:00Z"
+    result = transform(
+      raw, source="mercury", connection_id="conn_1", account_elements=ELEMENTS
+    )
+    event = next(
+      e for e in result.events if e["external_id"] == "mercury_txn_txn_office"
+    )
+    assert event["occurred_at"] == "2026-03-14T12:00:00Z"
+    assert event["metadata"]["posted_at"] == "0001-01-01T00:00:00Z"  # raw value kept
+
   def test_events_sorted_by_occurred_at(self):
     result, _ = _events()
     stamps = [e["occurred_at"] for e in result.events]
