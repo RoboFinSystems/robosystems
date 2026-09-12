@@ -12,10 +12,12 @@ Every target is a verified leaf of the Default Reporting Style's Networks
   support; drives the ~78% gross margin and the GrossProfit subtotal).
 """
 
-# The mapping is the shipped chart template's — one copy, in core.
-from robosystems.operations.taxonomy_block.chart_templates.saas import (
-  MAPPINGS,
-  mappings_for,
-)
+# The mapping is the shipped chart template's — one copy, read from
+# ``frameworks/chart-templates/saas/v1/mappings/rs-gaap.jsonld``.
+from robosystems.operations.taxonomy_block.chart_templates import CHART_TEMPLATES
+
+_RS_GAAP = CHART_TEMPLATES["saas"].mappings["rs-gaap"]
+MAPPINGS = _RS_GAAP.arcs_for("corporation")
+mappings_for = _RS_GAAP.arcs_for
 
 __all__ = ["MAPPINGS", "mappings_for"]

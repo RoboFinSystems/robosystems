@@ -114,9 +114,27 @@ frameworks/
 │   └── tenant-exclude/
 │       └── v1.json                 per-tenant copy curation (policy, NOT a package)
 │
+├── chart-templates/            NOT a framework — shipped chart-of-accounts stencils (see its README)
+│   ├── README.md
+│   ├── saas/v1/                chart.jsonld (accounts, framework-free) · mappings/rs-gaap.jsonld
+│   ├── services/v1/
+│   └── product/v1/
+│
 └── ontology/                   NOT a framework — the canonical RDF ontology
     └── v1/                     context.jsonld · ontology.ttl · shapes.ttl
 ```
+
+### `chart-templates/` — stencils, not a framework (added 2026-09-11)
+
+The three shipped chart-of-accounts templates that `initialize-chart-of-accounts`
+instantiates for a company keeping native books. Authored JSON-LD, maintained
+here with the library's vocabulary, but **not a framework and not a package**:
+no manifest, so discovery never sees it; nothing is seeded into `public`;
+nothing is copied into a tenant at provision. A template is *forked* once into
+tenant-owned `coa:*` elements and never referenced again — the opposite of a
+package, which is referenced by identity and immutable. The accounts file is
+framework-free (a chart maps into many frameworks) and each `mappings/<framework>.jsonld`
+is one framework's mapping set. Full rules: [`chart-templates/README.md`](chart-templates/README.md).
 
 ### `cm/` — the conceptual-model substrate (a framework, not a reporting taxonomy)
 

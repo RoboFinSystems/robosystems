@@ -1,0 +1,128 @@
+{
+  "@context": {
+    "rs": "https://robosystems.ai/vocab/",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "from": "rs:fromCode",
+    "to": {
+      "@id": "rs:toConcept",
+      "@type": "@id"
+    },
+    "arcs": {
+      "@id": "rs:mapping",
+      "@container": "@list"
+    },
+    "variants": "rs:variant"
+  },
+  "@id": "chart-templates:saas/v1/mappings/rs-gaap",
+  "@type": "rs:ChartMapping",
+  "framework": "rs-gaap",
+  "displayName": "US GAAP (rs-gaap)",
+  "structureName": "CoA to US GAAP Mapping",
+  "arcs": [
+    {
+      "from": "1000",
+      "to": "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+    },
+    {
+      "from": "1100",
+      "to": "rs-gaap:ReceivablesNetCurrent"
+    },
+    {
+      "from": "1200",
+      "to": "rs-gaap:PrepaidExpenseCurrent"
+    },
+    {
+      "from": "1210",
+      "to": "rs-gaap:PrepaidExpenseCurrent"
+    },
+    {
+      "from": "1300",
+      "to": "rs-gaap:PropertyPlantAndEquipmentGross"
+    },
+    {
+      "from": "1350",
+      "to": "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment"
+    },
+    {
+      "from": "2000",
+      "to": "rs-gaap:AccountsPayableCurrent"
+    },
+    {
+      "from": "2100",
+      "to": "rs-gaap:AccruedLiabilitiesCurrent"
+    },
+    {
+      "from": "2300",
+      "to": "rs-gaap:DeferredRevenueCurrent"
+    },
+    {
+      "from": "4000",
+      "to": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+    },
+    {
+      "from": "4100",
+      "to": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+    },
+    {
+      "from": "5000",
+      "to": "rs-gaap:CostOfGoodsAndServicesSold"
+    },
+    {
+      "from": "6000",
+      "to": "rs-gaap:ResearchAndDevelopmentExpense"
+    },
+    {
+      "from": "6100",
+      "to": "rs-gaap:SellingAndMarketingExpense"
+    },
+    {
+      "from": "6200",
+      "to": "rs-gaap:GeneralAndAdministrativeExpense"
+    },
+    {
+      "from": "6300",
+      "to": "rs-gaap:GeneralAndAdministrativeExpense"
+    },
+    {
+      "from": "6400",
+      "to": "rs-gaap:GeneralAndAdministrativeExpense"
+    },
+    {
+      "from": "7000",
+      "to": "rs-gaap:DepreciationDepletionAndAmortization"
+    }
+  ],
+  "defaultVariant": "corporation",
+  "variants": {
+    "corporation": [
+      {
+        "from": "3000",
+        "to": "rs-gaap:AdditionalPaidInCapital"
+      },
+      {
+        "from": "3100",
+        "to": "rs-gaap:RetainedEarningsAccumulatedDeficit"
+      }
+    ],
+    "partnership": [
+      {
+        "from": "3000",
+        "to": "rs-gaap:PartnersCapital"
+      },
+      {
+        "from": "3100",
+        "to": "rs-gaap:PartnersCapital"
+      }
+    ],
+    "llc": [
+      {
+        "from": "3000",
+        "to": "rs-gaap:MembersEquity"
+      },
+      {
+        "from": "3100",
+        "to": "rs-gaap:MembersEquity"
+      }
+    ]
+  }
+}

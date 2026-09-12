@@ -16,9 +16,11 @@ from __future__ import annotations
 
 from datetime import date
 
-from robosystems.operations.taxonomy_block.chart_templates.services import (
-  ACCOUNTS as ACCOUNTS,
-)
+from robosystems.operations.taxonomy_block.chart_templates import CHART_TEMPLATES
+
+# The chart is the shipped ``services`` template — one copy, read from
+# ``frameworks/chart-templates/services/v1/chart.jsonld``.
+ACCOUNTS = CHART_TEMPLATES["services"].accounts
 
 # ---------------------------------------------------------------------------
 # Evergreen reference dates

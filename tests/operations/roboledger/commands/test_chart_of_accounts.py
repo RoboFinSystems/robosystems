@@ -3,7 +3,9 @@
 The declarative CoA handler and the mapping command are each covered by
 their own suites; here they are stubbed so the tests pin the orchestration:
 the one-time rule, the template lookup, the entity-form default, the
-envelope handed to the handler, and how library misses are reported.
+envelope handed to the handler, which frameworks get a mapping structure
+(the ones the tenant's library carries), and how library misses are
+reported.
 """
 
 from __future__ import annotations
@@ -38,30 +40,43 @@ def _row_result(rows):
 
 def _scalar_result(value):
   result = MagicMock()
+  result.scalar.return_value = value
   result.scalar_one_or_none.return_value = value
   result.scalar_one.return_value = value
   return result
 
 
-def _session_for(template_key: str, *, existing_chart=None, library_misses=()):
+def _session_for(
+  template_key: str,
+  *,
+  existing_chart=None,
+  library_misses=(),
+  has_rs_gaap: bool = True,
+):
   """A session whose ``execute`` answers, in call order: the active-chart
-  probe, the mapping-structure lookup, the new chart's elements, and the
-  library elements for the template's targets (minus ``library_misses``)."""
+  probe, the "does this tenant carry rs-gaap" probe, the new chart's
+  elements, then — when rs-gaap is present — the mapping-structure lookup
+  and the library elements for the template's targets (minus
+  ``library_misses``)."""
   template = CHART_TEMPLATES[template_key]
   coa_rows = [(code, f"elem_{code}") for code, *_ in template.accounts]
-  targets = sorted({q for _c, q in template.mappings_for("corporation")})
+  targets = sorted(
+    {q for _c, q in template.mappings["rs-gaap"].arcs_for("corporation")}
+  )
   library_rows = [
     (qname, f"lib_{i}")
     for i, qname in enumerate(targets)
     if qname not in library_misses
   ]
   session = MagicMock()
-  session.execute.side_effect = [
+  answers = [
     _scalar_result(existing_chart),
-    _scalar_result("struct_map"),
+    _scalar_result(has_rs_gaap),
     _row_result(coa_rows),
-    _row_result(library_rows),
   ]
+  if has_rs_gaap:
+    answers += [_scalar_result("struct_map"), _row_result(library_rows)]
+  session.execute.side_effect = answers
   return session
 
 
@@ -112,9 +127,14 @@ class TestInitializeChartOfAccounts:
     assert all(e.trait for e in payload.elements)
     assert [s.block_type for s in payload.structures] == ["coa_mapping"]
     assert payload.structures[0].name == MAPPING_STRUCTURE_NAME
-    assert payload.metadata == {"template": "saas", "entity_type": "corporation"}
+    assert payload.metadata == {
+      "template": "saas",
+      "template_version": "v1",
+      "entity_type": "corporation",
+      "frameworks": ["rs-gaap"],
+    }
 
-    expected = template.mappings_for("corporation")
+    expected = template.mappings["rs-gaap"].arcs_for("corporation")
     assert self.map_assoc.call_count == len(expected)
     first = self.map_assoc.call_args_list[0].args[1]
     assert first.mapping_id == "struct_map"
@@ -127,7 +147,27 @@ class TestInitializeChartOfAccounts:
     assert response.entity_type == "corporation"
     assert response.elements_created == template.account_count
     assert response.mappings_created == len(expected)
+    assert response.frameworks == ["rs-gaap"]
     assert response.unresolved == []
+
+  def test_a_framework_the_tenant_lacks_gets_no_structure(self) -> None:
+    """The op follows the pin through the library copy: no rs-gaap
+    concepts in this graph → no rs-gaap mapping structure, no arcs, and
+    the skip is reported rather than every target listed as unresolved."""
+    session = _session_for("saas", has_rs_gaap=False)
+
+    response = initialize_chart_of_accounts(
+      session, InitializeChartOfAccountsRequest(template="saas"), "usr_1"
+    )
+
+    payload = self.create.call_args.args[1]
+    assert payload.structures == []
+    assert payload.metadata["frameworks"] == []
+    self.map_assoc.assert_not_called()
+    assert response.frameworks == []
+    assert response.mappings_created == 0
+    assert response.unresolved == ["rs-gaap: not in this graph's library"]
+    assert response.elements_created == CHART_TEMPLATES["saas"].account_count
 
   def test_entity_type_defaults_to_the_graphs_entity(self) -> None:
     entity = MagicMock()
@@ -180,7 +220,7 @@ class TestInitializeChartOfAccounts:
       session, InitializeChartOfAccountsRequest(template="saas"), "usr_1"
     )
 
-    expected = CHART_TEMPLATES["saas"].mappings_for("corporation")
+    expected = CHART_TEMPLATES["saas"].mappings["rs-gaap"].arcs_for("corporation")
     misses = [c for c, q in expected if q == missing]
     assert response.unresolved == [missing]
     assert response.mappings_created == len(expected) - len(misses)
@@ -195,7 +235,7 @@ class TestInitializeChartOfAccounts:
       session, InitializeChartOfAccountsRequest(template="saas"), "usr_1"
     )
 
-    expected = CHART_TEMPLATES["saas"].mappings_for("corporation")
+    expected = CHART_TEMPLATES["saas"].mappings["rs-gaap"].arcs_for("corporation")
     assert response.mappings_created == len(expected) - 1
     assert response.unresolved == []
 

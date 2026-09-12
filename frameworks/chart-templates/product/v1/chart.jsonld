@@ -1,0 +1,220 @@
+{
+  "@context": {
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "rs": "https://robosystems.ai/vocab/",
+    "trait": "https://robosystems.ai/taxonomy/fac-traits/v1/",
+    "label": "rdfs:label",
+    "documentation": "rdfs:comment",
+    "code": "rs:code",
+    "subClassification": "rs:subClassification",
+    "balance": {
+      "@id": "xbrli:balance"
+    },
+    "hasTrait": {
+      "@id": "rs:hasTrait",
+      "@type": "@id"
+    },
+    "accounts": {
+      "@id": "rs:account",
+      "@container": "@list"
+    }
+  },
+  "@id": "chart-templates:product/v1",
+  "@type": "rs:ChartTemplate",
+  "key": "product",
+  "ordinal": 2,
+  "displayName": "Product business (inventory and COGS)",
+  "description": "Goods sold direct and wholesale, subscription revenue with deferred revenue, three-stage inventory (raw materials, work in process, finished goods), cost of goods sold, production equipment, fulfillment and marketing expenses.",
+  "accounts": [
+    {
+      "code": "1000",
+      "label": "Operating Checking",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "cash_and_equivalents",
+      "balance": "debit"
+    },
+    {
+      "code": "1100",
+      "label": "Accounts Receivable",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "accounts_receivable",
+      "balance": "debit"
+    },
+    {
+      "code": "1200",
+      "label": "Prepaid Insurance",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "other_current_assets",
+      "balance": "debit"
+    },
+    {
+      "code": "1210",
+      "label": "Prepaid Software",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "other_current_assets",
+      "balance": "debit"
+    },
+    {
+      "code": "1220",
+      "label": "Prepaid Fulfillment",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "other_current_assets",
+      "balance": "debit"
+    },
+    {
+      "code": "1400",
+      "label": "Inventory — Raw Materials",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "inventory",
+      "balance": "debit"
+    },
+    {
+      "code": "1410",
+      "label": "Inventory — Work in Process",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "inventory",
+      "balance": "debit"
+    },
+    {
+      "code": "1420",
+      "label": "Inventory — Finished Goods",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "inventory",
+      "balance": "debit"
+    },
+    {
+      "code": "1500",
+      "label": "Production Equipment",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "fixed_assets",
+      "balance": "debit"
+    },
+    {
+      "code": "1550",
+      "label": "Accumulated Depreciation",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "fixed_assets",
+      "balance": "credit"
+    },
+    {
+      "code": "2000",
+      "label": "Accounts Payable",
+      "hasTrait": "trait:elementsOfFinancialStatements/liability",
+      "subClassification": "accounts_payable",
+      "balance": "credit"
+    },
+    {
+      "code": "2100",
+      "label": "Accrued Liabilities",
+      "hasTrait": "trait:elementsOfFinancialStatements/liability",
+      "subClassification": "other_current_liabilities",
+      "balance": "credit"
+    },
+    {
+      "code": "2300",
+      "label": "Deferred Subscription Revenue",
+      "hasTrait": "trait:elementsOfFinancialStatements/liability",
+      "subClassification": "deferred_revenue",
+      "balance": "credit"
+    },
+    {
+      "code": "3000",
+      "label": "Paid-in Capital",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit"
+    },
+    {
+      "code": "3100",
+      "label": "Retained Earnings",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit"
+    },
+    {
+      "code": "4000",
+      "label": "Subscription Revenue",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "operating_revenue",
+      "balance": "credit"
+    },
+    {
+      "code": "4100",
+      "label": "Wholesale Revenue",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "operating_revenue",
+      "balance": "credit"
+    },
+    {
+      "code": "4200",
+      "label": "Direct Sales Revenue",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "operating_revenue",
+      "balance": "credit"
+    },
+    {
+      "code": "5000",
+      "label": "Cost of Goods Sold",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "cost_of_goods_sold",
+      "balance": "debit"
+    },
+    {
+      "code": "6000",
+      "label": "Salaries & Wages",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6100",
+      "label": "Facility Rent",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6200",
+      "label": "Fulfillment & Shipping",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6300",
+      "label": "Marketing & Advertising",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6400",
+      "label": "Software & Subscriptions",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6500",
+      "label": "Insurance",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "6600",
+      "label": "Utilities & Supplies",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    },
+    {
+      "code": "7000",
+      "label": "Depreciation Expense",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit"
+    }
+  ]
+}
