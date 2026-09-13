@@ -2,7 +2,11 @@
 
 ``companies/{ticker}.json`` lists one filer's filings with their public
 representations; ``companies/index.json`` lists every filer with its latest
-filing. Both are a fold over the processed Report and Entity tables — the
+filing and whether any of its filings can be rendered (``renderable``, with
+``latest_renderable`` naming the one a page would show). The public company
+pages on roboinvestor.ai select on that flag — which filers to list, which to
+put in the sitemap — so it has to be answerable from the index alone, without
+a read per filer. Both are a fold over the processed Report and Entity tables — the
 same parquet the graph is built from — joined to each filing's
 ``manifest.json``, which the processor wrote beside the artifacts. They are
 regenerated whole: a run rewrites the file of every filer it touched (the
@@ -42,7 +46,13 @@ from robosystems.operations.aws.s3 import S3Client
 from .configs import SEC_QUARTERS, SECFilingCatalogConfig, sec_quarter_partitions
 from .text_index import _get_s3_client
 
-CATALOG_VERSION = 1
+CATALOG_VERSION = 2
+
+# What a page can render a filing *from*. The document as filed is listed and
+# served, never projected, so a filing carrying only that has nothing to show
+# beyond its own metadata. Keep this in step with `renderable()` in
+# roboinvestor-app's src/lib/filings/catalog.ts — the consumer of the flag.
+RENDERABLE_KINDS = frozenset({"holon", "tavi"})
 CATALOG_MEDIA_TYPE = "application/json"
 CATALOG_CACHE_CONTROL = "public, max-age=60"
 ROBOTS_CACHE_CONTROL = "public, max-age=3600"
@@ -190,6 +200,36 @@ def viewer_link(viewer_url: str, url: str) -> str:
   return f"{viewer_url.rstrip('/')}/?url={quote(url, safe='')}"
 
 
+def renderable(representations: list[dict[str, Any]] | None) -> bool:
+  """Whether a filing has a representation a page can project."""
+  return any((r or {}).get("kind") in RENDERABLE_KINDS for r in representations or [])
+
+
+def renderable_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
+  """Whether any of a filer's filings can be rendered, and the newest that can.
+
+  Carried on the index so a consumer can select the filers worth listing —
+  crawlable pages, a browse hub — without reading a per-filer catalog each to
+  find out. ``latest_renderable`` is the filing the page actually shows, so its
+  date is the honest last-modified for that page; ``latest`` is the newest
+  filing of any kind, which may have no artifacts at all.
+  """
+  newest = next((e for e in entries if renderable(e["representations"])), None)
+  return {
+    "renderable": newest is not None,
+    "latest_renderable": None
+    if newest is None
+    else {
+      "accession": newest["accession"],
+      "form": newest["form"],
+      "filing_date": newest["filing_date"],
+      "report_date": newest["report_date"],
+      "fiscal_year": newest["fiscal_year"],
+      "fiscal_period": newest["fiscal_period"],
+    },
+  }
+
+
 def build_company(
   filer: dict[str, Any],
   filings: list[dict[str, Any]],
@@ -233,10 +273,18 @@ def build_company(
     **filer,
     "filings": entries,
     "latest": latest,
+    **renderable_summary(entries),
   }
 
 
-def index_row(filer: dict[str, Any], filings: list[dict[str, Any]]) -> dict[str, Any]:
+def index_row(
+  filer: dict[str, Any],
+  filings: list[dict[str, Any]],
+  summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+  """One filer's row. ``summary`` is its :func:`renderable_summary` — from this
+  run for a filer it rewrote, carried forward from the previous index otherwise,
+  and absent (so: not renderable) for a filer neither has seen."""
   newest = filings[0]
   return {
     "ticker": filer["ticker"],
@@ -253,6 +301,8 @@ def index_row(filer: dict[str, Any], filings: list[dict[str, Any]]) -> dict[str,
       "fiscal_year": newest["fiscal_year"],
       "fiscal_period": newest["fiscal_period"],
     },
+    "renderable": bool(summary and summary.get("renderable")),
+    "latest_renderable": (summary or {}).get("latest_renderable"),
   }
 
 
@@ -389,6 +439,33 @@ def read_manifests(
     return dict(pool.map(one, filings))
 
 
+def read_prior_renderable(s3: Any, bucket: str) -> dict[str, dict[str, Any]]:
+  """The renderability the previous index recorded, keyed by ticker.
+
+  A run rewrites the catalog of the filers it *touched* but the index of *every*
+  filer, and only a touched filer's manifests are read. An untouched filer's
+  renderability therefore has to come from somewhere: it comes from the index the
+  previous run wrote — one GET, against a manifest read per filing of every filer
+  otherwise. A ``full_rebuild`` touches everything, so nothing is carried forward.
+  A missing or unreadable index is not an error: every filer is then computed from
+  this run, and the ones it did not touch settle on the next.
+  """
+  try:
+    body = s3.get_object(Bucket=bucket, Key=FILING_CATALOG_INDEX_KEY)["Body"].read()
+    companies = json.loads(body).get("companies") or []
+  except Exception as e:
+    logger.info(f"No prior catalog index to carry renderability from: {e}")
+    return {}
+  return {
+    row["ticker"]: {
+      "renderable": row.get("renderable", False),
+      "latest_renderable": row.get("latest_renderable"),
+    }
+    for row in companies
+    if row.get("ticker")
+  }
+
+
 # ── the asset ────────────────────────────────────────────────────────────────
 
 
@@ -464,12 +541,20 @@ def sec_filing_catalog(
     touched = {c for c in (_text(v) for v in in_run["cik"]) if c} & set(listed)
   context.log.info(f"{len(listed)} filers listed; rewriting {len(touched)}")
 
+  # Renderability for the filers this run does not rewrite (see the helper).
+  prior = {} if config.full_rebuild else read_prior_renderable(s3, public_bucket)
+
   written = 0
   failed = 0
+  summaries: dict[str, dict[str, Any]] = {}
   for cik in sorted(touched):
     filer, filings = listed[cik]
     manifests = read_manifests(s3, public_bucket, filings, config.manifest_workers)
     document = build_company(filer, filings, manifests, viewer_url=config.viewer_url)
+    summaries[cik] = {
+      "renderable": document["renderable"],
+      "latest_renderable": document["latest_renderable"],
+    }
     ok = writer.upload_string(
       _dump(document),
       public_bucket,
@@ -480,7 +565,12 @@ def sec_filing_catalog(
     written += int(ok)
     failed += int(not ok)
 
-  index = build_index([index_row(f, fs) for f, fs in listed.values()])
+  index = build_index(
+    [
+      index_row(filer, fs, summaries.get(cik) or prior.get(filer["ticker"]))
+      for cik, (filer, fs) in listed.items()
+    ]
+  )
   index_ok = writer.upload_string(
     _dump(index),
     public_bucket,
@@ -498,15 +588,22 @@ def sec_filing_catalog(
       cache_control=ROBOTS_CACHE_CONTROL,
     )
 
+  # The reprocess that gives the corpus its artifacts lands filer by filer, so the
+  # renderable count is how far along it is — and it is what the public pages key
+  # their own indexability off.
+  renderable_filers = sum(1 for row in index["companies"] if row["renderable"])
+
   context.log.info(
     f"Catalog: {written} filer files written, {failed} failed, "
-    f"index of {index['count']} {'written' if index_ok else 'FAILED'}"
+    f"index of {index['count']} ({renderable_filers} renderable) "
+    f"{'written' if index_ok else 'FAILED'}"
   )
   return MaterializeResult(
     metadata={
       "status": "success" if failed == 0 and index_ok else "partial",
       "graph_id": config.graph_id,
       "filers_listed": len(listed),
+      "filers_renderable": renderable_filers,
       "filers_written": written,
       "filers_failed": failed,
       "index_written": index_ok,
