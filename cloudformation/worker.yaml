@@ -123,6 +123,9 @@ Parameters:
   LogsBucketArn:
     Type: String
     Description: ARN of logs bucket (from S3 stack output)
+  PublicDataBucketArn:
+    Type: String
+    Description: ARN of public data bucket (from S3 stack output)
 
   # Monitoring
   LogRetentionDays:
@@ -251,6 +254,16 @@ Resources:
                   - !Sub "${DeploymentBucketArn}/*"
                   - !Ref LogsBucketArn
                   - !Sub "${LogsBucketArn}/*"
+              # Read-only: the published filing artifacts the information-block
+              # tools read when an operator calls them here. The bucket is
+              # CloudFront-OAC-only, so the role needs its own grant.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Ref PublicDataBucketArn
+                  - !Sub "${PublicDataBucketArn}/*"
               # AWS Bedrock for Claude AI (agent tasks)
               - Effect: Allow
                 Action:
@@ -453,6 +466,10 @@ Resources:
               - !Ref "AWS::NoValue"
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            # The published filing artifacts (holons) the information-block
+            # tools read when an operator calls them from this process.
+            - Name: PUBLIC_DATA_BUCKET
+              Value: !Select [5, !Split [":", !Ref PublicDataBucketArn]]
             # Dagster event-log storage — lets worker tasks report runless
             # AssetMaterialization events to the Dagster asset catalog
             # (graph_creation, subgraph_creation, graph_tier_upgrade,

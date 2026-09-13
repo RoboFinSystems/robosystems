@@ -1,4 +1,4 @@
-"""The map and the block — ``disclosures`` and ``information-block`` over the graph.
+"""The map and the block — ``disclosures`` and ``information-block`` over a report held whole.
 
 The two shaped tools ``xbrlkit serve`` offers over a loaded filing, served
 here over a report the platform holds whole: the published filing on the SEC
@@ -68,6 +68,15 @@ _SELECTOR_PROPERTIES: dict[str, Any] = {
 def _clean(value: Any) -> str | None:
   text = (value or "").strip() if isinstance(value, str) else None
   return text or None
+
+
+def _cap(value: Any, ceiling: int) -> int | None:
+  """An explicit cap clamped to xbrlkit's ceiling; ``None`` leaves the budget
+  in charge. A value that is not a whole number raises, and the tool answers
+  with an error rather than a traceback."""
+  if value is None:
+    return None
+  return max(1, min(int(value), ceiling))
 
 
 class DisclosuresTool(BaseTool):
@@ -231,8 +240,11 @@ class InformationBlockTool(BaseTool):
       if isinstance(periods_arg, list)
       else None
     )
-    max_rows = arguments.get("max_rows")
-    max_members = arguments.get("max_members")
+    try:
+      max_rows = _cap(arguments.get("max_rows"), MAX_BLOCK_ROWS)
+      max_members = _cap(arguments.get("max_members"), MAX_BLOCK_MEMBERS)
+    except (TypeError, ValueError):
+      return {"error": "max_rows and max_members must be whole numbers."}
     graph_id = self.client.graph_id
     try:
       report_id, resolved = await resolve_report(
@@ -248,12 +260,8 @@ class InformationBlockTool(BaseTool):
         block,
         periods=periods or None,
         member=_clean(arguments.get("member")),
-        max_rows=max(1, min(int(max_rows), MAX_BLOCK_ROWS))
-        if max_rows is not None
-        else None,
-        max_members=max(1, min(int(max_members), MAX_BLOCK_MEMBERS))
-        if max_members is not None
-        else None,
+        max_rows=max_rows,
+        max_members=max_members,
       )
     except (ReportSelectorError, ReportNotFoundError, BlockNotFoundError) as exc:
       return {"error": str(exc)}

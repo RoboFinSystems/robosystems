@@ -205,9 +205,10 @@ class GraphMCPTools:
         graph_client
       )
       # The map and the block — xbrlkit's `disclosures` / `information_block`
-      # over a report in the graph, on shared repos and tenants alike (the
-      # report's slice reads into xbrlkit's model; one implementation of the
-      # block rules). Reads, so they stay on read-only surfaces too.
+      # over a report the platform holds whole: the published filing on a
+      # shared repo, the ledger's own report on a tenant, read into xbrlkit's
+      # model (one implementation of the block rules; the graph is not in the
+      # path). Reads, so they stay on read-only surfaces too.
       from .disclosure_tools import DisclosuresTool, InformationBlockTool
 
       self.disclosures_tool = DisclosuresTool(graph_client)
@@ -809,8 +810,9 @@ class GraphMCPTools:
 
     - ``financial-statement-analysis`` — graph-backed (SEC + materialized tenants)
     - ``live-financial-statement`` — OLTP-backed (tenant entity graphs only)
-    - ``disclosures`` / ``information-block`` — graph-backed, xbrlkit's map and
-      block over the report's slice (SEC + materialized tenants)
+    - ``disclosures`` / ``information-block`` — xbrlkit's map and block over
+      the report held whole (the published filing on SEC, the ledger's own
+      report on a tenant)
     """
     tools: list[dict[str, Any]] = []
     if self.financial_statement_analysis_tool is not None:

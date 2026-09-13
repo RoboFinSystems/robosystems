@@ -54,6 +54,7 @@ from robosystems.config.storage.shared import (
 from robosystems.config.valkey_registry import ValkeyDatabase, create_async_redis_client
 from robosystems.logger import logger
 from robosystems.middleware.graph import get_graph_repository
+from robosystems.middleware.graph.utils.subgraph import is_subgraph
 from robosystems.middleware.operations import run_off_loop
 from robosystems.operations.aws.s3 import S3Client
 
@@ -139,7 +140,7 @@ async def load_report_model(graph_id: str, report_id: str) -> tuple[XbrlModel, b
       logger.warning(f"information-block model cache read failed for {key}: {exc}")
       blob = None
     if blob:
-      return XbrlModel.model_validate_json(zlib.decompress(blob)), True
+      return await run_off_loop(_thaw, blob), True
 
   started = time.perf_counter()
   shared = is_shared_repository_or_subgraph(graph_id)
@@ -156,13 +157,22 @@ async def load_report_model(graph_id: str, report_id: str) -> tuple[XbrlModel, b
 
   if cache is not None:
     ttl = MODEL_CACHE_TTL_SHARED_SECONDS if shared else MODEL_CACHE_TTL_TENANT_SECONDS
+    frozen = await run_off_loop(_freeze, model)
     try:
-      await cache.set(
-        key, zlib.compress(model.model_dump_json().encode("utf-8")), ex=ttl
-      )
+      await cache.set(key, frozen, ex=ttl)
     except Exception as exc:
       logger.warning(f"information-block model cache write failed for {key}: {exc}")
   return model, False
+
+
+def _freeze(model: XbrlModel) -> bytes:
+  """The model as the cache holds it. Serializing a 10-K's model is CPU work
+  of a few hundred milliseconds, so it runs off the loop like the reads."""
+  return zlib.compress(model.model_dump_json().encode("utf-8"))
+
+
+def _thaw(blob: bytes) -> XbrlModel:
+  return XbrlModel.model_validate_json(zlib.decompress(blob))
 
 
 async def _published_model(graph_id: str, report_id: str) -> XbrlModel:
@@ -190,7 +200,9 @@ async def _published_model(graph_id: str, report_id: str) -> XbrlModel:
       "published on the next reprocess of the repository."
     )
   try:
-    model, _gaps = from_holon_report(text)
+    # Reading a 10-K's holon into the model is a few hundred milliseconds of
+    # CPU; the API runs one worker, so it stays off the loop like the fetch.
+    model, _gaps = await run_off_loop(from_holon_report, text)
   except HolonError as exc:
     raise ReportNotPublishedError(
       f"The published holon for {accession} could not be read: {exc}"
@@ -277,9 +289,16 @@ async def resolve_report(
   filing of the form ``period_type`` selects (annual by default), narrowed by
   ``fiscal_year``; a tenant graph needs the ``report_id``.
   """
+  shared = is_shared_repository_or_subgraph(graph_id)
+  if not shared and is_subgraph(graph_id):
+    # A subgraph shares its parent's ledger schema and has no report of its
+    # own; the session factory would refuse the id deep inside the read.
+    raise ReportSelectorError(
+      "A subgraph has no ledger of its own; read the report on its parent graph."
+    )
   if report_id:
     return report_id, None
-  if not is_shared_repository_or_subgraph(graph_id):
+  if not shared:
     raise ReportSelectorError("report_id is required for tenant graphs.")
   if not ticker:
     raise ReportSelectorError(

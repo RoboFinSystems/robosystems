@@ -153,6 +153,10 @@ on:
         description: "ARN of user data bucket (from S3 stack)"
         required: true
         type: string
+      public_data_bucket_arn:
+        description: "ARN of public data bucket (from S3 stack)"
+        required: true
+        type: string
 
       # Database Configuration (from Postgres stack outputs)
       database_endpoint:
@@ -386,6 +390,7 @@ jobs:
                 ParameterKey=SharedProcessedBucketArn,ParameterValue=\"${{ inputs.shared_processed_bucket_arn }}\" \
                 ParameterKey=DeploymentBucketArn,ParameterValue=\"${{ inputs.deployment_bucket_arn }}\" \
                 ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\" \
+                ParameterKey=PublicDataBucketArn,ParameterValue=\"${{ inputs.public_data_bucket_arn }}\" \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
                 ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
                 ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }} \

@@ -213,6 +213,8 @@ Parameters:
     Type: String
   UserDataBucketArn:
     Type: String
+  PublicDataBucketArn:
+    Type: String
 
 Conditions:
   HasObservabilityStack: !Not [!Equals [!Ref PrometheusStackName, ""]]
@@ -401,7 +403,10 @@ Resources:
                     Fn::Sub: "${PrometheusStackName}-PrometheusWorkspaceArn"
                 - !Ref AWS::NoValue
               # S3 permissions - API role with least privilege access
-              # Read-only access to processed data and deployments
+              # Read-only access to processed data, deployments, and the
+              # public data bucket (the published filing artifacts the
+              # information-block views read in-cluster; the bucket is
+              # CloudFront-OAC-only, so the role needs its own grant)
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -411,6 +416,8 @@ Resources:
                   - !Sub "${SharedProcessedBucketArn}/*"
                   - !Ref DeploymentBucketArn
                   - !Sub "${DeploymentBucketArn}/*"
+                  - !Ref PublicDataBucketArn
+                  - !Sub "${PublicDataBucketArn}/*"
               # Read/Write access to user data bucket for uploads/temp files
               - Effect: Allow
                 Action:
@@ -724,6 +731,8 @@ Resources:
               Value: !Select [5, !Split [":", !Ref UserDataBucketArn]]
             - Name: DEPLOYMENT_BUCKET
               Value: !Select [5, !Split [":", !Ref DeploymentBucketArn]]
+            - Name: PUBLIC_DATA_BUCKET
+              Value: !Select [5, !Split [":", !Ref PublicDataBucketArn]]
             # Observability Configuration
             - Name: OTEL_ENABLED
               Value: !If [HasObservabilityStack, "true", "false"]

@@ -708,7 +708,8 @@ class FinancialStatementAnalysisResponse(BaseModel):
 # ── Information-block views (disclosures + information-block) ────────────────
 #
 # The two shaped tools ``xbrlkit serve`` offers over a loaded filing, served
-# over a report in the graph. The payload is xbrlkit's own — the same keys the
+# over a report the platform holds whole (the published filing on a shared
+# repository, the ledger's own report on a tenant). The payload is xbrlkit's own — the same keys the
 # local tool returns — under the envelope, with the graph and report stamped
 # on it; ``extra="allow"`` keeps a key xbrlkit adds later from being dropped.
 

@@ -1,7 +1,11 @@
-"""RoboLedger graph-backed analytical views (fact-grid operation).
+"""RoboLedger analytical views — the read-shaped operations in the dispatcher.
 
-Hosts `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid`,
-the one read-shaped operation in the dispatcher.
+Hosts `build-fact-grid`, `financial-statement-analysis`, and the pair
+`disclosures` / `information-block`, all under
+`POST /extensions/roboledger/{graph_id}/operations/`. The first two read the
+LadybugDB graph; the pair reads the report whole from where the platform
+holds it (the published filing on a shared repository, the ledger's own
+report on a tenant) and runs xbrlkit's tools over it.
 
 It sits in its own router, separate from `operations.py`, so the mount
 gates on `FACT_GRID_ENABLED` rather than `ROBOLEDGER_ENABLED`: the fact
@@ -94,11 +98,14 @@ def _require_readable_graph(
 ) -> None:
   """Lifecycle/subscription gate (read strength) for the analytical views.
 
-  The views read LadybugDB directly rather than the extensions OLTP, so they
-  do not pass through `require_graph_extension`; this is the same
-  `require_graph_access` check that dependency and `/query` run, so a
-  suspended or expired graph is closed here too. Shared repositories pass —
-  their access is per-user, checked by `get_current_user_with_graph`.
+  The views are reads that serve shared repositories too, so they do not
+  pass through `require_graph_extension` (which refuses shared repos); this
+  is the same `require_graph_access` check that dependency and `/query` run,
+  so a suspended or expired graph is closed here too. Shared repositories
+  pass — their access is per-user, checked by `get_current_user_with_graph`.
+  The block pair reads a tenant's report from the extensions OLTP through
+  the exports' bundle builder; a graph with no ledger schema answers the
+  dispatcher's schema-missing 404 there.
 
   Depends on the auth dependency so it can only run for an authenticated
   member (route-level dependencies otherwise resolve before the handler's

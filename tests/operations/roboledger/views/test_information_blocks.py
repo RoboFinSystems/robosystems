@@ -737,6 +737,13 @@ class TestResolveReport:
     ):
       await resolve_report("kg1234567890abcdef", ticker="ACME")
 
+  async def test_a_tenant_subgraph_reads_on_its_parent(self) -> None:
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=False),
+      pytest.raises(ReportSelectorError, match="parent graph"),
+    ):
+      await resolve_report("kg1234567890abcdef_dev", report_id="rpt_1")
+
   async def test_a_shared_repo_needs_a_ticker_or_a_report_id(self) -> None:
     with (
       patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=True),

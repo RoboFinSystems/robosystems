@@ -110,7 +110,7 @@ class TestGetToolDefinitionHelpers:
     names = {d["name"] for d in tools._get_curated_tool_definitions()}
     assert "financial-statement-analysis" in names
     assert "live-financial-statement" not in names
-    # The graph-backed pair reads the report's slice, so it serves SEC too.
+    # The pair reads the published filing on a shared repo, so it serves SEC too.
     assert {"disclosures", "information-block"} <= names
 
   def test_graphql_tools_absent_on_shared_repo(self, mock_client):
