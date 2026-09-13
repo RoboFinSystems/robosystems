@@ -33,6 +33,7 @@ from robosystems.models.api.views.view_config import DEFAULT_FACT_LIMIT
 from robosystems.operations.roboledger.views.information_blocks import (
   BlockNotFoundError,
   ReportNotFoundError,
+  ReportNotPublishedError,
   ReportSelectorError,
 )
 from robosystems.routers.extensions.roboledger.views import (
@@ -792,6 +793,12 @@ class TestInformationBlockOperations:
       (ReportSelectorError("report_id is required for tenant graphs."), 400),
       (
         ReportNotFoundError("No annual filing found for ACME in fiscal year 2005."),
+        404,
+      ),
+      (
+        ReportNotPublishedError(
+          "0000000000-24-000001 was processed before its filing artifacts existed."
+        ),
         404,
       ),
     ],

@@ -1,16 +1,17 @@
 """The map and the block — ``disclosures`` and ``information-block`` over the graph.
 
 The two shaped tools ``xbrlkit serve`` offers over a loaded filing, served
-here over a report in LadybugDB: the SEC shared repository, or a tenant graph
-whose ledger has been materialized. Both delegate to
-``operations/roboledger/views/information_blocks.py``, which reads the
-report's slice into xbrlkit's model and runs xbrlkit's own tools over it, so
-REST, MCP and the local server answer from one implementation. Read-only.
+here over a report the platform holds whole: the published filing on the SEC
+shared repository, the ledger's own report on a tenant graph. Both delegate
+to ``operations/roboledger/views/information_blocks.py``, which reads the
+report into xbrlkit's model and runs xbrlkit's own tools over it, so REST,
+MCP and the local server answer from one implementation. Read-only; the
+graph is not in the path.
 
 On a tenant graph these sit beside ``get-information-block`` /
-``list-information-blocks``, which return the *authored* block envelope from
-the ledger (its rules, verification and provenance). These two read the block
-as it is materialized in the graph. The descriptions say which is which; the
+``list-information-blocks``, which return one *authored* block's envelope
+(its rules, verification and provenance). These two read a section whole —
+values, breakdowns, footing, text. The descriptions say which is which; the
 names are the contract `xbrlkit serve` set and do not change.
 """
 
@@ -99,7 +100,7 @@ class DisclosuresTool(BaseTool):
 **RELATED TOOLS:**
 - `information-block` — one block read whole
 - `financial-statement-analysis` — the primary statements as flat fact rows
-- `get-information-block` / `list-information-blocks` (tenant graphs) — the authored block envelope in the ledger, with its rules and verification; this tool reads the block as materialized in the graph
+- `get-information-block` / `list-information-blocks` (tenant graphs) — one authored block's envelope, with its rules and verification; this tool maps the report's sections as the ledger holds them
 """,
       "inputSchema": {
         "type": "object",
@@ -168,13 +169,13 @@ class InformationBlockTool(BaseTool):
 **NOTES:**
 - Budgeted, not counted: breakdowns and columns are kept most-reported / most-recent first up to about 16K characters of cells each; a small table is never cut, and a row is never left blank by a cut
 - A footing difference is usually the filer's own tagging (an element swap, a fact in the wrong context) — read the section's text before calling it an error
-- Text blocks on the SEC graph are held outside it: a `text` entry carries the concept and label; read the text with `search-documents` and `get-document-section`
+- On the SEC repository the report is the published filing; a filing processed before its artifacts existed answers "not published yet" until the repository is reprocessed. A `text` entry marked `external` is a text block whose fragment could not be read; read it with `search-documents` and `get-document-section`
 
 **RELATED TOOLS:**
 - `disclosures` — the map; call it first
 - `financial-statement-analysis` — the primary statements as flat rows, cheaper when no breakdown is needed
 - `build-fact-grid` — a slice of facts across reports and entities
-- `get-information-block` (tenant graphs) — the authored envelope with rules and verification; this is the graph reading
+- `get-information-block` (tenant graphs) — one authored block's envelope with its rules and verification; this is the section read whole from the ledger's report
 """,
       "inputSchema": {
         "type": "object",

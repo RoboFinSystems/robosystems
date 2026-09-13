@@ -813,7 +813,6 @@ class DisclosuresResponse(BaseModel):
   blocks: list[dict[str, Any]] | None = None
   block_count: int | None = None
   note: str | None = None
-  graph_warnings: list[str] | None = None
 
 
 class InformationBlockResponse(BaseModel):
@@ -833,4 +832,3 @@ class InformationBlockResponse(BaseModel):
   calculation: list[dict[str, Any]] | None = None
   text: list[dict[str, Any]] | None = None
   note: str | None = None
-  graph_warnings: list[str] | None = None

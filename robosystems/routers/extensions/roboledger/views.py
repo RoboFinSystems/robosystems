@@ -355,10 +355,12 @@ async def financial_statement_analysis_op(
 # ── Information blocks: the map and the block ──────────────────────────────
 #
 # The two shaped tools ``xbrlkit serve`` runs over a loaded filing, served
-# over a report in the graph: the report's slice is read into xbrlkit's model
-# and xbrlkit's own ``disclosures`` / ``information_block`` run over it, so
-# the SEC shared repository, a materialized tenant graph and the local tool
-# answer identically from one implementation. Reads, like the two views above.
+# over a report the platform holds whole — the published filing on the SEC
+# shared repository, the ledger's own report on a tenant graph — read into
+# xbrlkit's model, over which xbrlkit's own ``disclosures`` /
+# ``information_block`` run, so the hosted tools and the local one answer
+# identically from one implementation. Reads, like the two views above; the
+# graph is not in the path.
 
 
 def _report_selector_errors(exc: ValueError) -> HTTPException:
@@ -382,11 +384,13 @@ def _report_selector_errors(exc: ValueError) -> HTTPException:
     "with its policies, tables and details, a statement with its parenthetical, "
     "the cover page — with block counts by level, fact and text-block counts, in "
     "filing order; with `topic`, one family's blocks with the ids "
-    "`information-block` takes. Reads the report out of the graph into xbrlkit's "
-    "model and runs xbrlkit's own `disclosures`, so the SEC shared repository and "
-    "a materialized tenant graph answer as `xbrlkit serve` does. Cheap: call it "
-    "before `information-block`. Shared-repo graphs take `ticker` (auto-resolving "
-    "the latest filing) or `report_id`; tenant graphs take `report_id`."
+    "`information-block` takes. Reads the report whole — the published filing "
+    "on the SEC shared repository, the ledger's own report on a tenant graph — "
+    "into xbrlkit's model and runs xbrlkit's own `disclosures`, so both answer "
+    "as `xbrlkit serve` does. Cheap: call it before `information-block`. "
+    "Shared-repo graphs take `ticker` (auto-resolving the latest filing) or "
+    "`report_id`; tenant graphs take `report_id`. A filing processed before its "
+    "artifacts existed answers 404 until the repository is reprocessed."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
@@ -445,8 +449,9 @@ async def disclosures_op(
     "never left blank by a cut, and `members_omitted` / `periods_omitted` say "
     "what was. Take `block` from `disclosures`. Same resolution as "
     "`disclosures`: `ticker` or `report_id` on shared-repo graphs, `report_id` "
-    "on tenant graphs. On a tenant graph this reads the block as materialized "
-    "in the graph; `get-information-block` returns the authored envelope."
+    "on tenant graphs. On a tenant graph this reads the section as the "
+    "ledger's report holds it; `get-information-block` returns one authored "
+    "block's envelope with its rules and verification."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
