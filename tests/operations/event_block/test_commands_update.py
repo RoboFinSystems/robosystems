@@ -756,6 +756,8 @@ class TestClassifyTransition:
   def test_captured_to_classified_patches_metadata_and_fires_nothing(self) -> None:
     event = _event("evt_bank", status="captured")
     event.event_type = "bank_transaction"
+    event.amount = -4250
+    event.resource_element_id = "elem_card"
     event.metadata_ = {"suggested_element_id": "elem_sugg", "connection_id": "conn_1"}
     session = _session_with_events(event)
     body = UpdateEventBlockRequest(
@@ -777,6 +779,44 @@ class TestClassifyTransition:
     assert event.status == "classified"
     assert event.metadata_["classified_element_id"] == "elem_office"
     assert event.metadata_["suggested_element_id"] == "elem_sugg"
+    assert envelope.status == "classified"
+
+  def test_a_choice_the_handler_cannot_post_is_refused_with_its_reason(
+    self,
+  ) -> None:
+    """The bank handler's plan runs on classify: accept_suggestion on a
+    suggestion the chart never matched is refused here, not at commit."""
+    event = _event("evt_bank", status="captured")
+    event.event_type = "bank_transaction"
+    event.amount = -2900
+    event.resource_element_id = "elem_card"
+    event.metadata_ = {"suggested_account_name": "Office Supplies"}
+    session = _session_with_events(event)
+    body = UpdateEventBlockRequest(
+      event_id="evt_bank",
+      transition_to="classified",
+      metadata_patch={"accept_suggestion": True},
+    )
+    with patch(
+      "robosystems.operations.event_block.commands._validate_routed_connection"
+    ):
+      with pytest.raises(HandlerMetadataValidationError) as exc:
+        update_event_block(session, body, "usr_1", graph_id="kg_test")
+    assert "'Office Supplies' matches no account on this chart" in str(exc.value)
+    session.commit.assert_not_called()
+
+  def test_handlers_without_the_hook_accept_classified_as_before(self) -> None:
+    event = _event("evt_x", status="captured")
+    session = _session_with_events(event)
+    body = UpdateEventBlockRequest(event_id="evt_x", transition_to="classified")
+    handler = MagicMock()
+    handler.validate_classification = None
+    with patch(
+      "robosystems.operations.event_block.commands.get_python_handler",
+      return_value=handler,
+    ):
+      envelope = update_event_block(session, body, "usr_1", graph_id="kg_test")
+    handler.metadata_schema.model_validate.assert_not_called()
     assert envelope.status == "classified"
 
   def test_classified_to_classified_is_not_a_transition(self) -> None:

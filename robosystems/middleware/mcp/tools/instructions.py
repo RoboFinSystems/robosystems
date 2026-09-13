@@ -133,8 +133,12 @@ def build_instructions(
         "- Classify one → `update-event-block(event_id, "
         "transition_to='classified', metadata_patch={classified_element_id, "
         "classified_by: 'claude', basis})`. A split: `classified_allocations: "
-        "[{element_id, amount}]` summing to the amount. To take the "
-        "suggestion as-is: `metadata_patch={accept_suggestion: true}`."
+        "[{element_id, amount}]` — positive cents summing to the line's "
+        "absolute amount. To take the suggestion as-is: "
+        "`metadata_patch={accept_suggestion: true}` (only when "
+        "`suggested_element_id` is set; a name-only suggestion needs a "
+        "choice). Classifying validates the choice — one that resolves no "
+        "account is refused there, with the reason."
       ),
       (
         "- Post it → `transition_to='committed'` (a person, or you when "
@@ -152,8 +156,9 @@ def build_instructions(
       )
     if has("preview-event-block"):
       inbox_lines.append(
-        "- Unsure what a commit would write? `preview-event-block` shows the "
-        "planned entry."
+        "- Unsure what a commit would write? `preview-event-block` with the "
+        "line's fields (from `get-event-block`) and your classification in "
+        "`metadata` shows the planned entry."
       )
     sections.append(_block(*inbox_lines))
 
