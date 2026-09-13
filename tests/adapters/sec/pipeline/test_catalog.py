@@ -13,6 +13,9 @@ from robosystems.adapters.sec.pipeline.catalog import (
   filings_by_cik,
   index_row,
   read_manifests,
+  read_prior_renderable,
+  renderable,
+  renderable_summary,
   viewer_link,
 )
 from robosystems.config.storage.shared import (
@@ -270,6 +273,11 @@ class TestDocuments:
     }
     # The latest openable filing per form: the 10-Q has nothing to open.
     assert doc["latest"] == {"10-K": "0000066740-25-000006"}
+    # The 10-K carries a Tavi and a holon, so the filer has a page to render and
+    # the 10-K — not the newer, artifact-less 10-Q — is what it would show.
+    assert doc["renderable"] is True
+    assert doc["latest_renderable"]["accession"] == "0000066740-25-000006"
+    assert doc["latest_renderable"]["form"] == "10-K"
 
   def test_viewer_link_encodes_the_url_parameter(self):
     link = viewer_link("https://xbrlkit.com", "https://cdn/a/b/holon.jsonld")
@@ -331,4 +339,138 @@ class TestReads:
       "0000066740-25-000006": {"representations": [1]},
       "0000066740-25-000020": None,
       "no-date": None,
+    }
+
+
+class TestRenderability:
+  """The flag the public company pages select on: can this filer's page render?"""
+
+  def test_only_a_projectable_representation_counts(self):
+    assert renderable([{"kind": "tavi"}]) is True
+    assert renderable([{"kind": "holon"}]) is True
+    assert renderable([{"kind": "tavi"}, {"kind": "document"}]) is True
+    # The filing as filed is served, never projected — a page has nothing to show.
+    assert renderable([{"kind": "document"}]) is False
+    assert renderable([]) is False
+    assert renderable(None) is False
+
+  def test_summary_names_the_newest_renderable_filing_not_the_newest_filing(self):
+    entries = [
+      {
+        "accession": "newest-no-artifacts",
+        "form": "10-Q",
+        "filing_date": "2025-04-30",
+        "report_date": "2025-03-31",
+        "fiscal_year": 2025,
+        "fiscal_period": "Q1",
+        "representations": [{"kind": "document"}],
+      },
+      {
+        "accession": "older-renderable",
+        "form": "10-K",
+        "filing_date": "2025-02-05",
+        "report_date": "2024-12-31",
+        "fiscal_year": 2024,
+        "fiscal_period": "FY",
+        "representations": [{"kind": "tavi"}],
+      },
+    ]
+
+    summary = renderable_summary(entries)
+
+    assert summary["renderable"] is True
+    assert summary["latest_renderable"]["accession"] == "older-renderable"
+    # The date a page's last-modified should use: the filing it actually shows.
+    assert summary["latest_renderable"]["filing_date"] == "2025-02-05"
+
+  def test_a_filer_with_no_artifacts_yet_is_not_renderable(self):
+    entries = [
+      {
+        "accession": "a",
+        "form": "10-K",
+        "filing_date": "2025-02-05",
+        "report_date": "2024-12-31",
+        "fiscal_year": 2024,
+        "fiscal_period": "FY",
+        "representations": [],
+      }
+    ]
+
+    assert renderable_summary(entries) == {
+      "renderable": False,
+      "latest_renderable": None,
+    }
+
+  def test_index_row_defaults_to_not_renderable_without_a_summary(self, corpus):
+    entities, reports, links = corpus
+    filer = filers(entities)[MMM]
+    filings = filings_by_cik(reports, links, entities, ["10-K", "10-Q"])[MMM]
+
+    row = index_row(filer, filings)
+
+    assert row["renderable"] is False
+    assert row["latest_renderable"] is None
+
+  def test_index_row_carries_the_summary_it_is_given(self, corpus):
+    entities, reports, links = corpus
+    filer = filers(entities)[MMM]
+    filings = filings_by_cik(reports, links, entities, ["10-K", "10-Q"])[MMM]
+    summary = {
+      "renderable": True,
+      "latest_renderable": {"accession": "0000066740-25-000006", "form": "10-K"},
+    }
+
+    row = index_row(filer, filings, summary)
+
+    assert row["renderable"] is True
+    assert row["latest_renderable"]["form"] == "10-K"
+    # `latest` stays the newest filing of any kind — the two are not the same thing.
+    assert row["latest"]["accession"] == "0000066740-25-000020"
+
+
+class TestPriorRenderable:
+  """Carrying renderability forward for the filers a run does not rewrite."""
+
+  def test_reads_the_previous_index_keyed_by_ticker(self):
+    s3 = MagicMock()
+    index = {
+      "companies": [
+        {
+          "ticker": "MMM",
+          "renderable": True,
+          "latest_renderable": {"accession": "x", "form": "10-K"},
+        },
+        {"ticker": "NVDA", "renderable": False, "latest_renderable": None},
+        {"ticker": None, "renderable": True},
+      ]
+    }
+    s3.get_object.return_value = {
+      "Body": MagicMock(read=lambda: __import__("json").dumps(index).encode())
+    }
+
+    prior = read_prior_renderable(s3, "public")
+
+    assert prior["MMM"] == {
+      "renderable": True,
+      "latest_renderable": {"accession": "x", "form": "10-K"},
+    }
+    assert prior["NVDA"] == {"renderable": False, "latest_renderable": None}
+    # A row with no ticker cannot be keyed and is dropped rather than crashing.
+    assert None not in prior
+
+  def test_a_missing_index_carries_nothing_forward(self):
+    s3 = MagicMock()
+    s3.get_object.side_effect = Exception("NoSuchKey")
+
+    assert read_prior_renderable(s3, "public") == {}
+
+  def test_an_index_written_before_the_flag_reads_as_not_renderable(self):
+    s3 = MagicMock()
+    index = {"companies": [{"ticker": "MMM", "latest": {"accession": "x"}}]}
+    s3.get_object.return_value = {
+      "Body": MagicMock(read=lambda: __import__("json").dumps(index).encode())
+    }
+
+    assert read_prior_renderable(s3, "public") == {
+      "MMM": {"renderable": False, "latest_renderable": None}
     }
