@@ -39,7 +39,7 @@ Extensions (roboledger, roboinvestor) live under `/extensions` and are
 
 - **Typed reads** → `POST /extensions/{graph_id}/graphql` (Strawberry + GraphiQL in dev)
 - **Command writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}`
-- **Analytical view operations** → `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed operations that query LadybugDB rather than the extensions OLTP database. Read-only, same envelope contract as command writes. `build-fact-grid` is the first one (pivot tables over the XBRL hypercube); gated independently of the OLTP domain flags so deployments without the corresponding tenants can still mount them
+- **Analytical view operations** → `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed operations that query LadybugDB rather than the extensions OLTP database. Read-only, same envelope contract as command writes. `build-fact-grid` (pivot tables over the XBRL hypercube), `financial-statement-analysis`, and the pair `disclosures` (the map of a report's sections) / `information-block` (one section read whole — xbrlkit's own tools run over the report held whole: the published holon on `sec`, the report bundle on a tenant; the graph is not in that path); gated independently of the OLTP domain flags so deployments without the corresponding tenants can still mount them
 
 All three surfaces take `graph_id` as a URL path parameter — auth + per-graph
 access are validated by FastAPI dependencies before the handler runs.
@@ -241,7 +241,7 @@ Workflow for any change:
 robosystems/
 ├── routers/                      # API endpoints (thin layer, calls operations)
 │   ├── extensions/               # Extensions command + analytical view surface
-│   │   ├── roboledger/           # operations.py + views.py (build-fact-grid)
+│   │   ├── roboledger/           # operations.py + views.py (build-fact-grid, disclosures, information-block)
 │   │   │                         # /extensions/roboledger/{g}/operations/*
 │   │   └── roboinvestor/         # /extensions/roboinvestor/{g}/operations/*
 │   └── …                         # Core platform routers (graphs, billing, auth, …)
@@ -255,7 +255,7 @@ robosystems/
 │   ├── roboledger/
 │   │   ├── reads/                # OLTP reads (PostgreSQL extensions DB)
 │   │   ├── commands/             # OLTP writes (PostgreSQL extensions DB)
-│   │   ├── views/                # Graph reads (LadybugDB XBRL hypercube)
+│   │   ├── views/                # Graph reads (LadybugDB XBRL hypercube; information_blocks.py = xbrlkit over the report held whole)
 │   │   ├── fiscal_calendar/      # FiscalCalendarService, PeriodCloseService
 │   │   ├── reports/              # fact_grid, guard_rails
 │   │   └── schedules/            # ScheduleService

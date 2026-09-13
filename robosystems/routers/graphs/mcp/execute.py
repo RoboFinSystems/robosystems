@@ -78,6 +78,8 @@ READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
     "live-financial-statement",
     "build-fact-grid",
     "resolve-element",
+    "disclosures",
+    "information-block",
     # Fiscal calendar / close reads
     "get-fiscal-calendar",
     "get-period-close-status",

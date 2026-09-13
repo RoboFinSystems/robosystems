@@ -24,13 +24,23 @@ import pytest
 from fastapi import HTTPException
 
 from robosystems.models.api.extensions.reports import (
+  DisclosuresRequest,
   FinancialStatementAnalysisRequest,
+  InformationBlockRequest,
 )
 from robosystems.models.api.views import CreateViewRequest
 from robosystems.models.api.views.view_config import DEFAULT_FACT_LIMIT
+from robosystems.operations.roboledger.views.information_blocks import (
+  BlockNotFoundError,
+  ReportNotFoundError,
+  ReportNotPublishedError,
+  ReportSelectorError,
+)
 from robosystems.routers.extensions.roboledger.views import (
   build_fact_grid_op,
+  disclosures_op,
   financial_statement_analysis_op,
+  information_block_op,
 )
 
 MODULE = "robosystems.routers.extensions.roboledger.views"
@@ -672,3 +682,163 @@ class TestFactGridFlagDecoupling:
       "FACT_GRID_ENABLED block must come AFTER (and outside) the "
       "ROBOLEDGER_ENABLED block, otherwise SEC-only deployments lose fact-grid"
     )
+
+
+# ── disclosures + information-block ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestInformationBlockOperations:
+  """Wire shape and error mapping for the map and the block. The view is
+  covered in the ops tests; here the ops are stubbed at the router's seam."""
+
+  _RESOLVED = {
+    "identifier": "rpt_abc",
+    "form": "10-K",
+    "filing_date": "2025-02-05",
+    "fiscal_year": 2024,
+    "fiscal_period": "FY",
+  }
+
+  @pytest.mark.unit
+  async def test_disclosures_wraps_the_map_in_the_envelope(self):
+    body = DisclosuresRequest(ticker="ACME", fiscal_year=2024)
+    payload = {
+      "graph_id": "sec",
+      "report_id": "rpt_abc",
+      "disclosures": [{"disclosure": "Leases", "blocks": 4, "levels": {"note": 1}}],
+      "count": 1,
+      "note": "families read from the filer's own role titles",
+    }
+    with (
+      patch(
+        f"{MODULE}.resolve_report",
+        new_callable=AsyncMock,
+        return_value=("rpt_abc", self._RESOLVED),
+      ) as mock_resolve,
+      patch(
+        f"{MODULE}.query_disclosures", new_callable=AsyncMock, return_value=payload
+      ) as mock_query,
+    ):
+      envelope = await disclosures_op(
+        body=body,
+        graph_id="sec",
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.operation == "disclosures"
+    assert envelope.status == "completed"
+    assert envelope.result["report_id"] == "rpt_abc"
+    assert envelope.result["resolved_report"]["form"] == "10-K"
+    assert envelope.result["disclosures"][0]["disclosure"] == "Leases"
+    assert envelope.result["count"] == 1
+    assert mock_resolve.call_args.kwargs["ticker"] == "ACME"
+    assert mock_resolve.call_args.kwargs["fiscal_year"] == 2024
+    assert mock_query.call_args.kwargs == {"topic": None}
+
+  @pytest.mark.unit
+  async def test_information_block_wraps_the_block_in_the_envelope(self):
+    body = InformationBlockRequest(
+      report_id="rpt_abc", block="LeasesDetails", member="Widgets", max_rows=50
+    )
+    payload = {
+      "graph_id": GRAPH_ID,
+      "report_id": "rpt_abc",
+      "block": {"id": "LeasesDetails", "role": "http://x/role/LeasesDetails"},
+      "columns": [{"key": "2024-12-31"}],
+      "rows": [{"depth": 0, "concept": "us-gaap:LeasesAbstract", "abstract": True}],
+      "row_count": 1,
+      "truncated": False,
+      "extra_key_from_xbrlkit": "kept",
+    }
+    with (
+      patch(
+        f"{MODULE}.resolve_report",
+        new_callable=AsyncMock,
+        return_value=("rpt_abc", None),
+      ),
+      patch(
+        f"{MODULE}.query_information_block",
+        new_callable=AsyncMock,
+        return_value=payload,
+      ) as mock_query,
+    ):
+      envelope = await information_block_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.operation == "information-block"
+    assert envelope.result["block"]["id"] == "LeasesDetails"
+    assert envelope.result["resolved_report"] is None
+    # A key xbrlkit adds later rides through rather than being dropped.
+    assert envelope.result["extra_key_from_xbrlkit"] == "kept"
+    assert mock_query.call_args.args == (GRAPH_ID, "rpt_abc", "LeasesDetails")
+    assert mock_query.call_args.kwargs == {
+      "periods": None,
+      "member": "Widgets",
+      "max_rows": 50,
+      "max_members": None,
+    }
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize(
+    ("error", "status"),
+    [
+      (ReportSelectorError("report_id is required for tenant graphs."), 400),
+      (
+        ReportNotFoundError("No annual filing found for ACME in fiscal year 2005."),
+        404,
+      ),
+      (
+        ReportNotPublishedError(
+          "0000000000-24-000001 was processed before its filing artifacts existed."
+        ),
+        404,
+      ),
+    ],
+  )
+  async def test_selector_errors_map_to_http(self, error, status):
+    with (
+      patch(f"{MODULE}.resolve_report", new_callable=AsyncMock, side_effect=error),
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      await disclosures_op(
+        body=DisclosuresRequest(),
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    assert exc_info.value.status_code == status
+    assert str(error) == exc_info.value.detail
+
+  @pytest.mark.unit
+  async def test_an_unknown_block_is_404(self):
+    with (
+      patch(
+        f"{MODULE}.resolve_report",
+        new_callable=AsyncMock,
+        return_value=("rpt_abc", None),
+      ),
+      patch(
+        f"{MODULE}.query_information_block",
+        new_callable=AsyncMock,
+        side_effect=BlockNotFoundError("No information block for 'Pensions'"),
+      ),
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      await information_block_op(
+        body=InformationBlockRequest(report_id="rpt_abc", block="Pensions"),
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    assert exc_info.value.status_code == 404
+    assert "Pensions" in exc_info.value.detail

@@ -186,6 +186,8 @@ class GraphMCPTools:
     self.example_queries_tool = None
     self.live_financial_statement_tool = None
     self.financial_statement_analysis_tool = None
+    self.disclosures_tool = None
+    self.information_block_tool = None
     self.resolve_element_tool = None
     self.resolve_structure_tool = None
 
@@ -202,6 +204,14 @@ class GraphMCPTools:
       self.financial_statement_analysis_tool = FinancialStatementAnalysisTool(
         graph_client
       )
+      # The map and the block — xbrlkit's `disclosures` / `information_block`
+      # over a report in the graph, on shared repos and tenants alike (the
+      # report's slice reads into xbrlkit's model; one implementation of the
+      # block rules). Reads, so they stay on read-only surfaces too.
+      from .disclosure_tools import DisclosuresTool, InformationBlockTool
+
+      self.disclosures_tool = DisclosuresTool(graph_client)
+      self.information_block_tool = InformationBlockTool(graph_client)
       # OLTP-backed live statement — tenant entity graphs only. Skipped on
       # shared repos (no OLTP tenant schema). A pure read, so it stays
       # available on read-only surfaces (graph viewers, read-only operators).
@@ -799,12 +809,18 @@ class GraphMCPTools:
 
     - ``financial-statement-analysis`` — graph-backed (SEC + materialized tenants)
     - ``live-financial-statement`` — OLTP-backed (tenant entity graphs only)
+    - ``disclosures`` / ``information-block`` — graph-backed, xbrlkit's map and
+      block over the report's slice (SEC + materialized tenants)
     """
     tools: list[dict[str, Any]] = []
     if self.financial_statement_analysis_tool is not None:
       tools.append(self.financial_statement_analysis_tool.get_tool_definition())
     if self.live_financial_statement_tool is not None:
       tools.append(self.live_financial_statement_tool.get_tool_definition())
+    if self.disclosures_tool is not None:
+      tools.append(self.disclosures_tool.get_tool_definition())
+    if self.information_block_tool is not None:
+      tools.append(self.information_block_tool.get_tool_definition())
     return tools
 
   def _tool_unavailable_reason(self, tool_name: str, feature_flag: str) -> str:
@@ -1024,6 +1040,24 @@ class GraphMCPTools:
             "This graph does not have the roboledger schema extension."
           )
         result = await self.financial_statement_analysis_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "disclosures":
+        if self.disclosures_tool is None:
+          raise ValueError(
+            "disclosures tool is not available. "
+            "This graph does not have the roboledger schema extension."
+          )
+        result = await self.disclosures_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "information-block":
+        if self.information_block_tool is None:
+          raise ValueError(
+            "information-block tool is not available. "
+            "This graph does not have the roboledger schema extension."
+          )
+        result = await self.information_block_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "live-financial-statement":

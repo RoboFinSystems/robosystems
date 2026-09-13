@@ -72,8 +72,9 @@ for oversized text), `classify.py`.
 | `iXBRLParser` (`xbrlkit.text`) | iXBRL disclosure sections (`ix:nonNumeric` TextBlock elements, continuation chains resolved) with XBRL element metadata for graph cross-reference; a long section comes back as parts |
 
 **MCP resolvers** (`mcp/`) — `report_resolver.py` resolves ticker plus form code
-to the latest relevant filing, backing `financial-statement-analysis`'s
-auto-resolve; `element_resolver.py` backs `resolve-element`.
+to the latest relevant filing, backing the auto-resolve of
+`financial-statement-analysis`, `disclosures` and `information-block`;
+`element_resolver.py` backs `resolve-element`.
 
 ## Enrichment (inline, per filing)
 

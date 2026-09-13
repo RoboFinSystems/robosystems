@@ -34,6 +34,10 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "up by ticker or CIK, with a reporting period).\n"
     "- Multidimensional fact analysis across entities / periods / dimensions → "
     "`build-fact-grid`.\n"
+    "- What a filing discloses, section by section → `disclosures` (the map: "
+    "one row per note or statement, cheap), then `information-block` for one "
+    "section read whole — rows, breakdowns by its own axes, calculation "
+    "footing, text blocks. The expensive call; one block per call.\n"
     '- Map a concept like "revenue" to its XBRL element qname → '
     "`resolve-element`.\n"
     "- Full-text search across filings → `search-documents`.\n"
