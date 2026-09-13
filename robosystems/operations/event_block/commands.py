@@ -62,7 +62,10 @@ from .engine import (
   resolve_agent_type,
 )
 from .python_handlers import get_python_handler
-from .python_handlers.types import HandlerMetadataValidationError
+from .python_handlers.types import (
+  EventBlockPythonHandler,
+  HandlerMetadataValidationError,
+)
 from .registry import (
   HandlerAmbiguousError,
   HandlerNotFoundError,
@@ -589,6 +592,26 @@ def fire_handler_on_commit(
   python_handler.dispatch(session, event, typed_metadata, created_by)
 
 
+def _validate_classification(event: Event) -> None:
+  """Let the event's Python handler refuse a ``classified`` it could not post.
+
+  Runs after the metadata patch, so the handler sees the caller's choice.
+  Handlers without the hook (most) accept the transition as before.
+  """
+  python_handler = get_python_handler(event.event_type)
+  if python_handler is None or python_handler.validate_classification is None:
+    return
+  raw_metadata = dict(event.metadata_ or {})
+  try:
+    typed_metadata = python_handler.metadata_schema.model_validate(raw_metadata)
+  except ValidationError as e:
+    raise HandlerMetadataValidationError(
+      f"Event {event.id} (type={event.event_type}): metadata fails handler "
+      f"validation — cannot classify. {e}"
+    )
+  python_handler.validate_classification(event, typed_metadata)
+
+
 def update_event_block(
   session: Session,
   body: UpdateEventBlockRequest,
@@ -603,6 +626,8 @@ def update_event_block(
   against the captured metadata to produce the corresponding GL rows.
   Handler errors roll back the entire update, including the status
   change — a failed commit leaves the event in its pre-approval state.
+  ``captured → classified`` gives the same handler a veto: a choice it
+  could not post is refused here, with the reason, rather than at commit.
   """
   # Lock the row for the life of the transaction. The transition check below
   # is read-decide-write, and the decision is only sound if nothing else can
@@ -750,6 +775,9 @@ def update_event_block(
   if body.event_action is not None:
     event.event_action = body.event_action
 
+  if body.transition_to == "classified":
+    _validate_classification(event)
+
   if fire_handler:
     # Handler runs after metadata patches so it sees the final shape.
     # Errors propagate; the surrounding transaction rolls back.
@@ -762,8 +790,15 @@ def update_event_block(
   return envelope
 
 
-def _python_preview_to_response(preview) -> PreviewEventBlockResponse:
-  """Map a Python HandlerPreview to the public PreviewEventBlockResponse shape."""
+def _python_preview_to_response(
+  preview, handler: EventBlockPythonHandler
+) -> PreviewEventBlockResponse:
+  """Map a Python HandlerPreview to the public PreviewEventBlockResponse shape.
+
+  ``matched_handler`` is the DSL row shape and stays empty for a Python
+  handler; the handler's name rides in ``handler_metadata`` instead so a
+  reader can see that one matched.
+  """
 
   def _line_element_ref(li: dict) -> str:
     # The metadata schema requires exactly one of element_id or
@@ -802,7 +837,10 @@ def _python_preview_to_response(preview) -> PreviewEventBlockResponse:
     planned_transactions=planned,
     validation_errors=preview.validation_errors,
     would_succeed=preview.would_succeed,
-    handler_metadata=preview.computed_values,
+    handler_metadata={
+      "handler": handler.display_name,
+      **(preview.computed_values or {}),
+    },
   )
 
 
@@ -831,7 +869,7 @@ def preview_event_block(
         would_succeed=False,
       )
     preview = python_handler.dispatch_preview(session, body, typed_metadata)
-    return _python_preview_to_response(preview)
+    return _python_preview_to_response(preview, python_handler)
 
   # 2. DSL registry fallback
   errors: list[str] = []
