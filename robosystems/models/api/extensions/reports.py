@@ -1,6 +1,7 @@
 """Report request and response models."""
 
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -702,3 +703,134 @@ class FinancialStatementAnalysisResponse(BaseModel):
   resolved_report: ResolvedReportInfo | None = None
   facts: list[AnalyticalStatementFactRow]
   fact_count: int
+
+
+# ── Information-block views (disclosures + information-block) ────────────────
+#
+# The two shaped tools ``xbrlkit serve`` offers over a loaded filing, served
+# over a report in the graph. The payload is xbrlkit's own — the same keys the
+# local tool returns — under the envelope, with the graph and report stamped
+# on it; ``extra="allow"`` keeps a key xbrlkit adds later from being dropped.
+
+# xbrlkit's caps (``xbrlkit.serve.tools.MAX_BLOCK_ROWS`` / ``MAX_BLOCK_MEMBERS_CAP``),
+# restated here so the request models need not import the tool module; the
+# view tests pin the two pairs equal.
+INFORMATION_BLOCK_MAX_ROWS = 400
+INFORMATION_BLOCK_MAX_MEMBERS = 200
+
+
+class ReportSelector(BaseModel):
+  """Which report a graph-backed view reads — the same contract as
+  financial-statement-analysis."""
+
+  ticker: str | None = Field(
+    None,
+    description=(
+      "Company ticker. On shared-repository graphs (SEC) it resolves the latest "
+      "matching filing when report_id is not given; ignored on tenant graphs."
+    ),
+  )
+  report_id: str | None = Field(
+    None,
+    description=(
+      "Specific report identifier. Required on tenant graphs; on SEC, optional "
+      "when ticker is given."
+    ),
+  )
+  fiscal_year: int | None = Field(
+    None, description="Narrow auto-resolution to this fiscal year focus"
+  )
+  period_type: str | None = Field(
+    None,
+    description=(
+      "Which forms auto-resolution considers: annual (10-K / 20-F / 40-F, the "
+      "default) or quarterly (10-Q as well)"
+    ),
+  )
+
+
+class DisclosuresRequest(ReportSelector):
+  """Request for the disclosures view op — the map of a report's sections."""
+
+  topic: str | None = Field(
+    None,
+    description=(
+      'A disclosure family\'s name, or part of it ("leases", "income taxes"), '
+      "for that family's blocks. Omit for the whole map."
+    ),
+  )
+
+
+class InformationBlockRequest(ReportSelector):
+  """Request for the information-block view op — one section read whole."""
+
+  block: str = Field(
+    ...,
+    description="The block id from disclosures (a role name or its last segment also resolves)",
+  )
+  periods: list[str] | None = Field(
+    None,
+    description=(
+      "Period keys to keep, from a previous call's columns. Default keeps the "
+      "budgeted set, year and balance columns first on an annual form."
+    ),
+  )
+  member: str | None = Field(
+    None,
+    description="Keep only breakdowns whose member key contains this text (a segment name)",
+  )
+  max_rows: int | None = Field(
+    None,
+    ge=1,
+    le=INFORMATION_BLOCK_MAX_ROWS,
+    description=f"Cap on presentation rows (default {INFORMATION_BLOCK_MAX_ROWS})",
+  )
+  max_members: int | None = Field(
+    None,
+    ge=1,
+    le=INFORMATION_BLOCK_MAX_MEMBERS,
+    description="An explicit cap on member breakdowns, instead of the response budget",
+  )
+
+
+class DisclosuresResponse(BaseModel):
+  """The disclosures view op's result: xbrlkit's map, stamped with the graph
+  and report it was read from.
+
+  Without ``topic``: ``disclosures`` / ``count``. With ``topic``:
+  ``disclosure`` / ``category`` / ``blocks`` / ``block_count``.
+  """
+
+  model_config = ConfigDict(extra="allow")
+
+  graph_id: str
+  report_id: str
+  resolved_report: ResolvedReportInfo | None = None
+  disclosures: list[dict[str, Any]] | None = None
+  count: int | None = None
+  disclosure: str | None = None
+  category: str | None = None
+  blocks: list[dict[str, Any]] | None = None
+  block_count: int | None = None
+  note: str | None = None
+  graph_warnings: list[str] | None = None
+
+
+class InformationBlockResponse(BaseModel):
+  """The information-block view op's result: xbrlkit's block, stamped."""
+
+  model_config = ConfigDict(extra="allow")
+
+  graph_id: str
+  report_id: str
+  resolved_report: ResolvedReportInfo | None = None
+  block: dict[str, Any]
+  columns: list[dict[str, Any]] = Field(default_factory=list)
+  axes: list[dict[str, Any]] | None = None
+  rows: list[dict[str, Any]] = Field(default_factory=list)
+  row_count: int | None = None
+  truncated: bool | None = None
+  calculation: list[dict[str, Any]] | None = None
+  text: list[dict[str, Any]] | None = None
+  note: str | None = None
+  graph_warnings: list[str] | None = None

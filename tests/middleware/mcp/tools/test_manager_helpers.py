@@ -84,9 +84,12 @@ class TestGetToolDefinitionHelpers:
   def test_curated_tools_present_with_roboledger(self, tools_with_roboledger):
     defs = tools_with_roboledger._get_curated_tool_definitions()
     names = {d["name"] for d in defs}
-    # Roboledger + non-shared, read-write graphs get both statement tools.
+    # Roboledger + non-shared, read-write graphs get both statement tools,
+    # and the map / block pair over the materialized graph.
     assert "financial-statement-analysis" in names
     assert "live-financial-statement" in names
+    assert "disclosures" in names
+    assert "information-block" in names
 
   def test_live_statement_tool_absent_on_shared_repo(self, mock_client):
     """Shared-repo graphs (SEC) must NOT get the OLTP live-statement tool
@@ -107,6 +110,8 @@ class TestGetToolDefinitionHelpers:
     names = {d["name"] for d in tools._get_curated_tool_definitions()}
     assert "financial-statement-analysis" in names
     assert "live-financial-statement" not in names
+    # The graph-backed pair reads the report's slice, so it serves SEC too.
+    assert {"disclosures", "information-block"} <= names
 
   def test_graphql_tools_absent_on_shared_repo(self, mock_client):
     """The GraphQL escape hatch reads the extensions OLTP schema, which a
@@ -257,6 +262,7 @@ class TestGetToolDefinitionHelpers:
     assert not leaked, f"OLTP tenant tools leaked onto shared repo: {leaked}"
     # Graph-backed analytical reads still belong on the shared repo.
     assert "financial-statement-analysis" in names
+    assert {"disclosures", "information-block"} <= names
 
 
 class TestCallToolErrors:
@@ -293,6 +299,12 @@ class TestCallToolErrors:
   @pytest.mark.asyncio
   async def test_disabled_financial_statement_analysis_raises(self, tools):
     result = await tools.call_tool("financial-statement-analysis", {})
+    assert "not available" in result or "Error" in result
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize("name", ["disclosures", "information-block"])
+  async def test_disabled_block_views_raise(self, tools, name):
+    result = await tools.call_tool(name, {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
