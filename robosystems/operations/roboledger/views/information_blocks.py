@@ -85,8 +85,9 @@ MAX_BLOCK_MEMBERS = xbrlkit_tools.MAX_BLOCK_MEMBERS_CAP
 # live and regenerates, so its model goes stale sooner.
 MODEL_CACHE_TTL_SHARED_SECONDS = 6 * 60 * 60
 MODEL_CACHE_TTL_TENANT_SECONDS = 5 * 60
-# Bump when the readers or the emitters change what a cached model holds.
-MODEL_CACHE_VERSION = "2"
+# Bump when the readers or the emitters change what a cached model holds:
+# v3 = xbrlkit 0.15.0 (targetRole read back, Calculations 1.1 as calculation).
+MODEL_CACHE_VERSION = "3"
 # Text-block fragments fetched from the public bucket per published filing.
 FRAGMENT_WORKERS = 8
 
