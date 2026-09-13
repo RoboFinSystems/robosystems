@@ -19,6 +19,8 @@ from robosystems.operations.event_block.python_handlers.bank_feed import (
   dispatch,
   dispatch_preview,
   plan_lines,
+  unclassified_reason,
+  validate_classification,
 )
 from robosystems.operations.event_block.python_handlers.types import (
   HandlerMetadataValidationError,
@@ -271,6 +273,23 @@ class TestDispatch:
         )
     journal.assert_not_called()
 
+  def test_accepting_a_name_only_suggestion_says_the_chart_has_no_match(self):
+    """The feed keeps the suggested *name* when the chart has no such
+    account; 'set accept_suggestion' is exactly what this caller did."""
+    event = _event()
+    metadata = BankFeedMetadata(
+      accept_suggestion=True, suggested_account_name="Office Supplies"
+    )
+    with patch(
+      f"{MODULE}.resolve_handler",
+      side_effect=HandlerNotFoundError("bank_transaction", "purchase"),
+    ):
+      with pytest.raises(BankEventNotClassifiedError) as exc:
+        dispatch(MagicMock(), event, metadata, "usr_1")
+    message = str(exc.value)
+    assert "'Office Supplies' matches no account on this chart" in message
+    assert "accept_suggestion: true to take" not in message
+
   def test_refusal_is_a_handler_validation_error_for_the_router(self):
     assert issubclass(BankEventNotClassifiedError, HandlerMetadataValidationError)
 
@@ -365,10 +384,15 @@ class TestPreview:
 
   def test_unclassified_preview_names_the_missing_choice(self):
     preview = dispatch_preview(
-      MagicMock(), self._body(), BankFeedMetadata(suggested_element_id="elem_office")
+      MagicMock(),
+      self._body(),
+      BankFeedMetadata(
+        suggested_element_id="elem_office", suggested_account_name="Office"
+      ),
     )
     assert preview.would_succeed is False
-    assert "No account chosen" in preview.validation_errors[0]
+    assert preview.validation_errors[0].startswith("No account chosen")
+    assert "take the suggestion 'Office'" in preview.validation_errors[0]
     assert preview.computed_values["suggested_element_id"] == "elem_office"
 
   def test_classified_preview_delegates_and_annotates(self):
@@ -412,3 +436,66 @@ def test_classification_summary():
     classification_summary({"classified_allocations": [{}, {}]})
     == "split across 2 accounts"
   )
+
+
+@pytest.mark.unit
+class TestUnclassifiedReason:
+  def test_accepted_but_unresolved_names_the_suggestion(self):
+    reason = unclassified_reason(
+      BankFeedMetadata(accept_suggestion=True, suggested_account_name="Office")
+    )
+    assert reason.startswith("accept_suggestion was set, but the suggestion 'Office'")
+    assert "matches no account on this chart" in reason
+
+  def test_accepted_with_no_suggestion_at_all(self):
+    reason = unclassified_reason(BankFeedMetadata(accept_suggestion=True))
+    assert "carries no suggestion" in reason
+
+  def test_resolved_suggestion_offers_the_one_click(self):
+    reason = unclassified_reason(
+      BankFeedMetadata(suggested_element_id="e1", suggested_account_name="Fees")
+    )
+    assert reason.startswith("No account chosen")
+    assert "accept_suggestion: true to take the suggestion 'Fees'" in reason
+
+  def test_nothing_suggested_asks_for_a_choice_only(self):
+    reason = unclassified_reason(BankFeedMetadata())
+    assert reason == (
+      "No account chosen. Set classified_element_id or classified_allocations."
+    )
+
+
+@pytest.mark.unit
+class TestValidateClassification:
+  """`captured → classified` runs the commit's plan and refuses what it
+  could not post — so `classified` never lies."""
+
+  def test_a_resolvable_choice_passes(self):
+    validate_classification(_event(), BankFeedMetadata(classified_element_id="e1"))
+
+  def test_accepting_a_name_only_suggestion_is_refused_with_the_reason(self):
+    with pytest.raises(BankEventNotClassifiedError) as exc:
+      validate_classification(
+        _event(),
+        BankFeedMetadata(accept_suggestion=True, suggested_account_name="Office"),
+      )
+    assert "cannot be marked classified" in str(exc.value)
+    assert "'Office' matches no account on this chart" in str(exc.value)
+
+  def test_a_split_that_does_not_add_up_is_refused(self):
+    with pytest.raises(HandlerMetadataValidationError, match="whole amount"):
+      validate_classification(
+        _event(amount=-4250),
+        BankFeedMetadata(
+          classified_allocations=[
+            {"element_id": "e1", "amount": 4000},
+            {"element_id": "e2", "amount": 100},
+          ]
+        ),
+      )
+
+  def test_an_internal_transfer_passes_as_it_is(self):
+    event = _event(event_type="internal_transfer", amount=50000)
+    validate_classification(
+      event, BankFeedMetadata(from_element_id="e_chk", to_element_id="e_sav")
+    )

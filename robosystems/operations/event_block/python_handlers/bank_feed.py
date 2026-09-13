@@ -28,7 +28,10 @@ account takes no new lines) are the ledger's own.
 An unclassified event falls back to the tenant's DSL rules — the
 deterministic floor for a counterparty that never varies — and, when no
 rule matches, refuses to commit: a bank event must never land
-``committed`` with no rows behind it.
+``committed`` with no rows behind it. The same test runs when a caller
+marks a line ``classified``: a patch that resolves no account (a split
+that does not add up, ``accept_suggestion`` on a suggestion the chart
+never matched) is refused there, with the reason, not later at commit.
 """
 
 from __future__ import annotations
@@ -103,6 +106,7 @@ class BankFeedMetadata(BaseModel):
   classified_allocations: list[BankAllocation] | None = None
   accept_suggestion: bool = False
   suggested_element_id: str | None = None
+  suggested_account_name: str | None = None
   from_element_id: str | None = None
   to_element_id: str | None = None
   classified_by: str | None = None
@@ -133,6 +137,39 @@ def contra_allocations(
   if not element_id:
     return None
   return [BankAllocation(element_id=element_id, amount=magnitude)]
+
+
+def unclassified_reason(metadata: BankFeedMetadata) -> str:
+  """Why this line has no contra account yet, and what would give it one.
+
+  Names the case the caller is actually in: ``accept_suggestion`` on a
+  suggestion the chart never matched is the common one — the feed keeps
+  the suggested *name* on the line, and telling that caller to set
+  ``accept_suggestion`` again helps nobody.
+  """
+  suggested_name = metadata.suggested_account_name
+  if metadata.accept_suggestion and not metadata.suggested_element_id:
+    if suggested_name:
+      return (
+        f"accept_suggestion was set, but the suggestion '{suggested_name}' "
+        "matches no account on this chart. Choose one: set "
+        "classified_element_id or classified_allocations."
+      )
+    return (
+      "accept_suggestion was set, but this line carries no suggestion. "
+      "Set classified_element_id or classified_allocations."
+    )
+  if metadata.suggested_element_id:
+    take = (
+      f"accept_suggestion: true to take the suggestion '{suggested_name}'"
+      if suggested_name
+      else "accept_suggestion: true to take the suggestion"
+    )
+    return (
+      "No account chosen. Set classified_element_id or classified_allocations, "
+      f"or {take}."
+    )
+  return "No account chosen. Set classified_element_id or classified_allocations."
 
 
 def plan_lines(
@@ -239,8 +276,16 @@ def _memo(event: Event) -> str:
   return (event.description or event.event_type or "Bank transaction")[:255]
 
 
-def _apply_dsl_floor(session: Session, event: Event, created_by: str) -> HandlerResult:
+def _apply_dsl_floor(
+  session: Session,
+  event: Event,
+  created_by: str,
+  *,
+  metadata: BankFeedMetadata | None = None,
+) -> HandlerResult:
   """An unclassified bank event posts through a matching tenant rule, if any."""
+  if metadata is None:
+    metadata = BankFeedMetadata.model_validate(dict(event.metadata_ or {}))
   try:
     handler = resolve_handler(
       session,
@@ -253,9 +298,8 @@ def _apply_dsl_floor(session: Session, event: Event, created_by: str) -> Handler
     )
   except HandlerNotFoundError:
     raise BankEventNotClassifiedError(
-      f"Bank event {event.id} has no account chosen and no rule matches it. "
-      "Classify it first — set metadata.classified_element_id (or "
-      "accept_suggestion: true to take the suggestion) — then commit."
+      f"Bank event {event.id} is not classified and no rule matches it. "
+      f"{unclassified_reason(metadata)} Classify it first, then commit."
     ) from None
   except HandlerAmbiguousError as exc:
     raise BankEventNotClassifiedError(
@@ -294,7 +338,7 @@ def dispatch(
   )
   if lines is None:
     _pin_to_local_lane(event)
-    return _apply_dsl_floor(session, event, created_by)
+    return _apply_dsl_floor(session, event, created_by, metadata=metadata)
 
   _pin_to_local_lane(event)
   journal = _journal_metadata(
@@ -334,10 +378,7 @@ def dispatch_preview(
   if lines is None:
     return HandlerPreview(
       would_succeed=False,
-      validation_errors=[
-        "No account chosen: set classified_element_id, classified_allocations, "
-        "or accept_suggestion before committing."
-      ],
+      validation_errors=[unclassified_reason(metadata)],
       computed_values={"suggested_element_id": metadata.suggested_element_id},
     )
   journal = _journal_metadata(
@@ -359,6 +400,28 @@ def dispatch_preview(
   return preview
 
 
+def validate_classification(event: Event, metadata: BankFeedMetadata) -> None:
+  """Refuse ``captured → classified`` when the commit could not post it.
+
+  Runs the same plan the commit will run. A split that does not add up
+  or a missing bank leg raises as it would at commit; a line with no
+  resolvable contra account is refused with ``unclassified_reason``. An
+  internal transfer always plans (both legs are on the line), so it
+  passes as it is.
+  """
+  lines = plan_lines(
+    event_type=event.event_type,
+    resource_element_id=event.resource_element_id,
+    amount=event.amount,
+    metadata=metadata,
+  )
+  if lines is None:
+    raise BankEventNotClassifiedError(
+      f"Bank event {event.id} cannot be marked classified: "
+      f"{unclassified_reason(metadata)}"
+    )
+
+
 def _handler(event_type: str, display_name: str) -> EventBlockPythonHandler:
   return EventBlockPythonHandler(
     event_type=event_type,
@@ -368,6 +431,7 @@ def _handler(event_type: str, display_name: str) -> EventBlockPythonHandler:
     target_status="classified",
     dispatch=dispatch,
     dispatch_preview=dispatch_preview,
+    validate_classification=validate_classification,
   )
 
 

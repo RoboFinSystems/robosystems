@@ -43,6 +43,10 @@ class EventBlockPythonHandler:
      that produce further work)
   - `dispatch`: the real execution path — reads, computes, writes
   - `dispatch_preview`: the dry-run path — reads, computes, returns plan only
+  - `validate_classification` (optional): refuses a caller's
+    ``captured → classified`` transition when the metadata records no
+    choice the later commit could honour — so ``classified`` is never a
+    status the commit then contradicts (bank-feed lines)
   """
 
   event_type: str
@@ -53,6 +57,7 @@ class EventBlockPythonHandler:
   dispatch_preview: Callable[
     [Session, CreateEventBlockRequest, BaseModel], HandlerPreview
   ]
+  validate_classification: Callable[[Event, BaseModel], None] | None = None
 
 
 class HandlerMetadataValidationError(Exception):

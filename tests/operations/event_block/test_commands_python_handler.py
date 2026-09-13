@@ -145,6 +145,7 @@ class TestPreviewEventBlockPythonHandlerPath:
     body = _make_body()
 
     python_handler = MagicMock()
+    python_handler.display_name = "Asset Disposed"
     python_handler.metadata_schema.model_validate.return_value = MagicMock()
     python_handler.dispatch_preview.return_value = HandlerPreview(
       would_succeed=True,
@@ -171,6 +172,10 @@ class TestPreviewEventBlockPythonHandlerPath:
 
     assert resp.would_succeed is True
     assert resp.handler_metadata["nbv_cents"] == 10000
+    # A Python handler is not an event_handlers row, so matched_handler stays
+    # empty; its name rides in handler_metadata so a reader sees the match.
+    assert resp.matched_handler is None
+    assert resp.handler_metadata["handler"] == "Asset Disposed"
     assert len(resp.planned_transactions) == 1
     assert resp.planned_transactions[0].debit_element_id == "elem_accum_dep"
     assert resp.planned_transactions[0].credit_element_id == "elem_asset"
