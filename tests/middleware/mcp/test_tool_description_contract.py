@@ -157,7 +157,7 @@ def test_the_registry_is_discoverable():
   # coverage unnoticed: two did, by writing their description as a variable
   # and a concatenation rather than a literal, and both were violating the
   # contract at the time. Raise this deliberately when a tool is added.
-  assert len(DESCRIPTIONS) == 53, (
+  assert len(DESCRIPTIONS) == 55, (
     f"found {len(DESCRIPTIONS)} tool descriptions, expected 53. If a tool was "
     "added or removed, update this number; if not, the parser has stopped "
     "matching a definition shape and those tools are now unguarded."

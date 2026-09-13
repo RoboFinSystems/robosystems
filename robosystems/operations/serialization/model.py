@@ -235,6 +235,9 @@ def _concept(element: BundleElement) -> Concept:
     # Every concept accepts a nil fact — the bundle carries no per-element
     # declaration, and a text block with no narrative yet is a nil.
     nillable=True,
+    # The standard label is the preferred one, as the parse sets it: the block
+    # and statement tools read a row's label from it.
+    pref_label=element.label,
     labels=labels,
   )
 
@@ -323,6 +326,9 @@ def _networks(bundle: StatementBundle) -> list[Network]:
       documentation=documentation,
       kind=kind,
       arcs=arcs,
+      # The producer knows its block's type as a column; the model has the
+      # slot for it, and the block tools and the holon carry it through.
+      block_type=link.block_type,
       structure_id=link.structure_id,
       fact_set_id=fact_set_by_structure.get(link.structure_id),
     )

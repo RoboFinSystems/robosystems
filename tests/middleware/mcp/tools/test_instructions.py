@@ -24,6 +24,8 @@ _LEDGER = _CORE | {
   "live-financial-statement",
   "build-fact-grid",
   "financial-statement-analysis",
+  "disclosures",
+  "information-block",
   "search-documents",
   "write-graph-cypher",
   "query-graphql",
@@ -82,6 +84,21 @@ class TestLedgerGraph:
 
   def test_tenant_docs_hint_present(self) -> None:
     assert "search-documents" in self._out()
+
+  def test_sections_route_to_the_map_then_the_block(self) -> None:
+    out = self._out()
+    assert "`disclosures` (the map, cheap)" in out
+    assert "`information-block`" in out
+
+  def test_the_pair_is_named_only_together(self) -> None:
+    out = build_instructions(
+      graph_id="kgLEDGER",
+      tool_names=_LEDGER - {"information-block"},
+      is_shared_repo=False,
+      read_only=False,
+    )
+    assert out is not None
+    assert "`disclosures`" not in out
 
 
 class TestGenericGraph:

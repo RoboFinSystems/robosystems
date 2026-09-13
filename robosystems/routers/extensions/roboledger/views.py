@@ -1,7 +1,11 @@
-"""RoboLedger graph-backed analytical views (fact-grid operation).
+"""RoboLedger analytical views — the read-shaped operations in the dispatcher.
 
-Hosts `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid`,
-the one read-shaped operation in the dispatcher.
+Hosts `build-fact-grid`, `financial-statement-analysis`, and the pair
+`disclosures` / `information-block`, all under
+`POST /extensions/roboledger/{graph_id}/operations/`. The first two read the
+LadybugDB graph; the pair reads the report whole from where the platform
+holds it (the published filing on a shared repository, the ledger's own
+report on a tenant) and runs xbrlkit's tools over it.
 
 It sits in its own router, separate from `operations.py`, so the mount
 gates on `FACT_GRID_ENABLED` rather than `ROBOLEDGER_ENABLED`: the fact
@@ -43,8 +47,12 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.extensions.reports import (
   AnalyticalStatementFactRow,
+  DisclosuresRequest,
+  DisclosuresResponse,
   FinancialStatementAnalysisRequest,
   FinancialStatementAnalysisResponse,
+  InformationBlockRequest,
+  InformationBlockResponse,
   ResolvedReportInfo,
 )
 from robosystems.models.api.views import (
@@ -59,10 +67,17 @@ from robosystems.operations.roboledger.reads.reports import (
   ANALYSIS_STATEMENT_TYPES,
 )
 from robosystems.operations.roboledger.views import (
+  BlockNotFoundError,
   FactGridBuilder,
+  ReportNotFoundError,
+  ReportSelectorError,
   deduplicate_facts,
+  query_disclosures,
   query_fact_grid,
   query_financial_statement,
+  query_information_block,
+  resolve_report,
+  resolved_report_info,
   summarize_by_element,
 )
 
@@ -83,11 +98,14 @@ def _require_readable_graph(
 ) -> None:
   """Lifecycle/subscription gate (read strength) for the analytical views.
 
-  The views read LadybugDB directly rather than the extensions OLTP, so they
-  do not pass through `require_graph_extension`; this is the same
-  `require_graph_access` check that dependency and `/query` run, so a
-  suspended or expired graph is closed here too. Shared repositories pass —
-  their access is per-user, checked by `get_current_user_with_graph`.
+  The views are reads that serve shared repositories too, so they do not
+  pass through `require_graph_extension` (which refuses shared repos); this
+  is the same `require_graph_access` check that dependency and `/query` run,
+  so a suspended or expired graph is closed here too. Shared repositories
+  pass — their access is per-user, checked by `get_current_user_with_graph`.
+  The block pair reads a tenant's report from the extensions OLTP through
+  the exports' bundle builder; a graph with no ledger schema answers the
+  dispatcher's schema-missing 404 there.
 
   Depends on the auth dependency so it can only run for an authenticated
   member (route-level dependencies otherwise resolve before the handler's
@@ -336,6 +354,159 @@ async def financial_statement_analysis_op(
       resolved_report=resolved_info,
       facts=facts,
       fact_count=len(facts),
+    )
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ── Information blocks: the map and the block ──────────────────────────────
+#
+# The two shaped tools ``xbrlkit serve`` runs over a loaded filing, served
+# over a report the platform holds whole — the published filing on the SEC
+# shared repository, the ledger's own report on a tenant graph — read into
+# xbrlkit's model, over which xbrlkit's own ``disclosures`` /
+# ``information_block`` run, so the hosted tools and the local one answer
+# identically from one implementation. Reads, like the two views above; the
+# graph is not in the path.
+
+
+def _report_selector_errors(exc: ValueError) -> HTTPException:
+  """The view's domain errors as HTTP: a caller's selector is a 400, a report
+  or block that does not exist a 404. Anything else falls through to the
+  dispatcher's policy."""
+  if isinstance(exc, ReportSelectorError):
+    return HTTPException(status_code=400, detail=str(exc))
+  if isinstance(exc, (ReportNotFoundError, BlockNotFoundError)):
+    return HTTPException(status_code=404, detail=str(exc))
+  raise exc
+
+
+@router.post(
+  "/disclosures",
+  response_model=OperationEnvelope[DisclosuresResponse],
+  operation_id="disclosures",
+  summary="Disclosures",
+  description=(
+    "The map of a report's sections: one row per disclosure family — a note "
+    "with its policies, tables and details, a statement with its parenthetical, "
+    "the cover page — with block counts by level, fact and text-block counts, in "
+    "filing order; with `topic`, one family's blocks with the ids "
+    "`information-block` takes. Reads the report whole — the published filing "
+    "on the SEC shared repository, the ledger's own report on a tenant graph — "
+    "into xbrlkit's model and runs xbrlkit's own `disclosures`, so both answer "
+    "as `xbrlkit serve` does. Cheap: call it before `information-block`. "
+    "Shared-repo graphs take `ticker` (auto-resolving the latest filing) or "
+    "`report_id`; tenant graphs take `report_id`. A filing processed before its "
+    "artifacts existed answers 404 until the repository is reprocessed."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/disclosures",
+  method="POST",
+  business_event_type="ledger_disclosures",
+)
+async def disclosures_op(
+  body: DisclosuresRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = OperationContext(
+    domain="roboledger",
+    operation_name="disclosures",
+    graph_id=graph_id,
+    user_id=str(user.id),
+    idempotency_key=idempotency_key,
+    body_fingerprint=fingerprint_body(body),
+  )
+
+  async def _runner():
+    try:
+      report_id, resolved = await resolve_report(
+        graph_id,
+        report_id=body.report_id,
+        ticker=body.ticker,
+        fiscal_year=body.fiscal_year,
+        period_type=body.period_type,
+      )
+      result = await query_disclosures(graph_id, report_id, topic=body.topic)
+    except ValueError as exc:
+      raise _report_selector_errors(exc) from exc
+    return DisclosuresResponse(**result, resolved_report=resolved_report_info(resolved))
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/information-block",
+  response_model=OperationEnvelope[InformationBlockResponse],
+  operation_id="informationBlock",
+  summary="Information Block",
+  description=(
+    "One section of a report read whole — the expensive call: rows in "
+    "presentation order with the consolidated value per period column, the "
+    "same rows broken out by the section's own axes, the axes with the members "
+    "that carry facts, every total's calculation children with a footing check, "
+    "and the section's text blocks. Member breakdowns and period columns are "
+    "kept most-reported / most-recent first up to a response budget; a row is "
+    "never left blank by a cut, and `members_omitted` / `periods_omitted` say "
+    "what was. Take `block` from `disclosures`. Same resolution as "
+    "`disclosures`: `ticker` or `report_id` on shared-repo graphs, `report_id` "
+    "on tenant graphs. On a tenant graph this reads the section as the "
+    "ledger's report holds it; `get-information-block` returns one authored "
+    "block's envelope with its rules and verification."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/information-block",
+  method="POST",
+  business_event_type="ledger_information_block",
+)
+async def information_block_op(
+  body: InformationBlockRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = OperationContext(
+    domain="roboledger",
+    operation_name="information-block",
+    graph_id=graph_id,
+    user_id=str(user.id),
+    idempotency_key=idempotency_key,
+    body_fingerprint=fingerprint_body(body),
+  )
+
+  async def _runner():
+    try:
+      report_id, resolved = await resolve_report(
+        graph_id,
+        report_id=body.report_id,
+        ticker=body.ticker,
+        fiscal_year=body.fiscal_year,
+        period_type=body.period_type,
+      )
+      result = await query_information_block(
+        graph_id,
+        report_id,
+        body.block,
+        periods=body.periods,
+        member=body.member,
+        max_rows=body.max_rows,
+        max_members=body.max_members,
+      )
+    except ValueError as exc:
+      raise _report_selector_errors(exc) from exc
+    return InformationBlockResponse(
+      **result, resolved_report=resolved_report_info(resolved)
     )
 
   return await _dispatch(ctx, _runner, cache)

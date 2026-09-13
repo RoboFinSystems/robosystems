@@ -127,6 +127,8 @@ Require `roboledger` in `schema_extensions`. These read LadybugDB (OLAP).
 | `financial-statement-analysis` | Graph-backed statement read with auto-resolve, dedup, and a period cap at the columns a filing presents | — |
 | `live-financial-statement` | Statement from the tenant's live OLTP ledger via CoA→GAAP mapping | tenant graphs only |
 | `build-fact-grid` | Cross-company comparison over canonical concepts | `FACT_GRID_ENABLED` |
+| `disclosures` | The map of a report's sections — one row per disclosure family, or one family's blocks; cheap, call it first | — |
+| `information-block` | One section read whole: rows in presentation order, breakdowns by the section's own axes, calculation footing, text blocks; the expensive call | — |
 
 `financial-statement-analysis` resolves the latest relevant SEC filing when no
 `report_id` is given (ticker and form-code resolution live in

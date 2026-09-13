@@ -63,6 +63,8 @@ class TestWriteClassificationFailClosed:
       "get-document",
       "financial-statement-analysis",
       "build-fact-grid",
+      "disclosures",
+      "information-block",
       "list-agents",
     ):
       assert tool in READ_ONLY_MCP_TOOLS, f"{tool} should be allowed for viewers"

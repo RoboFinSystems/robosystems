@@ -170,6 +170,11 @@ def build_instructions(
     report_bits.append("multidimensional pivots → `build-fact-grid`")
   if has("financial-statement-analysis"):
     report_bits.append("company analysis → `financial-statement-analysis`")
+  if has("disclosures") and has("information-block"):
+    report_bits.append(
+      "a report's sections → `disclosures` (the map, cheap) then "
+      "`information-block` (one section whole: breakdowns, footing, text)"
+    )
   if report_bits:
     sections.append(_block("REPORTING & ANALYSIS", "- " + "; ".join(report_bits) + "."))
 

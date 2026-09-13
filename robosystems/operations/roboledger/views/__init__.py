@@ -34,11 +34,29 @@ from robosystems.operations.roboledger.views.financial_statement_query import (
   deduplicate_facts,
   query_financial_statement,
 )
+from robosystems.operations.roboledger.views.information_blocks import (
+  BlockNotFoundError,
+  ReportNotFoundError,
+  ReportNotPublishedError,
+  ReportSelectorError,
+  query_disclosures,
+  query_information_block,
+  resolve_report,
+  resolved_report_info,
+)
 
 __all__ = [
+  "BlockNotFoundError",
   "FactGridBuilder",
+  "ReportNotFoundError",
+  "ReportNotPublishedError",
+  "ReportSelectorError",
   "deduplicate_facts",
+  "query_disclosures",
   "query_fact_grid",
   "query_financial_statement",
+  "query_information_block",
+  "resolve_report",
+  "resolved_report_info",
   "summarize_by_element",
 ]

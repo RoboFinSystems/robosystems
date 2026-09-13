@@ -470,6 +470,7 @@ jobs:
                 ParameterKey=SharedProcessedBucketArn,ParameterValue=\"${{ inputs.shared_processed_bucket_arn }}\" \
                 ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\" \
                 ParameterKey=DeploymentBucketArn,ParameterValue=\"${{ inputs.deployment_bucket_arn }}\" \
+                ParameterKey=PublicDataBucketArn,ParameterValue=\"${{ inputs.public_data_bucket_arn }}\" \
                 ParameterKey=LogsBucketArn,ParameterValue=\"${{ inputs.logs_bucket_arn }}\""
 
           if [ "$STACK_ACTION" = "create-stack" ]; then
