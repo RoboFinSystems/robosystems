@@ -166,7 +166,11 @@ def validate_arelle(zip_path: Path, out_md: Path, label: str) -> bool:
       + "container. Zero load + validation errors is the structural-correctness "
       + "claim: the output is valid XBRL 2.1, consumable by any standards-compliant "
       + "processor. This is **base XBRL 2.1** validation; SEC/EFM disclosure-system "
-      + "checks are not enabled (the instance isn't an SEC filing)."
+      + "checks are not enabled (the instance isn't an SEC filing). Scope: "
+      + "tenant-authored disclosure notes are excluded from this package — the "
+      + "emitter's fixed framework prefixes cannot declare an extension concept, "
+      + "so notes ride the JSON-LD and holon flavors. A report with notes "
+      + "therefore has fewer facts here than in those files."
     ),
     "",
   ]
