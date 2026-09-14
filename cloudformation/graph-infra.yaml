@@ -511,6 +511,50 @@ Resources:
           Protocol: email
 
   # Database capacity alarms
+  #
+  # This alarm was unmatched from its creation on 2025-12-23 until 2026-09-14:
+  # it carried no Dimensions at all, while the emitter
+  # (allocation_manager.py `_publish_allocation_metrics`) publishes
+  # DatabaseUtilizationPercent under [NodeType=writer]. CloudWatch matches an
+  # alarm to a metric on the exact dimension set, so it watched a stream nothing
+  # writes to and TreatMissingData rendered nine months of silence as OK. It
+  # read 100.0 on 2026-08-31 — the prod Standard fleet full, a real signup
+  # refused — and did not move. Same defect class as graph-ladybug.yaml's
+  # AllocationFailureAlarm. Validate any change with `aws cloudwatch
+  # get-metric-data` against the live namespace before deploying; cfn-lint
+  # cannot see a dimension mismatch.
+  #
+  # Period/evaluation are tuned to the emitter, not to habit:
+  # DatabaseUtilizationPercent is published ONLY on allocate/deallocate
+  # (allocation_manager.py:518, :798) — not by the 5-minute
+  # instance_metrics_collection_job, which publishes the Cluster* family
+  # instead. It is therefore a sparse, event-driven gauge:
+  #   * EvaluationPeriods 1, because two ADJACENT 5-minute windows that each
+  #     contain an allocation event is a condition that essentially never
+  #     occurs at this volume. The old value of 2 made the alarm unfireable
+  #     even had the dimensions matched.
+  #   * TreatMissingData stays notBreaching, and the reason is the operating
+  #     model rather than the metric. `missing` would latch the alarm ALARM
+  #     between events, which looks more correct in the console — but the
+  #     destination here is a monitored INBOX, not a console, and an alarm
+  #     that is already ALARM sends no further mail. Latching would notify
+  #     once and then go quiet for as long as the fleet stayed full. Under
+  #     notBreaching every fresh allocation against a full fleet re-crosses
+  #     the threshold and sends another email, which is the behaviour that
+  #     actually reaches a human. It also keeps the staging copy of this alarm
+  #     out of permanent INSUFFICIENT_DATA — the staging instance registry is
+  #     empty, so this metric has never published there at all.
+  #     The real fix for the silent case — full fleet, nobody attempting an
+  #     allocation, therefore no datapoints and no alarm either way — is a
+  #     periodic per-tier TenantSlotsFree gauge, noted below.
+  #
+  # Known limit, deliberately accepted: overall_utilization_percent is summed
+  # across every instance in the registry with no tier filter, so this is a
+  # fleet-wide average, not per-tier. It tracks Standard closely while
+  # ladybug-large / ladybug-xlarge sit at desired 0 (request-only tiers), but a
+  # single idle Large instance would dilute it below the threshold while
+  # Standard is full. A per-tier TenantSlotsFree signal is the real answer and
+  # is specced in the vault's data-plane domain.
   DatabaseCapacityAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete
@@ -520,9 +564,12 @@ Resources:
       AlarmDescription: RoboSystems graph database capacity is running low
       MetricName: DatabaseUtilizationPercent
       Namespace: !Sub "RoboSystems/Graph/${Environment}"
+      Dimensions:
+        - Name: NodeType
+          Value: writer
       Statistic: Average
       Period: 300
-      EvaluationPeriods: 2
+      EvaluationPeriods: 1
       Threshold: 85
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
