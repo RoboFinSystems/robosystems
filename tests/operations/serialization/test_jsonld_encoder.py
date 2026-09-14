@@ -165,6 +165,54 @@ class TestConcepts:
     assert (assets, XBRLI.periodType, Literal("instant")) in g
     assert (assets, SKOS.prefLabel, Literal("Assets")) in g
 
+  def test_tenant_concept_is_labelled_from_its_name(self) -> None:
+    """A tenant's own wording lives on ``name``, not ``label``.
+
+    ``create-taxonomy-block`` takes the display name and derives the QName
+    from it, and only the library seeding path writes ``ElementLabel`` rows,
+    so an extension concept reaches the bundle with a name and no authored
+    label. Reading ``label`` alone left it unlabelled in the holon while the
+    XBRL export of the same report carried the name.
+    """
+    bundle = _bundle()
+    bundle.schema_concepts.append(
+      BundleElement(
+        id="elem_policy",
+        qname="cadence:RevenueRecognitionPolicyTextBlock",
+        name="Revenue Recognition Policy",
+        period_type="duration",
+        is_monetary=False,
+        source="native",
+        item_type="textBlock",
+      )
+    )
+    g = build_graph(bundle)
+    policy = URIRef(
+      "https://robosystems.ai/concept/cadence:RevenueRecognitionPolicyTextBlock"
+    )
+    assert (policy, SKOS.prefLabel, Literal("Revenue Recognition Policy")) in g
+
+  def test_a_name_that_echoes_the_qname_is_not_a_label(self) -> None:
+    """``AssetsCurrent`` for ``rs-gaap:AssetsCurrent`` adds nothing."""
+    g = build_graph(_bundle())
+    assert (RS_GAAP.AssetsCurrent, SKOS.prefLabel, None) not in g
+
+  def test_both_encoders_agree_on_what_a_concept_is_called(self) -> None:
+    """The label rule is shared, so the two representations cannot drift."""
+    from robosystems.operations.serialization.bundle import concept_label
+    from robosystems.operations.serialization.xbrl import xbrl_21
+
+    concept = BundleElement(
+      id="elem_policy",
+      qname="cadence:RevenueRecognitionPolicyTextBlock",
+      name="Revenue Recognition Policy",
+      period_type="duration",
+      is_monetary=False,
+      source="native",
+    )
+    assert xbrl_21._concept_label(concept) == concept_label(concept)
+    assert concept_label(concept) == "Revenue Recognition Policy"
+
 
 # ── Structures + reified associations ────────────────────────────────────
 
