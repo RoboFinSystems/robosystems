@@ -847,8 +847,15 @@ class TestCollectMetrics:
     assert call_kwargs["Namespace"] == "RoboSystems/Graph/test"
 
   @pytest.mark.unit
-  def test_no_instances_no_metrics(self, monitor):
-    """When no healthy instances exist, minimal or no metrics are published."""
+  def test_no_instances_publishes_only_zero_tenant_slots(self, monitor):
+    """An empty fleet publishes no cluster metrics, but DOES report zero slots.
+
+    The cluster percentages are skipped because total_capacity == 0 has no
+    meaningful ratio. TenantSlotsFree is published anyway, and that asymmetry is
+    the point: an empty fleet is one on which nothing can be placed, which is
+    exactly the state the capacity alarm exists to report. Reporting nothing
+    would leave it indistinguishable from a healthy fleet.
+    """
     instance_table = _make_dynamo_table(items=[])
     graph_table = _make_dynamo_table(items=[])
 
@@ -863,9 +870,15 @@ class TestCollectMetrics:
 
     result = monitor.collect_metrics()
 
-    # No healthy instances -> total_capacity == 0 -> no cluster metrics
-    assert result.metrics_published == 0
     assert result.error_message is None
+    published = [
+      metric
+      for call in monitor._cloudwatch.put_metric_data.call_args_list
+      for metric in call[1]["MetricData"]
+    ]
+    assert {m["MetricName"] for m in published} == {"TenantSlotsFree"}
+    assert all(m["Value"] == 0 for m in published)
+    assert len(published) == 3
 
   @pytest.mark.unit
   def test_exception_sets_error_message(self, monitor):
@@ -875,3 +888,156 @@ class TestCollectMetrics:
     result = monitor.collect_metrics()
 
     assert result.error_message == "cloudwatch down"
+
+
+# ---------------------------------------------------------------------------
+# TestTenantSlotsFree
+# ---------------------------------------------------------------------------
+
+
+class TestTenantSlotsFree:
+  """Per-tier free tenant slots — the signal that should fire before a refusal."""
+
+  @staticmethod
+  def _collect(monitor, instances, graph_rows):
+    instance_table = _make_dynamo_table(items=instances)
+    graph_table = MagicMock()
+    graph_table.scan.return_value = {"Items": graph_rows}
+
+    def table_router(name):
+      if name == "test-instance":
+        return instance_table
+      if name == "test-graph":
+        return graph_table
+      return _make_dynamo_table()
+
+    monitor._dynamodb.Table.side_effect = table_router
+    monitor.collect_metrics()
+
+    published = {}
+    for call in monitor._cloudwatch.put_metric_data.call_args_list:
+      for metric in call[1]["MetricData"]:
+        if metric["MetricName"] == "TenantSlotsFree":
+          tier = metric["Dimensions"][0]["Value"]
+          published[tier] = metric
+    return published
+
+  @staticmethod
+  def _instance(instance_id, tier, created_at=None):
+    return {
+      "instance_id": instance_id,
+      "status": "healthy",
+      "tier": tier,
+      "max_databases": 10 if tier == "ladybug-shared" else 1,
+      "database_count": 0,
+      "created_at": created_at or (datetime.now(UTC) - timedelta(hours=2)).isoformat(),
+    }
+
+  @pytest.mark.unit
+  def test_published_per_tenant_tier_with_cluster_tier_dimension(self, monitor):
+    """All three tenant tiers report, each dimensioned ClusterTier."""
+    published = self._collect(
+      monitor, [self._instance("i-aaa", "ladybug-standard")], []
+    )
+
+    assert set(published) == {
+      "ladybug-standard",
+      "ladybug-large",
+      "ladybug-xlarge",
+    }
+    for metric in published.values():
+      assert metric["Unit"] == "Count"
+      assert [d["Name"] for d in metric["Dimensions"]] == ["ClusterTier"]
+
+  @pytest.mark.unit
+  def test_empty_instance_has_a_free_slot(self, monitor):
+    published = self._collect(
+      monitor, [self._instance("i-aaa", "ladybug-standard")], []
+    )
+    assert published["ladybug-standard"]["Value"] == 1
+
+  @pytest.mark.unit
+  def test_full_fleet_reports_zero(self, monitor):
+    """The condition that refused a real signup on 2026-09-01."""
+    published = self._collect(
+      monitor,
+      [
+        self._instance("i-aaa", "ladybug-standard"),
+        self._instance("i-bbb", "ladybug-standard"),
+      ],
+      [
+        {"instance_id": "i-aaa", "status": "active"},
+        {"instance_id": "i-bbb", "status": "active"},
+      ],
+    )
+    assert published["ladybug-standard"]["Value"] == 0
+
+  @pytest.mark.unit
+  def test_shared_repository_instances_are_not_tenant_capacity(self, monitor):
+    """A shared replica's 10 slots must never pad the tenant count.
+
+    This is the defect that made the fleet-wide percentages unusable: Standard
+    was 100% full while ClusterUsedCapacityPercent read 30.77%, because most of
+    its denominator was shared-repository capacity.
+    """
+    published = self._collect(
+      monitor,
+      [
+        self._instance("i-aaa", "ladybug-standard"),
+        self._instance("i-shared", "ladybug-shared"),
+      ],
+      [{"instance_id": "i-aaa", "status": "active"}],
+    )
+
+    assert "ladybug-shared" not in published
+    assert published["ladybug-standard"]["Value"] == 0
+
+  @pytest.mark.unit
+  def test_only_occupying_statuses_consume_a_slot(self, monitor):
+    """A failed or deleted graph row leaves the slot free — the allocator's rule."""
+    published = self._collect(
+      monitor,
+      [self._instance("i-aaa", "ladybug-standard")],
+      [{"instance_id": "i-aaa", "status": "failed"}],
+    )
+    assert published["ladybug-standard"]["Value"] == 1
+
+  @pytest.mark.unit
+  def test_creating_and_migrating_consume_a_slot(self, monitor):
+    """In-flight allocations hold their slot, or the fleet gets double-booked."""
+    for status in ("creating", "migrating"):
+      monitor._cloudwatch.put_metric_data.reset_mock()
+      published = self._collect(
+        monitor,
+        [self._instance("i-aaa", "ladybug-standard")],
+        [{"instance_id": "i-aaa", "status": status}],
+      )
+      assert published["ladybug-standard"]["Value"] == 0, status
+
+  @pytest.mark.unit
+  def test_registry_scan_failure_publishes_nothing_rather_than_false_headroom(
+    self, monitor
+  ):
+    """Unknown occupancy must not be reported as free slots."""
+    instance_table = _make_dynamo_table(
+      items=[self._instance("i-aaa", "ladybug-standard")]
+    )
+    graph_table = MagicMock()
+    graph_table.scan.side_effect = Exception("dynamo down")
+
+    def table_router(name):
+      if name == "test-instance":
+        return instance_table
+      if name == "test-graph":
+        return graph_table
+      return _make_dynamo_table()
+
+    monitor._dynamodb.Table.side_effect = table_router
+    monitor.collect_metrics()
+
+    names = [
+      metric["MetricName"]
+      for call in monitor._cloudwatch.put_metric_data.call_args_list
+      for metric in call[1]["MetricData"]
+    ]
+    assert "TenantSlotsFree" not in names

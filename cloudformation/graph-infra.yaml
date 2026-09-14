@@ -580,6 +580,44 @@ Resources:
   # longer knows. Published (zero included) by the daily registry sweep, which
   # marks such rows rather than deleting them; any non-zero value is a live
   # graph whose routing is stale and needs reconciling from on-disk truth.
+  # Free tenant slots on the Standard tier. This is the alarm that is supposed to
+  # fire BEFORE a signup is refused, and it is deliberately a count per tier
+  # rather than a fleet-wide percentage.
+  #
+  # Only ladybug-standard is alarmed. ladybug-large and ladybug-xlarge are
+  # request-only and sit at desired 0, so they legitimately publish 0 free slots
+  # and an alarm on them would be permanently breaching. The metric is still
+  # published for all three, so the reading exists when one is turned on.
+  #
+  # TreatMissingData is breaching, and that is the point of the alarm rather than
+  # an aside: the emitter is the 5-minute instance_metrics_collection_job, so
+  # missing data means the fleet's capacity is UNKNOWN, not that it is fine.
+  # Every other capacity signal here has failed by rendering silence as health —
+  # DatabaseCapacityAlarm sat OK for nine months on a dimension mismatch. This
+  # one goes off instead.
+  TenantSlotsFreeStandardAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-graph-${Environment}-tenant-slots-free-standard
+      AlarmDescription: Fewer than 2 free Standard tenant slots — the next signups will be refused
+      MetricName: TenantSlotsFree
+      Namespace: !Sub "RoboSystems/Graph/${Environment}"
+      Dimensions:
+        - Name: ClusterTier
+          Value: ladybug-standard
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+      OKActions:
+        - !Ref InfraAlertTopic
+
   OrphanedGraphRegistrationsAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete
