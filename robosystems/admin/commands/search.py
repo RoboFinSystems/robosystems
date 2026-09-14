@@ -19,9 +19,9 @@ console = Console()
 _OPENSEARCH_QUERY_SCRIPT = """
 import json, urllib.request, ssl, hmac, hashlib, datetime, sys, os, base64
 
-host = "{host}"
-region = "{region}"
-index_name = "{index}"
+host = {host}
+region = {region}
+index_name = {index}
 
 # IMDSv2 credentials
 token_req = urllib.request.Request(
@@ -116,12 +116,12 @@ def query_os(path, body=None, method="POST"):
     return json.loads(resp.read().decode())
 
 
-action = "{action}"
-graph_id = "{graph_id}"
-source_type = "{source_type}"
-before_date = "{before_date}"
-indexed_before = "{indexed_before}"
-dry_run = "{dry_run}" == "true"
+action = {action}
+graph_id = {graph_id}
+source_type = {source_type}
+before_date = {before_date}
+indexed_before = {indexed_before}
+dry_run = {dry_run} == "true"
 
 if action == "count":
     total = query_os(f"/{{index_name}}/_count", {{"query": {{"term": {{"graph_id": graph_id}}}}}})
@@ -240,6 +240,17 @@ def _get_opensearch_endpoint(environment: str, aws_profile: str) -> str:
   return endpoint.replace("https://", "").replace("http://", "").rstrip("/")
 
 
+def _literal(value: str) -> str:
+  """A string as a source literal for the bastion script.
+
+  The script is assembled by substitution, so a parameter that carried a quote
+  or a backslash would otherwise end the literal it sits in and the rest would
+  be read as code. json.dumps escapes both and emits valid Python. Applied to
+  every scalar, not only the ones that look risky today.
+  """
+  return json.dumps(str(value))
+
+
 def _run_opensearch_script(
   client,
   action: str,
@@ -255,16 +266,16 @@ def _run_opensearch_script(
   endpoint = _get_opensearch_endpoint(client.environment, client.aws_profile)
 
   script = _OPENSEARCH_QUERY_SCRIPT.format(
-    host=endpoint,
-    region="us-east-1",
-    index="documents",
-    action=action,
-    graph_id=graph_id,
-    size=size,
-    source_type=source_type,
-    before_date=before_date,
-    indexed_before=indexed_before,
-    dry_run="true" if dry_run else "false",
+    host=_literal(endpoint),
+    region=_literal("us-east-1"),
+    index=_literal("documents"),
+    action=_literal(action),
+    graph_id=_literal(graph_id),
+    size=int(size),
+    source_type=_literal(source_type),
+    before_date=_literal(before_date),
+    indexed_before=_literal(indexed_before),
+    dry_run=_literal("true" if dry_run else "false"),
   )
 
   # Base64 encode script and query text to avoid shell quoting issues.

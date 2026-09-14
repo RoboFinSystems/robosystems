@@ -12,13 +12,14 @@ import textwrap
 
 import pytest
 
-from robosystems.admin.commands.search import _OPENSEARCH_QUERY_SCRIPT
+from robosystems.admin.commands.search import _OPENSEARCH_QUERY_SCRIPT, _literal
 
-ACTIONS = ["count", "query", "delete", "force-merge"]
+# The dispatch values the template branches on — not the CLI subcommand names.
+ACTIONS = ["count", "search", "delete", "force-merge"]
 
 
 def render(**overrides) -> str:
-  """The script exactly as the dispatcher builds it."""
+  """The script exactly as the dispatcher builds it, encoding included."""
   params = {
     "host": "example.us-east-1.es.amazonaws.com",
     "region": "us-east-1",
@@ -32,7 +33,10 @@ def render(**overrides) -> str:
     "dry_run": "true",
   }
   params.update(overrides)
-  return _OPENSEARCH_QUERY_SCRIPT.format(**params)
+  return _OPENSEARCH_QUERY_SCRIPT.format(
+    size=int(params.pop("size")),
+    **{key: _literal(value) for key, value in params.items()},
+  )
 
 
 def delete_filters(**overrides) -> list[dict]:
@@ -150,3 +154,43 @@ def test_delete_combines_every_filter():
     {"range": {"filing_date": {"lt": "2025-01-01"}}},
     {"range": {"indexed_at": {"lt": "2026-09-13T18:00:00Z"}}},
   ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+  "hostile",
+  [
+    '"; import os; os.system("id"); x = "',
+    'sec" or True or "',
+    "back\\slash",
+    'quote"inside',
+    "new\nline",
+  ],
+)
+def test_a_parameter_cannot_escape_its_literal(hostile):
+  """A parameter is data in the generated script, never code.
+
+  The script is assembled by substitution and then run on the bastion, so a
+  value that ended its own literal would have the remainder read as source.
+  Assert the rendered script still parses AND that the value survives intact
+  as the string it was — escaping that mangles the value is its own defect.
+  """
+  script = render(action="delete", graph_id=hostile)
+  tree = ast.parse(script)
+
+  assigned = next(
+    node.value.value
+    for node in tree.body
+    if isinstance(node, ast.Assign)
+    and isinstance(node.targets[0], ast.Name)
+    and node.targets[0].id == "graph_id"
+  )
+  assert assigned == hostile
+
+
+@pytest.mark.unit
+def test_hostile_graph_id_still_lands_in_the_filter_verbatim():
+  """Escaping happens at the source-literal boundary, not in the query."""
+  hostile = 'sec" or True or "'
+  filters = delete_filters(graph_id=hostile)
+  assert filters == [{"term": {"graph_id": hostile}}]
