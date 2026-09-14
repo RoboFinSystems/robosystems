@@ -1,6 +1,6 @@
 # The World Online — Trial Balance
 
-**Graph**: `kg1a07f3227a7878a9d882`  
+**Graph**: `kg1a09d9c4e3eb6d476062`  
 **Period**: 2023-01-01 → 2028-12-31 (cumulative; includes the 12/31/2023 opening)  
 **Source vocabulary**: `mini` (Seattle Method MINI 2026)  
 **Grain**: mini line-item concept (the 239 raw GL accounts collapse to their mini concept at ingest)  
@@ -34,5 +34,5 @@ Produced from the ingested graph via the `trialBalance` GraphQL query. A trial b
 
 ```bash
 just demo-world-online                        # full pipeline
-just demo-world-online --step trial-balance --graph kg1a07f3227a7878a9d882
+just demo-world-online --step trial-balance --graph kg1a09d9c4e3eb6d476062
 ```
