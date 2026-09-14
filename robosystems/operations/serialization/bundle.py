@@ -560,13 +560,19 @@ def build_report_bundle(
       ).scalars():
         elements_by_id[str(e.id)] = e
 
-    # Calculation arcs live on separate rs-gaap-calculation Structures, not on
-    # the rendered presentation Networks — so without this they never reach the
-    # bundle and the XBRL calculation linkbase ships empty. Pull calc arcs whose
-    # BOTH endpoints are concepts we already declare, and bind each to the
-    # rendered Network (ELR) that carries both endpoints: it inherits that
-    # Network's role (conventional shared presentation/calculation ELR) and
-    # references only declared concepts, so the emitted linkbase is Arelle-safe.
+    # A library statement's calculation arcs live on separate
+    # rs-gaap-calculation Structures, not on the rendered presentation
+    # Networks — so without this they never reach the bundle and the XBRL
+    # calculation linkbase ships empty. Pull calc arcs whose BOTH endpoints
+    # are concepts we already declare, and bind each to the rendered Network
+    # (ELR) that carries both endpoints: it inherits that Network's role
+    # (conventional shared presentation/calculation ELR) and references only
+    # declared concepts, so the emitted linkbase is Arelle-safe.
+    #
+    # Not every calc arc is off-Network: a tenant-authored disclosure keeps
+    # its own on the structure it renders from, so ``associations`` already
+    # holds those. They are passed in so they can be excluded rather than
+    # sourced a second time onto the structure they are already on.
     associations.extend(
       _source_calculation_arcs(session, associations, structures_by_id, elements_by_id)
     )
@@ -848,7 +854,7 @@ def _element_to_bundle(e: Any, standard_label: str | None = None) -> BundleEleme
 
 def _source_calculation_arcs(
   session: Session,
-  presentation_associations: list[Any],
+  loaded_associations: list[Any],
   structures_by_id: dict[str, Any],
   elements_by_id: dict[str, Any],
 ) -> list[Any]:
@@ -862,6 +868,14 @@ def _source_calculation_arcs(
   presentation concepts contain both endpoints (deterministic statement
   order). Stand-ins — not ORM rows — avoid dirtying the session with a
   reassigned ``structure_id``.
+
+  ``loaded_associations`` is every arc the caller already loaded for the
+  rendered structures — NOT only presentation ones. A tenant-authored
+  disclosure keeps its calculation arcs on the very structure it renders
+  from, so those arrive here already bundled, and re-hosting one onto that
+  same structure would emit it twice and double its footing. They are
+  excluded up front for that reason; an arc re-hosted onto a DIFFERENT
+  structure is still a distinct arc on that ELR and is kept.
   """
   from robosystems.models.extensions.association import Association
 
@@ -870,10 +884,14 @@ def _source_calculation_arcs(
     return []
 
   pres_concepts_by_structure: dict[str, set[str]] = {}
-  for a in presentation_associations:
-    pres_concepts_by_structure.setdefault(str(a.structure_id), set()).update(
+  already_bundled: set[tuple[str, str, str]] = set()
+  for a in loaded_associations:
+    structure_id = str(a.structure_id)
+    pres_concepts_by_structure.setdefault(structure_id, set()).update(
       (str(a.from_element_id), str(a.to_element_id))
     )
+    if str(a.association_type) == "calculation":
+      already_bundled.add((structure_id, str(a.from_element_id), str(a.to_element_id)))
   if not pres_concepts_by_structure:
     return []
 
@@ -898,7 +916,9 @@ def _source_calculation_arcs(
 
   # Host each arc under a rendered Network and group by (host, subtotal).
   groups: dict[tuple[str, str], list[Any]] = {}
-  seen: set[tuple[str, str, str]] = set()
+  # Seeded with what the caller already carries, so an arc is never sourced
+  # onto a structure that already holds it.
+  seen: set[tuple[str, str, str]] = set(already_bundled)
   for a in calc_rows:
     frm, to = str(a.from_element_id), str(a.to_element_id)
     host = next(

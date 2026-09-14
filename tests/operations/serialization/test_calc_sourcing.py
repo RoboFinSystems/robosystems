@@ -1,9 +1,10 @@
 """Unit tests for ``_source_calculation_arcs`` (``bundle.py``).
 
 The calc-sourcing helper pulls calculation arcs for a report's concepts and
-hosts each under the rendered Network that carries both endpoints, then emits a
-subtotal's children ONLY when every child's stored weight sign is XBRL-legal
-for the endpoints' balance types (§5.1.1.2 Table 6). The logic is pure
+hosts each under the rendered Network that carries both endpoints, skipping any
+arc the caller already loaded onto that same structure, then emits a subtotal's
+children ONLY when every child's stored weight sign is XBRL-legal for the
+endpoints' balance types (§5.1.1.2 Table 6). The logic is pure
 computation (the only DB touch is a single ``session.execute`` whose rows we
 stub), so it's exercised here without a database.
 """
@@ -37,9 +38,14 @@ def _elem(balance: str | None) -> SimpleNamespace:
   return SimpleNamespace(balance_type=balance)
 
 
-def _pres(structure_id: str, frm: str, to: str) -> SimpleNamespace:
+def _pres(
+  structure_id: str, frm: str, to: str, association_type: str = "presentation"
+) -> SimpleNamespace:
   return SimpleNamespace(
-    structure_id=structure_id, from_element_id=frm, to_element_id=to
+    structure_id=structure_id,
+    from_element_id=frm,
+    to_element_id=to,
+    association_type=association_type,
   )
 
 
@@ -141,3 +147,79 @@ def test_empty_inputs_return_empty() -> None:
   assert _source_calculation_arcs(_Session([]), [], {}, {}) == []
   # Declared elements but no presentation networks → nothing to host under.
   assert _source_calculation_arcs(_Session([_calc("a", "b")]), [], {}, _ELEMENTS) == []
+
+
+# ── A disclosure's own arcs are already bundled ──────────────────────────────
+#
+# A library statement's calc arcs live on separate rs-gaap-calculation
+# structures, so sourcing is the only way they reach the bundle. A
+# tenant-authored disclosure is the other shape: create-taxonomy-block writes
+# its presentation AND calculation arcs onto the one structure it renders from,
+# so the caller's direct load already holds them. Re-hosting one onto that same
+# structure emitted it twice and doubled the note's footing — Driftline's
+# inventory note footed to 44,000 against a reported 22,000.
+
+
+_DISCLOSURE_ELEMENTS = {
+  **_ELEMENTS,
+  "inv_total": _elem("debit"),
+  "inv_raw": _elem("debit"),
+  "inv_wip": _elem("debit"),
+}
+# The note carries both arc types on the structure it renders from.
+_DISCLOSURE_LOADED = [
+  _pres("note_struct", "inv_total", "inv_raw"),
+  _pres("note_struct", "inv_total", "inv_wip"),
+  _pres("note_struct", "inv_total", "inv_raw", "calculation"),
+  _pres("note_struct", "inv_total", "inv_wip", "calculation"),
+]
+_DISCLOSURE_STRUCTURES = {
+  **_STRUCTURES,
+  "note_struct": SimpleNamespace(block_type="regulatory_disclosure"),
+}
+
+
+def test_disclosure_own_calc_arcs_not_sourced_again() -> None:
+  # The same two arcs come back from the query; both are already on the
+  # structure that would host them, so neither is emitted a second time.
+  result = _source_calculation_arcs(
+    _Session([_calc("inv_total", "inv_raw"), _calc("inv_total", "inv_wip")]),
+    _DISCLOSURE_LOADED,
+    _DISCLOSURE_STRUCTURES,
+    _DISCLOSURE_ELEMENTS,
+  )
+  assert result == []
+
+
+def test_arc_still_sourced_onto_a_different_structure() -> None:
+  # Exclusion is per (structure, from, to), not per arc: the same parent→child
+  # presented on a second ELR is a distinct arc there and must still be hosted.
+  loaded = [
+    *_DISCLOSURE_LOADED,
+    _pres("bs_struct", "inv_total", "inv_raw"),
+    _pres("bs_struct", "inv_total", "inv_wip"),
+  ]
+  result = _source_calculation_arcs(
+    _Session([_calc("inv_total", "inv_raw"), _calc("inv_total", "inv_wip")]),
+    loaded,
+    _DISCLOSURE_STRUCTURES,
+    _DISCLOSURE_ELEMENTS,
+  )
+  # bs_struct sorts ahead of the disclosure (block_order), so it is the host.
+  assert {(r.structure_id, r.from_element_id, r.to_element_id) for r in result} == {
+    ("bs_struct", "inv_total", "inv_raw"),
+    ("bs_struct", "inv_total", "inv_wip"),
+  }
+
+
+def test_library_statement_arcs_still_sourced() -> None:
+  # The regression guard's mirror: a statement whose calc arcs are NOT in the
+  # loaded set must still get them, or the calculation linkbase ships empty.
+  result = _source_calculation_arcs(
+    _Session([_calc("assets", "assets_cur"), _calc("assets", "assets_noncur")]),
+    _PRES,
+    _STRUCTURES,
+    _ELEMENTS,
+  )
+  assert len(result) == 2
+  assert all(r.structure_id == "bs_struct" for r in result)
