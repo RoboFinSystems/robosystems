@@ -213,6 +213,40 @@ class TestConcepts:
     assert xbrl_21._concept_label(concept) == concept_label(concept)
     assert concept_label(concept) == "Revenue Recognition Policy"
 
+  def test_the_holon_bridge_carries_the_label(self) -> None:
+    """The holon is written from the XbrlModel bridge, not this encoder.
+
+    ``_concept`` sets xbrlkit's ``Concept.name`` to the QName local part, so
+    xbrlkit's own ``pref_label or name`` fallback cannot recover a tenant's
+    wording — it has to arrive as ``pref_label`` or the holon renders the
+    QName where the reader expects a name.
+    """
+    from robosystems.operations.serialization.model import _concept
+
+    bridged = _concept(
+      BundleElement(
+        id="elem_policy",
+        qname="cadence:RevenueRecognitionPolicyTextBlock",
+        name="Revenue Recognition Policy",
+        period_type="duration",
+        is_monetary=False,
+        source="native",
+      )
+    )
+    assert bridged.pref_label == "Revenue Recognition Policy"
+    assert [lbl.value for lbl in bridged.labels] == ["Revenue Recognition Policy"]
+    # A name that echoes the local part stays unlabelled through the bridge.
+    echo = _concept(
+      BundleElement(
+        id="AssetsCurrent",
+        qname="rs-gaap:AssetsCurrent",
+        name="AssetsCurrent",
+        period_type="instant",
+        source="rs-gaap",
+      )
+    )
+    assert echo.pref_label is None and echo.labels == []
+
 
 # ── Structures + reified associations ────────────────────────────────────
 
