@@ -3,8 +3,12 @@
 The demos' ``sample_output/*.jsonld`` are committed reference artifacts. This
 pins that they conform to the published RoboSystems RDF ontology
 (``frameworks/ontology/v1/shapes.ttl``) — the positive instance shapes *and*
-the negative shapes that ban the retired dialects. If a future encoder change
-(or a hand-edit of a sample) drifts the shape, this fails loudly.
+the negative shapes that ban the retired dialects.
+
+**Shape only.** A sample whose content has rotted still conforms: labels can
+vanish from every element and an arc can be emitted twice without violating a
+shape. ``test_sample_artifact_invariants.py`` is the companion that checks the
+content.
 
 It's the same validation ``serialize_to_jsonld`` runs at publish time, applied
 to the checked-in evidence so the repo can't carry a non-conformant sample.
