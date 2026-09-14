@@ -172,6 +172,11 @@ def concept_label(concept: BundleElement) -> str | None:
   standard label. A ``name`` that merely echoes the QName local part
   (``"Assets"`` for ``rs-gaap:Assets``) adds nothing over the element
   declaration, so it is skipped rather than repeated.
+
+  That echo test guards the fallback only. An authored label is a decision
+  about what the concept is called and is carried through even when it reads
+  like the QName, because someone said it; a ``name`` that matches the local
+  part records no decision at all, and is where the QName came from.
   """
   authored = (concept.label or "").strip()
   if authored:
