@@ -40,6 +40,7 @@ from robosystems.operations.serialization.bundle import (
   BundleLinkbaseLink,
   BundlePeriod,
   StatementBundle,
+  concept_label,
   namespace_uri_for,
 )
 
@@ -214,9 +215,14 @@ def _concept(element: BundleElement) -> Concept:
   prefix = element.namespace or (
     element.qname.split(":", 1)[0] if ":" in element.qname else None
   )
+  # ``concept_label``, not ``element.label``: a tenant-authored concept keeps
+  # its wording on ``name``, and ``name`` below is the QName local part, so
+  # nothing downstream could recover the label if it did not come through
+  # here. This bridge feeds the holon and the Tavi flavor both.
+  label = concept_label(element)
   labels = (
-    [Label(value=element.label, role=STANDARD_LABEL_ROLE, language=TEXT_LANGUAGE)]
-    if element.label
+    [Label(value=label, role=STANDARD_LABEL_ROLE, language=TEXT_LANGUAGE)]
+    if label
     else []
   )
   return Concept(
@@ -237,7 +243,7 @@ def _concept(element: BundleElement) -> Concept:
     nillable=True,
     # The standard label is the preferred one, as the parse sets it: the block
     # and statement tools read a row's label from it.
-    pref_label=element.label,
+    pref_label=label,
     labels=labels,
   )
 

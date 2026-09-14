@@ -153,6 +153,40 @@ class BundleElement(BaseModel):
   item_type: str | None = None
 
 
+def concept_label(concept: BundleElement) -> str | None:
+  """The human-readable label for a concept, or ``None`` when there is
+  nothing worth labelling.
+
+  Every encoder reads this rather than ``label`` directly, so the XBRL
+  label linkbase and the JSON-LD ``skos:prefLabel`` cannot disagree about
+  what a concept is called. They did: the XBRL arm carried this fallback
+  and the JSON-LD arm emitted a label only when ``label`` was set, so a
+  tenant-authored concept came out labelled in the XBRL export of a report
+  and unlabelled in the holon of the same report.
+
+  Prefers the authored label (a standard label-linkbase entry, else the
+  element's description) and falls back to ``name``, which is where a
+  tenant's own wording lives: ``create-taxonomy-block`` takes the display
+  name and derives the QName from it, and only the library seeding path
+  writes ``ElementLabel`` rows, so an extension concept has a name and no
+  standard label. A ``name`` that merely echoes the QName local part
+  (``"Assets"`` for ``rs-gaap:Assets``) adds nothing over the element
+  declaration, so it is skipped rather than repeated.
+
+  That echo test guards the fallback only. An authored label is a decision
+  about what the concept is called and is carried through even when it reads
+  like the QName, because someone said it; a ``name`` that matches the local
+  part records no decision at all, and is where the QName came from.
+  """
+  authored = (concept.label or "").strip()
+  if authored:
+    return authored
+  name = (concept.name or "").strip()
+  if name and name != concept.qname.split(":", 1)[-1]:
+    return name
+  return None
+
+
 # ── Linkbases (XBRL linkbase content) ──────────────────────────────────────
 
 

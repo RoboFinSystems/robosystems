@@ -35,6 +35,7 @@ from robosystems.operations.serialization.bundle import (
   BundleLinkbaseLink,
   BundleUnit,
   StatementBundle,
+  concept_label,
 )
 
 # ── Namespace constants (matching the v1.0 ontology) ─────────────────────
@@ -669,24 +670,9 @@ _ROLE_LABEL = "http://www.xbrl.org/2003/role/label"
 _ARCROLE_CONCEPT_LABEL = "http://www.xbrl.org/2003/arcrole/concept-label"
 
 
-def _concept_label(concept: BundleElement) -> str | None:
-  """The human-readable label for a concept, or ``None`` when there's
-  nothing worth labelling.
-
-  Prefers the authored label (``description``) and falls back to the
-  element ``name`` (which for taxonomy concepts is the display label,
-  e.g. ``"Natural Gas, Storage [Member]"``). A ``name`` that merely
-  echoes the QName local part (``"Assets"`` for ``rs-gaap:Assets``)
-  adds nothing over the element declaration, so it's skipped rather
-  than emitting a redundant label.
-  """
-  authored = (concept.label or "").strip()
-  if authored:
-    return authored
-  name = (concept.name or "").strip()
-  if name and name != _local_name(concept.qname):
-    return name
-  return None
+# The label rule lives beside ``BundleElement`` so this linkbase and the
+# JSON-LD encoder read the same one; see :func:`concept_label`.
+_concept_label = concept_label
 
 
 def _has_labels(bundle: StatementBundle) -> bool:

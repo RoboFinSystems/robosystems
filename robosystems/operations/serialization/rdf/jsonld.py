@@ -38,7 +38,10 @@ from rdflib import RDF, XSD, Graph, Literal, Namespace, URIRef
 
 from robosystems.arelle.context import CANONICAL_CONTEXT
 from robosystems.logger import logger
-from robosystems.operations.serialization.bundle import StatementBundle
+from robosystems.operations.serialization.bundle import (
+  StatementBundle,
+  concept_label,
+)
 
 # Bundle ontology version emitted on the root node.
 SERIALIZATION_VERSION = "1.0"
@@ -273,8 +276,12 @@ def _add_schema_concepts(g: Graph, bundle: StatementBundle, root: URIRef) -> Non
       # Wire value domain ('textBlock', 'monetary', ...) — 'textBlock'
       # gates the narrative rendering arm in report-components.
       g.add((uri, RS.itemType, Literal(concept.item_type)))
-    if concept.label:
-      g.add((uri, SKOS.prefLabel, Literal(concept.label)))
+    # Not ``concept.label`` — a tenant-authored concept carries its wording
+    # on ``name``, and reading the raw field here left the holon unlabelled
+    # where the XBRL export of the same report was labelled.
+    label = concept_label(concept)
+    if label:
+      g.add((uri, SKOS.prefLabel, Literal(label)))
     if concept.substitution_group:
       g.add((uri, RS.substitutionGroup, _concept_uri(concept.substitution_group)))
     g.add((uri, RS.internalId, Literal(concept.id)))
