@@ -120,6 +120,7 @@ action = "{action}"
 graph_id = "{graph_id}"
 source_type = "{source_type}"
 before_date = "{before_date}"
+indexed_before = "{indexed_before}"
 dry_run = "{dry_run}" == "true"
 
 if action == "count":
@@ -180,12 +181,16 @@ elif action == "search":
     }}))
 
 elif action == "delete":
-    # Build query: filter by graph_id + optional source_type + optional date range
+    # Build query: filter by graph_id + optional source_type + optional date ranges.
+    # filing_date trims by what a filing covers; indexed_at trims by when this
+    # index last wrote the document — the orphan sweep after a re-index.
     filters = [{{"term": {{"graph_id": graph_id}}}}]
     if source_type:
         filters.append({{"term": {{"source_type": source_type}}}})
     if before_date:
         filters.append({{"range": {{"filing_date": {{"lt": before_date}}}}}})
+    if indexed_before:
+        filters.append({{"range": {{"indexed_at": {{"lt": indexed_before}}}}}})
 
     query = {{"query": {{"bool": {{"filter": filters}}}}}}
 
@@ -243,6 +248,7 @@ def _run_opensearch_script(
   size: int = 10,
   source_type: str = "",
   before_date: str = "",
+  indexed_before: str = "",
   dry_run: bool = False,
 ) -> dict:
   """Run OpenSearch query script on bastion via SSM."""
@@ -257,6 +263,7 @@ def _run_opensearch_script(
     size=size,
     source_type=source_type,
     before_date=before_date,
+    indexed_before=indexed_before,
     dry_run="true" if dry_run else "false",
   )
 
@@ -403,12 +410,28 @@ def search_query(client, query_text, graph_id, size, json_output):
   default="",
   help="Delete docs with filing_date before this date (e.g. 2025-01-01)",
 )
+@click.option(
+  "--indexed-before",
+  default="",
+  help="Delete docs last indexed before this instant (e.g. 2026-09-13T18:00:00Z) "
+  "— the orphan sweep after a full re-index",
+)
 @click.option("--force", is_flag=True, help="Skip confirmation prompt")
 @click.pass_obj
-def search_delete(client, source_type, graph_id, before, force):
+def search_delete(client, source_type, graph_id, before, indexed_before, force):
   """Delete documents by source_type from the index.
 
   Runs an async delete-by-query on OpenSearch. Use 'search count' to monitor progress.
+
+  The two date filters answer different questions. ``--before`` trims by
+  ``filing_date`` — what the filing covers — for retention. ``--indexed-before``
+  trims by ``indexed_at``, stamped on every write, which is how you sweep the
+  orphans a re-index leaves behind: documents whose ids stopped being generated
+  because a section merged, split differently, or crossed the part-size boundary.
+  Capture that cutoff BEFORE the re-index starts; it cannot be recovered after.
+
+  Deletes are always scoped to one graph_id and one source_type — the index is
+  shared with every tenant's uploaded documents.
 
   Examples:
 
@@ -417,6 +440,8 @@ def search_delete(client, source_type, graph_id, before, force):
     just admin prod search delete ixbrl_disclosure --graph-id sec
 
     just admin prod search delete narrative_section --before 2025-01-01
+
+    just admin prod search delete ixbrl_disclosure --indexed-before 2026-09-13T18:00:00Z
 
     just admin prod search delete narrative_section --force
   """
@@ -427,20 +452,22 @@ def search_delete(client, source_type, graph_id, before, force):
     graph_id=graph_id,
     source_type=source_type,
     before_date=before,
+    indexed_before=indexed_before,
     dry_run=True,
   )
 
-  count = data.get("count", 0)
-  if count == 0:
-    filter_desc = f"source_type={source_type}, graph_id={graph_id}"
-    if before:
-      filter_desc += f", filing_date < {before}"
-    console.print(f"\n[yellow]No documents found with {filter_desc}[/yellow]\n")
-    return
-
+  # Name the date field explicitly — mistaking filing_date for indexed_at is the
+  # way this command deletes the wrong half of the corpus.
   filter_desc = f"source_type={source_type}, graph_id={graph_id}"
   if before:
     filter_desc += f", filing_date < {before}"
+  if indexed_before:
+    filter_desc += f", indexed_at < {indexed_before}"
+
+  count = data.get("count", 0)
+  if count == 0:
+    console.print(f"\n[yellow]No documents found with {filter_desc}[/yellow]\n")
+    return
 
   if not force:
     console.print(
@@ -457,6 +484,7 @@ def search_delete(client, source_type, graph_id, before, force):
     graph_id=graph_id,
     source_type=source_type,
     before_date=before,
+    indexed_before=indexed_before,
   )
 
   task_id = data.get("task")
