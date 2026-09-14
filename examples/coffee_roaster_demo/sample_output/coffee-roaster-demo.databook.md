@@ -1,5 +1,5 @@
 ---
-id: https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2
+id: https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ
 type: DataBook
 title: "Driftline Coffee Roasters Demo — Driftline Coffee Roasters"
 version: 1.0.0
@@ -20,7 +20,7 @@ tags:
   - databook
 provenance:
   source: "Driftline Coffee Roasters"
-  method: "Materialized RoboSystems Report rpt_01M24C8CC0S498AEYH6YDWNAR2 (generation 1, draft)"
+  method: "Materialized RoboSystems Report rpt_01M2ESN4NJ653NB5YSWP8C4MKQ (generation 1, draft)"
 manifest:
   entrypoints:
     - block: balance_sheet
@@ -53,16 +53,16 @@ graph:
   href: coffee-roaster-demo.holon.jsonld
   graphs:
     - id: scene
-      iri: https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2#scene
+      iri: https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ#scene
       description: "Instance facts — the values this report reports"
       disposition: inline
     - id: boundary
-      iri: https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2#boundary
+      iri: https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ#boundary
       description: "Calculation network — the rollup rules the facts must obey"
       disposition: reference
       derived_from: rs-gaap-calculations@v1
     - id: projection
-      iri: https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2#projection
+      iri: https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ#projection
       description: "Presentation network — order, indentation, subtotals"
       disposition: reference
       derived_from: rs-gaap-presentation@v1
@@ -73,7 +73,7 @@ graph:
       note: "the books, not published — a report is an aggregation of the ledger, which is internal; substantiation available to authorized parties"
 report:
   reporting_style: 025f5d48-12ce-5d65-b9eb-4f137a10ef06
-  report_id: rpt_01M24C8CC0S498AEYH6YDWNAR2
+  report_id: rpt_01M2ESN4NJ653NB5YSWP8C4MKQ
   generation_count: 1
   filing_status: draft
   periods:
@@ -107,7 +107,7 @@ A report **is** a collection of Information Blocks, and this DataBook is a proje
 
 - **Structure**: rs-gaap — Balance Sheet — Classified
 - **Information Block**: `b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d`
-- **FactSet**: `fs_01M24C8CETNYQXBZQ133Z66DT0`
+- **FactSet**: `fs_01M2ESN4RKT456YTDGGPED2KD8`
 
 | QName | Concept | 2024-09-01 → 2026-08-31 | 2025-09-01 → 2026-08-31 |
 |---|---|---: | ---:|
@@ -139,394 +139,394 @@ A report **is** a collection of Information Blocks, and this DataBook is a proje
 @prefix xbrli: <http://www.xbrl.org/2003/instance#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AH> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQJW> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:AccountsPayableCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AH" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQJW" ;
     rs:numericValue 0.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AJ> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQJX> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:AdditionalPaidInCapital ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AJ" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQJX" ;
     rs:numericValue 100000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AK> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQJY> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:CashAndCashEquivalentsAtCarryingValue ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AK" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQJY" ;
     rs:numericValue 31166.49 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AN> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQK0> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:DeferredRevenueCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AN" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQK0" ;
     rs:numericValue 51999.99 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AT> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQK5> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AT" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQK5" ;
     rs:numericValue 96000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AV> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQK6> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:PrepaidExpenseCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AV" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQK6" ;
     rs:numericValue 11000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AW> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQK7> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:ReceivablesNetCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AW" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQK7" ;
     rs:numericValue 153333.33 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AX> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQK8> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:RetainedEarningsAccumulatedDeficit ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AX" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQK8" ;
     rs:numericValue 206499.95 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591B3> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKE> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:AccountsPayableCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591B3" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKE" ;
     rs:numericValue 0.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591B4> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKF> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:AdditionalPaidInCapital ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591B4" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKF" ;
     rs:numericValue 100000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591B5> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKG> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:CashAndCashEquivalentsAtCarryingValue ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591B5" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKG" ;
     rs:numericValue 71944.4 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591B7> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKJ> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:DeferredRevenueCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591B7" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKJ" ;
     rs:numericValue 38777.77 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BC> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKQ> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BC" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKQ" ;
     rs:numericValue 22000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BD> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKR> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:PrepaidExpenseCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BD" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKR" ;
     rs:numericValue 15500.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BE> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKS> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:ReceivablesNetCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BE" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKS" ;
     rs:numericValue 17333.33 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BF> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKT> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:RetainedEarningsAccumulatedDeficit ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BF" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKT" ;
     rs:numericValue 44785.7 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BR> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQM3> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:PropertyPlantAndEquipmentNet ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BR" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQM3" ;
     rs:numericValue 67000.12 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BS> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQM4> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:PropertyPlantAndEquipmentNet ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BS" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQM4" ;
     rs:numericValue 56785.74 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591C5> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:AssetsCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591C5" ;
-    rs:numericValue 291499.82 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591C6> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:AssetsNoncurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591C6" ;
-    rs:numericValue 67000.12 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591C7> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:LiabilitiesAndStockholdersEquity ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591C7" ;
-    rs:numericValue 358499.94 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591C8> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:LiabilitiesCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591C8" ;
-    rs:numericValue 51999.99 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CA> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQME> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:StockholdersEquity ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CA" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQME" ;
     rs:numericValue 306499.95 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CB> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:Assets ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CB" ;
-    rs:numericValue 358499.94 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CC> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:Liabilities ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CC" ;
-    rs:numericValue 51999.99 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CQ> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:AssetsCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CQ" ;
-    rs:numericValue 126777.73 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CS> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:AssetsNoncurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CS" ;
-    rs:numericValue 56785.74 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CT> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMF> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:LiabilitiesAndStockholdersEquity ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CT" ;
-    rs:numericValue 183563.47 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMF" ;
+    rs:numericValue 358499.94 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CV> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:LiabilitiesCurrent ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CV" ;
-    rs:numericValue 38777.77 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CX> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:StockholdersEquity ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CX" ;
-    rs:numericValue 144785.7 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CY> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMG> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:Assets ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CY" ;
-    rs:numericValue 183563.47 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMG" ;
+    rs:numericValue 358499.94 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CZ> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMH> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:Liabilities ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CZ" ;
-    rs:numericValue 38777.77 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMH" ;
+    rs:numericValue 51999.99 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/ib/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> a rs:InformationBlock ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMJ> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:AssetsNoncurrent ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMJ" ;
+    rs:numericValue 67000.12 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMK> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:AssetsCurrent ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMK" ;
+    rs:numericValue 291499.82 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMM> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:LiabilitiesCurrent ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMM" ;
+    rs:numericValue 51999.99 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMZ> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:StockholdersEquity ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMZ" ;
+    rs:numericValue 144785.7 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQN0> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:LiabilitiesAndStockholdersEquity ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQN0" ;
+    rs:numericValue 183563.47 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQN1> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:Assets ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQN1" ;
+    rs:numericValue 183563.47 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQN2> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:Liabilities ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQN2" ;
+    rs:numericValue 38777.77 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQN3> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:AssetsNoncurrent ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQN3" ;
+    rs:numericValue 56785.74 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQN4> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:AssetsCurrent ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQN4" ;
+    rs:numericValue 126777.73 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQN5> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:LiabilitiesCurrent ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQN5" ;
+    rs:numericValue 38777.77 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/ib/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> a rs:InformationBlock ;
     skos:prefLabel "rs-gaap — Balance Sheet — Classified" ;
     rs:blockType "balance_sheet" ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT0> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD8> ;
     rs:internalId "b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d" ;
     rs:taxonomyId "cf7178a0-e2d4-58df-995a-2f0233d15466" ;
     rs:taxonomyName "rs-gaap-presentation v1" .
@@ -707,21 +707,21 @@ rs-gaap:StockholdersEquity a rs:Element ;
     rs:source "rs-gaap" ;
     rs:substitutionGroup xbrli:item .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> a rs:Period ;
     xbrli:instant "2026-08-31"^^xsd:date ;
     xbrli:periodType "instant" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> a rs:Period ;
     xbrli:instant "2025-08-31"^^xsd:date ;
     xbrli:periodType "instant" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> a rs:Entity ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> a rs:Entity ;
     skos:prefLabel "Driftline Coffee Roasters" ;
     rs:country "US" ;
-    rs:internalId "entity_kg1a088c3b1b4dc2a7e5a7" ;
+    rs:internalId "entity_kg1a09d99ffade793a8fc3" ;
     rs:legalName "Driftline Coffee Roasters" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> a rs:Unit ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> a rs:Unit ;
     xbrli:measure iso4217:USD .
 ```
 
@@ -732,7 +732,7 @@ rs-gaap:StockholdersEquity a rs:Element ;
 
 - **Structure**: rs-gaap — Income Statement — Multi-step
 - **Information Block**: `47cd6544-03d1-5bc1-8c28-31c0cfa450f9`
-- **FactSet**: `fs_01M24C8CETNYQXBZQ133Z66DT1`
+- **FactSet**: `fs_01M2ESN4RKT456YTDGGPED2KD9`
 
 | QName | Concept | 2024-09-01 → 2026-08-31 | 2025-09-01 → 2026-08-31 |
 |---|---|---: | ---:|
@@ -761,322 +761,322 @@ rs-gaap:StockholdersEquity a rs:Element ;
 @prefix xbrli: <http://www.xbrl.org/2003/instance#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AM> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQJZ> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:CostOfGoodsAndServicesSold ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AM" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQJZ" ;
     rs:numericValue 508000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AQ> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQK1> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:DepreciationDepletionAndAmortization ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AQ" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQK1" ;
     rs:numericValue 13785.62 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AR> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQK3> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:GeneralAndAdministrativeExpense ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AR" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQK3" ;
     rs:numericValue 368500.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AY> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQK9> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AY" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQK9" ;
     rs:numericValue 1226399.87 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AZ> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKA> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:SellingAndMarketingExpense ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AZ" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKA" ;
     rs:numericValue 174400.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591B6> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKH> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:CostOfGoodsAndServicesSold ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591B6" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKH" ;
     rs:numericValue 84000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591B9> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKK> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:DepreciationDepletionAndAmortization ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591B9" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKK" ;
     rs:numericValue 3214.26 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BA> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKN> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:GeneralAndAdministrativeExpense ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BA" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKN" ;
     rs:numericValue 73000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BG> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKV> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BG" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKV" ;
     rs:numericValue 189599.96 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BH> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKW> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:SellingAndMarketingExpense ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BH" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKW" ;
     rs:numericValue 20600.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BK> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKX> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:NetIncomeLoss ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BK" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKX" ;
     rs:numericValue 161714.25 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BP> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQM0> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:NetIncomeLoss ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BP" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQM0" ;
     rs:numericValue 8785.7 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591C1> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMN> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:IncomeLossFromContinuingOperations ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591C1" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMN" ;
     rs:numericValue 161714.25 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591C2> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMP> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:OperatingIncomeLoss ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMP" ;
+    rs:numericValue 161714.25 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMQ> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:Revenues ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591C2" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMQ" ;
     rs:numericValue 1226399.87 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CD> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:OperatingExpenses ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CD" ;
-    rs:numericValue 556685.62 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CE> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMR> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:CostOfRevenue ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CE" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMR" ;
     rs:numericValue 508000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CF> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMS> a rs:Fact ;
     rs:decimals "INF" ;
-    rs:element rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:element rs-gaap:OperatingExpenses ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CF" ;
-    rs:numericValue 161714.25 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMS" ;
+    rs:numericValue 556685.62 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CG> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMT> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:GrossProfit ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CG" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMT" ;
     rs:numericValue 718399.87 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CH> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMV> a rs:Fact ;
     rs:decimals "INF" ;
-    rs:element rs-gaap:OperatingIncomeLoss ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:element rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CH" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMV" ;
     rs:numericValue 161714.25 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CJ> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQN6> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:IncomeLossFromContinuingOperations ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CJ" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQN6" ;
     rs:numericValue 8785.7 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CK> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:Revenues ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CK" ;
-    rs:numericValue 189599.96 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591D0> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:OperatingExpenses ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591D0" ;
-    rs:numericValue 96814.26 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591D1> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:CostOfRevenue ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591D1" ;
-    rs:numericValue 84000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591D2> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591D2" ;
-    rs:numericValue 8785.7 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591D3> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:GrossProfit ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591D3" ;
-    rs:numericValue 105599.96 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591D4> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQN7> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:OperatingIncomeLoss ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591D4" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQN7" ;
     rs:numericValue 8785.7 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/ib/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> a rs:InformationBlock ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQN8> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:Revenues ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQN8" ;
+    rs:numericValue 189599.96 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQN9> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:CostOfRevenue ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQN9" ;
+    rs:numericValue 84000.0 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQNA> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:OperatingExpenses ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQNA" ;
+    rs:numericValue 96814.26 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQNB> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:GrossProfit ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQNB" ;
+    rs:numericValue 105599.96 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQNC> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQNC" ;
+    rs:numericValue 8785.7 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/ib/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> a rs:InformationBlock ;
     skos:prefLabel "rs-gaap — Income Statement — Multi-step" ;
     rs:blockType "income_statement" ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT1> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KD9> ;
     rs:internalId "47cd6544-03d1-5bc1-8c28-31c0cfa450f9" ;
     rs:taxonomyId "cf7178a0-e2d4-58df-995a-2f0233d15466" ;
     rs:taxonomyName "rs-gaap-presentation v1" .
@@ -1224,23 +1224,23 @@ rs-gaap:SellingAndMarketingExpense a rs:Element ;
     rs:source "rs-gaap" ;
     rs:substitutionGroup xbrli:item .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> a rs:Period ;
     xbrli:endDate "2026-08-31"^^xsd:date ;
     xbrli:periodType "duration" ;
     xbrli:startDate "2025-09-01"^^xsd:date .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> a rs:Period ;
     xbrli:endDate "2025-08-31"^^xsd:date ;
     xbrli:periodType "duration" ;
     xbrli:startDate "2024-09-01"^^xsd:date .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> a rs:Entity ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> a rs:Entity ;
     skos:prefLabel "Driftline Coffee Roasters" ;
     rs:country "US" ;
-    rs:internalId "entity_kg1a088c3b1b4dc2a7e5a7" ;
+    rs:internalId "entity_kg1a09d99ffade793a8fc3" ;
     rs:legalName "Driftline Coffee Roasters" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> a rs:Unit ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> a rs:Unit ;
     xbrli:measure iso4217:USD .
 ```
 
@@ -1251,7 +1251,7 @@ rs-gaap:SellingAndMarketingExpense a rs:Element ;
 
 - **Structure**: rs-gaap — Cash Flow Statement — Indirect
 - **Information Block**: `5473639a-2dac-56a6-b9e5-38480ea38bc1`
-- **FactSet**: `fs_01M24C8CETNYQXBZQ133Z66DT2`
+- **FactSet**: `fs_01M2ESN4RKT456YTDGGPED2KDA`
 
 | QName | Concept | 2024-09-01 → 2026-08-31 | 2025-09-01 → 2026-08-31 |
 |---|---|---: | ---:|
@@ -1279,202 +1279,202 @@ rs-gaap:SellingAndMarketingExpense a rs:Element ;
 @prefix xbrli: <http://www.xbrl.org/2003/instance#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AP> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQK2> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:DepreciationDepletionAndAmortization ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AP" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQK2" ;
     rs:numericValue 13785.62 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591B8> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKM> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:DepreciationDepletionAndAmortization ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591B8" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKM" ;
     rs:numericValue 3214.26 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BJ> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKZ> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:NetIncomeLoss ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BJ" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKZ" ;
     rs:numericValue 161714.25 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BN> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQM2> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:NetIncomeLoss ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BN" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQM2" ;
     rs:numericValue 8785.7 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BT> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQM5> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:ProceedsFromIssuanceOfCommonStock ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BT" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQM5" ;
     rs:numericValue 100000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BW> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQM7> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BW" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQM7" ;
     rs:numericValue -90000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BX> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:IncreaseDecreaseInPrepaidExpense ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BX" ;
-    rs:numericValue 4500.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BY> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:IncreaseDecreaseInAccountsReceivable ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BY" ;
-    rs:numericValue -136000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BZ> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQM8> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:IncreaseDecreaseInInventories ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BZ" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQM8" ;
     rs:numericValue -74000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591C0> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQM9> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:IncreaseDecreaseInPrepaidExpense ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQM9" ;
+    rs:numericValue 4500.0 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMA> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:IncreaseDecreaseInAccountsReceivable ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMA" ;
+    rs:numericValue -136000.0 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMB> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591C0" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMB" ;
     rs:numericValue -10777.78 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591C3> a rs:Fact ;
-    rs:decimals "INF" ;
-    rs:element rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
-    rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591C3" ;
-    rs:numericValue -40777.91 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591C4> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMC> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591C4" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMC" ;
     rs:numericValue -40777.91 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CM> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMW> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CM" ;
-    rs:numericValue 11999.96 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMW" ;
+    rs:numericValue -40777.91 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CN> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMX> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CN" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMX" ;
     rs:numericValue 21999.96 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CP> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQND> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:NetCashProvidedByUsedInFinancingActivities ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CP" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQND" ;
     rs:numericValue 100000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CR> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQNE> a rs:Fact ;
+    rs:decimals "INF" ;
+    rs:element rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
+    rs:factType "numeric" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQNE" ;
+    rs:numericValue 11999.96 ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQNF> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:NetCashProvidedByUsedInInvestingActivities ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CR" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQNF" ;
     rs:numericValue -90000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/ib/5473639a-2dac-56a6-b9e5-38480ea38bc1> a rs:InformationBlock ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/ib/5473639a-2dac-56a6-b9e5-38480ea38bc1> a rs:InformationBlock ;
     skos:prefLabel "rs-gaap — Cash Flow Statement — Indirect" ;
     rs:blockType "cash_flow_statement" ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT2> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDA> ;
     rs:internalId "5473639a-2dac-56a6-b9e5-38480ea38bc1" ;
     rs:taxonomyId "cf7178a0-e2d4-58df-995a-2f0233d15466" ;
     rs:taxonomyName "rs-gaap-presentation v1" .
@@ -1611,23 +1611,23 @@ rs-gaap:NetIncomeLoss a rs:Element ;
     rs:source "rs-gaap" ;
     rs:substitutionGroup xbrli:item .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> a rs:Period ;
     xbrli:endDate "2026-08-31"^^xsd:date ;
     xbrli:periodType "duration" ;
     xbrli:startDate "2025-09-01"^^xsd:date .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> a rs:Period ;
     xbrli:endDate "2025-08-31"^^xsd:date ;
     xbrli:periodType "duration" ;
     xbrli:startDate "2024-09-01"^^xsd:date .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> a rs:Entity ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> a rs:Entity ;
     skos:prefLabel "Driftline Coffee Roasters" ;
     rs:country "US" ;
-    rs:internalId "entity_kg1a088c3b1b4dc2a7e5a7" ;
+    rs:internalId "entity_kg1a09d99ffade793a8fc3" ;
     rs:legalName "Driftline Coffee Roasters" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> a rs:Unit ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> a rs:Unit ;
     xbrli:measure iso4217:USD .
 ```
 
@@ -1638,7 +1638,7 @@ rs-gaap:NetIncomeLoss a rs:Element ;
 
 - **Structure**: rs-gaap — Statement of Changes in Equity — Roll Forward (Total)
 - **Information Block**: `0b179e5c-5f02-506d-b8d5-860cb10c7694`
-- **FactSet**: `fs_01M24C8CETNYQXBZQ133Z66DT3`
+- **FactSet**: `fs_01M2ESN4RKT456YTDGGPED2KDB`
 
 | QName | Concept | 2024-09-01 → 2026-08-31 | 2025-09-01 → 2026-08-31 |
 |---|---|---: | ---:|
@@ -1657,86 +1657,86 @@ rs-gaap:NetIncomeLoss a rs:Element ;
 @prefix xbrli: <http://www.xbrl.org/2003/instance#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BM> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKY> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:NetIncomeLoss ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT3> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDB> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BM" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKY" ;
     rs:numericValue 161714.25 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BQ> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQM1> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:NetIncomeLoss ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT3> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDB> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BQ" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQM1" ;
     rs:numericValue 8785.7 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BV> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQM6> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:ProceedsFromIssuanceOfCommonStock ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT3> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDB> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BV" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQM6" ;
     rs:numericValue 100000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591C9> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMD> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:StockholdersEquity ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT3> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDB> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591C9" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMD" ;
     rs:numericValue 306499.95 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591CW> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQMY> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:StockholdersEquity ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT3> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDB> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591CW" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQMY" ;
     rs:numericValue 144785.7 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/ib/0b179e5c-5f02-506d-b8d5-860cb10c7694> a rs:InformationBlock ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/ib/0b179e5c-5f02-506d-b8d5-860cb10c7694> a rs:InformationBlock ;
     skos:prefLabel "rs-gaap — Statement of Changes in Equity — Roll Forward (Total)" ;
     rs:blockType "equity_statement" ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDB> ;
     rs:internalId "0b179e5c-5f02-506d-b8d5-860cb10c7694" ;
     rs:taxonomyId "cf7178a0-e2d4-58df-995a-2f0233d15466" ;
     rs:taxonomyName "rs-gaap-presentation v1" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> a rs:Period ;
-    xbrli:endDate "2026-08-31"^^xsd:date ;
-    xbrli:periodType "duration" ;
-    xbrli:startDate "2025-09-01"^^xsd:date .
-
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> a rs:Period ;
     xbrli:instant "2026-08-31"^^xsd:date ;
     xbrli:periodType "instant" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> a rs:Period ;
     xbrli:instant "2025-08-31"^^xsd:date ;
     xbrli:periodType "instant" .
+
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> a rs:Period ;
+    xbrli:endDate "2026-08-31"^^xsd:date ;
+    xbrli:periodType "duration" ;
+    xbrli:startDate "2025-09-01"^^xsd:date .
 
 rs-gaap:ProceedsFromIssuanceOfCommonStock a rs:Element ;
     skos:prefLabel "Proceeds from Issuance of Common Stock" ;
@@ -1749,7 +1749,7 @@ rs-gaap:ProceedsFromIssuanceOfCommonStock a rs:Element ;
     rs:source "rs-gaap" ;
     rs:substitutionGroup xbrli:item .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> a rs:Period ;
     xbrli:endDate "2025-08-31"^^xsd:date ;
     xbrli:periodType "duration" ;
     xbrli:startDate "2024-09-01"^^xsd:date .
@@ -1776,13 +1776,13 @@ rs-gaap:StockholdersEquity a rs:Element ;
     rs:source "rs-gaap" ;
     rs:substitutionGroup xbrli:item .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> a rs:Entity ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> a rs:Entity ;
     skos:prefLabel "Driftline Coffee Roasters" ;
     rs:country "US" ;
-    rs:internalId "entity_kg1a088c3b1b4dc2a7e5a7" ;
+    rs:internalId "entity_kg1a09d99ffade793a8fc3" ;
     rs:legalName "Driftline Coffee Roasters" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> a rs:Unit ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> a rs:Unit ;
     xbrli:measure iso4217:USD .
 ```
 
@@ -1792,17 +1792,17 @@ rs-gaap:StockholdersEquity a rs:Element ;
 ## Significant Accounting Policies
 
 - **Structure**: Significant Accounting Policies
-- **Information Block**: `struct_01M24C7V794B6HDY66K6JJ180R`
-- **FactSet**: `fs_01M24C8CF4VRH9187313DF4GQA`
+- **Information Block**: `struct_01M2ESMEHA4VCDAQKDA18FGVZF`
+- **FactSet**: `fs_01M2ESN4TX8WG19TANVT2T3S15`
 
 | QName | Concept | 2024-09-01 → 2026-08-31 | 2025-09-01 → 2026-08-31 |
 |---|---|---: | ---:|
-| `driftline:InventoryPolicyTextBlock` |   Inventory Policy Text Block | — | — |
-| `driftline:RevenueRecognitionPolicyTextBlock` |   Revenue Recognition Policy Text Block | — | — |
-| `driftline:DepreciationPolicyTextBlock` |   Depreciation Policy Text Block | — | — |
+| `driftline:InventoryPolicyTextBlock` |   Inventory and Cost of Goods Sold Policy | — | — |
+| `driftline:RevenueRecognitionPolicyTextBlock` |   Revenue Recognition Policy | — | — |
+| `driftline:DepreciationPolicyTextBlock` |   Depreciation and Prepaid Policy | — | — |
 
 <details>
-<summary>▸ Significant Accounting Policies — scene RDF / Turtle (83 triples · 7.8 KB)</summary>
+<summary>▸ Significant Accounting Policies — scene RDF / Turtle (86 triples · 7.9 KB)</summary>
 
 ```turtle {#regulatory_disclosure}
 @prefix rs: <https://robosystems.ai/vocab/> .
@@ -1810,14 +1810,14 @@ rs-gaap:StockholdersEquity a rs:Element ;
 @prefix xbrli: <http://www.xbrl.org/2003/instance#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CF5WJZBE7Q734V495XW> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4TYX7EBJVHT9H42M9Z5> a rs:Fact ;
     rs:contentType "text/markdown" ;
     rs:element <https://robosystems.ai/concept/driftline:InventoryPolicyTextBlock> ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CF4VRH9187313DF4GQA> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4TX8WG19TANVT2T3S15> ;
     rs:factType "nonnumeric" ;
-    rs:internalId "fact_01M24C8CF5WJZBE7Q734V495XW" ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
+    rs:internalId "fact_01M2ESN4TYX7EBJVHT9H42M9Z5" ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
     rs:stringValue """# Inventory & Cost of Goods Sold Policy — Driftline Coffee Roasters
 
 ## Method
@@ -1832,16 +1832,16 @@ Buying green coffee ahead of a wholesale launch or the holiday season builds the
 
 ## Gross Margin
 Target blended gross margin ≈ 55%. Investigate months where COGS as a share of revenue moves materially off trend."""^^xsd:string ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7V794B6HDY66K6JJ180R> .
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMEHA4VCDAQKDA18FGVZF> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CF5WJZBE7Q734V495XX> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4TYX7EBJVHT9H42M9Z6> a rs:Fact ;
     rs:contentType "text/markdown" ;
     rs:element <https://robosystems.ai/concept/driftline:DepreciationPolicyTextBlock> ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CF4VRH9187313DF4GQA> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4TX8WG19TANVT2T3S15> ;
     rs:factType "nonnumeric" ;
-    rs:internalId "fact_01M24C8CF5WJZBE7Q734V495XX" ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
+    rs:internalId "fact_01M2ESN4TYX7EBJVHT9H42M9Z6" ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
     rs:stringValue """# Depreciation & Prepaid Policy — Driftline Coffee Roasters
 
 ## Depreciation
@@ -1861,16 +1861,16 @@ Purchases with a term greater than one month are capitalized and amortized strai
 | Annual Platform Prepay | $6,000.00 | 12 months | $500.00 | Software & Subscriptions (6400) | Prepaid Software (1210) |
 
 During each close, review prepaid and fixed-asset accounts for new purchases that lack a schedule, and create one."""^^xsd:string ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7V794B6HDY66K6JJ180R> .
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMEHA4VCDAQKDA18FGVZF> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CF5WJZBE7Q734V495XY> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4TYX7EBJVHT9H42M9Z7> a rs:Fact ;
     rs:contentType "text/markdown" ;
     rs:element <https://robosystems.ai/concept/driftline:RevenueRecognitionPolicyTextBlock> ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CF4VRH9187313DF4GQA> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4TX8WG19TANVT2T3S15> ;
     rs:factType "nonnumeric" ;
-    rs:internalId "fact_01M24C8CF5WJZBE7Q734V495XY" ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
+    rs:internalId "fact_01M2ESN4TYX7EBJVHT9H42M9Z7" ;
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
     rs:stringValue """# Revenue Recognition Policy — Driftline Coffee Roasters
 
 ## Standard
@@ -1891,54 +1891,57 @@ Subscriber prepayments are a liability until the coffee ships. Each month:
 
 ## Wholesale Accounts Receivable
 Wholesale sells on net-30 terms. Receivables that age past 60 days, or that concentrate in a single large account, are a working-capital and credit risk — review the AR aging by customer every close."""^^xsd:string ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7V794B6HDY66K6JJ180R> .
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMEHA4VCDAQKDA18FGVZF> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/ib/struct_01M24C7V794B6HDY66K6JJ180R> a rs:InformationBlock ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/ib/struct_01M2ESMEHA4VCDAQKDA18FGVZF> a rs:InformationBlock ;
     skos:prefLabel "Significant Accounting Policies" ;
     rs:blockType "regulatory_disclosure" ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CF4VRH9187313DF4GQA> ;
-    rs:internalId "struct_01M24C7V794B6HDY66K6JJ180R" ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7V794B6HDY66K6JJ180R> ;
-    rs:taxonomyId "tax_01M24C7V77ME31EX0H1D3BHA61" ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4TX8WG19TANVT2T3S15> ;
+    rs:internalId "struct_01M2ESMEHA4VCDAQKDA18FGVZF" ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMEHA4VCDAQKDA18FGVZF> ;
+    rs:taxonomyId "tax_01M2ESMEH8VNEG0JPG3ERGRJZN" ;
     rs:taxonomyName "Driftline Policy Notes" .
 
 <https://robosystems.ai/concept/driftline:DepreciationPolicyTextBlock> a rs:Element ;
+    skos:prefLabel "Depreciation and Prepaid Policy" ;
     xbrli:balance "debit" ;
     xbrli:periodType "duration" ;
     rs:abstract false ;
     rs:elementType "concept" ;
-    rs:internalId "elem_01M24C7V78QVQJ59NHQ5BJMAFB" ;
+    rs:internalId "elem_01M2ESMEH908S7B3GGK49KRFKF" ;
     rs:itemType "textBlock" ;
     rs:monetary false ;
     rs:source "native" .
 
 <https://robosystems.ai/concept/driftline:InventoryPolicyTextBlock> a rs:Element ;
+    skos:prefLabel "Inventory and Cost of Goods Sold Policy" ;
     xbrli:balance "debit" ;
     xbrli:periodType "duration" ;
     rs:abstract false ;
     rs:elementType "concept" ;
-    rs:internalId "elem_01M24C7V78QVQJ59NHQ5BJMAF9" ;
+    rs:internalId "elem_01M2ESMEH908S7B3GGK49KRFKD" ;
     rs:itemType "textBlock" ;
     rs:monetary false ;
     rs:source "native" .
 
 <https://robosystems.ai/concept/driftline:RevenueRecognitionPolicyTextBlock> a rs:Element ;
+    skos:prefLabel "Revenue Recognition Policy" ;
     xbrli:balance "debit" ;
     xbrli:periodType "duration" ;
     rs:abstract false ;
     rs:elementType "concept" ;
-    rs:internalId "elem_01M24C7V78QVQJ59NHQ5BJMAFA" ;
+    rs:internalId "elem_01M2ESMEH908S7B3GGK49KRFKE" ;
     rs:itemType "textBlock" ;
     rs:monetary false ;
     rs:source "native" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> a rs:Entity ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> a rs:Entity ;
     skos:prefLabel "Driftline Coffee Roasters" ;
     rs:country "US" ;
-    rs:internalId "entity_kg1a088c3b1b4dc2a7e5a7" ;
+    rs:internalId "entity_kg1a09d99ffade793a8fc3" ;
     rs:legalName "Driftline Coffee Roasters" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> a rs:Period ;
     xbrli:endDate "2026-08-31"^^xsd:date ;
     xbrli:periodType "duration" ;
     xbrli:startDate "2025-09-01"^^xsd:date .
@@ -1950,18 +1953,18 @@ Wholesale sells on net-30 terms. Receivables that age past 60 days, or that conc
 ## Inventory Components
 
 - **Structure**: Inventory Components
-- **Information Block**: `struct_01M24C7Q9EBSQXCHJEWTECDY1V`
-- **FactSet**: `fs_01M24C8CETNYQXBZQ133Z66DT4`
+- **Information Block**: `struct_01M2ESMAKQKWZ6MQCNHC6RP2ER`
+- **FactSet**: `fs_01M2ESN4RKT456YTDGGPED2KDC`
 
 | QName | Concept | 2024-09-01 → 2026-08-31 | 2025-09-01 → 2026-08-31 |
 |---|---|---: | ---:|
-| `driftline:InventoryRawMaterials` |   Inventory Raw Materials | — | $88,000.00 |
-| `driftline:InventoryWorkInProcess` |   Inventory Work In Process | — | $3,000.00 |
-| `driftline:InventoryFinishedGoods` |   Inventory Finished Goods | — | $5,000.00 |
+| `driftline:InventoryRawMaterials` |   Raw Materials — Green Coffee | — | $88,000.00 |
+| `driftline:InventoryWorkInProcess` |   Work in Process — Roasting | — | $3,000.00 |
+| `driftline:InventoryFinishedGoods` |   Finished Goods — Bagged Coffee | — | $5,000.00 |
 | `rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings` | **Inventory, Net of Allowances, Customer Advances and Progress Billings** | — | $96,000.00 |
 
 <details>
-<summary>▸ Inventory Components — scene RDF / Turtle (151 triples · 9.8 KB)</summary>
+<summary>▸ Inventory Components — scene RDF / Turtle (154 triples · 10.0 KB)</summary>
 
 ```turtle {#regulatory_disclosure}
 @prefix iso4217: <http://www.xbrl.org/2003/iso4217#> .
@@ -1971,143 +1974,146 @@ Wholesale sells on net-30 terms. Receivables that age past 60 days, or that conc
 @prefix xbrli: <http://www.xbrl.org/2003/instance#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AE> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQJS> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element <https://robosystems.ai/concept/driftline:InventoryFinishedGoods> ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT4> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDC> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AE" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQJS" ;
     rs:numericValue 5000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7Q9EBSQXCHJEWTECDY1V> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMAKQKWZ6MQCNHC6RP2ER> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AF> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQJT> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element <https://robosystems.ai/concept/driftline:InventoryRawMaterials> ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT4> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDC> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AF" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQJT" ;
     rs:numericValue 88000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7Q9EBSQXCHJEWTECDY1V> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMAKQKWZ6MQCNHC6RP2ER> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AG> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQJV> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element <https://robosystems.ai/concept/driftline:InventoryWorkInProcess> ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT4> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDC> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AG" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQJV" ;
     rs:numericValue 3000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7Q9EBSQXCHJEWTECDY1V> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMAKQKWZ6MQCNHC6RP2ER> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591AS> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQK4> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT4> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDC> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591AS" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQK4" ;
     rs:numericValue 96000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7Q9EBSQXCHJEWTECDY1V> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMAKQKWZ6MQCNHC6RP2ER> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591B0> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKB> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element <https://robosystems.ai/concept/driftline:InventoryFinishedGoods> ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT4> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDC> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591B0" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKB" ;
     rs:numericValue 5000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7Q9EBSQXCHJEWTECDY1V> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMAKQKWZ6MQCNHC6RP2ER> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591B1> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKC> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element <https://robosystems.ai/concept/driftline:InventoryRawMaterials> ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT4> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDC> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591B1" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKC" ;
     rs:numericValue 14000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7Q9EBSQXCHJEWTECDY1V> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMAKQKWZ6MQCNHC6RP2ER> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591B2> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKD> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element <https://robosystems.ai/concept/driftline:InventoryWorkInProcess> ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT4> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDC> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591B2" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKD" ;
     rs:numericValue 3000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7Q9EBSQXCHJEWTECDY1V> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMAKQKWZ6MQCNHC6RP2ER> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/fact/fact_01M24C8CEYR93M205JVA0591BB> a rs:Fact ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/fact/fact_01M2ESN4S6PF2ZYWZBS2REAQKP> a rs:Fact ;
     rs:decimals "INF" ;
     rs:element rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings ;
-    rs:entity <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT4> ;
+    rs:entity <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDC> ;
     rs:factType "numeric" ;
-    rs:internalId "fact_01M24C8CEYR93M205JVA0591BB" ;
+    rs:internalId "fact_01M2ESN4S6PF2ZYWZBS2REAQKP" ;
     rs:numericValue 22000.0 ;
-    rs:period <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7Q9EBSQXCHJEWTECDY1V> ;
-    rs:unit <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> .
+    rs:period <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMAKQKWZ6MQCNHC6RP2ER> ;
+    rs:unit <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/ib/struct_01M24C7Q9EBSQXCHJEWTECDY1V> a rs:InformationBlock ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/ib/struct_01M2ESMAKQKWZ6MQCNHC6RP2ER> a rs:InformationBlock ;
     skos:prefLabel "Inventory Components" ;
     rs:blockType "regulatory_disclosure" ;
-    rs:factSet <https://robosystems.ai/factset/fs_01M24C8CETNYQXBZQ133Z66DT4> ;
-    rs:internalId "struct_01M24C7Q9EBSQXCHJEWTECDY1V" ;
-    rs:structure <https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/structure/struct_01M24C7Q9EBSQXCHJEWTECDY1V> ;
-    rs:taxonomyId "tax_01M24C7Q9BX0PHKF81QPRT583H" ;
+    rs:factSet <https://robosystems.ai/factset/fs_01M2ESN4RKT456YTDGGPED2KDC> ;
+    rs:internalId "struct_01M2ESMAKQKWZ6MQCNHC6RP2ER" ;
+    rs:structure <https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/structure/struct_01M2ESMAKQKWZ6MQCNHC6RP2ER> ;
+    rs:taxonomyId "tax_01M2ESMAKMF7R3CC06CV8E5WXM" ;
     rs:taxonomyName "Driftline Reporting Extension" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_2> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_1> a rs:Period ;
     xbrli:instant "2026-08-31"^^xsd:date ;
     xbrli:periodType "instant" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_4> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_2> a rs:Period ;
     xbrli:instant "2025-08-31"^^xsd:date ;
     xbrli:periodType "instant" .
 
 <https://robosystems.ai/concept/driftline:InventoryFinishedGoods> a rs:Element ;
+    skos:prefLabel "Finished Goods — Bagged Coffee" ;
     xbrli:balance "debit" ;
     xbrli:periodType "instant" ;
     rs:abstract false ;
     rs:elementType "concept" ;
-    rs:internalId "elem_01M24C7Q9CX8W364QEC5WQMNCK" ;
+    rs:internalId "elem_01M2ESMAKNEBEGA3ZJ6QVM428M" ;
     rs:monetary true ;
     rs:source "native" .
 
 <https://robosystems.ai/concept/driftline:InventoryRawMaterials> a rs:Element ;
+    skos:prefLabel "Raw Materials — Green Coffee" ;
     xbrli:balance "debit" ;
     xbrli:periodType "instant" ;
     rs:abstract false ;
     rs:elementType "concept" ;
-    rs:internalId "elem_01M24C7Q9CX8W364QEC5WQMNCH" ;
+    rs:internalId "elem_01M2ESMAKNEBEGA3ZJ6QVM428J" ;
     rs:monetary true ;
     rs:source "native" .
 
 <https://robosystems.ai/concept/driftline:InventoryWorkInProcess> a rs:Element ;
+    skos:prefLabel "Work in Process — Roasting" ;
     xbrli:balance "debit" ;
     xbrli:periodType "instant" ;
     rs:abstract false ;
     rs:elementType "concept" ;
-    rs:internalId "elem_01M24C7Q9CX8W364QEC5WQMNCJ" ;
+    rs:internalId "elem_01M2ESMAKNEBEGA3ZJ6QVM428K" ;
     rs:monetary true ;
     rs:source "native" .
 
@@ -2122,23 +2128,23 @@ rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings a rs:Element
     rs:source "rs-gaap" ;
     rs:substitutionGroup xbrli:item .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_1> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_3> a rs:Period ;
     xbrli:endDate "2026-08-31"^^xsd:date ;
     xbrli:periodType "duration" ;
     xbrli:startDate "2025-09-01"^^xsd:date .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/period/p_3> a rs:Period ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/period/p_4> a rs:Period ;
     xbrli:endDate "2025-08-31"^^xsd:date ;
     xbrli:periodType "duration" ;
     xbrli:startDate "2024-09-01"^^xsd:date .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/entity/entity_kg1a088c3b1b4dc2a7e5a7> a rs:Entity ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/entity/entity_kg1a09d99ffade793a8fc3> a rs:Entity ;
     skos:prefLabel "Driftline Coffee Roasters" ;
     rs:country "US" ;
-    rs:internalId "entity_kg1a088c3b1b4dc2a7e5a7" ;
+    rs:internalId "entity_kg1a09d99ffade793a8fc3" ;
     rs:legalName "Driftline Coffee Roasters" .
 
-<https://robosystems.ai/report/rpt_01M24C8CC0S498AEYH6YDWNAR2/unit/u_USD> a rs:Unit ;
+<https://robosystems.ai/report/rpt_01M2ESN4NJ653NB5YSWP8C4MKQ/unit/u_USD> a rs:Unit ;
     xbrli:measure iso4217:USD .
 ```
 
@@ -2154,7 +2160,7 @@ Independent, standards-grade checks of the same bundle this DataBook renders —
 #### Result: ✅ **Conforms to RoboSystems RDF Ontology v1**
 
 - **Bundle**: `coffee-roaster-demo.jsonld`
-- **Graph triples**: 3,940
+- **Graph triples**: 3,948
 - **rs:Fact nodes**: 90
 - **rs:Association nodes**: 177
 - **rs:Element nodes**: 101
@@ -2170,7 +2176,7 @@ _None._ Zero violations.
 
 #### Result: ✅ **Valid XBRL 2.1**
 
-- **Package**: `coffee-roaster-demo.zip` (13,944 bytes)
+- **Package**: `coffee-roaster-demo.zip` (13,922 bytes)
 - **Files in zip**: 5 (`instance.xml, report-cal.xml, report-lab.xml, report-pre.xml, report.xsd`)
 - **Facts loaded by Arelle**: 70
 - **Load errors**: 0

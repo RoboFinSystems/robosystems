@@ -1,7 +1,7 @@
 # The World Online — Four-Statement Report (rs-gaap projection)
 
-**Graph**: `kg1a07f3227a7878a9d882`
-**Report**: `rpt_01M1ZK6QJ9JD5MVYDYHVYQB3J7` (published)
+**Graph**: `kg1a09d9c4e3eb6d476062`
+**Report**: `rpt_01M2ESV3NAG40A1KQ5AE5ZP3BH` (published)
 **Period**: 2024-01-01 → 2028-12-31 (cumulative; opening balance 12/31/2023)
 **Dataset**: Charlie Hoffman's *The World Online* — 22,288 GL lines, 3,389 entries
 **Source vocabulary**: `mini` (Seattle Method MINI 2026)
