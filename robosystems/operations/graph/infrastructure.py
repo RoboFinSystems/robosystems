@@ -30,6 +30,9 @@ from botocore.exceptions import ClientError
 from robosystems.config import env
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.logger import logger
+from robosystems.middleware.graph.allocation_manager import (
+  OCCUPYING_DATABASE_STATUSES,
+)
 
 if TYPE_CHECKING:
   from mypy_boto3_cloudwatch import CloudWatchClient  # type: ignore[import-not-found]
@@ -51,6 +54,16 @@ TIER_CAPACITY_MAP = {
   "ladybug-xlarge": 1,
   "ladybug-shared": 10,
 }
+
+# Tiers a customer graph can actually be allocated to. `ladybug-shared` is
+# deliberately absent: those instances host platform-managed shared repositories
+# (SEC and its subgraphs) at 10 slots each, and no tenant is ever placed on one.
+# Counting them as capacity is what made the fleet-wide utilisation percentages
+# useless — on 2026-08-31 the Standard tier was 100% full and refusing signups
+# while ClusterUsedCapacityPercent read 30.77%, because 20 of its 26 "slots" were
+# shared-repository slots. TenantSlotsFree is reported per tier for these three
+# only, so a tier with headroom can never mask a tier that is full.
+TENANT_TIERS = ("ladybug-standard", "ladybug-large", "ladybug-xlarge")
 
 # EC2 instance ID pattern
 EC2_INSTANCE_ID_PATTERN = re.compile(r"^i-[0-9a-f]{8,17}$")
@@ -813,20 +826,62 @@ class InstanceMonitor:
           ]
         )
 
-      # Count active databases
+      # One pass over the graph registry serves two purposes: the active-database
+      # count, and the per-instance occupancy that TenantSlotsFree is computed
+      # from. It projects instead of using Select="COUNT" because the occupancy
+      # map needs the rows, and it paginates — the previous COUNT form read
+      # `Count` off the first page only, which silently undercounts as soon as a
+      # scan exceeds 1 MB.
+      occupied_by_instance: dict[str, int] = {}
       try:
-        active_db_response = graph_table.scan(
-          FilterExpression="#s <> :deleted AND #s <> :pending_deletion",
-          ExpressionAttributeNames={"#s": "status"},
-          ExpressionAttributeValues={
+        total_active = 0
+        scan_kwargs: dict[str, Any] = {
+          "FilterExpression": "#s <> :deleted AND #s <> :pending_deletion",
+          "ExpressionAttributeNames": {"#s": "status", "#i": "instance_id"},
+          "ExpressionAttributeValues": {
             ":deleted": "deleted",
             ":pending_deletion": "pending_deletion",
           },
-          Select="COUNT",
-        )
-        total_active = active_db_response.get("Count", total_used)
-      except Exception:
+          "ProjectionExpression": "#i, #s",
+        }
+        while True:
+          graph_response = graph_table.scan(**scan_kwargs)
+          for row in graph_response.get("Items", []):
+            total_active += 1
+            if row.get("status") in OCCUPYING_DATABASE_STATUSES:
+              row_instance = row.get("instance_id")
+              if row_instance:
+                occupied_by_instance[row_instance] = (
+                  occupied_by_instance.get(row_instance, 0) + 1
+                )
+          last_key = graph_response.get("LastEvaluatedKey")
+          if not last_key:
+            break
+          scan_kwargs["ExclusiveStartKey"] = last_key
+      except Exception as exc:
+        # Occupancy is unknown, so publishing TenantSlotsFree would assert
+        # headroom nobody verified. Leave it unpublished and let the alarm's
+        # TreatMissingData: breaching speak instead.
+        logger.warning(f"Graph registry scan failed, skipping TenantSlotsFree: {exc}")
         total_active = total_used
+        occupied_by_instance = {}
+        tenant_slots_free = None
+      else:
+        tenant_slots_free = dict.fromkeys(TENANT_TIERS, 0)
+        for instance in instances:
+          tier = instance.get("tier") or instance.get(
+            "cluster_tier", "ladybug-standard"
+          )
+          if tier not in tenant_slots_free:
+            continue
+          instance_id = instance.get("instance_id")
+          # `max_databases` and the graph registry, deliberately — the same two
+          # inputs `_find_best_instance` places against. Not `total_capacity`,
+          # and not the instance registry's `database_count`, both of which can
+          # disagree with where graphs actually are.
+          slot_total = int(instance.get("max_databases") or _get_tier_capacity(tier))
+          occupied = occupied_by_instance.get(instance_id, 0)
+          tenant_slots_free[tier] += max(0, slot_total - occupied)
 
       # Overall cluster metrics
       if total_capacity > 0:
@@ -895,6 +950,21 @@ class InstanceMonitor:
                 ],
               }
             )
+
+      # Per-tier free tenant slots. Published outside the `total_capacity > 0`
+      # branch above on purpose: an empty fleet has zero free slots, and that is
+      # precisely the reading worth alarming on. The cluster percentages above
+      # cannot say it — 0/0 publishes nothing at all.
+      if tenant_slots_free is not None:
+        metrics.extend(
+          {
+            "MetricName": "TenantSlotsFree",
+            "Value": free,
+            "Unit": "Count",
+            "Dimensions": [{"Name": "ClusterTier", "Value": tier}],
+          }
+          for tier, free in tenant_slots_free.items()
+        )
 
       # Use environment-specific namespace
       cloudwatch_namespace = f"RoboSystems/Graph/{self.environment}"

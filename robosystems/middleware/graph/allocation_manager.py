@@ -91,6 +91,21 @@ class InstanceStatus(Enum):
   TERMINATING = "terminating"
 
 
+# A graph row in one of these statuses occupies a slot on its instance. This is
+# the single definition of "occupied" for the whole platform: `_find_best_instance`
+# places against it, and the fleet metrics collector reports free slots against it
+# (`operations/graph/infrastructure.py`). Keep them on one constant — a capacity
+# *reading* that uses a different status rule than the capacity *decision* will
+# disagree with reality in whichever direction nobody is looking.
+OCCUPYING_DATABASE_STATUSES = frozenset(
+  {
+    DatabaseStatus.ACTIVE.value,
+    DatabaseStatus.CREATING.value,
+    DatabaseStatus.MIGRATING.value,
+  }
+)
+
+
 @dataclass
 class DatabaseLocation:
   """Database location information."""
@@ -956,11 +971,6 @@ class LadybugAllocationManager:
     """
     from boto3.dynamodb.conditions import Key
 
-    occupying_statuses = {
-      DatabaseStatus.ACTIVE.value,
-      DatabaseStatus.CREATING.value,
-      DatabaseStatus.MIGRATING.value,
-    }
     count = 0
     query_kwargs: dict[str, Any] = {
       "IndexName": "instance-index",
@@ -971,7 +981,7 @@ class LadybugAllocationManager:
       count += sum(
         1
         for item in response.get("Items", [])
-        if item.get("status") in occupying_statuses
+        if item.get("status") in OCCUPYING_DATABASE_STATUSES
       )
       last_key = response.get("LastEvaluatedKey")
       if not last_key:
