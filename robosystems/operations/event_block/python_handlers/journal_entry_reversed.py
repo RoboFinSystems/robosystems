@@ -94,13 +94,23 @@ def dispatch(
     update(Entry).where(Entry.id == reversing.id).values(triggered_by_event_id=event.id)
   )
 
-  # Also link the now-`reversed` original — completes the audit chain so
-  # queries can find the originating reversal event from either side.
-  session.execute(
-    update(Entry)
-    .where(Entry.id == metadata.entry_id)
-    .values(triggered_by_event_id=event.id)
-  )
+  # The original is deliberately NOT re-pointed at this event. It used to be,
+  # to "complete the audit chain from either side" — but `Entry` has a single
+  # `triggered_by_event_id`, so that was an overwrite, not a second link: it
+  # discarded the provenance of the event that *created* the entry.
+  #
+  # Three consumers read this column as creation provenance and were wrong
+  # afterwards. `_assert_retractable` counts landed entries by it, so the
+  # creating event became retractable while its posted entry stood. The QB
+  # full-rebuild wipe (`extensions/loader.py`) deletes entries whose creating
+  # event is in the wipe set, so a re-pointed original survives its own wipe as
+  # an orphan while a reversal-event wipe takes it instead. And the projection
+  # then asserts an entry posted in March was caused by an event that occurred
+  # in September.
+  #
+  # The backward link already exists and needs no column: the reversing entry
+  # carries `reversal_of = <original>` and its own `triggered_by_event_id`, so
+  # "which event reversed this entry" is one join from the original.
 
   logger.info(
     "journal_entry_reversed event %s fired: original=%s reversing=%s",

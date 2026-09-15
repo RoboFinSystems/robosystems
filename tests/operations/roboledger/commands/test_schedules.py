@@ -56,11 +56,17 @@ def test_delete_schedule_removes_information_block_dependents_before_structure()
 
   structure = MagicMock()
   structure.id = "struct_sched"
+  # `_load_schedule_or_404` locks by primary key and checks the
+  # block type in Python, so the mock must carry it.
+  structure.block_type = "schedule"
 
   deleted_models: list[type] = []
   session = MagicMock()
+  session.get.return_value = structure
   session.execute.side_effect = [
-    _exec_result(row=structure),
+    # `lock_by_id` bounds its wait, so a `SET LOCAL lock_timeout`
+    # lands here before the row itself comes back from `session.get`.
+    _exec_result(),
     # The pending-obligation void bounds its wait, so a `SET LOCAL
     # lock_timeout` lands here.
     _exec_result(),
@@ -98,11 +104,17 @@ def test_delete_schedule_voids_pending_obligations_before_deletion() -> None:
 
   structure = MagicMock()
   structure.id = "struct_sched"
+  # `_load_schedule_or_404` locks by primary key and checks the
+  # block type in Python, so the mock must carry it.
+  structure.block_type = "schedule"
 
   deleted_models: list[type] = []
   session = MagicMock()
+  session.get.return_value = structure
   session.execute.side_effect = [
-    _exec_result(row=structure),
+    # `lock_by_id` bounds its wait, so a `SET LOCAL lock_timeout`
+    # lands here before the row itself comes back from `session.get`.
+    _exec_result(),
     _exec_result(),  # SET LOCAL lock_timeout around the void
     _exec_result(scalars_all=[]),
     _exec_result(scalars_all=[]),
@@ -131,6 +143,9 @@ def test_delete_schedule_voids_pending_obligations_before_deletion() -> None:
 def test_update_schedule_keeps_omitted_metadata_null_in_typed_mechanics() -> None:
   structure = MagicMock()
   structure.id = "struct_sched"
+  # `_load_schedule_or_404` locks by primary key and checks the
+  # block type in Python, so the mock must carry it.
+  structure.block_type = "schedule"
   structure.name = "Old Name"
   structure.taxonomy_id = "tax_1"
   structure.metadata_ = {
@@ -141,8 +156,11 @@ def test_update_schedule_keeps_omitted_metadata_null_in_typed_mechanics() -> Non
   }
 
   session = MagicMock()
+  session.get.return_value = structure
   session.execute.side_effect = [
-    _exec_result(row=structure),
+    # `lock_by_id` bounds its wait, so a `SET LOCAL lock_timeout`
+    # lands here before the row itself comes back from `session.get`.
+    _exec_result(),
     _exec_result(fetchone_row=MagicMock(cnt=2)),
     _exec_result(fetchone_row=MagicMock(cnt=1)),
   ]
@@ -164,6 +182,9 @@ def test_update_schedule_template_change_triggers_supersession() -> None:
 
   structure = MagicMock()
   structure.id = "struct_sched"
+  # `_load_schedule_or_404` locks by primary key and checks the
+  # block type in Python, so the mock must carry it.
+  structure.block_type = "schedule"
   structure.name = "Existing"
   structure.taxonomy_id = "tax_1"
   structure.metadata_ = {
@@ -178,8 +199,11 @@ def test_update_schedule_template_change_triggers_supersession() -> None:
   }
 
   session = MagicMock()
+  session.get.return_value = structure
   session.execute.side_effect = [
-    _exec_result(row=structure),
+    # `lock_by_id` bounds its wait, so a `SET LOCAL lock_timeout`
+    # lands here before the row itself comes back from `session.get`.
+    _exec_result(),
     # The template-change branch bounds its wait for the pending obligations
     # before superseding them, so a `SET LOCAL lock_timeout` lands here.
     _exec_result(),
@@ -230,6 +254,9 @@ def test_update_schedule_no_template_change_skips_supersession() -> None:
 
   structure = MagicMock()
   structure.id = "struct_sched"
+  # `_load_schedule_or_404` locks by primary key and checks the
+  # block type in Python, so the mock must carry it.
+  structure.block_type = "schedule"
   structure.name = "Old Name"
   structure.taxonomy_id = "tax_1"
   structure.metadata_ = {
@@ -241,8 +268,11 @@ def test_update_schedule_no_template_change_skips_supersession() -> None:
   }
 
   session = MagicMock()
+  session.get.return_value = structure
   session.execute.side_effect = [
-    _exec_result(row=structure),
+    # `lock_by_id` bounds its wait, so a `SET LOCAL lock_timeout`
+    # lands here before the row itself comes back from `session.get`.
+    _exec_result(),
     _exec_result(fetchone_row=MagicMock(cnt=2)),
     _exec_result(fetchone_row=MagicMock(cnt=1)),
   ]
@@ -267,6 +297,9 @@ def test_update_schedule_identical_template_skips_supersession() -> None:
 
   structure = MagicMock()
   structure.id = "struct_sched"
+  # `_load_schedule_or_404` locks by primary key and checks the
+  # block type in Python, so the mock must carry it.
+  structure.block_type = "schedule"
   structure.name = "Existing"
   structure.taxonomy_id = "tax_1"
   structure.metadata_ = {
@@ -281,8 +314,11 @@ def test_update_schedule_identical_template_skips_supersession() -> None:
   }
 
   session = MagicMock()
+  session.get.return_value = structure
   session.execute.side_effect = [
-    _exec_result(row=structure),
+    # `lock_by_id` bounds its wait, so a `SET LOCAL lock_timeout`
+    # lands here before the row itself comes back from `session.get`.
+    _exec_result(),
     _exec_result(fetchone_row=MagicMock(cnt=2)),
     _exec_result(fetchone_row=MagicMock(cnt=1)),
   ]
@@ -398,7 +434,8 @@ def _rebuild_session(
   """Wire a MagicMock session for the rebuild orchestration.
 
   execute call order:
-    1. _load_schedule_or_404 → scalar_one_or_none → structure
+    1. SET LOCAL lock_timeout — `_load_schedule_or_404` bounds its wait and
+       then takes the row through `session.get`, not `execute` (see below)
     2. posted-entry guard → fetchone → MagicMock(c=posted_count)
     3. draft posting dates for the period fence → scalars().all() (empty)
     4. SET LOCAL lock_timeout (bounded wait around the obligation void)
@@ -412,12 +449,15 @@ def _rebuild_session(
     10. count distinct periods → fetchone
   query().filter().delete() captures the deleted models in order.
   _calendar_closed_through_date uses session.query(FiscalCalendar).first().
-  session.get(Event, ...) returns ``old_event`` (the supersede path).
+
+  session.get is now shared: `lock_by_id` fetches the locked schedule
+  `Structure` through it, and the supersede path fetches the old `Event`. It
+  dispatches on the entity so both get the right row.
   """
   deleted_models: list[type] = []
   session = MagicMock()
   session.execute.side_effect = [
-    _exec_result(row=structure),  # _load_schedule_or_404
+    _exec_result(),  # SET LOCAL lock_timeout — the schedule row lock
     _exec_result(fetchone_row=MagicMock(c=posted_count)),  # posted-entry guard
     # Draft posting dates for the period fence, taken before any row lock.
     # Empty → no fence statement follows.
@@ -434,7 +474,10 @@ def _rebuild_session(
     _exec_result(fetchone_row=MagicMock(cnt=3)),  # count distinct periods
   ]
 
-  session.get.return_value = old_event
+  def _get(entity, _ident, **_kwargs):
+    return structure if entity.__name__ == "Structure" else old_event
+
+  session.get.side_effect = _get
 
   # session.query(...) is used both by _calendar_closed_through_date
   # (FiscalCalendar.first() → None) and by the cascade deletes
@@ -567,7 +610,10 @@ def test_rebuild_schedule_raises_when_definition_unreconstructable() -> None:
   structure.metadata_ = {}  # no entry_template
 
   session = MagicMock()
-  session.execute.side_effect = [_exec_result(row=structure)]
+  session.get.return_value = structure
+  # Only the bounded wait's `SET LOCAL lock_timeout` reaches `execute`; the row
+  # itself comes back through `session.get` under `lock_by_id`.
+  session.execute.side_effect = [_exec_result()]
 
   with pytest.raises(ValueError, match="entry_template"):
     rebuild_schedule(
@@ -702,7 +748,10 @@ def test_rebuild_schedule_supersedes_old_originator() -> None:
 
   # Locked and refreshed — a status write off a read, like every other event
   # transition.
-  session.get.assert_called_once_with(
+  # `assert_any_call`, not `assert_called_once_with`: `session.get` now also
+  # serves `lock_by_id`'s locked fetch of the schedule `Structure`, so the
+  # Event load is one of two calls rather than the only one.
+  session.get.assert_any_call(
     Event, "evt_old_origin", with_for_update=True, populate_existing=True
   )
   assert old_evt.status == "voided"
@@ -721,6 +770,9 @@ def test_reconstruct_schedule_definition_legacy_fallback() -> None:
 
   structure = MagicMock()
   structure.id = "struct_legacy"
+  # `_load_schedule_or_404` locks by primary key and checks the
+  # block type in Python, so the mock must carry it.
+  structure.block_type = "schedule"
   structure.artifact_mechanics = None
   structure.metadata_ = {
     "entry_template": {
@@ -816,6 +868,9 @@ def test_reinstate_reopened_schedule_scopes_handles_null_boundary() -> None:
 def _terminate_structure() -> MagicMock:
   structure = MagicMock()
   structure.id = "struct_term"
+  # `_load_schedule_or_404` locks by primary key and checks the block type in
+  # Python, so the mock has to carry it rather than relying on a SQL predicate.
+  structure.block_type = "schedule"
   structure.name = "AWS RI 2026-02 Prepaid Amortization"
   structure.artifact_mechanics = {
     "entry_template": {
@@ -844,6 +899,8 @@ def test_terminate_schedule_truncates_then_voids_scoped() -> None:
   structure = _terminate_structure()
   session = MagicMock()
   session.execute.return_value.scalar_one_or_none.return_value = structure
+  # The schedule row is now fetched under a lock via `lock_by_id`.
+  session.get.return_value = structure
 
   call_order: list[str] = []
 
@@ -914,6 +971,8 @@ def test_terminate_schedule_truncation_guard_stops_everything() -> None:
   structure = _terminate_structure()
   session = MagicMock()
   session.execute.return_value.scalar_one_or_none.return_value = structure
+  # The schedule row is now fetched under a lock via `lock_by_id`.
+  session.get.return_value = structure
 
   with (
     patch(
@@ -991,3 +1050,39 @@ def test_rewrite_sum_equals_rule_noops_without_rule() -> None:
 
   assert _rewrite_sum_equals_rule(session, structure) is False
   session.query.assert_not_called()
+
+
+class TestScheduleLoaderTakesABoundedLock:
+  """`_load_schedule_or_404` must lock, and must bound the wait.
+
+  Every caller — update, terminate, delete, rebuild — reads the entry template
+  and the originator event id out of this row and writes back a decision
+  derived from them, so the read has to be locked.
+
+  It has to be *bounded* for a separate reason that is easy to miss: all four
+  are request-path operations declaring `RowLockedError: 409` in their
+  `error_map` for contention here. A bare `with_for_update()` never raises it —
+  the caller blocks until the interactive statement-timeout ceiling and gets a
+  generic 504 instead of the fast, documented 409, pinning a pooled connection
+  for the whole wait. That is the failure `operations/locking.py` exists to
+  prevent, and the reason `lock_by_id` wraps `bounded_lock_wait`.
+  """
+
+  def _source(self) -> str:
+    from pathlib import Path
+
+    from robosystems.operations.roboledger.commands import schedules as mod
+
+    source = Path(mod.__file__).read_text()
+    start = source.index("def _load_schedule_or_404")
+    return source[start : source.index("\ndef ", start + 1)]
+
+  def test_takes_the_row_lock(self):
+    assert "with_for_update()" in self._source()
+
+  def test_bounds_the_wait(self):
+    body = self._source()
+    assert "bounded_lock_wait(" in body or "lock_by_id(" in body, (
+      "an unbounded lock here blocks to the statement-timeout ceiling and "
+      "surfaces as 504, defeating the RowLockedError: 409 these callers declare"
+    )
