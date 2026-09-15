@@ -1546,6 +1546,9 @@ class TestCreateClosingEntry:
     session.execute.return_value.fetchone.side_effect = [
       MagicMock(id="je_stale", status="draft"),
       None,  # No fact anymore
+      # `_delete_draft_entry` re-reads the row's status under FOR UPDATE before
+      # deleting anything — it refuses to remove an entry that has landed.
+      MagicMock(status="draft"),
     ]
     svc = ScheduleService()
 
@@ -1647,6 +1650,8 @@ class TestCreateClosingEntry:
       MagicMock(id="je_stale", status="draft"),
       MagicMock(value=500.00),  # new amount from edited schedule
       staleness_row,
+      # `_delete_draft_entry`'s locked status re-read (see above).
+      MagicMock(status="draft"),
     ]
     svc = ScheduleService()
 
@@ -2205,3 +2210,86 @@ class TestPeriodCloseStatusScope:
     body = source[start : start + 4000]
 
     assert "AND (f.id IS NOT NULL AND be.entry_id IS NOT NULL)" not in body
+
+
+class TestReversingEntryIsolation:
+  """An auto-reversal must not be mistaken for the next period's closing entry.
+
+  `create_closing_entry` posts the accrual on `period_end` and its reversal on
+  the FIRST DAY OF THE NEXT PERIOD, both carrying the same
+  `source_structure_id`. The reconcile lookup that asks "does this period
+  already have an entry?" therefore sees last month's reversal inside this
+  month's window. Unfiltered, it judged that reversal stale (its DR/CR are
+  flipped by construction) and deleted it, so the accrual never reversed and the
+  liability compounded every month — or, if the reversal had already posted,
+  refused to draft this period's entry at all.
+
+  `get_period_close_status` in the same file had always filtered the type. The
+  asymmetry between the two queries was the defect.
+  """
+
+  def test_reconcile_lookup_excludes_reversing_entries(self):
+    from robosystems.operations.roboledger.schedules import service as service_module
+
+    source = Path(service_module.__file__).read_text()
+    start = source.index("def create_closing_entry")
+    body = source[start : start + 6000]
+
+    assert "type != :reversing_type" in body, (
+      "create_closing_entry's reconcile must exclude reversing entries, or next "
+      "period's run consumes this period's auto-reversal"
+    )
+
+  def test_stranded_obligation_sweep_excludes_reversing_entries(self):
+    from robosystems.operations.event_block import promotion as promotion_module
+
+    source = Path(promotion_module.__file__).read_text()
+    assert "Entry.type != REVERSING_ENTRY_TYPE" in source, (
+      "the stranded sweep shares the reconcile's key; without the type filter a "
+      "genuinely stranded obligation reads as already drafted"
+    )
+
+
+class TestDeleteDraftEntryRefusesLandedRows:
+  """`_delete_draft_entry` must enforce the precondition its name states.
+
+  It used to be a docstring only — "must be status='draft'" — while every
+  statement ran unconditionally, including a cascade into
+  `WHERE reversal_of = :eid`, which targets a **posted** reversing entry by
+  construction. Reaching it with a posted-and-reversed pair erased both halves
+  from the ledger, and no foreign key stopped it: the FK on `entries` points at
+  `events` and its RESTRICT protects the referenced event, never the referencing
+  entry.
+  """
+
+  @pytest.mark.parametrize("landed_status", ["posted", "reversed"])
+  def test_refuses_to_delete_a_landed_entry(self, landed_status):
+    session = _mock_session()
+    session.execute.return_value.fetchone.return_value = MagicMock(status=landed_status)
+    svc = ScheduleService()
+
+    with pytest.raises(ValueError, match="Refusing to delete"):
+      svc._delete_draft_entry(session, "je_landed")
+
+  def test_missing_row_is_a_no_op(self):
+    session = _mock_session()
+    session.execute.return_value.fetchone.return_value = None
+    svc = ScheduleService()
+
+    svc._delete_draft_entry(session, "je_gone")  # must not raise
+
+  def test_draft_still_deletes(self):
+    session = _mock_session()
+    session.execute.return_value.fetchone.return_value = MagicMock(status="draft")
+    svc = ScheduleService()
+
+    svc._delete_draft_entry(session, "je_draft")
+
+    statements = [str(c[0][0]) for c in session.execute.call_args_list]
+    assert any("DELETE FROM entries WHERE id = :eid" in s for s in statements)
+    # Every delete is bounded to drafts so the cascade cannot reach a posted
+    # reversing entry even if the guard above were ever bypassed.
+    deletes = [
+      s for s in statements if s.strip().upper().startswith("DELETE FROM ENTRIES")
+    ]
+    assert deletes and all("status = 'draft'" in s for s in deletes)

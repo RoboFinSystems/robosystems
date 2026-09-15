@@ -37,6 +37,11 @@ from robosystems.models.extensions.trait import Trait
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
+from robosystems.operations.roboledger.entry_status import (
+  LANDED_ENTRY_STATUSES,
+  REVERSING_ENTRY_TYPE,
+  landed_entry_bindparam,
+)
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -1236,11 +1241,22 @@ class ScheduleService:
     assert_period_not_closed(session, *fence_dates)
 
     # ── Look up the existing entry (if any) for this structure + period ──
+    #
+    # `type != 'reversing'` is load-bearing, not tidiness. An `auto_reverse`
+    # schedule posts its accrual on `period_end` and the reversing entry on the
+    # FIRST DAY OF THE NEXT PERIOD, both carrying this same `source_structure_id`
+    # — so without this predicate next month's reconcile finds last month's
+    # reversal, reads it as "this period's entry", and (its DR/CR being flipped)
+    # judges it stale and deletes it. The accrual then never reverses and the
+    # liability compounds every month. `get_period_close_status` below has
+    # always filtered the type; this query did not, and the asymmetry inside one
+    # file was the whole defect.
     existing_row = session.execute(
       text("""
         SELECT id, status
         FROM entries
         WHERE source_structure_id = :structure_id
+          AND type != :reversing_type
           AND posting_date >= :period_start
           AND posting_date <= :period_end
         ORDER BY created_at DESC
@@ -1248,17 +1264,22 @@ class ScheduleService:
       """),
       {
         "structure_id": structure_id,
+        "reversing_type": REVERSING_ENTRY_TYPE,
         "period_start": period_start,
         "period_end": period_end,
       },
     ).fetchone()
 
     existing_entry_id: str | None = existing_row.id if existing_row else None
-    if existing_row and existing_row.status == "posted":
+    # Anything that has LANDED is refused, not just `posted`. `reversed` is the
+    # third status an entry can hold, and letting it through here sends a
+    # posted-and-reversed pair into the regenerate path below, which deletes
+    # both halves out of the books.
+    if existing_row and existing_row.status in LANDED_ENTRY_STATUSES:
       raise ValueError(
         f"Closing entry for schedule '{structure_id}' in period "
-        f"{period_start} to {period_end} has already been posted. "
-        "Use the reopen flow to modify it."
+        f"{period_start} to {period_end} has already been posted "
+        f"(status: {existing_row.status}). Use the reopen flow to modify it."
       )
 
     # ── Find the current in_scope fact for this period ──
@@ -1676,17 +1697,19 @@ class ScheduleService:
         f"fact ({bounds.first_start}). Deactivate the schedule instead."
       )
 
-    # Refuse to delete facts whose period overlaps a posted (non-draft) entry.
-    # A posted entry carries the record of that period's recognition — truncating
-    # underneath it would orphan the audit trail.
+    # Refuse to delete facts whose period overlaps a landed (non-draft) entry.
+    # A landed entry carries the record of that period's recognition — truncating
+    # underneath it would orphan the audit trail. `reversed` counts: the original
+    # and its reversing entry are both history, and the comment said "non-draft"
+    # long before the predicate did.
     overlap = session.execute(
       text("""
         SELECT COUNT(*) AS c
         FROM entries
         WHERE source_structure_id = :sid
-          AND status = 'posted'
+          AND status IN :landed_entry_statuses
           AND posting_date > :new_end
-      """),
+      """).bindparams(landed_entry_bindparam()),
       {"sid": structure_id, "new_end": new_end_date},
     ).fetchone()
     if overlap and overlap.c:
@@ -1799,26 +1822,58 @@ class ScheduleService:
     assert_period_not_closed(session, posting_date)
 
   def _delete_draft_entry(self, session: Session, entry_id: str) -> None:
-    """Delete an entry and its line items (must be status='draft')."""
+    """Delete a DRAFT entry and its line items. Refuses anything that landed.
+
+    The "must be status='draft'" part used to live only in this docstring while
+    every statement below ran unconditionally — including
+    `DELETE FROM entries WHERE reversal_of = :eid`, which targets a **posted**
+    reversing entry by construction. A caller that reached here with a
+    posted-and-reversed pair erased both halves from the ledger, and no foreign
+    key stopped it: `entries.triggered_by_event_id -> events(id) ON DELETE
+    RESTRICT` protects the referenced *event*, never the referencing entry.
+
+    So the precondition is enforced here, under a lock, rather than trusted from
+    the call site. Raising is correct over silently skipping: a caller that
+    believes it is regenerating a draft has a bug worth surfacing, and this
+    function is not a safe place to guess.
+    """
+    row = session.execute(
+      text("SELECT status FROM entries WHERE id = :eid FOR UPDATE"),
+      {"eid": entry_id},
+    ).fetchone()
+    if row is None:
+      return
+    if row.status != "draft":
+      raise ValueError(
+        f"Refusing to delete entry {entry_id!r}: status is {row.status!r}, not "
+        "'draft'. A landed entry is history — reopen the period and reverse it "
+        "through the ledger instead."
+      )
+
+    # A draft never has a reversing entry against it (only posted entries can be
+    # reversed), so the cascade below can only match rows this schedule drafted
+    # alongside it — an auto-reversal still in draft. Bounded to drafts for the
+    # same reason as above.
+    session.execute(
+      text("""
+        DELETE FROM line_items
+        WHERE entry_id IN (
+          SELECT id FROM entries WHERE reversal_of = :eid AND status = 'draft'
+        )
+      """),
+      {"eid": entry_id},
+    )
+    session.execute(
+      text("DELETE FROM entries WHERE reversal_of = :eid AND status = 'draft'"),
+      {"eid": entry_id},
+    )
     # Line items first (FK cascade not guaranteed at the model layer)
     session.execute(
       text("DELETE FROM line_items WHERE entry_id = :eid"),
       {"eid": entry_id},
     )
-    # Reversal entry, if one exists
     session.execute(
-      text("""
-        DELETE FROM line_items
-        WHERE entry_id IN (SELECT id FROM entries WHERE reversal_of = :eid)
-      """),
-      {"eid": entry_id},
-    )
-    session.execute(
-      text("DELETE FROM entries WHERE reversal_of = :eid"),
-      {"eid": entry_id},
-    )
-    session.execute(
-      text("DELETE FROM entries WHERE id = :eid"),
+      text("DELETE FROM entries WHERE id = :eid AND status = 'draft'"),
       {"eid": entry_id},
     )
     session.flush()

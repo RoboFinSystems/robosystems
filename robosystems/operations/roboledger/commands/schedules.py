@@ -41,6 +41,9 @@ from robosystems.operations.information_block.rules.engine import (
 from robosystems.operations.roboledger.commands._guards import (
   rule_summary as _rule_summary,
 )
+from robosystems.operations.roboledger.entry_status import (
+  landed_entry_bindparam,
+)
 from robosystems.operations.roboledger.schedules import ScheduleService
 from robosystems.operations.roboledger.schedules.service import (
   EntryTemplate,
@@ -828,8 +831,8 @@ def rebuild_schedule(
   posted_row = session.execute(
     text(
       "SELECT COUNT(*) AS c FROM entries "
-      "WHERE source_structure_id = :sid AND status = 'posted'"
-    ),
+      "WHERE source_structure_id = :sid AND status IN :landed_entry_statuses"
+    ).bindparams(landed_entry_bindparam()),
     {"sid": structure.id},
   ).fetchone()
   if posted_row and posted_row.c:

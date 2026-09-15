@@ -81,6 +81,9 @@ from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   assert_period_not_closed,
 )
+from robosystems.operations.roboledger.entry_status import (
+  REVERSING_ENTRY_TYPE,
+)
 
 
 @dataclass
@@ -160,8 +163,19 @@ def filter_stranded_obligations(session: Session, events: list[Event]) -> list[E
 
   schedule_ids = {sid for sid, _, _ in windows.values()}
   entry_dates: dict[str, list[date]] = {}
+  # Reversing entries are excluded for the same reason `create_closing_entry`'s
+  # reconcile excludes them: an auto-reversal carries its schedule's
+  # `source_structure_id` and posts on the first day of the NEXT period, so it
+  # falls inside that period's window and would answer "this period already has
+  # its entry" when nothing has been drafted — leaving a genuinely stranded
+  # obligation invisible to the sweep that exists to find it.
   for entry in (
-    session.query(Entry).filter(Entry.source_structure_id.in_(schedule_ids)).all()
+    session.query(Entry)
+    .filter(
+      Entry.source_structure_id.in_(schedule_ids),
+      Entry.type != REVERSING_ENTRY_TYPE,
+    )
+    .all()
   ):
     entry_dates.setdefault(str(entry.source_structure_id), []).append(
       entry.posting_date
