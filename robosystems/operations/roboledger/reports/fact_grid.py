@@ -20,6 +20,9 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.api.extensions import cents_to_dollars
+from robosystems.operations.roboledger.entry_status import (
+  landed_entry_bindparam,
+)
 from robosystems.operations.roboledger.reports.calc_dag import (
   load_rs_gaap_calculations,
   resolve_calc_dag,
@@ -792,7 +795,7 @@ def _read_mapped_balances(
         WHERE et.is_primary = TRUE
           AND t.category = 'elementsOfFinancialStatements'
       ) tcls ON tcls.element_id = target.id
-      WHERE e.status = 'posted'
+      WHERE e.status IN :landed_entry_statuses
         AND target.element_type = 'concept'
         AND target.is_abstract = false
         AND (e.posting_date <= :end_date OR :end_date IS NULL)
@@ -804,7 +807,7 @@ def _read_mapped_balances(
       GROUP BY source_elem.id, target.id, target.qname, target.name,
                tcls.identifier, target.balance_type
       ORDER BY target.qname
-    """),
+    """).bindparams(landed_entry_bindparam()),
     {
       "mapping_id": mapping_id,
       "arc_type": arc_type,
@@ -1367,11 +1370,11 @@ def _emit_flow_facts(
           AND t.category = 'activityType'
           AND t.identifier IN ('investingActivity', 'financingActivity')
         WHERE li.flow_element_id IS NOT NULL
-          AND en.status = 'posted'
+          AND en.status IN :landed_entry_statuses
           AND en.posting_date BETWEEN :start AND :end
           AND COALESCE(racct.qname, acct.qname) = ANY(:cash_qnames)
         GROUP BY flow_id, rf.qname, rf.name, rf.balance_type
-      """)
+      """).bindparams(landed_entry_bindparam())
 
   # Pass 2 — element-default fallback (the load-bearing path for real
   # QuickBooks data, which carries no flow_element_id). For an entry with no
@@ -1410,7 +1413,7 @@ def _emit_flow_facts(
           AND t.category = 'activityType'
           AND t.identifier IN ('investingActivity', 'financingActivity')
         WHERE li.flow_element_id IS NULL
-          AND en.status = 'posted'
+          AND en.status IN :landed_entry_statuses
           AND en.posting_date BETWEEN :start AND :end
           AND COALESCE(racct.qname, acct.qname) <> ALL(:cash_qnames)
           AND EXISTS (
@@ -1429,7 +1432,7 @@ def _emit_flow_facts(
             WHERE x.entry_id = en.id AND x.flow_element_id IS NOT NULL
           )
         GROUP BY rf.id, rf.qname, rf.name, rf.balance_type
-      """)
+      """).bindparams(landed_entry_bindparam())
 
   for period in periods:
     params = {
@@ -2037,12 +2040,12 @@ def _cumulative_closeable_sums(
         WHERE et.is_primary = TRUE
           AND t.category = 'elementsOfFinancialStatements'
       ) tcls ON tcls.element_id = target.id
-      WHERE e.status = 'posted'
+      WHERE e.status IN :landed_entry_statuses
         AND target.element_type = 'concept'
         AND target.is_abstract = false
         AND e.posting_date <= :end_date
       GROUP BY source_elem.id, target.qname, target.balance_type, tcls.identifier
-    """),
+    """).bindparams(landed_entry_bindparam()),
     {
       "mapping_id": mapping_id,
       "arc_type": arc_type,

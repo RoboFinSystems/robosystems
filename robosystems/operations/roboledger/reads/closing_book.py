@@ -15,6 +15,9 @@ from robosystems.models.api.extensions.closing_book import (
   ClosingBookStructuresResponse,
 )
 from robosystems.models.extensions.roboledger import Report, Structure
+from robosystems.operations.roboledger.entry_status import (
+  landed_entry_bindparam,
+)
 
 # Structure types that represent financial statements. `cash_flow_statement`
 # is absent because roboledger has no renderer for it; SEC XBRL cash-flow
@@ -145,7 +148,9 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
 
   # 5. Trial Balance — always present if there are posted entries
   has_posted = session.execute(
-    text("SELECT EXISTS(SELECT 1 FROM entries WHERE status = 'posted')")
+    text(
+      "SELECT EXISTS(SELECT 1 FROM entries WHERE status IN :landed_entry_statuses)"
+    ).bindparams(landed_entry_bindparam())
   ).scalar()
 
   if has_posted:

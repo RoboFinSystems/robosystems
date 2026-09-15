@@ -14,6 +14,7 @@ from robosystems.operations.extensions.materialize import (
   build_postgres_connstr,
   validate_materializer_against_schema,
 )
+from robosystems.operations.roboledger.entry_status import landed_is_live_sql
 
 
 def _env():
@@ -246,7 +247,12 @@ class TestREAStaging:
     tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
     assert "(status NOT IN ('voided', 'superseded')) AS is_live" in tables["Event"]
     assert "(status <> 'void')" in tables["Transaction"]
-    assert "(status = 'posted')" in tables["Entry"]
+    # Entry liveness is the ledger's landed-status predicate, not `posted` alone:
+    # a `reversed` original keeps its lines so the reversing entry that offsets it
+    # nets the pair to zero. Asserted through the shared constant so the graph and
+    # the OLTP reads cannot drift apart again.
+    assert landed_is_live_sql("status") in tables["Entry"]
+    assert "'reversed'" in tables["Entry"]
     for node in ("Event", "Transaction", "Entry", "LineItem"):
       assert "is_live" in tables[node]
 
@@ -255,7 +261,7 @@ class TestREAStaging:
     joined in at materialization so `WHERE li.is_live` needs no Entry hop.
     entry_id is NOT NULL, so the inner join drops no rows."""
     sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["LineItem"]
-    assert "(e.status = 'posted')" in sql
+    assert landed_is_live_sql("e.status") in sql
     assert "'entries'" in sql
     assert "e.id = li.entry_id" in sql
 

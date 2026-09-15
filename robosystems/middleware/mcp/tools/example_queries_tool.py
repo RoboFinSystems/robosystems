@@ -232,7 +232,7 @@ LIMIT 10""",
 WHERE e.is_live
 RETURN el.qname, sum(li.debit_amount) AS debits, sum(li.credit_amount) AS credits
 ORDER BY debits DESC LIMIT 25""",
-              "explanation": "CRITICAL: filter `e.is_live` (⇔ status = 'posted'). The graph keeps draft/reversed entries (and entries of voided events stay as 'draft'); without this filter cancelled amounts inflate every balance. You can filter LineItem directly too — `li.is_live` denormalizes the parent entry's liveness.",
+              "explanation": "CRITICAL: filter `e.is_live` (⇔ status IN ('posted','reversed')). The graph keeps drafts (entries of voided events stay 'draft'); without this filter uncommitted amounts inflate every balance. A reversed original stays live deliberately — its reversing entry offsets it, and summing only one half of that pair leaves the balance off by the entry. You can filter LineItem directly too — `li.is_live` denormalizes the parent entry's liveness.",
             },
             {
               "category": "ledger",

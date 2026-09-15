@@ -30,6 +30,7 @@ if TYPE_CHECKING:
   )
 
 from robosystems.logger import logger
+from robosystems.operations.roboledger.entry_status import landed_is_live_sql
 from robosystems.security.error_handling import redact_connection_secrets
 
 # How long ``materialize`` waits for the per-graph lock before giving up.
@@ -408,6 +409,12 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   """
   c = connstr  # shorthand for SQL interpolation
   s = graph_id  # tenant schema name in the extensions database
+  # `is_live` means "in the books" — which includes a `reversed` original,
+  # because its reversing entry is a `posted` row that only nets it to zero
+  # if both halves are summed. Sourced from the ledger's own predicate so the
+  # graph cannot drift from the OLTP reads. See `roboledger.entry_status`.
+  entry_is_live = landed_is_live_sql("status")
+  lineitem_is_live = landed_is_live_sql("e.status")
 
   tables: dict[str, str] = {}
 
@@ -591,7 +598,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       posting_date,
       type,
       status,
-      (status = 'posted')             AS is_live,
+      {entry_is_live} AS is_live,
       reversal_of,
       provenance,
       CAST(updated_at AS VARCHAR)     AS updated_at
@@ -599,7 +606,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   """
 
   # LineItem has no status of its own; its liveness is its parent Entry's.
-  # Denormalize (e.status = 'posted') as is_live via the entry join so ad-hoc /
+  # Denormalize the entry's landed-status test as is_live via the entry join so ad-hoc /
   # AI aggregations anchored at LineItem can filter with `WHERE li.is_live`
   # without traversing back to Entry. entry_id is NOT NULL, so the inner join
   # drops no rows.
@@ -613,7 +620,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       CAST(li.credit_amount AS DOUBLE) / 100.0   AS credit_amount,
       false                                      AS has_dimensions,
       0::BIGINT                                  AS dimension_count,
-      (e.status = 'posted')                      AS is_live,
+      {lineitem_is_live} AS is_live,
       CAST(li.updated_at AS VARCHAR)             AS updated_at
     FROM postgres_scan('{c}', '{s}', 'line_items') li
     JOIN postgres_scan('{c}', '{s}', 'entries') e ON e.id = li.entry_id

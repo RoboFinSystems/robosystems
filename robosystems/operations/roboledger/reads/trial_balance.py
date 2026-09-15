@@ -12,6 +12,9 @@ from robosystems.models.api.extensions.trial_balance import (
   TrialBalanceResponse,
   TrialBalanceRow,
 )
+from robosystems.operations.roboledger.entry_status import (
+  landed_entry_bindparam,
+)
 
 _TRIAL_BALANCE_SQL = text("""
   SELECT a.id, a.code, a.name,
@@ -29,12 +32,12 @@ _TRIAL_BALANCE_SQL = text("""
     WHERE et.is_primary = TRUE
       AND tr.category = 'elementsOfFinancialStatements'
   ) t ON t.element_id = a.id
-  WHERE e.status = 'posted'
+  WHERE e.status IN :landed_entry_statuses
     AND (e.posting_date >= :start_date OR :start_date IS NULL)
     AND (e.posting_date <= :end_date OR :end_date IS NULL)
   GROUP BY a.id, a.code, a.name, t.identifier, a.metadata->>'account_type'
   ORDER BY a.code
-""")
+""").bindparams(landed_entry_bindparam())
 
 
 def get_trial_balance(
