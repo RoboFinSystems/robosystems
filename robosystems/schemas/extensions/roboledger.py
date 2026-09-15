@@ -209,7 +209,8 @@ TRANSACTION_NODES = [
       Property(name="status", type="STRING"),  # draft, posted, reversed
       Property(
         name="is_live", type="BOOLEAN"
-      ),  # status = 'posted' — the only status that affects balances
+      ),  # status IN ('posted','reversed') — landed; a reversed original keeps
+      # its lines so the reversing entry that offsets it nets the pair to zero
       Property(
         name="reversal_of", type="STRING"
       ),  # Entry identifier this reverses (null if not a reversal)
@@ -238,7 +239,7 @@ TRANSACTION_NODES = [
       ),  # Number of dimensional qualifiers (0=no dimensions)
       Property(
         name="is_live", type="BOOLEAN"
-      ),  # denormalized parent Entry.is_live (parent status = 'posted')
+      ),  # denormalized parent Entry.is_live (parent status IN ('posted','reversed'))
       Property(name="updated_at", type="STRING"),
     ],
   ),

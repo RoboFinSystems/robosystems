@@ -19,6 +19,9 @@ from robosystems.models.api.extensions.account_rollups import (
   AccountRollupsResponse,
 )
 from robosystems.models.extensions.roboledger import COA_SOURCES, Structure
+from robosystems.operations.roboledger.entry_status import (
+  landed_entry_bindparam,
+)
 
 
 class MappingNotFoundError(LookupError):
@@ -75,7 +78,7 @@ _ROLLUP_SQL = text("""
            SUM(li.credit_amount) AS total_credits
     FROM line_items li
     JOIN entries e ON e.id = li.entry_id
-    WHERE e.status = 'posted'
+    WHERE e.status IN :landed_entry_statuses
       AND (e.posting_date >= :start_date OR :start_date IS NULL)
       AND (e.posting_date <= :end_date OR :end_date IS NULL)
     GROUP BY li.element_id
@@ -83,7 +86,7 @@ _ROLLUP_SQL = text("""
   WHERE mapping.structure_id = :mapping_id
     AND mapping.association_type = 'mapping'
   ORDER BY t.identifier, target.name, source.code
-""")
+""").bindparams(landed_entry_bindparam())
 
 
 _UNMAPPED_SQL = text("""

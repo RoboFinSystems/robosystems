@@ -35,6 +35,9 @@ from robosystems.operations.library.reads import (
   efs_trait_by_element,
   liquidity_by_element,
 )
+from robosystems.operations.roboledger.entry_status import (
+  landed_entry_bindparam,
+)
 from robosystems.operations.roboledger.reads.accounts import coa_element_clause
 
 
@@ -892,12 +895,12 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       WHERE et.is_primary = TRUE
         AND t.category = 'elementsOfFinancialStatements'
   ) tt ON tt.element_id = target.id
-  WHERE e.status = 'posted'
+  WHERE e.status IN :landed_entry_statuses
       AND (e.posting_date >= :start_date OR :start_date IS NULL)
       AND (e.posting_date <= :end_date OR :end_date IS NULL)
   GROUP BY target.id, target.qname, target.name, tt.identifier, target.balance_type
   ORDER BY target.qname
-""")
+""").bindparams(landed_entry_bindparam())
 
 
 def get_mapped_trial_balance(

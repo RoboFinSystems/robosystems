@@ -50,6 +50,9 @@ from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   assert_period_not_closed,
 )
+from robosystems.operations.roboledger.entry_status import (
+  LANDED_ENTRY_STATUSES,
+)
 from robosystems.operations.roboledger.reads.event_block import (
   _load_dimension_ids,
   _to_envelope,
@@ -188,7 +191,11 @@ _RETRACTED_STATUSES = frozenset({"voided", "superseded"})
 # Entry/Transaction statuses that mean the effect is in the books to stay.
 # `reversed` counts: the original posted, and a reversing entry stands against
 # it. Retracting the event would strand both halves of that pair.
-_LANDED_ENTRY_STATUSES = frozenset({"posted", "reversed"})
+#
+# Imported rather than restated: this is the same question the balance reads ask
+# ("is this entry in the books?"), and the two answering it separately is exactly
+# how the reversal defect survived — see `roboledger.entry_status`.
+_LANDED_ENTRY_STATUSES = LANDED_ENTRY_STATUSES
 _LANDED_TRANSACTION_STATUSES = frozenset({"posted"})
 
 

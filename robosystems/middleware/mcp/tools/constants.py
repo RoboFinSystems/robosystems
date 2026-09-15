@@ -41,10 +41,12 @@ prefer it over hand-writing per-node status filters (which differ by node and ar
 get wrong).
 
 What `is_live` means per node (the equivalent `status` filter, if you need finer control):
-- `Entry.is_live` ⇔ `status = 'posted'` (∈ {draft, posted, reversed}). Only posted entries
-  affect balances; `draft` includes entries of voided events, `reversed` = corrected by a
-  reversing entry.
-- `LineItem.is_live` ⇔ its parent Entry is posted. LineItem has no status of its own; the
+- `Entry.is_live` ⇔ `status IN ('posted','reversed')` (∈ {draft, posted, reversed}). Both
+  have landed in the books. A `reversed` original KEEPS its line items: the reversing entry
+  that corrects it is an ordinary `posted` row, so the pair nets to zero only if you sum
+  both halves — drop the original and the balance is off by the entry, with the sign
+  flipped. `draft` is excluded and covers entries of voided events.
+- `LineItem.is_live` ⇔ its parent Entry has landed. LineItem has no status of its own; the
   flag is denormalized so you can filter without joining back to Entry.
 - `Event.is_live` ⇔ `status NOT IN ('voided','superseded')` (∈ {captured, classified,
   committed, pending, fulfilled, voided, superseded}). It KEEPS open obligations

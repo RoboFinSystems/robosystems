@@ -36,6 +36,9 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.api.information_block import RollforwardMechanics
+from robosystems.operations.roboledger.entry_status import (
+  landed_entry_bindparam,
+)
 
 
 class RollforwardResidualError(ValueError):
@@ -226,9 +229,9 @@ def _bs_period_delta_cents(
       JOIN entries en ON en.id = li.entry_id
       WHERE li.element_id = :element_id
         AND en.posting_date BETWEEN :start AND :end
-        AND en.status = 'posted'
+        AND en.status IN :landed_entry_statuses
       """
-    ),
+    ).bindparams(landed_entry_bindparam()),
     {
       "element_id": bs_element_id,
       "start": period_start,
@@ -252,7 +255,9 @@ def _evaluate_one_filter(
 
   Match criteria:
    - LineItem.element_id = BS source (only lines touching the BS account)
-   - Entry.posting_date in period AND Entry.status='posted'
+   - Entry.posting_date in period AND Entry has landed (posted or reversed —
+     see `roboledger.entry_status`; a reversed original keeps its lines so its
+     reversing entry nets the pair to zero)
    - LineItem.flow_element_id ∈ the elements named by ``flow_qnames``
 
   The filter authors flow concepts by qname (the predicate's ``values``);
@@ -285,10 +290,10 @@ def _evaluate_one_filter(
       JOIN entries en ON en.id = li.entry_id
       WHERE li.element_id = :element_id
         AND en.posting_date BETWEEN :start AND :end
-        AND en.status = 'posted'
+        AND en.status IN :landed_entry_statuses
         AND li.flow_element_id = ANY(:value_ids)
       """
-    ),
+    ).bindparams(landed_entry_bindparam()),
     {
       "element_id": bs_element_id,
       "start": period_start,
