@@ -83,11 +83,20 @@ def landed_is_live_sql(status_column: str) -> str:
   return f"({status_column} IN {LANDED_ENTRY_SQL})"
 
 
-# A reversing entry is an entry like any other and is summed like any other — it
-# is the half that offsets its original. This constant exists for the *reconcile*
-# question instead: "does this schedule already have its closing entry for this
-# period?" An auto-reversal carries the same `source_structure_id` as the accrual
-# it reverses and is posted on the first day of the *next* period, so it lands
-# inside the next period's window and answers that question wrongly. Readers
-# asking it must exclude the type; readers summing money must not.
-REVERSING_ENTRY_TYPE = "reversing"
+# Telling a schedule's OWN entry for a period from the auto-reversal generated
+# against it. The discriminator is the reversal LINK, never the entry type.
+#
+# Type looked like the obvious key and is the wrong one: `entry_type` is
+# caller-authored and `EntryType` admits "reversing" as a legal value, so a
+# schedule can legitimately post primary entries typed `reversing`. Filtering
+# those out of a reconcile makes the lookup miss the entry it just wrote and
+# draft another one on the next run — duplicate closing entries, which is the
+# defect the type filter was reaching for, reintroduced from the other side.
+#
+# `reversal_of` carries no such ambiguity. It is set only where a reversal is
+# generated against a specific original, and is NULL on every authored entry,
+# whatever its type. Both lookups that must tell these apart — the schedule
+# reconcile and the stranded-obligation sweep — share it from here; the ORM
+# side spells it `Entry.reversal_of.is_(None)`.
+PRIMARY_ENTRY_SQL = "reversal_of IS NULL"
+GENERATED_REVERSAL_SQL = "reversal_of IS NOT NULL"

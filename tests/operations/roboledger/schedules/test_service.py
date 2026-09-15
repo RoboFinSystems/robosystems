@@ -2235,18 +2235,28 @@ class TestReversingEntryIsolation:
     start = source.index("def create_closing_entry")
     body = source[start : start + 6000]
 
-    assert "type != :reversing_type" in body, (
-      "create_closing_entry's reconcile must exclude reversing entries, or next "
-      "period's run consumes this period's auto-reversal"
+    assert "{PRIMARY_ENTRY_SQL}" in body, (
+      "create_closing_entry's reconcile must exclude generated reversals, or "
+      "next period's run consumes this period's auto-reversal"
     )
+    for type_filter in ("type != 'reversing'", "type != :reversing"):
+      assert type_filter not in body, (
+        "the reconcile must not discriminate on entry type: `entry_type` is "
+        "caller-authored and 'reversing' is a legal value, so a type filter "
+        "misses the schedule's own entry and drafts a duplicate every run"
+      )
 
   def test_stranded_obligation_sweep_excludes_reversing_entries(self):
     from robosystems.operations.event_block import promotion as promotion_module
 
     source = Path(promotion_module.__file__).read_text()
-    assert "Entry.type != REVERSING_ENTRY_TYPE" in source, (
-      "the stranded sweep shares the reconcile's key; without the type filter a "
-      "genuinely stranded obligation reads as already drafted"
+    assert "Entry.reversal_of.is_(None)" in source, (
+      "the stranded sweep shares the reconcile's key; without it a genuinely "
+      "stranded obligation reads as already drafted"
+    )
+    assert "Entry.type !=" not in source, (
+      "and it must key on the reversal link, not entry type, or schedules whose "
+      "own entries are typed 'reversing' are misread as stranded"
     )
 
 

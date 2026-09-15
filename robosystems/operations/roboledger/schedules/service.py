@@ -38,8 +38,9 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
 from robosystems.operations.roboledger.entry_status import (
+  GENERATED_REVERSAL_SQL,
   LANDED_ENTRY_STATUSES,
-  REVERSING_ENTRY_TYPE,
+  PRIMARY_ENTRY_SQL,
   landed_entry_bindparam,
 )
 from robosystems.operations.roboledger.fact_set import create_fact_set
@@ -1081,7 +1082,7 @@ class ScheduleService:
     # The best_entry CTE picks the most-advanced entry per structure
     # (posted > draft > reversed, via CASE ordering).
     result = session.execute(
-      text("""
+      text(f"""
         WITH best_entry AS (
           SELECT DISTINCT ON (source_structure_id)
             source_structure_id,
@@ -1091,7 +1092,7 @@ class ScheduleService:
           WHERE posting_date >= :period_start
             AND posting_date <= :period_end
             AND source_structure_id IS NOT NULL
-            AND type != 'reversing'
+            AND {PRIMARY_ENTRY_SQL}
           ORDER BY source_structure_id,
             CASE status WHEN 'posted' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END
         ),
@@ -1101,8 +1102,7 @@ class ScheduleService:
             id AS reversal_entry_id,
             status AS reversal_status
           FROM entries
-          WHERE type = 'reversing'
-            AND reversal_of IS NOT NULL
+          WHERE {GENERATED_REVERSAL_SQL}
           ORDER BY reversal_of,
             CASE status WHEN 'posted' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END
         )
@@ -1242,21 +1242,24 @@ class ScheduleService:
 
     # ── Look up the existing entry (if any) for this structure + period ──
     #
-    # `type != 'reversing'` is load-bearing, not tidiness. An `auto_reverse`
-    # schedule posts its accrual on `period_end` and the reversing entry on the
-    # FIRST DAY OF THE NEXT PERIOD, both carrying this same `source_structure_id`
-    # — so without this predicate next month's reconcile finds last month's
-    # reversal, reads it as "this period's entry", and (its DR/CR being flipped)
-    # judges it stale and deletes it. The accrual then never reverses and the
-    # liability compounds every month. `get_period_close_status` below has
-    # always filtered the type; this query did not, and the asymmetry inside one
-    # file was the whole defect.
+    # Excluding generated reversals is load-bearing, not tidiness. An
+    # `auto_reverse` schedule posts its accrual on `period_end` and the
+    # reversing entry on the FIRST DAY OF THE NEXT PERIOD, both carrying this
+    # same `source_structure_id`, so without this predicate next month's
+    # reconcile finds last month's reversal, reads it as "this period's entry",
+    # and (its DR/CR being flipped) judges it stale and deletes it. The accrual
+    # then never reverses and the liability compounds every month.
+    #
+    # Keyed on the reversal LINK, not on entry type: `entry_type` is
+    # caller-authored and may legitimately be "reversing", and excluding those
+    # would make this lookup miss the schedule's own entry and draft a duplicate
+    # on every run. See `entry_status.PRIMARY_ENTRY_SQL`.
     existing_row = session.execute(
-      text("""
+      text(f"""
         SELECT id, status
         FROM entries
         WHERE source_structure_id = :structure_id
-          AND type != :reversing_type
+          AND {PRIMARY_ENTRY_SQL}
           AND posting_date >= :period_start
           AND posting_date <= :period_end
         ORDER BY created_at DESC
@@ -1264,7 +1267,6 @@ class ScheduleService:
       """),
       {
         "structure_id": structure_id,
-        "reversing_type": REVERSING_ENTRY_TYPE,
         "period_start": period_start,
         "period_end": period_end,
       },
