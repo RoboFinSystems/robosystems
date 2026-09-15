@@ -14,7 +14,9 @@ from robosystems.adapters.sec.pipeline.configs import (
   SECDownloadConfig,
   SECHistoricalStageConfig,
   SECIncrementalStageConfig,
+  SECiXBRLIndexConfig,
   SECMaterializeConfig,
+  SECNarrativeIndexConfig,
   SECProcessConfig,
   SECStageConfig,
   sec_quarter_partitions,
@@ -287,3 +289,27 @@ class TestSECMaterializeConfig:
     """Test batch size minimum validation (1,000,000)."""
     with pytest.raises(Exception):
       SECMaterializeConfig(materialization_batch_size=500_000)
+
+
+@pytest.mark.unit
+class TestSECTextIndexConfigs:
+  """The forms the search index covers.
+
+  A foreign private issuer files a 20-F, not a 10-K, and its annual report was
+  absent from the index entirely until xbrlkit gained a 20-F section map in
+  0.16.2 — before that the extractor read one through the 10-K map, where
+  Item 4 is mine safety rather than the business.
+  """
+
+  def test_narratives_cover_the_foreign_private_issuers(self):
+    config = SECNarrativeIndexConfig()
+    assert config.form_types == ["10-K", "10-Q", "20-F"]
+
+  def test_disclosures_cover_the_foreign_private_issuers(self):
+    config = SECiXBRLIndexConfig()
+    assert config.form_types == ["10-K", "10-Q", "20-F"]
+
+  def test_40f_is_left_out_of_the_narrative_index(self):
+    """An MJDS wrapper files its substance as exhibits, so xbrlkit extracts no
+    sections from one; indexing the form would run the pass for nothing."""
+    assert "40-F" not in SECNarrativeIndexConfig().form_types
