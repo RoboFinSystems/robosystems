@@ -71,6 +71,40 @@ class Entry(ExtensionsBase):
       unique=True,
       postgresql_where="reversal_of IS NOT NULL",
     ),
+    # A schedule posts one closing entry per period, and the same argument
+    # applies: two depreciation entries for one month is wrong however it
+    # arose. The application check is a `SELECT ... LIMIT 1` with no lock, and
+    # it is only safe today because one caller reaches it under the obligation
+    # row lock — a second writer arriving on a different event row (an operator
+    # or MCP close co-pilot firing `schedule_entry_due` while the Dagster sweep
+    # is mid-dispatch) passes the same check and inserts the twin. Close then
+    # posts both, and the reconcile cannot repair it: `ORDER BY created_at DESC
+    # LIMIT 1` only ever sees one of them.
+    #
+    # `posting_date` is the period: obligations are minted with
+    # `posting_date = period_end` and the handler passes that through, so both
+    # racers derive the same date. Two real columns, so no expression index and
+    # no "fiscal periods are calendar months" assumption frozen into a
+    # migration — and `create_manual_closing_entry` writes
+    # `source_structure_id=None`, so a manual adjustment can never collide with
+    # a scheduled one.
+    #
+    # `reversal_of IS NULL` excludes the auto-reversal, which legitimately
+    # shares the schedule and posts on the next period's first day. Keyed on
+    # the reversal link rather than entry type for the reason `entry_status`
+    # gives: `entry_type` is caller-authored and may itself be "reversing".
+    #
+    # Honest limit: a caller passing a different `posting_date` for the same
+    # period slips past this, which is why `ScheduleService` also locks the
+    # schedule row. The lock turns the race into a clean 409; this is what
+    # makes the bad row impossible for the paths that forget to take it.
+    Index(
+      "uq_entries_one_primary_per_schedule_period",
+      "source_structure_id",
+      "posting_date",
+      unique=True,
+      postgresql_where="source_structure_id IS NOT NULL AND reversal_of IS NULL",
+    ),
     CheckConstraint(
       "type IN ('standard', 'adjusting', 'closing', 'reversing')",
       name="check_entry_type",

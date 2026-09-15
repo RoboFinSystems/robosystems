@@ -25,6 +25,7 @@ from datetime import date
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
@@ -149,3 +150,79 @@ def test_generated_reversal_predicate_is_the_exact_complement(ext_session):
 
   assert [r.id for r in primary] == [january.id]
   assert [r.id for r in generated] == [reversal.id]
+
+
+class TestOnePrimaryEntryPerSchedulePeriod:
+  """`uq_entries_one_primary_per_schedule_period`, exercised against real SQL.
+
+  The application check is a `SELECT ... LIMIT 1` with no lock, safe only
+  because one caller reaches it under the obligation row lock. A second writer
+  on a different event row passes the same check and inserts the twin, close
+  posts both, and the reconcile cannot repair it afterwards. The lock added
+  alongside this index turns that race into a clean conflict; the index is what
+  makes the bad row impossible for a path that forgets to take the lock.
+
+  The fixture builds the schema from the model, so these also assert the
+  declaration and the migration describe the same constraint.
+  """
+
+  def test_rejects_a_second_primary_entry_for_the_same_period(self, ext_session):
+    _entry(ext_session, posting_date=JAN_END, type_="closing")
+
+    with pytest.raises(
+      IntegrityError, match="uq_entries_one_primary_per_schedule_period"
+    ):
+      _entry(ext_session, posting_date=JAN_END, type_="closing")
+      ext_session.flush()
+
+  def test_allows_the_auto_reversal_alongside_its_original(self, ext_session):
+    """The reversal shares the schedule and is excluded by `reversal_of IS NULL`,
+    so the constraint must not refuse it."""
+    january = _entry(ext_session, posting_date=JAN_END, type_="closing")
+    _entry(
+      ext_session, posting_date=FEB_START, type_="reversing", reversal_of=january.id
+    )
+    ext_session.flush()  # must not raise
+
+  def test_allows_two_reversals_on_the_same_date_for_different_originals(
+    self, ext_session
+  ):
+    """Generated reversals are outside the index entirely — two schedules whose
+    accruals reverse on the same day must both be writable."""
+    a = _entry(ext_session, posting_date=JAN_END, type_="closing")
+    ext_session.flush()
+    b = Entry(
+      posting_date=date(2026, 1, 30),
+      status="draft",
+      type="closing",
+      source_structure_id=STRUCTURE_ID,
+      provenance="schedule_derived",
+      created_by="usr_test",
+    )
+    ext_session.add(b)
+    ext_session.flush()
+    for original in (a, b):
+      _entry(
+        ext_session,
+        posting_date=FEB_START,
+        type_="reversing",
+        reversal_of=original.id,
+      )
+    ext_session.flush()  # must not raise
+
+  def test_leaves_manual_entries_alone(self, ext_session):
+    """`create_manual_closing_entry` writes `source_structure_id=None`, so a
+    manual adjustment can never collide with a scheduled entry — or another
+    manual one on the same day."""
+    for _ in range(2):
+      ext_session.add(
+        Entry(
+          posting_date=JAN_END,
+          status="draft",
+          type="adjusting",
+          source_structure_id=None,
+          provenance="manual_entry",
+          created_by="usr_test",
+        )
+      )
+    ext_session.flush()  # must not raise
