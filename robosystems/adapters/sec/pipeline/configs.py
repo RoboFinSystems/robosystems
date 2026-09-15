@@ -255,7 +255,8 @@ class SECNarrativeIndexConfig(Config):
     "characters, cut at paragraph boundaries (0 = never split)",
   )
   form_types: list[str] = Field(
-    default=["10-K", "10-Q"], description="Form types to extract narratives from"
+    default=["10-K", "10-Q", "20-F"],
+    description="Form types to extract narratives from",
   )
   force_reindex: bool = Field(
     default=False, description="Re-index all documents (ignore incremental skip)"
@@ -280,7 +281,8 @@ class SECiXBRLIndexConfig(Config):
     "characters, cut at paragraph boundaries (0 = never split)",
   )
   form_types: list[str] = Field(
-    default=["10-K", "10-Q"], description="Form types to extract iXBRL disclosures from"
+    default=["10-K", "10-Q", "20-F"],
+    description="Form types to extract iXBRL disclosures from",
   )
   force_reindex: bool = Field(
     default=False, description="Re-index all documents (ignore incremental skip)"
