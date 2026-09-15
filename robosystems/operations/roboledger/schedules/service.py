@@ -1218,7 +1218,27 @@ class ScheduleService:
     the reopen flow to change a posted entry). Stale or non-existent drafts
     produce structured outcomes, not errors.
     """
-    structure = session.get(Structure, structure_id)
+    # Locked, because everything below decides from this row: the entry
+    # template that becomes the draft's DR/CR legs, and the reconcile that
+    # decides whether to create, regenerate or leave alone. Two writers on
+    # different event rows — the Dagster sweep and an operator or MCP close
+    # co-pilot firing `schedule_entry_due` for the same period — both read
+    # "no entry", both insert, and close posts the depreciation twice.
+    #
+    # `uq_entries_one_primary_per_schedule_period` is the database's half of
+    # this and the half nothing can route around; the lock is what turns the
+    # loser into a clean 409 instead of an IntegrityError, and what protects
+    # the template read that the index cannot see. Bounded: this runs on a
+    # request path as well as the sweep, and `RowLockedError` is retryable.
+    from robosystems.operations.locking import lock_by_id
+
+    structure = lock_by_id(
+      session,
+      Structure,
+      structure_id,
+      f"Schedule {structure_id} is being written by another process. "
+      "Retry in a moment.",
+    )
     if not structure or structure.block_type != "schedule":
       raise ValueError(f"Schedule structure '{structure_id}' not found")
 

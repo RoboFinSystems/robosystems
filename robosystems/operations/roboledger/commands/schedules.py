@@ -310,12 +310,22 @@ def promote_obligations(
 
 
 def _load_schedule_or_404(session: Session, structure_id: str) -> Structure:
-  """Load a schedule Structure row by id, raising ScheduleNotFoundError."""
+  """Load a schedule Structure row by id, locked, raising ScheduleNotFoundError.
+
+  Locked because every caller — update, terminate, delete, rebuild — reads the
+  template and the originator event id out of this row and writes back a
+  decision derived from them. Unlocked, two operators both read the same
+  `schedule_created_event_id`, both supersede obligations under it, and the
+  schedule ends up with two live obligation registers for the same months and a
+  template from one writer beside an originator from the other.
+  """
   structure = session.execute(
-    select(Structure).where(
+    select(Structure)
+    .where(
       Structure.id == structure_id,
       Structure.block_type == "schedule",
     )
+    .with_for_update()
   ).scalar_one_or_none()
   if structure is None:
     raise ScheduleNotFoundError(structure_id)
