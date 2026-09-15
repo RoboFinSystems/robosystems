@@ -318,16 +318,28 @@ def _load_schedule_or_404(session: Session, structure_id: str) -> Structure:
   `schedule_created_event_id`, both supersede obligations under it, and the
   schedule ends up with two live obligation registers for the same months and a
   template from one writer beside an originator from the other.
+
+  Bounded, via `lock_by_id` rather than a bare `with_for_update()`. All four
+  callers are request-path operations that declare `RowLockedError: 409` in
+  their `error_map` precisely for contention here; an unbounded lock never
+  raises it, blocking instead until the interactive statement-timeout ceiling
+  and surfacing as a generic 504 — while pinning a pooled connection for the
+  whole wait, which is the failure `operations/locking.py` exists to prevent.
   """
-  structure = session.execute(
-    select(Structure)
-    .where(
-      Structure.id == structure_id,
-      Structure.block_type == "schedule",
-    )
-    .with_for_update()
-  ).scalar_one_or_none()
-  if structure is None:
+  from robosystems.operations.locking import lock_by_id
+
+  # `lock_by_id` rather than a hand-rolled `bounded_lock_wait` + query: the
+  # siblings that lock a `Structure` for this same read-decide-write shape
+  # (`information_block/forecast.py`, `rollforward.py`, and
+  # `ScheduleService.create_closing_entry`) all use it, and a fourth spelling of
+  # one discipline is how these invariants drift apart in the first place.
+  structure = lock_by_id(
+    session,
+    Structure,
+    structure_id,
+    f"Schedule {structure_id} is being written by another process. Retry in a moment.",
+  )
+  if structure is None or structure.block_type != "schedule":
     raise ScheduleNotFoundError(structure_id)
   return structure
 
