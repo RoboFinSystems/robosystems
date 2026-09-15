@@ -59,7 +59,7 @@ def _fake_response(id_="je_reversal") -> JournalEntryResponse:
 
 
 class TestDispatch:
-  def test_dispatch_creates_reversal_and_links_both_entries(self) -> None:
+  def test_dispatch_links_the_reversing_entry_only(self) -> None:
     session = MagicMock()
     event = _make_event()
     metadata = _make_metadata()
@@ -74,9 +74,18 @@ class TestDispatch:
     body_arg = mock_reverse.call_args.args[1]
     assert body_arg.entry_id == "je_original"
 
-    # Two UPDATE statements: one for the reversing Entry, one for the
-    # original — both linked to the event for full audit chain.
-    assert session.execute.call_count == 2
+    # Exactly one UPDATE: the reversing Entry. The original keeps the event
+    # that CREATED it.
+    #
+    # This used to write a second UPDATE re-pointing the original at the
+    # reversal event, described as completing the audit chain "from either
+    # side". `Entry` has one `triggered_by_event_id`, so that was an overwrite,
+    # and three readers treat the column as creation provenance:
+    # `_assert_retractable` (which then let the creating event be retracted
+    # while its posted entry stood), the QB full-rebuild wipe, and the graph
+    # projection. The reverse link needs no column — the reversing entry
+    # carries `reversal_of` plus its own event id.
+    assert session.execute.call_count == 1
     assert result.entry_ids == ["je_reversal"]
     assert result.transaction_ids == []
 
