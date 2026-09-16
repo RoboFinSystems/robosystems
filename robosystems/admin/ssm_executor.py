@@ -13,6 +13,34 @@ from rich.console import Console
 
 console = Console()
 
+# `aws ssm wait command-executed` is botocore's CommandExecuted waiter: delay 5,
+# maxAttempts 20. Neither is configurable, so the wait always gives up at ~100s
+# no matter what `timeout` says — and an in-flight command has no ResponseCode,
+# which is what used to surface as "failed with exit code -1".
+_WAITER_CEILING_S = 100
+_POLL_INTERVAL_S = 5
+
+# SSM invocation statuses that mean "not finished yet". Anything else is terminal
+# (Success, Cancelled, TimedOut, Failed) and carries a ResponseCode.
+_IN_FLIGHT_STATUSES = frozenset({"Pending", "InProgress", "Delayed"})
+
+
+class SSMCommandStillRunning(RuntimeError):
+  """The command has not finished — it has NOT failed.
+
+  Raised instead of a generic failure so a caller (or a person reading a
+  traceback) does not re-run a command that is still doing its work. Some
+  commands this executor runs are destructive and not idempotent.
+  """
+
+  def __init__(
+    self, message: str, *, command_id: str, instance_id: str, status: str
+  ) -> None:
+    super().__init__(message)
+    self.command_id = command_id
+    self.instance_id = instance_id
+    self.status = status
+
 
 def _clean_env() -> dict[str, str]:
   """Strip AWS_ENDPOINT_URL to avoid hitting LocalStack when run locally."""
@@ -133,9 +161,15 @@ class SSMExecutor:
   def execute(self, command: str, stream_output: bool = True) -> tuple[str, str, int]:
     """Run a shell command on the bastion and return (stdout, stderr, exit_code).
 
-    Raises `RuntimeError` on a non-zero exit code. A wait timeout is not fatal:
-    the invocation is fetched anyway, since the command may have finished just
-    after the wait gave up.
+    Raises `RuntimeError` on a non-zero exit code, and `SSMCommandStillRunning`
+    when the command has not finished within `timeout` — those are different
+    outcomes and the caller must be able to tell them apart.
+
+    `aws ssm wait command-executed` gives up after **100 seconds** regardless of
+    `timeout`: botocore's waiter is `delay: 5, maxAttempts: 20` and neither is
+    configurable. So the wait returning non-zero says nothing about the command,
+    and this method polls `get-command-invocation` for the remainder of the
+    budget rather than treating that as the answer.
     """
     instance_id = self._get_bastion_instance()
     self._ensure_instance_running(instance_id)
@@ -187,6 +221,7 @@ class SSMExecutor:
       self.region,
     ]
 
+    started_at = time.time()
     try:
       wait_result = subprocess.run(
         wait_cmd,
@@ -198,7 +233,8 @@ class SSMExecutor:
 
       if wait_result.returncode != 0:
         console.print(
-          f"[yellow]⚠️  Command may have timed out (waited {self.timeout}s), fetching results...[/yellow]"
+          f"[dim]waiter gave up (fixed ~{_WAITER_CEILING_S}s ceiling, not a verdict); "
+          f"polling the invocation up to {self.timeout}s...[/dim]"
         )
     except subprocess.TimeoutExpired:
       console.print(
@@ -219,10 +255,30 @@ class SSMExecutor:
       self.region,
     ]
 
-    result = subprocess.run(
-      get_cmd, capture_output=True, text=True, check=True, env=_clean_env()
-    )
-    data = json.loads(result.stdout)
+    deadline = started_at + self.timeout
+    while True:
+      result = subprocess.run(
+        get_cmd, capture_output=True, text=True, check=True, env=_clean_env()
+      )
+      data = json.loads(result.stdout)
+      status = data.get("Status", "")
+
+      if status not in _IN_FLIGHT_STATUSES:
+        break
+
+      if time.time() >= deadline:
+        raise SSMCommandStillRunning(
+          f"Command {command_id} is still {status} after {self.timeout}s on "
+          f"{instance_id}. It has NOT failed — re-running it would repeat the "
+          f"side effect. Check it with:\n"
+          f"  aws ssm get-command-invocation --command-id {command_id} "
+          f"--instance-id {instance_id} --region {self.region}",
+          command_id=command_id,
+          instance_id=instance_id,
+          status=status,
+        )
+
+      time.sleep(_POLL_INTERVAL_S)
 
     stdout = data.get("StandardOutputContent", "")
     stderr = data.get("StandardErrorContent", "")
@@ -235,7 +291,7 @@ class SSMExecutor:
     if exit_code != 0:
       if stderr:
         console.print(f"\n[bold red]Error:[/bold red]\n{stderr}")
-      raise RuntimeError(f"Command failed with exit code {exit_code}")
+      raise RuntimeError(f"Command failed with exit code {exit_code} (status {status})")
 
     console.print("[green]✓ Command completed successfully[/green]")
     return stdout, stderr, exit_code
