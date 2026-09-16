@@ -135,13 +135,18 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres*"
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/valkey*"
-              # OpenSearch access for admin CLI (search queries, index stats).
-              # ESHttpPost is required for _search and _count API calls.
+              # OpenSearch access for the admin CLI. Get/Post/Head cover search,
+              # counts, delete-by-query and force-merge. Put/Delete are for
+              # `search recreate-index`, which drops the index and creates it
+              # again with a new mapping — the only way to change a knn_vector
+              # encoder. The Dagster task role already carries both.
               - Effect: Allow
                 Action:
                   - es:ESHttpGet
                   - es:ESHttpPost
                   - es:ESHttpHead
+                  - es:ESHttpPut
+                  - es:ESHttpDelete
                 Resource:
                   - !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/robosystems-*/*"
               # SSM Parameter Store permissions for feature flags and tuning parameters (allows debugging via bastion)
