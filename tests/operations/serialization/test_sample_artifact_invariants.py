@@ -99,6 +99,25 @@ def test_both_forms_agree_on_every_shared_concept_label(
   )
 
 
+@pytest.mark.parametrize("pair", PAIRS, ids=[p[0].stem for p in PAIRS])
+def test_both_forms_agree_on_the_reporting_style(pair: tuple[Path, Path]) -> None:
+  """Drift 3: the holon claimed ``sec-as-filed`` for a tenant report.
+
+  ``rs:reportingStyle`` sits on the ``rs:Report`` node of both forms under one
+  IRI, so the two cannot disagree about it and both be right.
+  """
+  flat, holon = pair
+  styles = {}
+  for label, path in (("flat", flat), ("holon", holon)):
+    reports = [n for n in _typed(path, "rs:Report") if "reportingStyle" in n]
+    assert reports, f"{path.name}: no rs:Report node carries a reportingStyle"
+    styles[label] = reports[0]["reportingStyle"]
+  assert styles["flat"] == styles["holon"], (
+    f"{flat.stem}: the flat bundle says reportingStyle={styles['flat']!r} and "
+    f"the holon says {styles['holon']!r} — regenerate this demo"
+  )
+
+
 def _authors_own_concepts(flat: Path) -> bool:
   return any(n["@id"].startswith(_UNMAPPED_PREFIX) for n in _typed(flat, "rs:Element"))
 
