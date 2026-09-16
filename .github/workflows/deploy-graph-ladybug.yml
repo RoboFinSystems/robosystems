@@ -80,6 +80,16 @@ on:
         required: false
         type: string
         default: ""
+      writer_az:
+        description: "Availability zone for this tier's ASG and EBS volumes (e.g. us-east-1d). Empty = <aws_region>c. A recovery/capacity lever, not tuning — see the AZ selection step."
+        required: false
+        type: string
+        default: ""
+      writer_az_change_allowed:
+        description: "Permit this run to move an EXISTING stack to a different AZ. 'true' only from a per-run dispatch input, never from a variable."
+        required: false
+        type: string
+        default: "false"
 
       # Tier Specifications (from graph.yml)
       instance_type:
@@ -179,16 +189,39 @@ jobs:
           echo "🌐 Selecting availability zone for deployment..."
           echo "⚠️  IMPORTANT: LadybugDB writers use persistent EBS volumes that are AZ-specific"
 
-          # ALL tiers need consistent AZ to ensure volume persistence
-          # EBS volumes cannot be moved between AZs, so instance replacement in a different AZ
-          # means data loss unless we restrict to a single AZ
+          # Every writer tier lives in ONE AZ: an EBS volume cannot cross an AZ and
+          # a writer reattaches to its existing volume on launch. The AZ is a deploy
+          # parameter for recovery (AZ loss) and capacity (no instance capacity in
+          # the default zone) — never for tuning.
+          #
+          # Two levers, one rule:
+          #   - the environment workflow's dispatch input (arriving here as
+          #     writer_az + writer_az_change_allowed=true) MOVES a tier;
+          #   - the GRAPH_WRITER_AZ_<ENV> variable SUSTAINS it across the input-less
+          #     release dispatches and may only name the AZ the tier already occupies.
+          # Changing VPCZoneIdentifier replaces every instance in the ASG, and a
+          # writer relaunched in another AZ boots healthy on an EMPTY volume (the
+          # volume registry is AZ-scoped), so a mismatch between the requested AZ
+          # and the stack's current AZ is refused below unless the run allows it.
 
-          echo "📍 Selecting single AZ for ALL writer tiers to ensure volume persistence"
+          WRITER_AZ_INPUT="${{ inputs.writer_az }}"
+          if [ -n "$WRITER_AZ_INPUT" ]; then
+            PREFERRED_AZ="$WRITER_AZ_INPUT"
+            EXPLICIT_AZ=true
+          else
+            PREFERRED_AZ="${{ inputs.aws_region }}c"
+            EXPLICIT_AZ=false
+          fi
 
-          # Use zone C for ALL tiers to consolidate resources
-          PREFERRED_AZ="${{ inputs.aws_region }}c"
+          case "$PREFERRED_AZ" in
+            "${{ inputs.aws_region }}"[a-z]) ;;
+            *)
+              echo "::error::writer_az '$PREFERRED_AZ' is not an availability zone in ${{ inputs.aws_region }}"
+              exit 1
+              ;;
+          esac
 
-          echo "📍 Preferred AZ for ${{ inputs.writer_tier }} tier: $PREFERRED_AZ"
+          echo "📍 Preferred AZ for ${{ inputs.writer_tier }} tier: $PREFERRED_AZ (explicit: $EXPLICIT_AZ)"
 
           # Get all subnet IDs and their AZs
           IFS=',' read -ra SUBNET_ARRAY <<< "${{ inputs.subnet_ids }}"
@@ -206,27 +239,55 @@ jobs:
             fi
           done
 
-          # If no subnet found in preferred AZ, use the first available one
           if [ -z "$SELECTED_SUBNET" ]; then
+            if [ "$EXPLICIT_AZ" = "true" ]; then
+              # An operator asked for this zone; landing somewhere else silently is
+              # exactly the failure this parameter exists to prevent.
+              echo "::error::No private subnet in requested AZ $PREFERRED_AZ (subnets: ${{ inputs.subnet_ids }})"
+              exit 1
+            fi
+            # Default zone absent (a VPC deployed with fewer AZs): use the first subnet
             SELECTED_SUBNET="${SUBNET_ARRAY[0]}"
             SELECTED_AZ=$(aws ec2 describe-subnets --subnet-ids "$SELECTED_SUBNET" --query 'Subnets[0].AvailabilityZone' --output text)
             echo "⚠️  No subnet found in $PREFERRED_AZ, using $SELECTED_SUBNET in $SELECTED_AZ"
-            echo "selected_az=$SELECTED_AZ" >> $GITHUB_OUTPUT
           else
-            echo "selected_az=$PREFERRED_AZ" >> $GITHUB_OUTPUT
+            SELECTED_AZ="$PREFERRED_AZ"
           fi
 
+          # Guard: never move an existing stack unless this run explicitly allows it
+          STACK_ACTION="create"
+          CURRENT_SUBNET=$(aws cloudformation describe-stacks \
+            --stack-name "${{ inputs.stack_name }}" \
+            --query "Stacks[0].Parameters[?ParameterKey=='SubnetIds'].ParameterValue" \
+            --output text 2>/dev/null || true)
+          if [ -n "$CURRENT_SUBNET" ] && [ "$CURRENT_SUBNET" != "None" ]; then
+            STACK_ACTION="update"
+            if [ "$CURRENT_SUBNET" != "$SELECTED_SUBNET" ]; then
+              CURRENT_AZ=$(aws ec2 describe-subnets --subnet-ids "$CURRENT_SUBNET" --query 'Subnets[0].AvailabilityZone' --output text 2>/dev/null || echo "unknown")
+              if [ "${{ inputs.writer_az_change_allowed }}" != "true" ]; then
+                echo "::error::${{ inputs.stack_name }} is in $CURRENT_AZ ($CURRENT_SUBNET) but this run resolved $SELECTED_AZ ($SELECTED_SUBNET). Moving a writer tier replaces every instance in its ASG, and each relaunches in the new AZ on an EMPTY volume. To move deliberately, dispatch with the graph_writer_az input; GRAPH_WRITER_AZ_<ENV> may only name the AZ the tier already occupies."
+                exit 1
+              fi
+              echo "::warning::${{ inputs.stack_name }}: MOVING writer tier ${{ inputs.writer_tier }} from $CURRENT_AZ to $SELECTED_AZ. Every instance will be replaced and relaunch on an empty volume. Afterwards: set GRAPH_WRITER_AZ_<ENV>=$SELECTED_AZ so later releases stay here, repoint each graph-registry row at a live writer, then restore each graph from its S3 backup."
+            fi
+          fi
+
+          echo "selected_az=$SELECTED_AZ" >> $GITHUB_OUTPUT
           echo "selected_subnet=$SELECTED_SUBNET" >> $GITHUB_OUTPUT
-          echo "use_single_subnet=true" >> $GITHUB_OUTPUT
 
           echo "📊 Writer Tier AZ Configuration for ${{ inputs.writer_tier }}:"
-          echo "  Subnet selected successfully"
-          echo "  Availability Zone: ${SELECTED_AZ:-$PREFERRED_AZ}"
+          echo "  Availability Zone: $SELECTED_AZ"
           echo "  ⚠️  All instances and volumes will be created in this single AZ"
           echo ""
           echo "⚠️  TRADE-OFF: Single AZ reduces availability but ensures data persistence"
           echo "  - Pro: Volumes can always be reattached after instance replacement"
           echo "  - Con: No multi-AZ redundancy (AZ failure affects this tier)"
+
+          {
+            echo "| Writer tier | AZ | Subnet | Stack |"
+            echo "|---|---|---|---|"
+            echo "| ${{ inputs.writer_tier }} | $SELECTED_AZ | $SELECTED_SUBNET | $STACK_ACTION |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Get S3 Bucket Configuration
         id: s3_config
