@@ -597,8 +597,12 @@ class FiscalCalendarService:
 
     Used by the reopen flow. If the reopened period is the current
     `closed_through_period`, retreats it to `reopened_period - 1`.
-    Otherwise this is a no-op — you can reopen an older period without
-    changing the pointer, but you lose sequential invariance.
+    Otherwise this is a no-op. The public `reopen_period` never reaches
+    that branch — it refuses any period other than `closed_through`, so a
+    later month is never left stamped from numbers that just became
+    mutable. The backfill's restamp does reach it: it reopens and recloses
+    an interior month in one transaction and walks forward to
+    `closed_through`, so the series is consistent when it finishes.
 
     Does NOT modify `close_target_period` — that's a separate user decision
     after reopening.
