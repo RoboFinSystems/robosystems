@@ -462,6 +462,21 @@ def test_entity_and_filing_identity() -> None:
 
 
 @pytest.mark.unit
+def test_filing_carries_the_bundle_reporting_style() -> None:
+  """An unset style does not omit the claim — it publishes the wrong one.
+
+  xbrlkit's graph writer defaults ``reporting_style`` to ``"sec-as-filed"``,
+  which is true of a filing and false of a tenant report. The holon half
+  (rs #1373) moved the encoder to xbrlkit without the bridge filling the
+  field, so every tenant holon asserted it was an SEC as-filed filing while
+  the flat JSON-LD of the same report carried the real style.
+  """
+  assert bundle_to_xbrl_model(_bundle()).filing.reporting_style == "BSC-CORP-IS02-CF1"
+  other = _bundle(reporting_style="RS-TENANT-01")
+  assert bundle_to_xbrl_model(other).filing.reporting_style == "RS-TENANT-01"
+
+
+@pytest.mark.unit
 def test_report_identifier_falls_back_to_the_live_snapshot() -> None:
   assert report_identifier(_bundle()) == "rpt_test"
   live = _bundle(

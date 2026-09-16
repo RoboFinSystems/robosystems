@@ -83,6 +83,24 @@ def test_arcs_are_identical_but_for_the_definition_arcs(projections) -> None:
   assert holon_arcs, "the fixture carries presentation and calculation arcs"
 
 
+def test_both_projections_report_the_same_reporting_style(projections) -> None:
+  """The report's style is one claim, so the two projections cannot differ.
+
+  xbrlkit's graph writer defaults an unset ``reporting_style`` to
+  ``"sec-as-filed"``. When the bridge left the field unset the holon asserted
+  every tenant report was an SEC as-filed filing while the flat JSON-LD of the
+  same report carried the real style — an unset field published a wrong claim
+  rather than omitting one.
+  """
+  flat, holon = projections
+  styles = []
+  for nodes in (flat, holon):
+    reports = [n for n in nodes if "Report" in _types(n) and "reportingStyle" in n]
+    assert reports, "no rs:Report node carries a reportingStyle"
+    styles.append(reports[0]["reportingStyle"])
+  assert styles[0] == styles[1] == "BSC-CORP-IS02-CF1"
+
+
 def test_each_fact_links_to_the_same_structure_and_fact_set(projections) -> None:
   flat, holon = projections
   in_flat = {n["@id"]: n for n in flat if n.get("@type") == "rs:Fact"}

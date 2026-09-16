@@ -183,6 +183,11 @@ def _filing(bundle: StatementBundle, concepts: dict[str, Concept]) -> FilingMeta
   (``_entity``) is what says they are not a CIK. Neutral names are xbrlkit's
   to add (spec §11.3); the wire output already resolves under the platform's
   scheme, so nothing downstream reads them as SEC identifiers.
+
+  ``reporting_style`` must be passed rather than left to default. xbrlkit's
+  graph writer falls back to ``"sec-as-filed"`` when the field is unset, which
+  is a true statement about a filing and a false one about a tenant report —
+  so an unset field does not omit the claim, it publishes the wrong one.
   """
   meta = bundle.report_meta
   report_id = report_identifier(bundle)
@@ -192,6 +197,7 @@ def _filing(bundle: StatementBundle, concepts: dict[str, Concept]) -> FilingMeta
     filing_date=meta.filed_at.date() if meta and meta.filed_at else None,
     is_inline_xbrl=False,
     report_uri=f"{REPORT_URI_BASE}/{report_id}",
+    reporting_style=bundle.reporting_style,
     taxonomy_namespaces=sorted({concept.namespace for concept in concepts.values()}),
   )
 
