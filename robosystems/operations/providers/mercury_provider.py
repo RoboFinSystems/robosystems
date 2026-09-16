@@ -32,6 +32,13 @@ from ...config import env
 from ...logger import logger
 from ...models.api.graphs.connections import MercuryConnectionConfig
 from ...operations.connection_service import ConnectionService
+from .bank_feed import (
+  purge_bank_feed_connection,
+  record_bank_feed_purged,
+)
+from .bank_feed import (
+  record_bank_feed_consent as record_consent,
+)
 from .oauth_handler import OAuthHandler
 from .types import SyncOutcome
 
@@ -310,7 +317,9 @@ async def cleanup_mercury_connection(connection: dict[str, Any], graph_id: str) 
     except Exception as exc:
       logger.warning(f"Mercury token revocation errored for {connection_id}: {exc}")
 
-  purged = _purge_feed(graph_id, connection_id)
+  purged = purge_bank_feed_connection(
+    graph_id, provider=PROVIDER, connection_id=connection_id
+  )
 
   with platform_session() as db:
     creds = ConnectionCredentials.get_by_connection_id(connection_id, db)
@@ -319,46 +328,14 @@ async def cleanup_mercury_connection(connection: dict[str, Any], graph_id: str) 
         {"auth_mode": auth_mode, "revoked_at": datetime.now(UTC).isoformat()}, db
       )
 
-  from ...security.audit_logger import SecurityAuditLogger, SecurityEventType
-
-  SecurityAuditLogger.log_security_event(
-    event_type=SecurityEventType.BANK_FEED_PURGED,
-    user_id=str(connection.get("user_id") or ""),
-    endpoint="/v1/graphs/{graph_id}/connections/{connection_id}",
-    details={
-      "graph_id": graph_id,
-      "connection_id": connection_id,
-      "provider": PROVIDER,
-      "auth_mode": auth_mode,
-      **purged,
-    },
-    risk_level="low",
+  record_bank_feed_purged(
+    provider=PROVIDER,
+    connection=connection,
+    graph_id=graph_id,
+    connection_id=connection_id,
+    auth_mode=auth_mode,
+    purged=purged,
   )
-
-
-def _purge_feed(graph_id: str, connection_id: str) -> dict[str, int]:
-  from sqlalchemy.exc import ProgrammingError
-
-  from ...db.extensions import extensions_session
-  from ...middleware.extensions import is_schema_missing
-  from ...operations.roboledger.commands.connections import purge_bank_feed
-
-  try:
-    with extensions_session(graph_id, statement_timeout_ms=None) as ext:
-      purged = purge_bank_feed(ext, source=PROVIDER, connection_id=connection_id)
-      ext.commit()
-  except ProgrammingError as exc:
-    if is_schema_missing(exc):
-      # Never provisioned or already torn down: nothing to purge.
-      return {"events_deleted": 0, "events_scrubbed": 0, "agents_deleted": 0}
-    raise
-  logger.info(
-    "Purged Mercury feed on graph %s for connection %s: %s",
-    graph_id,
-    connection_id,
-    purged,
-  )
-  return purged
 
 
 def record_bank_feed_consent(
@@ -372,21 +349,14 @@ def record_bank_feed_consent(
 ) -> None:
   """The consent record the partnership's DAA asks for: who connected which
   organization, over which credential, with what scope, when."""
-  from ...security.audit_logger import SecurityAuditLogger, SecurityEventType
-
-  SecurityAuditLogger.log_security_event(
-    event_type=SecurityEventType.BANK_FEED_CONSENT_GRANTED,
+  record_consent(
+    provider=PROVIDER,
+    environment=mercury_oauth_provider.environment,
+    graph_id=graph_id,
+    connection_id=connection_id,
     user_id=user_id,
-    endpoint="/v1/graphs/{graph_id}/connections/oauth/callback/mercury",
-    details={
-      "graph_id": graph_id,
-      "connection_id": connection_id,
-      "provider": PROVIDER,
-      "auth_mode": auth_mode,
-      "scope": scope,
-      "organization": organization,
-      "environment": mercury_oauth_provider.environment,
-      "granted_at": datetime.now(UTC).isoformat(),
-    },
-    risk_level="low",
+    auth_mode=auth_mode,
+    scope=scope,
+    organization=organization,
+    institution="Mercury",
   )

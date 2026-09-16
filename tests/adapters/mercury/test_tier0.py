@@ -12,9 +12,6 @@ from robosystems.adapters.mercury.pipeline.tier0 import (
   hint_for_custom_category,
   hint_for_gl_code,
   hint_for_mercury_category,
-  infer_trait,
-  parse_gl_code_name,
-  slug,
 )
 
 
@@ -49,19 +46,6 @@ class TestHintMap:
 
 @pytest.mark.unit
 class TestGlCodes:
-  @pytest.mark.parametrize(
-    ("label", "expected"),
-    [
-      ("500 - Office Supplies", ("500", "Office Supplies")),
-      ("6100 – Software", ("6100", "Software")),
-      ("4000: Revenue", ("4000", "Revenue")),
-      ("Office Supplies", (None, "Office Supplies")),
-      ("", (None, "")),
-    ],
-  )
-  def test_parse_gl_code_name(self, label, expected):
-    assert parse_gl_code_name(label) == expected
-
   def test_listed_gl_code_uses_its_hint(self):
     assert hint_for_gl_code("Credit card rewards") is HINTS["CreditCardRewards"]
 
@@ -70,21 +54,3 @@ class TestGlCodes:
     assert hint.name == "Office Supplies"
     assert hint.key == "gl_OfficeSupplies"
     assert (hint.trait, hint.balance_type) == ("expense", "debit")
-
-  @pytest.mark.parametrize(
-    ("name", "trait"),
-    [
-      ("Subscription revenue", ("revenue", "credit")),
-      ("Accounts payable", ("liability", "credit")),
-      ("Owner draw", ("equity", "credit")),
-      ("Prepaid insurance", ("asset", "debit")),
-      ("Meals", ("expense", "debit")),
-    ],
-  )
-  def test_infer_trait(self, name, trait):
-    assert infer_trait(name) == trait
-
-  def test_slug(self):
-    assert slug("General & Administrative:Technology") == (
-      "GeneralAdministrativeTechnology"
-    )

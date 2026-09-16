@@ -18,24 +18,23 @@ Three event types come out of a bank feed:
   entity? a loan?), so these carry no suggestion.
 
 The bank leg of every event is the chart account linked to the Mercury
-account (``accounts.link_bank_accounts``); the suggestion resolves against
+account (``bank_feed.accounts.link_bank_accounts``); the suggestion resolves against
 the same chart by name or code. Nothing here creates an account.
 """
 
 from __future__ import annotations
 
-import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex, name_key
 from robosystems.adapters.mercury.pipeline.tier0 import (
   HINTS,
   AccountHint,
   hint_for_custom_category,
   hint_for_gl_code,
   hint_for_mercury_category,
-  parse_gl_code_name,
 )
 
 # Failed / cancelled / blocked / reversed never become events. Pending ones
@@ -55,50 +54,7 @@ FEE_KINDS = frozenset(
 GOVERNMENT_CATEGORIES = frozenset({"Taxes", "GovernmentServices"})
 # The checking-account side of an IO card autopay names the card this way.
 CREDIT_CARD_LABEL = "Mercury Credit"
-
-
-@dataclass(frozen=True)
-class BankAccount:
-  """One account the feed exposes — a chart account is linked to each."""
-
-  mercury_id: str
-  name: str
-  kind: str
-  trait: str
-  balance_type: str
-  legal_business_name: str | None = None
-
-  @property
-  def is_credit(self) -> bool:
-    return self.kind == "credit"
-
-
-@dataclass
-class ChartIndex:
-  """Resolve a suggestion against the graph's chart, by name then by code."""
-
-  by_name: dict[str, str] = field(default_factory=dict)
-  by_code: dict[str, str] = field(default_factory=dict)
-
-  def resolve(self, *candidates: str | None) -> str | None:
-    for candidate in candidates:
-      if not candidate:
-        continue
-      element_id = self.by_name.get(name_key(candidate)) or self.by_code.get(
-        candidate.strip()
-      )
-      if element_id:
-        return element_id
-    return None
-
-  def resolve_gl_code(self, gl_code_name: str | None) -> str | None:
-    """A ``<code> - <name>`` label resolves by its code, then by its name."""
-    if not gl_code_name:
-      return None
-    code, name = parse_gl_code_name(gl_code_name)
-    if code and code in self.by_code:
-      return self.by_code[code]
-    return self.resolve(name, gl_code_name)
+INSTITUTION = "Mercury"
 
 
 @dataclass
@@ -111,11 +67,6 @@ class TransformResult:
 
 def cents(amount: float | int | str) -> int:
   return round(float(amount) * 100)
-
-
-def name_key(value: str) -> str:
-  """``Mercury Checking ••5424`` and ``Mercury Checking 5424`` resolve alike."""
-  return re.sub(r"[^a-z0-9]", "", value.lower())
 
 
 # ── Accounts and counterparties ─────────────────────────────────────────────
@@ -132,11 +83,12 @@ def bank_accounts(
     name = str(acct.get("name") or f"Mercury {kind.title()}")
     accounts.append(
       BankAccount(
-        mercury_id=str(acct["id"]),
+        account_id=str(acct["id"]),
         name=name,
         kind=kind,
         trait="asset",
         balance_type="debit",
+        institution=INSTITUTION,
         legal_business_name=acct.get("legalBusinessName"),
       )
     )
@@ -147,11 +99,12 @@ def bank_accounts(
     )
     accounts.append(
       BankAccount(
-        mercury_id=str(acct["id"]),
+        account_id=str(acct["id"]),
         name=name,
         kind="credit",
         trait="liability",
         balance_type="credit",
+        institution=INSTITUTION,
         legal_business_name=acct.get("legalBusinessName"),
       )
     )
@@ -229,7 +182,7 @@ def transform(
   chart = chart or ChartIndex()
   agent_ids = agent_ids or {}
   accounts = {
-    account.mercury_id: account
+    account.account_id: account
     for account in bank_accounts(raw, include_treasury=include_treasury)
   }
   own_names = own_counterparty_names(list(accounts.values()))

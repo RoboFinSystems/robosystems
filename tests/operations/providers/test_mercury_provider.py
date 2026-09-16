@@ -371,7 +371,7 @@ class TestCleanupMercuryConnection:
         return_value=True,
       ) as revoke,
       patch(
-        f"{MODULE}._purge_feed",
+        f"{MODULE}.purge_bank_feed_connection",
         return_value={
           "events_deleted": 3,
           "events_scrubbed": 1,
@@ -387,7 +387,7 @@ class TestCleanupMercuryConnection:
         {"connection_id": "conn_1", "user_id": "usr_1"}, "kg_test"
       )
     revoke.assert_awaited_once_with("ref")
-    purge.assert_called_once_with("kg_test", "conn_1")
+    purge.assert_called_once_with("kg_test", provider="mercury", connection_id="conn_1")
     emptied = creds.update_credentials.call_args.args[0]
     assert emptied["auth_mode"] == "oauth" and "revoked_at" in emptied
     assert "refresh_token" not in emptied and "api_key" not in emptied
@@ -411,7 +411,7 @@ class TestCleanupMercuryConnection:
       patch(
         f"{MODULE}.mercury_oauth_provider.revoke_token", new_callable=AsyncMock
       ) as revoke,
-      patch(f"{MODULE}._purge_feed", return_value={}),
+      patch(f"{MODULE}.purge_bank_feed_connection", return_value={}),
       patch("robosystems.security.audit_logger.SecurityAuditLogger.log_security_event"),
     ):
       await cleanup_mercury_connection({"connection_id": "conn_1"}, "kg_test")
@@ -437,7 +437,7 @@ class TestCleanupMercuryConnection:
         new_callable=AsyncMock,
         side_effect=httpx.ConnectError("down"),
       ),
-      patch(f"{MODULE}._purge_feed", return_value={}) as purge,
+      patch(f"{MODULE}.purge_bank_feed_connection", return_value={}) as purge,
       patch("robosystems.security.audit_logger.SecurityAuditLogger.log_security_event"),
     ):
       await cleanup_mercury_connection({"connection_id": "conn_1"}, "kg_test")
@@ -449,38 +449,9 @@ class TestCleanupMercuryConnection:
       cleanup_mercury_connection,
     )
 
-    with patch(f"{MODULE}._purge_feed") as purge:
+    with patch(f"{MODULE}.purge_bank_feed_connection") as purge:
       await cleanup_mercury_connection({}, "kg_test")
     purge.assert_not_called()
-
-  def test_purge_feed_on_a_missing_schema_is_nothing_to_do(self):
-    from sqlalchemy.exc import ProgrammingError
-
-    from robosystems.operations.providers.mercury_provider import _purge_feed
-
-    exc = ProgrammingError("stmt", {}, Exception("schema"))
-    with (
-      patch("robosystems.db.extensions.extensions_session", side_effect=exc),
-      patch("robosystems.middleware.extensions.is_schema_missing", return_value=True),
-    ):
-      assert _purge_feed("kg_test", "conn_1") == {
-        "events_deleted": 0,
-        "events_scrubbed": 0,
-        "agents_deleted": 0,
-      }
-
-  def test_purge_feed_other_errors_surface(self):
-    from sqlalchemy.exc import ProgrammingError
-
-    from robosystems.operations.providers.mercury_provider import _purge_feed
-
-    exc = ProgrammingError("stmt", {}, Exception("other"))
-    with (
-      patch("robosystems.db.extensions.extensions_session", side_effect=exc),
-      patch("robosystems.middleware.extensions.is_schema_missing", return_value=False),
-    ):
-      with pytest.raises(ProgrammingError):
-        _purge_feed("kg_test", "conn_1")
 
 
 @pytest.mark.unit
@@ -508,4 +479,5 @@ def test_record_bank_feed_consent_writes_the_daa_record():
   assert details["organization"] == "Cascade Books LLC"
   assert details["scope"] == "read offline_access"
   assert details["auth_mode"] == "oauth"
+  assert details["provider"] == "mercury"
   assert "granted_at" in details

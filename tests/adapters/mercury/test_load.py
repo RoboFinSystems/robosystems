@@ -8,12 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.adapters.mercury.pipeline.load import (
-  HINT_KEYS,
-  _refresh_hints,
-  load_feed,
-)
-from robosystems.adapters.mercury.pipeline.transform import ChartIndex
+from robosystems.adapters.bank_feed.chart import ChartIndex
+from robosystems.adapters.mercury.pipeline.load import HINT_KEYS, load_feed
 from tests.adapters.mercury.fixtures import (
   CARD_ID,
   CHECKING_ID,
@@ -22,7 +18,7 @@ from tests.adapters.mercury.fixtures import (
   raw_pull,
 )
 
-MODULE = "robosystems.adapters.mercury.pipeline.load"
+KERNEL = "robosystems.adapters.bank_feed.load.create_event_block_in_session"
 ELEMENTS = {
   CHECKING_ID: "e_chk",
   SAVINGS_ID: "e_sav",
@@ -66,7 +62,7 @@ class _Session:
 
 
 def _run(session, **kwargs):
-  with patch(f"{MODULE}.create_event_block_in_session") as create:
+  with patch(KERNEL) as create:
     report = load_feed(
       session,
       graph_id="kg_test",
@@ -104,7 +100,7 @@ class TestLoadFeed:
     raw = raw_pull()
     raw["transactions"][0]["postedAt"] = "0001-01-01T00:00:00Z"
     raw["transactions"][0]["createdAt"] = None
-    with patch(f"{MODULE}.create_event_block_in_session"):
+    with patch(KERNEL):
       report = load_feed(
         session,
         graph_id="kg_test",
@@ -150,7 +146,7 @@ class TestLoadFeed:
 
   def test_one_bad_row_does_not_stop_the_batch(self):
     session = _Session()
-    with patch(f"{MODULE}.create_event_block_in_session") as create:
+    with patch(KERNEL) as create:
       create.side_effect = [ValueError("bad row")] + [MagicMock()] * 8
       report = load_feed(
         session,
@@ -173,15 +169,5 @@ class TestLoadFeed:
 
 
 @pytest.mark.unit
-class TestRefreshHints:
-  def test_no_change_is_false(self):
-    event = SimpleNamespace(metadata_={"classification_source": "none"})
-    assert _refresh_hints(event, {"classification_source": "none"}) is False
-
-  def test_removed_hint_is_dropped(self):
-    event = SimpleNamespace(metadata_={"suggested_account_name": "x", "keep": 1})
-    assert _refresh_hints(event, {}) is True
-    assert event.metadata_ == {"keep": 1}
-
-  def test_hint_keys_are_the_mercury_signals(self):
-    assert "gl_allocations" in HINT_KEYS and "connection_id" not in HINT_KEYS
+def test_hint_keys_are_the_mercury_signals():
+  assert "gl_allocations" in HINT_KEYS and "connection_id" not in HINT_KEYS
