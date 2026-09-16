@@ -607,9 +607,13 @@ def search_recreate_index(client, force):
   create run in one bastion script, so no writer can recreate the index with a
   dynamic mapping in between.
 
+  Prove the rebuild before running this: launch rebuild_documents_job against
+  the live index first. It is idempotent there — same stable ids, delete by
+  prefix then rewrite — so a failure costs nothing while the old index stands.
+
   Examples:
 
-    just admin staging search recreate-index
+    just admin prod search recreate-index
 
     just admin prod search recreate-index --force
   """
