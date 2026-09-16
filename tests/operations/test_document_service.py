@@ -239,3 +239,22 @@ class TestCountDocuments:
     session = MagicMock()
     service = DocumentService(session)
     assert service.count_documents("kg_test") == 7
+
+
+class TestResyncDocument:
+  """The row→index primitive a rebuild walks every document through."""
+
+  @patch("robosystems.operations.search.get_search_service")
+  def test_reindexes_the_row_and_records_the_section_count(self, mock_search):
+    session = MagicMock()
+    doc = _mock_document()
+
+    search_service = MagicMock()
+    search_service.upload_document.return_value = _mock_upload_response()
+    mock_search.return_value = search_service
+
+    response = DocumentService(session).resync_document(doc)
+
+    assert response.sections_indexed == 2
+    search_service.upload_document.assert_called_once()
+    doc.update.assert_called_once_with(session, sections_indexed=2)

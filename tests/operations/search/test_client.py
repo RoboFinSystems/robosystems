@@ -475,3 +475,25 @@ class TestSnippetBudget:
       "content"
     ]
     assert (hl["fragment_size"], hl["number_of_fragments"]) == (200, 5)
+
+
+class TestEmbeddingMapping:
+  """The vector field is quantized at the mapping — the only place it can be."""
+
+  def test_embeddings_are_fp16_on_faiss_hnsw(self):
+    field = INDEX_MAPPING["mappings"]["properties"]["embedding"]
+    assert field["type"] == "knn_vector"
+    assert field["dimension"] == 384
+
+    method = field["method"]
+    assert (method["name"], method["engine"], method["space_type"]) == (
+      "hnsw",
+      "faiss",
+      "innerproduct",
+    )
+    # clip stays off on purpose: normalized vectors never leave [-1, 1], so an
+    # out-of-range value is a bug to reject, not one to round away.
+    assert method["parameters"]["encoder"] == {
+      "name": "sq",
+      "parameters": {"type": "fp16", "clip": False},
+    }

@@ -140,6 +140,12 @@ class Document(Model):
     return query.order_by(cls.updated_at.desc()).all()
 
   @classmethod
+  def graph_ids(cls, session: Session) -> list[str]:
+    """Every graph that has at least one document, in a stable order."""
+    rows = session.query(cls.graph_id).distinct().order_by(cls.graph_id).all()
+    return [row[0] for row in rows]
+
+  @classmethod
   def count_by_graph(
     cls,
     graph_id: str,

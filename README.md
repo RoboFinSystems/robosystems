@@ -272,7 +272,8 @@ The full corpus is also published monthly as one LadybugDB file on Hugging Face 
 
 - **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (Icebug+fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
 - **Graph**: the base schema plus the `roboledger` extension — 20 node types and 41 relationship types modeling the full XBRL reporting hierarchy
-- **Search**: Hybrid BM25 + KNN vector search across XBRL text blocks, narrative sections, and iXBRL disclosures
+- **Extraction**: every filing is parsed by [xbrlkit](https://xbrlkit.com) — the same open library behind the `disclosures` and `information-block` tools, the holon viewer, and its own MCP server
+- **Search**: Hybrid BM25 + KNN vector search across narrative sections and iXBRL disclosures
 - **Enrichment**: Semantic element mapping, statement classification, and disclosure tagging — applying aspects of the Seattle Method to the shared repository's disclosures (the methodology RoboLedger implements more broadly)
 
 See [SEC Adapter](/robosystems/adapters/sec/README.md) for detailed documentation.
