@@ -63,9 +63,6 @@ class ModelSpec:
   # Whether `temperature` is accepted. The Claude 5 family and GPT-5.6 both
   # reject it with a 400.
   accepts_sampling_params: bool
-  # Has `us.` / `global.` cross-region profiles. The open-weight catalog is
-  # In-Region only, which matters for failover and residency.
-  cross_region: bool
   # Hard output cap when the model's is below what the execution profiles
   # ask for (EXTENDED asks 8,000). None = no cap that binds. GLM 4.7 would
   # carry 4,096 here.
@@ -125,13 +122,20 @@ class OperatorConfig:
 
   # The model registry. One row per model the platform can run; the
   # profile map below picks which rows customer surfaces reach by name.
+  # Every row is a `us.` cross-region profile today. The open-weight catalog
+  # is In-Region only (no `us.` / `global.` profiles), so the first such row
+  # brings a residency/failover field with it.
+  #
+  # Wire ids: Bedrock publishes the Claude 5 family and GPT-5.6 as
+  # unversioned ids (`us.anthropic.claude-sonnet-5`, no `-v1:0`); the 4.x
+  # rows keep the versioned form. Both shapes are verified against the
+  # account's inference-profile list — do not "fix" one to match the other.
   MODEL_REGISTRY: dict[BedrockModel, ModelSpec] = {
     BedrockModel.SONNET_5: ModelSpec(
       model_id="us.anthropic.claude-sonnet-5",
       pricing_key="anthropic_claude_5_sonnet",
       cache_points=True,
       accepts_sampling_params=False,
-      cross_region=True,
       additional_request_fields=_CLAUDE_5_REQUEST_FIELDS,
     ),
     BedrockModel.SONNET_4_6: ModelSpec(
@@ -139,28 +143,24 @@ class OperatorConfig:
       pricing_key="anthropic_claude_4_sonnet",
       cache_points=True,
       accepts_sampling_params=True,
-      cross_region=True,
     ),
     BedrockModel.SONNET_4_5: ModelSpec(
       model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
       pricing_key="anthropic_claude_4_sonnet",
       cache_points=True,
       accepts_sampling_params=True,
-      cross_region=True,
     ),
     BedrockModel.SONNET_4: ModelSpec(
       model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
       pricing_key="anthropic_claude_4_sonnet",
       cache_points=True,
       accepts_sampling_params=True,
-      cross_region=True,
     ),
     BedrockModel.OPUS_5: ModelSpec(
       model_id="us.anthropic.claude-opus-5",
       pricing_key="anthropic_claude_5_opus",
       cache_points=True,
       accepts_sampling_params=False,
-      cross_region=True,
       additional_request_fields=_CLAUDE_5_REQUEST_FIELDS,
     ),
     # Verified over Converse 2026-09-15: tool use works, `temperature` and
@@ -172,7 +172,6 @@ class OperatorConfig:
       pricing_key="openai_gpt_5_6_luna",
       cache_points=False,
       accepts_sampling_params=False,
-      cross_region=True,
     ),
   }
 
