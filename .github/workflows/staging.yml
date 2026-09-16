@@ -28,6 +28,11 @@ on:
         required: false
         type: boolean
         default: false
+      graph_writer_az:
+        description: "Move ALL LadybugDB writer tiers to this AZ (e.g. us-east-1d). Recovery/capacity only — replaces every writer instance onto an empty volume. Leave empty for normal deploys; after a move, set GRAPH_WRITER_AZ_STAGING to the same value so later releases stay there."
+        required: false
+        type: string
+        default: ""
 
 jobs:
   # Guard: Verify staging environment is enabled
@@ -508,6 +513,14 @@ jobs:
       volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
       volume_manager_function_arn: ${{ needs.deploy-graph-volumes.outputs.volume_manager_function_arn }}
       volume_detachment_topic_arn: ${{ needs.deploy-graph-volumes.outputs.volume_detachment_topic_arn }}
+      # Writer placement. Every writer tier sits in ONE AZ (EBS volume affinity).
+      # The graph_writer_az dispatch input MOVES the tiers — a deliberate, per-run
+      # act. The GRAPH_WRITER_AZ_STAGING var SUSTAINS the AZ across the input-less
+      # dispatches from create-release / graph-maintenance and may only name the
+      # AZ the tiers already occupy (a mismatch fails the deploy). Both unset →
+      # <region>c, unchanged behaviour.
+      writer_az: ${{ inputs.graph_writer_az || vars.GRAPH_WRITER_AZ_STAGING || '' }}
+      writer_az_change_allowed: ${{ (inputs.graph_writer_az != '' && 'true') || 'false' }}
       # Graph Tier Configuration
       lbug_large_enabled: ${{ vars.LBUG_LARGE_ENABLED_STAGING || 'false' }}
       lbug_xlarge_enabled: ${{ vars.LBUG_XLARGE_ENABLED_STAGING || 'false' }}

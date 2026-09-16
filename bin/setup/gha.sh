@@ -465,6 +465,11 @@ function setup_full_config() {
         gh variable set LBUG_SHARED_MAX_INSTANCES_STAGING --body "1"
     fi
 
+    # GRAPH_WRITER_AZ_{PROD,STAGING} is deliberately NOT seeded here. It is the
+    # sustain-lever for a writer-tier AZ relocation (prod.yml / deploy-graph-ladybug.yml):
+    # absent means "<region>c", and re-asserting a default from this script would move
+    # the tiers back on the next release. Set it only after a deliberate move.
+
     # Shared Replicas Configuration - Read-Only Fleet
     # Replicas download shared databases from S3 at startup, then serve queries locally
     # Materialize sec_lbug_s3_published asset in Dagster to upload database, then enable replicas
