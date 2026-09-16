@@ -114,13 +114,14 @@ class HttpToolAccess:
     return _RemoteToolHandle(self, tool_name)
 
   async def get_tool_schemas(self, names: list[str]) -> list[dict[str, Any]]:
-    """Return Anthropic-shaped tool definitions for the requested names.
+    """Return MCP-shaped tool definitions for the requested names.
 
     The requested `names` are intersected with the tools actually available
     on this graph (GraphMCPTools gates by schema extension + feature flag),
     so an operator can ask for a broad read-only allowlist and safely get
-    back only what exists. Remaps the MCP `inputSchema` key to Anthropic's
-    `input_schema`.
+    back only what exists. The MCP shape (name / description / inputSchema)
+    is passed through unchanged; `AIClient` wraps it into the provider's
+    tool spec at request build.
     """
     if self._tools is None:
       await self.initialize()
@@ -129,7 +130,7 @@ class HttpToolAccess:
       {
         "name": defn["name"],
         "description": defn["description"],
-        "input_schema": defn["inputSchema"],
+        "inputSchema": defn["inputSchema"],
       }
       for defn in self._tools.get_tool_definitions_as_dict()
       if defn["name"] in wanted
@@ -202,7 +203,7 @@ class DirectToolAccess:
     )
 
   async def get_tool_schemas(self, names: list[str]) -> list[dict[str, Any]]:
-    """Return Anthropic-shaped definitions for registered tool instances.
+    """Return MCP-shaped definitions for registered tool instances.
 
     DirectToolAccess is used by operators that drive tools imperatively
     (e.g. MappingOperator), not by the model-driven tool loop. It only
@@ -218,7 +219,7 @@ class DirectToolAccess:
           {
             "name": defn["name"],
             "description": defn["description"],
-            "input_schema": defn["inputSchema"],
+            "inputSchema": defn["inputSchema"],
           }
         )
     return schemas

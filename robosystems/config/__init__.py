@@ -22,9 +22,10 @@ from .operators import (
   BedrockModel,
   ExecutionProfile,
   ModelConfig,
+  ModelProfile,
+  ModelSpec,
   OperatorConfig,
   OperatorExecutionMode,
-  model_accepts_sampling_params,
 )
 from .query_queue import QueryQueueConfig
 from .rate_limits import EndpointCategory, RateLimitConfig, RateLimitPeriod
@@ -45,6 +46,8 @@ __all__ = [
   "EnvValidator",
   "ExecutionProfile",
   "ModelConfig",
+  "ModelProfile",
+  "ModelSpec",
   # AI Operator exports
   "OperatorConfig",
   "OperatorExecutionMode",
@@ -58,5 +61,4 @@ __all__ = [
   "URIConstants",
   "XBRLConstants",
   "env",
-  "model_accepts_sampling_params",
 ]

@@ -169,12 +169,32 @@ class TestCreditServiceFlow:
       graph_id=graph.graph_id,
       input_tokens=1000,
       output_tokens=500,
-      model="claude-4-sonnet",
+      model="us.anthropic.claude-sonnet-4-6",
       operation_description="Test AI operation",
       user_id=str(credits.user_id),
     )
     assert result["success"] is True
     assert result["credits_consumed"] > 0
+
+  def test_consume_ai_tokens_unregistered_model_raises(
+    self, test_db, test_graph_with_credits
+  ):
+    """An unregistered model must not bill at some other model's rate: the
+    credits are an exact cost passthrough, so a guessed rate is a wrong
+    invoice. The old map silently defaulted anything unknown to Sonnet 4."""
+    graph = test_graph_with_credits["graph"]
+    credits = test_graph_with_credits["credits"]
+
+    service = CreditService(test_db)
+    with pytest.raises(ValueError, match="Unknown model or profile"):
+      service.consume_ai_tokens(
+        graph_id=graph.graph_id,
+        input_tokens=1000,
+        output_tokens=500,
+        model="claude-4-sonnet",
+        operation_description="Legacy short name",
+        user_id=str(credits.user_id),
+      )
 
   def test_consume_ai_tokens_prices_all_four_token_classes(
     self, test_db, test_graph_with_credits
@@ -218,3 +238,32 @@ class TestCreditServiceFlow:
     )
     assert result["success"] is True
     assert float(result["credits_consumed"]) == pytest.approx(13.2)
+
+  def test_consume_ai_tokens_prices_each_registered_model_at_its_own_rate(
+    self, test_db, test_graph_with_credits
+  ):
+    """Opus 5 and GPT-5.6 Luna bill under their own keys (5.5/27.5 and
+    0.22/1.32 per 1K) — a 25x spread that the old single-key map collapsed."""
+    graph = test_graph_with_credits["graph"]
+    credits = test_graph_with_credits["credits"]
+
+    service = CreditService(test_db)
+    opus = service.consume_ai_tokens(
+      graph_id=graph.graph_id,
+      input_tokens=1000,
+      output_tokens=1000,
+      model="us.anthropic.claude-opus-5",
+      operation_description="Opus 5 pricing test",
+      user_id=str(credits.user_id),
+    )
+    assert float(opus["credits_consumed"]) == pytest.approx(33.0)
+
+    luna = service.consume_ai_tokens(
+      graph_id=graph.graph_id,
+      input_tokens=1000,
+      output_tokens=1000,
+      model="us.openai.gpt-5.6-luna",
+      operation_description="Luna pricing test",
+      user_id=str(credits.user_id),
+    )
+    assert float(luna["credits_consumed"]) == pytest.approx(1.54)

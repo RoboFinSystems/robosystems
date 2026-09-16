@@ -40,7 +40,7 @@ def _tools(available: list[str], call_results: dict[str, object]) -> MagicMock:
   tools = MagicMock()
   tools.get_tool_schemas = AsyncMock(
     return_value=[
-      {"name": name, "description": "d", "input_schema": {"type": "object"}}
+      {"name": name, "description": "d", "inputSchema": {"type": "object"}}
       for name in available
     ]
   )
