@@ -1004,32 +1004,22 @@ class CreditService:
     Called *after* the model responds, so the charge reflects real usage rather
     than an estimate. Rates are per 1,000 tokens and a floor
     (``AIBillingConfig.apply_minimum_charge``) applies, so a tiny call still
-    costs the minimum. An unrecognised model falls back to Sonnet pricing
-    rather than billing zero.
+    costs the minimum.
+
+    ``model`` is the wire id as `AIResponse.model` carries it. It must be in
+    the model registry, which names the rate-card key it bills under; an
+    unregistered model raises ValueError rather than billing at some other
+    model's rate. The credits are an exact cost passthrough, so a wrong rate
+    is a wrong invoice in one direction or the other.
 
     ``input_tokens`` is the uncached input as Bedrock reports it; cache reads
     and writes are billed at their own rates. All four counts land in the
     transaction metadata so the CUR reconciliation stays reproducible.
     """
-    from ...config import AIBillingConfig
+    from ...config import AIBillingConfig, OperatorConfig
 
-    model_pricing_map = {
-      # Bedrock model IDs as they come back from AIClient
-      "us.anthropic.claude-sonnet-5": "anthropic_claude_5_sonnet",
-      "us.anthropic.claude-sonnet-4-6": "anthropic_claude_4_sonnet",
-      "us.anthropic.claude-sonnet-4-5-20250929-v1:0": "anthropic_claude_4_sonnet",
-      "us.anthropic.claude-sonnet-4-20250514-v1:0": "anthropic_claude_4_sonnet",
-      # Short-form names
-      "claude-4-sonnet": "anthropic_claude_4_sonnet",
-      "claude-4.1-sonnet": "anthropic_claude_4_sonnet",
-    }
-
-    pricing_key = model_pricing_map.get(model.lower(), "anthropic_claude_4_sonnet")
-    pricing = AIBillingConfig.TOKEN_PRICING.get(pricing_key)
-
-    if not pricing:
-      logger.warning(f"No pricing found for model {model}, using Sonnet pricing")
-      pricing = AIBillingConfig.TOKEN_PRICING["anthropic_claude_4_sonnet"]
+    pricing_key = OperatorConfig.pricing_key_for(model)
+    pricing = AIBillingConfig.TOKEN_PRICING[pricing_key]
 
     input_cost = (Decimal(input_tokens) / 1000) * pricing["input"]
     output_cost = (Decimal(output_tokens) / 1000) * pricing["output"]

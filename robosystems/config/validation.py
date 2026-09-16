@@ -419,9 +419,10 @@ class EnvValidator:
       },
       "operators": {
         "config_valid": operator_validation["valid"],
-        "default_model": OperatorConfig.DEFAULT_MODEL_CONFIG.default_model.value,
+        "default_profile": OperatorConfig.DEFAULT_MODEL_CONFIG.default_profile.value,
+        "default_model": OperatorConfig.resolve_model().model_id,
         "fallback_operator": OperatorConfig.ORCHESTRATOR_CONFIG["fallback_operator"],
-        "available_models": len(OperatorConfig.BEDROCK_MODELS),
+        "available_models": len(OperatorConfig.MODEL_REGISTRY),
         "execution_modes": len(OperatorConfig.EXECUTION_PROFILES),
       },
       "billing": {
