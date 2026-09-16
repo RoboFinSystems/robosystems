@@ -77,6 +77,7 @@ The instance-monitoring schedules are auto-enabled in staging and production onl
 | `reap_stalled_provisioning_job` | `stalled_provisioning_sensor` | Write off subscriptions stuck mid-provisioning so their infrastructure is reclaimed |
 | `invoice_subscription_renewal_job` | `invoice_subscription_renewal_sensor` | Rotate billing periods and generate invoices for invoice-billed subscriptions |
 | `send_email_job` | API | Email notifications |
+| `rebuild_documents_job` | Manual | Rebuild user graphs' uploaded documents into the search index from PostgreSQL — the recovery path after `search recreate-index` (a mapping change); one graph via `graph_id` run config, every graph when unset |
 | `shared_master_wake`, `shared_master_sleep`, `shared_replicas_refresh`, `shared_repository_refresh_replicas_job` | Schedule / sensor / manual | Shared repository master lifecycle and replica refresh |
 | `ladybug_migration_export_job`, `ladybug_migration_import_job`, `ladybug_migration_cleanup_job` | Manual | LadybugDB version migration: export pre-deploy, import post-deploy, delete rollback backups post-verify |
 | `extensions_materialize_job` | `stale_graph_materialization_sensor` | OLTP→OLAP materialization for a graph marked stale (extensions builds only) |

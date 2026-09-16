@@ -112,7 +112,12 @@ INDEX_MAPPING = {
       "last_modified": {"type": "date"},
       # Timestamps
       "indexed_at": {"type": "date"},
-      # Embedding — faiss engine for normalized embedding performance
+      # Embedding — faiss engine for normalized embedding performance.
+      # fp16 scalar quantization halves the HNSW graph's native-memory footprint.
+      # bge-small vectors are normalized to [-1, 1], far inside fp16's ±65504, so
+      # clip stays off: an out-of-range value is a bug to reject, not round away.
+      # An encoder is a mapping property — changing it means recreating the index
+      # (`just admin <env> search recreate-index`, then rebuild from source).
       "embedding": {
         "type": "knn_vector",
         "dimension": 384,  # fastembed BAAI/bge-small-en-v1.5
@@ -120,6 +125,9 @@ INDEX_MAPPING = {
           "name": "hnsw",
           "space_type": "innerproduct",
           "engine": "faiss",
+          "parameters": {
+            "encoder": {"name": "sq", "parameters": {"type": "fp16", "clip": False}},
+          },
         },
       },
       "embedding_model": {"type": "keyword"},  # "fastembed" or "bedrock"

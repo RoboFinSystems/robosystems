@@ -46,6 +46,7 @@ from robosystems.dagster.jobs.billing import (
   monthly_usage_report_job,
   monthly_usage_report_schedule,
 )
+from robosystems.dagster.jobs.documents import rebuild_documents_job
 from robosystems.dagster.jobs.graph import (
   backup_graph_job,
   materialize_file_job,
@@ -253,6 +254,8 @@ all_jobs = [
   ladybug_migration_cleanup_job,
   # Platform: Notifications
   send_email_job,
+  # Platform: Search (manually triggered)
+  rebuild_documents_job,
   # Adapter: SEC pipeline
   *sec["jobs"],
   # Adapter: QuickBooks pipeline

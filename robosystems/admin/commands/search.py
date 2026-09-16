@@ -17,7 +17,7 @@ console = Console()
 # Self-contained Python script for bastion execution.
 # Uses only stdlib (no boto3) — manual SigV4 signing via IMDSv2 credentials.
 _OPENSEARCH_QUERY_SCRIPT = """
-import json, urllib.request, ssl, hmac, hashlib, datetime, sys, os, base64
+import json, urllib.request, urllib.error, ssl, hmac, hashlib, datetime, sys, os, base64
 
 host = {host}
 region = {region}
@@ -122,6 +122,7 @@ source_type = {source_type}
 before_date = {before_date}
 indexed_before = {indexed_before}
 dry_run = {dry_run} == "true"
+mapping = {mapping}
 
 if action == "count":
     total = query_os(f"/{{index_name}}/_count", {{"query": {{"term": {{"graph_id": graph_id}}}}}})
@@ -209,6 +210,44 @@ elif action == "force-merge":
     # Force merge to 1 segment purges deleted doc tombstones and frees HNSW memory
     result = query_os(f"/{{index_name}}/_forcemerge?max_num_segments=1")
     print(json.dumps(result))
+
+elif action == "recreate-index":
+    # The whole index — every graph's documents. Count first so the confirm can
+    # name what is about to go; then DELETE and PUT the mapping in the SAME
+    # script: auto_create_index is on, so an index left missing would be
+    # recreated by the next writer with a dynamic mapping and no knn_vector.
+    try:
+        summary = query_os(f"/{{index_name}}/_search", {{
+            "size": 0,
+            "track_total_hits": True,
+            "query": {{"match_all": {{}}}},
+            "aggs": {{"by_graph": {{"terms": {{"field": "graph_id", "size": 200}}}}}},
+        }})
+        total = summary["hits"]["total"]["value"]
+        by_graph = summary["aggregations"]["by_graph"]["buckets"]
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+        total, by_graph = 0, []
+
+    if dry_run:
+        print(json.dumps({{"total": total, "by_graph": by_graph, "recreated": False}}))
+    else:
+        try:
+            query_os(f"/{{index_name}}", method="DELETE")
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+        query_os(f"/{{index_name}}", json.loads(mapping), method="PUT")
+        current = query_os(f"/{{index_name}}/_mapping", method="GET")
+        method = current[index_name]["mappings"]["properties"]["embedding"].get("method", {{}})
+        encoder = method.get("parameters", {{}}).get("encoder", {{}})
+        print(json.dumps({{
+            "total": total,
+            "by_graph": by_graph,
+            "recreated": True,
+            "encoder": encoder.get("parameters", {{}}).get("type"),
+        }}))
 """
 
 
@@ -261,6 +300,7 @@ def _run_opensearch_script(
   before_date: str = "",
   indexed_before: str = "",
   dry_run: bool = False,
+  mapping: str = "",
 ) -> dict:
   """Run OpenSearch query script on bastion via SSM."""
   endpoint = _get_opensearch_endpoint(client.environment, client.aws_profile)
@@ -276,6 +316,7 @@ def _run_opensearch_script(
     before_date=_literal(before_date),
     indexed_before=_literal(indexed_before),
     dry_run=_literal("true" if dry_run else "false"),
+    mapping=_literal(mapping),
   )
 
   # Base64 encode script and query text to avoid shell quoting issues.
@@ -547,3 +588,86 @@ def search_force_merge(client, force):
     )
   else:
     console.print(f"\n[red]Force merge had {failed} failed shards:[/red] {data}\n")
+
+
+@search.command("recreate-index")
+@click.option("--force", is_flag=True, help="Skip the confirmation prompt")
+@click.pass_obj
+def search_recreate_index(client, force):
+  """DELETE the 'documents' index and create it again with the current mapping.
+
+  The only way to change a knn_vector encoder (fp16 quantization). Every
+  graph's documents are gone afterwards and must be rebuilt from source: user
+  graphs via the rebuild_documents_job Dagster job (PostgreSQL is their source
+  of truth), sec via the SEC text-index pipeline. The procedure is
+  runbooks/sec-text-reindex.md §11 — do not run this outside it.
+
+  The mapping is INDEX_MAPPING from the LOCAL checkout: that is why this needs
+  no deploy, and why it must be run from the merged branch. The delete and the
+  create run in one bastion script, so no writer can recreate the index with a
+  dynamic mapping in between.
+
+  Examples:
+
+    just admin staging search recreate-index
+
+    just admin prod search recreate-index --force
+  """
+  from robosystems.operations.search.client import INDEX_MAPPING
+
+  mapping = json.dumps(INDEX_MAPPING)
+  expected_encoder = (
+    INDEX_MAPPING["mappings"]["properties"]["embedding"]["method"]
+    .get("parameters", {})
+    .get("encoder", {})
+    .get("parameters", {})
+    .get("type")
+  )
+
+  data = _run_opensearch_script(
+    client, action="recreate-index", mapping=mapping, dry_run=True
+  )
+  total = data.get("total", 0)
+  by_graph = data.get("by_graph", [])
+
+  console.print(
+    f"\n[bold red]Will DELETE the 'documents' index on {client.environment}[/bold red]"
+    f": {total:,} documents across {len(by_graph)} graphs"
+  )
+  if by_graph:
+    table = Table(show_header=True)
+    table.add_column("Graph")
+    table.add_column("Documents", justify="right")
+    for b in by_graph:
+      table.add_row(b["key"], f"{b['doc_count']:,}")
+    console.print(table)
+  console.print(
+    "Every graph's documents must then be rebuilt from source — "
+    "rebuild_documents_job for user graphs, the SEC text-index pipeline for sec.\n"
+  )
+
+  if not force:
+    typed = click.prompt(
+      f"Type the environment name ({client.environment}) to proceed",
+      default="",
+      show_default=False,
+    )
+    if typed != client.environment:
+      console.print("[dim]Cancelled.[/dim]")
+      return
+
+  data = _run_opensearch_script(client, action="recreate-index", mapping=mapping)
+  encoder = data.get("encoder")
+
+  console.print(
+    f"\n[green]Index recreated.[/green] embedding encoder: {encoder or 'none'}"
+  )
+  if encoder != expected_encoder:
+    console.print(
+      f"[red]Expected {expected_encoder or 'none'} — the mapping that landed is "
+      "not the one in this checkout.[/red]"
+    )
+  console.print(
+    "\nNext: launch rebuild_documents_job, then the SEC lanes "
+    "(runbooks/sec-text-reindex.md §11).\n"
+  )

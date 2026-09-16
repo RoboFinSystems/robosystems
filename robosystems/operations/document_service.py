@@ -119,11 +119,7 @@ class DocumentService:
       external_id=request.external_id,
     )
 
-    # Sync to OpenSearch
-    upload_response = self._sync_to_opensearch(doc)
-
-    # Update sections count
-    doc.update(self.session, sections_indexed=upload_response.sections_indexed)
+    upload_response = self.resync_document(doc)
 
     return doc, upload_response
 
@@ -193,8 +189,7 @@ class DocumentService:
     )
 
     # Re-sync to OpenSearch if content or metadata changed
-    upload_response = self._sync_to_opensearch(doc)
-    doc.update(self.session, sections_indexed=upload_response.sections_indexed)
+    upload_response = self.resync_document(doc)
 
     return doc, upload_response
 
@@ -225,6 +220,18 @@ class DocumentService:
           f"Document limit reached ({current_count}/{max_docs}). "
           f"Upgrade your plan for more capacity."
         )
+
+  def resync_document(self, doc: Document) -> DocumentUploadResponse:
+    """Re-section, re-embed and re-index one document from its PostgreSQL row.
+
+    The row is the source of truth and the index is derived from it, so this is
+    the primitive behind create and update — and the whole of a rebuild: after
+    ``search recreate-index`` empties the index, ``rebuild_documents_job`` walks
+    every row through here.
+    """
+    upload_response = self._sync_to_opensearch(doc)
+    doc.update(self.session, sections_indexed=upload_response.sections_indexed)
+    return upload_response
 
   def _sync_to_opensearch(self, doc: Document) -> DocumentUploadResponse:
     """Sync a document to OpenSearch (section, embed, index)."""

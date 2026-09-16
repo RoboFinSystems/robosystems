@@ -8,14 +8,17 @@ the invariants the toolchain cannot.
 """
 
 import ast
+import json
 import textwrap
+import urllib.error
 
 import pytest
 
 from robosystems.admin.commands.search import _OPENSEARCH_QUERY_SCRIPT, _literal
+from robosystems.operations.search.client import INDEX_MAPPING
 
 # The dispatch values the template branches on — not the CLI subcommand names.
-ACTIONS = ["count", "search", "delete", "force-merge"]
+ACTIONS = ["count", "search", "delete", "force-merge", "recreate-index"]
 
 
 def render(**overrides) -> str:
@@ -31,6 +34,7 @@ def render(**overrides) -> str:
     "before_date": "",
     "indexed_before": "",
     "dry_run": "true",
+    "mapping": "{}",
   }
   params.update(overrides)
   return _OPENSEARCH_QUERY_SCRIPT.format(
@@ -68,6 +72,61 @@ def delete_filters(**overrides) -> list[dict]:
   # of it in the test would drift from the template without failing.
   exec(textwrap.dedent("\n".join(lines)), namespace)  # noqa: S102
   return namespace["filters"]
+
+
+def recreate_calls(*, dry_run: bool, mapping: dict) -> list[tuple]:
+  """The recreate-index branch, run against a recording fake of ``query_os``.
+
+  Same idea as ``delete_filters``: execute the template's own lines so a change
+  to the branch is caught rather than mirrored by a copy kept here.
+  """
+  script = render(
+    action="recreate-index",
+    dry_run="true" if dry_run else "false",
+    mapping=json.dumps(mapping),
+  )
+  calls: list[tuple] = []
+
+  def query_os(path, body=None, method="POST"):
+    calls.append((method, path, body))
+    if path.endswith("/_search"):
+      return {
+        "hits": {"total": {"value": 3}},
+        "aggregations": {"by_graph": {"buckets": [{"key": "sec", "doc_count": 3}]}},
+      }
+    if path.endswith("/_mapping"):
+      return {
+        "documents": {
+          "mappings": {
+            "properties": {
+              "embedding": {
+                "method": {"parameters": {"encoder": {"parameters": {"type": "fp16"}}}}
+              }
+            }
+          }
+        }
+      }
+    return {}
+
+  namespace: dict = {
+    node.targets[0].id: node.value.value
+    for node in ast.parse(script).body
+    if isinstance(node, ast.Assign)
+    and isinstance(node.targets[0], ast.Name)
+    and isinstance(node.value, ast.Constant)
+  }
+  namespace.update(
+    {
+      "json": json,
+      "urllib": urllib,
+      "dry_run": dry_run,
+      "query_os": query_os,
+      "print": lambda *_: None,
+    }
+  )
+  body = script.split('elif action == "recreate-index":', 1)[1]
+  exec(textwrap.dedent(body), namespace)  # noqa: S102
+  return calls
 
 
 @pytest.mark.unit
@@ -194,3 +253,56 @@ def test_hostile_graph_id_still_lands_in_the_filter_verbatim():
   hostile = 'sec" or True or "'
   filters = delete_filters(graph_id=hostile)
   assert filters == [{"term": {"graph_id": hostile}}]
+
+
+@pytest.mark.unit
+def test_recreate_dry_run_only_counts():
+  """The confirm step reads the index; nothing is deleted."""
+  calls = recreate_calls(dry_run=True, mapping={"mappings": {}})
+  assert [method for method, _, _ in calls] == ["POST"]
+  assert calls[0][1] == "/documents/_search"
+
+
+@pytest.mark.unit
+def test_recreate_deletes_then_creates_with_the_decoded_mapping():
+  """DELETE and PUT happen in the same script, in that order — a missing index
+  would otherwise be recreated by the next writer with a dynamic mapping."""
+  mapping = {
+    "mappings": {"properties": {"x": {"type": "keyword"}}},
+    "settings": {"index.knn": True},
+  }
+  calls = recreate_calls(dry_run=False, mapping=mapping)
+
+  assert [method for method, _, _ in calls] == ["POST", "DELETE", "PUT", "GET"]
+  assert calls[1] == ("DELETE", "/documents", None)
+  assert calls[2] == ("PUT", "/documents", mapping)
+
+
+@pytest.mark.unit
+def test_recreate_ships_the_checkout_mapping_intact():
+  """The encoder crosses the literal boundary unchanged: what the checkout
+  declares is what the bastion PUTs."""
+  calls = recreate_calls(dry_run=False, mapping=INDEX_MAPPING)
+  put_body = calls[2][2]
+
+  assert put_body == json.loads(json.dumps(INDEX_MAPPING))
+  encoder = put_body["mappings"]["properties"]["embedding"]["method"]["parameters"][
+    "encoder"
+  ]
+  assert encoder == {"name": "sq", "parameters": {"type": "fp16", "clip": False}}
+
+
+@pytest.mark.unit
+def test_a_hostile_mapping_value_cannot_escape_its_literal():
+  mapping = {"mappings": {"_meta": {"note": '"; import os; os.system("id"); x = "'}}}
+  script = render(action="recreate-index", mapping=json.dumps(mapping))
+  tree = ast.parse(script)
+
+  assigned = next(
+    node.value.value
+    for node in tree.body
+    if isinstance(node, ast.Assign)
+    and isinstance(node.targets[0], ast.Name)
+    and node.targets[0].id == "mapping"
+  )
+  assert json.loads(assigned) == mapping
