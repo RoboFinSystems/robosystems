@@ -41,6 +41,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
   next_period,
   period_date_range,
   period_from_date,
+  previous_period,
 )
 from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   WritebackFailed,
@@ -76,6 +77,40 @@ class PeriodNotClosedError(Exception):
     super().__init__(f"Period {period!r} is not closed (status={status!r}).")
     self.period = period
     self.status = status
+
+
+class ReopenOrderError(Exception):
+  """Raised when reopening a closed period that is not the latest one.
+
+  Every later closed month carries statements stamped from this month's
+  numbers. A reopen makes those numbers mutable without touching the later
+  stamps, so the only reopen that leaves the closed series consistent is
+  the latest. ``reopen_order`` lists the months to reopen, latest first,
+  down to the one requested.
+  """
+
+  def __init__(self, period: str, closed_through: str | None) -> None:
+    self.period = period
+    self.closed_through = closed_through
+    order: list[str] = []
+    if closed_through is not None and closed_through > period:
+      current = closed_through
+      while current >= period:
+        order.append(current)
+        current = previous_period(current)
+    self.reopen_order = order
+    boundary = (
+      f"closed_through is {closed_through!r}"
+      if closed_through is not None
+      else "nothing is recorded as closed through"
+    )
+    steps = ", ".join(order) if order else period
+    super().__init__(
+      f"Cannot reopen {period!r}: only the latest closed period can be "
+      f"reopened ({boundary}). Every later closed month carries statements "
+      f"stamped from this month's numbers. Reopen latest-first — {steps} — "
+      "then close forward month by month."
+    )
 
 
 class BackfillPreconditionError(Exception):
@@ -286,9 +321,14 @@ def reopen_period(
   so its persisted statements — and their verification results — go
   with it. The re-close restamps fresh sets.
 
+  Only the latest closed period — ``closed_through`` — can be reopened.
+  To reach an earlier month, reopen latest-first down to it, then close
+  forward; each reopen carries its own reason.
+
   Raises `PeriodNotFoundInLedgerError` if the `FiscalPeriod` row
   doesn't exist, `PeriodNotClosedError` if it's not actually closed,
-  or service-level `FiscalCalendarError` for calendar issues.
+  `ReopenOrderError` if a later month is still closed, or service-level
+  `FiscalCalendarError` for calendar issues.
   """
   # Exclusive fence first — the same one `close_period` holds across its
   # mid-flow QuickBooks commit — then the FiscalPeriod row lock. Two
@@ -340,6 +380,7 @@ def _reopen_under_fence(
   note: str | None,
   service: FiscalCalendarService,
   actor_type: str,
+  enforce_latest: bool = True,
 ):
   """The reopen's writes, flushed but not committed.
 
@@ -347,6 +388,14 @@ def _reopen_under_fence(
   the backfill can run a reopen and the re-close as one transaction: on
   its own, a committed reopen followed by a failing close left closed
   history open with its statements retracted.
+
+  ``enforce_latest`` refuses any period other than ``closed_through``.
+  Every later closed month carries statements stamped from this month's
+  numbers, and the reopen makes those numbers mutable without touching
+  the later stamps — so the only reopen that leaves the closed series
+  consistent is the latest one. The backfill's restamp opts out: it
+  recloses the month in the same transaction and walks forward to
+  ``closed_through``.
   """
   session.flush()
   with bounded_lock_wait(session, _fence_detail(period)):
@@ -361,6 +410,10 @@ def _reopen_under_fence(
     raise PeriodNotFoundInLedgerError(period)
   if fp.status != "closed":
     raise PeriodNotClosedError(period, fp.status)
+  if enforce_latest:
+    closed_through = service.require(session, graph_id).closed_through_period
+    if closed_through != period:
+      raise ReopenOrderError(period, closed_through)
 
   fp.status = "closing"
   fp.closed_at = None
@@ -629,6 +682,9 @@ def _restamp_closed_period(
   """
   has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
   with exclusive_period_fence(graph_id, period, detail=_fence_detail(period)):
+    # An interior month is fine here: the restamp recloses it below in the
+    # same transaction and the backfill walks forward to closed_through,
+    # so no later stamp is left behind.
     _reopen_under_fence(
       session,
       graph_id,
@@ -638,6 +694,7 @@ def _restamp_closed_period(
       note=note,
       service=service,
       actor_type=actor_type,
+      enforce_latest=False,
     )
     result = close_service.close(
       session,

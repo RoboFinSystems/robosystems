@@ -24,6 +24,7 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   BackfillPreconditionError,
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
+  ReopenOrderError,
   ReopenPeriodResult,
   backfill_plan_history,
   close_period,
@@ -48,6 +49,13 @@ def _noop_exclusive_period_fence():
 
 def _fc_response() -> FiscalCalendarResponse:
   return FiscalCalendarResponse(graph_id=GRAPH_ID, fiscal_year_start_month=1)
+
+
+def _service_closed_through(period: str | None) -> MagicMock:
+  """A calendar service whose calendar reports ``period`` as closed_through."""
+  service = MagicMock()
+  service.require.return_value.closed_through_period = period
+  return service
 
 
 def _close_result(**overrides) -> PeriodCloseResult:
@@ -199,7 +207,7 @@ class TestReopenRetractsCanonicalSets:
         actor_id="usr_1",
         reason="missed accrual",
         note=None,
-        service=MagicMock(),
+        service=_service_closed_through("2026-01"),
       )
     return result, retract, fp
 
@@ -253,6 +261,33 @@ class TestReopenRetractsCanonicalSets:
         note=None,
         service=MagicMock(),
       )
+
+  def test_interior_reopen_refused_latest_first(self):
+    """Later closed months carry stamps computed from this month's numbers,
+    so only closed_through may be reopened; the refusal lists the order."""
+    session = MagicMock()
+    fp = MagicMock()
+    fp.status = "closed"
+    _stub_period_lock(session, fp)
+    with pytest.raises(ReopenOrderError) as exc:
+      reopen_period(
+        session,
+        MagicMock(),
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        reason="r",
+        note=None,
+        service=_service_closed_through("2026-03"),
+      )
+    assert exc.value.reopen_order == ["2026-03", "2026-02", "2026-01"]
+    assert "2026-03, 2026-02, 2026-01" in str(exc.value)
+    assert fp.status == "closed"
+
+  def test_reopen_order_without_a_boundary_names_the_gap(self):
+    err = ReopenOrderError("2026-01", None)
+    assert err.reopen_order == []
+    assert "nothing is recorded as closed through" in str(err)
 
 
 class TestBackfillPlanHistory:
@@ -534,6 +569,9 @@ class TestRestampClosedPeriod:
     result, session, reopen_body, close_service, fence = self._run()
     fence.assert_called_once()
     reopen_body.assert_called_once()
+    # The restamp recloses the month in the same transaction and walks
+    # forward to closed_through, so an interior month is allowed here.
+    assert reopen_body.call_args.kwargs["enforce_latest"] is False
     close_service.close.assert_called_once()
     session.commit.assert_called_once()
     assert result.period == "2026-01"

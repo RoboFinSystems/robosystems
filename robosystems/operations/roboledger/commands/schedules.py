@@ -93,7 +93,7 @@ def reinstate_reopened_schedule_scopes(session: Session) -> int:
   month's ending balance as the opening balance) and the re-close skips it.
   Flip the now-open window back to ``in_scope`` so every reader agrees with the
   calendar. Returns the number of facts re-stamped. Idempotent — a no-op when
-  the boundary didn't move (e.g. reopening an older period).
+  the boundary didn't move (the backfill's restamp of an interior month).
   """
   from sqlalchemy import text
 

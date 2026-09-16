@@ -43,6 +43,7 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   BackfillPreconditionError,
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
+  ReopenOrderError,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   backfill_plan_history as ops_backfill_plan_history,
@@ -531,7 +532,8 @@ class ReopenPeriodTool:
 
 **NOTES:**
 1. Transitions FiscalPeriod from 'closed' → 'closing' (drafts may still exist)
-2. If this was the latest closed period, decrements closed_through
+2. Only the latest closed period (closed_through) can be reopened;
+   closed_through retreats one month
 3. Retracts the month's canonical statement FactSets (a reopened month is
    no longer a closed assertion; re-closing restamps them fresh)
 4. Does NOT modify close_target — that's a separate user decision
@@ -542,8 +544,12 @@ class ReopenPeriodTool:
 - Posted entries stay posted. To "undo" a posted entry, create a reversing
   entry via create-event-block(event_type='journal_entry_recorded',
   metadata.type='reversing'), or reopen + correct + re-close.
-- Reopening older periods (not the most recently closed) is allowed but
-  does not decrement closed_through.
+- To reach an earlier month: reopen latest-first, one month at a time,
+  down to the target (each with its own reason), make the fix, then
+  close-period forward. An out-of-order reopen is refused
+  (error=reopen_order) with the ordered list — every later closed month
+  carries statements stamped from the earlier month's numbers, and a
+  reopen would leave those stamps outliving the numbers.
 
 **PARAMETERS:**
 - period (required): YYYY-MM format
@@ -623,6 +629,12 @@ class ReopenPeriodTool:
           return {
             "error": "not_closed",
             "message": f"Period {period!r} is not closed (status={exc.status!r}).",
+          }
+        except ReopenOrderError as exc:
+          return {
+            "error": "reopen_order",
+            "message": str(exc),
+            "reopen_order": exc.reopen_order,
           }
         except RowLockedError as exc:
           return {"error": "row_locked", "message": str(exc)}

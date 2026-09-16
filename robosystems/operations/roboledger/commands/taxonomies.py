@@ -51,6 +51,9 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_not_library_origin,
 )
 from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
+from robosystems.operations.taxonomy_block.immutability import (
+  assert_history_undisturbed,
+)
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 __all__ = [
@@ -155,6 +158,11 @@ def create_mapping_association(
   # The from-element must be tenant-authored (CoA side); the target is
   # allowed to be a library row — that's the whole point of mapping.
   assert_not_library_origin(from_elem)
+  # A closed month's statements were stamped through the arcs as they
+  # stood. A new arc for an account with landed history in one would
+  # restate it at read time while the stamp kept the old answer; map
+  # before close, or reopen latest-first and then map.
+  assert_history_undisturbed(session, account_ids=[body.from_element_id])
 
   to_elem = session.execute(
     select(Element).where(Element.id == body.to_element_id)
@@ -225,10 +233,12 @@ def delete_mapping_association(
 ) -> DeleteResult:
   """Delete a mapping association edge (the inverse of create).
 
-  Raises ``AssociationNotFoundError`` (→ 404) when no edge matches, or
-  ``LibraryImmutableError`` (→ 403) for library-seeded rows. Used to
-  correct a wrong mapping: delete the bad edge, then re-create the right
-  one with ``create_mapping_association``.
+  Raises ``AssociationNotFoundError`` (→ 404) when no edge matches,
+  ``LibraryImmutableError`` (→ 403) for library-seeded rows, or
+  ``ProtectedFactsError`` (→ 422) when the account has landed history in
+  a closed month — the stamped statements were computed through this arc.
+  Used to correct a wrong mapping: delete the bad edge, then re-create the
+  right one with ``create_mapping_association``.
   """
   assoc = session.execute(
     select(Association).where(
@@ -242,6 +252,7 @@ def delete_mapping_association(
   # rows at the service layer so the caller sees LibraryImmutableError
   # (→ 403) instead of a bare DB trigger ProgrammingError (→ 500).
   assert_not_library_origin(assoc)
+  assert_history_undisturbed(session, account_ids=[str(assoc.from_element_id)])
   _delete_association_dependents(session, [body.association_id])
   session.query(Association).filter(
     Association.id == body.association_id,

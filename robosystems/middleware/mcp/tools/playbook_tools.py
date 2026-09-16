@@ -61,6 +61,17 @@ _RECURRING_SEQUENCE: list[str] = [
   "(source='system', publish_to_source=false) because it mirrors an edit "
   "already made upstream and publishing it would double-apply it. Don't "
   "close over unreviewed reconciling items.",
+  "Two order rules the close depends on. (1) Map before you close: run "
+  "get-unmapped-elements and map anything with activity in the month "
+  "(suggest-mapping / create-mapping-association) BEFORE closing it. "
+  "Once a month is closed, a mapping change — or a balance_type / "
+  "period_type / trait change — for an account with landed history in it "
+  "is refused: the closed month's stamped statements were computed through "
+  "the old arcs, and the live render would silently disagree with them. "
+  "The refusal names the earliest affected month. (2) Reopen latest-first: "
+  "reopen-period accepts only closed_through. To fix an earlier month, "
+  "reopen each later month first (each with its own reason), make the "
+  "change, then re-close forward month by month.",
   "Schedules ending this period? (an asset sold or transferred, a prepaid "
   "cancelled or refunded): terminate BEFORE promoting obligations, or the "
   "sweep drafts entries the termination says should not exist. "

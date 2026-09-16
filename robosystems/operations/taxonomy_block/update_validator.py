@@ -13,6 +13,8 @@ mappings, orphan children) run after the projection check.
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -35,7 +37,7 @@ from robosystems.models.extensions import (
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.taxonomy_block.immutability import (
-  ProtectedFactsError,
+  ProtectedFactSets,
   find_protected_fact_sets,
 )
 from robosystems.operations.taxonomy_block.validators import (
@@ -291,8 +293,35 @@ def validate_update_envelope(
       session, taxonomy, payload, taxonomy_structure_id_set
     )
   )
+  issues.extend(
+    _validate_associations_to_add(session, taxonomy, payload, element_id_by_qname)
+  )
 
   return issues
+
+
+# The CoA→target arc the statement pivot reads through
+# (`reports/fact_grid._arc_type_for_taxonomy`). Adding or removing one for
+# an account with landed history in a closed month restates that month at
+# read time while its stamp keeps the old answer.
+_MAPPING_ARC_TYPE = "mapping"
+
+
+def _protected_facts_issue(
+  protected: ProtectedFactSets, context: dict[str, Any]
+) -> ValidationIssue:
+  return ValidationIssue(
+    phase="delta_validation",
+    code="protected_facts",
+    message=str(protected.to_error()),
+    context={
+      **context,
+      "filed_report_fact_set_ids": list(protected.filed_report_fact_set_ids),
+      "closed_period_fact_set_ids": list(protected.closed_period_fact_set_ids),
+      "disturbed_fact_set_ids": list(protected.disturbed_fact_set_ids),
+      "closed_periods": list(protected.closed_period_names),
+    },
+  )
 
 
 def _resolve_foreign_element_qnames(
@@ -340,9 +369,12 @@ def _load_efs_traits(
   classification into the virtual create request or any update on a
   chart_of_accounts block fails validation wholesale.
   """
-  if not current_elements:
+  return _load_efs_traits_by_id(session, [e.id for e in current_elements])
+
+
+def _load_efs_traits_by_id(session: Session, element_ids: list[str]) -> dict[str, str]:
+  if not element_ids:
     return {}
-  element_ids = [e.id for e in current_elements]
   return {
     str(element_id): str(identifier)
     for element_id, identifier in session.execute(
@@ -426,11 +458,18 @@ def _validate_elements_to_update(
 
   qnames = [p.qname for p in payload.elements_to_update]
   rows = session.execute(
-    select(Element.qname, Element.created_by).where(
-      Element.taxonomy_id == taxonomy.id, Element.qname.in_(qnames)
-    )
+    select(
+      Element.id,
+      Element.qname,
+      Element.created_by,
+      Element.balance_type,
+      Element.period_type,
+    ).where(Element.taxonomy_id == taxonomy.id, Element.qname.in_(qnames))
   ).all()
-  seeder_qnames = {qname for qname, created_by in rows if created_by == _LIBRARY_SEEDER}
+  seeder_qnames = {
+    qname for _eid, qname, created_by, _bt, _pt in rows if created_by == _LIBRARY_SEEDER
+  }
+  current_by_qname = {qname: (str(eid), bt, pt) for eid, qname, _cb, bt, pt in rows}
 
   for patch in payload.elements_to_update:
     if patch.qname not in element_id_by_qname:
@@ -459,7 +498,59 @@ def _validate_elements_to_update(
         )
       )
 
+  changed = _semantically_changed_element_ids(
+    session, payload, current_by_qname, seeder_qnames
+  )
+  if changed:
+    protected = find_protected_fact_sets(session, semantic_element_ids=changed)
+    if protected.any:
+      issues.append(_protected_facts_issue(protected, {"element_ids": changed}))
+
   return issues
+
+
+def _semantically_changed_element_ids(
+  session: Session,
+  payload: UpdateTaxonomyBlockRequest,
+  current_by_qname: dict[str, tuple[str, Any, Any]],
+  seeder_qnames: set[str],
+) -> list[str]:
+  """Elements whose ``balance_type`` / ``period_type`` / trait a patch changes.
+
+  Sign, period window and statement placement are what a closed month's
+  stamp was computed through. A rename, a code, ``is_active`` (retire is
+  the ordinary post-close verb) or a re-parent leaves the stamp meaning
+  what it meant, and a patch that restates the current value changes
+  nothing.
+  """
+  candidates = [
+    p
+    for p in payload.elements_to_update
+    if p.qname in current_by_qname
+    and p.qname not in seeder_qnames
+    and (p.balance_type is not None or p.period_type is not None or p.trait is not None)
+  ]
+  if not candidates:
+    return []
+  trait_by_id: dict[str, str] = {}
+  if any(p.trait is not None for p in candidates):
+    trait_by_id = _load_efs_traits_by_id(
+      session, [current_by_qname[p.qname][0] for p in candidates]
+    )
+  changed: list[str] = []
+  for p in candidates:
+    eid, balance_type, period_type = current_by_qname[p.qname]
+    if (
+      (p.balance_type is not None and p.balance_type != _text(balance_type))
+      or (p.period_type is not None and p.period_type != _text(period_type))
+      or (p.trait is not None and p.trait != trait_by_id.get(eid))
+    ):
+      changed.append(eid)
+  return changed
+
+
+def _text(value: Any) -> str | None:
+  return str(value) if value else None
 
 
 def _validate_elements_to_remove(
@@ -663,23 +754,7 @@ def _validate_structures_to_remove(
   if in_scope:
     protected = find_protected_fact_sets(session, structure_ids=in_scope)
     if protected.any:
-      issues.append(
-        ValidationIssue(
-          phase="delta_validation",
-          code="protected_facts",
-          message=str(
-            ProtectedFactsError(
-              filed_report_count=len(protected.filed_report_fact_set_ids),
-              closed_period_count=len(protected.closed_period_fact_set_ids),
-            )
-          ),
-          context={
-            "structure_ids": in_scope,
-            "filed_report_fact_set_ids": list(protected.filed_report_fact_set_ids),
-            "closed_period_fact_set_ids": list(protected.closed_period_fact_set_ids),
-          },
-        )
-      )
+      issues.append(_protected_facts_issue(protected, {"structure_ids": in_scope}))
 
   return issues
 
@@ -695,15 +770,19 @@ def _validate_associations_to_remove(
     return issues
 
   rows = session.execute(
-    select(Association.id, Association.structure_id).where(
-      Association.id.in_(payload.associations_to_remove)
-    )
+    select(
+      Association.id,
+      Association.structure_id,
+      Association.association_type,
+      Association.from_element_id,
+    ).where(Association.id.in_(payload.associations_to_remove))
   ).all()
-  found_by_id = dict(rows)
+  found_by_id = {aid: (sid, arc_type, from_id) for aid, sid, arc_type, from_id in rows}
 
+  remapped_accounts: list[str] = []
   for aid in payload.associations_to_remove:
-    sid = found_by_id.get(aid)
-    if sid is None:
+    found = found_by_id.get(aid)
+    if found is None:
       issues.append(
         ValidationIssue(
           phase="delta_validation",
@@ -713,6 +792,7 @@ def _validate_associations_to_remove(
         )
       )
       continue
+    sid, arc_type, from_id = found
     if sid not in taxonomy_structure_ids:
       issues.append(
         ValidationIssue(
@@ -725,8 +805,48 @@ def _validate_associations_to_remove(
           context={"association_id": aid},
         )
       )
+      continue
+    if arc_type == _MAPPING_ARC_TYPE:
+      remapped_accounts.append(str(from_id))
+
+  # Checked here rather than at apply: the orchestrators remove arcs before
+  # structures, so an apply-time refusal would land after the first delete.
+  if remapped_accounts:
+    protected = find_protected_fact_sets(session, account_ids=remapped_accounts)
+    if protected.any:
+      issues.append(
+        _protected_facts_issue(protected, {"account_ids": remapped_accounts})
+      )
 
   return issues
+
+
+def _validate_associations_to_add(
+  session: Session,
+  taxonomy: Taxonomy,
+  payload: UpdateTaxonomyBlockRequest,
+  element_id_by_qname: dict[str, str],
+) -> list[ValidationIssue]:
+  """A new mapping arc for an account with landed history in a closed month.
+
+  The projection above checks the arc's shape; this checks what it would
+  reach. The account was unmapped (or mapped elsewhere) when the month was
+  stamped, so the arc moves its balance into a statement line the stamp
+  never held.
+  """
+  accounts = sorted(
+    {
+      element_id_by_qname[a.from_ref]
+      for a in payload.associations_to_add
+      if a.association_type == _MAPPING_ARC_TYPE and a.from_ref in element_id_by_qname
+    }
+  )
+  if not accounts:
+    return []
+  protected = find_protected_fact_sets(session, account_ids=accounts)
+  if not protected.any:
+    return []
+  return [_protected_facts_issue(protected, {"account_ids": accounts})]
 
 
 __all__ = [

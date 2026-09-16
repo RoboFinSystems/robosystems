@@ -242,6 +242,10 @@ class MappingOperator(Operator):
     await ctx.progress.report(f"Found {total} unmapped elements", percent=0)
 
     mapped, flagged, skipped = 0, 0, 0
+    # Arcs the ledger refused because the account already has landed history
+    # in a closed month. Counted apart from ``skipped``: these are not the
+    # operator's call, they need the months reopened first.
+    refused_closed_history = 0
     processed = 0
 
     # Group by (EFS trait, liquidity) for candidate lookup. Liquidity
@@ -380,7 +384,10 @@ class MappingOperator(Operator):
                 f"rs-gaap mapping create rejected for {m['element_id']}: "
                 f"{written.get('error')}"
               )
-              skipped += 1
+              if written.get("error") == "protected_history":
+                refused_closed_history += 1
+              else:
+                skipped += 1
               continue
             if outcome == "mapped":
               mapped += 1
@@ -419,6 +426,11 @@ class MappingOperator(Operator):
       content += (
         f"; {len(unclassified)} unclassified (no EFS trait — needs classification)"
       )
+    if refused_closed_history:
+      content += (
+        f"; {refused_closed_history} refused (landed history in a closed month "
+        "— reopen those months latest-first, then re-run)"
+      )
 
     return OperatorResult(
       content=content,
@@ -426,6 +438,7 @@ class MappingOperator(Operator):
         "mapped": mapped,
         "flagged": flagged,
         "skipped": skipped,
+        "refused_closed_history": refused_closed_history,
         "unclassified": len(unclassified),
         "unclassified_elements": [
           {"id": e["id"], "name": e.get("name")} for e in unclassified[:50]
