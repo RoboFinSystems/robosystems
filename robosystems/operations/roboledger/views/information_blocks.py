@@ -39,11 +39,10 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import urlparse
 
+from xbrlkit import serve as xbrlkit_serve
 from xbrlkit.deserialize import HolonError, from_holon_report
 from xbrlkit.model import XbrlModel
-from xbrlkit.serve import tools as xbrlkit_tools
-from xbrlkit.serve.session import LoadedFiling
-from xbrlkit.serve.tools import ToolError
+from xbrlkit.serve import LoadedFiling, ToolError
 
 from robosystems.config import env
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
@@ -78,8 +77,8 @@ class BlockNotFoundError(ValueError):
 
 
 # xbrlkit's own caps, restated for the request models that cannot import them.
-MAX_BLOCK_ROWS = xbrlkit_tools.MAX_BLOCK_ROWS
-MAX_BLOCK_MEMBERS = xbrlkit_tools.MAX_BLOCK_MEMBERS_CAP
+MAX_BLOCK_ROWS = xbrlkit_serve.MAX_BLOCK_ROWS
+MAX_BLOCK_MEMBERS = xbrlkit_serve.MAX_BLOCK_MEMBERS_CAP
 
 # A published filing does not change once processed; a tenant's report is
 # live and regenerates, so its model goes stale sooner.
@@ -338,7 +337,7 @@ async def query_disclosures(
   """The map: one row per disclosure family, or one family's blocks."""
   model, _cached = await load_report_model(graph_id, report_id)
   try:
-    out = xbrlkit_tools.disclosures(_loaded(graph_id, report_id, model), topic)
+    out = xbrlkit_serve.disclosures(_loaded(graph_id, report_id, model), topic)
   except ToolError as exc:
     raise BlockNotFoundError(str(exc)) from exc
   external = _external_text_blocks(model)
@@ -358,14 +357,18 @@ async def query_information_block(
   member: str | None = None,
   max_rows: int | None = None,
   max_members: int | None = None,
+  offset: int | None = None,
 ) -> dict[str, Any]:
-  """The block: one section read whole."""
+  """The block: one section read whole, or — past ``max_rows`` — one page of
+  it, continued from the ``next_offset`` a truncated page returns."""
   model, _cached = await load_report_model(graph_id, report_id)
   kwargs: dict[str, Any] = {}
   if max_rows is not None:
     kwargs["max_rows"] = max_rows
+  if offset:
+    kwargs["offset"] = offset
   try:
-    out = xbrlkit_tools.information_block(
+    out = xbrlkit_serve.information_block(
       _loaded(graph_id, report_id, model),
       block,
       periods=periods,

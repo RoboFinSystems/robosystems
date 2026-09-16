@@ -150,6 +150,7 @@ class TestInformationBlockExecute:
           "member": "Widgets",
           "max_rows": 10_000,
           "max_members": 0,
+          "offset": 400,
         }
       )
     assert query.call_args.args == ("sec", "rpt_abc", "LeasesDetails")
@@ -158,9 +159,30 @@ class TestInformationBlockExecute:
       "member": "Widgets",
       "max_rows": MAX_BLOCK_ROWS,
       "max_members": 1,
+      "offset": 400,
     }
     assert "resolved_report" not in out
     assert MAX_BLOCK_MEMBERS >= 1
+
+  @pytest.mark.unit
+  async def test_offset_defaults_to_the_first_page_and_must_be_a_number(self):
+    with (
+      patch(f"{MODULE}.resolve_report", new=AsyncMock(return_value=("rpt_abc", None))),
+      patch(
+        f"{MODULE}.query_information_block",
+        new=AsyncMock(
+          return_value={"graph_id": "sec", "report_id": "rpt_abc", "rows": []}
+        ),
+      ) as query,
+    ):
+      await InformationBlockTool(_client()).execute(
+        {"block": "LeasesDetails", "report_id": "rpt_abc", "offset": -5}
+      )
+      assert query.call_args.kwargs["offset"] is None
+      out = await InformationBlockTool(_client()).execute(
+        {"block": "LeasesDetails", "report_id": "rpt_abc", "offset": "next"}
+      )
+    assert "offset must be whole numbers" in out["error"]
 
   @pytest.mark.unit
   async def test_an_unknown_block_is_an_error(self):

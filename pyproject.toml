@@ -60,7 +60,7 @@ dependencies = [
     "dagster-aws>=0.29.15,<1.0",
     # XBRL Toolkit. Capped to one minor: the information-block views import its
     # pre-1.0 ``serve`` internals, so a refactor there breaks a deploy, not CI.
-    "xbrlkit>=0.16.2,<0.17.0",
+    "xbrlkit>=0.17.1,<0.18.0",
     # Tenant-authored notes are markdown; the Tavi projection writes them as
     # HTML text blocks (operations/serialization/model.py).
     "markdown-it-py>=3.0",

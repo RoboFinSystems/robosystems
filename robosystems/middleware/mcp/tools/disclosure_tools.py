@@ -168,12 +168,13 @@ class InformationBlockTool(BaseTool):
 - `periods` — period keys to keep, from a previous call's `columns`; the default keeps the budgeted set, year and balance columns first on an annual form
 - `member` — keep only breakdowns whose member key contains this text (a segment name)
 - `max_rows` (default {MAX_BLOCK_ROWS}) / `max_members` (up to {MAX_BLOCK_MEMBERS}) — explicit caps when you want less than the budget
+- `offset` — rows to skip: the `next_offset` a truncated response returned
 
 **RETURNS:**
 - `block` — id, role, name, disclosure, level; `siblings` (the rest of the family); `merged_roles` when a second drawer of the same section folded in
 - `columns` — the period keys shown; `rows` — depth, concept, label, `values` and/or `members`, `abstract` on headers; `members_omitted` / `periods_omitted` on a row a cut touched
 - `axes` (each with the members that carry facts and its default), `calculation` (`foots` / `checked` counts per total; `differences` only where |reported − computed| exceeds half a unit at the stated precision), `text`
-- `truncated` when `max_rows` cut the walk; `resolved_report` when a ticker was resolved
+- `truncated` when `max_rows` cut the walk, with `next_offset` for the next page (a later page adds `ancestors` and leaves out axes, calculation and text); `resolved_report` when a ticker was resolved
 
 **NOTES:**
 - Budgeted, not counted: breakdowns and columns are kept most-reported / most-recent first up to about 16K characters of cells each; a small table is never cut, and a row is never left blank by a cut
@@ -223,6 +224,10 @@ class InformationBlockTool(BaseTool):
               "instead of the response budget."
             ),
           },
+          "offset": {
+            "type": "integer",
+            "description": "Rows to skip: the `next_offset` a truncated response returned.",
+          },
         },
         "required": ["block"],
         "additionalProperties": False,
@@ -243,8 +248,9 @@ class InformationBlockTool(BaseTool):
     try:
       max_rows = _cap(arguments.get("max_rows"), MAX_BLOCK_ROWS)
       max_members = _cap(arguments.get("max_members"), MAX_BLOCK_MEMBERS)
+      offset = max(0, int(arguments.get("offset") or 0))
     except (TypeError, ValueError):
-      return {"error": "max_rows and max_members must be whole numbers."}
+      return {"error": "max_rows, max_members and offset must be whole numbers."}
     graph_id = self.client.graph_id
     try:
       report_id, resolved = await resolve_report(
@@ -262,6 +268,7 @@ class InformationBlockTool(BaseTool):
         member=_clean(arguments.get("member")),
         max_rows=max_rows,
         max_members=max_members,
+        offset=offset or None,
       )
     except (ReportSelectorError, ReportNotFoundError, BlockNotFoundError) as exc:
       return {"error": str(exc)}

@@ -454,7 +454,9 @@ async def disclosures_op(
     "and the section's text blocks. Member breakdowns and period columns are "
     "kept most-reported / most-recent first up to a response budget; a row is "
     "never left blank by a cut, and `members_omitted` / `periods_omitted` say "
-    "what was. Take `block` from `disclosures`. Same resolution as "
+    "what was. A block longer than `max_rows` is `truncated`; pass its "
+    "`next_offset` as `offset` for the next page. Take `block` from "
+    "`disclosures`. Same resolution as "
     "`disclosures`: `ticker` or `report_id` on shared-repo graphs, `report_id` "
     "on tenant graphs. On a tenant graph this reads the section as the "
     "ledger's report holds it; `get-information-block` returns one authored "
@@ -502,6 +504,7 @@ async def information_block_op(
         member=body.member,
         max_rows=body.max_rows,
         max_members=body.max_members,
+        offset=body.offset,
       )
     except ValueError as exc:
       raise _report_selector_errors(exc) from exc

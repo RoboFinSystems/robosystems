@@ -19,6 +19,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from xbrlkit import serve as xbrlkit_serve
 from xbrlkit.model import (
   Arc,
   Concept,
@@ -34,7 +35,6 @@ from xbrlkit.model import (
 from xbrlkit.parse.ids import unit_id
 from xbrlkit.periods import duration_period, instant_period
 from xbrlkit.serialize import to_holon
-from xbrlkit.serve import tools as xbrlkit_tools
 
 from robosystems.models.api.extensions.reports import (
   INFORMATION_BLOCK_MAX_MEMBERS,
@@ -593,6 +593,20 @@ class TestPublishedFiling:
     [roll] = out["calculation"]
     assert (roll["total"], roll["foots"], roll["checked"]) == ("us-gaap:Assets", 2, 2)
 
+  async def test_a_block_longer_than_max_rows_pages(self, published, no_cache) -> None:
+    whole = await query_information_block("sec", REPORT_ID, "BalanceSheet")
+    first = await query_information_block("sec", REPORT_ID, "BalanceSheet", max_rows=2)
+    assert first["truncated"] is True and first["next_offset"] == 2
+    rest = await query_information_block(
+      "sec", REPORT_ID, "BalanceSheet", max_rows=2, offset=first["next_offset"]
+    )
+    # The pages join into the whole; the later one says what it sits under and
+    # leaves the section's calculation to the first.
+    assert first["rows"] + rest["rows"] == whole["rows"]
+    assert rest["offset"] == 2 and rest["truncated"] is False
+    assert [a["concept"] for a in rest["ancestors"]] == ["us-gaap:AssetsAbstract"]
+    assert "calculation" in first and "calculation" not in rest
+
   async def test_a_fragment_that_cannot_be_read_stays_marked(
     self, published, no_cache
   ) -> None:
@@ -794,10 +808,10 @@ class TestResolveReport:
 @pytest.mark.unit
 def test_the_request_models_restate_xbrlkits_caps() -> None:
   assert (
-    INFORMATION_BLOCK_MAX_ROWS == xbrlkit_tools.MAX_BLOCK_ROWS == module.MAX_BLOCK_ROWS
+    INFORMATION_BLOCK_MAX_ROWS == xbrlkit_serve.MAX_BLOCK_ROWS == module.MAX_BLOCK_ROWS
   )
   assert (
     INFORMATION_BLOCK_MAX_MEMBERS
-    == xbrlkit_tools.MAX_BLOCK_MEMBERS_CAP
+    == xbrlkit_serve.MAX_BLOCK_MEMBERS_CAP
     == module.MAX_BLOCK_MEMBERS
   )

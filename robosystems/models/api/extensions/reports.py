@@ -713,7 +713,7 @@ class FinancialStatementAnalysisResponse(BaseModel):
 # local tool returns — under the envelope, with the graph and report stamped
 # on it; ``extra="allow"`` keeps a key xbrlkit adds later from being dropped.
 
-# xbrlkit's caps (``xbrlkit.serve.tools.MAX_BLOCK_ROWS`` / ``MAX_BLOCK_MEMBERS_CAP``),
+# xbrlkit's caps (``xbrlkit.serve.MAX_BLOCK_ROWS`` / ``MAX_BLOCK_MEMBERS_CAP``),
 # restated here so the request models need not import the tool module; the
 # view tests pin the two pairs equal.
 INFORMATION_BLOCK_MAX_ROWS = 400
@@ -792,6 +792,11 @@ class InformationBlockRequest(ReportSelector):
     le=INFORMATION_BLOCK_MAX_MEMBERS,
     description="An explicit cap on member breakdowns, instead of the response budget",
   )
+  offset: int | None = Field(
+    None,
+    ge=0,
+    description="Rows to skip: the next_offset a truncated response returned",
+  )
 
 
 class DisclosuresResponse(BaseModel):
@@ -830,6 +835,11 @@ class InformationBlockResponse(BaseModel):
   rows: list[dict[str, Any]] = Field(default_factory=list)
   row_count: int | None = None
   truncated: bool | None = None
+  # Paging past max_rows: where this page starts, the headers above its first
+  # row (a later page only), and where the next page starts (truncated only).
+  offset: int | None = None
+  ancestors: list[dict[str, Any]] | None = None
+  next_offset: int | None = None
   calculation: list[dict[str, Any]] | None = None
   text: list[dict[str, Any]] | None = None
   note: str | None = None
