@@ -741,7 +741,11 @@ class TestInformationBlockOperations:
   @pytest.mark.unit
   async def test_information_block_wraps_the_block_in_the_envelope(self):
     body = InformationBlockRequest(
-      report_id="rpt_abc", block="LeasesDetails", member="Widgets", max_rows=50
+      report_id="rpt_abc",
+      block="LeasesDetails",
+      member="Widgets",
+      max_rows=50,
+      offset=50,
     )
     payload = {
       "graph_id": GRAPH_ID,
@@ -784,6 +788,7 @@ class TestInformationBlockOperations:
       "member": "Widgets",
       "max_rows": 50,
       "max_members": None,
+      "offset": 50,
     }
 
   @pytest.mark.unit
