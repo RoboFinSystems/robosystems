@@ -74,11 +74,14 @@ def delete_filters(**overrides) -> list[dict]:
   return namespace["filters"]
 
 
-def recreate_calls(*, dry_run: bool, mapping: dict) -> list[tuple]:
+def recreate_calls(
+  *, dry_run: bool, mapping: dict, refuse: tuple[str, str] | None = None
+) -> list[tuple]:
   """The recreate-index branch, run against a recording fake of ``query_os``.
 
   Same idea as ``delete_filters``: execute the template's own lines so a change
-  to the branch is caught rather than mirrored by a copy kept here.
+  to the branch is caught rather than mirrored by a copy kept here. ``refuse``
+  names a ``(method, path)`` the fake answers with HTTP 403, the way IAM does.
   """
   script = render(
     action="recreate-index",
@@ -89,6 +92,8 @@ def recreate_calls(*, dry_run: bool, mapping: dict) -> list[tuple]:
 
   def query_os(path, body=None, method="POST"):
     calls.append((method, path, body))
+    if refuse and (method, path) == refuse:
+      raise urllib.error.HTTPError(path, 403, "Forbidden", None, None)  # type: ignore[arg-type]
     if path.endswith("/_search"):
       return {
         "hits": {"total": {"value": 3}},
@@ -264,18 +269,90 @@ def test_recreate_dry_run_only_counts():
 
 
 @pytest.mark.unit
-def test_recreate_deletes_then_creates_with_the_decoded_mapping():
-  """DELETE and PUT happen in the same script, in that order — a missing index
-  would otherwise be recreated by the next writer with a dynamic mapping."""
+def test_recreate_proves_both_verbs_on_a_probe_then_deletes_and_creates():
+  """Both verbs and the mapping are exercised on a throwaway index first; only
+  then DELETE and PUT on the real one, in that order and in the same script."""
   mapping = {
     "mappings": {"properties": {"x": {"type": "keyword"}}},
     "settings": {"index.knn": True},
   }
   calls = recreate_calls(dry_run=False, mapping=mapping)
 
-  assert [method for method, _, _ in calls] == ["POST", "DELETE", "PUT", "GET"]
-  assert calls[1] == ("DELETE", "/documents", None)
-  assert calls[2] == ("PUT", "/documents", mapping)
+  assert [(m, p) for m, p, _ in calls] == [
+    ("POST", "/documents/_search"),
+    ("DELETE", "/documents-recreate-probe"),
+    ("PUT", "/documents-recreate-probe"),
+    ("DELETE", "/documents-recreate-probe"),
+    ("DELETE", "/documents"),
+    ("PUT", "/documents"),
+    ("GET", "/documents/_mapping"),
+  ]
+  assert calls[2][2] == mapping, "the probe is created with the real mapping"
+  assert calls[5][2] == mapping
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("verb", ["DELETE", "PUT"])
+def test_a_refused_verb_fails_before_the_live_index_is_touched(verb):
+  """The 2026-09-16 near-miss: the bastion role lacked Delete and Put. A refusal
+  must surface on the probe, with the live index still standing."""
+  with pytest.raises(urllib.error.HTTPError):
+    recreate_calls(
+      dry_run=False,
+      mapping={"mappings": {}},
+      refuse=(verb, "/documents-recreate-probe"),
+    )
+
+
+@pytest.mark.unit
+def test_a_refused_verb_leaves_no_call_against_the_live_index():
+  calls: list[tuple] = []
+  try:
+    calls = recreate_calls(
+      dry_run=False,
+      mapping={"mappings": {}},
+      refuse=("PUT", "/documents-recreate-probe"),
+    )
+  except urllib.error.HTTPError:
+    pass
+  # recreate_calls raised before returning; re-run the fake by hand to inspect
+  # the calls it recorded up to the refusal.
+  recorded: list[tuple] = []
+
+  def query_os(path, body=None, method="POST"):
+    recorded.append((method, path))
+    if (method, path) == ("PUT", "/documents-recreate-probe"):
+      raise urllib.error.HTTPError(path, 403, "Forbidden", None, None)  # type: ignore[arg-type]
+    if path.endswith("/_search"):
+      return {
+        "hits": {"total": {"value": 0}},
+        "aggregations": {"by_graph": {"buckets": []}},
+      }
+    return {}
+
+  script = render(action="recreate-index", dry_run="false", mapping="{}")
+  namespace: dict = {
+    node.targets[0].id: node.value.value
+    for node in ast.parse(script).body
+    if isinstance(node, ast.Assign)
+    and isinstance(node.targets[0], ast.Name)
+    and isinstance(node.value, ast.Constant)
+  }
+  namespace.update(
+    {
+      "json": json,
+      "urllib": urllib,
+      "dry_run": False,
+      "query_os": query_os,
+      "print": lambda *_: None,
+    }
+  )
+  body = script.split('elif action == "recreate-index":', 1)[1]
+  with pytest.raises(urllib.error.HTTPError):
+    exec(textwrap.dedent(body), namespace)  # noqa: S102
+  assert ("DELETE", "/documents") not in recorded
+  assert ("PUT", "/documents") not in recorded
+  assert calls == []
 
 
 @pytest.mark.unit
@@ -283,7 +360,7 @@ def test_recreate_ships_the_checkout_mapping_intact():
   """The encoder crosses the literal boundary unchanged: what the checkout
   declares is what the bastion PUTs."""
   calls = recreate_calls(dry_run=False, mapping=INDEX_MAPPING)
-  put_body = calls[2][2]
+  put_body = next(b for m, p, b in calls if (m, p) == ("PUT", "/documents"))
 
   assert put_body == json.loads(json.dumps(INDEX_MAPPING))
   encoder = put_body["mappings"]["properties"]["embedding"]["method"]["parameters"][

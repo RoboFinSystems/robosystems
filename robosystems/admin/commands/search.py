@@ -233,6 +233,21 @@ elif action == "recreate-index":
     if dry_run:
         print(json.dumps({{"total": total, "by_graph": by_graph, "recreated": False}}))
     else:
+        # Prove both verbs AND the mapping on a throwaway index before touching
+        # the real one. A verb the role lacks, or a mapping the engine rejects,
+        # fails here with the live index still standing — not after it is gone
+        # and the next writer has recreated it with a dynamic mapping.
+        # (2026-09-16: the bastion role lacked ESHttpDelete and ESHttpPut; the
+        # delete was refused, and had it not been, the create would have been.)
+        probe = f"{{index_name}}-recreate-probe"
+        try:
+            query_os(f"/{{probe}}", method="DELETE")
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+        query_os(f"/{{probe}}", json.loads(mapping), method="PUT")
+        query_os(f"/{{probe}}", method="DELETE")
+
         try:
             query_os(f"/{{index_name}}", method="DELETE")
         except urllib.error.HTTPError as e:
@@ -605,7 +620,8 @@ def search_recreate_index(client, force):
   The mapping is INDEX_MAPPING from the LOCAL checkout: that is why this needs
   no deploy, and why it must be run from the merged branch. The delete and the
   create run in one bastion script, so no writer can recreate the index with a
-  dynamic mapping in between.
+  dynamic mapping in between — and both verbs plus the mapping are proven on a
+  throwaway index first, so a refusal fails before the delete, never after.
 
   Prove the rebuild before running this: launch rebuild_documents_job against
   the live index first. It is idempotent there — same stable ids, delete by
