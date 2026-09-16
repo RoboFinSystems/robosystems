@@ -323,6 +323,7 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   BackfillPreconditionError,
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
+  ReopenOrderError,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   backfill_plan_history as cmd_backfill_plan_history,
@@ -503,6 +504,7 @@ from robosystems.operations.taxonomy_block.commands import (
 from robosystems.operations.taxonomy_block.commands import (
   update_taxonomy_block as cmd_update_taxonomy_block,
 )
+from robosystems.operations.taxonomy_block.immutability import ProtectedFactsError
 
 router = APIRouter()
 
@@ -1045,7 +1047,11 @@ update_taxonomy_block_op = _registrar.register(
       "Library-origin block types (`reporting_standard`) surface 501. "
       "`reporting_extension` / `custom_ontology` authoring may be "
       "disabled per environment (TAXONOMY_AUTHORING_ENABLED) — "
-      "disabled surfaces 403."
+      "disabled surfaces 403. Closed months are immutable against "
+      "curation: a mapping arc added or removed for an account with "
+      "landed history in a closed month, or a `balance_type` / "
+      "`period_type` / `trait` change on such an account, is refused "
+      "(422, `protected_facts`) naming the months to reopen first."
     ),
     command=cmd_update_taxonomy_block,
     request_model=UpdateTaxonomyBlockRequest,
@@ -1054,6 +1060,9 @@ update_taxonomy_block_op = _registrar.register(
       TaxonomyAuthoringDisabledError: 403,
       # Another update holds the taxonomy row; retryable.
       RowLockedError: 409,
+      # The apply-side backstop for a closed month's stamps; the validator
+      # reports the same condition as a `protected_facts` issue first.
+      ProtectedFactsError: 422,
       ValueError: 422,
       NotImplementedError: 501,
     },
@@ -1075,6 +1084,9 @@ delete_taxonomy_block_op = _registrar.register(
     request_model=DeleteTaxonomyBlockRequest,
     result_type=DeleteTaxonomyBlockResponse,
     error_map={
+      # A filed report's snapshot or a closed month's canonical sets would
+      # go with the cascade; reopen or un-file first.
+      ProtectedFactsError: 422,
       ValueError: 422,
       NotImplementedError: 501,
     },
@@ -1121,7 +1133,11 @@ create_mapping_association_op = _registrar.register(
     description=(
       "Link a chart-of-accounts element to a US GAAP reporting concept. "
       "One mapping edge per call — use `auto-map-elements` for bulk "
-      "AI-assisted mapping. Duplicate (from, to, type) tuples return 409."
+      "AI-assisted mapping. Duplicate (from, to, type) tuples return 409. "
+      "Map before you close: an account with landed history in a closed "
+      "month cannot be re-mapped (422) — the closed month's stamped "
+      "statements were computed through the old arcs. Reopen latest-first "
+      "down to the earliest month named, map, then close forward."
     ),
     command=cmd_create_mapping_association,
     request_model=CreateMappingAssociationOperation,
@@ -1137,6 +1153,7 @@ create_mapping_association_op = _registrar.register(
         409,
         lambda _e: "Mapping association already exists",
       ),
+      ProtectedFactsError: 422,
     },
     mark_stale_reason="mapping_association_created",
   )
@@ -1153,7 +1170,9 @@ delete_mapping_association_op = _registrar.register(
       "dropped. Use this to correct a wrong mapping — delete the bad edge, "
       "then `create-mapping-association` the right one. Find the "
       "association id via the `library_element_arcs` GraphQL field. "
-      "Library-seeded rows cannot be deleted (403)."
+      "Library-seeded rows cannot be deleted (403). An edge for an "
+      "account with landed history in a closed month cannot be removed "
+      "(422) until those months are reopened, latest-first."
     ),
     command=cmd_delete_mapping_association,
     request_model=DeleteMappingAssociationOperation,
@@ -1162,6 +1181,7 @@ delete_mapping_association_op = _registrar.register(
     error_map={
       AssociationNotFoundError: (404, lambda _e: "Association not found"),
       LibraryImmutableError: 403,
+      ProtectedFactsError: 422,
     },
     mark_stale_reason="mapping_association_deleted",
   )
@@ -2261,16 +2281,17 @@ async def close_period_op(
   operation_id="reopenPeriod",
   summary="Reopen Fiscal Period",
   description=(
-    "Reopen a closed period for adjustment. Reopening the current "
-    "`closed_through` decrements it by one; reopening an earlier period "
-    "is a prior-period adjustment and leaves `closed_through` unchanged "
-    "— re-closing it restores the period without advancing the pointer. "
-    "Either way the period's entries become writable again. Retracts "
-    "the month's canonical statement FactSets (a reopened month is no "
-    "longer a closed assertion; re-closing restamps them). The required "
-    "`reason` is captured in the audit log. Use sparingly — reopen "
-    "invalidates downstream artifacts that trusted the closed state "
-    "(reports, shared filings)."
+    "Reopen a closed period for adjustment. Only the latest closed period "
+    "(`closed_through`) can be reopened; it decrements by one and the "
+    "period's entries become writable again. To reach an earlier month, "
+    "reopen latest-first down to it, then re-close forward — an "
+    "out-of-order reopen is refused (422) with the ordered list, because "
+    "every later closed month carries statements stamped from the earlier "
+    "month's numbers. Retracts the month's canonical statement FactSets "
+    "(a reopened month is no longer a closed assertion; re-closing "
+    "restamps them). The required `reason` is captured in the audit log. "
+    "Use sparingly — reopen invalidates downstream artifacts that trusted "
+    "the closed state (reports, shared filings)."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -2326,6 +2347,8 @@ async def reopen_period_op(
         status_code=404, detail=f"Fiscal period {body.period!r} not found."
       )
     except PeriodNotClosedError as e:
+      raise HTTPException(status_code=422, detail=str(e))
+    except ReopenOrderError as e:
       raise HTTPException(status_code=422, detail=str(e))
     except FiscalCalendarError as e:
       raise HTTPException(status_code=404, detail=str(e))

@@ -111,6 +111,33 @@ async def test_a_rejected_write_is_skipped_not_mapped():
 
 
 @pytest.mark.asyncio
+async def test_a_closed_history_refusal_is_counted_apart_from_skipped():
+  """The ledger refused the arc because the account has landed history in a
+  closed month. Not the operator's call to make — the receipt says so."""
+  mappings = [
+    {"element_id": "el_0", "target_id": "rs_cash", "confidence": 0.95},
+    {"element_id": "el_1", "target_id": "rs_cash", "confidence": 0.95},
+  ]
+
+  def _create(args):
+    if args["from_element_id"] == "el_1":
+      return {
+        "error": "protected_history",
+        "message": "refusing to disturb facts that the ledger treats as immutable",
+        "closed_periods": ["2026-06"],
+      }
+    return {"association_id": "assoc_1"}
+
+  result, _ = await _run(_create, mappings)
+
+  assert result.metadata["mapped"] == 1
+  assert result.metadata["skipped"] == 0
+  assert result.metadata["refused_closed_history"] == 1
+  assert "1 refused" in result.content
+  assert "reopen" in result.content
+
+
+@pytest.mark.asyncio
 async def test_a_write_that_raises_is_skipped_not_mapped():
   mappings = [{"element_id": "el_0", "target_id": "rs_cash", "confidence": 0.95}]
 

@@ -106,7 +106,7 @@ class TestValidateElementsToUpdate:
 
     session = MagicMock()
     session.execute.return_value = _mock_execute_result(
-      [("x:Seeded", "library-seeder")]
+      [("e_seed", "x:Seeded", "library-seeder", None, None)]
     )
     taxonomy = _fake_taxonomy("custom_ontology")
     payload = UpdateTaxonomyBlockRequest(
@@ -125,7 +125,9 @@ class TestValidateElementsToUpdate:
     )
 
     session = MagicMock()
-    session.execute.return_value = _mock_execute_result([("x:Tenant", "usr_1")])
+    session.execute.return_value = _mock_execute_result(
+      [("e_1", "x:Tenant", "usr_1", "debit", "duration")]
+    )
     taxonomy = _fake_taxonomy("custom_ontology")
     payload = UpdateTaxonomyBlockRequest(
       taxonomy_id="tax_42",
@@ -134,6 +136,70 @@ class TestValidateElementsToUpdate:
     issues = _validate_elements_to_update(
       session, taxonomy, payload, {"x:Tenant": "e_1"}
     )
+    assert issues == []
+
+  def _semantic_run(self, patch_kwargs: dict, *, current_trait: str | None = None):
+    from robosystems.operations.taxonomy_block import update_validator
+    from robosystems.operations.taxonomy_block.immutability import ProtectedFactSets
+
+    session = MagicMock()
+    session.execute.return_value = _mock_execute_result(
+      [("e_1", "x:Tenant", "usr_1", "debit", "duration")]
+    )
+    taxonomy = _fake_taxonomy("chart_of_accounts")
+    payload = UpdateTaxonomyBlockRequest(
+      taxonomy_id="tax_42",
+      elements_to_update=[ElementUpdatePatch(qname="x:Tenant", **patch_kwargs)],
+    )
+    protected = ProtectedFactSets((), (), ("fs_jun",), ("2026-06",))
+    with (
+      patch.object(
+        update_validator, "find_protected_fact_sets", return_value=protected
+      ) as gate,
+      patch.object(
+        update_validator,
+        "_load_efs_traits_by_id",
+        return_value={"e_1": current_trait} if current_trait else {},
+      ),
+    ):
+      issues = update_validator._validate_elements_to_update(
+        session, taxonomy, payload, {"x:Tenant": "e_1"}
+      )
+    return issues, gate
+
+  def test_balance_type_flip_reports_protected_facts(self) -> None:
+    """Sign is what a closed month's stamp was computed through."""
+    issues, gate = self._semantic_run({"balance_type": "credit"})
+    gate.assert_called_once()
+    assert gate.call_args.kwargs == {"semantic_element_ids": ["e_1"]}
+    assert [i.code for i in issues] == ["protected_facts"]
+    assert issues[0].context["closed_periods"] == ["2026-06"]
+    assert "2026-06" in issues[0].message
+
+  def test_period_type_flip_reports_protected_facts(self) -> None:
+    issues, gate = self._semantic_run({"period_type": "instant"})
+    gate.assert_called_once()
+    assert [i.code for i in issues] == ["protected_facts"]
+
+  def test_trait_change_reports_protected_facts(self) -> None:
+    issues, gate = self._semantic_run({"trait": "Liabilities"}, current_trait="Assets")
+    gate.assert_called_once()
+    assert [i.code for i in issues] == ["protected_facts"]
+
+  def test_restating_the_current_values_changes_nothing(self) -> None:
+    issues, gate = self._semantic_run(
+      {"balance_type": "debit", "period_type": "duration", "trait": "Assets"},
+      current_trait="Assets",
+    )
+    gate.assert_not_called()
+    assert issues == []
+
+  def test_retire_rename_and_reparent_never_consult_closed_history(self) -> None:
+    """`is_active=false` is the ordinary post-close verb; it must stay free."""
+    issues, gate = self._semantic_run(
+      {"is_active": False, "name": "Cash (retired)", "code": "1000", "parent_ref": ""}
+    )
+    gate.assert_not_called()
     assert issues == []
 
 
@@ -331,7 +397,7 @@ class TestValidateAssociationsToRemove:
 
     session = MagicMock()
     session.execute.return_value = _mock_execute_result(
-      [("assoc_foreign", "s_foreign")]
+      [("assoc_foreign", "s_foreign", "presentation", "el_1")]
     )
     taxonomy = _fake_taxonomy("custom_ontology")
     payload = UpdateTaxonomyBlockRequest(
@@ -347,12 +413,123 @@ class TestValidateAssociationsToRemove:
     )
 
     session = MagicMock()
-    session.execute.return_value = _mock_execute_result([("assoc_mine", "s_mine")])
+    session.execute.return_value = _mock_execute_result(
+      [("assoc_mine", "s_mine", "presentation", "el_1")]
+    )
     taxonomy = _fake_taxonomy("custom_ontology")
     payload = UpdateTaxonomyBlockRequest(
       taxonomy_id="tax_42", associations_to_remove=["assoc_mine"]
     )
     issues = _validate_associations_to_remove(session, taxonomy, payload, {"s_mine"})
+    assert issues == []
+
+  def _arc_run(self, arc_type: str, *, reached: bool):
+    from robosystems.operations.taxonomy_block import update_validator
+    from robosystems.operations.taxonomy_block.immutability import ProtectedFactSets
+
+    session = MagicMock()
+    session.execute.return_value = _mock_execute_result(
+      [("assoc_1", "s_mine", arc_type, "el_cash")]
+    )
+    taxonomy = _fake_taxonomy("chart_of_accounts")
+    payload = UpdateTaxonomyBlockRequest(
+      taxonomy_id="tax_42", associations_to_remove=["assoc_1"]
+    )
+    protected = (
+      ProtectedFactSets((), (), ("fs_jun", "fs_jul"), ("2026-06", "2026-07"))
+      if reached
+      else ProtectedFactSets((), ())
+    )
+    with patch.object(
+      update_validator, "find_protected_fact_sets", return_value=protected
+    ) as gate:
+      issues = update_validator._validate_associations_to_remove(
+        session, taxonomy, payload, {"s_mine"}
+      )
+    return issues, gate
+
+  def test_removing_a_mapping_arc_with_closed_history_is_refused(self) -> None:
+    """The closed months' stamps were computed through this arc."""
+    issues, gate = self._arc_run("mapping", reached=True)
+    gate.assert_called_once()
+    assert gate.call_args.kwargs == {"account_ids": ["el_cash"]}
+    assert [i.code for i in issues] == ["protected_facts"]
+    assert issues[0].context["closed_periods"] == ["2026-06", "2026-07"]
+    assert "2026-06–2026-07" in issues[0].message
+
+  def test_removing_a_mapping_arc_without_closed_history_passes(self) -> None:
+    issues, gate = self._arc_run("mapping", reached=False)
+    gate.assert_called_once()
+    assert issues == []
+
+  def test_presentation_arcs_never_consult_closed_history(self) -> None:
+    issues, gate = self._arc_run("presentation", reached=True)
+    gate.assert_not_called()
+    assert issues == []
+
+
+class TestValidateAssociationsToAdd:
+  def _run(self, associations: list, element_id_by_qname: dict, *, reached: bool):
+    from robosystems.models.api.taxonomy_block import TaxonomyBlockAssociationRequest
+    from robosystems.operations.taxonomy_block import update_validator
+    from robosystems.operations.taxonomy_block.immutability import ProtectedFactSets
+
+    session = MagicMock()
+    taxonomy = _fake_taxonomy("chart_of_accounts")
+    payload = UpdateTaxonomyBlockRequest(
+      taxonomy_id="tax_42",
+      associations_to_add=[TaxonomyBlockAssociationRequest(**a) for a in associations],
+    )
+    protected = (
+      ProtectedFactSets((), (), ("fs_jun",), ("2026-06",))
+      if reached
+      else ProtectedFactSets((), ())
+    )
+    with patch.object(
+      update_validator, "find_protected_fact_sets", return_value=protected
+    ) as gate:
+      issues = update_validator._validate_associations_to_add(
+        session, taxonomy, payload, element_id_by_qname
+      )
+    return issues, gate
+
+  def test_new_mapping_arc_for_account_with_closed_history_is_refused(self) -> None:
+    issues, gate = self._run(
+      [
+        {
+          "structure_ref": "Mapping",
+          "from_ref": "acme:Cash",
+          "to_ref": "rs-gaap:Cash",
+          "association_type": "mapping",
+        }
+      ],
+      {"acme:Cash": "el_cash"},
+      reached=True,
+    )
+    gate.assert_called_once()
+    assert gate.call_args.kwargs == {"account_ids": ["el_cash"]}
+    assert [i.code for i in issues] == ["protected_facts"]
+
+  def test_presentation_arcs_and_unknown_sources_pass(self) -> None:
+    issues, gate = self._run(
+      [
+        {
+          "structure_ref": "BS",
+          "from_ref": "acme:Assets",
+          "to_ref": "acme:Cash",
+          "association_type": "presentation",
+        },
+        {
+          "structure_ref": "Mapping",
+          "from_ref": "acme:NotYetCreated",
+          "to_ref": "rs-gaap:Cash",
+          "association_type": "mapping",
+        },
+      ],
+      {"acme:Assets": "el_a", "acme:Cash": "el_cash"},
+      reached=True,
+    )
+    gate.assert_not_called()
     assert issues == []
 
 

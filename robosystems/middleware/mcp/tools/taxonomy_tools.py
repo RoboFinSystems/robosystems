@@ -52,6 +52,7 @@ from robosystems.operations.roboledger.reads.taxonomies import (
   list_unmapped_elements,
   suggest_mapping_candidates,
 )
+from robosystems.operations.taxonomy_block.immutability import ProtectedFactsError
 
 from ._errors import database_failure
 
@@ -494,6 +495,15 @@ class CreateMappingAssociationTool:
         "from_element_id": result.from_element_id,
         "to_element_id": result.to_element_id,
         "confidence": result.confidence,
+      }
+    except ProtectedFactsError as exc:
+      # The account already has landed history in a closed month, so the
+      # arc would restate stamped statements. Typed so the mapping operator
+      # can count it apart from an ordinary rejection.
+      return {
+        "error": "protected_history",
+        "message": str(exc),
+        "closed_periods": list(exc.closed_period_names),
       }
     except SQLAlchemyError as exc:
       return database_failure("create-mapping-association", exc)

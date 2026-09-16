@@ -33,7 +33,9 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.operations.taxonomy_block._helpers import structure_from_request
-from robosystems.operations.taxonomy_block.immutability import assert_facts_deletable
+from robosystems.operations.taxonomy_block.immutability import (
+  assert_history_undisturbed,
+)
 from robosystems.operations.taxonomy_block.rule_persistence import (
   persist_tenant_rules,
 )
@@ -457,7 +459,7 @@ def apply_structures_to_remove(
   ids = list(payload.structures_to_remove)
   # Filed snapshots and closed-month canonical sets are immutable against
   # curation; the validator reports the same condition, this is the backstop.
-  assert_facts_deletable(session, structure_ids=ids)
+  assert_history_undisturbed(session, structure_ids=ids)
   association_ids = (
     session.execute(select(Association.id).where(Association.structure_id.in_(ids)))
     .scalars()

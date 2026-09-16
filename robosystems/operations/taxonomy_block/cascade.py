@@ -35,7 +35,9 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.line_item import LineItem
-from robosystems.operations.taxonomy_block.immutability import assert_facts_deletable
+from robosystems.operations.taxonomy_block.immutability import (
+  assert_history_undisturbed,
+)
 
 
 @dataclass(frozen=True)
@@ -154,7 +156,9 @@ def cascade_delete_taxonomy(
   # Curation never destroys a filed report's snapshot or a closed month's
   # canonical statement sets — no flag reaches them. Checked before the
   # first delete so a refusal leaves nothing half-done.
-  assert_facts_deletable(session, structure_ids=structure_ids, element_ids=element_ids)
+  assert_history_undisturbed(
+    session, structure_ids=structure_ids, element_ids=element_ids
+  )
 
   facts_deleted = 0
   if cascade_facts:
