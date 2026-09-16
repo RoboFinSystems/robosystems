@@ -41,7 +41,7 @@ dependencies = [
     # Cloud Service (AWS)
     "boto3>=1.42.0,<2.0",
     "huggingface-hub>=1.19,<2",
-    # OLAP Staging/Vector/Graph Databases
+    # OLAP Databases (Graph)
     "duckdb==1.4.4",
     "lancedb>=0.34.0,<0.35",  # 0.34 made pylance an optional extra (unused here); 0.30<->0.36 format compat verified 2026-08-01
     "ladybug==0.18.1",
@@ -58,12 +58,6 @@ dependencies = [
     "dagster-webserver>=1.13.15,<2.0",
     "dagster-postgres>=0.29.15,<1.0",
     "dagster-aws>=0.29.15,<1.0",
-    # XBRL Toolkit. Capped to one minor: the information-block views import its
-    # pre-1.0 ``serve`` internals, so a refactor there breaks a deploy, not CI.
-    "xbrlkit>=0.17.1,<0.18.0",
-    # Tenant-authored notes are markdown; the Tavi projection writes them as
-    # HTML text blocks (operations/serialization/model.py).
-    "markdown-it-py>=3.0",
     # Data Transformation (dbt)
     "dbt-core>=1.11.14,<1.12",  # hold: 1.12 adds a beta parser dep + the metricflow subtree we don't use; 1.11.14 has the sqlparse<0.7.0 lift
     "dbt-duckdb>=1.10.0,<2.0",
@@ -74,11 +68,12 @@ dependencies = [
     "pandas>=2.3.0,<3.0",
     "pyarrow>=24.0.0,<25",  # hold: 25 is a fresh major feeding the duckdb/ladybug arrow seams; bump deliberately, paired with icebug 13
     "rdflib>=7.0.0,<8.0",
+    "xbrlkit>=0.17.1,<0.18.0",
     # External API Integrations
     "intuit-oauth>=1.2.0,<2.0",
     "python-quickbooks>=0.9.0,<1.0",
     "stripe>=11.1.0,<12.0",
-    # Observability
+    # Observability (OTel)
     "opentelemetry-api>=1.44.0,<2.0",
     "opentelemetry-exporter-otlp>=1.44.0,<2.0",
     "opentelemetry-sdk>=1.44.0,<2.0",
@@ -98,6 +93,7 @@ dependencies = [
     "httpx-sse>=0.4.0",
     "httpx>=0.28.0",
     "lxml>=6.1.0,<7.0",
+    "markdown-it-py>=3.0",
     "pillow>=12.3.0",
     "psutil>=7.2.1,<8.0",
     "pydantic[email]>=2.13.4,<3.0",
