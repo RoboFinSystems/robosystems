@@ -48,11 +48,12 @@ class ToolAccess(Protocol):
     """Call an MCP tool by name."""
 
   async def get_tool_schemas(self, names: list[str]) -> list[dict[str, Any]]:
-    """Return Anthropic-shaped tool definitions for the named tools.
+    """Return MCP-shaped tool definitions for the named tools.
 
     Filters to the subset of `names` that are actually available on this
     graph (extension/flag-gated tools are omitted) and returns them as
-    `{"name", "description", "input_schema"}` ready to hand to the model.
+    `{"name", "description", "inputSchema"}`; the AI client wraps them into
+    the provider's tool spec at request build.
     """
 
   def get_tool_instance(self, tool_class: type) -> Any:

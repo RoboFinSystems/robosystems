@@ -1,8 +1,9 @@
 """Tests for the bounded tool-use loop (run_tool_loop).
 
 The load-bearing behavior is error feedback: when a tool call fails, the loop
-must feed the error back to the model as an ``is_error`` tool_result so it can
-self-correct — the thing the old single-shot pipeline never did.
+must feed the error back to the model as an error-status tool result so it
+can self-correct — the thing the old single-shot pipeline never did. The
+transcript is Converse content blocks throughout.
 """
 
 from __future__ import annotations
@@ -20,6 +21,10 @@ from robosystems.operations.operators.tool_loop import run_tool_loop
 pytestmark = pytest.mark.asyncio
 
 
+def _tool_use_block(tool_id: str, name: str, **inp) -> dict:
+  return {"toolUse": {"toolUseId": tool_id, "name": name, "input": inp}}
+
+
 def _tool_use(tool_id: str, name: str, **inp) -> AIResponse:
   """A model turn that calls one tool."""
   return AIResponse(
@@ -28,7 +33,7 @@ def _tool_use(tool_id: str, name: str, **inp) -> AIResponse:
     input_tokens=10,
     output_tokens=5,
     stop_reason="tool_use",
-    content_blocks=[{"type": "tool_use", "id": tool_id, "name": name, "input": inp}],
+    content_blocks=[_tool_use_block(tool_id, name, **inp)],
   )
 
 
@@ -40,7 +45,7 @@ def _final(text: str) -> AIResponse:
     input_tokens=10,
     output_tokens=5,
     stop_reason="end_turn",
-    content_blocks=[{"type": "text", "text": text}],
+    content_blocks=[{"text": text}],
   )
 
 
@@ -51,7 +56,7 @@ def _tools_mock(call_results: list) -> MagicMock:
       {
         "name": "read-graph-cypher",
         "description": "run cypher",
-        "input_schema": {"type": "object"},
+        "inputSchema": {"type": "object"},
       }
     ]
   )
@@ -73,14 +78,22 @@ def _ctx(ai: MagicMock, tools: MagicMock, query: str = "How many companies?"):
 
 
 def _tool_result_blocks(messages: list) -> list[dict]:
-  """Flatten every tool_result block across a message list."""
+  """Flatten every toolResult payload across a message list."""
   return [
-    block
+    block["toolResult"]
     for msg in messages
     if isinstance(msg.content, list)
     for block in msg.content
-    if isinstance(block, dict) and block.get("type") == "tool_result"
+    if isinstance(block, dict) and "toolResult" in block
   ]
+
+
+def _is_error(result: dict) -> bool:
+  return result["status"] == "error"
+
+
+def _result_text(result: dict) -> str:
+  return result["content"][0]["text"]
 
 
 async def test_happy_path_captures_rows_and_cypher():
@@ -147,8 +160,8 @@ async def test_tool_error_is_fed_back_and_model_retries():
   # The SECOND model call must have seen the error as an is_error tool_result.
   second_call_messages = ai.create_message.call_args_list[1].kwargs["messages"]
   blocks = _tool_result_blocks(second_call_messages)
-  assert any(b.get("is_error") for b in blocks)
-  assert any("Invalid Cypher" in b.get("content", "") for b in blocks)
+  assert any(_is_error(b) for b in blocks)
+  assert any("Invalid Cypher" in _result_text(b) for b in blocks)
 
 
 async def test_empty_followup_does_not_clobber_captured_rows():
@@ -204,7 +217,7 @@ async def test_error_dict_result_is_flagged_and_not_captured_as_rows():
 
   assert result.rows is None  # error dict is not a result set
   blocks = _tool_result_blocks(ai.create_message.call_args_list[1].kwargs["messages"])
-  assert any(b.get("is_error") for b in blocks)
+  assert any(_is_error(b) for b in blocks)
 
 
 async def test_hits_iteration_cap_then_forces_a_final_answer():
@@ -237,21 +250,17 @@ async def test_hits_iteration_cap_then_forces_a_final_answer():
   assert ai.create_message.await_count == 3
 
   final_kwargs = ai.create_message.call_args_list[2].kwargs
-  assert final_kwargs["tools"]  # transcript stays valid
-  # ...but the nudge forbids further tool use, so the answer can't come back
-  # as a tool_use block the loop would have to drop.
-  assert final_kwargs["tool_choice"] == {"type": "none"}
-  # Loop turns carry no tool_choice — the model decides.
-  assert ai.create_message.call_args_list[0].kwargs.get("tool_choice") is None
+  # The transcript carries tool blocks, so `tools` must stay defined
+  # (Converse rejects the request otherwise); the nudge forbids further tool
+  # use in words.
+  assert final_kwargs["tools"]
+  assert "tool_choice" not in final_kwargs
   # The answer-now nudge is appended to the trailing user turn (no second
   # consecutive user message).
   last_user = final_kwargs["messages"][-1]
   assert last_user.role == "user"
   assert any(
-    isinstance(b, dict)
-    and b.get("type") == "text"
-    and "step limit" in b.get("text", "")
-    for b in last_user.content
+    isinstance(b, dict) and "step limit" in b.get("text", "") for b in last_user.content
   )
 
 
@@ -290,8 +299,8 @@ async def test_unadvertised_tool_is_refused_without_dispatch():
   second_turn_messages = ai.create_message.call_args_list[1].kwargs["messages"]
   blocks = _tool_result_blocks(second_turn_messages)
   assert len(blocks) == 1
-  assert blocks[0]["is_error"] is True
-  assert "not available" in blocks[0]["content"]
+  assert _is_error(blocks[0])
+  assert "not available" in _result_text(blocks[0])
 
 
 async def test_all_error_turn_is_not_charged_against_the_tool_budget():
@@ -324,10 +333,6 @@ async def test_all_error_turn_is_not_charged_against_the_tool_budget():
   assert result.rows == rows
   assert result.error_retries == 1
   assert result.iterations == 3
-  # No nudge was needed, so no call carried a tool_choice.
-  assert all(
-    c.kwargs.get("tool_choice") is None for c in ai.create_message.call_args_list
-  )
 
 
 async def test_error_retry_budget_is_bounded():
@@ -359,7 +364,6 @@ async def test_error_retry_budget_is_bounded():
   assert result.hit_cap is True
   assert result.error_retries == 1
   assert result.rows is None
-  assert ai.create_message.call_args_list[2].kwargs["tool_choice"] == {"type": "none"}
 
 
 async def test_mixed_turn_with_one_success_is_charged():
@@ -373,18 +377,8 @@ async def test_mixed_turn_with_one_success_is_charged():
     output_tokens=5,
     stop_reason="tool_use",
     content_blocks=[
-      {
-        "type": "tool_use",
-        "id": "t1",
-        "name": "read-graph-cypher",
-        "input": {"query": "bad"},
-      },
-      {
-        "type": "tool_use",
-        "id": "t2",
-        "name": "read-graph-cypher",
-        "input": {"query": "ok"},
-      },
+      _tool_use_block("t1", "read-graph-cypher", query="bad"),
+      _tool_use_block("t2", "read-graph-cypher", query="ok"),
     ],
   )
   ai.create_message = AsyncMock(side_effect=[mixed, _final("answer")])
@@ -400,13 +394,12 @@ async def test_mixed_turn_with_one_success_is_charged():
   )
 
   # Charged: the single budgeted turn is spent, so the next call is the
-  # tool-disabled nudge. Had the turn been free, the loop would have made a
-  # normal second call with no tool_choice and finished without hit_cap.
+  # answer-now nudge. Had the turn been free, the loop would have made a
+  # normal second call and finished without hit_cap.
   assert result.error_retries == 0
   assert result.hit_cap is True
   assert result.text == "answer"
   assert ai.create_message.await_count == 2
-  assert ai.create_message.call_args_list[1].kwargs["tool_choice"] == {"type": "none"}
 
 
 async def test_credit_ceiling_stops_the_loop_between_calls():
@@ -438,12 +431,9 @@ async def test_credit_ceiling_stops_the_loop_between_calls():
   assert result.text == "best effort within budget"
   assert ai.create_message.await_count == 2  # first turn + the nudge only
   final_kwargs = ai.create_message.call_args_list[1].kwargs
-  assert final_kwargs["tool_choice"] == {"type": "none"}
   last_user = final_kwargs["messages"][-1]
   assert any(
-    isinstance(b, dict)
-    and b.get("type") == "text"
-    and "credit limit" in b.get("text", "")
+    isinstance(b, dict) and "credit limit" in b.get("text", "")
     for b in last_user.content
   )
 
@@ -504,8 +494,8 @@ def _two_tools_mock(call_results: list) -> MagicMock:
   tools = MagicMock()
   tools.get_tool_schemas = AsyncMock(
     return_value=[
-      {"name": "get-graph-schema", "description": "schema", "input_schema": {}},
-      {"name": "read-graph-cypher", "description": "cypher", "input_schema": {}},
+      {"name": "get-graph-schema", "description": "schema", "inputSchema": {}},
+      {"name": "read-graph-cypher", "description": "cypher", "inputSchema": {}},
     ]
   )
   tools.call_tool = AsyncMock(side_effect=call_results)
@@ -541,13 +531,13 @@ async def test_orientation_tool_results_escape_the_default_cap():
   schema_block = _tool_result_blocks(
     ai.create_message.call_args_list[1].kwargs["messages"]
   )[0]
-  assert "truncated" not in schema_block["content"]
-  assert len(schema_block["content"]) > 12000
+  assert "truncated" not in _result_text(schema_block)
+  assert len(_result_text(schema_block)) > 12000
 
   rows_blocks = _tool_result_blocks(
     ai.create_message.call_args_list[2].kwargs["messages"]
   )
-  assert "truncated" in rows_blocks[-1]["content"]
+  assert "truncated" in _result_text(rows_blocks[-1])
 
 
 async def test_cancel_between_calls_stops_the_loop_without_a_wrap_up_call():
@@ -675,3 +665,60 @@ async def test_opening_turn_defaults_to_the_question():
   assert (
     ai.create_message.await_args.kwargs["messages"][-1].content == "How many companies?"
   )
+
+
+async def test_assistant_turn_is_replayed_verbatim_including_reasoning():
+  """A reasoning model returns a reasoningContent block alongside its tool
+  call; the replayed assistant turn must carry the model's blocks unchanged
+  (the reasoning signature is checked on replay)."""
+  reasoning = {"reasoningContent": {"reasoningText": {"text": "…", "signature": "s"}}}
+  turn = AIResponse(
+    content="",
+    model="m",
+    input_tokens=10,
+    output_tokens=5,
+    stop_reason="tool_use",
+    content_blocks=[reasoning, _tool_use_block("t1", "read-graph-cypher", query="q")],
+  )
+  ai = MagicMock()
+  ai.create_message = AsyncMock(side_effect=[turn, _final("done")])
+  tools = _tools_mock(call_results=[[{"n": 1}]])
+  ctx = _ctx(ai, tools)
+
+  await run_tool_loop(
+    ctx, system="s", tool_names=["read-graph-cypher"], max_iterations=5, max_tokens=100
+  )
+
+  second_call_messages = ai.create_message.call_args_list[1].kwargs["messages"]
+  assistant_turns = [m for m in second_call_messages if m.role == "assistant"]
+  assert assistant_turns[-1].content == turn.content_blocks
+  # And the tool result answers the toolUse id, with success status.
+  results = _tool_result_blocks(second_call_messages)
+  assert results == [
+    {"toolUseId": "t1", "content": [{"text": '[{"n": 1}]'}], "status": "success"}
+  ]
+
+
+async def test_wrap_up_tool_call_is_terminal_and_never_dispatched():
+  """Converse cannot forbid tool use on the wrap-up turn, so a model that
+  asks for another tool anyway gets no dispatch: the loop answers from what
+  it has (the fallback text when the turn carried no text)."""
+  ai = MagicMock()
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "read-graph-cypher", query="MATCH (n) RETURN n LIMIT 1"),
+      _tool_use("t2", "read-graph-cypher", query="MATCH (n) RETURN n LIMIT 2"),
+    ]
+  )
+  tools = _tools_mock(call_results=[[{"n": 1}]])
+  ctx = _ctx(ai, tools)
+
+  result = await run_tool_loop(
+    ctx, system="s", tool_names=["read-graph-cypher"], max_iterations=1, max_tokens=100
+  )
+
+  assert result.hit_cap is True
+  assert tools.call_tool.await_count == 1  # the wrap-up's request was not run
+  assert result.tools_called == ["read-graph-cypher"]
+  assert result.rows == [{"n": 1}]
+  assert "couldn't compose a final answer" in result.text

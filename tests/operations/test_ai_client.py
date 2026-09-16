@@ -1,18 +1,21 @@
-"""Comprehensive unit tests for the AI client module.
+"""Unit tests for the AI client module.
 
-Tests AWS Bedrock AI client initialization, configuration,
-message creation, model resolution, and error handling.
+Covers Bedrock client initialization, the Converse request shape per model,
+response parsing, model resolution, and error handling.
 """
 
-import json
+from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
-from robosystems.config.operators import BedrockModel, OperatorConfig
+from robosystems.config.operators import BedrockModel, ModelProfile, OperatorConfig
 
 # Module paths for patching
 AI_CLIENT_MODULE = "robosystems.operations.operators.ai_client"
+
+CACHE_POINT = {"cachePoint": {"type": "default"}}
 
 
 def _make_ai_client():
@@ -38,12 +41,30 @@ def _make_ai_client():
   return client, mock_bedrock_client
 
 
+def _converse_response(
+  blocks: list[dict],
+  stop_reason: str | None = "end_turn",
+  usage: dict | None = None,
+) -> dict:
+  """A Converse response body as boto3 returns it."""
+  response = {
+    "output": {"message": {"role": "assistant", "content": blocks}},
+    "usage": usage or {"inputTokens": 10, "outputTokens": 5},
+  }
+  if stop_reason is not None:
+    response["stopReason"] = stop_reason
+  return response
+
+
+def _text_response(text: str, **kwargs) -> dict:
+  return _converse_response([{"text": text}], **kwargs)
+
+
 class TestAIMessage:
   """Test the AIMessage dataclass."""
 
   @pytest.mark.unit
   def test_message_creation(self):
-    """Test basic AIMessage creation with role and content."""
     from robosystems.operations.operators.ai_client import AIMessage
 
     msg = AIMessage(role="user", content="Hello, world!")
@@ -51,21 +72,12 @@ class TestAIMessage:
     assert msg.content == "Hello, world!"
 
   @pytest.mark.unit
-  def test_message_with_assistant_role(self):
-    """Test AIMessage with assistant role."""
+  def test_message_with_block_content(self):
     from robosystems.operations.operators.ai_client import AIMessage
 
-    msg = AIMessage(role="assistant", content="I can help with that.")
-    assert msg.role == "assistant"
-    assert msg.content == "I can help with that."
-
-  @pytest.mark.unit
-  def test_message_with_empty_content(self):
-    """Test AIMessage with empty content string."""
-    from robosystems.operations.operators.ai_client import AIMessage
-
-    msg = AIMessage(role="user", content="")
-    assert msg.content == ""
+    blocks = [{"text": "a"}, {"toolUse": {"toolUseId": "t", "name": "n", "input": {}}}]
+    msg = AIMessage(role="assistant", content=blocks)
+    assert msg.content == blocks
 
 
 class TestAIResponse:
@@ -73,48 +85,63 @@ class TestAIResponse:
 
   @pytest.mark.unit
   def test_response_creation(self):
-    """Test basic AIResponse creation."""
     from robosystems.operations.operators.ai_client import AIResponse
 
-    resp = AIResponse(
-      content="Analysis complete.",
-      model="us.anthropic.claude-sonnet-4-6",
-      input_tokens=100,
-      output_tokens=50,
-    )
-    assert resp.content == "Analysis complete."
-    assert resp.model == "us.anthropic.claude-sonnet-4-6"
-    assert resp.input_tokens == 100
-    assert resp.output_tokens == 50
+    resp = AIResponse(content="hi", model="m", input_tokens=1, output_tokens=2)
     assert resp.stop_reason is None
+    assert resp.cache_read_input_tokens == 0
+    assert resp.cache_creation_input_tokens == 0
+    assert resp.content_blocks == []
+    assert resp.tool_calls == []
 
   @pytest.mark.unit
-  def test_response_with_stop_reason(self):
-    """Test AIResponse with explicit stop_reason."""
-    from robosystems.operations.operators.ai_client import AIResponse
+  def test_tool_calls_are_read_from_tool_use_blocks(self):
+    """Text and reasoning blocks are skipped; only toolUse blocks become
+    calls, with the provider shape stripped."""
+    from robosystems.operations.operators.ai_client import AIResponse, ToolCall
 
     resp = AIResponse(
-      content="Done.",
-      model="us.anthropic.claude-sonnet-4-6",
-      input_tokens=50,
-      output_tokens=25,
-      stop_reason="end_turn",
+      content="Let me check.",
+      model="m",
+      input_tokens=1,
+      output_tokens=2,
+      stop_reason="tool_use",
+      content_blocks=[
+        {"reasoningContent": {"reasoningText": {"text": "…"}}},
+        {"text": "Let me check."},
+        {
+          "toolUse": {
+            "toolUseId": "t1",
+            "name": "read-graph-cypher",
+            "input": {"query": "MATCH (n) RETURN n"},
+          }
+        },
+        {"toolUse": {"toolUseId": "t2", "name": "get-graph-schema"}},
+      ],
     )
-    assert resp.stop_reason == "end_turn"
+    assert resp.tool_calls == [
+      ToolCall(
+        id="t1", name="read-graph-cypher", input={"query": "MATCH (n) RETURN n"}
+      ),
+      ToolCall(id="t2", name="get-graph-schema", input={}),
+    ]
 
+
+class TestBlockHelpers:
   @pytest.mark.unit
-  def test_response_with_zero_tokens(self):
-    """Test AIResponse with zero token counts."""
-    from robosystems.operations.operators.ai_client import AIResponse
+  def test_tool_result_block_carries_status(self):
+    from robosystems.operations.operators.ai_client import tool_result_block
 
-    resp = AIResponse(
-      content="",
-      model="test-model",
-      input_tokens=0,
-      output_tokens=0,
+    assert tool_result_block("t1", "[]") == {
+      "toolResult": {
+        "toolUseId": "t1",
+        "content": [{"text": "[]"}],
+        "status": "success",
+      }
+    }
+    assert tool_result_block("t1", "boom", is_error=True)["toolResult"]["status"] == (
+      "error"
     )
-    assert resp.input_tokens == 0
-    assert resp.output_tokens == 0
 
 
 class TestAIClientInitialization:
@@ -251,185 +278,92 @@ class TestAIClientInitialization:
         AIClient()
 
 
-class TestAIClientGetModelId:
-  """Test model ID resolution in AIClient."""
-
-  @pytest.mark.unit
-  def test_default_model_id(self):
-    """Test that default model ID is returned when no override specified."""
-    client, _ = _make_ai_client()
-    model_id = client._get_model_id()
-
-    expected = OperatorConfig.get_bedrock_model_id()
-    assert model_id == expected
-
-  @pytest.mark.unit
-  def test_explicit_valid_model(self):
-    """Test model ID when a valid model name is provided."""
-    client, _ = _make_ai_client()
-    model_id = client._get_model_id(model=BedrockModel.SONNET_4.value)
-
-    expected = OperatorConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4)
-    assert model_id == expected
-
-  @pytest.mark.unit
-  def test_invalid_model_falls_back_to_default(self):
-    """Test that an invalid model name falls back to default."""
-    client, _ = _make_ai_client()
-    model_id = client._get_model_id(model="not-a-real-model")
-
-    # Should use default when model is invalid
-    expected = OperatorConfig.get_bedrock_model_id()
-    assert model_id == expected
-
-  @pytest.mark.unit
-  def test_agent_type_override(self):
-    """Test model ID with operator_type parameter."""
-    client, _ = _make_ai_client()
-    model_id = client._get_model_id(operator_type="financial")
-
-    expected = OperatorConfig.get_bedrock_model_id(operator_type="financial")
-    assert model_id == expected
-
-  @pytest.mark.unit
-  def test_model_and_agent_type_model_takes_precedence(self):
-    """Test that explicit model overrides operator_type."""
-    client, _ = _make_ai_client()
-    model_id = client._get_model_id(
-      model=BedrockModel.SONNET_4.value, operator_type="financial"
-    )
-
-    expected = OperatorConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4)
-    assert model_id == expected
-
-  @pytest.mark.unit
-  def test_none_model_and_none_agent_type(self):
-    """Test default model returned when both params are None."""
-    client, _ = _make_ai_client()
-    model_id = client._get_model_id(model=None, operator_type=None)
-
-    expected = OperatorConfig.get_bedrock_model_id()
-    assert model_id == expected
-
-
 class TestAIClientCreateMessage:
-  """Test the create_message method."""
+  """The Converse request shape and response parsing."""
 
   @pytest.mark.unit
   async def test_create_message_basic(self):
-    """Test basic message creation through Bedrock."""
+    """Default model (Sonnet 5): text in, text out, tokens and stop reason
+    parsed from the Converse envelope."""
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"text": "Financial analysis complete."}],
-      "usage": {"input_tokens": 150, "output_tokens": 75},
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
-    messages = [AIMessage(role="user", content="Analyze revenue trends")]
+    mock_bedrock.converse.return_value = _text_response(
+      "Financial analysis complete.",
+      usage={"inputTokens": 150, "outputTokens": 75},
+    )
 
     result = await client.create_message(
-      messages=messages,
+      messages=[AIMessage(role="user", content="Analyze revenue trends")],
       max_tokens=2000,
       temperature=0.5,
     )
 
     assert result.content == "Financial analysis complete."
+    assert result.model == "us.anthropic.claude-sonnet-5"
     assert result.input_tokens == 150
     assert result.output_tokens == 75
     assert result.stop_reason == "end_turn"
 
-  @pytest.mark.unit
-  async def test_create_message_with_system_prompt(self):
-    """Test message creation with a system prompt."""
-    client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.operators.ai_client import AIMessage
-
-    response_body = {
-      "content": [{"text": "Response with system context."}],
-      "usage": {"input_tokens": 200, "output_tokens": 100},
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
-    messages = [AIMessage(role="user", content="Test query")]
-
-    result = await client.create_message(
-      messages=messages,
-      system="You are a financial analyst.",
-      max_tokens=4000,
-      temperature=0.7,
-    )
-
-    call_args = mock_bedrock.invoke_model.call_args
-    request_body = json.loads(call_args[1]["body"])
-    # `system` is a content-block list carrying the cache breakpoint that
-    # caches tools + system together.
-    assert request_body["system"] == [
-      {
-        "type": "text",
-        "text": "You are a financial analyst.",
-        "cache_control": {"type": "ephemeral"},
-      }
+    request = mock_bedrock.converse.call_args.kwargs
+    assert request["modelId"] == "us.anthropic.claude-sonnet-5"
+    assert request["messages"] == [
+      {"role": "user", "content": [{"text": "Analyze revenue trends"}]}
     ]
-    assert result.content == "Response with system context."
+    assert request["inferenceConfig"] == {"maxTokens": 2000}
 
   @pytest.mark.unit
-  async def test_create_message_without_system_prompt(self):
-    """Test message creation without a system prompt excludes it from request."""
+  async def test_system_prompt_carries_the_prefix_cache_point(self):
+    """One cache point at the end of `system` caches tools + system together
+    (Converse evaluates tools -> system -> messages cumulatively)."""
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"text": "Response without system."}],
-      "usage": {"input_tokens": 100, "output_tokens": 50},
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+    mock_bedrock.converse.return_value = _text_response("ok")
 
-    messages = [AIMessage(role="user", content="Test query")]
-
-    await client.create_message(messages=messages)
-
-    call_args = mock_bedrock.invoke_model.call_args
-    request_body = json.loads(call_args[1]["body"])
-    assert "system" not in request_body
+    await client.create_message(
+      messages=[AIMessage(role="user", content="q")],
+      system="You are a financial analyst.",
+    )
+    request = mock_bedrock.converse.call_args.kwargs
+    assert request["system"] == [{"text": "You are a financial analyst."}, CACHE_POINT]
 
   @pytest.mark.unit
-  async def test_create_message_with_tools_and_tool_use_response(self):
-    """Tools are sent in the request body; a tool_use response exposes
-    content_blocks and stop_reason so the tool loop can drive it."""
+  async def test_no_system_prompt_omits_the_field(self):
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [
-        {"type": "text", "text": "Let me check."},
+    mock_bedrock.converse.return_value = _text_response("ok")
+    await client.create_message(messages=[AIMessage(role="user", content="q")])
+    assert "system" not in mock_bedrock.converse.call_args.kwargs
+
+  @pytest.mark.unit
+  async def test_tools_are_wrapped_as_tool_specs_and_tool_use_is_parsed(self):
+    """MCP-shaped definitions become Converse toolSpecs; a tool-use turn
+    exposes the calls and the full block list for the loop to replay."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    mock_bedrock.converse.return_value = _converse_response(
+      [
+        {"text": "Let me check."},
         {
-          "type": "tool_use",
-          "id": "toolu_1",
-          "name": "read-graph-cypher",
-          "input": {"query": "MATCH (n) RETURN n"},
+          "toolUse": {
+            "toolUseId": "toolu_1",
+            "name": "read-graph-cypher",
+            "input": {"query": "MATCH (n) RETURN n"},
+          }
         },
       ],
-      "usage": {"input_tokens": 120, "output_tokens": 30},
-      "stop_reason": "tool_use",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+      stop_reason="tool_use",
+      usage={"inputTokens": 120, "outputTokens": 30},
+    )
 
     tools = [
       {
         "name": "read-graph-cypher",
         "description": "run cypher",
-        "input_schema": {"type": "object"},
+        "inputSchema": {"type": "object"},
       }
     ]
     result = await client.create_message(
@@ -437,144 +371,82 @@ class TestAIClientCreateMessage:
       tools=tools,
     )
 
-    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
-    assert request_body["tools"] == tools
+    request = mock_bedrock.converse.call_args.kwargs
+    assert request["toolConfig"] == {
+      "tools": [
+        {
+          "toolSpec": {
+            "name": "read-graph-cypher",
+            "description": "run cypher",
+            "inputSchema": {"json": {"type": "object"}},
+          }
+        }
+      ]
+    }
+    assert "toolChoice" not in request["toolConfig"]
 
     assert result.stop_reason == "tool_use"
-    # `content` is the joined text blocks; tool_use carries no text.
+    # `content` is the joined text blocks; toolUse carries no text.
     assert result.content == "Let me check."
     assert len(result.content_blocks) == 2
-    assert result.content_blocks[1]["name"] == "read-graph-cypher"
+    assert result.tool_calls[0].name == "read-graph-cypher"
+    assert result.tool_calls[0].id == "toolu_1"
+    assert result.tool_calls[0].input == {"query": "MATCH (n) RETURN n"}
 
   @pytest.mark.unit
-  async def test_create_message_without_tools_omits_tools_key(self):
-    """No tools param → no `tools` key in the Bedrock request body."""
+  async def test_no_tools_omits_tool_config(self):
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"type": "text", "text": "hi"}],
-      "usage": {"input_tokens": 10, "output_tokens": 5},
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
+    mock_bedrock.converse.return_value = _text_response("hi")
     await client.create_message(messages=[AIMessage(role="user", content="hi")])
-    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
-    assert "tools" not in request_body
-
-  @pytest.mark.unit
-  async def test_create_message_sends_tool_choice_alongside_tools(self):
-    """tool_choice rides in the request body with the tools it constrains —
-    the tool loop's final nudge uses {"type": "none"} to keep the transcript
-    valid while forbidding another tool_use turn."""
-    client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.operators.ai_client import AIMessage
-
-    response_body = {
-      "content": [{"type": "text", "text": "final"}],
-      "usage": {"input_tokens": 10, "output_tokens": 5},
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
-    tools = [{"name": "t", "description": "d", "input_schema": {"type": "object"}}]
-    await client.create_message(
-      messages=[AIMessage(role="user", content="answer now")],
-      tools=tools,
-      tool_choice={"type": "none"},
-    )
-    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
-    assert request_body["tools"] == tools
-    assert request_body["tool_choice"] == {"type": "none"}
-
-  @pytest.mark.unit
-  async def test_tool_choice_without_tools_is_dropped(self):
-    """tool_choice is meaningless (and rejected by the API) without tools."""
-    client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.operators.ai_client import AIMessage
-
-    response_body = {
-      "content": [{"type": "text", "text": "hi"}],
-      "usage": {"input_tokens": 10, "output_tokens": 5},
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
-    await client.create_message(
-      messages=[AIMessage(role="user", content="hi")],
-      tool_choice={"type": "none"},
-    )
-    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
-    assert "tool_choice" not in request_body
+    assert "toolConfig" not in mock_bedrock.converse.call_args.kwargs
 
   @pytest.mark.unit
   async def test_cache_conversation_marks_the_trailing_turn(self):
-    """cache_conversation puts a cache breakpoint on the last block of the
-    trailing message — string content is wrapped into a text block — and the
-    caller's message objects are never mutated (a persisted marker on every
-    past turn would exceed the 4-breakpoint limit)."""
+    """cache_conversation appends a cache point to the trailing message —
+    string content is wrapped into a text block — and the caller's message
+    objects are never mutated (a persisted marker on every past turn would
+    exceed the 4-breakpoint limit)."""
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.operators.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import (
+      AIMessage,
+      tool_result_block,
+    )
 
-    response_body = {
-      "content": [{"type": "text", "text": "hi"}],
-      "usage": {"input_tokens": 10, "output_tokens": 5},
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+    mock_bedrock.converse.return_value = _text_response("hi")
 
-    tool_result = {"type": "tool_result", "tool_use_id": "t1", "content": "[]"}
+    tool_result = tool_result_block("t1", "[]")
+    trailing = [tool_result]
     messages = [
       AIMessage(role="user", content="question"),
-      AIMessage(role="assistant", content=[{"type": "tool_use", "id": "t1"}]),
-      AIMessage(role="user", content=[tool_result]),
+      AIMessage(
+        role="assistant",
+        content=[{"toolUse": {"toolUseId": "t1", "name": "n", "input": {}}}],
+      ),
+      AIMessage(role="user", content=trailing),
     ]
 
     await client.create_message(messages=messages, cache_conversation=True)
 
-    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
-    sent = request_body["messages"]
-    # Only the trailing turn's last block carries the marker.
-    assert sent[-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
-    assert "cache_control" not in json.dumps(sent[:-1])
-    # The caller's block object was copied, not mutated.
-    assert "cache_control" not in tool_result
+    sent = mock_bedrock.converse.call_args.kwargs["messages"]
+    assert sent[-1]["content"] == [tool_result, CACHE_POINT]
+    assert all("cachePoint" not in str(m) for m in sent[:-1])
+    # The caller's list was copied, not mutated.
+    assert trailing == [tool_result]
 
   @pytest.mark.unit
   async def test_cache_conversation_wraps_string_content(self):
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"type": "text", "text": "hi"}],
-      "usage": {"input_tokens": 10, "output_tokens": 5},
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
+    mock_bedrock.converse.return_value = _text_response("hi")
     await client.create_message(
       messages=[AIMessage(role="user", content="just a question")],
       cache_conversation=True,
     )
-    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
-    assert request_body["messages"][-1]["content"] == [
-      {
-        "type": "text",
-        "text": "just a question",
-        "cache_control": {"type": "ephemeral"},
-      }
-    ]
+    sent = mock_bedrock.converse.call_args.kwargs["messages"]
+    assert sent[-1]["content"] == [{"text": "just a question"}, CACHE_POINT]
 
   @pytest.mark.unit
   async def test_no_conversation_marker_by_default(self):
@@ -583,40 +455,27 @@ class TestAIClientCreateMessage:
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"type": "text", "text": "hi"}],
-      "usage": {"input_tokens": 10, "output_tokens": 5},
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
+    mock_bedrock.converse.return_value = _text_response("hi")
     await client.create_message(messages=[AIMessage(role="user", content="hi")])
-    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
-    assert request_body["messages"] == [{"role": "user", "content": "hi"}]
+    sent = mock_bedrock.converse.call_args.kwargs["messages"]
+    assert sent == [{"role": "user", "content": [{"text": "hi"}]}]
 
   @pytest.mark.unit
   async def test_cache_token_counts_are_parsed_from_usage(self):
-    """Bedrock reports cache reads/writes in usage; with caching in play
-    `input_tokens` is the uncached remainder, so all three must be carried."""
+    """With caching in play `inputTokens` is the uncached remainder, so the
+    cache read and write counts must be carried to the meter."""
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"type": "text", "text": "cached"}],
-      "usage": {
-        "input_tokens": 337,
-        "output_tokens": 50,
-        "cache_read_input_tokens": 3905,
-        "cache_creation_input_tokens": 12,
+    mock_bedrock.converse.return_value = _text_response(
+      "cached",
+      usage={
+        "inputTokens": 337,
+        "outputTokens": 50,
+        "cacheReadInputTokens": 3905,
+        "cacheWriteInputTokens": 12,
       },
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
+    )
     result = await client.create_message(
       messages=[AIMessage(role="user", content="hi")]
     )
@@ -626,20 +485,10 @@ class TestAIClientCreateMessage:
 
   @pytest.mark.unit
   async def test_cache_token_counts_default_to_zero_when_absent(self):
-    """Older recorded responses (and non-caching models) carry no cache
-    fields — they must read as zero, not KeyError."""
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"type": "text", "text": "hi"}],
-      "usage": {"input_tokens": 10, "output_tokens": 5},
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
+    mock_bedrock.converse.return_value = _text_response("hi")
     result = await client.create_message(
       messages=[AIMessage(role="user", content="hi")]
     )
@@ -647,211 +496,226 @@ class TestAIClientCreateMessage:
     assert result.cache_creation_input_tokens == 0
 
   @pytest.mark.unit
-  async def test_claude_4_family_sends_temperature_without_thinking(self):
-    """The 4.x family accepts temperature and does not run adaptive thinking,
-    so no thinking override is sent."""
+  async def test_claude_4_family_sends_temperature_and_no_extra_fields(self):
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"type": "text", "text": "hi"}],
-      "usage": {"input_tokens": 10, "output_tokens": 5},
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
+    mock_bedrock.converse.return_value = _text_response("hi")
     await client.create_message(
       messages=[AIMessage(role="user", content="hi")],
       model="claude-sonnet-4-6",
       temperature=0.3,
+      max_tokens=1000,
     )
-    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
-    assert request_body["temperature"] == 0.3
-    assert "thinking" not in request_body
+    request = mock_bedrock.converse.call_args.kwargs
+    assert request["modelId"] == "us.anthropic.claude-sonnet-4-6"
+    assert request["inferenceConfig"] == {"maxTokens": 1000, "temperature": 0.3}
+    assert "additionalModelRequestFields" not in request
 
   @pytest.mark.unit
-  async def test_sonnet_5_family_omits_temperature_and_disables_thinking(self):
+  async def test_claude_5_family_omits_temperature_and_disables_thinking(self):
     """Claude 5-family models 400 on `temperature` and run adaptive thinking
     unless explicitly disabled — thinking tokens would bill as output and eat
     max_tokens."""
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"type": "text", "text": "hi"}],
-      "usage": {"input_tokens": 10, "output_tokens": 5},
-      "stop_reason": "end_turn",
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
+    mock_bedrock.converse.return_value = _text_response("hi")
     await client.create_message(
       messages=[AIMessage(role="user", content="hi")],
       model="claude-sonnet-5",
       temperature=0.3,
     )
-    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
-    assert "temperature" not in request_body
-    assert request_body["thinking"] == {"type": "disabled"}
+    request = mock_bedrock.converse.call_args.kwargs
+    assert request["inferenceConfig"] == {"maxTokens": 4000}
+    assert request["additionalModelRequestFields"] == {"thinking": {"type": "disabled"}}
 
   @pytest.mark.unit
-  async def test_create_message_formats_messages_correctly(self):
-    """Test that messages are formatted into the correct dict structure."""
+  async def test_luna_sends_no_cache_points_no_temperature_no_extra_fields(self):
+    """GPT-5.6 over Converse rejects explicit cache points and `temperature`
+    (verified live 2026-09-15); it caches implicitly and reports the reads."""
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"text": "OK"}],
-      "usage": {"input_tokens": 50, "output_tokens": 10},
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
-    messages = [
-      AIMessage(role="user", content="First message"),
-      AIMessage(role="assistant", content="Response"),
-      AIMessage(role="user", content="Follow up"),
-    ]
-
-    # Pinned to the sampling-param family: the default model (Sonnet 5)
-    # rejects `temperature`, and the family gate is tested on its own.
-    await client.create_message(
-      messages=messages, max_tokens=1000, temperature=0.3, model="claude-sonnet-4-6"
+    mock_bedrock.converse.return_value = _text_response(
+      "42",
+      usage={
+        "inputTokens": 2,
+        "outputTokens": 5,
+        "cacheReadInputTokens": 1815,
+        "cacheWriteInputTokens": 64,
+      },
     )
-
-    call_args = mock_bedrock.invoke_model.call_args
-    request_body = json.loads(call_args[1]["body"])
-
-    assert len(request_body["messages"]) == 3
-    assert request_body["messages"][0] == {
-      "role": "user",
-      "content": "First message",
-    }
-    assert request_body["messages"][1] == {
-      "role": "assistant",
-      "content": "Response",
-    }
-    assert request_body["messages"][2] == {
-      "role": "user",
-      "content": "Follow up",
-    }
-    assert request_body["max_tokens"] == 1000
-    assert request_body["temperature"] == 0.3
-    assert request_body["anthropic_version"] == "bedrock-2023-05-31"
-
-  @pytest.mark.unit
-  async def test_create_message_with_model_override(self):
-    """Test message creation with explicit model override."""
-    client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.operators.ai_client import AIMessage
-
-    response_body = {
-      "content": [{"text": "OK"}],
-      "usage": {"input_tokens": 50, "output_tokens": 10},
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
-    messages = [AIMessage(role="user", content="Test")]
-
     result = await client.create_message(
-      messages=messages,
-      model=BedrockModel.SONNET_4.value,
+      messages=[AIMessage(role="user", content="hi")],
+      system="s" * 10,
+      model=ModelProfile.ECONOMY,
+      temperature=0.3,
+      cache_conversation=True,
+    )
+    request = mock_bedrock.converse.call_args.kwargs
+    assert request["modelId"] == "us.openai.gpt-5.6-luna"
+    assert request["system"] == [{"text": "s" * 10}]
+    assert request["messages"][-1]["content"] == [{"text": "hi"}]
+    assert request["inferenceConfig"] == {"maxTokens": 4000}
+    assert "additionalModelRequestFields" not in request
+    assert result.cache_read_input_tokens == 1815
+    assert result.cache_creation_input_tokens == 64
+
+  @pytest.mark.unit
+  async def test_reasoning_blocks_are_kept_for_replay_but_not_in_content(self):
+    """Reasoning models return a reasoningContent block; the loop replays it
+    verbatim (the signature is checked), but it is not the answer text."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    reasoning = {"reasoningContent": {"reasoningText": {"text": "…", "signature": "x"}}}
+    mock_bedrock.converse.return_value = _converse_response([reasoning, {"text": "42"}])
+    result = await client.create_message(
+      messages=[AIMessage(role="user", content="hi")]
+    )
+    assert result.content == "42"
+    assert result.content_blocks == [reasoning, {"text": "42"}]
+
+  @pytest.mark.unit
+  async def test_profile_and_wire_id_resolve(self):
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    mock_bedrock.converse.return_value = _text_response("hi")
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")], model="quality"
+    )
+    assert mock_bedrock.converse.call_args.kwargs["modelId"] == (
+      "us.anthropic.claude-opus-5"
+    )
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model="us.anthropic.claude-sonnet-4-20250514-v1:0",
+    )
+    assert mock_bedrock.converse.call_args.kwargs["modelId"] == (
+      "us.anthropic.claude-sonnet-4-20250514-v1:0"
     )
 
-    call_args = mock_bedrock.invoke_model.call_args
-    expected_model_id = OperatorConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4)
-    assert call_args[1]["modelId"] == expected_model_id
-    assert result.model == expected_model_id
-
   @pytest.mark.unit
-  async def test_create_message_bedrock_api_error(self):
-    """Test that Bedrock API errors propagate correctly."""
+  async def test_unknown_model_raises_before_any_call(self):
+    """An unregistered name is a configuration error; it never silently runs
+    the default (the old client warned and fell back)."""
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    mock_bedrock.invoke_model.side_effect = Exception("Bedrock throttling error")
-
-    messages = [AIMessage(role="user", content="Test")]
-
-    with pytest.raises(Exception, match="Bedrock throttling error"):
-      await client.create_message(messages=messages)
+    with pytest.raises(ValueError, match="Unknown model or profile"):
+      await client.create_message(
+        messages=[AIMessage(role="user", content="hi")], model="not-a-real-model"
+      )
+    mock_bedrock.converse.assert_not_called()
 
   @pytest.mark.unit
-  async def test_create_message_stop_reason_none(self):
-    """Test response when stop_reason is not in the response body."""
+  async def test_operator_type_override_is_honored(self, monkeypatch):
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"text": "Partial response"}],
-      "usage": {"input_tokens": 80, "output_tokens": 40},
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+    monkeypatch.setitem(
+      OperatorConfig.OPERATOR_MODEL_OVERRIDES, "financial", ModelProfile.ECONOMY
+    )
+    mock_bedrock.converse.return_value = _text_response("hi")
+    result = await client.create_message(
+      messages=[AIMessage(role="user", content="hi")], operator_type="financial"
+    )
+    assert result.model == "us.openai.gpt-5.6-luna"
 
-    messages = [AIMessage(role="user", content="Test")]
+  @pytest.mark.unit
+  async def test_max_output_tokens_clamps_the_request(self, monkeypatch):
+    """A model that caps output below what the execution profile asks for
+    is clamped at request build rather than truncated silently."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
 
-    result = await client.create_message(messages=messages)
+    spec = OperatorConfig.MODEL_REGISTRY[BedrockModel.SONNET_4_6]
+    monkeypatch.setitem(
+      OperatorConfig.MODEL_REGISTRY,
+      BedrockModel.SONNET_4_6,
+      replace(spec, max_output_tokens=1000),
+    )
+    mock_bedrock.converse.return_value = _text_response("hi")
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model=BedrockModel.SONNET_4_6,
+      max_tokens=8000,
+    )
+    assert mock_bedrock.converse.call_args.kwargs["inferenceConfig"]["maxTokens"] == (
+      1000
+    )
 
+  @pytest.mark.unit
+  async def test_stop_reason_none_when_absent(self):
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    mock_bedrock.converse.return_value = _text_response("partial", stop_reason=None)
+    result = await client.create_message(
+      messages=[AIMessage(role="user", content="hi")]
+    )
     assert result.stop_reason is None
 
+
+class TestAIClientErrors:
+  """Provider refusals surface as a typed error; everything else propagates."""
+
   @pytest.mark.unit
-  async def test_create_message_with_agent_type(self):
-    """Test message creation passes operator_type for model resolution."""
+  async def test_access_denied_becomes_a_provider_error(self):
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.operators.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage, AIProviderError
 
-    response_body = {
-      "content": [{"text": "OK"}],
-      "usage": {"input_tokens": 50, "output_tokens": 10},
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
-
-    messages = [AIMessage(role="user", content="Test")]
-
-    result = await client.create_message(
-      messages=messages,
-      operator_type="financial",
+    mock_bedrock.converse.side_effect = ClientError(
+      {
+        "Error": {
+          "Code": "AccessDeniedException",
+          "Message": "You don't have access to the model",
+        }
+      },
+      "Converse",
     )
-
-    expected_model_id = OperatorConfig.get_bedrock_model_id(operator_type="financial")
-    assert result.model == expected_model_id
+    with pytest.raises(AIProviderError) as exc:
+      await client.create_message(messages=[AIMessage(role="user", content="hi")])
+    assert "us.anthropic.claude-sonnet-5" in str(exc.value)
+    assert "AccessDeniedException" in str(exc.value)
+    assert "You don't have access" in str(exc.value)
 
   @pytest.mark.unit
-  async def test_create_message_default_parameters(self):
-    """Test create_message uses correct default parameters."""
+  async def test_validation_error_becomes_a_provider_error(self):
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage, AIProviderError
+
+    mock_bedrock.converse.side_effect = ClientError(
+      {"Error": {"Code": "ValidationException", "Message": "bad request"}},
+      "Converse",
+    )
+    with pytest.raises(AIProviderError):
+      await client.create_message(messages=[AIMessage(role="user", content="hi")])
+
+  @pytest.mark.unit
+  async def test_throttling_propagates_as_the_client_error(self):
+    """Retryable service errors keep their botocore type so callers can
+    distinguish them from a refused call."""
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    response_body = {
-      "content": [{"text": "OK"}],
-      "usage": {"input_tokens": 10, "output_tokens": 5},
-    }
-    mock_body = MagicMock()
-    mock_body.read.return_value = json.dumps(response_body).encode()
-    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+    mock_bedrock.converse.side_effect = ClientError(
+      {"Error": {"Code": "ThrottlingException", "Message": "slow down"}},
+      "Converse",
+    )
+    with pytest.raises(ClientError, match="ThrottlingException"):
+      await client.create_message(messages=[AIMessage(role="user", content="hi")])
 
-    messages = [AIMessage(role="user", content="Test")]
+  @pytest.mark.unit
+  async def test_unexpected_exceptions_propagate(self):
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
 
-    await client.create_message(messages=messages)
-
-    call_args = mock_bedrock.invoke_model.call_args
-    request_body = json.loads(call_args[1]["body"])
-    # Defaults: max_tokens=4000 on the default model (Sonnet 5), which takes
-    # no sampling params — the family gate sends `thinking: disabled` instead.
-    assert call_args[1]["modelId"] == "us.anthropic.claude-sonnet-5"
-    assert request_body["max_tokens"] == 4000
-    assert "temperature" not in request_body
-    assert request_body["thinking"] == {"type": "disabled"}
+    mock_bedrock.converse.side_effect = Exception("Bedrock throttling error")
+    with pytest.raises(Exception, match="Bedrock throttling error"):
+      await client.create_message(messages=[AIMessage(role="user", content="hi")])
 
 
 class TestAIClientBedrockEndpoint:
@@ -907,33 +771,26 @@ class TestAIClientBedrockEndpoint:
 class TestAIClientOffloadsBedrock:
   """The synchronous botocore call must run off the event loop.
 
-  `_bedrock_create_message` is `async def` and a model call can take minutes;
-  running `invoke_model` inline held the single-worker loop — and every tenant
-  on the task — for the whole call. It now goes through `asyncio.to_thread`.
+  A model call can take minutes; running it inline held the single-worker
+  loop — and every tenant on the task — for the whole call. It goes through
+  `asyncio.to_thread`.
   """
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_invoke_model_runs_in_a_thread(self):
+  async def test_converse_runs_in_a_thread(self):
     from robosystems.operations.operators.ai_client import AIMessage
 
     client, mock_bedrock = _make_ai_client()
-
-    body = MagicMock()
-    body.read.return_value = json.dumps(
-      {
-        "content": [{"type": "text", "text": "hi"}],
-        "usage": {"input_tokens": 3, "output_tokens": 1},
-        "stop_reason": "end_turn",
-      }
+    mock_bedrock.converse.return_value = _text_response(
+      "hi", usage={"inputTokens": 3, "outputTokens": 1}
     )
-    mock_bedrock.invoke_model.return_value = {"body": body}
 
     with patch(f"{AI_CLIENT_MODULE}.asyncio.to_thread") as mock_to_thread:
 
       async def _fake_to_thread(fn, *args, **kwargs):
         # Prove the blocking call is the one being offloaded, and run it.
-        assert fn == client._invoke_model_sync
+        assert fn == client._converse_sync
         return fn(*args, **kwargs)
 
       mock_to_thread.side_effect = _fake_to_thread

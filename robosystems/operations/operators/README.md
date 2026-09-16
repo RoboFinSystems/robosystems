@@ -73,7 +73,7 @@ Import the module in `implementations/__init__.py` so the decorator runs.
 | `base.py` | `Operator` ABC, `OperatorSpec`, `OperatorResult`, `OperatorCapability`, `OperatorMode`, `GraphScope` + `matches_graph_scope`, `enforce_operator_write_role`, and the legacy `BaseOperator` classes |
 | `operator_context.py` | `OperatorContext` dataclass; `ToolAccess` / `ProgressReporter` protocols |
 | `operator_registry.py` | `@register_operator`, `get_operator()`, `list_operators()`, adapter loading |
-| `ai_client.py` / `tracked_ai.py` | Bedrock wrapper, and the tracking wrapper around it |
+| `ai_client.py` / `tracked_ai.py` | Bedrock Converse client (one request shape for every model in the registry), and the tracking wrapper around it |
 | `credit_consumer.py` | `SessionCreditConsumer` (API), `FactoryCreditConsumer` (worker) |
 | `credit_preflight.py` | Pre-flight balance check before any Bedrock spend |
 | `tool_access.py` | `HttpToolAccess` (MCP over HTTP), `DirectToolAccess` (in-process) |
@@ -110,4 +110,6 @@ The envelope (`content`, `operator_used`, `mode_used`, `metadata`, `tokens_used`
 
 **Services are protocols.** `ToolAccess`, `ProgressReporter`, and `CreditConsumer` are protocols, so tests inject no-op implementations while API and worker contexts inject the real ones. The operator code doesn't change between them.
 
-**The tool loop is model-driven.** `tool_loop.py` lets the model choose and call read-only MCP tools, feeds tool errors back as `is_error` tool results so it can self-correct, and stops at a bounded iteration count.
+**The tool loop is model-driven.** `tool_loop.py` lets the model choose and call read-only MCP tools, feeds tool errors back as error-status tool results so it can self-correct, and stops at a bounded iteration count. The transcript is Converse content blocks, so the same loop drives any registered model.
+
+**Which model runs is a registry row.** `config/operators.py` holds `MODEL_REGISTRY` (wire id, pricing key, caching, sampling-parameter and output-cap behaviour per model) and `PROFILE_MODELS` (`economy` / `balanced` / `quality` → model). Resolution is most-specific-wins: an explicit per-call model or profile, then `OPERATOR_MODEL_OVERRIDES` for the operator class, then the platform default profile. An unregistered model raises at resolution and at billing — never a silent fallback. A provider refusal (entitlement, credentials, request shape) raises `AIProviderError`, which operators must surface rather than count as an empty result.

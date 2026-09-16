@@ -1,10 +1,11 @@
 """Bounded, model-driven tool-use loop for operators.
 
 The model chooses which read-only MCP tools to call; every tool error comes
-back as an ``is_error`` tool_result so it can correct itself and retry. The
+back as an error-status tool result so it can correct itself and retry. The
 loop is the shared harness behind `AnalystOperator` and any other read/analysis
-operator — the Claude-via-MCP tool loop run in-process on Bedrock, with
-per-call credit tracking supplied by `TrackedAIClient`.
+operator — the model-via-MCP tool loop run in-process on Bedrock Converse,
+with per-call credit tracking supplied by `TrackedAIClient`. The transcript
+is Converse content blocks throughout, so it drives any model in the registry.
 """
 
 from __future__ import annotations
@@ -14,7 +15,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from robosystems.logger import logger
-from robosystems.operations.operators.ai_client import AIMessage
+from robosystems.operations.operators.ai_client import (
+  AIMessage,
+  text_block,
+  tool_result_block,
+)
 
 if TYPE_CHECKING:
   from robosystems.operations.operators.operator_context import OperatorContext
@@ -53,10 +58,9 @@ _ANSWER_NOW_CREDITS = (
   "tools."
 )
 
-# The nudge keeps the tool definitions (the transcript carries tool_use
-# blocks, which the API requires tools for) but forbids further calls, so
-# the final turn is guaranteed to be text rather than a dropped tool_use.
-_NO_MORE_TOOLS: dict[str, Any] = {"type": "none"}
+_NO_ANSWER = (
+  "I gathered results but couldn't compose a final answer within the step limit."
+)
 
 
 @dataclass
@@ -216,17 +220,15 @@ async def run_tool_loop(
         error_retries=error_retries,
       )
 
-    # Replay the assistant turn (text + tool_use blocks) verbatim.
+    # Replay the assistant turn verbatim — text, tool-use, and any reasoning
+    # block the model returned (a reasoning signature is checked on replay).
     messages.append(AIMessage(role="assistant", content=response.content_blocks))
 
     tool_results: list[dict[str, Any]] = []
     turn_succeeded = False
-    for block in response.content_blocks:
-      if block.get("type") != "tool_use":
-        continue
-      name = block.get("name", "")
-      tool_use_id = block.get("id", "")
-      args = block.get("input") or {}
+    for call in response.tool_calls:
+      name = call.name
+      args = call.input
       tools_called.append(name)
 
       is_error = False
@@ -237,14 +239,11 @@ async def run_tool_loop(
           ctx.graph_id,
         )
         tool_results.append(
-          {
-            "type": "tool_result",
-            "tool_use_id": tool_use_id,
-            "content": _serialize_tool_result(
-              {"error": f"Tool '{name}' is not available"}
-            ),
-            "is_error": True,
-          }
+          tool_result_block(
+            call.id,
+            _serialize_tool_result({"error": f"Tool '{name}' is not available"}),
+            is_error=True,
+          )
         )
         continue
       try:
@@ -268,12 +267,7 @@ async def run_tool_loop(
       if not is_error:
         turn_succeeded = True
       tool_results.append(
-        {
-          "type": "tool_result",
-          "tool_use_id": tool_use_id,
-          "content": _serialize_tool_result(result, name),
-          "is_error": is_error,
-        }
+        tool_result_block(call.id, _serialize_tool_result(result, name), is_error)
       )
 
     messages.append(AIMessage(role="user", content=tool_results))
@@ -298,18 +292,18 @@ async def run_tool_loop(
     )
 
   # Nudge for a final answer, appending the nudge to the trailing user turn
-  # (a second consecutive user message would be rejected). Keep `tools`
-  # defined so the tool_use/tool_result transcript stays valid, but disable
-  # tool choice so the answer can't come back as a tool_use block that nobody
-  # would execute.
+  # (a second consecutive user message would be rejected). `tools` stays
+  # defined — Converse rejects a transcript carrying tool blocks without a
+  # toolConfig — and it has no way to forbid a further call, so the nudge
+  # does that in words and a stray tool call below is treated as terminal:
+  # nobody would execute it.
   answer_now = _ANSWER_NOW_CREDITS if hit_ceiling else _ANSWER_NOW
   final_messages = list(messages)
   last = final_messages[-1]
   if last.role == "user":
     if isinstance(last.content, list):
       final_messages[-1] = AIMessage(
-        role="user",
-        content=[*last.content, {"type": "text", "text": answer_now}],
+        role="user", content=[*last.content, text_block(answer_now)]
       )
     else:
       final_messages[-1] = AIMessage(
@@ -326,12 +320,16 @@ async def run_tool_loop(
     operator_type=operator_type,
     operation_description=operation_description,
     tools=tools,
-    tool_choice=_NO_MORE_TOOLS if tools else None,
     cache_conversation=True,
   )
+  if final.tool_calls and not final.content:
+    logger.info(
+      "run_tool_loop: model requested %d more tool(s) on the wrap-up turn; "
+      "answering from gathered results",
+      len(final.tool_calls),
+    )
   return ToolLoopResult(
-    text=final.content
-    or "I gathered results but couldn't compose a final answer within the step limit.",
+    text=final.content or _NO_ANSWER,
     rows=last_rows,
     cypher=last_cypher,
     tools_called=tools_called,

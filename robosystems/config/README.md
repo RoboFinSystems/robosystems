@@ -59,7 +59,7 @@ Tiers are named after the instance the customer gets, not a marketing label. The
 | `credits.py` | Credit costs and monthly allocations |
 | `rate_limits.py` | Endpoint categories and per-tier burst limits |
 | `graph_tier.py` | Tier config read from `.github/configs/graph.yml` |
-| `operators.py` | AI Operator models (Bedrock) and execution profiles |
+| `operators.py` | AI Operator model registry and profiles (Bedrock Converse), execution profiles |
 | `query_queue.py` | Query queue and admission control |
 | `shared_repositories.py` | Shared repository registry, fed by adapter manifests |
 | `valkey_registry.py` | Valkey database allocation and client factories |
@@ -137,16 +137,18 @@ AIBillingConfig.TOKEN_PRICING["anthropic_claude_4_sonnet"]
 
 ## Operators
 
-`operators.py` configures the Bedrock Claude models and execution profiles for the AI Operator system.
+`operators.py` configures the model registry, the model profiles, and the execution profiles for the AI Operator system. Every model runs through Bedrock's Converse API, so adding or swapping a model is a registry row here, not a code change in the client.
 
-`BedrockModel` members carry a short identifier; `OperatorConfig.BEDROCK_MODELS` maps each to a regional inference profile id (`us.anthropic.*`) so no marketplace subscription is needed.
+`MODEL_REGISTRY` maps each `BedrockModel` to a `ModelSpec`: the regional inference-profile id on the wire (`us.*`), the rate-card key it bills under (`AIBillingConfig.TOKEN_PRICING`), and the behaviour the client needs to know — whether it takes explicit cache points, whether it accepts sampling parameters, any model-specific request fields, an output cap. `PROFILE_MODELS` names which row `economy`, `balanced`, and `quality` reach; customer surfaces bind to those names, never to a model id.
 
 ```python
-from robosystems.config import BedrockModel, OperatorConfig, OperatorExecutionMode
+from robosystems.config import BedrockModel, ModelProfile, OperatorConfig, OperatorExecutionMode
 
-OperatorConfig.get_bedrock_model_id()                          # default (Sonnet 4.6)
-OperatorConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4_5)
-OperatorConfig.get_bedrock_model_id(operator_type="analyst")   # honors OPERATOR_MODEL_OVERRIDES
+OperatorConfig.resolve_model()                                 # default profile (balanced → Sonnet 5)
+OperatorConfig.resolve_model(ModelProfile.ECONOMY)             # a profile
+OperatorConfig.resolve_model(BedrockModel.OPUS_5)              # a pinned model
+OperatorConfig.resolve_model(operator_type="analyst")          # honors OPERATOR_MODEL_OVERRIDES
+OperatorConfig.pricing_key_for("us.anthropic.claude-sonnet-5") # what the meter bills under
 
 profile = OperatorConfig.get_execution_profile(OperatorExecutionMode.STANDARD)
 # max_tool_calls=5, timeout_seconds=60, max_input_tokens=100_000
@@ -154,7 +156,9 @@ profile = OperatorConfig.get_execution_profile(OperatorExecutionMode.STANDARD)
 OperatorConfig.validate_configuration()  # {"valid": bool, "issues": [...], "summary": {...}}
 ```
 
-Execution modes are `QUICK`, `STANDARD`, `EXTENDED`, and `STREAMING`; each has an `ExecutionProfile` bounding tool calls, tokens, and timeout. Change the platform default in `DEFAULT_MODEL_CONFIG`; pin a single operator to a different model by adding an entry to `OPERATOR_MODEL_OVERRIDES`.
+Resolution is most-specific-wins: an explicit per-call model or profile, then the operator class's entry in `OPERATOR_MODEL_OVERRIDES`, then `DEFAULT_MODEL_CONFIG.default_profile`. An unregistered model or profile raises — the meter must never price an unknown model at some other model's rate. `validate_configuration()` checks every registry row against the rate card at startup.
+
+Execution modes are `QUICK`, `STANDARD`, `EXTENDED`, and `STREAMING`; each has an `ExecutionProfile` bounding tool calls, tokens, and timeout. Re-point a profile in `PROFILE_MODELS` to move every caller of that profile; pin a single operator class by adding an entry to `OPERATOR_MODEL_OVERRIDES`.
 
 ## Startup validation
 

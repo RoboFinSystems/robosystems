@@ -1,24 +1,157 @@
 """Operator system configuration tests."""
 
+import pytest
+
+from robosystems.config.billing.ai import AIBillingConfig
 from robosystems.config.operators import (
   BedrockModel,
   ExecutionProfile,
+  ModelProfile,
+  ModelSpec,
   OperatorConfig,
   OperatorExecutionMode,
 )
 
 
-class TestBedrockModel:
-  """Tests for BedrockModel enum."""
+class TestModelRegistry:
+  """Every model the platform can run is a registry row, and every row is
+  priced. The registry is what the client and the meter both read."""
 
-  def test_all_models_have_bedrock_ids(self):
+  def test_every_model_has_a_spec(self):
     for model in BedrockModel:
-      assert model in OperatorConfig.BEDROCK_MODELS
+      assert model in OperatorConfig.MODEL_REGISTRY
+      assert isinstance(OperatorConfig.MODEL_REGISTRY[model], ModelSpec)
 
-  def test_bedrock_ids_are_strings(self):
-    for model_id in OperatorConfig.BEDROCK_MODELS.values():
-      assert isinstance(model_id, str)
-      assert "anthropic" in model_id
+  def test_every_spec_bills_under_a_rate_card_key(self):
+    for model, spec in OperatorConfig.MODEL_REGISTRY.items():
+      assert spec.pricing_key in AIBillingConfig.TOKEN_PRICING, model
+
+  def test_every_profile_maps_to_a_registered_model(self):
+    for profile in ModelProfile:
+      assert OperatorConfig.PROFILE_MODELS[profile] in OperatorConfig.MODEL_REGISTRY
+
+  def test_wire_ids_are_regional_inference_profiles(self):
+    """`us.*` keeps inference in the US; `global.*` is a later margin lever."""
+    for spec in OperatorConfig.MODEL_REGISTRY.values():
+      assert spec.model_id.startswith("us."), spec.model_id
+
+  def test_claude_5_family_disables_thinking_and_takes_no_sampling_params(self):
+    for model in (BedrockModel.SONNET_5, BedrockModel.OPUS_5):
+      spec = OperatorConfig.MODEL_REGISTRY[model]
+      assert spec.accepts_sampling_params is False
+      assert spec.additional_request_fields == {"thinking": {"type": "disabled"}}
+      assert spec.cache_points is True
+
+  def test_claude_4_family_accepts_sampling_params(self):
+    for model in (
+      BedrockModel.SONNET_4_6,
+      BedrockModel.SONNET_4_5,
+      BedrockModel.SONNET_4,
+    ):
+      spec = OperatorConfig.MODEL_REGISTRY[model]
+      assert spec.accepts_sampling_params is True
+      assert spec.additional_request_fields == {}
+
+  def test_luna_takes_no_cache_points_and_no_sampling_params(self):
+    """Verified over Converse 2026-09-15: explicit cachePoint blocks and
+    `temperature` are both rejected; implicit caching reports through usage."""
+    spec = OperatorConfig.MODEL_REGISTRY[BedrockModel.GPT_5_6_LUNA]
+    assert spec.model_id == "us.openai.gpt-5.6-luna"
+    assert spec.cache_points is False
+    assert spec.accepts_sampling_params is False
+    assert spec.additional_request_fields == {}
+    assert spec.pricing_key == "openai_gpt_5_6_luna"
+
+
+class TestProfiles:
+  def test_profile_values(self):
+    assert {p.value for p in ModelProfile} == {"economy", "balanced", "quality"}
+
+  def test_balanced_is_the_default_and_runs_sonnet_5(self):
+    assert OperatorConfig.DEFAULT_MODEL_CONFIG.default_profile == ModelProfile.BALANCED
+    assert OperatorConfig.PROFILE_MODELS[ModelProfile.BALANCED] == BedrockModel.SONNET_5
+    assert OperatorConfig.get_bedrock_model_id() == "us.anthropic.claude-sonnet-5"
+
+  def test_quality_and_economy_targets(self):
+    assert OperatorConfig.PROFILE_MODELS[ModelProfile.QUALITY] == BedrockModel.OPUS_5
+    assert (
+      OperatorConfig.PROFILE_MODELS[ModelProfile.ECONOMY] == BedrockModel.GPT_5_6_LUNA
+    )
+
+
+class TestResolveModel:
+  """Most specific wins: explicit choice → operator override → default."""
+
+  def test_default(self):
+    spec = OperatorConfig.resolve_model()
+    assert spec.model_id == "us.anthropic.claude-sonnet-5"
+
+  def test_explicit_enum(self):
+    assert (
+      OperatorConfig.resolve_model(BedrockModel.SONNET_4).model_id
+      == "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    )
+
+  def test_explicit_short_name_and_wire_id(self):
+    assert OperatorConfig.resolve_model("claude-opus-5").model_id == (
+      "us.anthropic.claude-opus-5"
+    )
+    assert OperatorConfig.resolve_model("us.anthropic.claude-opus-5").model_id == (
+      "us.anthropic.claude-opus-5"
+    )
+
+  def test_explicit_profile_by_enum_and_by_name(self):
+    assert OperatorConfig.resolve_model(ModelProfile.ECONOMY).model_id == (
+      "us.openai.gpt-5.6-luna"
+    )
+    assert OperatorConfig.resolve_model("quality").model_id == (
+      "us.anthropic.claude-opus-5"
+    )
+
+  def test_unknown_choice_raises(self):
+    """An unregistered model is a configuration error, not something to
+    guess a default for."""
+    with pytest.raises(ValueError, match="Unknown model or profile"):
+      OperatorConfig.resolve_model("not-a-real-model")
+
+  def test_operator_override_takes_precedence_over_default(self, monkeypatch):
+    monkeypatch.setitem(
+      OperatorConfig.OPERATOR_MODEL_OVERRIDES, "test_agent", ModelProfile.ECONOMY
+    )
+    assert OperatorConfig.get_bedrock_model_id(operator_type="test_agent") == (
+      "us.openai.gpt-5.6-luna"
+    )
+
+  def test_explicit_choice_beats_operator_override(self, monkeypatch):
+    monkeypatch.setitem(
+      OperatorConfig.OPERATOR_MODEL_OVERRIDES, "test_agent", ModelProfile.ECONOMY
+    )
+    assert OperatorConfig.get_bedrock_model_id(
+      model=BedrockModel.SONNET_4_6, operator_type="test_agent"
+    ) == ("us.anthropic.claude-sonnet-4-6")
+
+  def test_unknown_operator_type_falls_through_to_default(self):
+    assert OperatorConfig.get_bedrock_model_id(operator_type="analyst") == (
+      "us.anthropic.claude-sonnet-5"
+    )
+
+
+class TestPricingKeyFor:
+  def test_wire_id_and_short_name(self):
+    assert OperatorConfig.pricing_key_for("us.anthropic.claude-sonnet-5") == (
+      "anthropic_claude_5_sonnet"
+    )
+    assert OperatorConfig.pricing_key_for("claude-sonnet-4-6") == (
+      "anthropic_claude_4_sonnet"
+    )
+    assert OperatorConfig.pricing_key_for("us.openai.gpt-5.6-luna") == (
+      "openai_gpt_5_6_luna"
+    )
+
+  def test_unregistered_model_raises(self):
+    """The meter must never price an unknown model at another model's rate."""
+    with pytest.raises(ValueError, match="Unknown model or profile"):
+      OperatorConfig.pricing_key_for("claude-4-sonnet")
 
 
 class TestOperatorExecutionMode:
@@ -33,34 +166,6 @@ class TestOperatorExecutionMode:
     assert OperatorExecutionMode.STANDARD.value == "standard"
     assert OperatorExecutionMode.EXTENDED.value == "extended"
     assert OperatorExecutionMode.STREAMING.value == "streaming"
-
-
-class TestGetBedrockModelId:
-  """Tests for OperatorConfig.get_bedrock_model_id."""
-
-  def test_default_model(self):
-    model_id = OperatorConfig.get_bedrock_model_id()
-    assert isinstance(model_id, str)
-    assert "anthropic" in model_id
-
-  def test_specific_model(self):
-    model_id = OperatorConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4)
-    assert "sonnet-4" in model_id
-
-  def test_agent_type_override(self):
-    # Currently empty overrides, so it falls through to default
-    model_id = OperatorConfig.get_bedrock_model_id(operator_type="analyst")
-    assert isinstance(model_id, str)
-
-  def test_agent_override_takes_precedence(self):
-    original = OperatorConfig.OPERATOR_MODEL_OVERRIDES.copy()
-    try:
-      OperatorConfig.OPERATOR_MODEL_OVERRIDES["test_agent"] = BedrockModel.SONNET_4
-      model_id = OperatorConfig.get_bedrock_model_id(operator_type="test_agent")
-      expected = OperatorConfig.BEDROCK_MODELS[BedrockModel.SONNET_4]
-      assert model_id == expected
-    finally:
-      OperatorConfig.OPERATOR_MODEL_OVERRIDES = original
 
 
 class TestGetExecutionProfile:
@@ -134,10 +239,31 @@ class TestValidateConfiguration:
   def test_summary_has_counts(self):
     result = OperatorConfig.validate_configuration()
     summary = result["summary"]
-    assert summary["models"] == len(OperatorConfig.BEDROCK_MODELS)
+    assert summary["models"] == len(OperatorConfig.MODEL_REGISTRY)
+    assert summary["profiles"] == len(ModelProfile)
     assert summary["execution_profiles"] == len(OperatorConfig.EXECUTION_PROFILES)
     assert summary["operator_capabilities"] == len(OperatorConfig.OPERATOR_CAPABILITIES)
-    assert "token_cost_models" not in summary
+
+  def test_unpriced_model_is_reported(self, monkeypatch):
+    """A registry row without a rate-card entry is the misconfiguration the
+    meter's fail-loud exists for; startup validation must name it."""
+    from dataclasses import replace
+
+    spec = OperatorConfig.MODEL_REGISTRY[BedrockModel.SONNET_4]
+    monkeypatch.setitem(
+      OperatorConfig.MODEL_REGISTRY,
+      BedrockModel.SONNET_4,
+      replace(spec, pricing_key="nonexistent_key"),
+    )
+    result = OperatorConfig.validate_configuration()
+    assert result["valid"] is False
+    assert any("nonexistent_key" in issue for issue in result["issues"])
+
+  def test_invalid_override_is_reported(self, monkeypatch):
+    monkeypatch.setitem(OperatorConfig.OPERATOR_MODEL_OVERRIDES, "x", "no-such-model")
+    result = OperatorConfig.validate_configuration()
+    assert result["valid"] is False
+    assert any("invalid model override" in issue for issue in result["issues"])
 
 
 class TestGetAllConfig:
@@ -153,42 +279,15 @@ class TestGetAllConfig:
   def test_models_section(self):
     config = OperatorConfig.get_all_config()
     models = config["models"]
-    assert "default" in models
+    assert models["default"] == "balanced"
+    assert models["default_model_id"] == "us.anthropic.claude-sonnet-5"
     assert "fallback" in models
     assert "region" in models
-    assert "available_models" in models
+    assert set(models["available_models"]) == {m.value for m in BedrockModel}
+    assert models["profiles"]["economy"] == "us.openai.gpt-5.6-luna"
 
   def test_execution_profiles_section(self):
     config = OperatorConfig.get_all_config()
     profiles = config["execution_profiles"]
     for mode in OperatorExecutionMode:
       assert mode.value in profiles
-
-
-class TestModelFamilyRequestShaping:
-  """Sampling-param support is keyed off the resolved Bedrock model id so a
-  model swap is a data change in BEDROCK_MODELS, not a code change in
-  ai_client."""
-
-  def test_claude_4_family_accepts_sampling_params(self):
-    from robosystems.config.operators import model_accepts_sampling_params
-
-    assert model_accepts_sampling_params("us.anthropic.claude-sonnet-4-6")
-    assert model_accepts_sampling_params("us.anthropic.claude-sonnet-4-5-20250929-v1:0")
-
-  def test_claude_5_family_does_not(self):
-    from robosystems.config.operators import model_accepts_sampling_params
-
-    assert not model_accepts_sampling_params("us.anthropic.claude-sonnet-5")
-    assert not model_accepts_sampling_params("global.anthropic.claude-opus-5")
-
-  def test_sonnet_5_is_registered_but_not_default(self):
-    from robosystems.config.operators import BedrockModel, OperatorConfig
-
-    assert (
-      OperatorConfig.BEDROCK_MODELS[BedrockModel.SONNET_5]
-      == "us.anthropic.claude-sonnet-5"
-    )
-    assert OperatorConfig.DEFAULT_MODEL_CONFIG.default_model == BedrockModel.SONNET_5
-    assert OperatorConfig.DEFAULT_MODEL_CONFIG.fallback_model == BedrockModel.SONNET_4_6
-    assert OperatorConfig.get_bedrock_model_id() == "us.anthropic.claude-sonnet-5"

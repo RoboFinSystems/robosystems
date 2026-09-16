@@ -25,7 +25,7 @@ import logging
 import re
 from collections import defaultdict
 
-from robosystems.operations.operators.ai_client import AIMessage
+from robosystems.operations.operators.ai_client import AIMessage, AIProviderError
 from robosystems.operations.operators.base import (
   ExecutionProfile,
   GraphScope,
@@ -387,6 +387,11 @@ class MappingOperator(Operator):
             else:
               flagged += 1
 
+        except AIProviderError:
+          # Provider-down is not "the model mapped nothing": counting it as
+          # a skipped batch reports a successful run at 0% coverage. Let it
+          # fail the operation with the provider's message.
+          raise
         except Exception as e:
           logger.warning(f"Batch mapping failed for {cls}: {e}")
           skipped += len(batch)
