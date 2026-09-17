@@ -1,6 +1,6 @@
 # Product docs
 
-How to use RoboSystems, RoboLedger and RoboInvestor through Claude, ChatGPT or any MCP client, and what each needs to do the job well. Written for the person using the product and for the model working for them. How the platform is built, run and extended lives in the [wiki](https://github.com/RoboFinSystems/robosystems/wiki); the API reference is generated from the OpenAPI spec.
+How to use RoboSystems, RoboLedger and RoboInvestor through Claude, ChatGPT or any MCP client, and what each needs to do the job well. Written for the person using the product and for the model working for them. How the platform is built, run and extended lives in the [technical documentation](https://robosystems.ai/docs/technical); the API reference is generated from the OpenAPI spec.
 
 One folder per site, one file per page:
 

@@ -4,7 +4,7 @@ Thanks for your interest in contributing. This repository is the API and backend
 
 - **[Discussions](https://github.com/orgs/RoboFinSystems/discussions)** — questions, ideas, and general conversation
 - **[Project Board](https://github.com/orgs/RoboFinSystems/projects/3)** — work tracked across all RoboSystems repositories
-- **[Wiki](https://github.com/RoboFinSystems/robosystems/wiki)** — architecture docs and guides
+- **[Documentation](https://robosystems.ai/docs/technical)** — architecture docs and guides
 
 ## Table of Contents
 

@@ -623,7 +623,7 @@ When forking to a different AWS account:
    - `internal` (default): Access via SSM tunnel, JWT uses localhost
    - `public`: Internet-facing with custom domain and HTTPS
 
-See the [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) for complete fork deployment instructions.
+See the [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide) for complete fork deployment instructions.
 
 ---
 
@@ -641,7 +641,7 @@ See the [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Boo
 
 ## Related Documentation
 
-- [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) - Complete deployment walkthrough
+- [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide) - Complete deployment walkthrough
 - [CloudFormation Templates](/cloudformation/README.md) - Infrastructure templates
 - [Configuration Module](/robosystems/config/README.md) - Application configuration
 - [Graph Config](/.github/configs/graph.yml) - Graph database tier configurations

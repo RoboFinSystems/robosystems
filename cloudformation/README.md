@@ -666,14 +666,14 @@ When forking RoboSystems to a different AWS account:
 4. **Secrets**: Create new secrets in Secrets Manager (`just setup-aws`)
 5. **Domain Names**: Optional - works without custom domains via `ApiAccessMode=internal` and the SSM tunnel
 
-See the [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) for complete fork deployment instructions.
+See the [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide) for complete fork deployment instructions.
 
 ---
 
 ## Related Documentation
 
-- [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) - Complete deployment walkthrough
-- [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) - System architecture
+- [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide) - Complete deployment walkthrough
+- [Architecture Overview](https://robosystems.ai/docs/technical/architecture-overview) - System architecture
 - [Setup Scripts](/bin/setup/README.md) - Bootstrap and configuration scripts
 - [Graph Config](/.github/configs/graph.yml) - Graph database tier configurations (authoritative for instance sizing)
 - [Stack Names](/.github/configs/stacks.yml) - CloudFormation stack names per environment
