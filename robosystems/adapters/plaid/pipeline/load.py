@@ -8,16 +8,24 @@ the caller commits.
   ``classified``) is deleted. A posted one is the customer's books: it is
   flagged a reconciling item (``payload_drift`` with ``source_removed`` in the
   stashed payload) and never touched. A transfer pair that loses one leg
-  goes back to a single-leg event for the leg that remains.
+  releases the leg that remains as a single-leg event on its own date;
+  a posted pair is flagged as well, its ``legs`` narrowed to the retracted
+  one so the released leg lives on its own id.
 - **added / modified** — an event already on the graph takes a changed
   amount or date in place while it is unposted (a captured one also takes the
   refreshed hints). A posted one whose amount or date changed becomes a
   reconciling item: the stashed payload carries the entry the line should now
   have, rebuilt from its own classification, so the plan shows the difference
-  rather than a reversal. A new transfer-shaped line whose leg is already
-  waiting as a captured ``external_transfer`` on this connection is merged
-  with it into one ``internal_transfer``. Everything else is captured through
-  the kernel.
+  rather than a reversal. A leg already inside a pair reconciles the pair
+  (``reconcile_pairs``): while the legs still match, the pair takes the
+  change the same way; when they no longer do, the pair dissolves and each
+  leg stands on its own. A new transfer-shaped line whose other side is
+  already on the graph settles against it (``find_waiting_leg``): merged
+  into one ``internal_transfer`` while that side is unposted and either
+  unclassified or classified to this leg's bank account; captured and
+  voided when that side is posted to this leg's bank account, because the
+  movement is booked; captured on its own, naming its counterpart, when that
+  side went somewhere else. Everything else is captured through the kernel.
 - **a replaced Item** — Plaid's ids are Item-scoped, so after a re-Link (a
   dead Item replaced in place, or a reconnect after a disconnect) the same
   bank transactions come back under new ids. A replay re-keys the events the
@@ -27,10 +35,12 @@ the caller commits.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, cast
 
+from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.orm import Session
@@ -49,13 +59,17 @@ from robosystems.adapters.plaid.pipeline.transform import (
   SOURCE,
   TRANSFER_WINDOW_DAYS,
   Leg,
+  bank_event,
   counterparties,
+  days_between,
+  leg_from_transaction,
   transfer_event,
   transform,
   txn_external_id,
   window,
 )
 from robosystems.logger import logger
+from robosystems.models.api.event_block import UpdateEventBlockRequest
 from robosystems.models.extensions import Event
 from robosystems.models.extensions.roboledger.dimension_junctions import (
   event_dimensions,
@@ -91,12 +105,15 @@ SOURCE_STATE_KEYS = frozenset(
     "source_posted_date",
     "source_removed",
     "source_removed_transaction_ids",
+    "source_legs",
+    "pair_dissolved",
     "posting_date",
     "memo",
     "line_items",
     "entries",
   }
 )
+COUNTERPART_STATUSES = ("captured", "classified", "committed", "pending", "fulfilled")
 
 
 @dataclass
@@ -104,6 +121,8 @@ class PlaidLoadReport(LoadReport):
   events_removed: int = 0
   events_rekeyed: int = 0
   transfers_matched: int = 0
+  pairs_dissolved: int = 0
+  legs_voided: int = 0
   reconciling_items: int = 0
 
   def as_counts(self) -> dict[str, Any]:
@@ -112,6 +131,8 @@ class PlaidLoadReport(LoadReport):
       "events_removed": self.events_removed,
       "events_rekeyed": self.events_rekeyed,
       "transfers_matched": self.transfers_matched,
+      "pairs_dissolved": self.pairs_dissolved,
+      "legs_voided": self.legs_voided,
       "reconciling_items": self.reconciling_items,
     }
 
@@ -198,6 +219,22 @@ def load_sync(
       )
     )
 
+  result.events.extend(
+    reconcile_pairs(
+      session,
+      in_pairs,
+      latest,
+      by_account=by_account,
+      account_elements=account_elements,
+      chart=chart,
+      agent_ids=agent_ids,
+      connection_id=connection_id,
+      item_id=item_id,
+      report=report,
+      consumed=consumed,
+    )
+  )
+
   for payload in result.events:
     prior = singles.get(str(payload["external_id"]))
     if prior is not None:
@@ -205,20 +242,20 @@ def load_sync(
         reconcile_existing(prior, payload, report)
       continue
     if payload["metadata"].get("transfer_candidate"):
-      waiting = find_waiting_leg(
+      other = find_waiting_leg(
         session, payload, connection_id=connection_id, consumed=consumed
       )
-      if waiting is not None and _merge_into_pair(
+      if other is not None and settle_with_counterpart(
         session,
-        waiting,
+        other,
         payload,
         graph_id=graph_id,
         connection_id=connection_id,
         item_id=item_id,
         created_by=created_by,
         report=report,
+        consumed=consumed,
       ):
-        consumed.add(str(waiting.id))
         continue
     capture_event(
       session, payload, graph_id=graph_id, created_by=created_by, report=report
@@ -258,13 +295,19 @@ def apply_removed(
   for event in {str(e.id): e for e in pairs.values()}.values():
     legs = [str(leg) for leg in (event.metadata_ or {}).get("legs") or []]
     gone = [leg for leg in legs if leg in removed]
+    survivor = survivor_payload(event, gone)
     if event.status in UNPOSTED_STATUSES:
       to_delete.append(str(event.id))
-      survivor = survivor_payload(event, gone)
       if survivor is not None:
         survivors.append(survivor)
     elif event.status in POSTED_STATUSES:
-      _flag_removed(event, gone)
+      # The pair's entry is reversed by the catch-up; the leg still real at
+      # the bank lives on as its own line, and leaves the pair's legs so a
+      # later sync finds it there and not here.
+      released = [str(survivor["metadata"]["transaction_id"])] if survivor else None
+      _flag_removed(event, gone, released=released)
+      if survivor is not None:
+        survivors.append(survivor)
       report.reconciling_items += 1
 
   if to_delete:
@@ -297,13 +340,15 @@ def survivor_payload(pair: Event, gone: list[str]) -> dict[str, Any] | None:
   side = "from" if outgoing else "to"
   amount = abs(int(pair.amount or 0))
   account_name = metadata.get(f"{side}_account_name")
+  # The leg's own date where the pair kept it; the pair's for older pairs.
+  day = str(metadata.get(f"{side}_date") or _iso(pair.occurred_at)[:10])[:10]
   return {
     "event_type": "external_transfer",
     "event_category": "treasury",
     "event_class": "economic",
     "event_action": "transfer",
     "resource_type": "money",
-    "occurred_at": _iso(pair.occurred_at),
+    "occurred_at": f"{day}T00:00:00Z",
     "source": SOURCE,
     "external_id": txn_external_id(remaining[0]),
     "amount": -amount if outgoing else amount,
@@ -329,16 +374,42 @@ def survivor_payload(pair: Event, gone: list[str]) -> dict[str, Any] | None:
   }
 
 
-def _flag_removed(event: Event, transaction_ids: list[str]) -> None:
+def _flag_removed(
+  event: Event, transaction_ids: list[str], *, released: list[str] | None = None
+) -> None:
   """A posted line the bank retracted: a reconciling item, the books untouched.
 
   The stashed payload carries no entry, so the reconciling-item plan nets the
-  posted entry against nothing — its catch-up is the reversal.
+  posted entry against nothing — its catch-up is the reversal. ``released``
+  names a pair's leg that lives on as its own line: it leaves the pair's
+  ``legs``, in the stashed payload and on the row, so the pair never claims
+  it again.
   """
   accepted = _accepted_payload(event)
   accepted["source_removed"] = True
   accepted["source_removed_transaction_ids"] = transaction_ids
+  if released:
+    _release_legs(event, accepted, released)
   _flag(event, accepted)
+  if released:
+    event.metadata_ = {
+      **(event.metadata_ or {}),
+      "legs": accepted["legs"],
+      "released_legs": accepted["released_legs"],
+    }
+
+
+def _release_legs(event: Event, accepted: dict[str, Any], released: list[str]) -> None:
+  kept = [
+    str(leg)
+    for leg in ((event.metadata_ or {}).get("legs") or [])
+    if str(leg) not in released
+  ]
+  accepted["legs"] = kept
+  accepted["released_legs"] = [
+    *[str(leg) for leg in ((event.metadata_ or {}).get("released_legs") or [])],
+    *released,
+  ]
 
 
 def _flag_changed(event: Event, payload: dict[str, Any]) -> None:
@@ -352,6 +423,18 @@ def _flag_changed(event: Event, payload: dict[str, Any]) -> None:
   its payload carries no entry and the plan shows the reversal, for the
   operator to re-post.
   """
+  amount = int(payload["amount"])
+  posted_date = str(payload["occurred_at"])[:10]
+  accepted = _accepted_payload(event)
+  accepted["source_amount"] = amount
+  accepted["source_posted_date"] = posted_date
+  accepted.update(_planned_entry(event, amount, posted_date))
+  _flag(event, accepted)
+
+
+def _planned_entry(event: Event, amount: int, posted_date: str) -> dict[str, Any]:
+  """The entry a posted line should now have, from its own classification —
+  or nothing, for a line posted through a tenant rule."""
   from robosystems.operations.event_block.python_handlers.bank_feed import (
     BankFeedMetadata,
     plan_lines,
@@ -360,11 +443,6 @@ def _flag_changed(event: Event, payload: dict[str, Any]) -> None:
     HandlerMetadataValidationError,
   )
 
-  amount = int(payload["amount"])
-  posted_date = str(payload["occurred_at"])[:10]
-  accepted = _accepted_payload(event)
-  accepted["source_amount"] = amount
-  accepted["source_posted_date"] = posted_date
   try:
     lines = plan_lines(
       event_type=str(event.event_type),
@@ -372,20 +450,22 @@ def _flag_changed(event: Event, payload: dict[str, Any]) -> None:
       amount=amount,
       metadata=BankFeedMetadata.model_validate(dict(event.metadata_ or {})),
     )
-  except HandlerMetadataValidationError:
+  except (HandlerMetadataValidationError, ValidationError):
     lines = None
-  if lines:
-    accepted["posting_date"] = posted_date
-    accepted["memo"] = event.description
-    accepted["line_items"] = [
+  if not lines:
+    return {}
+  return {
+    "posting_date": posted_date,
+    "memo": event.description,
+    "line_items": [
       {
         "element_id": line.element_id,
         "debit_amount": line.debit_amount,
         "credit_amount": line.credit_amount,
       }
       for line in lines
-    ]
-  _flag(event, accepted)
+    ],
+  }
 
 
 def _accepted_payload(event: Event) -> dict[str, Any]:
@@ -678,6 +758,242 @@ def reconcile_existing(
   report.events_existing += 1
 
 
+# ── legs already inside a pair ───────────────────────────────────────────────
+
+
+def stored_legs(pair: Event) -> dict[str, Leg]:
+  """The two legs a captured pair recorded — each on its own date where the
+  pair kept it, on the pair's date for pairs captured before it did."""
+  metadata = pair.metadata_ or {}
+  legs = [str(leg) for leg in metadata.get("legs") or []]
+  if len(legs) != 2:
+    return {}
+  day = _iso(pair.occurred_at)[:10]
+  amount = abs(int(pair.amount or 0))
+  description = metadata.get("bank_description")
+  out_id, in_id = legs
+  return {
+    out_id: Leg(
+      transaction_id=out_id,
+      account_id=str(metadata.get("from_account_id") or ""),
+      account_name=metadata.get("from_account_name"),
+      element_id=metadata.get("from_element_id"),
+      amount=-amount,
+      day=str(metadata.get("from_date") or day)[:10],
+      description=description,
+    ),
+    in_id: Leg(
+      transaction_id=in_id,
+      account_id=str(metadata.get("to_account_id") or ""),
+      account_name=metadata.get("to_account_name"),
+      element_id=metadata.get("to_element_id"),
+      amount=amount,
+      day=str(metadata.get("to_date") or day)[:10],
+      description=description,
+    ),
+  }
+
+
+def legs_pair(first: Leg, second: Leg) -> bool:
+  """Whether two legs are still the two sides of one transfer."""
+  out_leg, in_leg = (first, second) if first.amount < 0 else (second, first)
+  return (
+    out_leg.amount < 0 < in_leg.amount
+    and in_leg.amount == -out_leg.amount
+    and in_leg.account_id != out_leg.account_id
+    and abs(days_between(out_leg.day, in_leg.day)) <= TRANSFER_WINDOW_DAYS
+  )
+
+
+def legs_signature(legs: Iterable[Leg]) -> frozenset[tuple[str, int, str]]:
+  return frozenset((leg.transaction_id, leg.amount, leg.day) for leg in legs)
+
+
+def known_legs(pair: Event) -> frozenset[tuple[str, int, str]]:
+  """The legs the bank last reported for a posted pair: a pending flag's,
+  else a resolved one's, else the pair's own — so a change already raised or
+  resolved is not raised again."""
+  metadata = pair.metadata_ or {}
+  drift = metadata.get("drift_payload")
+  source: Any = None
+  if bool(pair.payload_drift) and isinstance(drift, dict) and drift.get("source_legs"):
+    source = drift["source_legs"]
+  elif metadata.get("source_legs"):
+    source = metadata["source_legs"]
+  if isinstance(source, list):
+    return frozenset(
+      (
+        str(leg.get("transaction_id")),
+        int(leg.get("amount") or 0),
+        str(leg.get("date") or "")[:10],
+      )
+      for leg in source
+      if isinstance(leg, dict)
+    )
+  return legs_signature(stored_legs(pair).values())
+
+
+def reconcile_pairs(
+  session: Session,
+  in_pairs: dict[str, Event],
+  latest: dict[str, dict[str, Any]],
+  *,
+  by_account: dict[str, BankAccount],
+  account_elements: dict[str, str],
+  chart: ChartIndex,
+  agent_ids: dict[str, str],
+  connection_id: str,
+  item_id: str | None,
+  report: PlaidLoadReport,
+  consumed: set[str],
+) -> list[dict[str, Any]]:
+  """Apply the batch's changes to legs already inside a pair.
+
+  A pair stays a pair while its legs still match: an unposted one takes the
+  new amount and dates in place; a posted one becomes a reconciling item
+  whose stashed payload carries the entry it should now have. Legs that no
+  longer match dissolve the pair: an unposted pair is deleted, a posted one
+  is flagged with no entry (its catch-up reverses it) and its ``legs``
+  emptied; either way both legs come back as single-leg payloads for the
+  main loop, where one may pair anew. Returns those payloads.
+  """
+  by_pair: dict[str, tuple[Event, dict[str, dict[str, Any]]]] = {}
+  for leg_id, pair in in_pairs.items():
+    if leg_id in latest and str(pair.id) not in consumed:
+      by_pair.setdefault(str(pair.id), (pair, {}))[1][leg_id] = latest[leg_id]
+
+  released: list[dict[str, Any]] = []
+  for pair, changed in by_pair.values():
+    legs = stored_legs(pair)
+    if not legs:
+      report.events_existing += 1
+      continue
+    current = {
+      **legs,
+      **{
+        leg_id: leg_from_transaction(txn, by_account, account_elements)
+        for leg_id, txn in changed.items()
+      },
+    }
+    first, second = current.values()
+    still = legs_pair(first, second)
+    out_leg, in_leg = (first, second) if first.amount < 0 else (second, first)
+
+    def leg_payloads(
+      pair: Event = pair,
+      changed: dict[str, dict[str, Any]] = changed,
+      current: dict[str, Leg] = current,
+    ) -> list[dict[str, Any]]:
+      out: list[dict[str, Any]] = []
+      for leg_id in current:
+        if leg_id in changed:
+          event, _classification = bank_event(
+            changed[leg_id],
+            by_account,
+            account_elements,
+            chart,
+            agent_ids,
+            connection_id=connection_id,
+            item_id=item_id,
+          )
+          out.append(event)
+        else:
+          single = survivor_payload(
+            pair, [other for other in current if other != leg_id]
+          )
+          if single is not None:
+            out.append(single)
+      return out
+
+    if pair.status in UNPOSTED_STATUSES:
+      if still:
+        if _update_pair(pair, out_leg, in_leg):
+          report.events_updated += 1
+        else:
+          report.events_existing += 1
+      else:
+        released.extend(leg_payloads())
+        _delete_events(session, [str(pair.id)])
+        consumed.add(str(pair.id))
+        report.pairs_dissolved += 1
+    elif pair.status in POSTED_STATUSES:
+      if known_legs(pair) == legs_signature(current.values()):
+        report.events_existing += 1
+      elif still:
+        _flag_pair_changed(pair, out_leg, in_leg)
+        report.reconciling_items += 1
+      else:
+        released.extend(leg_payloads())
+        _flag_pair_dissolved(pair, list(current))
+        report.reconciling_items += 1
+        report.pairs_dissolved += 1
+    else:
+      report.events_existing += 1
+  if by_pair:
+    logger.info(
+      "Plaid legs inside pairs on connection %s: %d pairs touched, %d dissolved",
+      connection_id,
+      len(by_pair),
+      report.pairs_dissolved,
+    )
+  return released
+
+
+def _update_pair(pair: Event, out_leg: Leg, in_leg: Leg) -> bool:
+  """An unposted pair takes its legs' new amount and dates; True if changed."""
+  changed = False
+  magnitude = abs(in_leg.amount)
+  later = max(out_leg.day, in_leg.day)
+  if int(pair.amount or 0) != magnitude:
+    pair.amount = magnitude
+    changed = True
+  if pair.occurred_at is None or _iso(pair.occurred_at)[:10] != later:
+    pair.occurred_at = _parse(f"{later}T00:00:00Z")
+    changed = True
+  metadata = dict(pair.metadata_ or {})
+  for key, value in (("from_date", out_leg.day), ("to_date", in_leg.day)):
+    if metadata.get(key) != value:
+      metadata[key] = value
+      changed = True
+  if changed:
+    pair.metadata_ = metadata
+  return changed
+
+
+def _leg_record(leg: Leg) -> dict[str, Any]:
+  return {"transaction_id": leg.transaction_id, "amount": leg.amount, "date": leg.day}
+
+
+def _flag_pair_changed(pair: Event, out_leg: Leg, in_leg: Leg) -> None:
+  """A posted pair whose legs moved together: a reconciling item carrying the
+  transfer it should now be."""
+  magnitude = abs(in_leg.amount)
+  later = max(out_leg.day, in_leg.day)
+  accepted = _accepted_payload(pair)
+  accepted["source_legs"] = [_leg_record(out_leg), _leg_record(in_leg)]
+  accepted["source_amount"] = magnitude
+  accepted["source_posted_date"] = later
+  accepted["from_date"] = out_leg.day
+  accepted["to_date"] = in_leg.day
+  accepted.update(_planned_entry(pair, magnitude, later))
+  _flag(pair, accepted)
+
+
+def _flag_pair_dissolved(pair: Event, leg_ids: list[str]) -> None:
+  """A posted pair whose legs no longer match: a reconciling item with no
+  entry — its catch-up reverses the transfer — and both legs released to
+  live as their own lines."""
+  accepted = _accepted_payload(pair)
+  accepted["pair_dissolved"] = True
+  _release_legs(pair, accepted, leg_ids)
+  _flag(pair, accepted)
+  pair.metadata_ = {
+    **(pair.metadata_ or {}),
+    "legs": accepted["legs"],
+    "released_legs": accepted["released_legs"],
+  }
+
+
 # ── transfer legs across syncs ───────────────────────────────────────────────
 
 
@@ -688,8 +1004,11 @@ def find_waiting_leg(
   connection_id: str,
   consumed: set[str],
 ) -> Event | None:
-  """A captured single-leg transfer on another of this connection's accounts,
-  opposite in sign and equal in size, within the transfer window."""
+  """The other side of this leg, already on the graph: a single-leg transfer
+  on another of this connection's accounts, opposite in sign and equal in
+  size, within the transfer window. A still-captured one comes first, then
+  a classified one, then a posted one; ``settle_with_counterpart`` decides
+  what each means."""
   day = str(payload["occurred_at"])[:10]
   lo, hi = window(day, TRANSFER_WINDOW_DAYS)
   account_id = str(payload["metadata"].get("account_id") or "")
@@ -698,7 +1017,7 @@ def find_waiting_leg(
       select(Event)
       .where(
         Event.source == SOURCE,
-        Event.status == "captured",
+        Event.status.in_(COUNTERPART_STATUSES),
         Event.event_type == "external_transfer",
         Event.amount == -int(payload["amount"]),
         Event.occurred_at >= datetime.combine(lo, time.min),
@@ -716,9 +1035,119 @@ def find_waiting_leg(
   if not candidates:
     return None
   target = _parse(payload["occurred_at"]).date()
+  rank = {"captured": 0, "classified": 1}
   return min(
-    candidates, key=lambda event: abs((event.occurred_at.date() - target).days)
+    candidates,
+    key=lambda event: (
+      rank.get(str(event.status), 2),
+      abs((event.occurred_at.date() - target).days),
+    ),
   )
+
+
+def classified_to(event: Event) -> str | None:
+  """The one account a bank leg is classified to, or ``None`` (unclassified,
+  a split, a rule-posted line)."""
+  from robosystems.operations.event_block.python_handlers.bank_feed import (
+    BankFeedMetadata,
+    contra_allocations,
+  )
+  from robosystems.operations.event_block.python_handlers.types import (
+    HandlerMetadataValidationError,
+  )
+
+  try:
+    allocations = contra_allocations(
+      BankFeedMetadata.model_validate(dict(event.metadata_ or {})),
+      amount=int(event.amount or 0),
+    )
+  except (HandlerMetadataValidationError, ValidationError):
+    return None
+  if allocations and len(allocations) == 1:
+    return str(allocations[0].element_id)
+  return None
+
+
+def settle_with_counterpart(
+  session: Session,
+  other: Event,
+  payload: dict[str, Any],
+  *,
+  graph_id: str,
+  connection_id: str,
+  item_id: str | None,
+  created_by: str,
+  report: PlaidLoadReport,
+  consumed: set[str],
+) -> bool:
+  """This leg's other side is already on the graph; settle the two.
+
+  While the other side is unposted and either unclassified or classified to
+  this leg's bank account, the two merge into one ``internal_transfer`` —
+  the merged pair posts exactly the entry the operator chose. When the
+  other side is posted to this leg's bank account the movement is booked,
+  so this leg is captured and voided against it: a live second line would
+  book it again the moment someone classified it. When the other side went
+  somewhere else, this leg is captured on its own, naming its counterpart,
+  for the operator to judge. Returns True when the payload needs no capture.
+  """
+  mine = str(payload.get("resource_element_id") or "")
+  contra = classified_to(other)
+  status = str(other.status)
+  if status == "captured" or (status == "classified" and contra == mine):
+    if _merge_into_pair(
+      session,
+      other,
+      payload,
+      graph_id=graph_id,
+      connection_id=connection_id,
+      item_id=item_id,
+      created_by=created_by,
+      report=report,
+    ):
+      consumed.add(str(other.id))
+      return True
+    return False
+
+  metadata = payload["metadata"]
+  metadata["counterpart_event_id"] = str(other.id)
+  metadata["counterpart_status"] = status
+  metadata["classification_source"] = "counterpart"
+  booked = status in POSTED_STATUSES | {"pending"} and contra == mine
+  if not booked:
+    return False
+  if not capture_event(
+    session, payload, graph_id=graph_id, created_by=created_by, report=report
+  ):
+    return True
+  external_id = str(payload["external_id"])
+  captured = existing_events(session, SOURCE, [external_id]).get(external_id)
+  if captured is None:
+    return True
+  from robosystems.operations.event_block.commands import update_event_block
+
+  update_event_block(
+    session,
+    UpdateEventBlockRequest(
+      event_id=str(captured.id),
+      transition_to="voided",
+      metadata_patch={
+        "voided_reason": (
+          f"The other leg of this transfer is already posted as event "
+          f"{other.id}; the movement is booked."
+        ),
+      },
+    ),
+    created_by,
+    graph_id=graph_id,
+  )
+  report.legs_voided += 1
+  logger.info(
+    "Plaid leg %s voided: its other side %s is already posted",
+    external_id,
+    other.id,
+  )
+  return True
 
 
 class _MergeFailed(Exception):
