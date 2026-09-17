@@ -43,6 +43,13 @@ class SearchRequest(BaseModel):
     False,
     description="Enable hybrid semantic search (BM25 + KNN). Default is BM25-only for speed.",
   )
+  group: bool = Field(
+    False,
+    description="Fold hits from successive filings of the same filer and section "
+    "into the best-ranked one; also_in_filings counts the others. Ignored when "
+    "entity is set, where a filer's filing history is the point. A grouped page "
+    "is drawn from the first 100 hits.",
+  )
   size: int = Field(10, ge=1, le=50, description="Max results to return")
   offset: int = Field(0, ge=0, description="Pagination offset")
   snippet_chars: int | None = Field(
@@ -60,6 +67,10 @@ class SearchHit(BaseModel):
   A long SEC section (an MD&A, a commitments note) is indexed in parts, each
   a document of its own: ``part`` of ``part_count``, ``parent_document_id``
   shared by the section's parts, ``next_document_id`` to read on.
+
+  On a grouped search, ``also_in_filings`` counts the other filings of the
+  same filer whose same section (and part) matched and were folded into
+  this hit.
   """
 
   document_id: str
@@ -84,6 +95,7 @@ class SearchHit(BaseModel):
   document_title: str | None = None
   tags: list[str] | None = None
   folder: str | None = None
+  also_in_filings: int | None = None
 
 
 class SearchResponse(BaseModel):

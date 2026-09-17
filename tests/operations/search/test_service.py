@@ -299,3 +299,132 @@ class TestSnippetCharsPassThrough:
     mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
     service.search_documents("sec", SearchRequest(query="x"))
     assert mock_client.search.call_args.kwargs["snippet_chars"] is None
+
+
+def _os_hit(
+  doc_id,
+  score,
+  cik=None,
+  section="us-gaap:GoodwillDisclosureTextBlock",
+  filed="2026-03-01",
+  part=1,
+):
+  source = {
+    "source_type": "ixbrl_disclosure",
+    "section_id": section,
+    "filing_date": filed,
+    "part": part,
+  }
+  if cik:
+    source["entity_cik"] = cik
+  return {"_id": doc_id, "_score": score, "_source": source}
+
+
+def _os_result(*hits):
+  return {"hits": {"total": {"value": len(hits)}, "hits": list(hits)}}
+
+
+ACME = "0001234567"
+ZENITH = "0007654321"
+
+
+class TestGroupSuccessiveFilings:
+  def test_folds_a_filers_repeats_into_the_newest_tied_hit(self, service, mock_client):
+    mock_client.search.return_value = _os_result(
+      _os_hit("acme-25", 0.6, ACME, filed="2025-03-01"),
+      _os_hit("acme-26", 0.6, ACME, filed="2026-03-01"),
+      _os_hit("zenith-26", 0.5, ZENITH),
+      _os_hit("acme-24", 0.4, ACME, filed="2024-03-01"),
+      _os_hit("acme-leases", 0.3, ACME, section="us-gaap:LeasesTextBlock"),
+    )
+
+    hits = service.search_documents("sec", SearchRequest(query="x", group=True)).hits
+
+    assert [(h.document_id, h.also_in_filings) for h in hits] == [
+      ("acme-26", 2),
+      ("zenith-26", None),
+      ("acme-leases", None),
+    ]
+
+  def test_a_better_score_leads_over_a_newer_filing(self, service, mock_client):
+    mock_client.search.return_value = _os_result(
+      _os_hit("acme-24", 0.9, ACME, filed="2024-03-01"),
+      _os_hit("acme-26", 0.5, ACME, filed="2026-03-01"),
+    )
+
+    hits = service.search_documents("sec", SearchRequest(query="x", group=True)).hits
+
+    assert [(h.document_id, h.also_in_filings) for h in hits] == [("acme-24", 1)]
+
+  def test_different_parts_of_one_section_stay_apart(self, service, mock_client):
+    mock_client.search.return_value = _os_result(
+      _os_hit("rf-2", 0.7, ACME, section="item_1a", part=2),
+      _os_hit("rf-5", 0.6, ACME, section="item_1a", part=5),
+    )
+
+    hits = service.search_documents("sec", SearchRequest(query="x", group=True)).hits
+
+    assert [h.document_id for h in hits] == ["rf-2", "rf-5"]
+
+  def test_uploaded_documents_are_never_folded(self, service, mock_client):
+    mock_client.search.return_value = _os_result(
+      _os_hit("udoc_1_0", 0.7, section="policy"),
+      _os_hit("udoc_2_0", 0.7, section="policy"),
+    )
+
+    hits = service.search_documents("kg1", SearchRequest(query="x", group=True)).hits
+
+    assert [h.document_id for h in hits] == ["udoc_1_0", "udoc_2_0"]
+
+  def test_the_page_comes_from_an_over_fetched_window(self, service, mock_client):
+    mock_client.search.return_value = _os_result(
+      _os_hit("acme-26", 0.9, ACME, filed="2026-03-01"),
+      _os_hit("acme-25", 0.9, ACME, filed="2025-03-01"),
+      _os_hit("zenith", 0.8, ZENITH),
+      _os_hit("acme-leases", 0.7, ACME, section="us-gaap:LeasesTextBlock"),
+    )
+
+    hits = service.search_documents(
+      "sec", SearchRequest(query="x", group=True, size=2, offset=1)
+    ).hits
+
+    kwargs = mock_client.search.call_args.kwargs
+    assert (kwargs["size"], kwargs["offset"]) == (12, 0)
+    assert [h.document_id for h in hits] == ["zenith", "acme-leases"]
+
+  def test_the_window_never_passes_the_hybrid_candidate_pool(
+    self, service, mock_client
+  ):
+    mock_client.search_hybrid.return_value = _os_result()
+
+    service.search_documents(
+      "sec", SearchRequest(query="x", group=True, semantic=True, size=50)
+    )
+
+    assert mock_client.search_hybrid.call_args.kwargs["size"] == 100
+
+  def test_an_entity_filter_keeps_the_filing_history(self, service, mock_client):
+    mock_client.search.return_value = _os_result(
+      _os_hit("acme-26", 0.6, ACME, filed="2026-03-01"),
+      _os_hit("acme-25", 0.6, ACME, filed="2025-03-01"),
+    )
+
+    hits = service.search_documents(
+      "sec", SearchRequest(query="x", group=True, entity=ACME, size=5, offset=0)
+    ).hits
+
+    kwargs = mock_client.search.call_args.kwargs
+    assert (kwargs["size"], kwargs["offset"]) == (5, 0)
+    assert [h.document_id for h in hits] == ["acme-26", "acme-25"]
+
+  def test_the_rest_default_does_not_group(self, service, mock_client):
+    mock_client.search.return_value = _os_result(
+      _os_hit("acme-26", 0.6, ACME, filed="2026-03-01"),
+      _os_hit("acme-25", 0.6, ACME, filed="2025-03-01"),
+    )
+
+    hits = service.search_documents("sec", SearchRequest(query="x", offset=20)).hits
+
+    kwargs = mock_client.search.call_args.kwargs
+    assert (kwargs["size"], kwargs["offset"]) == (10, 20)
+    assert [h.also_in_filings for h in hits] == [None, None]

@@ -163,6 +163,10 @@ class SearchDocumentsTool(_SearchToolMixin):
 - Filing fields every hit shares (entity_ticker, entity_name, form_type,
   filing_date, fiscal_year) appear once at the result root; when the hits span
   filings they stay on each hit
+- The same section from a filer's successive filings comes back once, as its
+  best-ranked (then newest) filing; `also_in_filings` counts the other filings
+  folded into it. With `entity` set nothing is folded, so pass a ticker or CIK
+  to see one filer's filings of a section side by side
 - A snippet is an excerpt around the match, not the passage — read the section
   with get-document-section before quoting a figure from it
 - A long section (an MD&A, a commitments note) is indexed in parts of about 25K
@@ -255,6 +259,7 @@ class SearchDocumentsTool(_SearchToolMixin):
       element=arguments.get("element"),
       fiscal_year=arguments.get("fiscal_year"),
       semantic=arguments.get("semantic", False),
+      group=True,
       size=min(arguments.get("size", 10), 50),
       snippet_chars=max(SNIPPET_CHARS_MIN, min(snippet_chars, SNIPPET_CHARS_MAX)),
     )
