@@ -321,9 +321,3 @@ def _get_redoc_fallback_template(title: str, openapi_url: str) -> str:
     .replace("__OPENAPI_URL__", openapi_url)
     .replace("__THEME_JSON__", theme_json)
   )
-
-
-# Convenience function for main RoboSystems ReDoc with dark theme styling
-def generate_robosystems_redoc() -> str:
-  """Generate ReDoc documentation with dark theme for main RoboSystems API."""
-  return generate_redoc_docs(title="RoboSystems API")

@@ -422,6 +422,7 @@ Each package documents itself — read the README for a directory before working
 ## API Reference
 
 - [API reference](https://robosystems.ai/docs/api) — every endpoint, with its parameters, schemas and an example call
+- [Interactive API console](https://api.robosystems.ai) — Swagger UI, to run a call against the live API with your own key
 - [OpenAPI specification](https://api.robosystems.ai/openapi.json) — the machine-readable source, what the SDK generators read
 
 ## Support

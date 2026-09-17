@@ -2,12 +2,13 @@
 
 The matcher decides which Content-Security-Policy header a path gets:
 
-- "docs": Swagger UI / ReDoc pages and /static assets. Everything is
+- "docs": the Swagger UI page at "/" and its /static assets. Everything is
   self-hosted (static/vendor), so the policy allows no third-party script
-  origins and no 'unsafe-inline' script. Those pages are served in
-  development only — the published reference is rendered on the app's
-  domain — so the variant is too, and the default is closed. That is what
-  leaves production with the strict policy on every path.
+  origins and no 'unsafe-inline' script — but it keeps 'unsafe-inline'
+  style, which Swagger sets at runtime. The page is kept in every
+  environment as a tool: it is the only way to run a call against a deployed
+  API from a browser. "/docs" is NOT in this group any more — it redirects
+  to the published reference, and a redirect needs no relaxed policy.
 - "graphiql": the GraphiQL playground, which loads React/GraphiQL from
   CDNs and needs the relaxed policy. The post-cutover URL change
   (graph-scoping the GraphQL endpoint) silently broke the original
@@ -28,44 +29,23 @@ from main import csp_variant_for_path
 
 class TestCspVariantForPath:
   def test_root_swagger_ui_docs_variant(self) -> None:
-    assert csp_variant_for_path("/", docs_enabled=True) == "docs"
-
-  def test_docs_page_docs_variant(self) -> None:
-    assert csp_variant_for_path("/docs", docs_enabled=True) == "docs"
+    assert csp_variant_for_path("/") == "docs"
 
   def test_static_assets_docs_variant(self) -> None:
-    assert csp_variant_for_path("/static/swagger-custom.css", docs_enabled=True) == (
+    assert csp_variant_for_path("/static/swagger-custom.css") == "docs"
+    assert csp_variant_for_path("/static/vendor/swagger-ui-5.9.0/swagger-ui.css") == (
       "docs"
     )
-    assert csp_variant_for_path(
-      "/static/vendor/swagger-ui-5.9.0/swagger-ui.css", docs_enabled=True
-    ) == ("docs")
-    assert csp_variant_for_path("/static", docs_enabled=True) == "docs"
+    assert csp_variant_for_path("/static") == "docs"
 
-  def test_docs_paths_strict_where_the_pages_are_not_served(self) -> None:
-    """Outside development these paths redirect, so they get the strict policy.
+  def test_the_redirect_gets_the_strict_policy(self) -> None:
+    """`/docs` no longer renders a page, so it no longer needs a page's policy.
 
-    This is the retirement of the relaxed style-src on this origin: with the
-    pages gone from production, nothing there needs 'unsafe-inline' style or
-    a blob worker. The default is closed, so a caller that omits the flag
-    cannot relax it.
+    It used to serve ReDoc and shared the relaxed variant. Now it answers a
+    301 to the published reference, and a redirect needs nothing relaxed.
     """
-    for path in (
-      "/",
-      "/docs",
-      "/static",
-      "/static/swagger-custom.css",
-      "/static/vendor/redoc-2.5.3/redoc.standalone.js",
-    ):
-      assert csp_variant_for_path(path, docs_enabled=False) == "api"
-      assert csp_variant_for_path(path) == "api"
-
-  def test_the_two_flags_do_not_relax_each_other(self) -> None:
-    """A playground-enabled deployment does not thereby serve the docs pages."""
+    assert csp_variant_for_path("/docs") == "api"
     assert csp_variant_for_path("/docs", graphiql_enabled=True) == "api"
-    assert (
-      csp_variant_for_path("/extensions/kg01a2b3c/graphql", docs_enabled=True) == "api"
-    )
 
   def test_graph_scoped_graphiql_relaxed(self) -> None:
     """The graph-scoped GraphQL endpoint must get the graphiql variant.
@@ -142,8 +122,10 @@ class TestDocsPagesSelfHosted:
   """The rendered docs pages must not reference third-party origins.
 
   This is the regression guard for the docs supply-chain hardening: the
-  Swagger UI / ReDoc bundles are vendored under /static/vendor, and the
-  Swagger initializer is an external script (no inline <script>).
+  bundles are vendored under /static/vendor, and the Swagger initializer is
+  an external script (no inline <script>). The main API serves only Swagger
+  now — ReDoc's surviving caller is the Graph API microservice, which builds
+  its page from the same generator, so the guard follows it there.
   """
 
   def test_swagger_page_has_no_third_party_or_inline_script(self) -> None:
@@ -159,9 +141,9 @@ class TestDocsPagesSelfHosted:
     assert "<script>" not in html
 
   def test_redoc_page_has_no_third_party_script_or_fonts(self) -> None:
-    from robosystems.utils.docs_template import generate_robosystems_redoc
+    from robosystems.utils.docs_template import generate_redoc_docs
 
-    html = generate_robosystems_redoc()
+    html = generate_redoc_docs(title="RoboSystems Graph API")
     assert "https://cdn.redoc.ly" not in html
     assert "https://fonts.googleapis.com" not in html
     assert "/static/vendor/redoc-2.5.3/redoc.standalone.js" in html

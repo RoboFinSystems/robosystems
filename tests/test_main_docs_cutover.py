@@ -1,32 +1,24 @@
 """The API host after the reference moved to robosystems.ai.
 
-The rendered reference is a page per operation on the app's domain. What is
-left here is the development affordance and the pointers:
+Two surfaces, split by what each is for, and the split is the same in every
+environment:
 
-- Everywhere but development, ``/`` and ``/docs`` answer ``301`` so every
-  README, CONTRIBUTING file and outside link keeps working and its link
-  equity moves to the published pages, and ``/static`` is not mounted at all.
-  With no page on this origin, nothing needs the relaxed ``style-src`` that
-  the docs CSP variant carried — the accepted residual has no surface left.
-  The suite runs with ``ENVIRONMENT=test``, so the shared ``client`` fixture
-  is already that shape and tests it directly.
-- Development still serves Swagger at ``/`` and ReDoc at ``/docs`` from the
-  vendored bundles under ``/static``, because trying a call against a local
-  stack is worth having and is safe on localhost. **That branch is not
-  exercised here.** The routes are decided when the app is built, so it would
-  take a second ``create_app()``, and this suite already sits at the edge of
-  the local development Postgres: at the default parallelism, adding any
-  module that uses the shared ``client`` fixture errors unrelated modules in
-  setup with ``OutOfMemory``, and a second app is more of the same cost. What
-  is pinned instead is everything the branch depends on: the CSP variant
-  those paths get when the pages are served (``TestDevelopmentKeepsItsPolicy``
-  below, and ``tests/test_main_csp.py``) and the pages the generators produce
-  (``TestDocsPagesSelfHosted``, same file). The registration itself is
-  exercised by anyone running the stack locally, where a regression is
-  immediate and visible.
-- ``/openapi.json`` is unchanged and stays served — both SDK generators read
-  it — and is marked ``noindex`` so the raw specification does not compete
-  with the rendered reference in a search index.
+- **``/`` keeps Swagger UI.** Its try-it panel is a tool, and there is no
+  other way to run a call against a deployed API from a browser. It is
+  marked ``noindex``: a tool, not a document. That keeps the relaxed
+  ``style-src`` on this origin, which is the deliberate price of keeping it.
+- **``/docs`` is gone.** It served ReDoc — a read-only renderer of the same
+  specification, which the per-operation pages on the app's domain do far
+  better, and which no crawler could read because it renders in the browser
+  from a ~950 KB file. It answers ``301`` so every README, CONTRIBUTING file
+  and outside link keeps working and its link equity moves with it. A
+  redirect needs no relaxed policy, so it gets the strict one.
+- **``/openapi.json``** is unchanged and stays served — both SDK generators
+  read it — and is ``noindex`` for the same reason as ``/``.
+
+ReDoc itself is not deleted: the Graph API microservice still serves its own
+from ``generate_redoc_docs`` and mounts the same vendored bundle. What went is
+the main API's route and the thin wrapper behind it.
 """
 
 from __future__ import annotations
@@ -38,52 +30,71 @@ from robosystems.config import env
 pytestmark = pytest.mark.unit
 
 
-class TestOutsideDevelopment:
-  @pytest.mark.parametrize("path", ["/", "/docs"])
-  def test_docs_paths_redirect_to_the_published_reference(self, client, path) -> None:
-    response = client.get(path, follow_redirects=False)
+class TestTheRedirect:
+  def test_docs_redirects_to_the_published_reference(self, client) -> None:
+    response = client.get("/docs", follow_redirects=False)
     assert response.status_code == 301
     assert response.headers["location"] == f"{env.ROBOSYSTEMS_URL}/docs/api"
 
-  @pytest.mark.parametrize("path", ["/", "/docs"])
-  def test_the_redirect_answers_head_as_well_as_get(self, client, path) -> None:
+  def test_it_answers_head_as_well_as_get(self, client) -> None:
     """A link checker that probes with HEAD has to see the redirect too.
 
-    FastAPI does not imply HEAD from GET, so before these paths became
-    redirects they answered 405 to it — harmless for a page, useless for a
-    URL whose only job is to be followed.
+    FastAPI does not imply HEAD from GET, so before this path became a
+    redirect it answered 405 to it — harmless for a page, useless for a URL
+    whose only job is to be followed.
     """
-    response = client.head(path, follow_redirects=False)
+    response = client.head("/docs", follow_redirects=False)
     assert response.status_code == 301
     assert response.headers["location"] == f"{env.ROBOSYSTEMS_URL}/docs/api"
 
-  def test_static_is_not_mounted(self, client) -> None:
-    assert client.get("/static/swagger-init.js").status_code == 404
-
-  @pytest.mark.parametrize("path", ["/", "/docs", "/static/swagger-custom.css"])
-  def test_the_relaxed_docs_policy_is_gone(self, client, path) -> None:
-    response = client.get(path, follow_redirects=False)
-    csp = response.headers["content-security-policy"]
+  def test_a_redirect_needs_no_relaxed_policy(self, client) -> None:
+    csp = client.get("/docs", follow_redirects=False).headers["content-security-policy"]
     assert "'unsafe-inline'" not in csp
-    assert "worker-src" not in csp
     assert "script-src 'self';" in csp
 
-  def test_the_specification_is_served_but_not_indexed(self, client) -> None:
+  def test_the_main_api_no_longer_renders_redoc(self) -> None:
+    """The wrapper is gone; the Graph API's own generator is untouched."""
+    from robosystems.utils import docs_template
+
+    assert not hasattr(docs_template, "generate_robosystems_redoc")
+    assert hasattr(docs_template, "generate_redoc_docs")
+
+
+class TestTheTool:
+  def test_swagger_is_served(self, client) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+
+  def test_its_bundle_is_served(self, client) -> None:
+    assert client.get("/static/swagger-init.js").status_code == 200
+
+  def test_it_keeps_the_policy_it_needs(self, client) -> None:
+    csp = client.get("/").headers["content-security-policy"]
+    # Swagger sets inline style attributes at runtime.
+    assert "style-src 'self' 'unsafe-inline'" in csp
+    # Still no third-party origin and no inline script, as the remediation set.
+    assert "https://" not in csp
+    assert "script-src 'self';" in csp
+
+  def test_redocs_blob_worker_left_with_redoc(self, client) -> None:
+    assert "worker-src" not in client.get("/").headers["content-security-policy"]
+
+
+class TestNothingHereIsTheReference:
+  """The rendered pages are on the app's domain; this origin competes with none."""
+
+  @pytest.mark.parametrize("path", ["/", "/openapi.json", "/static/swagger-init.js"])
+  def test_marked_noindex(self, client, path) -> None:
+    assert client.get(path).headers["x-robots-tag"] == "noindex"
+
+  def test_api_routes_are_not(self, client) -> None:
+    assert "x-robots-tag" not in client.get("/v1/status").headers
+
+  def test_the_specification_is_still_served(self, client) -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200
-    assert response.headers["x-robots-tag"] == "noindex"
     assert response.json()["info"]["title"] == "RoboSystems API"
 
   def test_the_disclosure_route_survives(self, client) -> None:
-    """It reads its file at startup, not through the /static mount."""
     assert client.get("/.well-known/security.txt").status_code == 200
-
-
-class TestDevelopmentKeepsItsPolicy:
-  """The half of the development branch that costs nothing to pin."""
-
-  def test_the_pages_would_get_the_policy_they_need(self) -> None:
-    from main import csp_variant_for_path
-
-    assert csp_variant_for_path("/", docs_enabled=True) == "docs"
-    assert csp_variant_for_path("/static/swagger-init.js", docs_enabled=True) == "docs"

@@ -73,9 +73,9 @@ class TestCorsOriginAllowlist:
 
 
 class TestResponseHeaderBaseline:
-  # `/` is the unauthenticated path the assessment probed. It now answers a
-  # 301 to the published reference, so these follow no redirect: the headers
-  # are asserted on the response this origin actually returns.
+  # `/` is the unauthenticated path the assessment probed, and still serves
+  # the Swagger page. Redirects are not followed anywhere in this file, so
+  # every assertion is on the response this origin itself returns.
   def test_baseline_headers_present(self, client):
     response = client.get("/", follow_redirects=False)
     assert response.headers["x-content-type-options"] == "nosniff"
