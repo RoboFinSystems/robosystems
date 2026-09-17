@@ -13,12 +13,14 @@ left here is the development affordance and the pointers:
 - Development still serves Swagger at ``/`` and ReDoc at ``/docs`` from the
   vendored bundles under ``/static``, because trying a call against a local
   stack is worth having and is safe on localhost. **That branch is not
-  exercised here**: the routes are decided when the app is built, and a
-  second ``create_app()`` — even one never served — is enough, across xdist
-  workers, to exhaust Postgres's lock table and error the rest of the suite
-  in setup. What is pinned instead is everything the branch depends on: the
-  CSP variant those paths get when the pages are served
-  (``tests/test_main_csp.py``) and the pages the generators produce
+  exercised here.** The routes are decided when the app is built, so it would
+  take a second ``create_app()``, and this suite already sits at the edge of
+  the local development Postgres: at the default parallelism, adding any
+  module that uses the shared ``client`` fixture errors unrelated modules in
+  setup with ``OutOfMemory``, and a second app is more of the same cost. What
+  is pinned instead is everything the branch depends on: the CSP variant
+  those paths get when the pages are served (``TestDevelopmentKeepsItsPolicy``
+  below, and ``tests/test_main_csp.py``) and the pages the generators produce
   (``TestDocsPagesSelfHosted``, same file). The registration itself is
   exercised by anyone running the stack locally, where a regression is
   immediate and visible.
