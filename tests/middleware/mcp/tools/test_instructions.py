@@ -55,6 +55,18 @@ class TestAuthoredOverride:
     )
     assert out is not None
     assert "READ-ONLY" in out
+    assert "https://robosystems.ai/docs/guides/sec-filings" in out
+
+  def test_another_shared_repo_is_not_sent_to_the_sec_guide(self) -> None:
+    out = build_instructions(
+      graph_id="edgar_eu",
+      tool_names=_CORE,
+      is_shared_repo=True,
+      read_only=True,
+    )
+    assert out is not None
+    assert "sec-filings" not in out
+    assert "https://robosystems.ai/docs/guides" in out
 
 
 class TestLedgerGraph:

@@ -245,10 +245,21 @@ def build_instructions(
   # page can cite it, and a person asking "where is this written down?" gets an
   # address instead of a paraphrase. One line, the pages that match this graph.
   if is_shared_repo:
-    doc_lines = [
-      "- https://robosystems.ai/docs/guides/sec-filings — what to ask of the "
-      "filings, and the rules that decide whether a number is right"
-    ]
+    # `sec` is the only shared repository today, and its manifest authors its
+    # own instructions, so this branch is the fallback for a future one. Name
+    # the SEC guide only for `sec`; any other repository gets the platform
+    # guides rather than a page about filings it does not hold.
+    doc_lines = (
+      [
+        "- https://robosystems.ai/docs/guides/sec-filings — what to ask of the "
+        "filings, and the rules that decide whether a number is right"
+      ]
+      if graph_id == "sec"
+      else [
+        "- https://robosystems.ai/docs/guides — the platform: connecting a "
+        "client, graph access, shared repositories, credits"
+      ]
+    )
   elif has_ledger:
     doc_lines = [
       "- https://roboledger.ai/docs — what RoboLedger does with a company's "
