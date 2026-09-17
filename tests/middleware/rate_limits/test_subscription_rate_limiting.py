@@ -76,6 +76,7 @@ class TestSubscriptionRateLimits:
     assert should_use_subscription_limits("/v1/graphs/kg1a2b3c/mcp/query")
     # The graph-agnostic OAuth transport is tenant-scoped through its grant.
     assert should_use_subscription_limits("/v1/mcp")
+    assert should_use_subscription_limits("/v1/mcp/roboledger")
     assert should_use_subscription_limits("/v1/graphs/sec/entity/")
 
     # Non-graph endpoints that should use subscription limits
@@ -347,6 +348,14 @@ class TestSubscriptionAwareRateLimiting:
     mock_check_rate_limit.assert_called_once_with(expected_identifier, 30, 60)
 
     assert mock_request.state.rate_limit_tier == "base"
+
+  def test_agnostic_mcp_routes_are_the_mcp_category(self):
+    """Neither graph-agnostic transport carries a graph in its path; both
+    must land in the MCP bucket, not the generic API limiter."""
+    assert get_endpoint_category("/v1/mcp", "POST") == EndpointCategory.GRAPH_MCP
+    assert (
+      get_endpoint_category("/v1/mcp/roboledger", "POST") == EndpointCategory.GRAPH_MCP
+    )
 
   def test_mcp_endpoint_category(self):
     """Test MCP endpoints get correct category and limits."""

@@ -62,6 +62,7 @@ from .graphs import (
 from .graphs.content_ops import router as graph_content_ops_router
 from .graphs.mcp import agnostic_router as mcp_agnostic_router
 from .graphs.mcp import remote_router as mcp_remote_router
+from .graphs.mcp import roboledger_router as mcp_roboledger_router
 from .graphs.operations import router as graph_operations_router
 from .graphs.operator import (
   router as operator_router,
@@ -164,6 +165,9 @@ operations_router_v1.include_router(operations_router)
 # supplied by the include prefix, not the router's own.)
 mcp_agnostic_router_v1 = APIRouter(prefix="/v1")
 mcp_agnostic_router_v1.include_router(mcp_agnostic_router, prefix="/mcp")
+# The RoboLedger twin: POST /v1/mcp/roboledger — RoboLedger graphs only, with
+# a product tool profile (a directory listing freezes one tool list per URL).
+mcp_agnostic_router_v1.include_router(mcp_roboledger_router, prefix="/mcp/roboledger")
 
 # Auth routes that don't require a graph_id
 auth_router_v1 = APIRouter(prefix="/v1/auth", tags=["Auth"])

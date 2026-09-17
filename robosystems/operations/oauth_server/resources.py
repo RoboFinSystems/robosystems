@@ -1,9 +1,16 @@
 """Protected resources, their canonical URLs, and the discovery documents.
 
-Two resources exist: the graph-agnostic ``/v1/mcp`` (OAuth-only; the grant
-carries the graph) and ``/v1/graphs/{graph_id}/mcp`` (the URL carries the
-graph). A token is bound to exactly one canonical resource URL — the
-audience — and is refused at the other.
+Three resources exist:
+
+- ``/v1/mcp`` — graph-agnostic and OAuth-only; the grant carries the graph.
+- ``/v1/mcp/roboledger`` — the same, for RoboLedger tenant graphs only: the
+  consent decision refuses any other graph, and the transport serves a
+  product tool profile. It exists because a directory listing freezes one
+  tool list per URL, and OpenAI allows one MCP URL per plugin.
+- ``/v1/graphs/{graph_id}/mcp`` — the URL carries the graph.
+
+A token is bound to exactly one canonical resource URL — the audience — and
+is refused at the others.
 
 Canonical form is ``{issuer}{path}`` with no query, fragment, or trailing
 slash. Clients present the URL as the user typed it (RFC 8707 ``resource``),
@@ -19,6 +26,8 @@ from robosystems.config import env
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 AGNOSTIC_MCP_PATH = "/v1/mcp"
+PRODUCT_ROBOLEDGER = "roboledger"
+ROBOLEDGER_MCP_PATH = f"{AGNOSTIC_MCP_PATH}/{PRODUCT_ROBOLEDGER}"
 _GRAPH_MCP_PATH = re.compile(
   rf"^/v1/graphs/({GRAPH_OR_SUBGRAPH_ID_PATTERN.strip('^$')})/mcp$"
 )
@@ -38,11 +47,13 @@ REVOCATION_ENDPOINT_PATH = "/v1/oauth/revoke"
 
 @dataclass(frozen=True)
 class ResourceTarget:
-  """A resolved protected resource: its canonical URL and, for the per-graph
-  route, the graph the URL names (``None`` on the agnostic route)."""
+  """A resolved protected resource: its canonical URL; for the per-graph
+  route, the graph the URL names (``None`` on the agnostic routes); and for a
+  product route, the product whose graphs it serves (``None`` otherwise)."""
 
   resource: str
   graph_id: str | None
+  product: str | None = None
 
   @property
   def is_agnostic(self) -> bool:
@@ -62,14 +73,34 @@ def agnostic_target() -> ResourceTarget:
   return ResourceTarget(resource=f"{issuer()}{AGNOSTIC_MCP_PATH}", graph_id=None)
 
 
+def roboledger_target() -> ResourceTarget:
+  return ResourceTarget(
+    resource=f"{issuer()}{ROBOLEDGER_MCP_PATH}",
+    graph_id=None,
+    product=PRODUCT_ROBOLEDGER,
+  )
+
+
 def graph_target(graph_id: str) -> ResourceTarget:
   return ResourceTarget(
     resource=f"{issuer()}/v1/graphs/{graph_id}/mcp", graph_id=graph_id
   )
 
 
+def route_target(
+  graph_id: str | None = None, product: str | None = None
+) -> ResourceTarget:
+  """The resource an MCP route serves: the URL's graph on the per-graph
+  route, else the product route, else the graph-agnostic one."""
+  if graph_id:
+    return graph_target(graph_id)
+  if product == PRODUCT_ROBOLEDGER:
+    return roboledger_target()
+  return agnostic_target()
+
+
 def resolve_resource(value: str | None) -> ResourceTarget | None:
-  """Map a presented ``resource`` value onto one of our two targets.
+  """Map a presented ``resource`` value onto one of our targets.
 
   ``None`` (a client that predates RFC 8707 in MCP) resolves to the agnostic
   route — the only resource a token can be minted for without a graph in
@@ -91,6 +122,8 @@ def resolve_resource(value: str | None) -> ResourceTarget | None:
   path = parts.path.rstrip("/") or "/"
   if path == AGNOSTIC_MCP_PATH:
     return agnostic_target()
+  if path == ROBOLEDGER_MCP_PATH:
+    return roboledger_target()
   match = _GRAPH_MCP_PATH.match(path)
   if match:
     return graph_target(match.group(1))
@@ -122,14 +155,18 @@ def prm_url(target: ResourceTarget) -> str:
 
 
 def protected_resource_metadata(target: ResourceTarget) -> dict:
+  if target.product == PRODUCT_ROBOLEDGER:
+    resource_name = "RoboLedger MCP"
+  elif target.is_agnostic:
+    resource_name = "RoboSystems MCP"
+  else:
+    resource_name = f"RoboSystems MCP — {target.graph_id}"
   return {
     "resource": target.resource,
     "authorization_servers": [issuer()],
     "scopes_supported": list(SUPPORTED_SCOPES),
     "bearer_methods_supported": ["header"],
-    "resource_name": "RoboSystems MCP"
-    if target.is_agnostic
-    else f"RoboSystems MCP — {target.graph_id}",
+    "resource_name": resource_name,
     "resource_documentation": f"{env.ROBOSYSTEMS_URL.rstrip('/')}/open-source",
   }
 

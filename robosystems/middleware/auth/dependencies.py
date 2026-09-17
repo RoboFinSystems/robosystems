@@ -585,7 +585,11 @@ def _oauth_bearer_token(request: Request) -> str | None:
 
 
 def _mcp_challenge_headers(
-  graph_id: str | None, *, error: str | None = None, description: str | None = None
+  graph_id: str | None,
+  *,
+  product: str | None = None,
+  error: str | None = None,
+  description: str | None = None,
 ) -> dict[str, str]:
   """``WWW-Authenticate`` for an MCP route naming its resource metadata —
   how an OAuth client discovers the authorization server. Only emitted
@@ -597,12 +601,11 @@ def _mcp_challenge_headers(
     return {"WWW-Authenticate": "Bearer, ApiKey"}
 
   from robosystems.operations.oauth_server.resources import (
-    agnostic_target,
     bearer_challenge,
-    graph_target,
+    route_target,
   )
 
-  target = graph_target(graph_id) if graph_id else agnostic_target()
+  target = route_target(graph_id, product)
   return {
     "WWW-Authenticate": bearer_challenge(
       target, error=error, error_description=description
@@ -611,13 +614,20 @@ def _mcp_challenge_headers(
 
 
 def _oauth_principal_graph_access(
-  request: Request, principal: OAuthPrincipal, graph_id: str
+  request: Request,
+  principal: OAuthPrincipal,
+  graph_id: str,
+  *,
+  route_graph_id: str | None,
+  product: str | None = None,
 ) -> None:
   """Live access check for an OAuth principal on ``graph_id`` — the same
   evidence the JWT branch gathers (per-user graph-access cache, capped at
   ten minutes, so a revoked membership stops the token quickly). Raises
   403 ``insufficient_scope`` on denial: the token is valid, the user is
-  not (or no longer) a member.
+  not (or no longer) a member. The challenge names the route's resource
+  (``route_graph_id`` is the URL's graph, ``None`` on the agnostic routes),
+  not the grant's graph.
   """
   client_ip = request.client.host if request.client else None
   endpoint = str(request.url.path)
@@ -651,33 +661,34 @@ def _oauth_principal_graph_access(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Access denied to graph",
       headers=_mcp_challenge_headers(
-        graph_id, error="insufficient_scope", description="Access denied to graph"
+        route_graph_id,
+        product=product,
+        error="insufficient_scope",
+        description="Access denied to graph",
       ),
     )
 
 
 def _resolve_oauth_principal(
-  request: Request, token: str, graph_id: str | None
+  request: Request, token: str, graph_id: str | None, product: str | None = None
 ) -> OAuthPrincipal:
   """Validate an OAuth bearer for an MCP route and bind it to the route.
 
   ``graph_id`` is the URL's graph on the per-graph route, ``None`` on the
-  graph-agnostic route. The token's audience (the grant's canonical
+  graph-agnostic routes; ``product`` names the product route
+  (``/v1/mcp/roboledger``). The token's audience (the grant's canonical
   resource) must be exactly this route's resource; the grant's graph must
   be the URL's graph where the URL names one. Invalid, expired and revoked
   tokens answer 401 ``invalid_token`` so clients refresh.
   """
-  from robosystems.operations.oauth_server.resources import (
-    agnostic_target,
-    graph_target,
-  )
+  from robosystems.operations.oauth_server.resources import route_target
 
   client_ip = request.client.host if request.client else None
   user_agent = request.headers.get("user-agent")
   endpoint = str(request.url.path)
 
   principal = validate_oauth_access_token(token)
-  expected = graph_target(graph_id) if graph_id else agnostic_target()
+  expected = route_target(graph_id, product)
   audience_ok = principal is not None and principal.resource == expected.resource
   graph_ok = principal is not None and (
     graph_id is None or principal.graph_id == graph_id
@@ -701,12 +712,17 @@ def _resolve_oauth_principal(
       status_code=status.HTTP_401_UNAUTHORIZED,
       detail="Invalid or expired token",
       headers=_mcp_challenge_headers(
-        graph_id, error="invalid_token", description="Invalid or expired token"
+        graph_id,
+        product=product,
+        error="invalid_token",
+        description="Invalid or expired token",
       ),
     )
 
   resolved_graph = graph_id or principal.graph_id
-  _oauth_principal_graph_access(request, principal, resolved_graph)
+  _oauth_principal_graph_access(
+    request, principal, resolved_graph, route_graph_id=graph_id, product=product
+  )
 
   publish_principal(request, principal.user_id, "oauth", api_key=token)
   SecurityAuditLogger.log_auth_success(
@@ -769,6 +785,27 @@ async def get_oauth_mcp_principal(
   flow). The returned principal names the grant's graph, which the
   transport uses as the resolved ``graph_id`` for every isolation key.
   """
+  return _require_agnostic_oauth_principal(request, api_key, token, product=None)
+
+
+async def get_oauth_roboledger_mcp_principal(
+  request: Request,
+  api_key: str = Security(API_KEY_HEADER),
+  token: str | None = Query(None, include_in_schema=False),
+) -> OAuthPrincipal:
+  """The RoboLedger MCP route's credential: an OAuth bearer bound to
+  ``/v1/mcp/roboledger``. Same contract as the graph-agnostic route; the
+  consent decision already restricted the grant to a RoboLedger graph."""
+  from robosystems.operations.oauth_server.resources import PRODUCT_ROBOLEDGER
+
+  return _require_agnostic_oauth_principal(
+    request, api_key, token, product=PRODUCT_ROBOLEDGER
+  )
+
+
+def _require_agnostic_oauth_principal(
+  request: Request, api_key: str | None, token: str | None, product: str | None
+) -> OAuthPrincipal:
   from robosystems.config import env
 
   client_ip = request.client.host if request.client else None
@@ -799,10 +836,10 @@ async def get_oauth_mcp_principal(
     raise HTTPException(
       status_code=status.HTTP_401_UNAUTHORIZED,
       detail="OAuth bearer token required",
-      headers=_mcp_challenge_headers(None),
+      headers=_mcp_challenge_headers(None, product=product),
     )
 
-  return _resolve_oauth_principal(request, oauth_token, None)
+  return _resolve_oauth_principal(request, oauth_token, None, product)
 
 
 def require_graph_write_role(user_id: str, graph_id: str) -> None:

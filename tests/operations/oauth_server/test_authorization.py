@@ -1,6 +1,6 @@
 """The authorize → consent → code leg."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -15,6 +15,7 @@ from robosystems.operations.oauth_server.authorization import (
   PendingAuthorizationStore,
   begin_authorization,
   client_callback,
+  graph_serves_product,
   record_decision,
 )
 
@@ -272,3 +273,164 @@ class TestRecordDecision:
         session=test_db,
       )
     assert exc.value.status_code == 400
+
+  async def test_roboledger_resource_refuses_a_non_roboledger_graph(
+    self, test_db, test_user, claude_client
+  ):
+    location = begin_authorization(
+      _params(
+        client_id=claude_client.client_id,
+        resource="https://api.test.example/v1/mcp/roboledger",
+      ),
+      test_db,
+    )
+    request_id = _query(location)["request_id"]
+    with (
+      patch(
+        "robosystems.routers.graphs.mcp.handlers.validate_mcp_access",
+        new=AsyncMock(),
+      ),
+      patch(
+        "robosystems.operations.oauth_server.authorization.graph_serves_product",
+        return_value=False,
+      ) as serves,
+      pytest.raises(ConsentError) as exc,
+    ):
+      await record_decision(
+        request_id=request_id,
+        user=test_user,
+        approved=True,
+        graph_id="sec",
+        session=test_db,
+      )
+    assert exc.value.status_code == 403
+    assert serves.call_args.args[:2] == ("sec", "roboledger")
+    assert OAuthGrant.get_active_by_user_id(str(test_user.id), test_db) == []
+
+  async def test_roboledger_resource_checks_access_before_the_product(
+    self, test_db, test_user, claude_client
+  ):
+    """A graph the user cannot read is refused as inaccessible — the answer
+    must not reveal whether it is a RoboLedger graph."""
+    location = begin_authorization(
+      _params(
+        client_id=claude_client.client_id,
+        resource="https://api.test.example/v1/mcp/roboledger",
+      ),
+      test_db,
+    )
+    request_id = _query(location)["request_id"]
+    with (
+      patch(
+        "robosystems.routers.graphs.mcp.handlers.validate_mcp_access",
+        new=AsyncMock(side_effect=HTTPException(status_code=403, detail="no")),
+      ),
+      patch(
+        "robosystems.operations.oauth_server.authorization.graph_serves_product"
+      ) as serves,
+      pytest.raises(ConsentError) as exc,
+    ):
+      await record_decision(
+        request_id=request_id,
+        user=test_user,
+        approved=True,
+        graph_id=KG,
+        session=test_db,
+      )
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "You do not have access to that graph"
+    serves.assert_not_called()
+
+  async def test_roboledger_resource_grants_a_roboledger_graph(
+    self, test_db, test_user, claude_client, fake_redis
+  ):
+    location = begin_authorization(
+      _params(
+        client_id=claude_client.client_id,
+        resource="https://api.test.example/v1/mcp/roboledger",
+      ),
+      test_db,
+    )
+    request_id = _query(location)["request_id"]
+    with (
+      patch(
+        "robosystems.routers.graphs.mcp.handlers.validate_mcp_access",
+        new=AsyncMock(),
+      ),
+      patch(
+        "robosystems.operations.oauth_server.authorization.graph_serves_product",
+        return_value=True,
+      ),
+    ):
+      url = await record_decision(
+        request_id=request_id,
+        user=test_user,
+        approved=True,
+        graph_id=KG,
+        session=test_db,
+      )
+    assert "code" in _query(url)
+    grants = OAuthGrant.get_active_by_user_id(str(test_user.id), test_db)
+    assert len(grants) == 1
+    assert grants[0].graph_id == KG
+    assert grants[0].resource == "https://api.test.example/v1/mcp/roboledger"
+
+  async def test_agnostic_resource_does_not_check_the_product(
+    self, test_db, test_user, pending_id, fake_redis
+  ):
+    with (
+      patch(
+        "robosystems.routers.graphs.mcp.handlers.validate_mcp_access",
+        new=AsyncMock(),
+      ),
+      patch(
+        "robosystems.operations.oauth_server.authorization.graph_serves_product"
+      ) as serves,
+    ):
+      await record_decision(
+        request_id=pending_id,
+        user=test_user,
+        approved=True,
+        graph_id="sec",
+        session=test_db,
+      )
+    serves.assert_not_called()
+
+
+class TestGraphServesProduct:
+  """The RoboLedger resource's graph test. The extension alone is not enough:
+  the SEC manifest declares ``roboledger`` and subgraphs inherit it."""
+
+  @staticmethod
+  def _graph(**fields):
+    base = {
+      "is_repository": False,
+      "graph_type": "entity",
+      "schema_extensions": ["roboledger"],
+    }
+    base.update(fields)
+    return Mock(**base)
+
+  def _serves(self, graph_id, graph):
+    with patch("robosystems.models.core.Graph.get_by_id", return_value=graph):
+      return graph_serves_product(graph_id, "roboledger", Mock())
+
+  def test_tenant_graph_with_the_extension(self):
+    assert self._serves(KG, self._graph()) is True
+
+  def test_tenant_graph_without_the_extension(self):
+    assert self._serves(KG, self._graph(schema_extensions=["roboinvestor"])) is False
+    assert self._serves(KG, self._graph(schema_extensions=None)) is False
+
+  def test_repository_flag_or_type(self):
+    assert self._serves(KG, self._graph(is_repository=True)) is False
+    assert self._serves(KG, self._graph(graph_type="repository")) is False
+
+  def test_shared_repository_and_subgraph_ids_never_reach_the_database(self):
+    with patch("robosystems.models.core.Graph.get_by_id") as get_by_id:
+      assert graph_serves_product("sec", "roboledger", Mock()) is False
+      assert graph_serves_product(f"{KG}_dev", "roboledger", Mock()) is False
+    get_by_id.assert_not_called()
+
+  def test_missing_graph(self):
+    assert self._serves(KG, None) is False

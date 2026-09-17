@@ -60,6 +60,7 @@ class TestFlagOff:
     [
       ("GET", "/.well-known/oauth-authorization-server"),
       ("GET", "/.well-known/oauth-protected-resource/v1/mcp"),
+      ("GET", "/.well-known/oauth-protected-resource/v1/mcp/roboledger"),
       ("GET", "/v1/oauth/authorize"),
       ("POST", "/v1/oauth/token"),
       ("POST", "/v1/oauth/register"),
@@ -90,6 +91,22 @@ class TestDiscovery:
     assert agnostic["resource"] == "http://testserver/v1/mcp"
     assert graph["resource"] == f"http://testserver/v1/graphs/{KG}/mcp"
     assert graph["authorization_servers"] == ["http://testserver"]
+
+  def test_roboledger_resource_document(self, client):
+    doc = client.get("/.well-known/oauth-protected-resource/v1/mcp/roboledger").json()
+    assert doc["resource"] == "http://testserver/v1/mcp/roboledger"
+    assert doc["resource_name"] == "RoboLedger MCP"
+    assert doc["authorization_servers"] == ["http://testserver"]
+
+  def test_roboledger_transport_challenge_names_its_document(self, client):
+    response = client.post(
+      "/v1/mcp/roboledger", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}
+    )
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == (
+      'Bearer resource_metadata="http://testserver/.well-known/'
+      'oauth-protected-resource/v1/mcp/roboledger", scope="mcp"'
+    )
 
   def test_malformed_graph_id_is_not_served(self, client):
     # (A ".." segment is normalized away by HTTP clients before it reaches
@@ -232,6 +249,7 @@ class TestFullFlow:
       assert body["is_trusted"] is False
       assert body["graph_id"] is None
       assert body["resource"] == "http://testserver/v1/mcp"
+      assert body["product"] is None
 
       # 3. approve with a graph → callback with code
       with patch(
@@ -307,3 +325,36 @@ class TestFullFlow:
       data={"token": refreshed.json()["refresh_token"], "client_id": client_id},
     )
     assert revoked.status_code == 200
+
+
+@pytest.mark.usefixtures("oauth_on")
+def test_pending_roboledger_request_names_its_product(client, test_user):
+  """The consent page filters its graph picker on ``product``."""
+  from main import app
+
+  client_id = client.post("/v1/oauth/register", json=VSCODE_BODY).json()["client_id"]
+  response = client.get(
+    "/v1/oauth/authorize",
+    params={
+      "response_type": "code",
+      "client_id": client_id,
+      "redirect_uri": "http://127.0.0.1:33418/",
+      "state": "st4te",
+      "code_challenge": CHALLENGE,
+      "code_challenge_method": "S256",
+      "scope": "mcp",
+      "resource": "http://testserver/v1/mcp/roboledger",
+    },
+    follow_redirects=False,
+  )
+  assert response.status_code == 302, response.text
+  request_id = _q(response.headers["location"])["request_id"]
+
+  app.dependency_overrides[get_optional_jwt_user] = lambda: test_user
+  try:
+    body = client.get(f"/v1/oauth/authorize/{request_id}").json()
+  finally:
+    app.dependency_overrides.pop(get_optional_jwt_user, None)
+  assert body["resource"] == "http://testserver/v1/mcp/roboledger"
+  assert body["product"] == "roboledger"
+  assert body["graph_id"] is None

@@ -156,3 +156,36 @@ class TestNotApplicableOnSubgraph:
       not isinstance(result, dict)
       or result.get("error") != "not_applicable_on_subgraph"
     )
+
+
+@pytest.mark.unit
+class TestRoboLedgerRouteToolProfile:
+  def test_no_exclusion_is_a_typo(self, all_flags_on):
+    """A misspelled exclusion lists a tool it was meant to withhold, and
+    nothing fails. Every name must be a real tool on a RoboLedger graph."""
+    from robosystems.middleware.mcp.tools.manager import (
+      ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
+    )
+
+    real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
+    unmatched = ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS - real
+    assert unmatched == set(), f"exclusions matching no real tool: {sorted(unmatched)}"
+
+  def test_the_accounting_surface_survives_the_cut(self, all_flags_on):
+    from robosystems.middleware.mcp.tools.manager import (
+      ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
+    )
+
+    real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
+    kept = real - ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
+    for tool in (
+      "get-close-playbook",
+      "get-fiscal-calendar",
+      "close-period",
+      "promote-obligations",
+      "list-period-drafts",
+      "create-event-block",
+      "live-financial-statement",
+      "read-graph-cypher",
+    ):
+      assert tool in kept, tool

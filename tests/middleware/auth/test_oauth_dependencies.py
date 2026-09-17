@@ -271,3 +271,120 @@ class TestAgnosticRoute:
     ):
       await deps.get_oauth_mcp_principal(request, api_key=None)
     assert exc.value.status_code == 404
+
+
+@pytest.mark.usefixtures("oauth_on")
+class TestRoboLedgerRoute:
+  """``/v1/mcp/roboledger`` is its own audience: its tokens work only there,
+  and a ``/v1/mcp`` token (the ChatGPT SEC plugin's, say) is refused."""
+
+  PATH = "/v1/mcp/roboledger"
+
+  async def test_valid_token_yields_principal(self):
+    request = _request({"authorization": f"Bearer {TOKEN}"}, path=self.PATH)
+    principal = _principal(graph_id=KG, resource=f"{ISSUER}{self.PATH}")
+    with (
+      patch.object(deps, "validate_oauth_access_token", return_value=principal),
+      patch.object(
+        deps.api_key_cache, "get_cached_jwt_graph_access", return_value=True
+      ),
+      patch.object(deps, "publish_principal"),
+      patch.object(deps, "SecurityAuditLogger"),
+    ):
+      resolved = await deps.get_oauth_roboledger_mcp_principal(request, api_key=None)
+    assert resolved.graph_id == KG
+    assert request.state.auth_graph_id == KG
+
+  @pytest.mark.parametrize(
+    "resource", [f"{ISSUER}/v1/mcp", f"{ISSUER}/v1/graphs/{KG}/mcp"]
+  )
+  async def test_other_audiences_are_refused_with_this_routes_challenge(self, resource):
+    request = _request({"authorization": f"Bearer {TOKEN}"}, path=self.PATH)
+    with (
+      patch.object(
+        deps,
+        "validate_oauth_access_token",
+        return_value=_principal(resource=resource),
+      ),
+      patch.object(deps, "SecurityAuditLogger"),
+      pytest.raises(HTTPException) as exc,
+    ):
+      await deps.get_oauth_roboledger_mcp_principal(request, api_key=None)
+    assert exc.value.status_code == 401
+    challenge = exc.value.headers["WWW-Authenticate"]
+    assert 'error="invalid_token"' in challenge
+    assert "/.well-known/oauth-protected-resource/v1/mcp/roboledger" in challenge
+
+  async def test_roboledger_token_is_refused_on_the_agnostic_route(self):
+    request = _request({"authorization": f"Bearer {TOKEN}"}, path="/v1/mcp")
+    with (
+      patch.object(
+        deps,
+        "validate_oauth_access_token",
+        return_value=_principal(resource=f"{ISSUER}{self.PATH}"),
+      ),
+      patch.object(deps, "SecurityAuditLogger"),
+      pytest.raises(HTTPException) as exc,
+    ):
+      await deps.get_oauth_mcp_principal(request, api_key=None)
+    assert exc.value.status_code == 401
+    assert 'oauth-protected-resource/v1/mcp"' in exc.value.headers["WWW-Authenticate"]
+
+  async def test_missing_credential_challenge_names_this_resource(self):
+    request = _request({}, path=self.PATH)
+    with (
+      patch.object(deps, "SecurityAuditLogger"),
+      pytest.raises(HTTPException) as exc,
+    ):
+      await deps.get_oauth_roboledger_mcp_principal(request, api_key=None)
+    assert exc.value.status_code == 401
+    assert (
+      "/.well-known/oauth-protected-resource/v1/mcp/roboledger"
+      in exc.value.headers["WWW-Authenticate"]
+    )
+
+  async def test_revoked_membership_is_403_with_this_routes_challenge(self):
+    request = _request({"authorization": f"Bearer {TOKEN}"}, path=self.PATH)
+    principal = _principal(graph_id=KG, resource=f"{ISSUER}{self.PATH}")
+    with (
+      patch.object(deps, "validate_oauth_access_token", return_value=principal),
+      patch.object(
+        deps.api_key_cache, "get_cached_jwt_graph_access", return_value=False
+      ),
+      patch.object(deps, "SecurityAuditLogger"),
+      pytest.raises(HTTPException) as exc,
+    ):
+      await deps.get_oauth_roboledger_mcp_principal(request, api_key=None)
+    assert exc.value.status_code == 403
+    assert (
+      "/.well-known/oauth-protected-resource/v1/mcp/roboledger"
+      in exc.value.headers["WWW-Authenticate"]
+    )
+
+  async def test_flag_off_is_404(self):
+    request = _request({"authorization": f"Bearer {TOKEN}"}, path=self.PATH)
+    with (
+      patch.object(env, "MCP_OAUTH_ENABLED", False),
+      pytest.raises(HTTPException) as exc,
+    ):
+      await deps.get_oauth_roboledger_mcp_principal(request, api_key=None)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.usefixtures("oauth_on")
+async def test_agnostic_route_revoked_membership_challenge_names_the_agnostic_resource():
+  """The 403 names the route's metadata document, not the grant graph's
+  per-graph one — a client re-discovering from it must land back here."""
+  request = _request({"authorization": f"Bearer {TOKEN}"}, path="/v1/mcp")
+  principal = _principal(graph_id=KG, resource=f"{ISSUER}/v1/mcp")
+  with (
+    patch.object(deps, "validate_oauth_access_token", return_value=principal),
+    patch.object(deps.api_key_cache, "get_cached_jwt_graph_access", return_value=False),
+    patch.object(deps, "SecurityAuditLogger"),
+    pytest.raises(HTTPException) as exc,
+  ):
+    await deps.get_oauth_mcp_principal(request, api_key=None)
+  assert exc.value.status_code == 403
+  challenge = exc.value.headers["WWW-Authenticate"]
+  assert 'oauth-protected-resource/v1/mcp"' in challenge
+  assert "/v1/graphs/" not in challenge
