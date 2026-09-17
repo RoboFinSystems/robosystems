@@ -7,7 +7,11 @@ class SearchRequest(BaseModel):
   """Request model for document search."""
 
   query: str = Field(..., min_length=1, max_length=500, description="Search query")
-  entity: str | None = Field(None, description="Filter by ticker, CIK, or entity name")
+  entity: str | None = Field(
+    None,
+    description="Filter by ticker or CIK (exactly one filer), or by entity name "
+    "(a loose word match that can include other filers)",
+  )
   form_type: str | None = Field(
     None, description="Filter by SEC form type (10-K, 10-Q)"
   )

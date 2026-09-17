@@ -178,7 +178,10 @@ class SearchDocumentsTool(_SearchToolMixin):
   resolve-element, then read-graph-cypher for its structured values. Note
   resolve-element is only published on graphs with semantic enrichment
 - Natural language queries work well ("depreciation policy", "month end close procedures")
-- Use entity filter to focus on one company's filings
+- Use entity filter to focus on one company's filings: a ticker or CIK selects
+  exactly that filer, while a company name is a loose word match that can take
+  in other filers sharing a word ("Acme Holdings" also matches every filer
+  with "Holdings" in its name)
 - Use section filter (item_1a, item_7) to target specific filing sections, or an
   element qname (us-gaap:CommitmentsAndContingenciesDisclosureTextBlock) to
   target one iXBRL disclosure across filings; the `element` filter finds the
@@ -192,7 +195,7 @@ class SearchDocumentsTool(_SearchToolMixin):
           },
           "entity": {
             "type": "string",
-            "description": "Optional: filter by ticker, CIK, or company name",
+            "description": "Optional: filter by ticker or CIK (exactly one filer), or by company name (a loose word match that can include other filers)",
           },
           "form_type": {
             "type": "string",

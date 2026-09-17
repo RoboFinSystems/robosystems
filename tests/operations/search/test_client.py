@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.operations.search.client import (
+  HYBRID_CANDIDATE_DEPTH,
   HYBRID_PIPELINE_NAME,
   INDEX_MAPPING,
   OpenSearchClient,
@@ -266,6 +267,33 @@ class TestSearchHybrid:
     assert len(queries) == 2
     assert "bool" in queries[0]  # BM25 wrapped in bool for filtering
     assert "knn" in queries[1]
+
+  def test_candidate_pool_does_not_follow_page_size(self, client, mock_opensearch):
+    """min_max normalizes over the pool, so a pool sized by the page would
+    score the same document differently at size 3 and size 10."""
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    pools = []
+    for size, offset in [(3, 0), (10, 0), (50, 40)]:
+      client.search_hybrid(
+        "test", DUMMY_EMBEDDING, graph_id="sec", size=size, offset=offset
+      )
+      hybrid = mock_opensearch.search.call_args.kwargs["body"]["query"]["hybrid"]
+      pools.append(
+        (hybrid["pagination_depth"], hybrid["queries"][1]["knn"]["embedding"]["k"])
+      )
+
+    assert pools == [(HYBRID_CANDIDATE_DEPTH, HYBRID_CANDIDATE_DEPTH)] * 3
+
+  def test_offset_pages_within_the_pool(self, client, mock_opensearch):
+    """OpenSearch rejects a hybrid query with from > 0 and no pagination_depth."""
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search_hybrid("test", DUMMY_EMBEDDING, graph_id="sec", size=10, offset=20)
+
+    body = mock_opensearch.search.call_args.kwargs["body"]
+    assert (body["from"], body["size"]) == (20, 10)
+    assert body["query"]["hybrid"]["pagination_depth"] == HYBRID_CANDIDATE_DEPTH
 
   def test_uses_search_pipeline(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
