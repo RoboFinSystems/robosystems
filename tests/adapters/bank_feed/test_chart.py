@@ -35,3 +35,12 @@ def test_a_liability_account_is_credit():
     institution="First Platypus Bank",
   )
   assert card.is_credit
+
+
+@pytest.mark.unit
+def test_a_hint_resolves_through_its_template_aliases():
+  from robosystems.adapters.bank_feed.hints import HINTS
+
+  index = ChartIndex(by_name={name_key("Travel & Entertainment"): "e_te"})
+  assert index.resolve_hint(HINTS["BusinessMeals"]) == "e_te"
+  assert index.resolve_hint(HINTS["InterestIncome"]) is None

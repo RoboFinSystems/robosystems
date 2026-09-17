@@ -369,7 +369,7 @@ def _bank_event(
   merchant = txn.get("merchant") or {}
   gl_code_name = allocations[0].get("glCodeName") if allocations else None
   suggested_element_id = (
-    (chart.resolve_gl_code(gl_code_name) or chart.resolve(suggested.name))
+    (chart.resolve_gl_code(gl_code_name) or chart.resolve_hint(suggested))
     if suggested
     else None
   )

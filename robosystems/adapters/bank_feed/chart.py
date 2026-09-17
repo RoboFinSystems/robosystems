@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from robosystems.adapters.bank_feed.hints import parse_gl_code_name
+from robosystems.adapters.bank_feed.hints import AccountHint, parse_gl_code_name
 
 
 def name_key(value: str) -> str:
@@ -52,6 +52,11 @@ class ChartIndex:
       if element_id:
         return element_id
     return None
+
+  def resolve_hint(self, hint: AccountHint) -> str | None:
+    """A hint resolves by its own name, then by the names it goes by on the
+    shipped chart templates."""
+    return self.resolve(hint.name, *hint.aliases)
 
   def resolve_gl_code(self, gl_code_name: str | None) -> str | None:
     """A ``<code> - <name>`` label resolves by its code, then by its name."""
