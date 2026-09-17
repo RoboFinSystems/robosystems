@@ -142,6 +142,7 @@ class TestBody:
     assert summary["cursor_stored"] is True
     assert summary["history_complete"] is True
     assert summary["window"]["full_rebuild"] is False
+    assert run.load.call_args.kwargs["rekey_replaced"] is False
     run.bootstrap.assert_called_once()
 
   def test_the_body_waits_for_the_historical_pull(self):
@@ -171,6 +172,7 @@ class TestBody:
       credentials=FIRST_SYNC,
     )
     assert len(run.load.call_args.kwargs["sync"].added) == 217
+    assert run.load.call_args.kwargs["rekey_replaced"] is True
     run.store.assert_called_once_with("conn_1", "c2", history_complete=True)
     run.bootstrap.assert_called_once()
 

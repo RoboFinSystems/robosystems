@@ -19,6 +19,7 @@ from robosystems.adapters.plaid.pipeline.load import (
   load_sync,
   merge_legs,
   reconcile_existing,
+  rekey_replaced_events,
   survivor_payload,
 )
 from robosystems.adapters.plaid.pipeline.transform import bank_accounts
@@ -378,7 +379,16 @@ class TestTransferLegsAcrossSyncs:
 
 @pytest.mark.unit
 class TestLoadSync:
-  def _load(self, *, existing=None, waiting=None, removed=(), modified=()):
+  def _load(
+    self,
+    *,
+    existing=None,
+    waiting=None,
+    removed=(),
+    modified=(),
+    replay=False,
+    old_events=(),
+  ):
     captured: list[dict] = []
     session = _Session()
     sync = TransactionsSync(
@@ -391,6 +401,7 @@ class TestLoadSync:
       patch(f"{MODULE}.ensure_agents", return_value=({}, 3)),
       patch(f"{MODULE}.find_waiting_leg", return_value=waiting),
       patch(f"{MODULE}._merge_into_pair", return_value=True) as merge,
+      patch(f"{MODULE}._replay_candidates", return_value=list(old_events)),
       patch(
         f"{MODULE}.capture_event",
         side_effect=lambda s, payload, **kw: captured.append(payload) or True,
@@ -406,6 +417,7 @@ class TestLoadSync:
         sync=sync,
         account_elements=ELEMENTS,
         chart=ChartIndex(),
+        rekey_replaced=replay,
       )
     return report, captured, removals, merge, session
 
@@ -446,6 +458,36 @@ class TestLoadSync:
       removed=[{"transaction_id": "t_gone", "account_id": CARD_ID}, {}]
     )
     assert removals.call_args.args[2] == ["t_gone"]
+
+  def test_a_replay_rekeys_the_old_items_events_instead_of_capturing(self):
+    # The coffee line as an earlier Item captured and posted it, then purged:
+    # no transaction id or description left, the classification intact.
+    old = _event(
+      status="committed",
+      external_id="plaid_txn_old_coffee",
+      metadata_={"connection_id": "conn_old", "classified_element_id": "e_te"},
+    )
+    report, captured, *_ = self._load(replay=True, old_events=[old])
+    assert "plaid_txn_t_coffee" not in {p["external_id"] for p in captured}
+    assert report.events_rekeyed == 1 and report.events_existing == 1
+    assert old.external_id == "plaid_txn_t_coffee"
+    assert old.metadata_["transaction_id"] == "t_coffee"
+    assert old.metadata_["item_id"] == ITEM_ID
+    assert old.metadata_["connection_id"] == "conn_1"
+    assert old.metadata_["classified_element_id"] == "e_te"
+    assert old.metadata_["rekeyed_from"] == [
+      {
+        "external_id": "plaid_txn_old_coffee",
+        "at": old.metadata_["rekeyed_from"][0]["at"],
+        "connection_id": "conn_old",
+      }
+    ]
+
+  def test_an_incremental_sync_never_rekeys(self):
+    old = _event(status="committed", external_id="plaid_txn_old_coffee")
+    report, captured, *_ = self._load(replay=False, old_events=[old])
+    assert "plaid_txn_t_coffee" in {p["external_id"] for p in captured}
+    assert report.events_rekeyed == 0 and old.external_id == "plaid_txn_old_coffee"
 
 
 @pytest.mark.unit
@@ -519,3 +561,162 @@ class TestFlagPayloads:
     accepted = event.metadata_["drift_payload"]
     assert accepted["source_amount"] == -1500
     assert "line_items" not in accepted and "posting_date" not in accepted
+
+
+@pytest.mark.unit
+class TestRekey:
+  """After a re-Link the history comes back under new ids; a replay finds it."""
+
+  def _old(self, txn="old_1", *, status="committed", item_id="item_old", **meta):
+    return _event(
+      status=status,
+      external_id=f"plaid_txn_{txn}",
+      metadata_={
+        "connection_id": "conn_1",
+        "transaction_id": txn,
+        "account_id": "acct_old",
+        "item_id": item_id,
+        "bank_description": "HARBOR COFFEE",
+        **meta,
+      },
+    )
+
+  def _new(self, txn="new_1", **meta):
+    payload = _payload(**{"bank_description": "HARBOR COFFEE", **meta})
+    payload["external_id"] = f"plaid_txn_{txn}"
+    payload["metadata"]["transaction_id"] = txn
+    payload["metadata"]["item_id"] = "item_new"
+    return payload
+
+  def _rekey(self, payloads, candidates, *, known=None, item_id="item_new"):
+    report = PlaidLoadReport()
+    with patch(f"{MODULE}._replay_candidates", return_value=list(candidates)):
+      out = rekey_replaced_events(
+        _Session(),
+        payloads,
+        known=known or {},
+        connection_id="conn_1",
+        item_id=item_id,
+        report=report,
+      )
+    return out, report
+
+  def test_an_old_items_event_takes_the_new_identity(self):
+    old, new = self._old(), self._new()
+    out, report = self._rekey([new], [old])
+    assert out == {"plaid_txn_new_1": old} and report.events_rekeyed == 1
+    assert old.external_id == "plaid_txn_new_1"
+    assert old.metadata_["transaction_id"] == "new_1"
+    assert old.metadata_["item_id"] == "item_new"
+    assert old.metadata_["account_id"] == CARD_ID
+    trail = old.metadata_["rekeyed_from"]
+    assert trail[0]["external_id"] == "plaid_txn_old_1"
+    assert trail[0]["transaction_id"] == "old_1" and trail[0]["item_id"] == "item_old"
+    assert (
+      trail[0]["account_id"] == "acct_old" and trail[0]["connection_id"] == "conn_1"
+    )
+
+  def test_another_connections_live_line_is_never_touched(self):
+    """Same chart account, date and amount, no description on the old side —
+    but it still carries another connection's Item, so it is another feed's."""
+    theirs = self._old(item_id="item_theirs", connection_id="conn_2")
+    theirs.metadata_.pop("bank_description")
+    out, report = self._rekey([self._new()], [theirs])
+    assert out == {} and report.events_rekeyed == 0
+    assert theirs.external_id == "plaid_txn_old_1"
+
+  def test_the_same_items_events_are_never_rekeyed(self):
+    out, _ = self._rekey([self._new()], [self._old(item_id="item_new")])
+    assert out == {}
+
+  def test_an_event_a_payload_already_identifies_is_never_a_target(self):
+    old = self._old(item_id="")
+    out, _ = self._rekey([self._new()], [old], known={"plaid_txn_other": old})
+    assert out == {}
+
+  def test_descriptions_decide_between_same_day_same_amount_lines(self):
+    coffee = self._old("old_c")
+    lunch = self._old("old_l", bank_description="HARBOR LUNCH")
+    new_lunch = self._new("new_l", bank_description="HARBOR LUNCH")
+    new_coffee = self._new("new_c")
+    out, _ = self._rekey([new_lunch, new_coffee], [coffee, lunch])
+    assert out["plaid_txn_new_l"] is lunch and out["plaid_txn_new_c"] is coffee
+
+  def test_differing_descriptions_never_cross(self):
+    out, _ = self._rekey([self._new()], [self._old(bank_description="SOMEWHERE ELSE")])
+    assert out == {}
+
+  def test_a_purged_line_matches_without_a_description(self):
+    old = self._old(item_id="")
+    old.metadata_ = {"connection_id": "conn_old", "classified_element_id": "e_te"}
+    out, _ = self._rekey([self._new()], [old])
+    assert out == {"plaid_txn_new_1": old}
+    assert old.metadata_["connection_id"] == "conn_1"
+    assert old.metadata_["classified_element_id"] == "e_te"
+
+  def test_a_posted_line_matches_on_the_date_the_bank_last_reported(self):
+    old = self._old(source_amount=-1240, source_posted_date="2026-03-16")
+    new = self._new()
+    new["occurred_at"] = "2026-03-16T00:00:00Z"
+    out, _ = self._rekey([new], [old])
+    assert out == {"plaid_txn_new_1": old}
+
+  def test_a_captured_line_matches_on_its_own_columns(self):
+    old = self._old(status="captured")
+    out, _ = self._rekey([self._new()], [old])
+    assert out == {"plaid_txn_new_1": old}
+
+  def test_a_pair_rekeys_its_legs(self):
+    pair = _event(
+      status="committed",
+      event_type="internal_transfer",
+      amount=50000,
+      resource_element_id="e_sav",
+      external_id="plaid_xfer_old_a",
+      metadata_={
+        "connection_id": "conn_1",
+        "item_id": "item_old",
+        "legs": ["old_a", "old_b"],
+        "from_element_id": "e_chk",
+        "to_element_id": "e_sav",
+        "from_account_id": "a_old",
+        "to_account_id": "b_old",
+        "bank_description": "TRANSFER",
+      },
+    )
+    payload = {
+      "external_id": "plaid_xfer_new_a",
+      "event_type": "internal_transfer",
+      "amount": 50000,
+      "occurred_at": "2026-03-14T00:00:00Z",
+      "resource_element_id": "e_sav",
+      "metadata": {
+        "connection_id": "conn_1",
+        "item_id": "item_new",
+        "legs": ["new_a", "new_b"],
+        "from_element_id": "e_chk",
+        "to_element_id": "e_sav",
+        "from_account_id": CHECKING_ID,
+        "to_account_id": SAVINGS_ID,
+        "bank_description": "TRANSFER",
+      },
+    }
+    out, _ = self._rekey([payload], [pair])
+    assert out == {"plaid_xfer_new_a": pair}
+    assert pair.external_id == "plaid_xfer_new_a"
+    assert pair.metadata_["legs"] == ["new_a", "new_b"]
+    assert pair.metadata_["from_account_id"] == CHECKING_ID
+    assert pair.metadata_["rekeyed_from"][0]["legs"] == ["old_a", "old_b"]
+
+  def test_nothing_to_match_costs_no_query(self):
+    with patch(f"{MODULE}._replay_candidates") as query:
+      out = rekey_replaced_events(
+        _Session(),
+        [self._new()],
+        known={"plaid_txn_new_1": self._old()},
+        connection_id="conn_1",
+        item_id="item_new",
+        report=PlaidLoadReport(),
+      )
+    assert out == {}
+    query.assert_not_called()

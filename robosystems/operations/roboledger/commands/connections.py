@@ -86,6 +86,7 @@ BANK_FEED_PAYLOAD_KEYS: frozenset[str] = frozenset(
     "note",
     "payment_channel",
     "plaid_category_confidence",
+    "rekeyed_from",
     "plaid_category_detailed",
     "plaid_category_primary",
     "split",

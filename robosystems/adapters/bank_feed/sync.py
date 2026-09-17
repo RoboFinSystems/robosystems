@@ -11,10 +11,14 @@ stale. Everything past the body is best-effort and never fails the run.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from dagster import AssetExecutionContext, Config
+
+from robosystems.adapters.bank_feed.window import (
+  default_backfill_start as default_backfill_start,
+)
 
 # The earliest month the books can open at. A feed can carry a placeholder
 # date (the Mercury sandbox posts transactions dated year 1); a calendar
@@ -35,12 +39,6 @@ class BankFeedSyncConfig(Config):
   # can start without waiting out the lock's TTL. Empty when no lock was
   # acquired (Valkey unavailable at dispatch).
   sync_lock_id: str = ""
-
-
-def default_backfill_start(today: date | None = None) -> date:
-  """The connect-time backfill start when none is given: 1 January of last year."""
-  today = today or date.today()
-  return date(today.year - 1, 1, 1)
 
 
 def last_sync(connection_id: str) -> datetime | None:
