@@ -135,7 +135,7 @@ class TestBody:
   def test_the_cursor_advances_only_when_plaid_was_ready(self):
     run = _run_body([_sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9")])
     run.client.sync_transactions.assert_called_once_with("access-1", "c8")
-    run.store.assert_called_once_with("conn_1", "c9")
+    run.store.assert_called_once_with("conn_1", "c9", history_complete=True)
     run.session.commit.assert_called_once()
     summary = run.update.call_args.args[2]
     assert summary["cursor_stored"] is True
@@ -148,13 +148,34 @@ class TestBody:
       [
         _sync("NOT_READY"),
         _sync("INITIAL_UPDATE_COMPLETE", next_cursor="c1"),
+        _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c2", added=16),
         _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c2"),
-      ]
+      ],
+      credentials=FIRST_SYNC,
     )
-    assert run.client.sync_transactions.call_count == 3
+    assert run.client.sync_transactions.call_count == 4
     assert run.clock.sleep.call_count == 2
-    run.store.assert_called_once_with("conn_1", "c2")
+    run.store.assert_called_once_with("conn_1", "c2", history_complete=True)
     run.bootstrap.assert_called_once()
+
+  def test_the_first_run_to_see_the_history_drains_what_lands_with_it(self):
+    # Sandbox, 2026-09-16: the flag flipped on a page of 16; 201 more answered
+    # the next cursor a beat later.
+    run = _run_body(
+      [
+        _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c1", added=16),
+        _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c2", added=201),
+        _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c2"),
+      ],
+      credentials=FIRST_SYNC,
+    )
+    assert len(run.load.call_args.kwargs["sync"].added) == 217
+    run.store.assert_called_once_with("conn_1", "c2", history_complete=True)
+    run.bootstrap.assert_called_once()
+
+  def test_a_run_after_the_history_was_seen_does_not_drain(self):
+    run = _run_body([_sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9", added=3)])
+    assert run.client.sync_transactions.call_count == 1
 
   def test_a_first_pull_still_empty_after_the_wait_fails_and_writes_nothing(self):
     run = _run_body(lambda *args: _sync("NOT_READY"), expect=Failure)
@@ -168,7 +189,7 @@ class TestBody:
   def test_a_partial_history_is_captured_but_the_calendar_waits(self):
     run = _run_body(lambda *args: _sync("INITIAL_UPDATE_COMPLETE", next_cursor="c1"))
     run.session.commit.assert_called_once()
-    run.store.assert_called_once_with("conn_1", "c1")
+    run.store.assert_called_once_with("conn_1", "c1", history_complete=False)
     run.bootstrap.assert_not_called()
     assert run.update.call_args.args[2]["history_complete"] is False
 
@@ -186,11 +207,24 @@ class TestBody:
     run.stale.assert_called_once()
 
 
-def _sync(status: str, *, next_cursor: str = "") -> TransactionsSync:
-  return TransactionsSync(next_cursor=next_cursor, update_status=status)
+SEEN = {
+  "access_token": "access-1",
+  "cursor": "c8",
+  "item_id": "i1",
+  "history_complete_at": "2026-09-01T00:00:00+00:00",
+}
+FIRST_SYNC = {"access_token": "access-1", "item_id": "i1"}
 
 
-def _run_body(syncs, *, failed=0, errors=(), expect=None):
+def _sync(status: str, *, next_cursor: str = "", added: int = 0) -> TransactionsSync:
+  return TransactionsSync(
+    added=[{"transaction_id": f"t{i}"} for i in range(added)],
+    next_cursor=next_cursor,
+    update_status=status,
+  )
+
+
+def _run_body(syncs, *, credentials=None, failed=0, errors=(), expect=None):
   """Run the body against a mocked Plaid client and tenant session.
 
   ``syncs`` is the sequence ``sync_transactions`` answers, or a callable that
@@ -216,7 +250,7 @@ def _run_body(syncs, *, failed=0, errors=(), expect=None):
   )
   report.as_counts.return_value = {}
   run = SimpleNamespace(client=client, session=session, error=None, result=None)
-  credentials = {"access_token": "access-1", "cursor": "c8", "item_id": "i1"}
+  credentials = dict(SEEN if credentials is None else credentials)
   with (
     patch(f"{MODULE}.load_credentials", return_value=credentials),
     patch(
@@ -229,7 +263,9 @@ def _run_body(syncs, *, failed=0, errors=(), expect=None):
       return_value=MagicMock(links={}, linked=0, created=0),
     ),
     patch("robosystems.adapters.bank_feed.accounts.build_chart_index"),
-    patch("robosystems.adapters.plaid.pipeline.load.load_sync", return_value=report),
+    patch(
+      "robosystems.adapters.plaid.pipeline.load.load_sync", return_value=report
+    ) as load,
     patch(f"{MODULE}.time") as clock,
     patch(f"{MODULE}.store_cursor") as store,
     patch(f"{MODULE}.update_last_sync") as update,
@@ -237,7 +273,7 @@ def _run_body(syncs, *, failed=0, errors=(), expect=None):
     patch(f"{MODULE}.mark_graph_stale") as stale,
   ):
     run.clock, run.store, run.update = clock, store, update
-    run.bootstrap, run.stale = bootstrap, stale
+    run.bootstrap, run.stale, run.load = bootstrap, stale, load
     if expect is None:
       run.result = _run_plaid_sync(build_asset_context(), _config())
     else:

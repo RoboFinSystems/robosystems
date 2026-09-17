@@ -145,6 +145,17 @@ class TransactionsSync:
     """True once the whole requested history is at Plaid."""
     return self.update_status == HISTORY_COMPLETE
 
+  def extend(self, other: TransactionsSync) -> None:
+    """Fold a later page set into this one; the cursor moves to the other's."""
+    self.added.extend(other.added)
+    self.modified.extend(other.modified)
+    self.removed.extend(other.removed)
+    if other.accounts:
+      self.accounts = list(other.accounts)
+    if other.next_cursor:
+      self.next_cursor = other.next_cursor
+    self.update_status = other.update_status or self.update_status
+
 
 class PlaidClient:
   def __init__(

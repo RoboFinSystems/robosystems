@@ -12,6 +12,7 @@ from robosystems.adapters.plaid.client.api import (
   MAX_DAYS_REQUESTED,
   PlaidClient,
   PlaidError,
+  TransactionsSync,
 )
 
 
@@ -216,3 +217,24 @@ class TestErrors:
       client.get_item("access-1")
     assert exc_info.value.status_code == 503
     assert not exc_info.value.needs_reauth
+
+
+@pytest.mark.unit
+def test_extend_folds_a_later_page_set_in():
+  first = TransactionsSync(
+    added=[{"transaction_id": "a"}],
+    next_cursor="c1",
+    update_status="INITIAL_UPDATE_COMPLETE",
+  )
+  first.extend(
+    TransactionsSync(
+      added=[{"transaction_id": "b"}],
+      removed=[{"transaction_id": "z"}],
+      accounts=[{"account_id": "acct"}],
+      next_cursor="c2",
+      update_status="HISTORICAL_UPDATE_COMPLETE",
+    )
+  )
+  assert [t["transaction_id"] for t in first.added] == ["a", "b"]
+  assert len(first.removed) == 1 and first.accounts == [{"account_id": "acct"}]
+  assert first.next_cursor == "c2" and first.history_complete

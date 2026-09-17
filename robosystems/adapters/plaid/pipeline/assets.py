@@ -60,6 +60,8 @@ SOURCE_LABEL = "Plaid"
 # How long a run waits for Plaid to finish pulling the Item's history.
 PULL_WAIT_SECONDS = 600
 PULL_POLL_SECONDS = 10
+# How many extra cursors the first run to see the history complete drains.
+SETTLE_ROUNDS = 10
 
 
 class PlaidSyncConfig(BankFeedSyncConfig):
@@ -132,6 +134,7 @@ def _run_plaid_sync(
   sync_config = dict(credentials.get("sync_config") or {})
   since = since_date(config, sync_config)
   cursor = sync_cursor(config, credentials)
+  history_seen = bool(credentials.get("history_complete_at"))
   item_id = credentials.get("item_id")
   context.log.info(
     f"Plaid sync for graph={config.graph_id} connection={config.connection_id} "
@@ -150,6 +153,8 @@ def _run_plaid_sync(
       time.sleep(PULL_POLL_SECONDS)
       waited += PULL_POLL_SECONDS
       sync = client.sync_transactions(access_token, cursor)
+    if sync.history_complete and not history_seen:
+      sync = settle_after_history(context, client, access_token, sync)
   except PlaidError as exc:
     if exc.needs_reauth:
       mark_needs_reauth(config.connection_id)
@@ -231,7 +236,9 @@ def _run_plaid_sync(
 
   cursor_stored = bool(sync.next_cursor)
   if cursor_stored:
-    store_cursor(config.connection_id, sync.next_cursor)
+    store_cursor(
+      config.connection_id, sync.next_cursor, history_complete=sync.history_complete
+    )
 
   context.log.info(
     f"Accounts: {link_result.linked} linked, {link_result.created} created. "
@@ -289,6 +296,33 @@ def _run_plaid_sync(
   )
 
 
+def settle_after_history(
+  context: AssetExecutionContext,
+  client: Any,
+  access_token: str,
+  sync: Any,
+) -> Any:
+  """Drain what lands with the history-complete flag.
+
+  Observed against the sandbox 2026-09-16: the status flipped to
+  ``HISTORICAL_UPDATE_COMPLETE`` on a page holding the recent window, and the
+  historical rows answered the *next* cursor a beat later. The first run to
+  see the flag keeps pulling until a cursor returns nothing, so the calendar
+  opens on the whole history; the credential bundle then records
+  ``history_complete_at`` and later runs never pay for it.
+  """
+  for _round in range(SETTLE_ROUNDS):
+    more = client.sync_transactions(access_token, sync.next_cursor)
+    if not (more.added or more.modified or more.removed):
+      return sync
+    context.log.info(
+      f"Plaid delivered {len(more.added)} added, {len(more.modified)} modified, "
+      f"{len(more.removed)} removed after the history flag; folding them in"
+    )
+    sync.extend(more)
+  return sync
+
+
 def since_date(config: PlaidSyncConfig, sync_config: dict[str, Any]) -> date:
   """The earliest posting date captured: an explicit ``since_date`` for this
   run, else the connect-time one, else 1 January of last year."""
@@ -320,9 +354,12 @@ def load_credentials(connection_id: str) -> dict[str, Any]:
     return dict(row.get_credentials()) if row is not None else {}
 
 
-def store_cursor(connection_id: str, cursor: str) -> None:
+def store_cursor(
+  connection_id: str, cursor: str, *, history_complete: bool = False
+) -> None:
   """Advance the stored cursor, re-reading the bundle so a concurrent re-link
-  that replaced the access token is never overwritten."""
+  that replaced the access token is never overwritten. The first time the
+  history is complete, stamp ``history_complete_at``."""
   from robosystems.database import SessionFactory
   from robosystems.models.core.connection.connection_credentials import (
     ConnectionCredentials,
@@ -333,14 +370,11 @@ def store_cursor(connection_id: str, cursor: str) -> None:
     if row is None:
       return
     current = dict(row.get_credentials())
-    row.update_credentials(
-      {
-        **current,
-        "cursor": cursor,
-        "cursor_updated_at": datetime.now(UTC).isoformat(),
-      },
-      session,
-    )
+    now = datetime.now(UTC).isoformat()
+    updated = {**current, "cursor": cursor, "cursor_updated_at": now}
+    if history_complete and not current.get("history_complete_at"):
+      updated["history_complete_at"] = now
+    row.update_credentials(updated, session)
 
 
 def mark_needs_reauth(connection_id: str) -> None:
