@@ -1,0 +1,105 @@
+name: Publish Docs
+
+# Publishes the public docs catalog to the content CDN: the GitHub wiki
+# (technical docs, rendered at robosystems.ai/docs/technical) and docs/product/
+# (product pages, rendered on each site's /docs), as markdown bodies plus
+# index.json. The apps read https://<DOCS_BASE_URL>/index.json with ISR.
+#
+# Runs only where DOCS_BUCKET is set, so a fork without a content bucket skips it.
+# The upload is skipped when the built digest matches the published one, which
+# keeps the hourly run a no-op on quiet days.
+
+on:
+  gollum:
+  push:
+    branches: [main]
+    paths:
+      - "docs/product/**"
+      - "robosystems/scripts/publish_docs.py"
+      - ".github/workflows/publish-docs.yml"
+  schedule:
+    # Backstop for wiki edits: GitHub does not document whether a git push to the
+    # wiki repository fires `gollum`, and every wiki commit arrives that way.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-docs
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: vars.DOCS_BUCKET != '' && vars.DOCS_BASE_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DOCS_BUCKET: ${{ vars.DOCS_BUCKET }}
+      DOCS_BASE_URL: ${{ vars.DOCS_BASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history without blobs: each page's `updated` is its last commit date.
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Checkout wiki
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.12.8" # keep in step with the ghcr.io/astral-sh/uv tag in both Dockerfiles
+
+      - name: Build the catalog
+        run: |
+          uv run --no-project --python 3.13 python robosystems/scripts/publish_docs.py \
+            --wiki wiki \
+            --product docs/product \
+            --asset-base "${DOCS_BASE_URL%/}/" \
+            --out build/docs
+
+      - name: Compare with the published catalog
+        id: compare
+        run: |
+          built=$(jq -r .digest build/docs/index.json)
+          live=$(curl -fsS "${DOCS_BASE_URL%/}/index.json" 2>/dev/null | jq -r '.digest // empty' 2>/dev/null || true)
+          echo "built=$built live=${live:-none}"
+          if [ "$built" = "$live" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Published catalog is current; nothing to upload."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure AWS credentials
+        if: steps.compare.outputs.changed == 'true'
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      # Order matters: bodies first, then the index that references them, then
+      # the delete pass, so a reader never gets an index pointing at a missing body.
+      - name: Upload
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          dest="s3://${DOCS_BUCKET}/docs"
+          cache="public, max-age=300"
+          aws s3 sync build/docs "$dest" --exclude "*" --include "*.md" \
+            --content-type "text/markdown; charset=utf-8" --cache-control "$cache"
+          aws s3 sync build/docs "$dest" --exclude "*.md" --exclude "index.json" \
+            --cache-control "$cache"
+          aws s3 cp build/docs/index.json "$dest/index.json" \
+            --content-type "application/json" --cache-control "$cache"
+          aws s3 sync build/docs "$dest" --delete --exclude "index.json" --size-only \
+            --cache-control "$cache"
+          echo "Published $(jq '.pages | length' build/docs/index.json) pages to ${DOCS_BASE_URL%/}/index.json"

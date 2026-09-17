@@ -582,6 +582,10 @@ sec-health verbose="" json="" api_url="http://localhost:8001":
 
 ## Misc ##
 
+# Build the public docs catalog locally (wiki + docs/product) into .local/docs, as the Publish Docs workflow does
+docs-build wiki="../robosystems.wiki" out=".local/docs":
+    uv run --no-project python robosystems/scripts/publish_docs.py --wiki {{wiki}} --product docs/product --out {{out}}
+
 # Forward Stripe webhook events to local API
 stripe-webhook url="http://localhost:8000":
     stripe listen --forward-to {{url}}/admin/v1/webhooks/stripe

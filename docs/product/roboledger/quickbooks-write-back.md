@@ -1,0 +1,32 @@
+---
+title: Nothing writes to QuickBooks until you post
+description: Reading, reporting, planning and syncing never write to QuickBooks. Entries RoboLedger posts do. How write-back works, and how to control it.
+order: 5
+---
+
+Connecting QuickBooks, syncing, asking questions, building reports and running forecasts never write anything to QuickBooks. Syncing only reads. You can use everything in [What Claude can do with your books](what-claude-can-do.md) short of the close without changing a single QuickBooks record.
+
+## What does write to QuickBooks
+
+With the default write-back policy, only entries RoboLedger posts:
+
+1. **Closing a month.** The entries RoboLedger drafted for the month are written to QuickBooks when the month closes. That means schedule entries like depreciation, and one-off adjustments you asked Claude to draft. Transactions that came from QuickBooks are never sent back.
+2. **Posting a single entry.** Claude can post one entry you've agreed on, outside a close, and it's written to QuickBooks when it posts.
+
+Before a close, the list of drafts shows which entries will be written to QuickBooks and which stay in RoboLedger. An entry can also be marked to stay in RoboLedger only.
+
+If QuickBooks rejects an entry during a close, the close reports it. Entries that were already written aren't sent again when you retry.
+
+## The write-back policy
+
+The QuickBooks card under **Entity → Connections** has a **Write-back policy** setting:
+
+- **QuickBooks authoritative, write back on close** is the default. QuickBooks stays your book of record, and the entries RoboLedger posts are written to it.
+- **Native, RoboLedger only, no write-back** keeps the entries RoboLedger posts in RoboLedger.
+
+## Disconnecting QuickBooks
+
+Disconnecting asks what the graph should do next:
+
+- **Disconnect** revokes access and stops syncing. Your books stay in the graph. Connect the same QuickBooks company again later and it picks up where it left off, with QuickBooks as the source of truth.
+- **Sever and go native** keeps the chart of accounts QuickBooks created as the graph's own, and you keep your books in RoboLedger from then on. QuickBooks can never resume over those books. This can't be undone.
