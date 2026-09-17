@@ -212,10 +212,7 @@ class TestLinkToken:
 @pytest.mark.asyncio
 class TestCompleteLink:
   def _patches(self, client, credentials, *, duplicate=None, stored=True):
-    registry = MagicMock()
-    registry.sync_connection = AsyncMock(
-      return_value=SyncOutcome(status="dispatched", task_id="run_1")
-    )
+    registry = AsyncMock(return_value="run_1")  # dispatch_first_sync
     return (
       registry,
       patch(f"{MODULE}.plaid_client", return_value=client),
@@ -227,7 +224,7 @@ class TestCompleteLink:
         return_value=stored,
       ),
       patch(f"{MODULE}.record_bank_feed_consent"),
-      patch("robosystems.operations.providers.registry.provider_registry", registry),
+      patch(f"{MODULE}.dispatch_first_sync", registry),
     )
 
   async def _complete(self, client, credentials, connection=None, **kwargs):
@@ -260,16 +257,19 @@ class TestCompleteLink:
     )
     assert result["success"] and result["auto_sync_task_id"] == "run_1"
     assert result["message"] == "Harborline Bank connected through Plaid"
-    kwargs = update.call_args.kwargs
-    creds = kwargs["credentials"]
+    # The credential lands first; the row turns connected only after.
+    first, final = update.call_args_list[0].kwargs, update.call_args_list[1].kwargs
+    creds = first["credentials"]
+    assert "status" not in first
     assert creds["access_token"] == "access-new" and creds["item_id"] == "item-new"
     assert creds["institution_id"] == "ins_1" and creds["cursor"] is None
     assert creds["sync_config"] == {"since_date": "2026-01-01"}
     assert [a["mask"] for a in creds["accounts"]] == ["1234", "9012"]
-    assert kwargs["status"] == "connected"
-    assert kwargs["metadata"]["institution_name"] == "Harborline Bank"
+    assert final["status"] == "connected"
+    assert final["metadata"]["institution_name"] == "Harborline Bank"
     assert consent.call_args.kwargs["provider"] == "plaid"
-    assert registry.sync_connection.call_args.args[2] == {"full_rebuild": True}
+    assert registry.call_args.kwargs["full_rebuild"] is True
+    assert registry.call_args.kwargs["connection_id"] == "conn_1"
 
   async def test_update_mode_keeps_the_item_and_its_cursor(self):
     client = _client()
@@ -292,9 +292,9 @@ class TestCompleteLink:
         "metadata": {"last_sync": "2026-09-01T00:00:00"},
       },
     )
-    creds = update.call_args.kwargs["credentials"]
+    creds = update.call_args_list[0].kwargs["credentials"]
     assert creds["access_token"] == "access-1" and creds["cursor"] == "c5"
-    assert registry.sync_connection.call_args.args[2] is None
+    assert registry.call_args.kwargs["full_rebuild"] is False
     client.remove_item.assert_not_called()
 
   async def test_a_fresh_item_replacing_a_dead_one_removes_the_old(self):
@@ -308,8 +308,19 @@ class TestCompleteLink:
       },
     )
     client.remove_item.assert_called_once_with("access-dead")
-    assert update.call_args.kwargs["credentials"]["cursor"] is None
-    assert registry.sync_connection.call_args.args[2] == {"full_rebuild": True}
+    assert update.call_args_list[0].kwargs["credentials"]["cursor"] is None
+    assert registry.call_args.kwargs["full_rebuild"] is True
+
+  async def test_the_old_item_outlives_a_failed_credential_write(self):
+    client = _client()
+    with pytest.raises(RuntimeError, match="could not be stored"):
+      await self._complete(
+        client,
+        {"access_token": "access-dead", "item_id": "item-dead"},
+        stored=False,
+      )
+    # Nothing was removed at Plaid: the row still needs the token it has.
+    client.remove_item.assert_not_called()
 
   async def test_a_duplicate_item_is_removed_and_refused(self):
     from robosystems.operations.providers.plaid_provider import (
@@ -491,3 +502,45 @@ class TestCleanup:
     _row, purge, _purged = await self._cleanup(client, {})
     client.remove_item.assert_not_called()
     purge.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestPendingWindow:
+  async def test_a_newer_window_replaces_the_one_parked_on_the_row(self):
+    from robosystems.operations.providers.plaid_provider import refresh_pending_window
+
+    with (
+      patch(
+        f"{MODULE}._credentials",
+        return_value={"auth_mode": "link", "sync_config": {"since_date": "2025-01-01"}},
+      ),
+      patch(f"{MODULE}.ConnectionService.update", new_callable=AsyncMock) as update,
+    ):
+      await refresh_pending_window(
+        "conn_1",
+        PlaidConnectionConfig(since_date=date(2026, 3, 1)),
+        "usr_1",
+        MagicMock(),
+      )
+    creds = update.call_args.kwargs["credentials"]
+    assert creds == {"auth_mode": "link", "sync_config": {"since_date": "2026-03-01"}}
+
+  async def test_no_window_or_the_same_window_writes_nothing(self):
+    from robosystems.operations.providers.plaid_provider import refresh_pending_window
+
+    with (
+      patch(
+        f"{MODULE}._credentials",
+        return_value={"sync_config": {"since_date": "2026-03-01"}},
+      ),
+      patch(f"{MODULE}.ConnectionService.update", new_callable=AsyncMock) as update,
+    ):
+      await refresh_pending_window("conn_1", None, "usr_1", MagicMock())
+      await refresh_pending_window(
+        "conn_1",
+        PlaidConnectionConfig(since_date=date(2026, 3, 1)),
+        "usr_1",
+        MagicMock(),
+      )
+    update.assert_not_called()

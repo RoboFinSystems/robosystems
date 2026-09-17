@@ -31,9 +31,8 @@ from robosystems.operations.connection_service import (
   ConnectionService,
   ProviderConflictError,
   assert_provider_compatible,
+  dispatch_first_sync,
 )
-
-from .utils import provider_registry
 
 router = APIRouter()
 
@@ -135,19 +134,22 @@ async def _complete_mercury_oauth(
   # The first sync after consent backfills from the connect-time start date;
   # a later re-consent on the same row keeps the incremental window.
   is_first_sync = (connection.get("metadata") or {}).get("last_sync") is None
-  outcome = await provider_registry.sync_connection(
-    "mercury", connection, {"full_rebuild": True} if is_first_sync else None, graph_id
+  task_id = await dispatch_first_sync(
+    graph_id=graph_id,
+    connection_id=connection_id,
+    user_id=str(current_user.id),
+    full_rebuild=is_first_sync,
   )
   logger.info(
     "Auto-sync initiated for Mercury connection: task_id=%s (first_sync=%s)",
-    outcome.task_id,
+    task_id,
     is_first_sync,
   )
   return {
     "success": True,
     "message": "Mercury connection established successfully",
     "connection_id": connection_id,
-    "auto_sync_task_id": outcome.task_id,
+    "auto_sync_task_id": task_id,
   }
 
 
@@ -504,34 +506,24 @@ async def oauth_callback(
       )
 
       if is_valid:
-        # Optionally trigger initial sync
-        auto_sync = True  # Always auto-sync on connect
-        task_id = None
-
-        if auto_sync:
-          # First sync after a fresh OAuth has no prior data to be
-          # incremental against — default to full_rebuild so the user
-          # sees their full history. Existing connections (already
-          # synced once) re-trigger with the default 60-day incremental
-          # window. Detected via ``last_sync`` being None.
-          # ``connection`` is the dict from ConnectionService.get_connection
-          # → Connection.to_dict(), which nests ``last_sync`` under
-          # ``metadata`` (alongside realm_id, item_id, etc.).
-          is_first_sync = (connection.get("metadata") or {}).get("last_sync") is None
-          sync_options = {"full_rebuild": True} if is_first_sync else None
-
-          outcome = await provider_registry.sync_connection(
-            "quickbooks", connection, sync_options, graph_id
-          )
-          # `auto_sync_task_id` is the run id, not the outcome object.
-          task_id = outcome.task_id
-          logger.info(
-            "Auto-sync initiated for QuickBooks connection: task_id=%s "
-            "(first_sync=%s, full_rebuild=%s)",
-            task_id,
-            is_first_sync,
-            is_first_sync,
-          )
+        # First sync after a fresh OAuth has no prior data to be
+        # incremental against — full_rebuild so the user sees their full
+        # history. A connection already synced once re-triggers with the
+        # default incremental window. Detected via ``last_sync`` being
+        # None; ``connection`` nests it under ``metadata``. Dispatched
+        # under the per-connection lock, like the sync endpoint.
+        is_first_sync = (connection.get("metadata") or {}).get("last_sync") is None
+        task_id = await dispatch_first_sync(
+          graph_id=graph_id,
+          connection_id=target_connection_id,
+          user_id=str(current_user.id),
+          full_rebuild=is_first_sync,
+        )
+        logger.info(
+          "Auto-sync initiated for QuickBooks connection: task_id=%s (first_sync=%s)",
+          task_id,
+          is_first_sync,
+        )
 
         return {
           "success": True,

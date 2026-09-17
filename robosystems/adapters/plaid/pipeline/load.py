@@ -172,19 +172,28 @@ def load_sync(
   )
 
   # The later record of a transaction wins: a ``modified`` row supersedes the
-  # ``added`` one when a single cursor window carries both.
+  # ``added`` one when a single cursor window carries both, and a retraction
+  # in the same window supersedes either — a line added and removed between
+  # two syncs is never captured.
   latest: dict[str, dict[str, Any]] = {}
   for txn in [*sync.added, *sync.modified]:
     latest[str(txn["transaction_id"])] = txn
+  for removed_id in removed_ids:
+    latest.pop(removed_id, None)
   transactions = list(latest.values())
   ids = list(latest)
 
   singles = existing_events(session, SOURCE, [txn_external_id(i) for i in ids])
   in_pairs = pair_events_by_leg(session, connection_id=connection_id, leg_ids=ids)
 
+  in_window = [
+    txn
+    for txn in transactions
+    if since is None or str(txn.get("date") or "") >= since.isoformat()
+  ]
   agent_ids, report.agents_created = ensure_agents(
     session,
-    counterparties(transactions, account_ids=set(by_account), source=SOURCE),
+    counterparties(in_window, account_ids=set(by_account), source=SOURCE),
     source=SOURCE,
     connection_id=connection_id,
     created_by=created_by,

@@ -57,6 +57,7 @@ CARD_PAYMENT = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"
 NOT_A_TRANSFER_DETAILED = frozenset({"TRANSFER_IN_DEPOSIT", "TRANSFER_OUT_WITHDRAWAL"})
 MOVEMENT_PRIMARIES = frozenset({"LOAN_PAYMENTS", "LOAN_DISBURSEMENTS"})
 TREASURY_DETAILED = frozenset({"INCOME_INTEREST_EARNED", "INCOME_DIVIDENDS"})
+INCOME_PRIMARY = "INCOME"
 TRANSFER_WINDOW_DAYS = 3
 
 
@@ -109,7 +110,7 @@ def account_display_name(acct: dict[str, Any], institution: str) -> str:
   name = str(acct.get("name") or acct.get("official_name") or acct.get("subtype") or "")
   name = name.strip() or "Account"
   core = _GENERIC_INSTITUTION_WORDS.sub("", institution).strip() or institution
-  if core and core.lower() not in name.lower():
+  if core and not re.search(rf"\b{re.escape(core)}\b", name, re.IGNORECASE):
     name = f"{institution} {name}"
   mask = acct.get("mask")
   return f"{name} ••{mask}" if mask else name
@@ -166,10 +167,13 @@ def counterparties(
     if key is None or not name:
       continue
     record = by_key.setdefault(
-      key, {"name": name, "net": 0, "count": 0, "government": False}
+      key, {"name": name, "income": False, "count": 0, "government": False}
     )
-    record["net"] += cents(txn.get("amount"))
     record["count"] += 1
+    # Typed by what the bank says the money was, never by its direction: a
+    # refund from a vendor is money in, and the vendor stays a vendor.
+    if primary == INCOME_PRIMARY:
+      record["income"] = True
     if primary == GOVERNMENT_PRIMARY and detailed != GOVERNMENT_DONATIONS:
       record["government"] = True
   agents: list[dict[str, Any]] = []
@@ -177,7 +181,7 @@ def counterparties(
     if record["government"]:
       agent_type = "government"
     else:
-      agent_type = "customer" if record["net"] > 0 else "vendor"
+      agent_type = "customer" if record["income"] else "vendor"
     agents.append(
       {
         "agent_type": agent_type,
@@ -427,8 +431,17 @@ def bank_event(
   elif primary in MOVEMENT_PRIMARIES or detailed in TREASURY_DETAILED:
     event_type, event_category = "bank_transaction", "treasury"
   else:
+    # The category names the line's nature, never its direction: a refund
+    # from a vendor is money in on a purchase, and a rule keyed on sales
+    # must not see it. A deposit or withdrawal the bank could not attribute
+    # is a movement of the company's own cash until someone says otherwise.
     event_type = "bank_transaction"
-    event_category = "sales" if amount > 0 else "purchase"
+    if primary == INCOME_PRIMARY:
+      event_category = "sales"
+    elif primary in TRANSFER_PRIMARIES:
+      event_category = "treasury"
+    else:
+      event_category = "purchase"
 
   agent_key = (
     None

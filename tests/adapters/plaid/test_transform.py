@@ -302,3 +302,56 @@ class TestTransform:
   def test_events_sorted_by_occurred_at(self):
     stamps = [event["occurred_at"] for event in _run().events]
     assert stamps == sorted(stamps)
+
+
+@pytest.mark.unit
+class TestNatureNotDirection:
+  """The category and the counterparty's type follow what the bank says the
+  money was, never which way it moved."""
+
+  def test_a_vendor_refund_is_a_purchase_and_the_vendor_stays_a_vendor(self):
+    refund = txn(
+      "t_refund",
+      CARD_ID,
+      -12.40,
+      "2026-03-15",
+      name="HARBOR COFFEE CO REFUND",
+      primary="FOOD_AND_DRINK",
+      detailed="FOOD_AND_DRINK_COFFEE",
+      merchant="Harbor Coffee Co",
+      entity_id="ent_coffee",
+    )
+    result = _run(transactions=[refund])
+    event = result.events[0]
+    assert event["amount"] == 1240 and event["event_category"] == "purchase"
+    agents = counterparties([refund], account_ids={CARD_ID}, source="plaid")
+    assert [a["agent_type"] for a in agents] == ["vendor"]
+
+  def test_income_is_sales_and_an_unattributed_deposit_is_treasury(self):
+    deposit = txn(
+      "t_dep",
+      CHECKING_ID,
+      -900.00,
+      "2026-03-15",
+      name="MOBILE CHECK DEPOSIT",
+      primary="TRANSFER_IN",
+      detailed="TRANSFER_IN_DEPOSIT",
+    )
+    by_id = _by_external_id(_run(transactions=[*transactions(), deposit]))
+    assert by_id["plaid_txn_t_payout"]["event_category"] == "sales"
+    assert by_id["plaid_txn_t_dep"]["event_category"] == "treasury"
+
+  @pytest.mark.parametrize(
+    ("institution", "account", "expected"),
+    [
+      ("US Bank", "Business Checking", "US Bank Business Checking ••1234"),
+      ("TD Bank", "TD Beyond Checking", "TD Beyond Checking ••1234"),
+      ("Harborline Bank", "Harborline Savings", "Harborline Savings ••1234"),
+    ],
+  )
+  def test_the_institution_matches_whole_words_only(
+    self, institution, account, expected
+  ):
+    assert account_display_name({"name": account, "mask": "1234"}, institution) == (
+      expected
+    )

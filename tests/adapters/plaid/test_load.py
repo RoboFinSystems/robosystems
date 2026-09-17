@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
@@ -427,6 +427,7 @@ class TestLoadSync:
     modified=(),
     replay=False,
     old_events=(),
+    since=None,
   ):
     captured: list[dict] = []
     session = _Session()
@@ -437,7 +438,7 @@ class TestLoadSync:
       patch(f"{MODULE}.apply_removed", return_value=set()) as removals,
       patch(f"{MODULE}.existing_events", return_value=existing or {}),
       patch(f"{MODULE}.pair_events_by_leg", return_value={}),
-      patch(f"{MODULE}.ensure_agents", return_value=({}, 3)),
+      patch(f"{MODULE}.ensure_agents", return_value=({}, 3)) as agents,
       patch(f"{MODULE}.find_waiting_leg", return_value=waiting),
       patch(f"{MODULE}._merge_into_pair", return_value=True) as merge,
       patch(f"{MODULE}._replay_candidates", return_value=list(old_events)),
@@ -457,7 +458,9 @@ class TestLoadSync:
         account_elements=ELEMENTS,
         chart=ChartIndex(),
         rekey_replaced=replay,
+        since=since,
       )
+    session.agent_specs = agents.call_args.args[1]
     return report, captured, removals, merge, session
 
   def test_fresh_item_captures_every_event(self):
@@ -491,6 +494,15 @@ class TestLoadSync:
     _report, captured, *_ = self._load(modified=[changed])
     coffee = next(p for p in captured if p["external_id"] == "plaid_txn_t_coffee")
     assert coffee["amount"] == -2000
+
+  def test_a_line_added_and_removed_in_one_window_is_never_captured(self):
+    _report, captured, *_ = self._load(removed=[{"transaction_id": "t_coffee"}])
+    assert "plaid_txn_t_coffee" not in {p["external_id"] for p in captured}
+
+  def test_agents_are_made_only_for_lines_inside_the_window(self):
+    *_, session = self._load(since=date(2026, 1, 1))
+    names = {spec["name"] for spec in session.agent_specs}
+    assert "Quillstack" not in names and "Harbor Coffee Co" in names
 
   def test_removed_ids_reach_the_removal_step(self):
     _report, _captured, removals, *_ = self._load(

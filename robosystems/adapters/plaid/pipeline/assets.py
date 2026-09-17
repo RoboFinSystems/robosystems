@@ -148,7 +148,7 @@ def _run_plaid_sync(
   client = plaid_client()
   try:
     accounts_body = client.get_accounts(access_token)
-    sync = client.sync_transactions(access_token, cursor)
+    sync = sync_or_not_ready(client, access_token, cursor)
     waited = 0
     budget = PULL_WAIT_SECONDS if cursor is None else PULL_RECHECK_SECONDS
     while sync.pull_pending and waited < budget:
@@ -157,7 +157,7 @@ def _run_plaid_sync(
       )
       time.sleep(PULL_POLL_SECONDS)
       waited += PULL_POLL_SECONDS
-      sync = client.sync_transactions(access_token, cursor)
+      sync = sync_or_not_ready(client, access_token, cursor)
     if sync.history_complete and not history_seen:
       sync = settle_after_history(context, client, access_token, sync)
   except PlaidError as exc:
@@ -302,6 +302,20 @@ def _run_plaid_sync(
       "cursor_stored": cursor_stored,
     }
   )
+
+
+def sync_or_not_ready(client: Any, access_token: str, cursor: str | None) -> Any:
+  """One sync call, with Plaid's older way of saying "not yet" folded into
+  the newer: ``PRODUCT_NOT_READY`` is an error on the wire, ``NOT_READY`` a
+  status on the page, and the run waits for both the same way."""
+  from robosystems.adapters.plaid.client import PlaidError, TransactionsSync
+
+  try:
+    return client.sync_transactions(access_token, cursor)
+  except PlaidError as exc:
+    if exc.code == "PRODUCT_NOT_READY":
+      return TransactionsSync(update_status="NOT_READY")
+    raise
 
 
 def settle_after_history(

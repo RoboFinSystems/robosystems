@@ -823,6 +823,36 @@ def _release_sync_lock(connection_id: str, sync_lock_id: str) -> None:
     )
 
 
+async def dispatch_first_sync(
+  *, graph_id: str, connection_id: str, user_id: str, full_rebuild: bool
+) -> str | None:
+  """The sync a connect flow starts, under the per-connection lock.
+
+  The same path the sync endpoint takes, so a callback can never run a
+  second sync beside one the operator started while the consent screen was
+  open. A sync already in progress is left to finish and the connect
+  succeeds with no run of its own. Anything else propagates: the row is
+  connected by now, and the caller decides what a failed dispatch means.
+  Returns the run id, or ``None`` when no run was started.
+  """
+  try:
+    result = await dispatch_connection_sync(
+      graph_id=graph_id,
+      connection_id=connection_id,
+      user_id=user_id,
+      full_rebuild=full_rebuild,
+    )
+  except SyncInProgressError as exc:
+    logger.info(
+      "First sync for connection %s not started: one is already running (%s)",
+      connection_id,
+      exc,
+    )
+    return None
+  task_id = result.get("task_id")
+  return str(task_id) if task_id else None
+
+
 async def dispatch_connection_sync(
   *,
   graph_id: str,

@@ -211,6 +211,20 @@ class TestErrors:
     assert _client(handler).get_item("access-1") == {}
     assert responses == []
 
+  def test_the_exchange_is_never_retried_on_a_transport_error(self):
+    calls = []
+
+    def handler(request):
+      calls.append(request.url.path)
+      raise httpx.ConnectError("reset")
+
+    with pytest.raises(PlaidError, match="Could not reach Plaid"):
+      _client(handler).exchange_public_token("public-1")
+    assert calls == ["/item/public_token/exchange"]
+    with pytest.raises(PlaidError, match="Could not reach Plaid"):
+      _client(handler).get_item("access-1")
+    assert calls.count("/item/get") == 4  # the idempotent call still retries
+
   def test_retries_are_bounded(self):
     client = _client(lambda r: httpx.Response(503, text="down"), max_attempts=2)
     with pytest.raises(PlaidError) as exc_info:

@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from robosystems.operations.providers.types import SyncOutcome
 from robosystems.routers.graphs.connections.oauth import init_oauth, oauth_callback
 
 OAUTH_MODULE = "robosystems.routers.graphs.connections.oauth"
@@ -108,10 +107,7 @@ async def test_callback_completes_consent_records_it_and_syncs():
     "auth_mode": "oauth",
     "sync_config": {"since_date": "2026-01-01"},
   }
-  registry = MagicMock()
-  registry.sync_connection = AsyncMock(
-    return_value=SyncOutcome(status="dispatched", task_id="run_9")
-  )
+  sync_mock = AsyncMock(return_value="run_9")
 
   with (
     patch(
@@ -135,7 +131,7 @@ async def test_callback_completes_consent_records_it_and_syncs():
     patch(f"{PROVIDER_MODULE}.mercury_oauth_handler", handler),
     patch(f"{PROVIDER_MODULE}.mercury_oauth_provider", provider),
     patch(f"{PROVIDER_MODULE}.record_bank_feed_consent") as consent,
-    patch(f"{OAUTH_MODULE}.provider_registry", registry),
+    patch(f"{OAUTH_MODULE}.dispatch_first_sync", sync_mock),
   ):
     result = await oauth_callback(
       provider="mercury",
@@ -176,8 +172,9 @@ async def test_callback_completes_consent_records_it_and_syncs():
   assert consent.call_args.kwargs["organization"] == "Cascade Books LLC"
   assert consent.call_args.kwargs["scope"] == "read offline_access"
   # First consent → full backfill.
-  registry.sync_connection.assert_awaited_once()
-  assert registry.sync_connection.call_args.args[2] == {"full_rebuild": True}
+  sync_mock.assert_awaited_once()
+  assert sync_mock.call_args.kwargs["full_rebuild"] is True
+  assert sync_mock.call_args.kwargs["connection_id"] == CONNECTION_ID
 
 
 @pytest.mark.unit
@@ -244,10 +241,7 @@ async def test_callback_reconsent_keeps_the_incremental_window():
     "sync_config": {},
   }
   provider.get_entity_info = AsyncMock(return_value={"legal_business_name": "X"})
-  registry = MagicMock()
-  registry.sync_connection = AsyncMock(
-    return_value=SyncOutcome(status="dispatched", task_id="run_2")
-  )
+  sync_mock = AsyncMock(return_value="run_2")
   with (
     patch(
       "robosystems.operations.providers.oauth_handler.OAuthState.validate",
@@ -270,7 +264,7 @@ async def test_callback_reconsent_keeps_the_incremental_window():
     patch(f"{PROVIDER_MODULE}.mercury_oauth_handler", handler),
     patch(f"{PROVIDER_MODULE}.mercury_oauth_provider", provider),
     patch(f"{PROVIDER_MODULE}.record_bank_feed_consent"),
-    patch(f"{OAUTH_MODULE}.provider_registry", registry),
+    patch(f"{OAUTH_MODULE}.dispatch_first_sync", sync_mock),
   ):
     await oauth_callback(
       provider="mercury",
@@ -280,4 +274,4 @@ async def test_callback_reconsent_keeps_the_incremental_window():
       db=MagicMock(),
       _rate_limit=None,
     )
-  assert registry.sync_connection.call_args.args[2] is None
+  assert sync_mock.call_args.kwargs["full_rebuild"] is False
