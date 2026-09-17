@@ -189,7 +189,12 @@ def load_sync(
   if rekey_replaced:
     singles.update(
       rekey_replaced_events(
-        session, result.events, known=singles, item_id=item_id, report=report
+        session,
+        result.events,
+        known=singles,
+        connection_id=connection_id,
+        item_id=item_id,
+        report=report,
       )
     )
 
@@ -443,19 +448,24 @@ def rekey_replaced_events(
   payloads: list[dict[str, Any]],
   *,
   known: dict[str, Event],
+  connection_id: str,
   item_id: str | None,
   report: PlaidLoadReport,
 ) -> dict[str, Event]:
   """Give events captured under an earlier Item the ids the new one uses.
 
   Only a replay calls this: every id the feed still has is in the batch, so
-  an event carrying another Item's id (or none, after a purge) that no
-  payload identifies is one the new Item re-issued. It is matched on the
-  chart account, the posting date and amount the bank last reported, and
-  the bank's description where both sides have one — a pair also on its
-  ``from`` account. Two lines alike on everything but description never
-  cross. Returns ``{new_external_id: event}`` for the main loop to reconcile
-  as existing.
+  an event that no payload identifies and that this connection may claim is
+  one the new Item re-issued. Two shapes may be claimed: an event this same
+  connection captured under its previous Item (the dead Item replaced in
+  place), and an event with no Item at all (a disconnect purged its source
+  keys; a reconnect finds it). An event that still carries another
+  connection's Item is another feed's line and is never touched, whatever
+  else matches. Within that, the match is on the chart account, the posting
+  date and amount the bank last reported, and the bank's description where
+  both sides have one — a pair also on its ``from`` account. Two lines alike
+  on everything but description never cross. Returns ``{new_external_id:
+  event}`` for the main loop to reconcile as existing.
   """
   fresh = [p for p in payloads if str(p["external_id"]) not in known]
   if not fresh:
@@ -467,9 +477,13 @@ def rekey_replaced_events(
   identified = {str(event.id) for event in known.values()}
   by_key: dict[tuple[Any, ...], list[Event]] = {}
   for event in _replay_candidates(session, elements, min(days), max(days)):
-    same_item = str((event.metadata_ or {}).get("item_id") or "") == str(item_id or "")
-    if same_item or str(event.id) in identified:
+    metadata = event.metadata_ or {}
+    held_item = str(metadata.get("item_id") or "")
+    if held_item == str(item_id or "") or str(event.id) in identified:
       continue
+    ours = str(metadata.get("connection_id") or "") == connection_id
+    if held_item and not ours:
+      continue  # another connection's live line
     by_key.setdefault(_event_fingerprint(event), []).append(event)
   if not by_key:
     return {}
@@ -501,7 +515,11 @@ def rekey_replaced_events(
 def _replay_candidates(
   session: Session, element_ids: set[str], lo: date, hi: date
 ) -> list[Event]:
-  """This feed's events on the batch's chart accounts around its dates."""
+  """This feed's events on the batch's chart accounts around its dates.
+
+  Source and chart account are not indexed together; the date index carries
+  the scan, and a replay is rare (a re-Link, a full rebuild).
+  """
   if not element_ids:
     return []
   slack = timedelta(days=REKEY_DATE_SLACK_DAYS)
@@ -571,11 +589,7 @@ def _rekey(event: Event, payload: dict[str, Any], *, at: str) -> None:
     {
       "external_id": event.external_id,
       "at": at,
-      **{
-        key: metadata[key]
-        for key in ("transaction_id", "item_id", "connection_id", "legs")
-        if metadata.get(key) is not None
-      },
+      **{key: metadata[key] for key in IDENTITY_KEYS if metadata.get(key) is not None},
     }
   )
   for key in IDENTITY_KEYS:

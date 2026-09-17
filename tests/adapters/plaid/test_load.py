@@ -592,7 +592,12 @@ class TestRekey:
     report = PlaidLoadReport()
     with patch(f"{MODULE}._replay_candidates", return_value=list(candidates)):
       out = rekey_replaced_events(
-        _Session(), payloads, known=known or {}, item_id=item_id, report=report
+        _Session(),
+        payloads,
+        known=known or {},
+        connection_id="conn_1",
+        item_id=item_id,
+        report=report,
       )
     return out, report
 
@@ -607,6 +612,18 @@ class TestRekey:
     trail = old.metadata_["rekeyed_from"]
     assert trail[0]["external_id"] == "plaid_txn_old_1"
     assert trail[0]["transaction_id"] == "old_1" and trail[0]["item_id"] == "item_old"
+    assert (
+      trail[0]["account_id"] == "acct_old" and trail[0]["connection_id"] == "conn_1"
+    )
+
+  def test_another_connections_live_line_is_never_touched(self):
+    """Same chart account, date and amount, no description on the old side —
+    but it still carries another connection's Item, so it is another feed's."""
+    theirs = self._old(item_id="item_theirs", connection_id="conn_2")
+    theirs.metadata_.pop("bank_description")
+    out, report = self._rekey([self._new()], [theirs])
+    assert out == {} and report.events_rekeyed == 0
+    assert theirs.external_id == "plaid_txn_old_1"
 
   def test_the_same_items_events_are_never_rekeyed(self):
     out, _ = self._rekey([self._new()], [self._old(item_id="item_new")])
@@ -697,6 +714,7 @@ class TestRekey:
         _Session(),
         [self._new()],
         known={"plaid_txn_new_1": self._old()},
+        connection_id="conn_1",
         item_id="item_new",
         report=PlaidLoadReport(),
       )
