@@ -28,13 +28,10 @@ from tests.operations.roboledger.commands.test_reconciling_items_db import (
   GRAPH_ID,
   NEW_EXPENSE,
   _seed_elements,
-  _skip_platform_db_checks,  # noqa: F401  (autouse: stubs the platform-DB checks)
-)
-from tests.operations.roboledger.commands.test_reconciling_items_db import (
-  session as _session_fixture,  # noqa: F401  (registers the `session` fixture)
 )
 
 pytestmark = pytest.mark.unit
+
 
 CONNECTION = "conn_plaid_1"
 ITEM = "item_plaid_1"
