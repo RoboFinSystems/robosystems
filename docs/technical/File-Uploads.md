@@ -4,7 +4,9 @@ This guide shows you how to load bulk node and relationship data into a **custom
 
 The write path is a set of **content operations** at `POST /v1/graphs/{graph_id}/operations/{op_name}` — `create-file-upload`, `ingest-file`, and `delete-file`. Each returns an `OperationEnvelope` and accepts an `Idempotency-Key`. Reads stay on the files router at `GET /v1/graphs/{graph_id}/files`.
 
-**Quick Start:** Run `just demo-custom-graph` to exercise the entire upload → stage → ingest → query flow end-to-end against a real schema.
+**Quick Start:** Request a presigned URL with `create-file-upload`, `PUT` the bytes to S3, then call `ingest-file` with `ingest_to_graph: true` — see [Quick Start](#quick-start) below for the calls.
+
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
 ## Table of Contents
 
@@ -24,6 +26,7 @@ The write path is a set of **content operations** at `POST /v1/graphs/{graph_id}
 - [Monitoring Async Work](#monitoring-async-work)
 - [Worked Example (End to End)](#worked-example-end-to-end)
 - [Gotchas and Pitfalls](#gotchas-and-pitfalls)
+- [Self-hosted deployments](#self-hosted-deployments)
 - [Related Documentation](#related-documentation)
 - [Support](#support)
 
@@ -71,29 +74,22 @@ Every file lives across three layers, each with its own independent status. The 
 
 Before starting, ensure you have:
 
-- Docker running locally and services started with `just start`
-- A user account and API key — run `just demo-user`, which writes credentials to `.local/config.json`
-- A custom graph and its `graph_id` — `just demo-custom-graph` creates one for you (see [Custom Graph Schema](Custom-Graph-Schema))
+- A RoboSystems account and an API key (see [Quick Start](Quick-Start))
+- A custom graph and its `graph_id` (see [Custom Graph Schema](Custom-Graph-Schema))
 
-All `curl` examples below read the API key from `.local/config.json` and target `http://localhost:8000`. Substitute your own `graph_id` (the examples use `kg1a2b3c4d`).
+All `curl` examples below read the API key from `$ROBOSYSTEMS_API_KEY` and target `https://api.robosystems.ai`. Substitute your own `graph_id` (the examples use `kg1a2b3c4d`).
 
 ## Quick Start
-
-The fastest way to see the full upload → stage → ingest → query flow is the bundled demo, which generates parquet node and relationship files, uploads them, stages them, materializes the graph, and runs a few verification queries. It runs seven steps in all, finishing with document indexing and a `knowledge` subgraph that exercises structured and semantic memory:
-
-```bash
-just demo-custom-graph
-```
 
 To drive the flow yourself against an existing graph, the minimal path is three calls — request a presigned URL, `PUT` the bytes to S3, then call `ingest-file` with `ingest_to_graph: true`:
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=kg1a2b3c4d
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
 # 1. Request a presigned upload URL (auto-creates the Person table)
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/create-file-upload" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/create-file-upload" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"file_name": "Person.parquet", "content_type": "application/x-parquet", "table_name": "Person"}'
 ```
@@ -111,8 +107,8 @@ All three write calls are operations, which means two things hold for every one 
 `POST /v1/graphs/{graph_id}/operations/create-file-upload` returns a presigned S3 URL and a `file_id`. It auto-creates the staging table named in `table_name` if it does not already exist.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/operations/create-file-upload" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/operations/create-file-upload" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "file_name": "Person.parquet",
@@ -161,8 +157,8 @@ curl -X PUT "<upload_url from step 1>" \
 `POST /v1/graphs/{graph_id}/operations/ingest-file` tells the platform the bytes are in S3. It validates the object exists (via a `head_object`), counts rows, and triggers DuckDB staging. Set `ingest_to_graph: true` to also push the staged data into the graph in the same call. There is no status field — naming the `file_id` is what marks it uploaded.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/operations/ingest-file" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/operations/ingest-file" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "file_id": "<file_id>", "ingest_to_graph": true }'
 ```
@@ -196,17 +192,10 @@ The top-level `operationId` on a pending envelope is what you pass to `/v1/opera
 Once the data is in the graph, query it. Reads run through `POST /v1/graphs/{graph_id}/query/cypher`, or through any MCP-compatible AI tool using the `read-graph-cypher` tool (run `get-graph-schema` first). See [Search and AI Retrieval](Search-and-AI-Retrieval) for the MCP path.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/query/cypher" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/query/cypher" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "query": "MATCH (p:Person) RETURN count(p) AS people" }'
-```
-
-You can also verify directly from the host with the `just` helpers:
-
-```bash
-just graph-query kg1a2b3c4d "MATCH (p:Person) RETURN count(p) AS people"
-just graph-info kg1a2b3c4d
 ```
 
 **Note:** Main graphs are read-only to Cypher — use `POST /query/cypher` to verify, not to write. You cannot create nodes via Cypher on a main graph (subgraphs are writable).
@@ -223,8 +212,8 @@ There are two ingestion modes. They differ only in *when* staged data reaches th
 For batch loads, stage all your files first, then rebuild the graph from staging in a single operation:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/operations/materialize" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/operations/materialize" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
   -d '{"rebuild": true}'
@@ -259,15 +248,15 @@ Files are managed independently of tables. You can list them, inspect per-layer 
 **List all files in a graph** (optional `table_name` and `status` query filters):
 
 ```bash
-curl "http://localhost:8000/v1/graphs/kg1a2b3c4d/files" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/files" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 **Get one file with its per-layer pipeline status.** The response includes a `layers` object with `s3`, `duckdb`, and `graph` entries — each carries its own `status`, `timestamp`, `row_count`, and `size_bytes`, so you can see exactly how far a file has progressed:
 
 ```bash
-curl "http://localhost:8000/v1/graphs/kg1a2b3c4d/files/<file_id>" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/files/<file_id>" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 A file's upload status is one of `pending`, `uploaded`, or `failed`. Nothing sets it directly — `pending` is minted by `create-file-upload`, and `ingest-file` moves it to `uploaded` (or `failed`) as a side effect of staging.
@@ -276,14 +265,14 @@ A file's upload status is one of `pending`, `uploaded`, or `failed`. Nothing set
 
 ```bash
 # Remove S3 object + DB record only (DuckDB rows excluded from queries, not physically removed)
-curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/operations/delete-file" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/operations/delete-file" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "file_id": "<file_id>" }'
 
 # Full cascade: also removes DuckDB rows and marks the graph stale
-curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/operations/delete-file" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/operations/delete-file" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "file_id": "<file_id>", "cascade": true }'
 ```
@@ -295,23 +284,23 @@ The envelope's `result` reports what happened: `cascade_deleted`, `tables_affect
 When staging or ingestion runs asynchronously (large files, or `ingest_to_graph: true`), the envelope comes back `status: "pending"` and carries an `operationId`, with the same id repeated as `result.operation_id` alongside a `monitor_url`. Stream progress over Server-Sent Events:
 
 ```bash
-curl -N "http://localhost:8000/v1/operations/<operation_id>/stream" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -N "https://api.robosystems.ai/v1/operations/<operation_id>/stream" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 This is the same operation-monitoring stream used across the platform's write operations.
 
 ## Worked Example (End to End)
 
-The example below loads a single `Person.parquet` node file and ingests it in one pass. For the complete multi-file flow against a real schema, `just demo-custom-graph` is the canonical runnable reference.
+The example below loads a single `Person.parquet` node file and ingests it in one pass.
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=kg1a2b3c4d
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
 # 1. Request a presigned upload URL (auto-creates the Person table)
-RESPONSE=$(curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/create-file-upload" \
-  -H "X-API-Key: $API_KEY" \
+RESPONSE=$(curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/create-file-upload" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"file_name": "Person.parquet", "content_type": "application/x-parquet", "table_name": "Person"}')
 
@@ -324,19 +313,19 @@ curl -X PUT "$UPLOAD_URL" \
   --data-binary @Person.parquet
 
 # 3. Stage the file and ingest it into the graph
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/ingest-file" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/ingest-file" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d "{\"file_id\": \"$FILE_ID\", \"ingest_to_graph\": true}"
 
 # 4. Verify the data landed in the graph
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/query/cypher" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/query/cypher" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "MATCH (p:Person) RETURN count(p) AS people"}'
 ```
 
-For the full request and response schemas (`FileUploadRequest`, `IngestFileOp`, `DeleteFileOp`, `OperationEnvelope`, `GetFileInfoResponse`, `DeleteFileResponse`), see the live API reference at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally).
+For the full request and response schemas (`FileUploadRequest`, `IngestFileOp`, `DeleteFileOp`, `OperationEnvelope`, `GetFileInfoResponse`, `DeleteFileResponse`), see the live API reference at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs).
 
 ## Gotchas and Pitfalls
 
@@ -353,11 +342,15 @@ For the full request and response schemas (`FileUploadRequest`, `IngestFileOp`, 
 - **Delete without `cascade` leaves DuckDB rows.** A non-cascade delete removes the S3 object and DB record only; DuckDB excludes the file from queries but does not physically remove the data. Set `cascade: true` to remove DuckDB rows and mark the graph stale.
 - **Main graphs are read-only to Cypher.** Verify ingested data with `POST /query/cypher` reads; you cannot write nodes via Cypher on a main graph (subgraphs are writable).
 
+## Self-hosted deployments
+
+On a local stack, `just demo-custom-graph` exercises the entire upload → stage → ingest → query flow end-to-end against a real schema and is the canonical runnable reference for the multi-file flow. It creates a custom graph, generates parquet node and relationship files, uploads them, stages them, materializes the graph, and runs a few verification queries — seven steps in all, finishing with document indexing and a `knowledge` subgraph that exercises structured and semantic memory. See [Local Development](Local-Development).
+
 ## Related Documentation
 
 **Wiki Guides:**
 
-- **[Custom Graph Schema](Custom-Graph-Schema)** - Design the schema and tables that file uploads populate; `just demo-custom-graph` runs this exact flow end-to-end
+- **[Custom Graph Schema](Custom-Graph-Schema)** - Design the schema and tables that file uploads populate
 - **[Search and AI Retrieval](Search-and-AI-Retrieval)** - Query the loaded graph with MCP tools (`read-graph-cypher`, `get-graph-schema`) after ingest
 - **[Document Management](Document-Management)** - For entity-graph markdown documents (the contrasting surface; this page is bulk tabular data)
 

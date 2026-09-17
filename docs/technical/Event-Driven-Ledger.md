@@ -2,6 +2,8 @@
 
 RoboLedger treats business events as the durable truth and the general ledger as something derived from them. A sale, a payment, an asset disposal — those happen in the world; the debits and credits that record them are a downstream interpretation. The **Event Block** is the single write surface that carries an event into the ledger, and handlers turn it into balanced journal entries.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [The Thesis: Events Explain, the Ledger Is Derived](#the-thesis-events-explain-the-ledger-is-derived)
@@ -12,6 +14,7 @@ RoboLedger treats business events as the durable truth and the general ledger as
 - [Handlers: How Events Become GL Entries](#handlers-how-events-become-gl-entries)
 - [The REA Graph Projection](#the-rea-graph-projection)
 - [Posting an Event to the Ledger](#posting-an-event-to-the-ledger)
+- [Self-hosted deployments](#self-hosted-deployments)
 - [Related Documentation](#related-documentation)
 - [Support](#support)
 
@@ -205,17 +208,17 @@ The RoboLedger extension adds the **bridge** edges that connect an event to the 
 
 ## Posting an Event to the Ledger
 
-This is the contribution path: how you actually put an event into a graph and watch it become GL. All examples target a local stack at `http://localhost:8000`, authenticate with `X-API-Key`, and use the RoboLedger graph from `.local/config.json`.
+This is the contribution path: how you actually put an event into a graph and watch it become GL. All examples target `https://api.robosystems.ai`, authenticate with `X-API-Key`, and use a RoboLedger graph.
 
 **Prerequisites:**
 
-- A running local stack with `ROBOLEDGER_ENABLED=true`.
-- A RoboLedger graph and an API key. Run `just demo-roboledger` to provision one with synthetic data (it writes the `graph_id` and `api_key` into `.local/config.json`), or `just demo-roboledger --skeleton` for an empty graph plus `just demo-user` for credentials.
-- Set `GRAPH_ID` to your graph and read the key from config:
+- A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start).
+- A RoboLedger graph — on the hosted platform, one comes from roboledger.ai when you connect QuickBooks, or from **Create Graph** in the app. The command surface requires `ROBOLEDGER_ENABLED` on the deployment; on robosystems.ai it is on.
+- Set your credentials:
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=<your roboledger graph id>
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 ```
 
 The `elem_*` element IDs and `agt_*` agent ID below are **illustrative placeholders**. A live graph resolves real ULIDs from its own chart of accounts; list them first with a GraphQL read of your accounts before posting against real elements.
@@ -225,8 +228,8 @@ The `elem_*` element IDs and `agt_*` agent ID below are **illustrative placehold
 A plain create defaults to `apply_handlers=false`, so the event lands in the inbox at status `captured` and writes no GL. This is how an adapter records a raw business event for later classification.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-event-block" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-event-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "event_type": "invoice_issued",
@@ -258,8 +261,8 @@ The handler accepts **two metadata shapes**, and the validator enforces exactly 
 Supplying both is rejected, as is supplying neither.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-event-block" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-event-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "event_type": "journal_entry_recorded",
@@ -291,8 +294,8 @@ With `"status": "draft"` the event lands `classified` — the entry is created b
 `preview-event-block` takes the same body as a create but writes nothing. It returns the planned debit/credit lines and a `would_succeed` flag — a safe dry run for an operator or UI before it commits.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/preview-event-block" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/preview-event-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "event_type": "journal_entry_recorded",
@@ -315,13 +318,13 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/p
 Reads go through the typed GraphQL surface at `POST /extensions/{graph_id}/graphql`. The `graph_id` is the URL — never a query argument. The `eventBlocks` field filters by `eventType`, `eventCategory`, `status`, `agentId`, `source`, plus `limit` / `offset`; `eventBlock(id)` fetches a single event.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ eventBlocks(status: \"captured\", source: \"manual\", limit: 10) { id eventType eventCategory status amount currency occurredAt agentId } }"}'
 ```
 
-In dev the same endpoint renders GraphiQL with introspection, so you can explore the full event schema interactively.
+Introspection over POST works on the hosted API, so you can discover the full event schema with an introspection query; the in-browser GraphiQL explorer is development-only and is not mounted on `api.robosystems.ai`.
 
 ### Step 5: Trace the Audit Chain in the Graph
 
@@ -335,10 +338,13 @@ RETURN e.event_type, t.amount, en.status, li.debit_amount, li.credit_amount
 LIMIT 10
 ```
 
-Run it directly against LadybugDB:
+Run it through the Cypher query endpoint, `POST /v1/graphs/{graph_id}/query/cypher`, or the MCP `read-graph-cypher` tool — see [Querying the Analytical Graph](Querying-the-Analytical-Graph):
 
 ```bash
-just lbug-query $GRAPH_ID "MATCH (e:Event)-[:EVENT_TRIGGERS_TRANSACTION]->(t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem) RETURN e.event_type, t.amount, en.status, li.debit_amount, li.credit_amount LIMIT 10"
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/query/cypher" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "MATCH (e:Event)-[:EVENT_TRIGGERS_TRANSACTION]->(t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem) RETURN e.event_type, t.amount, en.status, li.debit_amount, li.credit_amount LIMIT 10"}'
 ```
 
 If the query returns nothing, the events have not been materialized yet — `EVENT_TRIGGERS_TRANSACTION` is built from `transactions.triggered_by_event_id` during materialization, not at write time.
@@ -360,6 +366,14 @@ The same paths are available to AI clients. Write tools `create-event-block` and
 | GraphQL error about `graphId` | GraphQL takes no `graphId` argument; scope is the URL `/extensions/{graph_id}/graphql`. |
 | Can't find a `void` operation | There isn't one. Use `update-event-block` with `transition_to`; `superseded` also needs `superseded_by_id`. |
 | Cypher trace returns nothing | The graph edge only exists after materialization. |
+
+## Self-hosted deployments
+
+On your own stack, `just demo-roboledger` provisions a RoboLedger graph with synthetic data and writes the `graph_id` and `api_key` into `.local/config.json`; `just demo-roboledger --skeleton` gives an empty graph, with `just demo-user` for credentials. To run the Step 5 trace directly against LadybugDB, bypassing the API:
+
+```bash
+just lbug-query $GRAPH_ID "MATCH (e:Event)-[:EVENT_TRIGGERS_TRANSACTION]->(t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem) RETURN e.event_type, t.amount, en.status, li.debit_amount, li.credit_amount LIMIT 10"
+```
 
 ## Related Documentation
 

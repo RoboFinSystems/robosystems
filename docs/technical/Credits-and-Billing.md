@@ -2,6 +2,8 @@
 
 In RoboSystems, only AI operations consume credits — every database, graph, MCP, Cypher, import, sync, backup, and schema operation is free. Credits exist solely to meter the external model-inference cost of AI Operators (Anthropic Claude via AWS Bedrock), and each graph carries a monthly credit allocation tied to its tier.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [The Credit Model](#the-credit-model)
@@ -15,7 +17,7 @@ In RoboSystems, only AI operations consume credits — every database, graph, MC
 - [Organizations and Account Limits](#organizations-and-account-limits)
 - [Billing Endpoints](#billing-endpoints)
 - [Rate Limits](#rate-limits)
-- [Admin CLI Reference](#admin-cli-reference)
+- [Self-hosted deployments](#self-hosted-deployments)
 - [Related Documentation](#related-documentation)
 
 ## The Credit Model
@@ -66,11 +68,15 @@ A graph's **current balance** is its monthly allocation minus the credits consum
 
 ## Checking Your Credit Balance
 
-A graph's credit summary is available over REST. All examples use the local stack at `http://localhost:8000` and read the API key from `.local/config.json` (created by `just demo-user`).
+A graph's credit summary is available over REST. All examples call `https://api.robosystems.ai` and send your API key as `X-API-Key`:
 
 ```bash
-curl -X GET "http://localhost:8000/v1/graphs/kg1a2b3c4d5e/credits" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+```
+
+```bash
+curl -X GET "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e/credits" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json"
 ```
 
@@ -98,8 +104,8 @@ The response is a credit summary for the graph:
 To see the individual credit movements behind the balance, request the transaction history. It supports filtering by type and date range:
 
 ```bash
-curl -X GET "http://localhost:8000/v1/graphs/kg1a2b3c4d5e/credits/transactions?transaction_type=consumption&start_date=2026-06-01&limit=50" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -X GET "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e/credits/transactions?transaction_type=consumption&start_date=2026-06-01&limit=50" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 The response carries a `transactions[]` list and a per-operation `summary` (with `total_amount`, `transaction_count`, `average_amount`, `first_transaction`, and `last_transaction` for each operation type), plus `total_count`, `filtered_count`, and the resolved `date_range`.
@@ -118,21 +124,21 @@ Each credit transaction has a type drawn from a fixed set:
 For a combined view of credits alongside storage, performance, and event metrics, use the analytics endpoint:
 
 ```bash
-curl -X GET "http://localhost:8000/v1/graphs/kg1a2b3c4d5e/usage" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -X GET "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e/usage" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 This returns a usage report that includes both a `credit_summary` and a `storage_summary`, so it is the right call when you want the storage and credit pictures together. A graph-level metrics endpoint is also available at `GET /v1/graphs/{graph_id}/metrics`.
 
-For the exact request parameters and response schemas of every endpoint on this page, see the live OpenAPI reference at [api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` against a local stack) rather than re-deriving them here.
+For the exact request parameters and response schemas of every endpoint on this page, see the live OpenAPI reference at [api.robosystems.ai/docs](https://api.robosystems.ai/docs) rather than re-deriving them here.
 
 ## Public Pricing and Offerings
 
 Public pricing — subscription tiers, per-model token pricing, and the list of included (free) operations — is exposed without needing a graph scope:
 
 ```bash
-curl -X GET "http://localhost:8000/v1/offering" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -X GET "https://api.robosystems.ai/v1/offering" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 The response includes the subscription tiers, a `token_pricing` block per model, and an `included_operations` list enumerating the operations that do not consume credits. This is the authoritative, machine-readable source for current pricing.
@@ -142,8 +148,8 @@ The response includes the subscription tiers, a `token_pricing` block per model,
 Shared public repositories — such as the SEC XBRL corpus — use a **separate per-user credit pool**, not a graph's pool. When you query a shared repository identifier (for example `sec`) at the credits endpoint, the response transparently routes to that per-user repository pool and reports a synthetic tier of `sec-repository`:
 
 ```bash
-curl -X GET "http://localhost:8000/v1/graphs/sec/credits" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -X GET "https://api.robosystems.ai/v1/graphs/sec/credits" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 This keeps shared-repository AI usage metered independently from the credits attached to your own graphs. As with graph pools, only AI operations against the repository consume these credits — browsing and querying the repository data is free.
@@ -220,9 +226,13 @@ Rate limits are the third metering axis, alongside credits and storage — and t
 
 Rate limits and credits are **independent** — hitting a rate limit does not consume credits, and an exhausted credit pool does not change your rate limits. Shared repositories carry their own per-plan rate limits; see [Shared Repositories](Shared-Repositories).
 
-## Admin CLI Reference
+## Self-hosted deployments
 
-For operators of a self-hosted deployment, the admin CLI exposes credit-pool inspection and management. The first argument is the environment (`dev`, `staging`, or `prod`):
+robosystems.ai runs with billing on. A self-hosted deployment controls this with `BILLING_ENABLED`, which is off by default — so a local development stack runs with billing off.
+
+### Admin CLI Reference
+
+For operators of a self-hosted deployment, the admin CLI exposes credit-pool inspection and management. It runs against a deployment you operate, not robosystems.ai. The first argument is that deployment's environment (`dev`, `staging`, or `prod`):
 
 ```bash
 just admin dev credits list          # List graph credit pools

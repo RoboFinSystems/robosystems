@@ -1,8 +1,10 @@
 # RoboInvestor Operations
 
-This guide shows you how to drive the RoboInvestor command surface against a local RoboSystems stack — creating securities, building portfolio blocks with positions, updating and disposing positions, and reading the data back. It also explains the cross-graph issuer-linking concept that connects an investor's holdings to the companies that issue them.
+This guide shows you how to drive the RoboInvestor command surface through the RoboSystems API — creating securities, building portfolio blocks with positions, updating and disposing positions, and reading the data back. It also explains the cross-graph issuer-linking concept that connects an investor's holdings to the companies that issue them.
 
-RoboInvestor is focused on private-company portfolio management. This page documents what the command surface exposes: six write operations plus a GraphQL read surface. It is an API-first walkthrough — every step is a `curl` against a graph you provision yourself. If you would rather see the whole surface driven end-to-end first, `just demo-roboinvestor` builds the **Meridian Ventures Fund I** scenario, including the cross-graph report share described in [Cross-Graph Issuer Linking](#cross-graph-issuer-linking).
+RoboInvestor is focused on private-company portfolio management. This page documents what the command surface exposes: six write operations plus a GraphQL read surface. It is an API-first walkthrough — every step is a `curl` against a graph you provision yourself.
+
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
 ## Table of Contents
 
@@ -17,6 +19,7 @@ RoboInvestor is focused on private-company portfolio management. This page docum
 - [Operations Reference](#operations-reference)
 - [Gotchas](#gotchas)
 - [Surface Scope](#surface-scope)
+- [Self-hosted deployments](#self-hosted-deployments)
 - [Related Documentation](#related-documentation)
 - [Support](#support)
 
@@ -36,17 +39,9 @@ The surface is intentionally small. Portfolios and positions are written through
 
 ## Prerequisites
 
-- The local stack running:
-
-  ```bash
-  git clone https://github.com/RoboFinSystems/robosystems.git
-  cd robosystems
-  just start
-  ```
-
-- `ROBOINVESTOR_ENABLED=true` in your environment. This flag gates both the RoboInvestor operations and the GraphQL investor fields. If it is off, the REST operations return HTTP 404 "Investor module not initialized." and the GraphQL fields raise `INVESTOR_NOT_INITIALIZED`.
-- A graph provisioned with the `roboinvestor` schema extension. The operations and the GraphQL investor fields only appear on graphs that carry this extension. `just demo-roboinvestor` provisions one (into the `roboinvestor_demo` slot of `.local/config.json`) along with the Meridian Ventures Fund I data set.
-- An API key. Run `just demo-user` to create or reuse demo credentials, then read the key from `.local/config.json`.
+- A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start).
+- RoboInvestor enabled on the deployment. The `ROBOINVESTOR_ENABLED` flag gates both the RoboInvestor operations and the GraphQL investor fields; on robosystems.ai it is on. On a deployment where it is off, the REST operations return HTTP 404 "Investor module not initialized." and the GraphQL fields raise `INVESTOR_NOT_INITIALIZED`.
+- A graph provisioned with the `roboinvestor` schema extension. The operations and the GraphQL investor fields only appear on graphs that carry this extension. In the app, **Create Graph** lets you select it among the graph's schema extensions.
 
 ## The Two Write Surfaces
 
@@ -76,20 +71,14 @@ All portfolio and position writes flow through the three Portfolio Block operati
 
 ## Quick Start
 
-The quickest way to get a graph that actually carries the `roboinvestor` extension is `just demo-roboinvestor`, which provisions the investor graph into the `roboinvestor_demo` slot. Then read your credentials once and drive the surface with `curl`:
+Set your credentials once and drive the surface with `curl`:
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=$(jq -r '.graphs.roboinvestor_demo.graph_id' .local/config.json)
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 ```
 
-The `graph_id` is nested under `graphs.<slot>.graph_id` in `.local/config.json` — it is not a top-level key, and the slot name varies by which demo script created it. **Name the slot; do not pick one positionally.** A `to_entries[0]` grabs whichever slot sorts first, which is typically a RoboLedger graph — every command on this page then fails with `EXTENSION_NOT_PROVISIONED`. List the slots first if you are unsure which is yours:
-
-```bash
-jq -r '.graphs | keys[]' .local/config.json
-```
-
-The graph must carry the `roboinvestor` extension; see [Prerequisites](#prerequisites).
+The graph must carry the `roboinvestor` extension; see [Prerequisites](#prerequisites). Pointing `GRAPH_ID` at a RoboLedger graph makes every command on this page fail with `EXTENSION_NOT_PROVISIONED`.
 
 The minimal end-to-end path is: create a security, create a portfolio block that references it, then read it back via GraphQL. The walkthrough below does exactly that.
 
@@ -100,8 +89,8 @@ The minimal end-to-end path is: create a security, create a portfolio block that
 Securities are master data. They must exist before any position can reference them — `create-portfolio-block` never mints securities.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboinvestor/$GRAPH_ID/operations/create-security" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/operations/create-security" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "entity_id": "ent_acme_holdings",
@@ -122,8 +111,8 @@ The response is an `OperationEnvelope` whose `result` is a `SecurityResponse`. I
 A portfolio block creates the portfolio and its initial positions in one atomic operation. Every `security_id` is validated up front; an unknown one rejects the whole request.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboinvestor/$GRAPH_ID/operations/create-portfolio-block" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/operations/create-portfolio-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "portfolio": {
@@ -157,8 +146,8 @@ curl -X POST "http://localhost:8000/extensions/roboinvestor/$GRAPH_ID/operations
 Updates to a portfolio block carry the portfolio's own field changes plus position deltas in three buckets: `add`, `update`, and `dispose`. Each delta targets a position by id, and every targeted id must belong to this portfolio.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboinvestor/$GRAPH_ID/operations/update-portfolio-block" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/operations/update-portfolio-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "portfolio_id": "port_q1_growth_2026",
@@ -186,8 +175,8 @@ Reads are GraphQL-only — see [Reading Data Back With GraphQL](#reading-data-ba
 Deleting a portfolio that still has active positions requires explicit confirmation, so you do not accidentally drop a live portfolio.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboinvestor/$GRAPH_ID/operations/delete-portfolio-block" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/operations/delete-portfolio-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"portfolio_id": "port_legacy_2024", "confirm_active_positions": true}'
 ```
@@ -208,8 +197,6 @@ When you call `create-security`, the issuer link is resolved in priority order:
 
 This is a **mutual handshake**: the investor records the company's `graph_id`, *and* the company shares a report into the investor's graph. Neither alone establishes the link. Authorization lives at the report-sharing boundary, not in the RoboInvestor OLTP layer — recording a `source_graph_id` for a company that has not shared a report simply leaves the security unlinked until that report arrives.
 
-`just demo-roboinvestor` is the executable proof of this handshake: it provisions the Meridian Ventures Fund I investor graph into the `roboinvestor_demo` slot, provisions an issuer graph (the SaaS startup scenario) into `saas_startup`, and performs the report share that links the two. Its flags let you drive each half separately — `--issuer <id>` targets an existing issuer graph, `--reload-issuer` rebuilds it, `--skip-share` stops short of the share so you can watch a security sit unlinked, and `--revoke` shares, then revokes and verifies the teardown. `--dry-run` previews the portfolio without writing anything.
-
 ## Reading Data Back With GraphQL
 
 The read side is GraphQL only. The endpoint is graph-scoped by URL and is **not** roboinvestor-prefixed:
@@ -218,7 +205,7 @@ The read side is GraphQL only. The endpoint is graph-scoped by URL and is **not*
 POST /extensions/{graph_id}/graphql
 ```
 
-`graph_id` comes from the URL — there is no `graphId` query argument. In dev, this endpoint renders GraphiQL with introspection, which is the easiest way to confirm exact field names and casing.
+`graph_id` comes from the URL — there is no `graphId` query argument. An introspection query over POST (allowed with or without credentials) is the way to confirm exact field names and casing on the hosted API; the in-browser GraphiQL explorer is development-only and is not mounted on `api.robosystems.ai`.
 
 The investor query fields are:
 
@@ -232,11 +219,11 @@ The investor query fields are:
 | `holdings` | `portfolioId` (required) | holdings list |
 | `portfolioBlock` | `portfolioId` (required) | the assembled Portfolio Block molecule |
 
-Argument names are camelCased (the Python `entity_id` becomes `entityId`, `portfolio_id` becomes `portfolioId`, and so on). The example below reads a Portfolio Block back; verify the exact selection-set field names in GraphiQL, since the schema is generated from the response models:
+Argument names are camelCased (the Python `entity_id` becomes `entityId`, `portfolio_id` becomes `portfolioId`, and so on). The example below reads a Portfolio Block back; verify the exact selection-set field names through introspection, since the schema is generated from the response models:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ portfolioBlock(portfolioId: \"port_q1_growth_2026\") { id name totalCostBasisDollars totalCurrentValueDollars activePositionCount positions { id quantity status security { name securityType issuer { name sourceGraphId } } } } }"}'
 ```
@@ -247,7 +234,7 @@ For agent-driven reads, the same GraphQL surface is reachable through the MCP `q
 
 ## Operations Reference
 
-The full request and response schemas are published in the live OpenAPI spec — see [API Documentation](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally) rather than re-tabulating every field here. The six operations are:
+The full request and response schemas are published in the live OpenAPI spec — see [API Documentation](https://api.robosystems.ai/docs) rather than re-tabulating every field here. The six operations are:
 
 | Operation | Request model | Result in envelope |
 | --- | --- | --- |
@@ -294,7 +281,7 @@ The last two are easy to confuse. `INVESTOR_NOT_INITIALIZED` means the domain is
 
 **The GraphQL URL is not roboinvestor-prefixed.** Reads go to `/extensions/{graph_id}/graphql`, not `/extensions/roboinvestor/{graph_id}/graphql`. The graph is scoped by the URL path; there is no `graphId` query argument.
 
-**Some vocabularies are open.** `quantity_type` (for example `shares`, `units`, `percentage`, `principal`), `valuation_source` (for example `manual`, `report_derived`, `market`, `formula`, `broker_statement`), `strategy`, and a position's `status` are treated as open vocabularies rather than fixed enums. Use the OpenAPI spec and GraphiQL for the values your deployment accepts.
+**Some vocabularies are open.** `quantity_type` (for example `shares`, `units`, `percentage`, `principal`), `valuation_source` (for example `manual`, `report_derived`, `market`, `formula`, `broker_statement`), `strategy`, and a position's `status` are treated as open vocabularies rather than fixed enums. Use the OpenAPI spec and GraphQL introspection for the values your deployment accepts.
 
 ## Surface Scope
 
@@ -306,6 +293,17 @@ The RoboInvestor surface covers private-company portfolio management:
 - Cross-graph issuer linking via `source_graph_id` and the report-sharing handshake.
 
 Atom-level portfolio and position CRUD endpoints do not exist — all portfolio and position writes go through the Portfolio Block. The surface is deliberately narrow; the molecule is the contract.
+
+## Self-hosted deployments
+
+On your own stack, `just demo-roboinvestor` drives the whole surface end-to-end and is the executable proof of the [cross-graph handshake](#cross-graph-issuer-linking): it provisions the **Meridian Ventures Fund I** investor graph into the `roboinvestor_demo` slot of `.local/config.json`, provisions an issuer graph (the SaaS startup scenario) into `saas_startup`, and performs the report share that links the two. Its flags drive each half separately — `--issuer <id>` targets an existing issuer graph, `--reload-issuer` rebuilds it, `--skip-share` stops short of the share so you can watch a security sit unlinked, and `--revoke` shares, then revokes and verifies the teardown. `--dry-run` previews the portfolio without writing anything.
+
+The `graph_id` is nested under `graphs.<slot>.graph_id` — not a top-level key. **Name the slot; do not pick one positionally:** `to_entries[0]` typically grabs a RoboLedger graph.
+
+```bash
+jq -r '.graphs | keys[]' .local/config.json
+GRAPH_ID=$(jq -r '.graphs.roboinvestor_demo.graph_id' .local/config.json)
+```
 
 ## Related Documentation
 
@@ -323,7 +321,7 @@ Atom-level portfolio and position CRUD endpoints do not exist — all portfolio 
 
 **API Reference:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - Full request and response schemas for all six operations (local equivalent at `http://localhost:8000/docs`).
+- **[API Documentation](https://api.robosystems.ai/docs)** - Full request and response schemas for all six operations.
 
 ## Support
 

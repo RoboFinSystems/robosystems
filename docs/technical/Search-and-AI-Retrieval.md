@@ -2,7 +2,9 @@
 
 This guide shows you how to give an AI Operator the institutional-knowledge layer over your entity graph: upload unstructured content (policies, procedures, notes — plus SEC filing narratives on shared repositories), index it with hybrid keyword + semantic search, and let an Operator ground its answers on the right document.
 
-**Quick Start:** Run `just demo-roboledger` to create a writable graph, upload a policy document, then run `just search <graph_id> "depreciation policy"` to see it surface.
+**Quick Start:** Upload a policy document into a writable graph with the `index-document` operation, then search it with `POST /v1/graphs/{graph_id}/search` (or the `search-documents` MCP tool) to see it surface.
+
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
 ## Overview
 
@@ -26,27 +28,25 @@ Indexing and semantic search run a local embedding model in-image. They make **n
 
 Before starting, ensure you have:
 
-- Docker running locally with the full stack up (`just start`)
-- `SEMANTIC_SEARCH_ENABLED=true` in your environment (gates the documents router and all of the search/document MCP tools; the search router itself mounts when either `SEMANTIC_SEARCH_ENABLED` **or** `SEMANTIC_MEMORY_ENABLED` is on, because it hosts memory `recall` too)
-- OpenSearch running and reachable at `OPENSEARCH_URL` (default `http://localhost:9200`)
-- A demo user and a writable graph — `just demo-user` then `just demo-roboledger`
+- A RoboSystems account, an API key, and a writable graph of your own (see [Quick Start](Quick-Start))
+- For SEC filing narratives, a subscription to the `sec` repository (from **Repositories** in the app)
+- Document search enabled on the deployment. It is on robosystems.ai; a self-hosted deployment controls it with `SEMANTIC_SEARCH_ENABLED` (see [Self-hosted deployments](#self-hosted-deployments))
 
-Your API key is saved to `.local/config.json` after running `just demo-user`. All `curl` examples below read it from there.
+All `curl` examples below target `https://api.robosystems.ai` and read your API key from `$ROBOSYSTEMS_API_KEY`.
 
 ## Quick Start
 
-The fastest path is to create a graph, upload one policy document, and search it.
+The fastest path is to upload one policy document into a graph you own ([Step 1](#step-1-create-the-policy-document) of the worked example below) and search it.
 
 ```bash
-# Create a demo user and a writable RoboLedger graph
-just demo-user
-just demo-roboledger
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
-# Search documents in a graph (semantic ranking is on by default in this recipe)
-just search <your_graph_id> "PP&E depreciation policy useful lives"
-
-# Count indexed documents and see the breakdown by source type
-just search-count <your_graph_id>
+# Search documents in a graph (semantic ranking is opt-in; this call turns it on)
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/search" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "PP&E depreciation policy useful lives", "semantic": true, "size": 5}'
 ```
 
 **Note:** A just-created document may take up to ~30 seconds to appear in search results — the index refresh interval is 30 seconds (60 seconds during bulk loads).
@@ -71,11 +71,11 @@ This is the canonical thread: you upload a depreciation policy, then an Operator
 Upload a markdown policy into your graph. The platform splits it on headings, embeds each section, and indexes the sections independently.
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=<your graph id>
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-document" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/index-document" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Property, Plant & Equipment Depreciation Policy",
@@ -114,8 +114,8 @@ The bare `id` (`doc_…`) is the PostgreSQL document id used by `get-document` a
 Search for the policy. By default search uses BM25 keyword matching; add `"semantic": true` to combine it with semantic vector ranking.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/search" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/search" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "PP&E depreciation policy useful lives", "semantic": true, "size": 5}'
 ```
@@ -127,8 +127,8 @@ Each hit carries a `document_id`, a relevance `score`, a `section_label`, and a 
 Take the `document_id` from the most relevant hit and fetch its complete text:
 
 ```bash
-curl -X GET "http://localhost:8000/v1/graphs/$GRAPH_ID/search/udoc_doc_abc123def456_1" \
-  -H "X-API-Key: $API_KEY"
+curl -X GET "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/search/udoc_doc_abc123def456_1" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 This returns the full section content (here, the "Useful Lives" list with the 7-year figure for machinery).
@@ -154,15 +154,14 @@ The Operator never guesses — its answer is anchored to the section text it ret
 
 ## Accessing Search
 
-You have three ways to upload documents and run searches:
+You have two ways to upload documents and run searches:
 
 1. **[MCP Tools](#option-1-mcp-tools-for-ai-operators)** — for AI Operators and any MCP-compatible client
 2. **[REST API](#option-2-rest-api)** — `curl` with `X-API-Key` for direct integration
-3. **[just Commands](#option-3-just-commands)** — developer convenience from the command line
 
 ### Option 1: MCP Tools (For AI Operators)
 
-AI Operators interact with the index through MCP tools. All of them require `SEMANTIC_SEARCH_ENABLED=true`; if search is disabled or OpenSearch is unreachable, the tools return an error and are listed as unavailable.
+AI Operators interact with the index through MCP tools. All of them require document search to be enabled on the deployment (`SEMANTIC_SEARCH_ENABLED`); if search is disabled or OpenSearch is unreachable, the tools return an error and are listed as unavailable.
 
 **Search tools:**
 
@@ -185,46 +184,26 @@ For Operator setup and the broader MCP tool surface, see [AI Operators and MCP](
 
 ### Option 2: REST API
 
-Both surfaces live under `/v1/graphs/{graph_id}`. Use the `X-API-Key` header and read the key from `.local/config.json`. Search and section-fetch are REST endpoints (`POST /search`, `GET /search/{document_id}`); document reads are REST GETs under `/documents`; document writes are the `index-document` and `delete-document` operations.
+Both surfaces live under `/v1/graphs/{graph_id}`. Send your API key in the `X-API-Key` header. Search and section-fetch are REST endpoints (`POST /search`, `GET /search/{document_id}`); document reads are REST GETs under `/documents`; document writes are the `index-document` and `delete-document` operations.
 
 Indexing, search, and section-fetch are shown in the [worked example](#worked-example-ground-an-operator-on-the-ppe-depreciation-policy) above. The read side of the document lifecycle is list and get:
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=<your graph id>
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
 # List documents in a graph (optionally filter by source type)
-curl "http://localhost:8000/v1/graphs/$GRAPH_ID/documents" \
-  -H "X-API-Key: $API_KEY"
+curl "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/documents" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 
 # Get a single document with its metadata (use the bare PG id, e.g. doc_…)
-curl "http://localhost:8000/v1/graphs/$GRAPH_ID/documents/doc_abc123def456" \
-  -H "X-API-Key: $API_KEY"
+curl "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/documents/doc_abc123def456" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
-The full request/response schema for every endpoint is published in the live OpenAPI spec — see [API Documentation](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally) rather than re-deriving it here.
+The full request/response schema for every endpoint is published in the live OpenAPI spec — see [API Documentation](https://api.robosystems.ai/docs) rather than re-deriving it here.
 
 **Important:** The document write operations (`index-document`, `delete-document`) require write access and are blocked on shared-repository graphs. You can `search` and `get-document-section` against the `sec` repository, but you cannot index documents into it — index into your own graph. See [Document Management](Document-Management) for the full document lifecycle.
-
-### Option 3: just Commands
-
-Two recipes give you search from the command line during development:
-
-```bash
-# Search a graph; semantic ranking is ON by default in this recipe
-just search <graph_id> "tariff exposure supply chain risk"
-
-# Disable semantic ranking (BM25 only)
-just search <graph_id> "depreciation policy" --no-semantic
-
-# Scope an SEC narrative search with filters
-just search sec "tariff exposure supply chain risk" --entity NVDA --form-type 10-K --fiscal-year 2025
-
-# Count indexed documents and break down by source type
-just search-count sec
-```
-
-**Note:** The `just search` recipe forces semantic mode by default, while the REST and MCP surfaces default to BM25-only (`semantic=false`). Pass `--no-semantic` to the recipe to match the REST/MCP default.
 
 ## Search Filters
 
@@ -293,17 +272,17 @@ The two planes are deliberately kept apart. Documents are authored artifacts wit
 | POST | `/v1/graphs/{graph_id}/operations/forget` | Delete one by id |
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/memory/recall" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/memory/recall" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "what did we decide about the Acme invoice", "k": 5}'
 ```
 
 `recall` returns the **same `SearchResponse` shape as document search** — the same `SearchHit` objects, so an Operator can rank memory hits and document hits with one set of field names. What it does *not* mean is that memories live in the search index: `recall` reads LanceDB, `POST /search` reads OpenSearch, and the two never see each other's records. The `source_type: "memory"` you see on a recall hit is stamped on at read time, not stored in an index.
 
-**Different flags gate it.** Memory is controlled by `SEMANTIC_MEMORY_ENABLED`, with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on the four MCP tools — **not** by `SEMANTIC_SEARCH_ENABLED`. A deployment can run document search with memory off, or memory with document search off. (The `/search` router mounts if *either* flag is on, since it hosts `recall` as well.)
+**Different flags gate it.** A deployment controls memory with `SEMANTIC_MEMORY_ENABLED`, with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on the four MCP tools — **not** with `SEMANTIC_SEARCH_ENABLED`. A deployment can run document search with memory off, or memory with document search off. (The `/search` router mounts if *either* flag is on, since it hosts `recall` as well.)
 
-**Scope rules.** Memory is blocked on shared repositories. `remember` and `update-memory` are additionally blocked on subgraphs — a subgraph exists to be cheap to create and throw away, so memories belong on the parent graph — while `forget` stays open so existing memories remain removable. `just demo-custom-graph` exercises both halves: step 6 indexes markdown documents, and step 7 creates a `knowledge` subgraph that pairs structured graph traversal on the subgraph with semantic recall on the parent.
+**Scope rules.** Memory is blocked on shared repositories. `remember` and `update-memory` are additionally blocked on subgraphs — a subgraph exists to be cheap to create and throw away, so memories belong on the parent graph — while `forget` stays open so existing memories remain removable.
 
 ## Response Shapes
 
@@ -328,21 +307,16 @@ The search service is disabled or OpenSearch is unreachable.
 
 ```bash
 # Confirm the search routes are mounted (they are absent when the flag is off)
-curl -s http://localhost:8000/openapi.json | jq '.paths | keys | map(select(test("/search")))'
-
-# Confirm OpenSearch is reachable at OPENSEARCH_URL
-curl http://localhost:9200
+curl -s https://api.robosystems.ai/openapi.json | jq '.paths | keys | map(select(test("/search")))'
 ```
 
-**Note:** `grep SEMANTIC_SEARCH_ENABLED .env.local` is not a useful check — the flag defaults to `true` and ships commented out, so no output means the default applies, not that the feature is off. Ask the running API which routes it mounted instead.
-
-**Solution:** Set `SEMANTIC_SEARCH_ENABLED=true`, ensure OpenSearch is running and reachable at `OPENSEARCH_URL`, then `just restart`. That flag controls the documents router and all seven search/document MCP tools (`search-documents`, `get-document-section`, `create-document`, `update-document`, `delete-document`, `get-document`, `list-documents`) at once.
+On a self-hosted deployment, see [Self-hosted deployments](#self-hosted-deployments) for the flag and OpenSearch checks.
 
 ### Newly Uploaded Document Doesn't Appear in Search
 
 The index refresh interval is 30 seconds (60 seconds during bulk loads), so a just-created document may not be searchable immediately.
 
-**Solution:** Wait ~30 seconds and search again. To confirm the document was indexed, run `just search-count <graph_id>` and check the count and source-type breakdown.
+**Solution:** Wait ~30 seconds and search again. To confirm the document was indexed, check that the `index-document` response reported a non-zero `sections_indexed`.
 
 ### 403 When Uploading to the `sec` Repository
 
@@ -354,13 +328,41 @@ Document write operations are blocked on shared-repository graphs.
 
 Searching `sec` runs a subscription/access check. Without access to the repository, the search returns 403.
 
-**Solution:** Grant repository access to your user (for example `just demo-user --repositories sec`), then retry.
+**Solution:** Subscribe to the SEC repository from **Repositories** in the app, then retry.
 
 ### Snippet Is Just the Section Heading
 
 Document content is excluded from the search response body, so when there are no highlight fragments the `snippet` falls back to the section label.
 
 **Solution:** This is expected. Call `get-document-section` with the hit's `document_id` to read the full section text.
+
+## Self-hosted deployments
+
+**Flags and OpenSearch.** `SEMANTIC_SEARCH_ENABLED` gates the documents router and all seven search/document MCP tools (`search-documents`, `get-document-section`, `create-document`, `update-document`, `delete-document`, `get-document`, `list-documents`) at once. The search router itself mounts when either `SEMANTIC_SEARCH_ENABLED` **or** `SEMANTIC_MEMORY_ENABLED` is on, because it hosts memory `recall` too. OpenSearch must be reachable at `OPENSEARCH_URL` (default `http://localhost:9200`).
+
+If search returns 503, confirm the routes are mounted with `curl -s http://localhost:8000/openapi.json | jq '.paths | keys | map(select(test("/search")))'` and that OpenSearch answers with `curl http://localhost:9200`. `grep SEMANTIC_SEARCH_ENABLED .env.local` is not a useful check — the flag defaults to `true` and ships commented out, so no output means the default applies, not that the feature is off. Set `SEMANTIC_SEARCH_ENABLED=true`, ensure OpenSearch is reachable, then `just restart`.
+
+**Access to `sec`.** Grant a local user repository access with `just demo-user --repositories sec`.
+
+**just commands.** Two recipes give you search from the command line:
+
+```bash
+# Search a graph; semantic ranking is ON by default in this recipe
+just search <graph_id> "tariff exposure supply chain risk"
+
+# Disable semantic ranking (BM25 only)
+just search <graph_id> "depreciation policy" --no-semantic
+
+# Scope an SEC narrative search with filters
+just search sec "tariff exposure supply chain risk" --entity NVDA --form-type 10-K --fiscal-year 2025
+
+# Count indexed documents and break down by source type
+just search-count sec
+```
+
+The `just search` recipe forces semantic mode by default, while the REST and MCP surfaces default to BM25-only (`semantic=false`). Pass `--no-semantic` to match the REST/MCP default.
+
+`just demo-user` then `just demo-roboledger` create a demo user and a writable RoboLedger graph to upload into, and `just demo-custom-graph` exercises both retrieval planes: step 6 indexes markdown documents, and step 7 creates a `knowledge` subgraph that pairs structured graph traversal on the subgraph with semantic recall on the parent. See [Local Development](Local-Development).
 
 ## Related Documentation
 
@@ -379,7 +381,6 @@ Document content is excluded from the search response body, so when there are no
 **API Reference:**
 
 - **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec
-- **RoboSystems API (local)**: http://localhost:8000/docs
 
 ## Support
 

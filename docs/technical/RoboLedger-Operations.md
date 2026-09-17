@@ -2,7 +2,9 @@
 
 This guide shows you how to drive RoboLedger's command-write and analytical-view surface — the graph-scoped operations at `POST /extensions/roboledger/{graph_id}/operations/{op_name}`. Command writes mutate the ledger (update the entity, close a period, generate a report); analytical views read facts back out, either from the XBRL hypercube or from the live OLTP ledger. Both share one response contract and live under the same URL prefix.
 
-**Quick Start:** Run `just demo-roboledger` to provision a fully-populated tenant, then `curl` any operation below using the API key from `.local/config.json`.
+**Quick Start:** With an API key and a RoboLedger graph, `curl` any operation below against `https://api.robosystems.ai`, sending the key in the `X-API-Key` header.
+
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
 ## Table of Contents
 
@@ -16,6 +18,7 @@ This guide shows you how to drive RoboLedger's command-write and analytical-view
 - [Worked Example: build-fact-grid](#worked-example-build-fact-grid)
 - [Financial Statements](#financial-statements)
 - [Gotchas and Pitfalls](#gotchas-and-pitfalls)
+- [Self-hosted deployments](#self-hosted-deployments)
 - [Related Documentation](#related-documentation)
 
 ## Overview
@@ -34,21 +37,21 @@ Command writes and analytical views share one response shape — the `OperationE
 
 ## Prerequisites
 
-- A running local stack (`just start`).
-- A graph with an initialized RoboLedger ledger. The fastest path is the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough), which provisions a tenant with 16 months of synthetic books in ~60 seconds.
-- An API key and graph id in `.local/config.json` (written by `just demo-user` or `just demo-roboledger`).
-- `ROBOLEDGER_ENABLED=true` gates the command-write operations. The analytical view router is gated independently by `FACT_GRID_ENABLED`, so deployments serving only the SEC shared repository can mount `build-fact-grid` without enabling RoboLedger tenants.
+- A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start).
+- A graph with an initialized RoboLedger ledger. On the hosted platform a RoboLedger graph comes from roboledger.ai when you connect QuickBooks, or from **Create Graph** in the app.
+- The SEC examples (`/extensions/roboledger/sec/...`) need a subscription to the SEC repository, from **Repositories** in the app.
+- `ROBOLEDGER_ENABLED` gates the command-write operations. The analytical view router is gated independently by `FACT_GRID_ENABLED`, so deployments serving only the SEC shared repository can mount `build-fact-grid` without enabling RoboLedger tenants. On robosystems.ai both are on; a self-hosted deployment sets them in its environment.
 
 ## Quick Start
 
-Read the credentials from `.local/config.json` once, then reuse them across calls:
+Set your credentials once, then reuse them across calls:
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=$(jq -r '.graphs[].graph_id' .local/config.json | head -1)
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 ```
 
-Every example below uses `http://localhost:8000` and the `X-API-Key` header. The full endpoint and schema reference — request bodies, response models, every field — lives in the live OpenAPI spec at [http://localhost:8000/docs](http://localhost:8000/docs) (or [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs)). This page carries the concepts and the worked examples; it does not re-tabulate the endpoint surface.
+Every example below uses `https://api.robosystems.ai` and the `X-API-Key` header. The full endpoint and schema reference — request bodies, response models, every field — lives in the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs). This page carries the concepts and the worked examples; it does not re-tabulate the endpoint surface.
 
 ## The Operation Envelope Contract
 
@@ -99,8 +102,8 @@ The registered command-write operations, grouped by workflow stage (from [`route
 A second example, `update-entity`, illustrates the partial-update convention. Only the non-null fields in the body are applied; an empty body returns `400 "No fields provided for update."`
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/update-entity" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/update-entity" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "legal_name": "Cascade Advisory Group, LLC",
@@ -123,8 +126,8 @@ The close workflow is the most product-distinctive command path. The fiscal cale
 Setting a target closes nothing. `close-period` does the locking, and it works **sequentially**: the `period` you pass must equal `closed_through + 1`. The `period` value matches the regex `^\d{4}-(0[1-9]|1[0-2])$` (e.g. `2026-03`).
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/close-period" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/close-period" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: close-2026-03-$(date +%s)" \
   -H "Content-Type: application/json" \
   -d '{"period": "2026-03", "allow_stale_sync": false}'
@@ -162,7 +165,7 @@ On success, the envelope's `result` is a close summary:
 }
 ```
 
-`entries_posted` is the total across both post paths, and `entries_published_to_qb` / `entries_posted_locally` are the split. On a graph whose QuickBooks connection is `qb_authoritative`, the close first publishes eligible RoboLedger-originated drafts back to QuickBooks (each is promoted to posted at publish time); everything else goes through the local bulk transition. See [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally) for the write-policy model behind that split.
+`entries_posted` is the total across both post paths, and `entries_published_to_qb` / `entries_posted_locally` are the split. On a graph whose QuickBooks connection is `qb_authoritative`, the close first publishes eligible RoboLedger-originated drafts back to QuickBooks (each is promoted to posted at publish time); everything else goes through the local bulk transition.
 
 The close also stamps the period's canonical statement FactSets. `stamped_statement_sets` maps `structure_id` → `fact_set_id` for each set minted, and `statement_rule_summary` reports statement-rule verification (distinct from `rule_summary`, which is the schedule-rule pass). When the tenant hasn't set up reporting yet, `statements_stamped` is `false` and `statement_stamp_note` carries the soft-skip reason (`no_coa_mapping`, `no_entity`, `no_statement_structures`, or `no_taxonomy`) — the close still succeeds.
 
@@ -211,8 +214,8 @@ Other optional fields scope the query further: `entity`, `entities[]`, `form`, `
 A balance-sheet rollup against a tenant graph, scoped to three concepts at one instant:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/build-fact-grid" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/build-fact-grid" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "elements": ["us-gaap:Assets", "us-gaap:Liabilities", "us-gaap:StockholdersEquity"],
@@ -269,8 +272,8 @@ The envelope's `result` is a `ViewResponse` — `metadata`, `dimensions`, `facts
 The `view_config` block scopes the query further; it is **filtering only**. This example asks the SEC shared repository for NVIDIA's annual revenue, restricted to three specific period members (NVIDIA's fiscal year ends in late January, so the members are its fiscal year ends, not calendar ones):
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/sec/operations/build-fact-grid" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/build-fact-grid" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "canonical_concepts": ["revenue"],
@@ -318,8 +321,8 @@ Two operations render a *complete* statement rather than a free-form slice. Whic
 It lives in a third router, [`reads.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/reads.py), sibling to `operations.py` (command writes) and `views.py` (graph-backed views). All three mount under the same `/operations/` prefix, but `reads.py` is gated by `ROBOLEDGER_ENABLED` — unlike `views.py`, which stays mounted for SEC-only deployments.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/live-financial-statement" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/live-financial-statement" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"statement_type": "balance_sheet", "period_type": "annual", "fiscal_year": 2026}'
 ```
@@ -331,8 +334,8 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/l
 `financial-statement-analysis` renders the same four statement types out of the hypercube (`Structure → FactSet → Fact`). Use it against the SEC shared repository, or against a tenant graph whose ledger has already been materialized to LadybugDB.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/financial-statement-analysis" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/financial-statement-analysis" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"statement_type": "balance_sheet", "report_id": "..."}'
 ```
@@ -382,6 +385,10 @@ A tenant ledger must be materialized into LadybugDB before its facts appear in a
 
 Reusing an `Idempotency-Key` with a different request body returns `409`, not a silent overwrite. Use a fresh key per distinct operation.
 
+## Self-hosted deployments
+
+On your own stack, `just demo-roboledger` provisions a tenant with 16 months of synthetic books in about 60 seconds and writes the API key and graph id into `.local/config.json` — see the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough). To layer real synced data under the same workflow, and for the write-policy model behind the `entries_published_to_qb` / `entries_posted_locally` split, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
+
 ## Related Documentation
 
 **Wiki Guides:**
@@ -390,12 +397,10 @@ Reusing an `Idempotency-Key` with a different request body returns `409`, not a 
 - **[GraphQL Reads](GraphQL-Reads)** - The typed-read sibling surface (`POST /extensions/{graph_id}/graphql`)
 - **[Reporting and Rendering](Reporting-and-Rendering)** - How statements are rendered and footed from the hypercube
 - **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough)** - See the operations surface end-to-end against a populated tenant
-- **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)** - Layer real synced data under the same workflow
 
 **API Reference:**
 
 - **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI spec with every request body and response model
-- **RoboSystems API (local)**: http://localhost:8000/docs
 
 **Codebase Documentation:**
 

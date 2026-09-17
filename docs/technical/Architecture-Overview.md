@@ -4,14 +4,15 @@ RoboSystems is an AI-native financial intelligence platform for accounting, fina
 
 ## Documentation Map
 
-This wiki is organized into six areas:
+This wiki is organized into seven areas:
 
-- **Getting Started & Platform** — orientation and self-hosting ([Quick Start](Quick-Start), [Core Concepts](Core-Concepts), [Bootstrap Guide](Bootstrap-Guide)).
-- **Demos** — hands-on walkthroughs ([RoboLedger Demos](RoboLedger-Demo-Walkthrough), [SEC XBRL Pipeline](SEC-XBRL-Pipeline), [Custom Graph Schema](Custom-Graph-Schema)).
+- **Getting Started & Platform** — orientation against the hosted platform ([Quick Start](Quick-Start), [Core Concepts](Core-Concepts), [Security & Compliance](Security-and-Compliance)).
 - **Operations Layer** — the core platform API and graph management ([Graph Operations](Graph-Operations), [Querying the Analytical Graph](Querying-the-Analytical-Graph), [AI Operators & MCP](AI-Operators-and-MCP)).
 - **Extensions Layer** — RoboLedger and RoboInvestor ([Extensions Surface Overview](Extensions-Surface-Overview), [GraphQL Reads](GraphQL-Reads), [RoboLedger Operations](RoboLedger-Operations)).
 - **Content & Contribution Fabric** — the semantic content model ([Information Blocks](Information-Blocks), [Taxonomy & Frameworks](Taxonomy-and-Frameworks), [Event-Driven Ledger](Event-Driven-Ledger), [Reporting & Rendering](Reporting-and-Rendering)).
 - **Documents & Search** — unstructured content and retrieval ([Search & AI Retrieval](Search-and-AI-Retrieval), [Document Management](Document-Management)).
+- **Self-Hosting & Development** — running the platform yourself ([Local Development](Local-Development), [Windows Setup (WSL2)](Windows-Setup-with-WSL2), [Bootstrap Guide](Bootstrap-Guide)).
+- **Demos** — hands-on walkthroughs on a local stack ([RoboLedger Demos](RoboLedger-Demo-Walkthrough), [SEC XBRL Pipeline](SEC-XBRL-Pipeline), [Custom Graph Schema](Custom-Graph-Schema)).
 
 ### Three Retrieval Planes
 

@@ -2,6 +2,8 @@
 
 RoboSystems renders financial statements once, on the server, from atomic facts — and ships the result to any consumer as light JSON. The browser displays pre-computed rows; it never walks a calculation graph. This page explains the rendering engine, the conceptual model behind it, and how to request a rendered report.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -131,7 +133,7 @@ This is why a statement is a view, not a stored artifact: the Report holds facts
 
 ## How to Request a Rendered Report
 
-There are several addressable surfaces, depending on whether you want a saved Report, a live ad-hoc statement, or a pivot grid. All authenticated `curl` examples read the API key from `.local/config.json` (created by `just demo-user` or any demo command) and target `http://localhost:8000`. Replace `$GRAPH_ID` with your tenant graph id, or use `sec` for the shared SEC repository.
+There are several addressable surfaces, depending on whether you want a saved Report, a live ad-hoc statement, or a pivot grid. All authenticated `curl` examples target `https://api.robosystems.ai` and send your API key from `$ROBOSYSTEMS_API_KEY` in the `X-API-Key` header; to get an account, a key, and a graph, see [Quick Start](Quick-Start). Replace `$GRAPH_ID` with your tenant graph id, or use `sec` for the shared SEC repository.
 
 Full request/response schemas live in the [live OpenAPI spec](https://api.robosystems.ai/docs) — this page shows usage, not the full endpoint surface.
 
@@ -141,11 +143,11 @@ Full request/response schemas live in the [live OpenAPI spec](https://api.robosy
 
 It works on the SEC shared repo and on materialized tenant graphs. The request must supply `elements` and/or `canonical_concepts`, **and** at least one of `periods` / `period_type` / `fiscal_year` — otherwise it returns a 400.
 
-The `sec` examples below need a subscription to the shared repository; a fresh `just demo-user` key gets a 403 until you run `just demo-sec-subscribe`.
+The `sec` examples below need a subscription to the shared repository, from **Repositories** in the app; a key without one gets a 403.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/sec/operations/build-fact-grid" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/build-fact-grid" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "elements": ["us-gaap:Assets"],
@@ -158,8 +160,8 @@ curl -X POST "http://localhost:8000/extensions/roboledger/sec/operations/build-f
 A narrower slice puts entities on rows and pins the exact period columns you want back:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/sec/operations/build-fact-grid" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/build-fact-grid" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "canonical_concepts": ["revenue"],
@@ -174,15 +176,15 @@ curl -X POST "http://localhost:8000/extensions/roboledger/sec/operations/build-f
   }'
 ```
 
-`view_config` carries only `rows` and `columns`. Each is a list of axis configs whose `type` is one of `element`, `period`, or `entity` — `dimension` is rejected with a 422 — plus optional `selected_members` and `include_null_dimension`. **`view_config` filters; it does not format.** There are no ordering, labelling, value-field, or aggregation-function options, because ordering and labelling are presentation concerns belonging to the consumer that arranges the facts into a table. The SEC graph this runs against is the one set up in the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) guide.
+`view_config` carries only `rows` and `columns`. Each is a list of axis configs whose `type` is one of `element`, `period`, or `entity` — `dimension` is rejected with a 422 — plus optional `selected_members` and `include_null_dimension`. **`view_config` filters; it does not format.** There are no ordering, labelling, value-field, or aggregation-function options, because ordering and labelling are presentation concerns belonging to the consumer that arranges the facts into a table. The SEC graph this runs against is described in the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) guide.
 
 ### Create a Saved Report
 
 `create-report` renders the Balance Sheet, Income Statement, Cash Flow, and Equity facts for a tenant ledger and publishes them as a Report. `taxonomy_id` defaults to `rs-gaap`, but **`mapping_id` is required** — without a chart-of-accounts → GAAP mapping there is nothing to roll up.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-report" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-report" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
   -d '{
@@ -203,8 +205,8 @@ Obtain a real `mapping_id` from the `auto-map-elements` output or by creating a 
 The rendered View is exposed on the Information Block envelope. GraphQL is served at `POST /extensions/{graph_id}/graphql` — the graph is the URL scope, so queries do **not** take a `graphId` argument.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ informationBlock(id: \"<structure_id>\") { blockType displayName view { rendering { rows { elementName depth isSubtotal values } periods { label start end } validation { passed checks failures } } } verificationSummary { passed failed } } }"}'
 ```
@@ -218,8 +220,8 @@ curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
 `live-financial-statement` renders straight off the OLTP ledger with no saved Report. It is **tenant-only** — rejected on shared-repository graphs like `sec`. Supported `statement_type` values are `income_statement`, `balance_sheet`, `cash_flow_statement`, and `equity_statement`.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/live-financial-statement" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/live-financial-statement" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"statement_type": "income_statement", "period_type": "annual", "fiscal_year": 2026}'
 ```
@@ -245,18 +247,18 @@ The reporting layer reads from three kinds of authored content, each with its ow
 A worked example — request a rendered Income Statement after you have a mapped ledger:
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=<your tenant graph id>
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
 # 1. Render live off the ledger to confirm the mapping foots
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/live-financial-statement" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/live-financial-statement" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"statement_type": "income_statement", "period_type": "annual", "fiscal_year": 2026}'
 
 # 2. Once it foots, save it as a Report package
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-report" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-report" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
   -d '{"name": "FY2026 Income Statement", "mapping_id": "<your mapping id>",
@@ -264,7 +266,7 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/c
        "period_type": "annual", "comparative": true}'
 ```
 
-If a number is wrong, the fix is almost never in the renderer — it is in the mapping (a CoA account pointed at a subtotal instead of a leaf), the taxonomy (a missing calc arc), or the ledger (an untagged flow line). To explore the running surface end-to-end, `just demo-roboledger` provisions a tenant with synthetic data and a mapped chart of accounts.
+If a number is wrong, the fix is almost never in the renderer — it is in the mapping (a CoA account pointed at a subtotal instead of a leaf), the taxonomy (a missing calc arc), or the ledger (an untagged flow line).
 
 ## Related Documentation
 

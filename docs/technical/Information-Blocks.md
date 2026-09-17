@@ -2,6 +2,8 @@
 
 An Information Block is a typed, self-describing envelope that bundles raw graph atoms — elements, associations, and facts — together with the molecular wiring that makes them meaningful: an information model, mechanics, verification rules, and a per-period fact set. It is the unifying join between taxonomy content and ledger content, projected into financial reports.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [Atomic vs. Molecular](#atomic-vs-molecular)
@@ -130,7 +132,7 @@ Rendering and the broader reporting surface — including the multi-dimensional 
 
 Because statements are rendered and metrics are derived, the block you actually **author** is a declarative one — a **Schedule** is the canonical worked example. Authoring goes through the RoboLedger command surface; reading back goes through the always-on GraphQL surface.
 
-All authenticated calls use the `X-API-Key` header, read from `.local/config.json` (created by `just demo-user`). The base URL for local testing is `http://localhost:8000`, and `GRAPH_ID` is your tenant graph id (for example `kg1a2b3c...`).
+All authenticated calls use the `X-API-Key` header with a key from **Settings → API keys** at robosystems.ai. The base URL is `https://api.robosystems.ai`, and `GRAPH_ID` is your tenant graph id (for example `kg1a2b3c...`) — a graph with the `roboledger` extension. See [Quick Start](Quick-Start) for getting an account, a key, and a graph.
 
 ### Step 1: Create a Schedule (the write path)
 
@@ -139,11 +141,11 @@ The `create-information-block` operation takes a body discriminated on `block_ty
 `element_ids` and the `entry_template` sides take **chart-of-accounts element ids**, not taxonomy qnames — the `id` values returned by `get-unmapped-elements` or `get-graph-schema`. Resolve the two ids you need first and substitute them for the placeholders below; passing `us-gaap:Depreciation` here will not resolve.
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=<your graph id>
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-information-block" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-information-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $(date +%s)" \
   -d '{
@@ -170,8 +172,8 @@ The response is the full `InformationBlockEnvelope` for the freshly created bloc
 Reads go to `POST /extensions/{graph_id}/graphql`. **The graph is the URL scope, not a query argument** — there is no `graphId` argument; passing one is wrong. GraphQL field names are camelCase.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ informationBlock(id: \"STRUCTURE_ID_FROM_STEP_1\") { id blockType name displayName category informationModel { conceptArrangement memberArrangement } artifact { topic mechanics } facts { elementQname value periodEnd } factSet { id factsetType provenance } verificationSummary { passed failed } } }"}'
 ```
@@ -181,8 +183,8 @@ curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
 The `informationBlocks` query takes optional `blockType` and `category` filters plus `limit` / `offset`. This is always-on regardless of product flags.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ informationBlocks(blockType: \"schedule\", category: \"Close\", limit: 20) { id name displayName facts { value } } }"}'
 ```
@@ -192,8 +194,8 @@ curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
 Verification rules live as rows on the block — each carries a category (what it checks) and a mechanism (how it checks). Running the rule engine writes one `VerificationResult` per rule and returns a status-keyed summary.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/evaluate-rules" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/evaluate-rules" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"structure_id": "STRUCTURE_ID_FROM_STEP_1"}'
 ```

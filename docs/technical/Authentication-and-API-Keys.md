@@ -1,6 +1,8 @@
 # Authentication & API Keys
 
-This guide shows you how to authenticate against a local RoboSystems stack from scripts, `curl`, MCP clients, and SDKs. The one rule to internalize up front: backend and programmatic access uses the `X-API-Key` header, JWT/Bearer tokens are a frontend concern, and OAuth 2.1 is how MCP clients sign in (covered on [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients)).
+This guide shows you how to authenticate against the RoboSystems API from scripts, `curl`, MCP clients, and SDKs. The one rule to internalize up front: backend and programmatic access uses the `X-API-Key` header, JWT/Bearer tokens are a frontend concern, and OAuth 2.1 is how MCP clients sign in (covered on [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients)).
+
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
 ## Three Authentication Methods at a Glance
 
@@ -8,11 +10,11 @@ RoboSystems has three doors into the same building. All resolve to the same `Use
 
 | Method | Who uses it | Header | Where it comes from | Lifecycle |
 | --- | --- | --- | --- | --- |
-| **API key** | Scripts, `curl`, MCP clients, SDKs, CI | `X-API-Key` | `just demo-user` writes one to `.local/config.json`; create more via `POST /v1/user/api-keys` | Long-lived; you revoke or expire it explicitly |
+| **API key** | Scripts, `curl`, MCP clients, SDKs, CI | `X-API-Key` | **Settings → API keys** at robosystems.ai; or `POST /v1/user/api-keys` | Long-lived; you revoke or expire it explicitly |
 | **JWT / Bearer** | The browser frontends (robosystems-app, roboledger-app, roboinvestor-app) | `Authorization: Bearer …` | `POST /v1/auth/login` issues a token | Short-lived, auto-refreshed by the frontend session layer |
 | **OAuth 2.1 bearer** | MCP clients that run a consent flow — claude.ai, Claude Code, ChatGPT, Cursor, VS Code, the Docker MCP Toolkit | `Authorization: Bearer rfso…` (opaque; accepted by the MCP routes only) | The client discovers the authorization server from `https://api.robosystems.ai/v1/mcp`, you sign in, and the consent screen picks the graph — see [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients) | 1-hour access token, 90-day refresh token rotated on use; scoped to the one graph chosen at consent; revoke with `POST /v1/oauth/revoke` |
 
-For everything in this guide — `curl`, MCP, SDK smoke tests — use the API key. You never need to call `login` for backend testing, and OAuth is the hosted, browser-driven path rather than the local-stack one.
+For everything in this guide — `curl`, MCP, SDK smoke tests — use the API key. You never need to call `login` for backend testing, and OAuth is the browser-driven sign-in an MCP client runs for you.
 
 Those three are the *credentials*. How a person proves who they are to get a JWT in the first place is a separate, configurable question: password, passkey, or an enterprise identity provider. A deployment publishes its own answer at `GET /v1/auth/providers` — see [Login Methods](#login-methods) below.
 
@@ -20,7 +22,7 @@ Those three are the *credentials*. How a person proves who they are to get a JWT
 
 - [Overview](#overview)
 - [Prerequisites](#prerequisites)
-- [Getting Your Local API Key](#getting-your-local-api-key)
+- [Getting an API Key](#getting-an-api-key)
 - [The X-API-Key Path](#the-x-api-key-path)
 - [Worked Examples](#worked-examples)
 - [API Key Lifecycle](#api-key-lifecycle)
@@ -43,50 +45,33 @@ Authentication in RoboSystems is credential-in-header, validated by a FastAPI de
 
 Access is layered. A valid credential authenticates *you*; access to a specific `graph_id` is checked separately by the graph-scoped dependency. That distinction drives the most important status-code rule on the platform: **401 means "no/invalid credential," 403 means "valid user, no access to that graph."** Keep them straight and most auth debugging resolves itself.
 
-The full endpoint surface — request/response schemas, every field, every status code — lives in the live OpenAPI docs at [http://localhost:8000/docs](http://localhost:8000/docs) (or the hosted [API Documentation](https://api.robosystems.ai/docs)). This page covers the concepts and the day-to-day tasks; it does not re-tabulate the endpoint surface.
+The full endpoint surface — request/response schemas, every field, every status code — lives in the live [API Documentation](https://api.robosystems.ai/docs). This page covers the concepts and the day-to-day tasks; it does not re-tabulate the endpoint surface.
 
 ## Prerequisites
 
-- A running local stack. See [Quick Start](Quick-Start) for `just start` and the full setup. The API listens on `http://localhost:8000`.
-- `jq` installed (used to read the key out of `.local/config.json` inline).
-- A demo user with an API key — created by `just demo-user` (next section).
+- A RoboSystems account — sign up at [robosystems.ai/register](https://robosystems.ai/register).
+- An API key (next section).
+- For the graph-scoped examples, a graph. See [Quick Start](Quick-Start) for getting all three.
 
-## Getting Your Local API Key
+## Getting an API Key
 
-Run the demo-user recipe from the `robosystems/` directory. It creates (or reuses) a demo user, issues an API key, and writes everything to `.local/config.json`:
+In the app at robosystems.ai, open **Settings → API keys** and choose **Create**. A key can be scoped to all your graphs or to one graph. The key starts with `rfs` and is shown once — copy it before you leave the page. Keys can also be created over the API; see [API Key Lifecycle](#api-key-lifecycle).
+
+The examples on this page read the key and a graph id from the environment:
 
 ```bash
-just demo-user
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 ```
 
-The resulting `.local/config.json` looks like this:
-
-```json
-{
-  "user": { "id": "...", "name": "...", "email": "..." },
-  "user_id": "...",
-  "email": "demo_user_...@example.com",
-  "password": "...",
-  "api_key": "rfs<64 hex chars>",
-  "base_url": "http://localhost:8000",
-  "created_at": "YYYY-MM-DD HH:MM:SS",
-  "graphs": { "<slot>": { "graph_id": "kg..." } }
-}
-```
-
-The two fields you read most often:
-
-- `api_key` — your `X-API-Key` credential. Read it inline with `jq -r .api_key .local/config.json`.
-- `graphs.<slot>.graph_id` — a graph identifier, for graph-scoped requests. Read it with `jq -r '.graphs.<slot>.graph_id' .local/config.json`.
-
-**Important:** Read the key inline from the config file rather than copy-pasting a literal. Do not stash it in a shell variable like `TOKEN="..."` — that does not persist reliably into `curl` calls. The inline `$(jq -r .api_key .local/config.json)` form is the canonical pattern across all RoboSystems docs.
+**Important:** `ROBOSYSTEMS_API_KEY` is the same variable name the MCP client uses, and it is the pattern across the RoboSystems docs. Keep the key in the environment rather than pasting the literal into commands.
 
 ## The X-API-Key Path
 
 For all programmatic access, send your key in the `X-API-Key` header:
 
 ```bash
--H "X-API-Key: $(jq -r .api_key .local/config.json)"
+-H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 The header name is exactly `X-API-Key` (case-insensitive per HTTP, but use this spelling). On each request the auth dependency resolves the key to a `User`, updates the key's `last_used_at`, and attaches the user to the request context. The same header works for REST endpoints, the graph-scoped GraphQL endpoint, and MCP clients.
@@ -100,7 +85,7 @@ The header name is exactly `X-API-Key` (case-insensitive per HTTP, but use this 
 `GET /v1/status` is the load-balancer health probe and needs no credential:
 
 ```bash
-curl http://localhost:8000/v1/status
+curl https://api.robosystems.ai/v1/status
 ```
 
 **Output:**
@@ -113,11 +98,11 @@ Note that the root `/` serves the Swagger UI (HTML), and `/openapi.json` serves 
 
 ### Authenticated REST GET (Whoami)
 
-Read your current user with the key pulled inline from config:
+Read your current user with the key from the environment:
 
 ```bash
-curl -X GET "http://localhost:8000/v1/user" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X GET "https://api.robosystems.ai/v1/user" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json"
 ```
 
@@ -126,8 +111,8 @@ A 200 with your user record confirms the key is valid. A 401 means the key is mi
 ### List Your Graphs
 
 ```bash
-curl -X GET "http://localhost:8000/v1/graphs" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X GET "https://api.robosystems.ai/v1/graphs" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json"
 ```
 
@@ -136,13 +121,10 @@ curl -X GET "http://localhost:8000/v1/graphs" \
 The extensions GraphQL endpoint is graph-scoped at the URL level: the `graph_id` is a path parameter, never a query argument. The same `X-API-Key` authenticates you, and the endpoint validates your access to that specific graph before the resolver runs:
 
 ```bash
-# Slot names vary by which demo you ran — list them first:
-#   jq -r '.graphs | keys' .local/config.json
-# `just demo-roboledger` writes the `cascade_demo` slot.
-GRAPH_ID=$(jq -r '.graphs.cascade_demo.graph_id' .local/config.json)
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ fiscalCalendar { closedThrough closeTarget } }"}'
 ```
@@ -154,7 +136,7 @@ The `fiscalCalendar` query above is illustrative — substitute any field your d
 
 ## API Key Lifecycle
 
-API keys are managed under `/v1/user/api-keys`. The full request/response schemas are in the [OpenAPI docs](http://localhost:8000/docs); the concepts you need to operate them are below.
+API keys are managed under `/v1/user/api-keys`. The full request/response schemas are in the [OpenAPI docs](https://api.robosystems.ai/docs); the concepts you need to operate them are below.
 
 ### Key Format
 
@@ -170,8 +152,8 @@ The prefix difference exists for human and incident legibility only — **the au
 ### Create a Key
 
 ```bash
-curl -X POST "http://localhost:8000/v1/user/api-keys" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/user/api-keys" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "CI pipeline key", "description": "for nightly smoke tests"}'
 ```
@@ -179,8 +161,8 @@ curl -X POST "http://localhost:8000/v1/user/api-keys" \
 The request fields are `name` (required), `description` (optional), `expires_at` (optional, ISO-8601, must be in the future), and `graph_id` (optional). Supplying a `graph_id` mints a **graph-scoped** key: it works only for that graph and its subgraphs, and it is the only kind of key an MCP connector URL accepts. Omit it for an account-wide key.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/user/api-keys" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/user/api-keys" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "CI pipeline key",
@@ -203,8 +185,8 @@ The response contains the key metadata (`api_key`) plus the raw `key`:
 ### List Keys
 
 ```bash
-curl -X GET "http://localhost:8000/v1/user/api-keys" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X GET "https://api.robosystems.ai/v1/user/api-keys" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json"
 ```
 
@@ -215,8 +197,8 @@ Each entry exposes `id`, `name`, `description`, `prefix`, `is_active`, `last_use
 `PUT /v1/user/api-keys/{api_key_id}` updates mutable metadata (`name` and `description`). Use the `id` (a ULID prefixed `uak`) from the list response:
 
 ```bash
-curl -X PUT "http://localhost:8000/v1/user/api-keys/uak_..." \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X PUT "https://api.robosystems.ai/v1/user/api-keys/uak_..." \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"description": "rotated 2026-06-11"}'
 ```
@@ -224,8 +206,8 @@ curl -X PUT "http://localhost:8000/v1/user/api-keys/uak_..." \
 ### Revoke a Key
 
 ```bash
-curl -X DELETE "http://localhost:8000/v1/user/api-keys/uak_..." \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X DELETE "https://api.robosystems.ai/v1/user/api-keys/uak_..." \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json"
 ```
 
@@ -303,8 +285,8 @@ Four rules govern the surface, and each one is a distinct error if you trip it:
 - **Shared repositories have no member management.** They are subscription-based, so these endpoints return 403 for `sec` and its peers. See [Shared Repositories](Shared-Repositories).
 
 ```bash
-curl "http://localhost:8000/v1/graphs/kg1234567890abcdef/members" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/members" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 ```text
@@ -379,7 +361,7 @@ The practical consequence: **rotating a password is not a way to cut off program
 Everything above concerns *credentials in a header*. This section covers the other half — how a human proves identity to obtain a session in the first place. It is deployment-configurable, and a deployment publishes its own posture:
 
 ```bash
-curl http://localhost:8000/v1/auth/providers
+curl https://api.robosystems.ai/v1/auth/providers
 ```
 
 ```json
@@ -481,7 +463,7 @@ This is a frontend-to-frontend concern built on the Bearer/session layer. You do
 The credential is missing, malformed, expired, or revoked. Check, in order:
 
 - The `X-API-Key` header is present and spelled correctly.
-- You are reading a live key: `jq -r .api_key .local/config.json` returns an `rfs...` value, not `null`.
+- You are sending a live key: `$ROBOSYSTEMS_API_KEY` expands to an `rfs...` value, not an empty string.
 - The key has not been revoked or expired (list your keys; confirm `is_active` is true and `expires_at` is in the future).
 - No stale `Authorization: Bearer` header is also being sent (see the next item).
 
@@ -511,7 +493,7 @@ The graph-scoped GraphQL endpoint takes `graph_id` from the URL path, not as a q
 
 ### `/v1/status` Works but Everything Else 401s
 
-`/v1/status` is the load-balancer health probe and needs no credential. If it returns 200 but authenticated calls 401, the stack is up and the problem is your credential, not the server. Re-run `just demo-user` to refresh `.local/config.json`, then re-read the key inline.
+`/v1/status` is the load-balancer health probe and needs no credential. If it returns 200 but authenticated calls 401, the API is up and the problem is your credential, not the server. Check the key under **Settings → API keys** at robosystems.ai, or create a new one and export it again.
 
 ### Every Browser Session Signed Out After a Password Change
 
@@ -527,7 +509,7 @@ Expected. Changing or resetting a password bumps the user's `session_version`, w
 
 **Wiki Guides:**
 
-- **[Quick Start](Quick-Start)** - Start the local stack and run `just demo-user` to get your first API key
+- **[Quick Start](Quick-Start)** - Create an account, your first API key, and a graph on robosystems.ai
 - **[Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM)** - Identity-provider federation and SCIM 2.0 provisioning for dedicated and self-hosted deployments
 - **[Security & Compliance](Security-and-Compliance)** - The platform's built-in controls and the optional compliance stacks
 - **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)** - The per-graph access model and 401-vs-403 semantics
@@ -537,7 +519,7 @@ Expected. Changing or resetting a password bumps the user's `session_version`, w
 **API Reference:**
 
 - **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI reference with request/response schemas for every endpoint
-- **Local OpenAPI spec**: [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger UI) and [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json) (machine-readable)
+- **OpenAPI spec**: [https://api.robosystems.ai/openapi.json](https://api.robosystems.ai/openapi.json) (machine-readable)
 
 **Codebase Documentation:**
 

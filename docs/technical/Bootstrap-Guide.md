@@ -274,8 +274,8 @@ Initial deployment creates all infrastructure (VPC, databases, ECS services). Su
 **Verify deployment:**
 ```bash
 just tunnel prod all    # Connect to all services
-# API at http://localhost:8000
-# Dagster at http://localhost:8002
+# API at http://127.0.0.1:18000
+# Dagster at http://127.0.0.1:18002
 ```
 
 ## Multi-Repository Setup
@@ -316,7 +316,7 @@ The ALB is internal (not internet-accessible) and all access is through the VPC 
 
 ```bash
 just tunnel prod all
-# API at http://localhost:8000
+# API at http://127.0.0.1:18000
 ```
 
 This is the default - no GitHub variables needed.

@@ -4,6 +4,8 @@ This guide shows you how a published RoboLedger report is projected into portabl
 
 **Quick Start:** Publish a report with `create-report`, then query the `reportDownloadUrl` GraphQL field to get a presigned link to its bundle.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Overview
 
 A published report in RoboLedger isn't a single rendered document — it's a structured object that can be projected into different portable file formats without re-querying the database. That object is the **StatementBundle**, an in-memory envelope assembled from the report's facts, periods, framework slice, and per-statement [Information Blocks](Information-Blocks). Two encoder families walk that one envelope:
@@ -25,10 +27,9 @@ End to end, this page covers:
 
 Before starting, ensure you have:
 
-- Docker running locally with services started via `just start`
-- The RoboLedger extension enabled (`ROBOLEDGER_ENABLED=true`)
-- A demo user and API key (`just demo-user`) — the key is saved to `.local/config.json`
-- A graph with ledger data and at least one published report (run `just demo-roboledger` to provision one end to end)
+- A RoboSystems account and an API key — see [Quick Start](Quick-Start)
+- The RoboLedger extension enabled — it is on robosystems.ai; a self-hosted deployment sets `ROBOLEDGER_ENABLED=true`
+- A graph with ledger data and at least one published report
 
 ## The StatementBundle Envelope
 
@@ -64,11 +65,11 @@ A bundle is built by `build_report_bundle(session, graph_id, report_id)` and car
 Bundles are produced as a side effect of publishing a report, not on demand. When you run the `create-report` or `regenerate-report` operation, the JSON-LD bundle is built and uploaded to S3 **inside the publish transaction**.
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=<your graph id>
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-report" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-report" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "FY2025 Annual Report",
@@ -88,8 +89,8 @@ The operation returns an `OperationEnvelope` wrapping a `ReportResponse`; the `i
 **Regeneration re-stamps.** Running `regenerate-report` re-runs the pipeline against current ledger state and writes a new generation. The report's facts come from the same `fact_grid` / report pipeline described in [Reporting & Rendering](Reporting-and-Rendering); serialization picks up wherever that pipeline leaves off.
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/regenerate-report" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/regenerate-report" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"report_id": "'"$REPORT_ID"'"}'
 ```
@@ -134,8 +135,8 @@ Each cached artifact is keyed by `generation_count`, and a generation is immutab
 ### Requesting a Download URL
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query":"{ reportDownloadUrl(reportId: \"'"$REPORT_ID"'\", format: JSONLD) { downloadUrl expiresAt contentType format generationCount } }"}'
 ```
@@ -162,7 +163,7 @@ Swap `format: XBRL_2_1` for the filing package (`-o report.zip`) or `format: HOL
 
 **Note:** Reports published before serialization shipped have a `NULL` `bundle_url`. Any flavor requested for one of those raises `REPORT_BUNDLE_NOT_AVAILABLE` with a message to regenerate the report. There is no automatic backfill — run `regenerate-report` to stamp a current generation.
 
-The field also raises `REPORT_BUNDLE_SIGNING_FAILED` on a signing or materialization fault, and returns `null` when the `reportId` does not resolve at all. Introspect the full schema from GraphiQL in dev, or browse [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) for the surrounding operations.
+The field also raises `REPORT_BUNDLE_SIGNING_FAILED` on a signing or materialization fault, and returns `null` when the `reportId` does not resolve at all. Introspect the full schema over the API, or browse [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) for the surrounding operations.
 
 ## What's Inside Each Format
 
@@ -203,7 +204,7 @@ The platform makes a strong claim about its serialized output: **the JSON-LD con
 
 ### SHACL at Publish
 
-The publish hook can run the ontology's SHACL shapes over the emitted JSON-LD and record conformance on the report. This is controlled by an environment variable:
+The publish hook can run the ontology's SHACL shapes over the emitted JSON-LD and record conformance on the report. This is controlled by a deployment setting, `REPORT_BUNDLE_SHACL_VALIDATION`:
 
 | Mode | Behavior |
 | --- | --- |
@@ -211,19 +212,13 @@ The publish hook can run the ontology's SHACL shapes over the emitted JSON-LD an
 | `warn` | Non-conformance is recorded but does not block the publish |
 | `strict` | Non-conformance fails the publish |
 
-Set the mode in `.env.local`:
-
-```bash
-REPORT_BUNDLE_SHACL_VALIDATION=warn
-```
-
-Because validation is opt-in and defaults to `off`, you control whether conformance is enforced for your deployment.
+The mode is chosen by whoever operates the deployment; see [Self-hosted deployments](#self-hosted-deployments) for setting it on your own stack.
 
 ### Round-Trip Validation
 
 The broader guarantee is verified end to end against a real reference dataset in the demos: the same published report is emitted in both flavors, and each is independently validated by an external, format-native tool — SHACL (via `pyshacl`) for the JSON-LD, and Arelle for the XBRL package. Because both projections come from one envelope, validating both proves the bundle is simultaneously a conformant ontology instance and a valid XBRL 2.1 filing.
 
-A small in-repo harness runs each check. After running a demo that publishes reports and emits both flavors:
+A small in-repo harness runs each check on artifacts you have downloaded. It reads the files from disk, so it needs a checkout of the repository but no running stack:
 
 ```bash
 # SHACL: does the JSON-LD conform to the ontology shapes?
@@ -231,13 +226,6 @@ uv run python -m examples._common.validate --jsonld report.jsonld --label fy2025
 
 # Arelle: is the zip valid XBRL 2.1?
 uv run python -m examples._common.validate --zip report.zip --label fy2025
-```
-
-The Seattle Method demos exercise this full publish-to-validate path against a reference GL:
-
-```bash
-just demo-seattle-method
-just demo-seattle-method-create-report
 ```
 
 ## Contributing the Content That Gets Serialized
@@ -256,8 +244,8 @@ A worked example — record a journal entry (Event Block), then republish so the
 
 ```bash
 # 1. Record a journal entry (Event Block) via the ledger command surface
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-event-block" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-event-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "event_type": "journal_entry_recorded",
@@ -278,14 +266,14 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/c
   }'
 
 # 2. Regenerate the report so the new entry flows into a fresh bundle generation
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/regenerate-report" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/regenerate-report" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"report_id": "'"$REPORT_ID"'"}'
 
 # 3. Get a download URL for the new generation
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query":"{ reportDownloadUrl(reportId: \"'"$REPORT_ID"'\", format: JSONLD) { downloadUrl expiresAt generationCount } }"}'
 ```
@@ -301,8 +289,8 @@ The report has no stored bundle (`bundle_url` is `NULL`) — it was published be
 **Solution:** Regenerate the report to stamp a current generation:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/regenerate-report" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/regenerate-report" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"report_id": "'"$REPORT_ID"'"}'
 ```
@@ -323,7 +311,28 @@ Only the **first** download of a given generation pays for the build: it re-runs
 
 The JSON-LD bundle is uploaded inside the publish transaction. If S3 is unreachable, the publish fails by design rather than leaving a report without an artifact.
 
-**Solution:** Verify S3 connectivity and storage configuration, then re-run the publish operation.
+**Solution:** Re-run the publish operation. On a self-hosted deployment, verify S3 connectivity and storage configuration first.
+
+## Self-hosted deployments
+
+### SHACL Validation Mode
+
+Set the mode in `.env.local`:
+
+```bash
+REPORT_BUNDLE_SHACL_VALIDATION=warn
+```
+
+Because validation is opt-in and defaults to `off`, you control whether conformance is enforced for your deployment.
+
+### Seattle Method Demos
+
+The Seattle Method demos exercise the full publish-to-validate path against a reference GL:
+
+```bash
+just demo-seattle-method
+just demo-seattle-method-create-report
+```
 
 ## Related Documentation
 

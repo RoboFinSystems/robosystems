@@ -2,6 +2,8 @@
 
 The extensions surface is the read/write API layer for RoboSystems product extensions (RoboLedger and RoboInvestor). It sits beside the core `/v1` platform API under a single `/extensions/*` prefix, and everything on it is graph-scoped at the URL.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [What the Extensions Surface Is](#what-the-extensions-surface-is)
@@ -34,12 +36,12 @@ Everything on the extensions surface falls into one of three sub-surfaces, split
 
 A few details worth pinning down:
 
-- **GraphQL typed reads** are served by a single Strawberry endpoint per graph. The schema is composed dynamically per deployment (see [Feature Flags](#feature-flags-and-the-dynamically-built-schema)). In dev, this endpoint renders GraphiQL with introspection.
+- **GraphQL typed reads** are served by a single Strawberry endpoint per graph. The schema is composed dynamically per deployment (see [Feature Flags](#feature-flags-and-the-dynamically-built-schema)). Introspection over POST works on the hosted API, with or without credentials; the in-browser GraphiQL explorer is development-only and is not mounted on `api.robosystems.ai`.
 - **Command writes** are explicit, named operations (`close-period`, `share-report`, `create-security`) rather than resource CRUD. They match the multi-step domain operations they actually perform. Each returns an [`OperationEnvelope`](#the-operationenvelope-contract).
 - **Analytical view operations** share the same envelope contract as command writes but are read-only and routed to the materialized graph rather than the OLTP database. There are two: `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube) and `financial-statement-analysis`. These are gated independently of the OLTP domains, so a deployment without RoboLedger tenants can still use them.
 - **One more shape rides the command-operation transport.** A few RoboLedger operations are POST `…/operations/{name}` and return an `OperationEnvelope` like a command write, but read the OLTP database instead of writing to it. `live-financial-statement` generates an ad-hoc statement straight from the tenant's ledger using the active CoA→GAAP mapping, with no materialization step. Because it reads the same PostgreSQL database the ledger commands write, it is gated by `ROBOLEDGER_ENABLED` rather than `FACT_GRID_ENABLED`.
 
-For the full, machine-readable endpoint surface — every operation name, request schema, and response shape — see the live OpenAPI spec at [`https://api.robosystems.ai/docs`](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally). This page covers the concepts and tasks; the OpenAPI spec is the authoritative endpoint reference.
+For the full, machine-readable endpoint surface — every operation name, request schema, and response shape — see the live OpenAPI spec at [`https://api.robosystems.ai/docs`](https://api.robosystems.ai/docs). This page covers the concepts and tasks; the OpenAPI spec is the authoritative endpoint reference.
 
 ## Graph-Scoping at the URL
 
@@ -63,10 +65,10 @@ Authentication and per-graph access are enforced by FastAPI dependencies that ru
 - GraphQL requests resolve the user and graph through the context dependency, then check graph access before the query is executed.
 - Command and view operations resolve the user and validate per-graph access via the operation dependency before the runner is invoked.
 
-For local and backend testing, authenticate with the **`X-API-Key`** header. The key (format `rfs` followed by 64 hex characters) is written to `.local/config.json` after you run `just demo-user`. Read it inline with `jq` rather than stashing it in a shell variable:
+Authenticate API calls with the **`X-API-Key`** header. Create the key in the app under **Settings → API keys** — it is shown once, and can be scoped to all your graphs or to one graph. The key has the format `rfs` followed by 64 hex characters:
 
 ```bash
--H "X-API-Key: $(jq -r .api_key .local/config.json)"
+-H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 `Authorization: Bearer` (JWT) is a frontend concern — the apps use an HTTP-only cookie. Do not use Bearer tokens for backend `curl` testing.
@@ -74,6 +76,8 @@ For local and backend testing, authenticate with the **`X-API-Key`** header. The
 ## Feature Flags and the Dynamically Built Schema
 
 Each sub-surface is gated by a feature flag, and the gating happens at **schema-construction time, not request time**. Disabled domains are simply absent from the API rather than mounted and throwing runtime errors.
+
+These flags are deployment configuration, not something an API caller sets. On robosystems.ai all four are on; a self-hosted deployment controls them through its environment.
 
 | Flag | Gates | Default |
 | --- | --- | --- |
@@ -125,15 +129,20 @@ This invariant is load-bearing: whether a request arrives through GraphQL, a nam
 
 ## Worked Examples
 
-All examples assume a local stack (`just start`) and a graph provisioned via `just demo-roboledger` (which writes the API key to `.local/config.json`). Set `GRAPH_ID` to the graph you want to target.
+All examples assume an API key and a RoboLedger graph — see [Quick Start](Quick-Start) for getting both. Set them once:
+
+```bash
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
+```
 
 ### GraphQL Liveness and Auth Probe
 
 The `hello` field is an auth probe that returns no business data — it works on any extensions-enabled graph and is the quickest way to confirm credentials and reachability:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ hello }"}'
 ```
@@ -143,8 +152,8 @@ curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
 The graph is in the URL, so the query carries no `graphId` argument. Field names are camelCase on the wire:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ fiscalCalendar { closedThrough closeTarget } entity { name } }"}'
 ```
@@ -156,8 +165,8 @@ GraphQL list resolvers take `limit` (per-resolver default, must be 1–1000) and
 A RoboLedger command write returns an `OperationEnvelope` and supports `Idempotency-Key`:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/close-period" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/close-period" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
   -d '{"period": "2026-03", "allow_stale_sync": false}'
@@ -168,8 +177,8 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/c
 A graph-backed analytical view that pivots over the XBRL hypercube. It hits the materialized LadybugDB graph rather than the OLTP database:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/build-fact-grid" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/build-fact-grid" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
         "canonical_concepts": ["revenue"],
@@ -185,21 +194,21 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/b
 
 ### RoboInvestor Command Write — Create a Security
 
-RoboInvestor writes go through the same operation surface under the `roboinvestor` path segment, and require a graph with `ROBOINVESTOR_ENABLED`:
+RoboInvestor writes go through the same operation surface under the `roboinvestor` path segment, and require a deployment with `ROBOINVESTOR_ENABLED` (on robosystems.ai it is) and a graph that carries the `roboinvestor` extension:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboinvestor/$GRAPH_ID/operations/create-security" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/operations/create-security" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "Acme Common Stock", "security_type": "common_stock"}'
 ```
 
-For the exact request-body fields of any operation, consult the OpenAPI spec at [`http://localhost:8000/docs`](http://localhost:8000/docs) rather than guessing.
+For the exact request-body fields of any operation, consult the OpenAPI spec at [`https://api.robosystems.ai/docs`](https://api.robosystems.ai/docs) rather than guessing.
 
 ## Gotchas
 
 - **GraphQL takes no `graphId` argument.** Use `{ entity { … } }`, never `{ entity(graphId: "kg_x") }`. The graph is the URL.
-- **Use `X-API-Key` for local and backend testing**, not `Authorization: Bearer`. Read the key from `.local/config.json` with `jq -r .api_key .local/config.json`. Do not put the key in a `TOKEN=` shell variable or in the URL.
+- **Use `X-API-Key` for API calls**, not `Authorization: Bearer`. Send the key as a header, never in the URL.
 - **Graph-backed analytical views (`build-fact-grid`, `financial-statement-analysis`) are gated by `FACT_GRID_ENABLED`, not `ROBOLEDGER_ENABLED`.** They live under the `/extensions/roboledger/...` path but are flagged independently, so they remain available on SEC-only deployments. `live-financial-statement`, which reads the OLTP database rather than the graph, follows `ROBOLEDGER_ENABLED` like the command writes.
 - **Subgraph IDs are rejected on the GraphQL endpoint with HTTP 403.** They match the path pattern, so the failure surfaces at runtime rather than as a validation error. Target the parent graph. The operation endpoints do not apply this restriction.
 - **`build-fact-grid` requires a scoping filter** — `elements` and/or `canonical_concepts`, plus at least one of `periods` / `period_type` / `fiscal_year`, or you get HTTP 400.

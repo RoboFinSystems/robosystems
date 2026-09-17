@@ -2,7 +2,9 @@
 
 This guide shows you how to query the analytical graph — the OLAP plane of RoboSystems, backed by the LadybugDB columnar graph database — using ad-hoc Cypher, SQL over the DuckDB staging tables, and the MCP tools that wrap both for AI agents.
 
-**Quick Start:** Run `just graph-query sec "MATCH (e:Entity) RETURN e.name LIMIT 10"` to run your first Cypher query against the SEC analytical graph.
+**Quick Start:** Post `{"query": "MATCH (e:Entity) RETURN e.name LIMIT 10"}` to `https://api.robosystems.ai/v1/graphs/sec/query/cypher` with your API key in `X-API-Key` to run your first Cypher query against the SEC analytical graph.
+
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
 ## Overview
 
@@ -35,35 +37,36 @@ LadybugDB analytical graph  ──  Cypher  ──▶  POST /v1/graphs/{g}/query
 
 Before querying, ensure you have:
 
-- Docker running locally with services started via `just start`
-- A graph to query — the examples use the shared `sec` repository; run `just demo-sec` to load it
-- An API key in `.local/config.json` (created by `just demo-user` or `just demo-sec`) for any `curl` against the public API
+- A RoboSystems account and an API key — see [Quick Start](Quick-Start)
+- A graph to query — the examples use the shared `sec` repository, which needs a subscription from **Repositories** in the app (see [Shared Repositories](Shared-Repositories)); the staging-SQL examples use a graph you own
 
 ## Quick Start
 
-The fastest path for local development is the `just graph-query` recipe, which runs Cypher against the analytical graph without requiring an API key:
+Every query goes through the public HTTP API at `https://api.robosystems.ai`, authenticated with `X-API-Key`:
 
 ```bash
-# List companies in the SEC analytical graph
-just graph-query sec "MATCH (e:Entity) RETURN e.name, e.identifier LIMIT 10"
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
 
-# Count nodes by label
-just lbug-query sec "MATCH (n) WITH labels(n) AS label, count(n) AS c RETURN label, c ORDER BY c DESC"
+# List companies in the SEC analytical graph
+curl -X POST "https://api.robosystems.ai/v1/graphs/sec/query/cypher" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "MATCH (e:Entity) RETURN e.name, e.identifier LIMIT 10"}'
 ```
 
-For application and integration code, use the public HTTP API at `http://localhost:8000`, authenticated with `X-API-Key`. The rest of this guide walks through each surface.
+The rest of this guide walks through each surface.
 
 ## The Public Query Endpoint
 
-The user-facing way to run Cypher is `POST /v1/graphs/{graph_id}/query/cypher`. The public API at port 8000 adds authentication, rate limiting, billing and lifecycle enforcement, circuit breakers, and queueing on top of the lower-level graph engine.
+The user-facing way to run Cypher is `POST /v1/graphs/{graph_id}/query/cypher`. The public API adds authentication, rate limiting, billing and lifecycle enforcement, circuit breakers, and queueing on top of the lower-level graph engine.
 
 ### Running Ad-Hoc Cypher
 
-Read the API key from `.local/config.json` and post a Cypher query with named parameters:
+Send your API key as `X-API-Key` and post a Cypher query with named parameters:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/sec/query/cypher" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/sec/query/cypher" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) WHERE e.name CONTAINS $name AND el.name = $element RETURN e.name, r.form, f.numeric_value LIMIT $limit",
@@ -117,13 +120,13 @@ Schema DDL and bulk operations are blocked everywhere: `COPY`/`LOAD`/`IMPORT` re
 The endpoint accepts a `mode` query parameter (`auto`, `sync`, `async`, `stream`); `auto` is the default and picks a strategy based on query weight and current load. A heavy query may return **HTTP 202** with an `operation_id` instead of inline results. Monitor it over SSE:
 
 ```bash
-curl -N "http://localhost:8000/v1/operations/{operation_id}/stream" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -N "https://api.robosystems.ai/v1/operations/{operation_id}/stream" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 Streaming result delivery is available by setting `Accept: application/x-ndjson` or `Accept: text/event-stream`, and `chunk_size` (10–10,000) tunes the streamed batch size.
 
-For the full request/response schema and every query parameter, see the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (operation `executeCypher`; its SQL peer below is `executeSql`), or `http://localhost:8000/docs` when running locally.
+For the full request/response schema and every query parameter, see the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (operation `executeCypher`; its SQL peer below is `executeSql`).
 
 ## Querying the Staging Tables
 
@@ -134,8 +137,8 @@ The same graph-centric data is also addressable relationally, through the graph'
 `POST /v1/graphs/{graph_id}/query/sql` runs read-only SQL over the columnar tables. Parameters here are a **positional array** with `?` placeholders — a different convention from the Cypher endpoint's named `$param` — and `$1`/`$2`-style numbered placeholders bind against the same array:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/query/sql" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/query/sql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "sql": "SELECT name, industry FROM Company WHERE industry = ? LIMIT ?",
@@ -179,38 +182,7 @@ LIMIT 20;
 
 ### Shared Repositories Reject Public Staging SQL
 
-The public `POST /v1/graphs/{graph_id}/query/sql` endpoint returns **HTTP 403** for shared repositories and their subgraphs (for example, `sec`), with a message directing you to `POST /query/cypher` instead — a shared repository has no user columnar tables to query, so SQL is refused there entirely while Cypher continues to serve its reads from the graph. This is a real trap: `just tables-query sec "..."` works because that recipe talks straight to the lower-level graph engine (which has no shared-repo guard), but the **public** `/v1/graphs/sec/query/sql` path is blocked. For shared repos, query the graph with Cypher rather than the staging tables.
-
-## Command-Line Recipes
-
-The `just` recipes are development shortcuts. Two of them go through the lower-level graph engine and two open the embedded database files directly, bypassing the API entirely:
-
-| Recipe | What it queries | Path |
-| --- | --- | --- |
-| **`just graph-query GRAPH_ID "CYPHER"`** | Cypher via the graph engine | through the engine |
-| **`just lbug-query GRAPH_ID "CYPHER"`** | Direct LadybugDB embedded query | `./data/lbug-dbs/{graph_id}.lbug` |
-| **`just tables-query GRAPH_ID "SQL"`** | SQL over DuckDB staging via the engine | through the engine |
-| **`just duckdb-query GRAPH_ID "SQL"`** | Direct DuckDB staging query | `./data/staging/{graph_id}.duckdb` |
-| **`just graph-health`** | Graph engine health | through the engine |
-| **`just graph-info GRAPH_ID`** | Database info | through the engine |
-
-```bash
-# Cypher against the SEC analytical graph
-just graph-query sec "MATCH (e:Entity) RETURN e.name, e.identifier LIMIT 10"
-
-# Direct LadybugDB query (bypasses the API entirely)
-just lbug-query sec "MATCH (n) WITH labels(n) AS label, count(n) AS c RETURN label, c ORDER BY c DESC"
-
-# Inspect staging directly
-just duckdb-query sec "SELECT name, cik FROM Entity LIMIT 10"
-
-# JSON output instead of the default table format
-just graph-query sec "MATCH (e:Entity) RETURN e.name LIMIT 5" json
-```
-
-**Note:** `just graph-query` and `just tables-query` target the lower-level graph engine, **not** the public `/v1` path — so they do not exercise the same authentication, rate limiting, or shared-repo guards as the `curl` examples above. They are the fastest way to inspect data locally, but the public API is the contract for application code.
-
-**Note:** `just graph-query` rewrites single quotes to double quotes in Cypher. Keep that in mind when a literal genuinely needs single quotes.
+The public `POST /v1/graphs/{graph_id}/query/sql` endpoint returns **HTTP 403** for shared repositories and their subgraphs (for example, `sec`), with a message directing you to `POST /query/cypher` instead — a shared repository has no user columnar tables to query, so SQL is refused there entirely while Cypher continues to serve its reads from the graph. For shared repos, query the graph with Cypher rather than the staging tables.
 
 ## From an AI Agent — MCP Tools
 
@@ -221,25 +193,29 @@ The same analytical surface is exposed to AI agents through Model Context Protoc
 
 These map directly onto the surfaces above: `read-graph-cypher` is the query endpoint, and `get-graph-schema` is schema discovery. Database reads through MCP — Cypher, schema, and staging — **consume no credits**; only AI/LLM calls cost credits.
 
-You can list and call tools over the public API:
+AI clients reach these tools over the MCP transport at `POST /v1/graphs/{graph_id}/mcp`, which speaks JSON-RPC. You can call it directly with an API key:
 
 ```bash
 # List available MCP tools for a graph
-curl "http://localhost:8000/v1/graphs/sec/mcp/tools" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/sec/mcp" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }'
 
 # Discover the schema first
-curl -X POST "http://localhost:8000/v1/graphs/sec/mcp/call-tool" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/sec/mcp" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name": "get-graph-schema", "arguments": {}}'
+  -d '{ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "get-graph-schema", "arguments": {} } }'
 
 # Then run a read-only Cypher query through MCP
-curl -X POST "http://localhost:8000/v1/graphs/sec/mcp/call-tool" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/sec/mcp" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name": "read-graph-cypher", "arguments": {"query": "MATCH (e:Entity) RETURN e.name LIMIT 5"}}'
+  -d '{ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "read-graph-cypher", "arguments": { "query": "MATCH (e:Entity) RETURN e.name LIMIT 5" } } }'
 ```
+
+The older REST tool endpoints (`GET /mcp/tools`, `POST /mcp/call-tool`) no longer exist.
 
 Alongside these two, `get-graph-info` is available on every graph, and on graphs carrying the `roboledger` extension (including `sec`) the plane also exposes `get-example-queries` and `resolve-element`. There is a separate operational MCP plane (`query-graphql`, `get-graphql-schema`) that reads the OLTP database, and an unstructured plane (`search-documents`, `get-document-section`) over the document index. For the full agent surface, see [AI Operators and MCP](AI-Operators-and-MCP).
 
@@ -268,13 +244,13 @@ Over HTTP the same discovery is two plain `GET`s, and they answer different ques
 ```bash
 # Runtime schema — what is actually in the database right now:
 # node labels, relationship types, and sample properties per node type
-curl -s "http://localhost:8000/v1/graphs/sec/schema" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -s "https://api.robosystems.ai/v1/graphs/sec/schema" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 
 # Declared schema — the definition the graph was created with.
 # Add ?include_data_stats=true for live node/relationship counts.
-curl -s "http://localhost:8000/v1/graphs/sec/schema/export" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -s "https://api.robosystems.ai/v1/graphs/sec/schema/export" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 ### Traversal Patterns
@@ -343,7 +319,24 @@ LIMIT 20
 - **Queries are scoped to one graph.** There are no cross-database or cross-graph queries; each request targets a single `graph_id`.
 - **Ingestion is sequential and single-writer.** Each database allows one writer at a time and a limited number of concurrent connections, so favor read-only traversals when querying live graphs.
 - **`CALL db.*` introspection is auto-translated** to the LadybugDB equivalent, but prefer `get-graph-schema` for reliable schema discovery.
-- **`just` shortcuts bypass the API.** `lbug-query` and `duckdb-query` open the embedded files directly with no authentication; `graph-query` and `tables-query` hit the engine, not the public `/v1` guards.
+
+## Self-hosted deployments
+
+On a stack you run, the `just` recipes are development shortcuts. Two of them go through the lower-level graph engine and two open the embedded database files directly, bypassing the API entirely:
+
+| Recipe | What it queries | Path |
+| --- | --- | --- |
+| **`just graph-query GRAPH_ID "CYPHER"`** | Cypher via the graph engine | through the engine |
+| **`just lbug-query GRAPH_ID "CYPHER"`** | Direct LadybugDB embedded query | `./data/lbug-dbs/{graph_id}.lbug` |
+| **`just tables-query GRAPH_ID "SQL"`** | SQL over DuckDB staging via the engine | through the engine |
+| **`just duckdb-query GRAPH_ID "SQL"`** | Direct DuckDB staging query | `./data/staging/{graph_id}.duckdb` |
+| **`just graph-health`** | Graph engine health | through the engine |
+| **`just graph-info GRAPH_ID`** | Database info | through the engine |
+
+None of them exercise the public API's authentication, rate limiting, or shared-repo guards, so the public API remains the contract for application code. Two consequences:
+
+- `just tables-query sec "..."` works locally because the engine has no shared-repo guard, while the public `/v1/graphs/sec/query/sql` path returns 403.
+- `just graph-query` rewrites single quotes to double quotes in Cypher, and takes a trailing `json` argument for JSON output instead of the default table format.
 
 ## Related Documentation
 

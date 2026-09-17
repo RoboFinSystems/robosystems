@@ -65,7 +65,7 @@ By the end of this guide you'll have all four working against either a QB sandbo
    git clone https://github.com/RoboFinSystems/roboledger-app.git
    ```
 
-2. **Complete the base local setup first** so `just start` works — see [Quick Start](Quick-Start) / [Bootstrap Guide](Bootstrap-Guide) (Docker, `uv`, `just`, the generated `.env`, migrations).
+2. **Complete the base local setup first** so `just start` works — see [Local Development](Local-Development) / [Bootstrap Guide](Bootstrap-Guide) (Docker, `uv`, `just`, the generated `.env`, migrations).
 3. **Install the frontend deps**: `cd roboledger-app && npm install` (Node 22+; `.nvmrc` pins the exact version). Run the frontend with `npm run dev` on the host for the OAuth step (see the Private-Network-Access note in [Troubleshooting](#troubleshooting)).
 
 ### Intuit Developer account (both paths)

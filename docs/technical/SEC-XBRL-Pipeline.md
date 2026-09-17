@@ -192,7 +192,7 @@ You have multiple options for accessing and querying the loaded SEC data:
 2. **[Direct Cypher Queries](#option-2-direct-cypher-queries-for-development)** - Command-line Cypher queries via `just graph-query`
 3. **[Query Staging Tables](#option-3-query-staging-tables-for-data-validation)** - SQL queries on DuckDB staging via `just tables-query`
 4. **[Python API](#option-4-python-api-for-applications)** - Programmatic access via RoboSystems Python client
-5. **[G.V() Visual Explorer](#option-5-gv-visual-graph-explorer-for-interactive-exploration)** - Interactive graph visualization (recommended tool)
+5. **[G.V() Visual Explorer](#option-5-gv-graph-ide-for-interactive-exploration)** - Interactive graph visualization (recommended tool)
 6. **[SQL IDE Tools](#option-6-sql-ide-tools-for-staging-data-validation)** - Direct database access with DuckDB-compatible IDEs
 
 ### Option 1: MCP Client (For AI Agents)

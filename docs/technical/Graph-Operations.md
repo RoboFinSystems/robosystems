@@ -2,6 +2,8 @@
 
 This guide shows you how to perform graph-lifecycle writes — creating subgraphs and backups, changing tier, and materializing — through the RoboSystems CQRS command surface and how to monitor long-running operations to completion.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -15,6 +17,7 @@ This guide shows you how to perform graph-lifecycle writes — creating subgraph
 - [Worked Example: Create a Backup and Watch It Complete](#worked-example-create-a-backup-and-watch-it-complete)
 - [Downloading and Unpacking a Backup](#downloading-and-unpacking-a-backup)
 - [Common Pitfalls](#common-pitfalls)
+- [Self-hosted deployments](#self-hosted-deployments)
 - [Related Documentation](#related-documentation)
 - [Support](#support)
 
@@ -63,34 +66,37 @@ The rest move content and memory in and out of the graph, using the identical en
 
 Before starting, ensure you have:
 
-- A running RoboSystems development stack — `just start`
-- Demo credentials — `just demo-user` writes your API key to `.local/config.json`
-- A writable graph to act on. `just demo-roboledger` provisions an entity graph and gives you a real `graph_id`. Substitute your own `graph_id` everywhere `kg1a2b3c4d5` appears below.
+- A RoboSystems account and an API key — see [Quick Start](Quick-Start)
+- A writable graph to act on — one you create in the app with **Create Graph** (see [Quick Start](Quick-Start)). Substitute your own `graph_id` everywhere `kg1a2b3c4d5` appears below.
 - `jq` and `curl` on your path
 
 The shared `sec` repository is **read-only** — these operations are blocked on it. Use a graph you own.
 
 ## Quick Start
 
-Read the API key inline from `.local/config.json` and send it as `X-API-Key`. The base URL for local testing is always `http://localhost:8000`.
+Send your API key as `X-API-Key`. The base URL is `https://api.robosystems.ai`.
+
+```bash
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+```
 
 ```bash
 # Create an empty subgraph (synchronous — completes in the response)
-curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/create-subgraph" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/operations/create-subgraph" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "dev", "display_name": "Development Environment"}'
 ```
 
 ```bash
 # Kick off a backup (asynchronous — returns 202 and an operation_id)
-curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/create-backup" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/operations/create-backup" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"backup_format": "full_dump", "retention_days": 30}'
 ```
 
-The full surface — every field, every status code — is in the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` when running locally). This page carries the concepts and the worked tasks; the spec is the exhaustive reference.
+The full surface — every field, every status code — is in the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs). This page carries the concepts and the worked tasks; the spec is the exhaustive reference.
 
 ## The CQRS Command Surface
 
@@ -157,8 +163,8 @@ The semantics:
 ```bash
 # Retrying this exact call with the same key replays the cached result
 # rather than creating a second backup.
-curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/create-backup" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/operations/create-backup" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: backup-2026-06-11-001" \
   -H "Content-Type: application/json" \
   -d '{"backup_format": "full_dump", "retention_days": 30}'
@@ -187,8 +193,8 @@ GET /v1/operations/{operation_id}/status    # point-in-time JSON snapshot
 
 ```bash
 # Stream events live (-N disables curl buffering so events arrive as emitted)
-curl -N "http://localhost:8000/v1/operations/op_01J9ZK7M3QABCDEF.../stream" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -N "https://api.robosystems.ai/v1/operations/op_01J9ZK7M3QABCDEF.../stream" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 On reconnect, pass `from_sequence` to replay events you missed rather than starting blind.
@@ -197,8 +203,8 @@ On reconnect, pass `from_sequence` to replay events you missed rather than start
 
 ```bash
 # Point-in-time status (no streaming)
-curl -s "http://localhost:8000/v1/operations/op_01J9ZK7M3QABCDEF.../status" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -s "https://api.robosystems.ai/v1/operations/op_01J9ZK7M3QABCDEF.../status" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 **Note:** SSE streaming consumes no credits, but it is authenticated, enforces ownership (you can only stream your own operations), and is rate-limited to 5 concurrent SSE connections per user.
@@ -216,8 +222,8 @@ Adds a child graph under a parent. The resulting subgraph id is `{parent_graph_i
 - Subgraph count is capped by tier — see [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
 
 ```bash
-curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/create-subgraph" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/operations/create-subgraph" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "dev", "display_name": "Development Environment"}'
 ```
@@ -237,7 +243,7 @@ Produces a stored dump. **Asynchronous** (202).
 - **Requires graph `admin`.** A member or viewer gets 403.
 - Blocked on shared repositories, and killable per deployment: with `BACKUP_CREATION_ENABLED=false` the operation returns 403 for everyone.
 
-**You do not have to ask for a backup to have one.** Every active customer graph and subgraph is backed up nightly, on a schedule that fans out one job per graph so a single failure does not take the fleet's backups with it. `create-backup` is the *on-demand* path — the one you reach for before a risky change, or when you want a dump to download right now. Backups on the read side carry an `initiated_by` field distinguishing the two: `scheduled` backups are taken on your behalf and do not count against the tier's daily backup limit; `user` ones do. Shared repositories such as `sec` are excluded from the nightly sweep — they are re-ingestible from their public source. The schedule runs in staging and production; on a local `dev` stack it ships stopped, so the only backups you will see there are ones you asked for.
+**You do not have to ask for a backup to have one.** Every active customer graph and subgraph is backed up nightly, on a schedule that fans out one job per graph so a single failure does not take the fleet's backups with it. `create-backup` is the *on-demand* path — the one you reach for before a risky change, or when you want a dump to download right now. Backups on the read side carry an `initiated_by` field distinguishing the two: `scheduled` backups are taken on your behalf and do not count against the tier's daily backup limit; `user` ones do. Shared repositories such as `sec` are excluded from the nightly sweep — they are re-ingestible from their public source.
 
 ### Backups Are for Downloading, Not Restoring
 
@@ -252,8 +258,8 @@ Migrates a graph to a new instance tier (an EBS volume migration). **Asynchronou
 - **Body:** `new_tier`, one of `ladybug-standard`, `ladybug-large`, `ladybug-xlarge`.
 
 ```bash
-curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/change-tier" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/operations/change-tier" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"new_tier": "ladybug-large"}'
 ```
@@ -266,8 +272,8 @@ Rebuilds the analytical graph (LadybugDB) from OLTP or staged source data. **Asy
 
 ```bash
 # Materialize an entity graph from the extensions OLTP database
-curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/materialize" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/operations/materialize" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
   -d '{"source": "extensions", "rebuild": false}'
@@ -275,8 +281,8 @@ curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/material
 
 ```bash
 # Dry run — synchronous, returns a completed envelope with the plan, materializes nothing
-curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/materialize" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/operations/materialize" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"dry_run": true}'
 ```
@@ -307,8 +313,8 @@ This walks the full async path end to end: kick off a backup, monitor it over SS
 Backups are asynchronous, so this returns HTTP 202 with a `pending` envelope and an `operation_id`.
 
 ```bash
-curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/create-backup" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/operations/create-backup" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: backup-2026-06-11-001" \
   -H "Content-Type: application/json" \
   -d '{"backup_format": "full_dump", "retention_days": 30}'
@@ -339,8 +345,8 @@ Copy the `operationId` — every following step keys off it.
 Connect to the SSE endpoint and watch the operation move through its event types.
 
 ```bash
-curl -N "http://localhost:8000/v1/operations/op_01J9ZK7M3QABCDEF.../stream" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -N "https://api.robosystems.ai/v1/operations/op_01J9ZK7M3QABCDEF.../stream" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 The stream emits `operation_started`, then one or more `operation_progress` events, then a terminal `operation_completed` (or `operation_error` if something failed). The completion event carries the result data.
@@ -350,8 +356,8 @@ The stream emits `operation_started`, then one or more `operation_progress` even
 If you would rather poll than hold a connection open, hit `/status` for a point-in-time view:
 
 ```bash
-curl -s "http://localhost:8000/v1/operations/op_01J9ZK7M3QABCDEF.../status" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -s "https://api.robosystems.ai/v1/operations/op_01J9ZK7M3QABCDEF.../status" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 ### Step 4: Confirm the Backup Landed
@@ -359,8 +365,8 @@ curl -s "http://localhost:8000/v1/operations/op_01J9ZK7M3QABCDEF.../status" \
 The read side is a plain `GET` — no envelope, no operation. List the graph's backups to see the new one:
 
 ```bash
-curl -s "http://localhost:8000/v1/graphs/kg1a2b3c4d5/backups" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -s "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/backups" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 Because you sent an `Idempotency-Key` in Step 1, re-running that exact request within 24 hours replays the original envelope (`idempotentReplay: true`) instead of creating a second backup.
@@ -371,8 +377,8 @@ Downloading is a read, not an operation. Ask for a time-limited presigned URL, t
 
 ```bash
 # Returns { "download_url": "...", "expires_at": "...", "backup_id": "..." }
-curl -s "http://localhost:8000/v1/graphs/kg1a2b3c4d5/backups/bk1a2b3c4d5/download?expires_in=3600" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -s "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/backups/bk1a2b3c4d5/download?expires_in=3600" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 
 # Fetch the file — the presigned URL carries its own auth, so no API key here
 curl -L -o backup.zip "PASTE_THE_DOWNLOAD_URL"
@@ -430,14 +436,7 @@ No `--long` flag is needed on your side: the snapshots are compressed with a 128
 
 ### Using the Decompressed `.lbug`
 
-The result is an ordinary LadybugDB database file. Drop it into a local stack's database directory and query it directly:
-
-```bash
-mv sec_20260805_031500.lbug ./data/lbug-dbs/sec.lbug
-just lbug-query sec "MATCH (e:Entity) RETURN e.name LIMIT 10"
-```
-
-Or open it from Python with the `ladybug` package (pinned to `0.18.1` in this repo — match the version the snapshot was written with):
+The result is an ordinary LadybugDB database file. Open it from Python with the `ladybug` package (pinned to `0.18.1` in this repo — match the version the snapshot was written with):
 
 ```python
 import ladybug as lbug
@@ -451,6 +450,8 @@ while result.has_next():
 
 conn.close()
 ```
+
+If you run your own stack, you can also drop the file into its database directory — see [Self-hosted deployments](#self-hosted-deployments).
 
 ## Common Pitfalls
 
@@ -486,6 +487,17 @@ The key is bound to the first body it saw. Change the body and you get a **409 C
 
 The backup request model rejects `compression: false`. Omit it (it defaults to and is forced to `true`) rather than trying to turn it off.
 
+## Self-hosted deployments
+
+**Querying a downloaded `.lbug` on your own stack.** Drop the decompressed file into the local database directory and query it directly:
+
+```bash
+mv sec_20260805_031500.lbug ./data/lbug-dbs/sec.lbug
+just lbug-query sec "MATCH (e:Entity) RETURN e.name LIMIT 10"
+```
+
+**Nightly backups.** The nightly backup schedule ships stopped on a local `dev` stack, so the only backups you will see there are ones you asked for with `create-backup`.
+
 ## Related Documentation
 
 **Wiki Guides:**
@@ -502,7 +514,6 @@ The backup request model rejects `compression: false`. Omit it (it defaults to a
 **API Reference:**
 
 - **[API Documentation](https://api.robosystems.ai/docs)** - Full request/response models and status codes (machine-readable OpenAPI spec)
-- **RoboSystems API (local)**: http://localhost:8000/docs (when running locally)
 
 ## Support
 

@@ -2,6 +2,8 @@
 
 A **shared repository** is a platform-managed, read-only public dataset you subscribe to and query alongside your own graphs. Where the dedicated tiers in [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy) give each customer an isolated graph, a shared repository is a single large graph that every subscriber reads — served from its own infrastructure tier and billed per subscriber. SEC EDGAR is the one shared repository available today.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [What a shared repository is](#what-a-shared-repository-is)
@@ -9,6 +11,7 @@ A **shared repository** is a platform-managed, read-only public dataset you subs
 - [The registry and manifest model](#the-registry-and-manifest-model)
 - [Subscribing and accessing](#subscribing-and-accessing)
 - [The SEC shared repository](#the-sec-shared-repository)
+- [Self-hosted deployments](#self-hosted-deployments)
 - [Related Documentation](#related-documentation)
 - [Support](#support)
 
@@ -33,7 +36,7 @@ Shared repositories run on a dedicated infrastructure tier, `ladybug-shared`, se
 
 - A **shared master** instance owns the build path — the ingestion pipeline materializes the graph here.
 - A **read-only replica fleet** serves queries. Replicas download the materialized `.lbug` / `.duckdb` / vector artifacts from S3 on boot and sit behind a load balancer, so read volume scales by adding replicas rather than by resizing one instance.
-- The tier is **opt-in** per deployment (`LBUG_SHARED_ENABLED`), since the replica fleet is separate infrastructure.
+- On robosystems.ai this tier serves the SEC repository; for a self-hosted deployment it is **opt-in** (`LBUG_SHARED_ENABLED`), since the replica fleet is separate infrastructure.
 
 See the [Architecture Overview](Architecture-Overview) for the cluster topology and the S3-publish → replica-refresh flow.
 
@@ -48,14 +51,16 @@ Adding a new shared repository is therefore a two-step change — write the mani
 Shared repository plans are discoverable without authentication at the public offering endpoint, which returns graph subscription tiers, shared repository plans, and AI credit costs:
 
 ```bash
-curl http://localhost:8000/v1/offering
+curl https://api.robosystems.ai/v1/offering
 ```
 
-A customer graph's subscription is created automatically when the graph is provisioned. A **shared repository** is different — you subscribe to it explicitly, choosing one of its plans:
+A customer graph's subscription is created automatically when the graph is provisioned. A **shared repository** is different — you subscribe to it explicitly, choosing one of its plans, from **Repositories** in the app or over the API:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/sec/subscriptions" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+
+curl -X POST "https://api.robosystems.ai/v1/graphs/sec/subscriptions" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"plan_name": "sec-starter"}'
 ```
@@ -63,22 +68,22 @@ curl -X POST "http://localhost:8000/v1/graphs/sec/subscriptions" \
 Plan names are repository-prefixed: `sec-starter` and `sec-advanced`. Checking your subscription uses the same endpoint, which auto-detects graphs versus repositories:
 
 ```bash
-curl "http://localhost:8000/v1/graphs/sec/subscriptions" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl "https://api.robosystems.ai/v1/graphs/sec/subscriptions" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 Changing plan and cancelling are the other two verbs on the same path:
 
 ```bash
 # Move to the higher plan (synchronous for repositories)
-curl -X PATCH "http://localhost:8000/v1/graphs/sec/subscriptions" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X PATCH "https://api.robosystems.ai/v1/graphs/sec/subscriptions" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"new_plan_name": "sec-advanced"}'
 
 # Cancel at period end (access stays until the period closes)
-curl -X POST "http://localhost:8000/v1/graphs/sec/subscriptions/cancel" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -X POST "https://api.robosystems.ai/v1/graphs/sec/subscriptions/cancel" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 Cancellation defaults to end-of-period; pass `immediate: true` together with `confirm: "sec"` to stop access right away. All three write calls accept an optional `user_id`, so an org owner or admin can subscribe, change, or cancel on behalf of another member of their organization — repository access is per-user while the billing is org-level, so the subscriber is what determines who gets in. A member acting on their own subscription omits it.
@@ -86,8 +91,8 @@ Cancellation defaults to end-of-period; pass `immediate: true` together with `co
 Once subscribed, you query the repository exactly like your own graph — its id (`sec`) is the `graph_id` in the URL:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/sec/query/cypher" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/sec/query/cypher" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "MATCH (e:Entity) RETURN e.name LIMIT 10"}'
 ```
@@ -107,7 +112,7 @@ Prices and credit allocations are served live and unauthenticated at **`GET /v1/
 
 The Advanced plan carries roughly 5× the rate limits of Starter. Rate limits apply per category — queries, MCP calls, searches, and AI agent calls each have their own per-minute / per-hour / per-day budgets.
 
-The repository id is `sec`, and it exposes a `sec_historical` subgraph for older filings. For a hands-on walkthrough — loading filings locally, querying them with Cypher and MCP, and the data model — see the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) demo.
+The repository id is `sec`, and it exposes a `sec_historical` subgraph for older filings. For a hands-on walkthrough — querying filings with Cypher and MCP, and the data model — see the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) demo.
 
 ### Downloading a snapshot
 
@@ -116,10 +121,10 @@ Subscribers whose plan carries a download allowance can pull the whole repositor
 ```bash
 # Latest published snapshot — one backup record per repository, republished on each pipeline run
 curl -s "https://api.robosystems.ai/v1/graphs/sec/backups" \
-  -H "X-API-Key: YOUR_API_KEY"
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 
 curl -s "https://api.robosystems.ai/v1/graphs/sec/backups/BACKUP_ID/download" \
-  -H "X-API-Key: YOUR_API_KEY"
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 
 curl -L -o sec.lbug.zst "PASTE_THE_DOWNLOAD_URL"
 ```
@@ -139,6 +144,10 @@ zstd -d sec.lbug.zst   # -> sec.lbug ; add --rm to delete the .zst afterwards
 ```
 
 Plain `zstd -d` is enough — no `--long` flag — and the decompressed file is roughly 2× the download, so leave disk headroom. The result is a LadybugDB database you can query directly; see [Graph Operations](Graph-Operations#downloading-and-unpacking-a-backup) for the full download-and-unpack walkthrough.
+
+## Self-hosted deployments
+
+There is no free hosted SEC tier; self-hosting is the free path. On a stack you run, load the filings you want with `just sec-load` and query them through the same `sec` graph id — see [Local Development](Local-Development#sec-filings).
 
 ## Related Documentation
 

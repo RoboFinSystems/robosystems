@@ -4,14 +4,7 @@
 - [Quick Start](Quick-Start)
 - [Core Concepts](Core-Concepts)
 - [Architecture Overview](Architecture-Overview)
-- [Bootstrap Guide](Bootstrap-Guide)
-- [Windows Setup (WSL2)](Windows-Setup-with-WSL2)
 - [Security & Compliance](Security-and-Compliance)
-
-### Demos
-- [RoboLedger Demos](RoboLedger-Demo-Walkthrough)
-- [SEC XBRL Pipeline](SEC-XBRL-Pipeline)
-- [Custom Graph Schema](Custom-Graph-Schema)
 
 ### Operations Layer
 - [Authentication & API Keys](Authentication-and-API-Keys)
@@ -30,7 +23,6 @@
 - [GraphQL Reads](GraphQL-Reads)
 - [RoboLedger Operations](RoboLedger-Operations)
 - [RoboInvestor Operations](RoboInvestor-Operations)
-- [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)
 
 ### Content & Contribution Fabric
 - [Information Blocks](Information-Blocks)
@@ -43,3 +35,14 @@
 - [Search & AI Retrieval](Search-and-AI-Retrieval)
 - [Document Management](Document-Management)
 - [File Uploads](File-Uploads)
+
+### Self-Hosting & Development
+- [Local Development](Local-Development)
+- [Windows Setup (WSL2)](Windows-Setup-with-WSL2)
+- [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)
+- [Bootstrap Guide](Bootstrap-Guide)
+
+### Demos
+- [RoboLedger Demos](RoboLedger-Demo-Walkthrough)
+- [SEC XBRL Pipeline](SEC-XBRL-Pipeline)
+- [Custom Graph Schema](Custom-Graph-Schema)

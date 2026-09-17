@@ -2,6 +2,8 @@
 
 RoboSystems exposes its data and reasoning surface to AI through the [Model Context Protocol](https://modelcontextprotocol.io/). An **AI Operator** is a Claude-driven executor that answers a natural-language question by composing reads across three retrieval planes — operational, analytical, and unstructured — using the same MCP tool layer that any MCP client (Claude, Claude Code, Cursor, a custom orchestrator) can call directly.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ---
 
 ## Connecting from MCP Clients
@@ -45,7 +47,7 @@ claude mcp add --transport http robosystems-sec \
 }
 ```
 
-Both routes speak JSON-RPC 2.0 and negotiate MCP revision **2025-06-18** — the only revision offered, because it is exactly the one this dispatch implements. Clients on other revisions negotiate to it at `initialize`. The transport is stateless (no session id), rejects JSON-RPC batching unconditionally, streams long-running tool calls over SSE with progress notifications when the client accepts `text/event-stream`, and runs the identical authorization chain as the rest of the API. Against a local stack the same shapes work at `http://localhost:8000/v1/mcp` (with `MCP_OAUTH_ENABLED=true`) and `http://localhost:8000/v1/graphs/{graph_id}/mcp`.
+Both routes speak JSON-RPC 2.0 and negotiate MCP revision **2025-06-18** — the only revision offered, because it is exactly the one this dispatch implements. Clients on other revisions negotiate to it at `initialize`. The transport is stateless (no session id), rejects JSON-RPC batching unconditionally, streams long-running tool calls over SSE with progress notifications when the client accepts `text/event-stream`, and runs the identical authorization chain as the rest of the API. A self-hosted stack serves the same routes — see [Self-hosted deployments](#self-hosted-deployments).
 
 ---
 
@@ -266,17 +268,18 @@ For the operator framework patterns, see the [Operations README](https://github.
 
 ## Worked Examples
 
-All examples target the local stack at `http://localhost:8000` and read the API key from `.local/config.json` (written by `just demo-user`). Use the `X-API-Key` header on the per-graph route. Set `GRAPH_ID` to your graph (for example a roboledger graph `kg1a2b3c4d5e`). Without an `Accept: text/event-stream` header the transport answers plain JSON, which is what you want from curl.
+All examples target `https://api.robosystems.ai` with your API key in the `X-API-Key` header on the per-graph route. Set `GRAPH_ID` to your graph (for example a roboledger graph `kg1a2b3c4d5e`). Without an `Accept: text/event-stream` header the transport answers plain JSON, which is what you want from curl.
 
 ### List the Tools Available on a Graph
 
 This shows exactly which planes a given deployment and graph expose. Always start here.
 
 ```bash
-GRAPH_ID=<your graph id>
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
-curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/mcp" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }'
 ```
@@ -286,8 +289,8 @@ curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
 No credits are consumed. Run `get-graph-schema` first in real use to learn the node and relationship types.
 
 ```bash
-curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/mcp" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -306,8 +309,8 @@ curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
 The `graph_id` comes from the URL, never the query body.
 
 ```bash
-curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/mcp" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -323,8 +326,8 @@ curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
 `semantic: true` opts into KNN vector ranking on top of keyword search.
 
 ```bash
-curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/mcp" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -340,13 +343,11 @@ curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
 Auto-select picks the right operator; `?mode=sync` returns a single JSON response rather than streaming.
 
 ```bash
-curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operator?mode=sync" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operator?mode=sync" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "message": "What are my five largest expense accounts this year?", "mode": "standard" }'
 ```
-
-For direct, API-bypassing graph access during development, `just lbug-query GRAPH_ID "CYPHER"` queries LadybugDB directly and `just graph-query GRAPH_ID "CYPHER"` goes through the API.
 
 ---
 
@@ -368,6 +369,12 @@ For direct, API-bypassing graph access during development, `just lbug-query GRAP
 | Credits | Only AI (LLM) calls consume credits; every database/search tool call is free |
 
 Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSIONS_GRAPHQL_ENABLED`, `SEMANTIC_SEARCH_ENABLED`, `MCP_GRAPHQL_ENABLED`, `MCP_SUBGRAPH_OPS_ENABLED`, `MCP_WORKSPACE_ENABLED`, `SEMANTIC_MEMORY_ENABLED`, `MCP_SEMANTIC_MEMORY_ENABLED`, `FACT_GRID_ENABLED`) determine the catalog at runtime. See the [Configuration README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/README.md) in codebase.
+
+---
+
+## Self-hosted deployments
+
+A stack you run serves both MCP routes at `http://localhost:8000/v1/mcp` and `http://localhost:8000/v1/graphs/{graph_id}/mcp`. The OAuth route requires `MCP_OAUTH_ENABLED=true`; the per-graph route takes the key from `just demo-user` in `X-API-Key`. See [Local Development](Local-Development).
 
 ---
 

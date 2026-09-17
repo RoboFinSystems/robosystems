@@ -2,6 +2,8 @@
 
 RoboSystems is multi-tenant at the graph layer: every customer dataset lives in its own isolated graph database keyed by a `graph_id`. This page explains the `graph_id` model, the three stores a tenant spans, the available graph tiers, subgraphs, and the day-to-day tasks of creating, listing, and querying graphs.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -55,14 +57,13 @@ The two PostgreSQL databases have **independent migration histories** and live o
 
 ## Prerequisites
 
-Before working with graphs locally, ensure you have:
+Before working with graphs, ensure you have:
 
-- Docker running locally
-- RoboSystems development environment set up
-- Services started with `just start`
-- Demo credentials created with `just demo-user` (writes your API key to `.local/config.json`), plus `just demo-custom-graph` or `just demo-roboledger` to provision a graph and record its `graph_id` under `.graphs.<slot>`
+- A RoboSystems account
+- An API key, from **Settings → API keys** at robosystems.ai
+- A graph, or the org owner or admin role needed to create one (see [Creating a Graph](#creating-a-graph))
 
-All authenticated examples below read the API key from `.local/config.json` and target `http://localhost:8000`. Use the `X-API-Key` header for backend testing; `Authorization: Bearer` is a frontend concern only.
+[Quick Start](Quick-Start) walks through getting all three. All authenticated examples below target `https://api.robosystems.ai` and read the API key from `$ROBOSYSTEMS_API_KEY`. Use the `X-API-Key` header for backend testing; `Authorization: Bearer` is a frontend concern only.
 
 ## The `graph_id` Model and Per-Graph Isolation
 
@@ -153,25 +154,19 @@ There are two flavors of graph:
 
 ### Quick Start
 
-The fastest path to a working custom graph is the demo command, which creates a user, provisions a graph, ingests sample data, and runs verification queries:
+The fastest path to a working graph is the app: choose **Create Graph** on the Home page or in the graph selector at robosystems.ai. A RoboLedger graph can also come from roboledger.ai when you connect QuickBooks.
 
-```bash
-# Ensure RoboSystems is running
-just start
-
-# Create user, graph, sample data, and run queries
-just demo-custom-graph
-```
+Creating a graph starts a subscription on the organization's payment method, and only organization owners and admins can create one. Over the API, a caller without that role gets `403 graph_creation_requires_admin`, and an organization with no payment method gets `402 payment_required`.
 
 ### Create an Entity Graph
 
 This creates a RoboLedger-enabled entity graph on the Standard tier. The `Idempotency-Key` header makes retries safe.
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
 
-curl -X POST "http://localhost:8000/v1/graphs" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
   -d '{
@@ -195,7 +190,7 @@ curl -X POST "http://localhost:8000/v1/graphs" \
 
 **Note:** The response is an `OperationEnvelope` with an `operation_id`, not a finished graph. Track progress over Server-Sent Events at `GET /v1/operations/{operation_id}/stream`. The `entity_type` (such as `llc`, `corporation`, or `partnership`) drives the default reporting style for entity graphs.
 
-For the full request and response schema — every field, type, and validation rule — see the live OpenAPI docs rather than re-deriving it here: [api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally).
+For the full request and response schema — every field, type, and validation rule — see the live OpenAPI docs rather than re-deriving it here: [api.robosystems.ai/docs](https://api.robosystems.ai/docs).
 
 ## Schema Extensions and the Extensions Surface
 
@@ -231,7 +226,7 @@ Everything under `/extensions/*` is graph-scoped at the URL and falls into one o
 
 **For an entity graph, the command-write surface — not the Cypher endpoint — is how data enters the system.** This is the point that ties the whole page together: `/v1/graphs/{graph_id}/query/cypher` is read-only on the main graph *because* the write path is `/extensions/{domain}/{graph_id}/operations/*`, and the graph is rebuilt from what those operations write.
 
-Both surfaces are gated per deployment by `ROBOLEDGER_ENABLED` and `ROBOINVESTOR_ENABLED`, and the GraphQL schema is composed at construction time — a ledger-only deployment has literally no investor fields to introspect, rather than fields that fail at runtime. Full detail, including the operation envelope and idempotency semantics, is in **[Extensions Surface Overview](Extensions-Surface-Overview)**.
+Both surfaces are gated per deployment: on robosystems.ai both extensions are enabled, and a self-hosted deployment controls each with `ROBOLEDGER_ENABLED` and `ROBOINVESTOR_ENABLED`. The GraphQL schema is composed at construction time — a ledger-only deployment has literally no investor fields to introspect, rather than fields that fail at runtime. Full detail, including the operation envelope and idempotency semantics, is in **[Extensions Surface Overview](Extensions-Surface-Overview)**.
 
 ## Listing and Inspecting Graphs
 
@@ -240,23 +235,15 @@ Both surfaces are gated per deployment by `ROBOLEDGER_ENABLED` and `ROBOINVESTOR
 `GET /v1/graphs` returns the graphs you can access, plus the shared repositories you are **subscribed to** — not the ones on offer. The response is `{graphs[], selectedGraphId}`, with subscribed repositories appended into the same `graphs[]` array carrying `isRepository: true`. To discover repositories you have *not* subscribed to, use `GET /v1/offering`.
 
 ```bash
-curl "http://localhost:8000/v1/graphs" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl "https://api.robosystems.ai/v1/graphs" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 `POST /v1/graphs/{graph_id}/select` sets the `selectedGraphId` that comes back on subsequent list calls — it is how the frontends remember which graph you were last working in.
 
 ### Inspect a Single Graph
 
-`GET /v1/graphs/{graph_id}/info` returns database details for one graph. Locally you can use the `just` shortcuts:
-
-```bash
-# Database info (node/edge counts, size, status)
-just graph-info kg1234567890abcdef
-
-# Graph API health check
-just graph-health
-```
+`GET /v1/graphs/{graph_id}/info` returns database details for one graph.
 
 Several more read endpoints answer the questions that come up around a single graph:
 
@@ -313,8 +300,8 @@ The inherited `schema_extensions` column is therefore best read as vestigial on 
 Subgraph creation is a graph operation and returns an `OperationEnvelope`. Both `name` and `display_name` are **required**; the rest of the body is optional. By default it creates an empty subgraph; set `fork_parent: true` to clone the parent's data.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/operations/create-subgraph" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/operations/create-subgraph" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "dev",
@@ -335,8 +322,8 @@ The resulting subgraph ID is `kg1234567890abcdef_dev`. Three further optional fi
 `GET /v1/graphs/{graph_id}/subgraphs` returns the parent's subgraphs along with the tier's `max_subgraphs`, the current `subgraph_count`, and total size.
 
 ```bash
-curl "http://localhost:8000/v1/graphs/kg1234567890abcdef/subgraphs" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/subgraphs" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 Subgraph lifecycle writes (create, delete) follow the same operation pattern as other graph operations. See [Graph Operations](Graph-Operations) for the complete operations surface.
@@ -346,20 +333,10 @@ Subgraph lifecycle writes (create, delete) follow the same operation pattern as 
 Graphs are queried with Cypher over `POST /v1/graphs/{graph_id}/query/cypher`. The sibling route `POST /v1/graphs/{graph_id}/query/sql` reads the graph's DuckDB staging tables — the columnar side of the same graph, used during ingestion and materialization rather than for graph traversal. **SQL is read-only**, and it is **blocked entirely on shared repositories**, which have no user columnar tables; use `/query/cypher` for those.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/query/cypher" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/query/cypher" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "MATCH (n) RETURN labels(n) AS label, count(*) AS count"}'
-```
-
-Locally, the `just` shortcuts wrap the same path:
-
-```bash
-# Query through the Graph API
-just graph-query kg1234567890abcdef "MATCH (n) RETURN count(n)"
-
-# Query LadybugDB directly (bypasses the API — local debugging only)
-just lbug-query kg1234567890abcdef "MATCH (n) RETURN count(n)"
 ```
 
 ### Where Writes Go

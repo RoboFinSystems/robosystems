@@ -2,6 +2,8 @@
 
 RoboSystems treats accounting vocabulary as data, not code: concepts, hierarchies, calculation arcs, and rules are queryable, versionable rows seeded from JSON-LD packages. This page explains the substrate — the `fac`, `cm`, and `rs-gaap` frameworks, the canonical ontology, the Element and Association atoms, and traits — and shows you how to contribute your own vocabulary through the Taxonomy Block write path.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -14,6 +16,7 @@ RoboSystems treats accounting vocabulary as data, not code: concepts, hierarchie
 - [Worked Example](#worked-example)
 - [Reading the Library](#reading-the-library)
 - [Common Pitfalls](#common-pitfalls)
+- [Self-hosted deployments](#self-hosted-deployments)
 - [Related Documentation](#related-documentation)
 - [Support](#support)
 
@@ -123,12 +126,6 @@ The pin manifest (`frameworks/{name}/v1.json`) declares the framework, its versi
 
 **Library-origin rows are immutable inside every tenant.** Once a concept is copied from the public library into a tenant, you extend it — you never mutate it. This is enforced by immutability triggers and is the foundation of the contribution model below: tenants add native elements alongside the library, never edit the library in place.
 
-**Editing the framework source** (the JSON-LD packages themselves) requires reseeding the library. A plain restart re-reads the baked image copy; reseed the library from source to pick up edits to `frameworks/**/taxonomy.jsonld`:
-
-```bash
-just reset-local
-```
-
 ## Contributing: The Taxonomy Block Write Path
 
 The **Taxonomy Block** is the single public write path for vocabulary. It is modeled directly on the [Information Block](Information-Blocks): a molecule (the envelope) crosses the API boundary in one transaction, never a raw atom. "No raw element writes" is the taxonomy-side twin of "no raw fact writes" — there is no per-row element or association CRUD on the public surface.
@@ -169,7 +166,7 @@ POST /extensions/roboledger/{graph_id}/operations/{op_name}
 
 `auto-map-elements` is a worker-backed operation that returns `202` with a `pending` envelope, then streams progress over SSE. It auto-approves mappings with confidence at or above `0.90`, flags those between `0.70` and `0.89` for review, and skips anything below `0.70`.
 
-The request and response schemas (`CreateTaxonomyBlockRequest`, `TaxonomyBlockElementRequest`, `TaxonomyBlockAssociationRequest`, `TaxonomyBlockRuleRequest`, `TaxonomyBlockEnvelope`, and the rest) are published in the live OpenAPI spec rather than re-documented here. See [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` when running locally). A few load-bearing field facts to know before you call:
+The request and response schemas (`CreateTaxonomyBlockRequest`, `TaxonomyBlockElementRequest`, `TaxonomyBlockAssociationRequest`, `TaxonomyBlockRuleRequest`, `TaxonomyBlockEnvelope`, and the rest) are published in the live OpenAPI spec rather than re-documented here. See [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs). A few load-bearing field facts to know before you call:
 
 - **`qname` is the envelope-local reference token.** It is unique within the envelope's `elements` list, and `parent_ref`, `from_ref`, `to_ref`, and rule targets all reference elements by qname — never by id.
 - **List caps:** elements ≤ 5,000, structures ≤ 100, associations ≤ 20,000, rules ≤ 500.
@@ -177,17 +174,18 @@ The request and response schemas (`CreateTaxonomyBlockRequest`, `TaxonomyBlockEl
 
 ## Worked Example
 
-This walkthrough authors a custom ontology, then reads it back. The examples assume a tenant graph id in `$GRAPH_ID` (set it from `.local/config.json` after running `just demo-roboledger`) and read the API key from the same config file.
+This walkthrough authors a custom ontology, then reads it back. The examples need an API key and a tenant graph (see [Quick Start](Quick-Start)); they read the key from `$ROBOSYSTEMS_API_KEY` and the graph id from `$GRAPH_ID`.
 
 ### Step 1: Create a Custom Ontology
 
 A `custom_ontology` block has no accounting discipline — no required trait, no balance type, no forced period type. This one declares an emissions vocabulary with a small presentation tree:
 
 ```bash
-GRAPH_ID=<your tenant graph id>
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-taxonomy-block" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-taxonomy-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
   -d '{
@@ -216,8 +214,8 @@ The response is a `TaxonomyBlockEnvelope`. Its `id` is the **taxonomy id** (not 
 The chart-of-accounts case is the declarative reference. Every element requires a `trait`, and stock concepts (assets, liabilities, equity) are forced to `period_type='instant'` regardless of what you send:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-taxonomy-block" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-taxonomy-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
   -d '{
@@ -240,8 +238,8 @@ A chart of accounts auto-links to the graph entity as its primary chart of accou
 A `reporting_extension` adds native concepts onto a library reporting standard. It requires `parent_taxonomy_id` (the id of an `rs-gaap` reporting standard taxonomy), and `parent_ref` may point at a library element qname — references resolve local-first, then fall back to the parent library taxonomy:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-taxonomy-block" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-taxonomy-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Acme rs-gaap Extension",
@@ -261,8 +259,8 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/c
 Use the tenant-scoped GraphQL endpoint and the taxonomy id from the create response. Fields are camelCase in the GraphQL schema even though the Python resolvers are snake_case:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ taxonomyBlock(id: \"<taxonomy id from create response>\") { name taxonomyType elementCount associationCount elements { qname name trait origin } } }"}'
 ```
@@ -271,13 +269,13 @@ The `origin` field on each element reports `library` for copied-from-public rows
 
 ## Reading the Library
 
-There is **one** GraphQL endpoint and one composed `Query` root — Strawberry-backed, with GraphiQL available in dev. What changes is the *scope* the URL selects, not the schema: the library fields are composed unconditionally, so every `library*` field resolves on any graph-scoped endpoint too.
+There is **one** GraphQL endpoint and one composed `Query` root, Strawberry-backed. What changes is the *scope* the URL selects, not the schema: the library fields are composed unconditionally, so every `library*` field resolves on any graph-scoped endpoint too.
 
 **Browse the canonical public library** through the `library` sentinel — a first-class `graph_id` that pins `search_path=public`:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/library/graphql" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/library/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ libraryElement(qname: \"rs-gaap:Assets\") { id qname name balanceType periodType source } libraryTaxonomies(standard: \"rs-gaap\") { id name version } }"}'
 ```
@@ -290,7 +288,7 @@ The library fields cover taxonomies (`libraryTaxonomies`, `libraryTaxonomy`, `li
 POST /extensions/{graph_id}/graphql
 ```
 
-The two scopes differ in what the same fields see, not in which fields exist: `library` browses the public catalog only, while a tenant `graph_id` sees that tenant's rows with public fallback. The full field set is introspectable from GraphiQL in dev, or browse the spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs).
+The two scopes differ in what the same fields see, not in which fields exist: `library` browses the public catalog only, while a tenant `graph_id` sees that tenant's rows with public fallback. The full field set is introspectable over the API, or browse the spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs).
 
 ## Common Pitfalls
 
@@ -322,9 +320,15 @@ Once a library concept is copied into a tenant, it can never be updated or delet
 
 Chart-of-accounts elements must carry a `trait`, and stock concepts (`asset`, `contraAsset`, `liability`, `contraLiability`, `equity`, `contraEquity`, `temporaryEquity`) are forced to `period_type='instant'` no matter what you send.
 
-### Framework Source Edits Need a Reseed
+## Self-hosted deployments
 
-Editing `frameworks/**/taxonomy.jsonld` does not take effect on a plain restart — the baked image copy is re-read. Run `just reset-local` to reseed the library from source.
+### Editing the Framework Source
+
+Editing the JSON-LD packages themselves (`frameworks/**/taxonomy.jsonld`) requires reseeding the library. The edit does not take effect on a plain restart — the baked image copy is re-read. Reseed the library from source:
+
+```bash
+just reset-local
+```
 
 Validate the edit before you pay for a reseed. `just framework-validate` checks the `rs-gaap` framework's structure, package integrity, and chart-of-accounts coverage; `--summary` gives the terse form and `--coverage-only` just the coverage report.
 

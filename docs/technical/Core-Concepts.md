@@ -2,6 +2,8 @@
 
 RoboSystems is a financial intelligence platform for accounting, financial reporting, and investment management, built on a multi-tenant knowledge graph — and a handful of recurring terms run through every endpoint, SDK call, and README. This page is an orientation glossary: short, plain-language definitions that build on one another, each linking to its deep-dive page. Read it once to get your bearings, then follow the links when you need detail.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [graph_id and Tenancy](#graph_id-and-tenancy)
@@ -25,14 +27,14 @@ Parent graph IDs match the regex `kg[a-f0-9]{16,}` — `kg` followed by 16 or mo
 The simplest call needs no `graph_id` at all — the health check:
 
 ```bash
-curl http://localhost:8000/v1/status
+curl https://api.robosystems.ai/v1/status
 ```
 
-Authenticated calls read the API key from `.local/config.json` (created by `just demo-user`) and send it as `X-API-Key`. Listing the graphs your key can reach:
+Authenticated calls send your API key (create one under **Settings → API keys** at robosystems.ai) as `X-API-Key`; the examples read it from `$ROBOSYSTEMS_API_KEY`. Listing the graphs your key can reach:
 
 ```bash
-curl "http://localhost:8000/v1/graphs" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl "https://api.robosystems.ai/v1/graphs" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 **Note:** Use `X-API-Key` for backend and `curl` testing. `Authorization: Bearer` (JWT) is a frontend concern and is not used for API testing.
@@ -78,16 +80,10 @@ The `Element` node is keyed by `identifier` and carries properties such as `qnam
 You can see Elements directly with a Cypher read over the analytical graph:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/query/cypher" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/query/cypher" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "MATCH (e:Element) RETURN e.qname, e.balance LIMIT 5"}'
-```
-
-Or, using the `just` helper with a literal graph ID:
-
-```bash
-just graph-query kg1234567890abcdef "MATCH (e:Element) RETURN e.qname LIMIT 5"
 ```
 
 → Deep-dive: [Information Blocks](Information-Blocks)
@@ -101,8 +97,8 @@ What the frontend calls a "Balance Sheet" or a "Depreciation Schedule" the backe
 Information Blocks are read through the GraphQL surface. Note that `graph_id` comes from the URL, not from a query argument:
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/kg1234567890abcdef/graphql" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/extensions/kg1234567890abcdef/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ informationBlocks { id blockType } }"}'
 ```
@@ -132,8 +128,8 @@ The rename resolved an "agent operates on agent" naming collision: an AI Operato
 Invoking an Operator (auto-routing to the best-fit one for the query):
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/operator" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/operator" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"message": "What was total revenue last period?"}'
 ```
@@ -199,7 +195,7 @@ This page is the orientation hub. Each glossary term has a deeper home:
 | Information Blocks, Elements, Taxonomy/Event Blocks, frameworks | [Information Blocks](Information-Blocks) |
 | Operators, the REA Agent distinction, the MCP retrieval planes | [AI Operators and MCP](AI-Operators-and-MCP) |
 
-For the full, machine-readable endpoint surface, use the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` against a local stack), rather than re-deriving routes by hand.
+For the full, machine-readable endpoint surface, use the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs), rather than re-deriving routes by hand.
 
 ## Related Documentation
 

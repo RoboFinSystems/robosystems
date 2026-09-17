@@ -4,6 +4,8 @@ This guide shows you how to manage the institutional-knowledge document store th
 
 **Quick Start:** Create a markdown document with `POST /v1/graphs/{graph_id}/operations/index-document` (or the `create-document` MCP tool), and it is automatically split into sections and indexed for search. Creation, update, and deletion are **content operations**; the REST surface at `/v1/graphs/{graph_id}/documents` is read-only (list and get).
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Overview
 
 The document store is a per-graph layer for unstructured, human- and agent-authored knowledge — the policies, procedures, working notes, and narrative context that complement the structured ledger and reporting data in the graph. It does four things end-to-end when you upload a document:
@@ -19,22 +21,21 @@ Documents are the foundation of the retrieval layer your AI agents read from —
 
 ## Prerequisites
 
-- A running local stack (`just start` brings up PostgreSQL, Valkey, LadybugDB, OpenSearch, the API, and Dagster).
+- A RoboSystems account and an API key, sent as the `X-API-Key` header (see [Quick Start](Quick-Start)).
 - A **non-shared user graph** — document operations are rejected on shared public repositories (SEC and other platform-managed repos).
-- An API key. Run `just demo-user` from the `robosystems/` directory; credentials are written to `.local/config.json`. Read the key with `jq -r .api_key .local/config.json`.
-- `SEMANTIC_SEARCH_ENABLED=true`. The flag gates both halves, but differently. The read routers (`/documents`, `/search`) are conditionally mounted — with the flag off they do not exist and calls return **404**. The `index-document` and `delete-document` operations are always mounted and return **503 "Document search is not enabled"** instead.
+- Document search enabled on the deployment. It is on robosystems.ai; a self-hosted deployment controls it with `SEMANTIC_SEARCH_ENABLED` (see [Self-hosted deployments](#self-hosted-deployments)).
 
 ## Quick Start
 
 Upload a markdown document, then list what is in the graph:
 
 ```bash
-API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=<your graph id>
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 
 # Upload a policy document
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-document" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/index-document" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Revenue Recognition Policy",
@@ -44,8 +45,8 @@ curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-documen
   }'
 
 # List documents in the graph
-curl "http://localhost:8000/v1/graphs/$GRAPH_ID/documents" \
-  -H "X-API-Key: $API_KEY"
+curl "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/documents" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 The operation returns an `OperationEnvelope`; the indexing report sits inside `result`:
@@ -70,7 +71,7 @@ The operation returns an `OperationEnvelope`; the indexing report sits inside `r
 
 Envelope keys are camelCase on the wire; the payload fields inside `result` keep their snake_case names.
 
-The full endpoint and schema surface is published in the live OpenAPI spec at [api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally). This guide covers the concepts and tasks; the OpenAPI spec is the authoritative reference for request and response shapes.
+The full endpoint and schema surface is published in the live OpenAPI spec at [api.robosystems.ai/docs](https://api.robosystems.ai/docs). This guide covers the concepts and tasks; the OpenAPI spec is the authoritative reference for request and response shapes.
 
 ## The Document Model
 
@@ -108,8 +109,8 @@ Both operations return an `OperationEnvelope` and accept an `Idempotency-Key` he
 ### Get a Document
 
 ```bash
-curl "http://localhost:8000/v1/graphs/$GRAPH_ID/documents/doc_01J9XYZ..." \
-  -H "X-API-Key: $API_KEY"
+curl "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/documents/doc_01J9XYZ..." \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 Returns the full document including raw `content`, `tags`, `folder`, `external_id`, `source_type`, `sections_indexed`, and timestamps.
@@ -120,8 +121,8 @@ Update is the **same** `index-document` operation with a `document_id` supplied.
 
 ```bash
 # Update only the content — re-sections and re-indexes
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-document" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/index-document" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"document_id": "doc_01J9XYZ...", "content": "# Scope\n\nUpdated scope language for FY2026.\n"}'
 ```
@@ -131,8 +132,8 @@ To **clear** a field rather than leave it untouched, pass `null` explicitly (e.g
 ### Delete a Document
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/delete-document" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/delete-document" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"document_id": "doc_01J9XYZ..."}'
 ```
@@ -148,8 +149,8 @@ Documents are markdown, and the way they are split into sections determines how 
 If the content opens with a YAML frontmatter block, it is stripped from the body and can fill **unset** metadata fields — `title`, `tags`, and `folder`. Explicit values in the request always win over frontmatter; frontmatter only fills gaps.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-document" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/index-document" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "content": "---\ntitle: Close Checklist\ntags: close, monthly\nfolder: procedures\n---\n\n# Pre-Close\n\nReconcile all bank accounts.\n\n# Close\n\nPost accruals and run the trial balance.\n"
@@ -175,8 +176,8 @@ The body is split into sections on markdown heading boundaries (`#` through `###
 This is the pattern for syncing documents from an external system where each source item has a stable id (for example, a Google Drive file id). Re-indexing the same `external_id` after the source changes updates the stored document in place:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-document" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/index-document" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Expense Policy",
@@ -201,13 +202,13 @@ The read side lives under `/v1/graphs/{graph_id}/search`:
 
 ```bash
 # Find the document via search, then delete it by its PostgreSQL id
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/search" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/search" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "revenue recognition ASC 606", "source_type": "uploaded_doc", "size": 5}'
 
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/delete-document" \
-  -H "X-API-Key: $API_KEY" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/delete-document" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"document_id": "doc_01J9XYZ..."}'
 ```
@@ -240,7 +241,7 @@ Agent recollections used to be modelled as documents filed under `folder="memory
 | REST reads | `GET /v1/graphs/{g}/memory`, `GET /v1/graphs/{g}/memory/{memory_id}`, `POST /v1/graphs/{g}/memory/recall` |
 | Write operations | `POST /v1/graphs/{g}/operations/{remember\|update-memory\|forget}` |
 
-The gating is **different from documents**: memory is controlled by `SEMANTIC_MEMORY_ENABLED` (with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on the MCP tools), not by `SEMANTIC_SEARCH_ENABLED`. Like documents, memory is blocked on shared repositories. Unlike documents, `remember` and `update-memory` are also blocked on subgraphs — a subgraph is meant to be cheap to create and throw away, so memories belong on the parent graph — while `forget` stays open so existing memories remain removable.
+The gating is **different from documents**: a deployment controls memory with `SEMANTIC_MEMORY_ENABLED` (with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on the MCP tools), not with `SEMANTIC_SEARCH_ENABLED`. Like documents, memory is blocked on shared repositories. Unlike documents, `remember` and `update-memory` are also blocked on subgraphs — a subgraph is meant to be cheap to create and throw away, so memories belong on the parent graph — while `forget` stays open so existing memories remain removable.
 
 Memory recall is covered with the rest of the retrieval layer in [Search and AI Retrieval](Search-and-AI-Retrieval).
 
@@ -253,15 +254,11 @@ When a create would exceed the limit, the call returns **422** with a "Document 
 The cap itself is served rather than restated here. `GET /v1/graphs/{graph_id}/limits` returns a `documents` block with your graph's `current_count`, its `max_documents` for the tier, and an `approaching_limit` flag:
 
 ```bash
-curl "http://localhost:8000/v1/graphs/$GRAPH_ID/limits" \
-  -H "X-API-Key: $API_KEY" | jq .documents
+curl "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/limits" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" | jq .documents
 ```
 
 ## Troubleshooting
-
-### Reads Return 404, Writes Return 503
-
-The two halves fail differently when `SEMANTIC_SEARCH_ENABLED` is off. The documents and search **read** routers are conditionally mounted, so the routes do not exist and requests 404 rather than returning a feature-disabled error. The `index-document` and `delete-document` **operations** are always mounted and return 503 "Document search is not enabled" instead. Either way the fix is the same: confirm the flag in your environment and restart the stack if you changed it.
 
 ### Document Saves but `sections_indexed` Is 0
 
@@ -283,6 +280,10 @@ Update via `index-document` is strictly partial: omitted fields are untouched, a
 
 Content is capped at 500,000 characters at the request layer. Individual sections are additionally truncated at 50,000 characters during indexing. For very large bodies, split the source into multiple documents.
 
+## Self-hosted deployments
+
+Document search is gated by `SEMANTIC_SEARCH_ENABLED`, and the flag gates both halves differently. The read routers (`/documents`, `/search`) are conditionally mounted — with the flag off they do not exist and calls return **404** rather than a feature-disabled error. The `index-document` and `delete-document` operations are always mounted and return **503 "Document search is not enabled"** instead. Either way the fix is the same: confirm the flag in your environment and restart the stack if you changed it. See [Local Development](Local-Development).
+
 ## Related Documentation
 
 **Wiki Guides:**
@@ -298,7 +299,7 @@ Content is capped at 500,000 characters at the request layer. Individual section
 
 **API Reference:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI spec with full request/response schemas (local equivalent at `http://localhost:8000/docs`)
+- **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI spec with full request/response schemas
 
 ## Support
 

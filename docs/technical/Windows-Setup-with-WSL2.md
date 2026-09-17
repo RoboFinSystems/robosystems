@@ -2,7 +2,7 @@
 
 RoboSystems is developed and tested on macOS and Linux. On Windows, the supported path is **WSL2 with the repository stored inside the Linux filesystem** — which makes your environment the Linux environment we already test, rather than a third platform.
 
-**Quick Start:** Run `wsl --install` in an admin PowerShell, enable Docker Desktop's WSL integration, clone the repo to `~/` **inside** the distro (never `/mnt/c`), install `uv`, `just`, and `jq`, then follow the normal [Quick Start](Quick-Start).
+**Quick Start:** Run `wsl --install` in an admin PowerShell, enable Docker Desktop's WSL integration, clone the repo to `~/` **inside** the distro (never `/mnt/c`), install `uv`, `just`, and `jq`, then follow the normal [Local Development](Local-Development) guide.
 
 ## Why WSL2 rather than native Windows
 
@@ -124,7 +124,7 @@ just demo-user
 just demo-custom-graph
 ```
 
-See [Quick Start](Quick-Start) for the full walkthrough.
+See [Local Development](Local-Development) for the full walkthrough.
 
 ## Working with the stack from Windows
 
@@ -180,6 +180,6 @@ If you hit something not listed here, please [open an issue](https://github.com/
 
 ## Related
 
-- [Quick Start](Quick-Start) — the standard walkthrough, which works verbatim inside WSL2
+- [Local Development](Local-Development) — the standard walkthrough, which works verbatim inside WSL2
 - [Core Concepts](Core-Concepts) — what the platform does once it is running
 - [Bootstrap Guide](Bootstrap-Guide) — AWS setup, if you intend to deploy your own fork

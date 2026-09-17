@@ -6,26 +6,16 @@ RoboSystems is an open-source, AI-native financial intelligence platform for acc
 
 **The platform is fork-ready.** The [repository](https://github.com/RoboFinSystems/robosystems) ships full GitHub Actions CI/CD that deploys the CloudFormation infrastructure into your own AWS account — see the [Bootstrap Guide](Bootstrap-Guide) to stand up a deployment of your own.
 
-This wiki is the technical documentation for using, operating, and building on the platform. It is organized into six areas — orientation and self-hosting, hands-on demos, the operational API, the RoboLedger and RoboInvestor extensions, the financial-content fabric, and the document and search layer.
+This wiki is the technical documentation for using, operating, and building on the platform. Its examples call the hosted API at `https://api.robosystems.ai`; to run the platform yourself, start with [Local Development](Local-Development). It is organized into seven areas — orientation, the operational API, the RoboLedger and RoboInvestor extensions, the financial-content fabric, the document and search layer, self-hosting and development, and hands-on demos.
 
 ## Getting Started & Platform
 
-Orientation and self-hosting: stand up a local stack, learn the vocabulary, and understand the system design.
+Orientation: get an API key, make your first query, learn the vocabulary, and understand the system design.
 
-- **[Quick Start](Quick-Start)** - From `just start` to your first authenticated query in ten minutes
+- **[Quick Start](Quick-Start)** - From a new account to your first authenticated query and a connected AI client
 - **[Core Concepts](Core-Concepts)** - The vocabulary: graphs, tiers, blocks, operators, operational vs analytical
 - **[Architecture Overview](Architecture-Overview)** - System design and components
-- **[Bootstrap Guide](Bootstrap-Guide)** - Set up AWS OIDC federation and GitHub Actions (self-hosting)
-- **[Windows Setup (WSL2)](Windows-Setup-with-WSL2)** - Set up WSL2 and run the stack on Windows
 - **[Security & Compliance](Security-and-Compliance)** - The security posture, built-in controls, and optional compliance stacks for forks
-
-## Demos
-
-Hands-on walkthroughs — run one command, explore the result.
-
-- **[RoboLedger Demos](RoboLedger-Demo-Walkthrough)** - Synthetic-data and Seattle Method XBRL demos
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query real SEC financial filings
-- **[Custom Graph Schema](Custom-Graph-Schema)** - Design, build, and query a custom graph
 
 ## Operations Layer
 
@@ -50,7 +40,6 @@ RoboLedger and RoboInvestor — the graph-scoped product surfaces.
 - **[GraphQL Reads](GraphQL-Reads)** - Ad-hoc typed reads over the operational (OLTP) graph
 - **[RoboLedger Operations](RoboLedger-Operations)** - Command writes and analytical views (the fact grid)
 - **[RoboInvestor Operations](RoboInvestor-Operations)** - Portfolios, securities, and positions
-- **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)** - Run real QB OAuth against a local stack via ngrok
 
 ## Content & Contribution Fabric
 
@@ -69,6 +58,23 @@ Unstructured content and retrieval — the institutional-knowledge layer that gr
 - **[Search & AI Retrieval](Search-and-AI-Retrieval)** - Index documents and retrieve them through MCP tools
 - **[Document Management](Document-Management)** - The document store over entity graphs
 - **[File Uploads](File-Uploads)** - File uploads for generic graphs
+
+## Self-Hosting & Development
+
+RoboSystems is open source: run the whole platform on your machine, contribute to it, or deploy it into your own AWS account.
+
+- **[Local Development](Local-Development)** - From `just start` to your first authenticated query in ten minutes, and how a local stack differs from hosted
+- **[Windows Setup (WSL2)](Windows-Setup-with-WSL2)** - Set up WSL2 and run the stack on Windows
+- **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)** - Run real QB OAuth against a local stack via ngrok
+- **[Bootstrap Guide](Bootstrap-Guide)** - Set up AWS OIDC federation and GitHub Actions to deploy your own
+
+## Demos
+
+Hands-on walkthroughs on a local stack — run one command, explore the result.
+
+- **[RoboLedger Demos](RoboLedger-Demo-Walkthrough)** - Synthetic-data and Seattle Method XBRL demos
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query real SEC financial filings
+- **[Custom Graph Schema](Custom-Graph-Schema)** - Design, build, and query a custom graph
 
 ## Reference
 
