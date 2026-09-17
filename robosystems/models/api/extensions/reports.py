@@ -373,10 +373,22 @@ class ReportResponse(BaseModel):
     ),
   )
   filed_at: datetime | None = Field(
-    None, description="When the report was transitioned to `filed`."
+    None,
+    description=(
+      "When the report was transitioned to `filed`. On a report shared in "
+      "from another graph this is the sender's filing time, carried over "
+      "with `filing_status` so a recipient can tell a draft they were sent "
+      "from final statements."
+    ),
   )
   filed_by: str | None = Field(
-    None, description="User ID that transitioned the report to `filed`."
+    None,
+    description=(
+      "User ID that transitioned the report to `filed`. Always null on a "
+      "report shared in from another graph: the sender's user id resolves "
+      "to nobody in the recipient's graph, so it is deliberately not "
+      "carried across with `filing_status` and `filed_at`."
+    ),
   )
   supersedes_id: str | None = Field(
     None,

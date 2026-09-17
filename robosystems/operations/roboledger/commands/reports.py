@@ -789,8 +789,8 @@ def delete_report(
   """Delete a report and its generated facts.
 
   Raises `NotAuthorizedError` if the caller doesn't own the report.
-  Raises `ReportNotFiledError` if the report is in a locked filing
-  state (``filed`` or ``archived``) — the Report Block lifecycle treats
+  Raises `ReportNotFiledError` if a report this graph authored is in a locked
+  filing state (``filed`` or ``archived``) — the Report Block lifecycle treats
   filed/archived as immutable so the audit trail can't be erased.
   Returns True if a row was deleted, False if the report did not exist.
 
@@ -798,7 +798,9 @@ def delete_report(
   exception to the owner rule: its ``created_by`` is the *sender's* user id, so
   no one in the receiving graph could ever match it. An admin of the receiving
   graph may delete such a copy — the recipient's exit from a share they did not
-  ask for. Native reports are unaffected; only their owner can delete them.
+  ask for. Native reports are unaffected; only their owner can delete them. It
+  is also exempt from the filed/archived lock below, which guards an author's
+  audit trail rather than a recipient's inbox.
 
   Deleting the copy deliberately leaves the sender's ``ReportShare`` row alone:
   the sender's record that they sent it is theirs, not the recipient's to erase.
@@ -840,7 +842,16 @@ def delete_report(
   )
   if active_share_targets:
     raise ReportHasActiveSharesError(report_id, active_share_targets)
-  if report_def.filing_status in {"filed", "archived"}:
+  # Filed/archived immutability protects an *author's* audit trail. A copy
+  # shared in from another graph is not that: it is a delivery, and the
+  # sender's lifecycle status now travels with it, so applying the guard here
+  # would close the recipient's only per-report exit the moment a sender filed
+  # before sharing. The block-and-purge path already deletes such copies in
+  # raw SQL without consulting this guard; the two exits agree.
+  if report_def.source_graph_id is None and report_def.filing_status in {
+    "filed",
+    "archived",
+  }:
     raise ReportNotFiledError(
       f"Report '{report_id}' is '{report_def.filing_status}' and cannot "
       f"be deleted. Reach 'archived' via transition-filing-status if "
@@ -940,6 +951,14 @@ def share_report(
       "comparative": report_def.comparative,
       "periods": report_def.periods,
       "generation_count": int(report_def.generation_count or 0),
+      # Where the report stands in the sender's filing lifecycle. A recipient
+      # needs it to tell a draft it was sent from final statements, and
+      # sharing a `draft` is legal — only `generation_status` is gated above.
+      # `filed_by` deliberately stays behind: it is the sender's platform user
+      # id, which means nothing in the recipient's graph and is rendered
+      # verbatim by the viewer.
+      "filing_status": report_def.filing_status,
+      "filed_at": report_def.filed_at,
     }
 
     # The FactSets travel as themselves, not as one flat fact list. Every
@@ -1517,6 +1536,13 @@ def _share_to_target(
         comparative=report_snapshot["comparative"],
         periods=report_snapshot.get("periods"),
         generation_status="published",
+        # The sender's filing status travels with the copy. Without it the
+        # column default applies and every received report reads `draft` —
+        # permanently, since `_assert_report_mutable_by` closes the lifecycle
+        # transitions to a shared-in copy, so the recipient's viewer would
+        # label final statements a draft with no way to correct it.
+        filing_status=report_snapshot.get("filing_status") or "draft",
+        filed_at=report_snapshot.get("filed_at"),
         created_by=shared_by,
         source_graph_id=source_graph_id,
         source_report_id=report_snapshot["id"],

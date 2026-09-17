@@ -27,7 +27,10 @@ from robosystems.db.extensions import ExtensionsBase, extensions_session
 from robosystems.models.api.extensions.blocked_source_graphs import (
   BlockSourceGraphRequest,
 )
-from robosystems.models.api.extensions.reports import RevokeReportShareRequest
+from robosystems.models.api.extensions.reports import (
+  RevokeReportShareRequest,
+  ShareReportRequest,
+)
 from robosystems.models.extensions import (
   BlockedSourceGraph,
   Element,
@@ -41,9 +44,11 @@ from robosystems.operations.roboledger.commands.blocked_source_graphs import (
 )
 from robosystems.operations.roboledger.commands.reports import (
   ReportHasActiveSharesError,
+  ReportNotFiledError,
   _share_to_target,
   delete_report,
   revoke_report_share,
+  share_report,
 )
 
 pytestmark = pytest.mark.integration
@@ -212,11 +217,11 @@ def _patch_platform_graph_lookup():
   return patch("robosystems.db.platform.SessionFactory", return_value=platform)
 
 
-def _share() -> object:
+def _share(report_snapshot: dict | None = None) -> object:
   with _patch_platform_graph_lookup():
     return _share_to_target(
       source_graph_id=SOURCE_GRAPH,
-      report_snapshot=_REPORT_SNAPSHOT,
+      report_snapshot=report_snapshot or _REPORT_SNAPSHOT,
       source_fact_sets=_SOURCE_FACT_SETS,
       source_facts=_SOURCE_FACTS,
       target_graph_id=TARGET_GRAPH,
@@ -359,6 +364,122 @@ def test_the_copy_carries_honest_provenance() -> None:
   # The copy is stamped with the *sender's* user id — which is exactly why the
   # recipient's delete had to be widened beyond the owner rule.
   assert row.created_by == _SENDER
+
+
+def test_the_copy_reports_where_the_sender_was_in_the_filing_lifecycle() -> None:
+  """A filed report must not arrive labelled `draft`.
+
+  The copy takes the column default unless the share carries the status over,
+  and nothing in the recipient's graph can correct it afterwards —
+  `_assert_report_mutable_by` closes every lifecycle transition to a shared-in
+  copy. So the recipient's viewer would call final statements a draft forever.
+  `filed_by` is the one field left behind: the sender's platform user id means
+  nothing here and the viewer prints it verbatim.
+  """
+  filed_at = datetime(2026, 4, 15, 12, 0, tzinfo=UTC)
+  list_id = _seed_publishable_report(filing_status="filed", filed_at=filed_at)
+
+  with (
+    _patch_platform_graph_lookup(),
+    patch(
+      "robosystems.operations.roboledger.commands.reports._load_publication_artifacts",
+      return_value={},
+    ),
+  ):
+    share_report(
+      SOURCE_GRAPH,
+      _REPORT_SNAPSHOT["id"],
+      ShareReportRequest(publish_list_id=list_id),
+      acting_user_id=_SENDER,
+    )
+
+  with extensions_session(TARGET_GRAPH) as session:
+    row = session.execute(
+      text("SELECT filing_status, filed_at, filed_by FROM reports")
+    ).one()
+
+  assert row.filing_status == "filed"
+  assert row.filed_at == filed_at
+  assert row.filed_by is None
+
+
+def test_a_draft_shared_report_still_arrives_as_a_draft() -> None:
+  """The status travels; it is not forced to `filed`. Sharing is gated on
+  `generation_status`, so a fund can legitimately be sent a draft — and being
+  told which it is holding is the point of carrying the field at all."""
+  list_id = _seed_publishable_report(filing_status="draft")
+
+  with (
+    _patch_platform_graph_lookup(),
+    patch(
+      "robosystems.operations.roboledger.commands.reports._load_publication_artifacts",
+      return_value={},
+    ),
+  ):
+    share_report(
+      SOURCE_GRAPH,
+      _REPORT_SNAPSHOT["id"],
+      ShareReportRequest(publish_list_id=list_id),
+      acting_user_id=_SENDER,
+    )
+
+  with extensions_session(TARGET_GRAPH) as session:
+    row = session.execute(text("SELECT filing_status, filed_at FROM reports")).one()
+
+  assert row.filing_status == "draft"
+  assert row.filed_at is None
+
+
+def test_a_recipient_admin_can_delete_a_filed_copy() -> None:
+  """Filed/archived immutability guards an author's audit trail, not an
+  inbox. Once the sender's status travels with the copy, applying that guard
+  in the recipient's schema would shut the only per-report exit for exactly
+  the reports most likely to be shared — the filed ones."""
+  filed = {
+    **_REPORT_SNAPSHOT,
+    "filing_status": "filed",
+    "filed_at": datetime(2026, 4, 15, 12, 0, tzinfo=UTC),
+  }
+  _share(filed)
+
+  with extensions_session(TARGET_GRAPH) as session:
+    copy_id = session.execute(text("SELECT id FROM reports")).scalar_one()
+    deleted = delete_report(
+      session,
+      copy_id,
+      acting_user_id=_RECIPIENT_ADMIN,
+      acting_user_is_graph_admin=True,
+    )
+
+  assert deleted is True
+  assert _counts(TARGET_GRAPH) == (0, 0, 0)
+
+
+def test_a_filed_report_this_graph_authored_still_cannot_be_deleted() -> None:
+  """The other half of that exemption: it is keyed on `source_graph_id`, so a
+  native filed report keeps its lock."""
+  with extensions_session(TARGET_GRAPH) as session:
+    session.add(
+      Report(
+        id="rpt_native_filed",
+        name="Recipient's own filed report",
+        taxonomy_id="tax_rsgaap_reporting",
+        period_type="quarterly",
+        comparative=False,
+        generation_status="published",
+        filing_status="filed",
+        created_by=_RECIPIENT_ADMIN,
+      )
+    )
+
+  with extensions_session(TARGET_GRAPH) as session:
+    with pytest.raises(ReportNotFiledError):
+      delete_report(
+        session,
+        "rpt_native_filed",
+        acting_user_id=_RECIPIENT_ADMIN,
+        acting_user_is_graph_admin=True,
+      )
 
 
 def test_a_block_keeps_the_copy_out() -> None:
@@ -860,9 +981,16 @@ def test_revoke_survives_a_recipient_whose_schema_was_dropped() -> None:
 # ── share_report holds the source report for the whole share ─────────────────
 
 
-def _seed_publishable_report() -> str:
+def _seed_publishable_report(
+  filing_status: str = "draft", filed_at: datetime | None = None
+) -> str:
   """A published report in the source schema, with a fact set and a publish
-  list pointing at the target. Returns the publish list id."""
+  list pointing at the target. Returns the publish list id.
+
+  ``filing_status`` is a parameter because sharing is gated on
+  ``generation_status`` alone — a sender may share from anywhere in the filing
+  lifecycle, and where they shared from is what the recipient's copy must
+  report."""
   from robosystems.models.api.fact_provenance import PivotProvenance
   from robosystems.models.extensions.roboledger.fact import Fact
   from robosystems.models.extensions.roboledger.publish_list import (
@@ -886,7 +1014,9 @@ def _seed_publishable_report() -> str:
         period_end=_REPORT_SNAPSHOT["period_end"],
         comparative=False,
         generation_status="published",
-        filing_status="draft",
+        filing_status=filing_status,
+        filed_at=filed_at,
+        filed_by=_SENDER if filed_at else None,
         created_by=_SENDER,
       )
     )
