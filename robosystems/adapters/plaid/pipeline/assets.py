@@ -12,9 +12,11 @@ the Item's whole history.
 Plaid pulls a new Item in two steps: the most recent ~30 days first
 (``INITIAL_UPDATE_COMPLETE``), the rest of the requested history later
 (``HISTORICAL_UPDATE_COMPLETE``), and nothing at all for the first seconds
-(``NOT_READY``). The asset waits for the history, up to a bound. A run that
-still has nothing fails, so the connection never reads as synced with zero
-data. A run that has only the recent window captures it and stores the cursor
+(``NOT_READY``). The asset waits for the history: up to ten minutes on the
+Item's first sync, a minute on any later run (a run with a cursor already
+captured what had landed; a short recheck is enough, and a worker is never
+held long on a scheduled sync). A run that still has nothing fails, so the
+connection never reads as synced with zero data. A run that has only the recent window captures it and stores the cursor
 — the rest arrives as ``added`` on a later sync — but leaves the fiscal
 calendar alone: bootstrapping it on 30 days would close every earlier month
 before its transactions arrived, and the closed-period gate would then refuse
@@ -57,8 +59,10 @@ from robosystems.adapters.bank_feed.sync import (
 
 SOURCE = "plaid"
 SOURCE_LABEL = "Plaid"
-# How long a run waits for Plaid to finish pulling the Item's history.
+# How long a run waits for Plaid to finish pulling the Item's history: the
+# first sync (no cursor yet) waits the long bound, a later run rechecks briefly.
 PULL_WAIT_SECONDS = 600
+PULL_RECHECK_SECONDS = 60
 PULL_POLL_SECONDS = 10
 # How many extra cursors the first run to see the history complete drains.
 SETTLE_ROUNDS = 10
@@ -146,7 +150,8 @@ def _run_plaid_sync(
     accounts_body = client.get_accounts(access_token)
     sync = client.sync_transactions(access_token, cursor)
     waited = 0
-    while sync.pull_pending and waited < PULL_WAIT_SECONDS:
+    budget = PULL_WAIT_SECONDS if cursor is None else PULL_RECHECK_SECONDS
+    while sync.pull_pending and waited < budget:
       context.log.info(
         f"Plaid is still pulling this Item's history ({sync.update_status}); waiting"
       )

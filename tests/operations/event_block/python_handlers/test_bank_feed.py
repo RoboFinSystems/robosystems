@@ -555,3 +555,40 @@ class TestSourceOverrides:
       with pytest.raises(HandlerMetadataValidationError, match="tenant rule"):
         dispatch(MagicMock(), _event(), metadata, "usr_1")
     floor.assert_not_called()
+
+  def test_preview_refuses_a_retracted_line_like_dispatch(self):
+    body = CreateEventBlockRequest(
+      event_type="bank_transaction",
+      event_category="purchase",
+      event_class="economic",
+      event_action="transfer",
+      resource_type="money",
+      source="plaid",
+      external_id="plaid_txn_p1",
+      occurred_at=datetime(2026, 3, 14, tzinfo=UTC),
+      amount=-4250,
+      resource_element_id="elem_card",
+    )
+    metadata = BankFeedMetadata(
+      classified_element_id="elem_office", source_removed=True
+    )
+    preview = dispatch_preview(MagicMock(), body, metadata)
+    assert preview.would_succeed is False
+    assert "retracted" in preview.validation_errors[0]
+
+  def test_preview_names_the_rule_refusal_like_dispatch(self):
+    body = CreateEventBlockRequest(
+      event_type="bank_transaction",
+      event_category="purchase",
+      event_class="economic",
+      event_action="transfer",
+      resource_type="money",
+      source="plaid",
+      external_id="plaid_txn_p2",
+      occurred_at=datetime(2026, 3, 14, tzinfo=UTC),
+      amount=-4250,
+      resource_element_id="elem_card",
+    )
+    preview = dispatch_preview(MagicMock(), body, BankFeedMetadata(source_amount=-5000))
+    assert preview.would_succeed is False
+    assert "tenant rule" in preview.validation_errors[0]

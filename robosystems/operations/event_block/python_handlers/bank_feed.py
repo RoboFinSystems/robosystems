@@ -353,6 +353,30 @@ def source_posting_date(
   return posting_date_for_event(effective_at=effective_at, occurred_at=occurred_at)
 
 
+def source_refusal(metadata: BankFeedMetadata, *, unclassified: bool) -> str | None:
+  """Why the bank's current record stops this line posting, or ``None``.
+
+  A retracted line never posts. A line with no classification of its own
+  would post through a tenant rule, and a rule re-posts the captured amount
+  and date rather than the bank's — so when the bank's record differs it is
+  refused too. Both are the catch-up disposition's job.
+  """
+  if metadata.source_removed:
+    return (
+      "The bank retracted this line; it cannot be posted. Resolve the "
+      "reconciling item as catch_up to reverse it."
+    )
+  if unclassified and (
+    metadata.source_amount is not None or metadata.source_posted_date is not None
+  ):
+    return (
+      "This line was posted through a tenant rule, which would re-post the "
+      "captured amount and date rather than the bank's. Resolve the "
+      "reconciling item as catch_up."
+    )
+  return None
+
+
 def dispatch(
   session: Session,
   event: Event,
@@ -364,11 +388,9 @@ def dispatch(
   Fires at the first commit and again when a reconciling item is restated,
   so it posts what the bank *now* says whenever the metadata carries it.
   """
-  if metadata.source_removed:
-    raise HandlerMetadataValidationError(
-      f"Bank event {event.id}: the bank retracted this line; it cannot be "
-      "posted. Resolve the reconciling item as catch_up to reverse it."
-    )
+  refusal = source_refusal(metadata, unclassified=False)
+  if refusal:
+    raise HandlerMetadataValidationError(f"Bank event {event.id}: {refusal}")
   amount = source_amount(metadata, event.amount)
   lines = plan_lines(
     event_type=event.event_type,
@@ -377,12 +399,9 @@ def dispatch(
     metadata=metadata,
   )
   if lines is None:
-    if metadata.source_amount is not None or metadata.source_posted_date is not None:
-      raise HandlerMetadataValidationError(
-        f"Bank event {event.id} was posted through a tenant rule, which would "
-        "re-post the captured amount and date rather than the bank's. Resolve "
-        "the reconciling item as catch_up."
-      )
+    refusal = source_refusal(metadata, unclassified=True)
+    if refusal:
+      raise HandlerMetadataValidationError(f"Bank event {event.id}: {refusal}")
     _pin_to_local_lane(event)
     return _apply_dsl_floor(session, event, created_by, metadata=metadata)
 
@@ -411,7 +430,13 @@ def dispatch_preview(
   body: CreateEventBlockRequest,
   metadata: BankFeedMetadata,
 ) -> HandlerPreview:
-  """The entry the commit would write — the inbox's preview of an approve."""
+  """The entry the commit would write — the inbox's preview of an approve.
+
+  Refuses exactly what ``dispatch`` refuses, so preview and commit agree.
+  """
+  refusal = source_refusal(metadata, unclassified=False)
+  if refusal:
+    return HandlerPreview(would_succeed=False, validation_errors=[refusal])
   try:
     lines = plan_lines(
       event_type=body.event_type,
@@ -422,9 +447,10 @@ def dispatch_preview(
   except HandlerMetadataValidationError as exc:
     return HandlerPreview(would_succeed=False, validation_errors=[str(exc)])
   if lines is None:
+    refusal = source_refusal(metadata, unclassified=True)
     return HandlerPreview(
       would_succeed=False,
-      validation_errors=[unclassified_reason(metadata)],
+      validation_errors=[refusal or unclassified_reason(metadata)],
       computed_values={"suggested_element_id": metadata.suggested_element_id},
     )
   journal = _journal_metadata(

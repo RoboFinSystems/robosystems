@@ -13,6 +13,7 @@ from robosystems.adapters.bank_feed.sync import default_backfill_start
 from robosystems.adapters.plaid.client import PlaidError, TransactionsSync
 from robosystems.adapters.plaid.pipeline.assets import (
   PULL_POLL_SECONDS,
+  PULL_RECHECK_SECONDS,
   PULL_WAIT_SECONDS,
   PlaidSyncConfig,
   get_dagster_components,
@@ -178,7 +179,9 @@ class TestBody:
     assert run.client.sync_transactions.call_count == 1
 
   def test_a_first_pull_still_empty_after_the_wait_fails_and_writes_nothing(self):
-    run = _run_body(lambda *args: _sync("NOT_READY"), expect=Failure)
+    run = _run_body(
+      lambda *args: _sync("NOT_READY"), credentials=FIRST_SYNC, expect=Failure
+    )
     assert "has not finished" in str(run.error)
     polls = PULL_WAIT_SECONDS // PULL_POLL_SECONDS + 1
     assert run.client.sync_transactions.call_count == polls
@@ -186,8 +189,21 @@ class TestBody:
     run.store.assert_not_called()
     run.update.assert_not_called()
 
+  def test_a_later_run_rechecks_a_pending_history_only_briefly(self):
+    run = _run_body(
+      lambda *args: _sync("INITIAL_UPDATE_COMPLETE", next_cursor="c9"),
+      credentials={"access_token": "access-1", "cursor": "c8", "item_id": "i1"},
+    )
+    polls = PULL_RECHECK_SECONDS // PULL_POLL_SECONDS + 1
+    assert run.client.sync_transactions.call_count == polls
+    run.store.assert_called_once_with("conn_1", "c9", history_complete=False)
+    run.bootstrap.assert_not_called()
+
   def test_a_partial_history_is_captured_but_the_calendar_waits(self):
-    run = _run_body(lambda *args: _sync("INITIAL_UPDATE_COMPLETE", next_cursor="c1"))
+    run = _run_body(
+      lambda *args: _sync("INITIAL_UPDATE_COMPLETE", next_cursor="c1"),
+      credentials=FIRST_SYNC,
+    )
     run.session.commit.assert_called_once()
     run.store.assert_called_once_with("conn_1", "c1", history_complete=False)
     run.bootstrap.assert_not_called()
