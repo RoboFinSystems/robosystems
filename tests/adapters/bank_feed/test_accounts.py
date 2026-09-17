@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.adapters.mercury.pipeline.accounts import (
+from robosystems.adapters.bank_feed.accounts import (
   BANK_FEED_KEY,
   ChartRequiredError,
   _next_code,
@@ -15,9 +15,9 @@ from robosystems.adapters.mercury.pipeline.accounts import (
   build_chart_index,
   link_bank_accounts,
 )
-from robosystems.adapters.mercury.pipeline.transform import BankAccount
+from robosystems.adapters.bank_feed.chart import BankAccount
 
-MODULE = "robosystems.adapters.mercury.pipeline.accounts"
+MODULE = "robosystems.adapters.bank_feed.accounts"
 
 
 def _element(id, name, *, code=None, qname=None, metadata=None, is_active=True):
@@ -34,23 +34,25 @@ def _element(id, name, *, code=None, qname=None, metadata=None, is_active=True):
   )
 
 
-def _checking(mercury_id="acct_1", name="Mercury Checking ••1234") -> BankAccount:
+def _checking(account_id="acct_1", name="Mercury Checking ••1234") -> BankAccount:
   return BankAccount(
-    mercury_id=mercury_id,
+    account_id=account_id,
     name=name,
     kind="checking",
     trait="asset",
     balance_type="debit",
+    institution="Mercury",
   )
 
 
-def _card(mercury_id="acct_card") -> BankAccount:
+def _card(account_id="acct_card") -> BankAccount:
   return BankAccount(
-    mercury_id=mercury_id,
+    account_id=account_id,
     name="Mercury IO ••9012",
     kind="credit",
     trait="liability",
     balance_type="credit",
+    institution="Mercury",
   )
 
 
@@ -80,7 +82,11 @@ class TestLinkBankAccounts:
     with patch(f"{MODULE}.active_chart_id", return_value=None):
       with pytest.raises(ChartRequiredError):
         link_bank_accounts(
-          _Session(), [_checking()], connection_id="conn_1", created_by="u"
+          _Session(),
+          [_checking()],
+          provider="mercury",
+          connection_id="conn_1",
+          created_by="u",
         )
 
   def test_previously_linked_account_resolves_by_feed_metadata(self):
@@ -92,7 +98,11 @@ class TestLinkBankAccounts:
     session = _Session([linked])
     with patch(f"{MODULE}.active_chart_id", return_value="tax_1"):
       result = link_bank_accounts(
-        session, [_checking()], connection_id="conn_1", created_by="u"
+        session,
+        [_checking()],
+        provider="mercury",
+        connection_id="conn_1",
+        created_by="u",
       )
     assert result.links == {"acct_1": "e1"}
     assert (result.linked, result.created) == (1, 0)
@@ -102,7 +112,11 @@ class TestLinkBankAccounts:
     session = _Session([existing])
     with patch(f"{MODULE}.active_chart_id", return_value="tax_1"):
       result = link_bank_accounts(
-        session, [_checking()], connection_id="conn_1", created_by="u"
+        session,
+        [_checking()],
+        provider="mercury",
+        connection_id="conn_1",
+        created_by="u",
       )
     assert result.links == {"acct_1": "e1"}
     assert existing.metadata_[BANK_FEED_KEY]["account_id"] == "acct_1"
@@ -122,7 +136,11 @@ class TestLinkBankAccounts:
       patch(f"{MODULE}.update_chart_block") as update,
     ):
       result = link_bank_accounts(
-        session, [_checking(), _card()], connection_id="conn_1", created_by="u"
+        session,
+        [_checking(), _card()],
+        provider="mercury",
+        connection_id="conn_1",
+        created_by="u",
       )
     payload = update.call_args.args[1]
     assert payload.taxonomy_id == "tax_1"
@@ -149,7 +167,13 @@ class TestLinkBankAccounts:
       patch(f"{MODULE}.active_chart_id", return_value="tax_1"),
       patch(f"{MODULE}.update_chart_block") as update,
     ):
-      link_bank_accounts(session, [_checking()], connection_id="conn_1", created_by="u")
+      link_bank_accounts(
+        session,
+        [_checking()],
+        provider="mercury",
+        connection_id="conn_1",
+        created_by="u",
+      )
     req = update.call_args.args[1].elements_to_add[0]
     assert req.code is None
     assert req.qname == "coa:MercuryChecking1234"
@@ -162,7 +186,11 @@ class TestLinkBankAccounts:
     ):
       with pytest.raises(RuntimeError, match="was not created"):
         link_bank_accounts(
-          session, [_checking()], connection_id="conn_1", created_by="u"
+          session,
+          [_checking()],
+          provider="mercury",
+          connection_id="conn_1",
+          created_by="u",
         )
 
 
@@ -193,3 +221,84 @@ class TestHelpers:
   def test_build_chart_index_without_chart_is_empty(self):
     with patch(f"{MODULE}.active_chart_id", return_value=None):
       assert build_chart_index(MagicMock()).resolve("cash") is None
+
+
+@pytest.mark.unit
+def test_another_providers_link_does_not_claim_the_account():
+  mercury_linked = _element(
+    "e1",
+    "Operating cash",
+    metadata={BANK_FEED_KEY: {"provider": "mercury", "account_id": "acct_1"}},
+  )
+  created = _element("e2", "Mercury Checking ••1234", qname="coa:MercuryChecking1234")
+  session = _Session([mercury_linked], [created])
+  with (
+    patch(f"{MODULE}.active_chart_id", return_value="tax_1"),
+    patch(f"{MODULE}.update_chart_block") as update,
+  ):
+    result = link_bank_accounts(
+      session, [_checking()], provider="plaid", connection_id="conn_2", created_by="u"
+    )
+  assert (result.linked, result.created) == (0, 1)
+  link = update.call_args.args[1].elements_to_add[0].metadata[BANK_FEED_KEY]
+  assert link["provider"] == "plaid" and link["institution"] == "Mercury"
+
+
+@pytest.mark.unit
+def test_an_account_another_connection_feeds_is_not_claimed_by_name():
+  owned = _element(
+    "e1",
+    "Mercury Checking ••1234",
+    qname="coa:MercuryChecking1234",
+    metadata={
+      BANK_FEED_KEY: {
+        "provider": "mercury",
+        "account_id": "merc_1",
+        "connection_id": "conn_mercury",
+      }
+    },
+  )
+  created = _element("e2", "Mercury Checking ••1234", qname="coa:MercuryChecking12342")
+  session = _Session([owned], [created])
+  with (
+    patch(f"{MODULE}.active_chart_id", return_value="tax_1"),
+    patch(f"{MODULE}.update_chart_block") as update,
+  ):
+    result = link_bank_accounts(
+      session,
+      [_checking()],
+      provider="plaid",
+      connection_id="conn_plaid",
+      created_by="u",
+    )
+  assert (result.linked, result.created) == (0, 1)
+  assert result.links == {"acct_1": "e2"}
+  # The other feed's link is untouched.
+  assert owned.metadata_[BANK_FEED_KEY]["provider"] == "mercury"
+  assert update.call_args.args[1].elements_to_add[0].qname == "coa:MercuryChecking12342"
+
+
+@pytest.mark.unit
+def test_a_connection_reclaims_its_own_account_under_a_new_account_id():
+  own = _element(
+    "e1",
+    "Mercury Checking ••1234",
+    metadata={
+      BANK_FEED_KEY: {
+        "provider": "plaid",
+        "account_id": "old_item_acct",
+        "connection_id": "conn_plaid",
+      }
+    },
+  )
+  session = _Session([own])
+  with patch(f"{MODULE}.active_chart_id", return_value="tax_1"):
+    result = link_bank_accounts(
+      session,
+      [_checking()],
+      provider="plaid",
+      connection_id="conn_plaid",
+      created_by="u",
+    )
+  assert result.links == {"acct_1": "e1"} and result.created == 0
+  assert own.metadata_[BANK_FEED_KEY]["account_id"] == "acct_1"

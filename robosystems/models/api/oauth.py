@@ -29,9 +29,22 @@ class OAuthInitRequest(BaseModel):
 
 
 class OAuthInitResponse(BaseModel):
-  """Response with OAuth authorization URL."""
+  """Where the user authorizes: a redirect URL, or a token for an embedded widget."""
 
-  auth_url: str = Field(..., description="URL to redirect user for authorization")
+  auth_url: str | None = Field(
+    None,
+    description=(
+      "URL to redirect the user to for authorization. Null for providers that "
+      "authorize in an embedded widget (Plaid: see link_token)."
+    ),
+  )
+  link_token: str | None = Field(
+    None,
+    description=(
+      "Plaid only: the token that opens Plaid Link. Link's public_token completes "
+      "the flow through the callback, as code."
+    ),
+  )
   state: str = Field(..., description="OAuth state for security")
   expires_at: datetime = Field(..., description="When this OAuth request expires")
 
@@ -39,7 +52,13 @@ class OAuthInitResponse(BaseModel):
 class OAuthCallbackRequest(BaseModel):
   """OAuth callback parameters."""
 
-  code: str = Field(..., description="Authorization code from OAuth provider")
+  code: str = Field(
+    ...,
+    description=(
+      "Authorization code from the OAuth provider (Plaid: the public_token Link "
+      "returned)"
+    ),
+  )
   state: str = Field(..., description="OAuth state for verification")
   realm_id: str | None = Field(None, description="QuickBooks-specific realm ID")
   error: str | None = Field(None, description="OAuth error if authorization failed")

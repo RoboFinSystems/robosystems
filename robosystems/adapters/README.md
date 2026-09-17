@@ -12,7 +12,7 @@ limits, endpoint access, and credit costs. The manifest is the single source of
 truth; `config/shared_repositories.py` collects manifests and exposes the query
 API used by billing, middleware, and operations.
 
-**Private adapters** (`quickbooks/`, `mercury/`) integrate a per-user external
+**Private adapters** (`quickbooks/`, `mercury/`, `plaid/`) integrate a per-user external
 service. They have a client and a Dagster pipeline but no manifest, because they
 operate on individual user graphs rather than shared platform data.
 
@@ -102,12 +102,11 @@ connection or on a graph with no chart of accounts.
   `invalid_grant` / `invalid_scope` / `invalid_client`) or a personal read-only
   key (`StaticToken`, self-hosted deployments only).
 - `pipeline/` — one Dagster asset, `mercury_feed` in job `mercury_sync` (`assets.py`): pull →
-  `accounts.py` (link or create one chart account per bank account, through the
-  TaxonomyBlock envelope) → `transform.py` (transactions → captured events;
-  internal transfers paired into one event; `tier0.py` hints from
-  `glAllocations`, the custom category and `mercuryCategory`) → `load.py`
-  (through `create_event_block_in_session`). Failures at every stage are
-  recorded on the connection; the job retries three times.
+  link or create one chart account per bank account → `transform.py`
+  (transactions → captured events; internal transfers paired into one event;
+  `tier0.py` hints from `glAllocations`, the custom category and
+  `mercuryCategory`) → `load.py`. Failures at every stage are recorded on the
+  connection; the job retries three times.
 
 ```python
 from robosystems.adapters.mercury import MercuryClient
@@ -120,6 +119,29 @@ transactions = client.transactions(since=date(2026, 1, 1))
 Disconnect runs the deletion the partnership's data agreement promises
 (`purge_bank_feed`): captured feed rows are hard-deleted, Mercury payload keys
 are scrubbed from posted ones, and the credential bundle is emptied.
+
+**Plaid** — the aggregator bank feed, on the same contract. One connection per
+Plaid Item (one institution login), connected through Plaid Link inside the
+app: `POST .../oauth/init` returns a `link_token`, and Link's `public_token`
+completes the connection through `POST .../oauth/callback/plaid`. A login that
+breaks marks the connection `needs_reauth`, and init then opens Link in update
+mode on the same Item.
+
+- `client/api.py` — `PlaidClient`: Link tokens, the public-token exchange,
+  accounts, the `/transactions/sync` cursor, Item removal.
+- `pipeline/` — one Dagster asset, `plaid_feed` in job `plaid_sync`: sync the
+  cursor → link or create a chart account per cash and card account →
+  `transform.py` (posted transactions → captured events; transfer legs paired
+  across accounts within three days; `tier0.py` hints from Plaid's
+  personal-finance category) → `load.py` (removed lines deleted while unposted
+  and flagged as reconciling items once posted; a leg that posts on a later
+  sync merges with its waiting partner) → the cursor advances after commit.
+  Only a dead run worker is retried; a failed body is not.
+
+**The bank-feed lane** (`bank_feed/`) is what both feeds share: the hint
+vocabulary (with the names the shipped chart templates use), the chart index,
+link-or-create, the event-block load, and the sync-result bookkeeping. A third
+feed brings its client, its category table and its transform.
 
 ## Adapter structure
 
@@ -174,6 +196,8 @@ adapters/
 ├── sec/           # upstream maintains
 ├── quickbooks/    # upstream maintains
 ├── mercury/       # upstream maintains
+├── plaid/         # upstream maintains
+├── bank_feed/     # upstream maintains
 └── custom_*/      # yours; upstream never touches
 ```
 

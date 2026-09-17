@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+from robosystems.adapters.bank_feed.chart import ChartIndex, name_key
 from robosystems.adapters.mercury.pipeline.transform import (
-  ChartIndex,
   bank_accounts,
   counterparties,
-  name_key,
   own_counterparty_names,
   transform,
 )
@@ -58,7 +57,7 @@ def _events():
 class TestAccounts:
   def test_bank_accounts_include_the_card_as_a_liability(self):
     accounts = bank_accounts(raw_pull())
-    assert [a.mercury_id for a in accounts] == [
+    assert [a.account_id for a in accounts] == [
       CHECKING_ID,
       SAVINGS_ID,
       TREASURY_ID,
@@ -73,7 +72,7 @@ class TestAccounts:
     assert accounts[0].legal_business_name == "Cascade Books LLC"
 
   def test_treasury_can_be_excluded(self):
-    ids = [a.mercury_id for a in bank_accounts(raw_pull(), include_treasury=False)]
+    ids = [a.account_id for a in bank_accounts(raw_pull(), include_treasury=False)]
     assert TREASURY_ID not in ids and CHECKING_ID in ids
 
   def test_own_names_include_the_autopay_label(self):
@@ -229,20 +228,3 @@ class TestTransform:
     result, _ = _events()
     stamps = [e["occurred_at"] for e in result.events]
     assert stamps == sorted(stamps)
-
-
-@pytest.mark.unit
-class TestChartIndex:
-  def test_resolve_by_name_normalizes(self):
-    index = ChartIndex(by_name={name_key("Bank Fees"): "e1"})
-    assert index.resolve("bank-fees") == "e1"
-    assert index.resolve(None, "nothing") is None
-
-  def test_resolve_gl_code_prefers_the_code(self):
-    index = ChartIndex(
-      by_name={name_key("Office Supplies"): "by_name"}, by_code={"500": "by_code"}
-    )
-    assert index.resolve_gl_code("500 - Office Supplies") == "by_code"
-    assert index.resolve_gl_code("501 - Office Supplies") == "by_name"
-    assert index.resolve_gl_code("Yachts") is None
-    assert index.resolve_gl_code(None) is None

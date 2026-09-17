@@ -750,6 +750,13 @@ class EnvConfig:
     get_parameter_value("MERCURY_API_KEY_CONNECTIONS_ENABLED", "false").lower()
     == "true",
   )
+  # Plaid bank feed — the aggregator feed on the same bank-feed contract, one
+  # connection per Item (one institution login for one customer). Off by
+  # default: hosted production needs Plaid's production access.
+  CONNECTION_PLAID_ENABLED = get_bool_env(
+    "CONNECTION_PLAID_ENABLED",
+    get_parameter_value("CONNECTION_PLAID_ENABLED", "false").lower() == "true",
+  )
 
   # Routes QB Reports API calls (JournalReport — our live GL posting source)
   # through Intuit's modernized "v2" reporting service via the
@@ -1113,6 +1120,12 @@ class EnvConfig:
   MERCURY_CLIENT_ID = get_secret_value("MERCURY_CLIENT_ID", "")
   MERCURY_CLIENT_SECRET = get_secret_value("MERCURY_CLIENT_SECRET", "")
   MERCURY_ENVIRONMENT = get_secret_value("MERCURY_ENVIRONMENT", "sandbox")
+
+  # Plaid (bank feed) — one client id, a secret per environment;
+  # PLAID_ENVIRONMENT picks the host (sandbox or production).
+  PLAID_CLIENT_ID = get_secret_value("PLAID_CLIENT_ID", "")
+  PLAID_SECRET = get_secret_value("PLAID_SECRET", "")
+  PLAID_ENVIRONMENT = get_secret_value("PLAID_ENVIRONMENT", "sandbox")
 
   # SEC
   # SEC_GOV_USER_AGENT is a secret identity for API access

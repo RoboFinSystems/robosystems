@@ -20,6 +20,7 @@ class TestDisabledProviderHandling:
       # Configure mock env with external disabled
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
       mock_env.CONNECTION_MERCURY_ENABLED = False
+      mock_env.CONNECTION_PLAID_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
 
       # Re-initialize the provider registry with external disabled
@@ -68,6 +69,7 @@ class TestDisabledProviderHandling:
         # Configure mock env with external disabled
         mock_env.CONNECTION_EXTERNAL_ENABLED = False
         mock_env.CONNECTION_MERCURY_ENABLED = False
+        mock_env.CONNECTION_PLAID_ENABLED = False
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
 
         from robosystems.operations.providers.registry import ProviderRegistry
@@ -121,6 +123,7 @@ class TestDisabledProviderHandling:
           # Configure mock env with QuickBooks disabled
           mock_env.CONNECTION_EXTERNAL_ENABLED = False
           mock_env.CONNECTION_MERCURY_ENABLED = False
+          mock_env.CONNECTION_PLAID_ENABLED = False
           mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
 
           # Re-initialize the provider registry

@@ -124,10 +124,10 @@ def build_instructions(
     inbox_lines = [
       "INBOX / BANK FEED",
       (
-        "- A bank feed (Mercury) lands every posted transaction `captured` "
+        "- A bank feed (Mercury, Plaid) lands every posted transaction `captured` "
         "with `metadata.suggested_element_id` + `suggested_account_name`; "
         "nothing posts until it is classified. Find them → "
-        "`list-event-blocks(source='mercury', status='captured')`."
+        "`list-event-blocks(source='mercury' or 'plaid', status='captured')`."
       ),
       (
         "- Classify one → `update-event-block(event_id, "

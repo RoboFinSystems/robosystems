@@ -8,10 +8,11 @@ rows; posting is a classification a person (or Claude over MCP) makes once.
 - ``client/api.py`` — ``MercuryClient`` over a ``TokenSource`` (the partner
   OAuth client's rotating tokens, or a personal read-only key on self-hosted
   deployments).
-- ``pipeline/`` — ``transform.py`` (transactions → captured events with a
-  Tier-0 suggestion), ``accounts.py`` (link or create one chart account per
-  bank account), ``load.py`` (through the event-block kernel), ``assets.py``
-  (the one Dagster asset ``mercury_feed``, job ``mercury_sync``).
+- ``pipeline/`` — ``tier0.py`` (Mercury's category tables), ``transform.py``
+  (transactions → captured events with a Tier-0 suggestion), ``load.py``,
+  ``assets.py`` (the one Dagster asset ``mercury_feed``, job
+  ``mercury_sync``). Link-or-create, the chart index, the load kernel and the
+  sync bookkeeping are the shared bank-feed lane (``adapters/bank_feed/``).
 
 Design: ``local/RoboSystems/specs/adapters/mercury-adapter.md`` §3;
 doctrine in ``ref/adapters.md`` §2.9.

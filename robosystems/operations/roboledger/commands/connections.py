@@ -53,34 +53,49 @@ def sever_synced_chart(
 # Bank feed purge — the disconnect half of a bank-feed connection
 # ---------------------------------------------------------------------------
 
-# Event metadata the bank feed wrote from Mercury's payload. Scrubbed from
-# accepted (posted) events on disconnect; the accounting keys — the amount,
-# the accounts, the classification — are the tenant's own and stay.
+# Event metadata a bank feed wrote from its source's payload (Mercury's or
+# Plaid's). Scrubbed from accepted (posted) events on disconnect; the
+# accounting keys — the amount, the accounts, the classification — are the
+# tenant's own and stay.
 BANK_FEED_PAYLOAD_KEYS: frozenset[str] = frozenset(
   {
     "account_id",
     "account_name",
+    "authorized_date",
     "bank_description",
     "card_id",
+    "check_number",
     "counterparty_external_id",
     "counterparty_id",
     "counterparty_name",
+    "counterparty_type",
     "custom_category",
     "dashboard_link",
     "external_memo",
     "from_account_id",
     "from_account_name",
     "gl_allocations",
+    "item_id",
     "legs",
+    "logo_url",
     "merchant_category",
     "merchant_category_code",
+    "merchant_entity_id",
+    "merchant_name",
     "mercury_category",
     "note",
+    "payment_channel",
+    "plaid_category_confidence",
+    "plaid_category_detailed",
+    "plaid_category_primary",
     "split",
     "suggested_account_key",
     "suggested_account_name",
     "to_account_id",
     "to_account_name",
+    "transaction_code",
+    "transaction_id",
+    "website",
   }
 )
 _UNPOSTED_STATUSES: tuple[str, ...] = ("captured", "classified", "voided")

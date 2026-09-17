@@ -11,9 +11,9 @@ exactly as if the customer had added it with ``update-taxonomy-block``.
 
 The link lives on the element as ``metadata.bank_feed`` — never as an
 element ``source`` (which stays ``native`` / ``quickbooks``) and never as a
-``mercury:`` qname, so the loader's vocabulary learns nothing and the chart
-stays the tenant's. An element the feed created additionally carries
-``external_source='mercury'`` + ``external_id`` for provenance.
+provider-prefixed qname, so the loader's vocabulary learns nothing and the
+chart stays the tenant's. An element the feed created additionally carries
+``external_source=<provider>`` + ``external_id`` for provenance.
 """
 
 from __future__ import annotations
@@ -23,12 +23,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from robosystems.adapters.mercury.pipeline.tier0 import slug
-from robosystems.adapters.mercury.pipeline.transform import (
-  BankAccount,
-  ChartIndex,
-  name_key,
-)
+from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex, name_key
+from robosystems.adapters.bank_feed.hints import slug
 from robosystems.logger import logger
 from robosystems.models.api.taxonomy_block import (
   TaxonomyBlockElementRequest,
@@ -43,9 +39,8 @@ from robosystems.operations.taxonomy_block.chart_of_accounts import (
 )
 
 BANK_FEED_KEY = "bank_feed"
-PROVIDER = "mercury"
 # Code ranges for accounts the feed has to create, when the chart uses codes:
-# cash-side assets in the 10xx block, the IO card in the 21xx block.
+# cash-side assets in the 10xx block, cards and credit lines in the 21xx block.
 ASSET_CODE_BASE = 1010
 LIABILITY_CODE_BASE = 2110
 CODE_STEP = 10
@@ -86,10 +81,11 @@ def link_bank_accounts(
   session: Session,
   accounts: list[BankAccount],
   *,
+  provider: str,
   connection_id: str,
   created_by: str,
 ) -> AccountLinkResult:
-  """Return ``{mercury_account_id: element_id}`` for every account, creating
+  """Return ``{feed_account_id: element_id}`` for every account, creating
   the ones nothing on the chart matches. Flushes; the caller commits."""
   chart_id = active_chart_id(session)
   if chart_id is None:
@@ -106,23 +102,33 @@ def link_bank_accounts(
   by_name: dict[str, Element] = {}
   for element in elements:
     link = (element.metadata_ or {}).get(BANK_FEED_KEY) or {}
-    if link.get("provider") == PROVIDER and link.get("account_id"):
+    if link.get("provider") == provider and link.get("account_id"):
       by_feed[str(link["account_id"])] = element
-    if element.name and element.is_active:
+    # An account another connection feeds is never claimed by name: two
+    # feeds sharing one chart account would overwrite each other's link on
+    # every sync. The same connection may re-claim its own (a replaced Plaid
+    # Item brings new account ids for the same accounts).
+    owned_elsewhere = bool(link) and (
+      link.get("provider") != provider or link.get("connection_id") != connection_id
+    )
+    if element.name and element.is_active and not owned_elsewhere:
       by_name.setdefault(name_key(str(element.name)), element)
 
   links: dict[str, str] = {}
   linked = 0
   to_create: list[BankAccount] = []
   for account in accounts:
-    element = by_feed.get(account.mercury_id) or by_name.get(name_key(account.name))
+    element = by_feed.get(account.account_id) or by_name.get(name_key(account.name))
     if element is None:
       to_create.append(account)
       continue
-    links[account.mercury_id] = str(element.id)
+    links[account.account_id] = str(element.id)
     linked += 1
-    if account.mercury_id not in by_feed:
-      _stamp_link(element, account, connection_id)
+    if account.account_id not in by_feed:
+      element.metadata_ = {
+        **(element.metadata_ or {}),
+        BANK_FEED_KEY: _link(account, provider, connection_id),
+      }
 
   if to_create:
     created = _create_accounts(
@@ -130,6 +136,7 @@ def link_bank_accounts(
       chart_id,
       elements,
       to_create,
+      provider=provider,
       connection_id=connection_id,
       created_by=created_by,
     )
@@ -139,16 +146,15 @@ def link_bank_accounts(
   return AccountLinkResult(links=links, created=len(to_create), linked=linked)
 
 
-def _stamp_link(element: Element, account: BankAccount, connection_id: str) -> None:
-  metadata = dict(element.metadata_ or {})
-  metadata[BANK_FEED_KEY] = {
-    "provider": PROVIDER,
-    "account_id": account.mercury_id,
+def _link(account: BankAccount, provider: str, connection_id: str) -> dict[str, str]:
+  return {
+    "provider": provider,
+    "account_id": account.account_id,
     "account_name": account.name,
+    "institution": account.institution,
     "kind": account.kind,
     "connection_id": connection_id,
   }
-  element.metadata_ = metadata
 
 
 def _create_accounts(
@@ -157,6 +163,7 @@ def _create_accounts(
   existing: list[Element],
   accounts: list[BankAccount],
   *,
+  provider: str,
   connection_id: str,
   created_by: str,
 ) -> dict[str, str]:
@@ -176,7 +183,7 @@ def _create_accounts(
       else None
     )
     qname = _unique_qname(taken_qnames, code or slug(account.name))
-    qname_by_account[account.mercury_id] = qname
+    qname_by_account[account.account_id] = qname
     requests.append(
       TaxonomyBlockElementRequest(
         qname=qname,
@@ -185,16 +192,10 @@ def _create_accounts(
         balance_type=account.balance_type,
         period_type="instant",
         code=code,
-        description=f"Mercury {account.kind} account, added by the bank feed.",
-        metadata={
-          BANK_FEED_KEY: {
-            "provider": PROVIDER,
-            "account_id": account.mercury_id,
-            "account_name": account.name,
-            "kind": account.kind,
-            "connection_id": connection_id,
-          }
-        },
+        description=(
+          f"{account.institution} {account.kind} account, added by the bank feed."
+        ),
+        metadata={BANK_FEED_KEY: _link(account, provider, connection_id)},
       )
     )
 
@@ -213,20 +214,21 @@ def _create_accounts(
   by_qname = {str(element.qname): element for element in rows}
   links: dict[str, str] = {}
   for account in accounts:
-    element = by_qname.get(qname_by_account[account.mercury_id])
+    element = by_qname.get(qname_by_account[account.account_id])
     if element is None:
       raise RuntimeError(
-        f"Chart account for Mercury account {account.mercury_id} was not created"
+        f"Chart account for {provider} account {account.account_id} was not created"
       )
-    element.external_source = PROVIDER
-    element.external_id = account.mercury_id
+    element.external_source = provider
+    element.external_id = account.account_id
     element.connection_id = connection_id
-    links[account.mercury_id] = str(element.id)
+    links[account.account_id] = str(element.id)
     logger.info(
-      "Bank feed created chart account %s (%s) for Mercury account %s",
+      "Bank feed created chart account %s (%s) for %s account %s",
       element.qname,
       account.name,
-      account.mercury_id,
+      provider,
+      account.account_id,
     )
   return links
 

@@ -37,9 +37,12 @@ from .utils import provider_registry
 
 router = APIRouter()
 
-# Providers that authorize over OAuth. The handler is looked up per call so a
+# Providers that authorize through these endpoints. QuickBooks and Mercury
+# redirect (OAuth 2.0); Plaid authorizes in the embedded Link widget — init
+# returns a link_token instead of an auth_url, and Link's public_token comes
+# back through the callback as ``code``. Handlers are looked up per call so a
 # test can patch the provider module's singleton.
-OAUTH_PROVIDERS = frozenset({"quickbooks", "mercury"})
+OAUTH_PROVIDERS = frozenset({"quickbooks", "mercury", "plaid"})
 
 
 def _oauth_handler_for(provider: str):
@@ -148,6 +151,97 @@ async def _complete_mercury_oauth(
   }
 
 
+async def _init_plaid_link(
+  *, connection_id: str, user_id: str, redirect_uri: str | None, db: Session
+) -> OAuthInitResponse:
+  """A Link token for the connection, and the state its callback redeems.
+
+  Update mode when the connection already holds an Item (a login to repair);
+  a new Item otherwise. The state outlives the default OAuth window: the
+  bank's own multi-factor step happens inside Link.
+  """
+  from robosystems.adapters.plaid.client import PlaidError
+  from robosystems.operations.providers.oauth_handler import OAuthState
+  from robosystems.operations.providers.plaid_provider import (
+    LINK_STATE_TTL_SECONDS,
+    create_link_token,
+  )
+
+  try:
+    link = await create_link_token(connection_id, user_id, db)
+  except PlaidError as exc:
+    logger.warning(
+      "Plaid refused a Link token for connection %s: %s (request %s)",
+      connection_id,
+      exc.code,
+      exc.request_id,
+    )
+    raise create_error_response(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Plaid could not start Link for this connection.",
+      code=ErrorCode.PROVIDER_ERROR,
+    )
+  state = OAuthState.create(
+    connection_id, user_id, redirect_uri or "", ttl_seconds=LINK_STATE_TTL_SECONDS
+  )
+  return OAuthInitResponse(
+    link_token=str(link["link_token"]),
+    state=state,
+    expires_at=datetime.now(UTC) + timedelta(seconds=LINK_STATE_TTL_SECONDS),
+  )
+
+
+async def _complete_plaid_link(
+  *,
+  graph_id: str,
+  connection: dict,
+  connection_id: str,
+  public_token: str,
+  current_user: User,
+  db: Session,
+) -> dict:
+  """Finish Link. A bank the graph already has connected is refused (409) and
+  a fresh pending row for it is withdrawn, so the duplicate leaves nothing
+  behind."""
+  from robosystems.adapters.plaid.client import PlaidError
+  from robosystems.operations.providers.plaid_provider import (
+    DuplicateBankConnectionError,
+    complete_plaid_link,
+  )
+
+  try:
+    return await complete_plaid_link(
+      graph_id=graph_id,
+      connection=connection,
+      connection_id=connection_id,
+      public_token=public_token,
+      user_id=str(current_user.id),
+      db=db,
+    )
+  except DuplicateBankConnectionError as duplicate:
+    if connection.get("status") == "pending_oauth":
+      await ConnectionService.delete_connection(
+        connection_id, str(current_user.id), graph_id=graph_id, db_session=db
+      )
+    raise create_error_response(
+      status_code=status.HTTP_409_CONFLICT,
+      detail=str(duplicate),
+      code="DUPLICATE_BANK_CONNECTION",
+    )
+  except PlaidError as exc:
+    logger.warning(
+      "Plaid Link completion failed for connection %s: %s (request %s)",
+      connection_id,
+      exc.code,
+      exc.request_id,
+    )
+    raise create_error_response(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Plaid could not complete the bank connection. Start Link again.",
+      code=ErrorCode.PROVIDER_ERROR,
+    )
+
+
 @router.post(
   "/oauth/init",
   operation_id="initOAuth",
@@ -201,6 +295,14 @@ async def init_oauth(
         code=conflict.code,
       )
 
+    if provider == "plaid":
+      return await _init_plaid_link(
+        connection_id=request.connection_id,
+        user_id=str(current_user.id),
+        redirect_uri=request.redirect_uri,
+        db=db,
+      )
+
     # Generate authorization URL
     auth_url, state = _oauth_handler_for(provider).get_authorization_url(
       connection_id=request.connection_id,
@@ -228,7 +330,7 @@ async def init_oauth(
 @router.post(
   "/oauth/callback/{provider}",
   summary="OAuth Callback",
-  description="Completes the OAuth authorization flow after provider redirect. Exchanges the authorization code for tokens, stores them, and triggers an initial sync. This is a redirect target — not typically called directly.",
+  description="Completes the OAuth authorization flow after provider redirect. Exchanges the authorization code for tokens, stores them, and triggers an initial sync. This is a redirect target — not typically called directly. Plaid: pass Link's public_token as `code`; a bank already connected to the graph is refused (409 DUPLICATE_BANK_CONNECTION).",
   operation_id="oauthCallback",
   response_model=OAuthCallbackResponse,
   responses={**RESOURCE_ERROR_RESPONSES},
@@ -450,6 +552,15 @@ async def oauth_callback(
         connection_id=connection_id,
         code=request.code,
         redirect_uri=redirect_uri,
+        current_user=current_user,
+        db=db,
+      )
+    elif provider.lower() == "plaid":
+      return await _complete_plaid_link(
+        graph_id=graph_id,
+        connection=connection,
+        connection_id=connection_id,
+        public_token=request.code,
         current_user=current_user,
         db=db,
       )

@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 # Provider types
-ProviderType = Literal["quickbooks", "external", "mercury"]
+ProviderType = Literal["quickbooks", "external", "mercury", "plaid"]
 
 # Source names an external connection can never claim: platform-emitted
 # values, platform adapter providers (current and reserved), and the
@@ -78,6 +78,27 @@ class MercuryConnectionConfig(BaseModel):
   )
 
 
+class PlaidConnectionConfig(BaseModel):
+  """Plaid bank-feed connection configuration.
+
+  A bank feed is native accounting: the graph must already have a chart of
+  accounts and no live QuickBooks connection. The connection is created
+  ``pending_oauth``; ``POST /oauth/init`` returns a ``link_token`` for Plaid
+  Link, and the ``public_token`` Link hands back completes it through
+  ``POST /oauth/callback/plaid`` (as ``code``). One connection per institution
+  login; a graph can hold several.
+  """
+
+  since_date: date | None = Field(
+    None,
+    description=(
+      "First day of the backfill (ISO 8601), and how much history Plaid is "
+      "asked to pull for the new Item (at most two years). Defaults to "
+      "1 January of last year."
+    ),
+  )
+
+
 class ExternalConnectionConfig(BaseModel):
   """External-integration connection configuration.
 
@@ -120,6 +141,7 @@ class CreateConnectionRequest(ConnectionBase):
   quickbooks_config: QuickBooksConnectionConfig | None = None
   external_config: ExternalConnectionConfig | None = None
   mercury_config: MercuryConnectionConfig | None = None
+  plaid_config: PlaidConnectionConfig | None = None
 
   @field_validator("entity_id")
   @classmethod
@@ -132,25 +154,29 @@ class CreateConnectionRequest(ConnectionBase):
       raise ValueError("entity_id is required for QuickBooks connections")
     return v
 
-  @field_validator("quickbooks_config", "external_config", "mercury_config")
+  @field_validator(
+    "quickbooks_config", "external_config", "mercury_config", "plaid_config"
+  )
   @classmethod
   def validate_provider_config(
     cls,
     v: QuickBooksConnectionConfig
     | ExternalConnectionConfig
     | MercuryConnectionConfig
+    | PlaidConnectionConfig
     | None,
     info: ValidationInfo,
   ) -> (
     QuickBooksConnectionConfig
     | ExternalConnectionConfig
     | MercuryConnectionConfig
+    | PlaidConnectionConfig
     | None
   ):
     """Ensure only the matching provider config is provided.
 
-    Every config is optional for Mercury — the defaults are the OAuth
-    connection with the default backfill window."""
+    Every config is optional for the bank feeds (Mercury, Plaid) — the
+    defaults are the connection with the default backfill window."""
     provider = info.data.get("provider")
     field_name = info.field_name
     if field_name is None:
@@ -160,8 +186,9 @@ class CreateConnectionRequest(ConnectionBase):
       "quickbooks_config": "quickbooks",
       "external_config": "external",
       "mercury_config": "mercury",
+      "plaid_config": "plaid",
     }
-    optional_for = {"mercury"}
+    optional_for = {"mercury", "plaid"}
 
     expected_provider = field_to_provider.get(field_name)
 
