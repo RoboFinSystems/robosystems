@@ -76,7 +76,7 @@ The `graph_id` is the primary multi-tenant identifier. It appears as a URL path 
 | **Parent graph** | `kg` + 16 or more hex characters | `kg1234567890abcdef` | Yes |
 | **Subgraph** | `{parent_id}_{subgraph_name}` | `kg1234567890abcdef_dev` | **No** |
 | **Shared repository** | Fixed reserved name | `sec` | No |
-| **Shared-repo subgraph** | `{repo_id}_{subgraph_name}`, platform-created only | `sec_historical` | No |
+| **Shared-repo subgraph** | `{repo_id}_{subgraph_name}`, platform-created only | `sec_archive2019` | No |
 | **Taxonomy library sentinel** | The literal `library` | `library` | Reads the shared library |
 
 The parent graph identifier follows the regex `kg[a-f0-9]{16,}`. A subgraph appends an underscore and an alphanumeric name (`[a-zA-Z0-9]{1,20}`) to its parent's ID, so the parent is always recoverable from the subgraph ID.
@@ -292,7 +292,7 @@ The inherited `schema_extensions` column is therefore best read as vestigial on 
 - **Name**: alphanumeric only, 1–20 characters, no hyphens or underscores. The name is normalized to lowercase. `dev`, `staging`, and `prod1` are valid; `dev-1` and `my_env` are rejected.
 - **ID format**: `{parent_id}_{subgraph_name}`. A subgraph named `dev` under `kg1234567890abcdef` becomes `kg1234567890abcdef_dev`.
 - **Single-level only**: you cannot create a subgraph of a subgraph.
-- **Shared repositories are platform-managed.** They *do* have subgraphs — `sec_historical` holds deeper SEC filing history — but you cannot create or delete them; both operations return `403`. You query them exactly like the parent repository.
+- **Shared repositories are platform-managed.** They *can* have subgraphs, created by the platform rather than by you — but you cannot create or delete them; both operations return `403`. You query them exactly like the parent repository.
 - **Capacity**: capped per tier. Exceeding the cap returns `403`. Call `GET /v1/graphs/tiers` or `GET /v1/graphs/{graph_id}/limits` for the cap your tier enforces.
 
 ### Create a Subgraph
@@ -347,7 +347,7 @@ The Cypher endpoint enforces a three-tier write policy, and knowing which tier y
 | --- | --- | --- |
 | **Main graph** (`kg…`) | Rejected | It is a **projection**, rebuilt from an upstream source of truth. Hand-editing a derived artifact would be silently undone at the next rebuild. |
 | **Subgraph** (`kg…_dev`) | Allowed, for `member` and `admin` | It is a first-class writable database with no upstream — the only such surface on the platform. `viewer` is read-only and gets a `403`. |
-| **Shared repository** (`sec`, `sec_historical`) | Rejected for everyone | Platform-managed public data. |
+| **Shared repository** (`sec`) | Rejected for everyone | Platform-managed public data. |
 
 So how does data reach a main graph? It depends on what kind of graph it is — and this is exactly the distinction [The Three Stores](#the-three-stores) sets up:
 

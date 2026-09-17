@@ -481,7 +481,7 @@ For Cursor / VS Code (`mcp.json`):
 
 Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`. Clients without HTTP transport support can use the legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client).
 
-Some clients — claude.ai and Claude Desktop custom connectors among them — have no field for a custom header. For those, the credential travels in the URL instead: `http://localhost:8000/v1/graphs/<your-graph-id>/mcp?token=<graph-scoped API key>`. Only **graph-scoped** keys are accepted this way; an account-wide key in a URL is rejected outright. See [AI Operators & MCP](AI-Operators-and-MCP) for generating one.
+Clients with no field for a custom header — claude.ai and Claude Desktop custom connectors among them — sign in instead: add `https://api.robosystems.ai/v1/mcp`, and choose the graph on the consent screen. The `?token=` carriage that once allowed a key in the URL was retired when OAuth landed, and a credential in the query string is now rejected. See [AI Operators & MCP](AI-Operators-and-MCP).
 
 4. Restart your MCP-compatible AI tool
 

@@ -13,7 +13,7 @@ In RoboSystems, only AI operations consume credits — every database, graph, MC
 - [Public Pricing and Offerings](#public-pricing-and-offerings)
 - [Shared Repository Credits](#shared-repository-credits)
 - [Alerts and Low-Balance Thresholds](#alerts-and-low-balance-thresholds)
-- [Storage Is Billed Separately](#storage-is-billed-separately)
+- [Storage Is Not Paid For With Credits](#storage-is-not-paid-for-with-credits)
 - [Organizations and Account Limits](#organizations-and-account-limits)
 - [Billing Endpoints](#billing-endpoints)
 - [Rate Limits](#rate-limits)
@@ -44,9 +44,9 @@ Everything that does not call an AI model is free and unmetered by credits:
 
 ### Token-Based Pricing
 
-AI operations are priced on the tokens consumed by the model call, not as a flat per-call fee. Nothing is reserved up front: the charge is computed *after* the model responds, from the input and output token counts it actually reported, at a per-1,000-token rate for each direction. A **minimum charge of 1 credit** then applies, so a very small call still costs something — but a call that consumed nothing costs nothing rather than being rounded up. An unrecognized model falls back to the standard rate rather than billing zero.
+AI operations are priced on the tokens consumed by the model call, not as a flat per-call fee. Nothing is reserved up front: the charge is computed *after* the model responds, from the input and output token counts it actually reported, at a per-1,000-token rate for each direction. A **minimum charge of 1 credit** then applies, so a very small call still costs something — but a call that consumed nothing costs nothing rather than being rounded up. An unregistered model raises at billing time rather than guessing a rate, so a model has to be priced before it can be used.
 
-The current rates are served as `operation_costs.token_pricing` from `GET /v1/offering`, which is where to read them rather than from a copy on this page. The production model of record is Claude Sonnet served via AWS Bedrock, priced today at 3 credits per 1,000 input tokens and 15 per 1,000 output tokens; a typical AI Operator call lands around 38 credits. Treat that as a rough planning figure — the charge is always the real measured token cost, never a fixed estimate.
+The current rates are served as `operation_costs.token_pricing` from `GET /v1/offering`, which is where to read them rather than from a copy on this page. The production model of record is Claude Sonnet served via AWS Bedrock, and a typical AI Operator call lands around 38 credits. Treat that as a rough planning figure — the charge is always the real measured token cost, never a fixed estimate.
 
 ## Monthly Allocations by Tier
 
@@ -95,7 +95,7 @@ The response is a credit summary for the graph:
 }
 ```
 
-**Note:** `monthly_allocation` is whatever the graph's tier grants — the `8000.0` above is one tier's figure, not a platform constant. `consumed_this_month`, `current_balance`, and `usage_percentage` are computed from the consumption transactions recorded in the current calendar month — they reflect the live ledger, not a single stored counter. Storage limits are intentionally not part of this response (see [Storage Is Billed Separately](#storage-is-billed-separately)).
+**Note:** `monthly_allocation` is whatever the graph's tier grants — the `8000.0` above is one tier's figure, not a platform constant. `consumed_this_month`, `current_balance`, and `usage_percentage` are computed from the consumption transactions recorded in the current calendar month — they reflect the live ledger, not a single stored counter. Storage limits are intentionally not part of this response (see [Storage Is Not Paid For With Credits](#storage-is-not-paid-for-with-credits)).
 
 ## Reviewing Usage and Transaction History
 
@@ -118,6 +118,7 @@ Each credit transaction has a type drawn from a fixed set:
 | `consumption` | An AI operation debit (token-based) |
 | `bonus` | A referral or admin grant |
 | `refund` | A reversal of a prior consumption |
+| `expiration` | The monthly reset, which clears an unspent balance |
 
 ### Usage Analytics
 
@@ -134,11 +135,10 @@ For the exact request parameters and response schemas of every endpoint on this 
 
 ## Public Pricing and Offerings
 
-Public pricing — subscription tiers, per-model token pricing, and the list of included (free) operations — is exposed without needing a graph scope:
+Public pricing — subscription tiers, per-model token pricing, and the list of included (free) operations — is exposed without a graph scope and without a key. It needs no sign-in at all, so a program can read the current offering before anyone has an account:
 
 ```bash
-curl -X GET "https://api.robosystems.ai/v1/offering" \
-  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
+curl -X GET "https://api.robosystems.ai/v1/offering"
 ```
 
 The response includes the subscription tiers, a `token_pricing` block per model, and an `included_operations` list enumerating the operations that do not consume credits. This is the authoritative, machine-readable source for current pricing.
@@ -166,9 +166,9 @@ The platform tracks balance against three thresholds so usage can be flagged bef
 
 Because credits only gate AI operations, an exhausted pool stops AI Operator calls but leaves every free operation — queries, syncs, imports, backups — fully available.
 
-## Storage Is Billed Separately
+## Storage Is Not Paid For With Credits
 
-Storage is a distinct axis from credits. Each tier carries its own storage limits (with an optional override and auto-expand behavior), tracked independently of the credit pool. Storage is **never paid for with credits**, and storage limit fields are deliberately absent from the `/credits` response.
+Storage is a distinct axis from credits. Each tier **includes** its storage: there is no metering and no overage billing, only the tier's limit (with an optional override and auto-expand behavior), tracked independently of the credit pool. Storage is **never paid for with credits**, and storage limit fields are deliberately absent from the `/credits` response.
 
 To see storage usage, use the analytics endpoint described above — storage figures appear in its `storage_summary`, not in the credit balance. Tier storage limits are defined alongside the rest of the billing configuration; see the [Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing) and [Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml) in the codebase.
 

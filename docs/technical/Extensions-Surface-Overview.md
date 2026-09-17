@@ -45,7 +45,7 @@ For the full, machine-readable endpoint surface — every operation name, reques
 
 ## Graph-Scoping at the URL
 
-The `graph_id` is always a URL path parameter, never a query argument or request-body field. The path pattern accepts parent graph IDs (`kg` + 16 or more hex chars, e.g. `kg1a2b3c4d5e6f7890`), shared-repository IDs (`sec`, `sec_historical`), the reserved `library` sentinel (which browses the shared public taxonomy library), and subgraph IDs (`{parent_id}_{subgraph_name}`, e.g. `kg1a2b3c4d5e6f7890_dev`).
+The `graph_id` is always a URL path parameter, never a query argument or request-body field. The path pattern accepts parent graph IDs (`kg` + 16 or more hex chars, e.g. `kg1a2b3c4d5e6f7890`), shared-repository IDs (`sec`, and any subgraph the platform creates under it), the reserved `library` sentinel (which browses the shared public taxonomy library), and subgraph IDs (`{parent_id}_{subgraph_name}`, e.g. `kg1a2b3c4d5e6f7890_dev`).
 
 This matters most for GraphQL. The graph is determined by the URL, and resolvers read it from request context — so GraphQL queries do **not** take a `graphId` argument:
 

@@ -158,7 +158,7 @@ curl -X POST "https://api.robosystems.ai/v1/user/api-keys" \
   -d '{"name": "CI pipeline key", "description": "for nightly smoke tests"}'
 ```
 
-The request fields are `name` (required), `description` (optional), `expires_at` (optional, ISO-8601, must be in the future), and `graph_id` (optional). Supplying a `graph_id` mints a **graph-scoped** key: it works only for that graph and its subgraphs, and it is the only kind of key an MCP connector URL accepts. Omit it for an account-wide key.
+The request fields are `name` (required), `description` (optional), `expires_at` (optional, ISO-8601, must be in the future), and `graph_id` (optional). Supplying a `graph_id` mints a **graph-scoped** key: it works only for that graph and its subgraphs. Omit it for an account-wide key, which reaches every graph your account can. A graph's MCP address accepts either kind; scoping a connector's key to its graph is the safer default.
 
 ```bash
 curl -X POST "https://api.robosystems.ai/v1/user/api-keys" \

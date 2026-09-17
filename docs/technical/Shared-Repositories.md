@@ -112,7 +112,7 @@ Prices and credit allocations are served live and unauthenticated at **`GET /v1/
 
 The Advanced plan carries roughly 5× the rate limits of Starter. Rate limits apply per category — queries, MCP calls, searches, and AI agent calls each have their own per-minute / per-hour / per-day budgets.
 
-The repository id is `sec`, and it exposes a `sec_historical` subgraph for older filings. For a hands-on walkthrough — querying filings with Cypher and MCP, and the data model — see the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) demo.
+The repository id is `sec`. For a hands-on walkthrough — querying filings with Cypher and MCP, and the data model — see the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) demo.
 
 ### Downloading a snapshot
 

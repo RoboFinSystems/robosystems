@@ -14,7 +14,7 @@ Every graph is an MCP server, served over MCP's Streamable HTTP transport direct
 >
 > **API key:** `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp` — the graph is in the URL (`sec` for the public SEC repository, your graph id for a tenant graph; a subgraph id such as `kg…_dev` is just another URL). The key goes in the same `X-API-Key` header the REST API uses. Keys can be account-wide or **graph-scoped** — valid only for one graph and its subgraphs.
 
-The OAuth path is what the [Claude Connectors Directory](https://claude.com/docs/connectors) and [ChatGPT plugin directory](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) listings use, and it works the same as a custom connector or from any OAuth-capable MCP client. Registration is automatic: clients with a hosted client-metadata document (Claude, Claude Code) are recognised from it; others register dynamically (RFC 7591). Access tokens are bound to the MCP URL, refresh tokens rotate, and every authorization is revocable — a password change or account deactivation revokes them all.
+The OAuth path is what a directory listing uses — the [RoboSystems plugin](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) in ChatGPT's plugin directory connects this way — and it works the same as a custom connector or from any OAuth-capable MCP client. Registration is automatic: clients with a hosted client-metadata document (Claude, Claude Code) are recognised from it; others register dynamically (RFC 7591). Access tokens are bound to the MCP URL, refresh tokens rotate, and every authorization is revocable — a password change or account deactivation revokes them all.
 
 **Claude Code** — one command; `/mcp` then opens the browser for consent:
 
@@ -30,7 +30,7 @@ claude mcp add --transport http robosystems-sec \
   --header "X-API-Key: <your key>"
 ```
 
-**Claude (claude.ai / Desktop)** — install from the Connectors Directory, or Settings → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp`; the dialog detects OAuth and the hosted client metadata on its own. Header-only clients (scripts, CI, editors without OAuth) put an API key in `X-API-Key` on a per-graph URL — the **MCP page** in the app (`/connect`) mints keys scoped to one graph for exactly that, and Claude's connector dialog accepts custom request headers too. Credentials never travel in the URL: the `?token=` connector URL was the bridge to OAuth and was retired once OAuth covered those clients. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
+**Claude (claude.ai / Desktop)** — Settings → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp`; the dialog detects OAuth and the hosted client metadata on its own. Header-only clients (scripts, CI, editors without OAuth) put an API key in `X-API-Key` on a per-graph URL — the **MCP page** in the app (`/connect`) mints keys scoped to one graph for exactly that, and Claude's connector dialog accepts custom request headers too. Credentials never travel in the URL: the `?token=` connector URL was the bridge to OAuth and was retired once OAuth covered those clients. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
 
 **ChatGPT** — install the [RoboSystems plugin](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) from the ChatGPT plugin directory and pick a graph at sign-in. The directory version carries the SEC EDGAR read surface — statements, fact grids, read-only Cypher, filing text search. A RoboLedger graph connects through it too, with those same read tools. For the full RoboLedger toolset in ChatGPT — close, mapping, journal entries — add the server as a custom connector in developer mode (Settings → Connectors → Create) with `https://api.robosystems.ai/v1/mcp`; a custom connector serves every tool of the graph you pick at consent.
 
@@ -55,12 +55,13 @@ Both routes speak JSON-RPC 2.0 and negotiate MCP revision **2025-06-18** — the
 
 MCP is the shared tool layer. Every entry path — the in-product Operator endpoint, external MCP clients, and in-process operators — calls the *same* tool classes in `middleware/mcp/tools/`. There is one implementation per tool; only the transport differs.
 
-Two transport routes expose the surface:
+Three transport routes expose the surface:
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/v1/mcp` | OAuth bearer | Graph chosen at consent ([see above](#connecting-from-mcp-clients)) |
 | `POST` | `/v1/graphs/{graph_id}/mcp` | `X-API-Key`, or an OAuth bearer bound to this URL | Graph fixed by the URL |
+| `POST` | `/v1/mcp/roboledger` | OAuth bearer | A RoboLedger tenant graph, chosen at consent, with the platform's write tools withheld. It exists because a directory listing freezes one tool list per URL, and a plugin gets one URL |
 
 Both take MCP JSON-RPC: `initialize`, `tools/list`, and `tools/call` with a tool `name` plus an `arguments` object.
 
@@ -82,7 +83,7 @@ The former REST pair (`GET …/mcp/tools`, `POST …/mcp/call-tool`) was removed
 
 ### Tool Catalog
 
-The following tool names are the exact `name` strings for `tools/call`. Every tool also carries a `title` and MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) in `tools/list`; the Cypher tools carry no read/destructive hint because the statement itself is classified server-side. The [three planes](#the-three-retrieval-planes) below describe *retrieval*; the tools that manage memory, documents, and the graph workspace sit alongside them rather than inside one.
+The following tool names are the exact `name` strings for `tools/call`. Every tool also carries a `title` and MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) in `tools/list`; the Cypher read tools are hinted read-only, matching what the server enforces, and `write-graph-cypher` is hinted destructive; every other write is hinted destructive too, conservatively, because a directory scan reads the hint rather than the statement. The [three planes](#the-three-retrieval-planes) below describe *retrieval*; the tools that manage memory, documents, and the graph workspace sit alongside them rather than inside one.
 
 **Retrieval — the three planes:**
 

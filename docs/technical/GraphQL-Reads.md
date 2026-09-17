@@ -70,7 +70,7 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
 POST /extensions/{graph_id}/graphql
 ```
 
-- `graph_id` is a FastAPI path parameter validated against the platform's graph-or-subgraph ID pattern. Three kinds of value work: an entity graph (`kg` + 16 or more hex chars), a shared-repository id (`sec`, `sec_historical`), or the reserved **`library`** sentinel, which browses the shared public taxonomy library rather than a tenant. It is **not** a GraphQL argument — resolvers read it from request context.
+- `graph_id` is a FastAPI path parameter validated against the platform's graph-or-subgraph ID pattern. Three kinds of value work: an entity graph (`kg` + 16 or more hex chars), a shared-repository id (`sec`), or the reserved **`library`** sentinel, which browses the shared public taxonomy library rather than a tenant. It is **not** a GraphQL argument — resolvers read it from request context.
 - **Subgraph IDs match the pattern but are rejected with HTTP 403.** A subgraph is a modality container with no extensions schema of its own, so `POST /extensions/{parent}_{name}/graphql` fails at runtime rather than at validation. Target the parent graph.
 - The request body is a standard GraphQL POST payload: a JSON object with a `query` string, optional `variables` object, and optional `operationName`.
 - The in-browser **GraphiQL** explorer (a GET on the same URL) is development-only and is not mounted on `api.robosystems.ai`. Introspection over POST works on the hosted API, with or without credentials — see [Discovering the Schema](#discovering-the-schema).
