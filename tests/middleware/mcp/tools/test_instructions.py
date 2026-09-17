@@ -85,6 +85,12 @@ class TestLedgerGraph:
   def test_tenant_docs_hint_present(self) -> None:
     assert "search-documents" in self._out()
 
+  def test_public_docs_are_offered_as_urls(self) -> None:
+    out = self._out()
+    assert "DOCUMENTATION" in out
+    assert "https://roboledger.ai/docs" in out
+    assert "https://robosystems.ai/docs/guides" in out
+
   def test_sections_route_to_the_map_then_the_block(self) -> None:
     out = self._out()
     assert "`disclosures` (the map, cheap)" in out
