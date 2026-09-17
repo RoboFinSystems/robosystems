@@ -281,11 +281,14 @@ def create_app() -> FastAPI:
   else:
     published_reference = f"{env.ROBOSYSTEMS_URL}/docs/api"
 
-    @app.get("/", include_in_schema=False)
+    # HEAD as well as GET: these paths exist to be followed, and the link
+    # checkers and crawlers that probe with HEAD would otherwise be answered
+    # 405 and never see the redirect. FastAPI does not imply HEAD from GET.
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     async def docs_root_redirect() -> RedirectResponse:
       return RedirectResponse(published_reference, status_code=301)
 
-    @app.get("/docs", include_in_schema=False)
+    @app.api_route("/docs", methods=["GET", "HEAD"], include_in_schema=False)
     async def docs_redirect() -> RedirectResponse:
       return RedirectResponse(published_reference, status_code=301)
 

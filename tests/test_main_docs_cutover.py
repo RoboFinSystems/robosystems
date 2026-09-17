@@ -45,6 +45,18 @@ class TestOutsideDevelopment:
     assert response.status_code == 301
     assert response.headers["location"] == f"{env.ROBOSYSTEMS_URL}/docs/api"
 
+  @pytest.mark.parametrize("path", ["/", "/docs"])
+  def test_the_redirect_answers_head_as_well_as_get(self, client, path) -> None:
+    """A link checker that probes with HEAD has to see the redirect too.
+
+    FastAPI does not imply HEAD from GET, so before these paths became
+    redirects they answered 405 to it — harmless for a page, useless for a
+    URL whose only job is to be followed.
+    """
+    response = client.head(path, follow_redirects=False)
+    assert response.status_code == 301
+    assert response.headers["location"] == f"{env.ROBOSYSTEMS_URL}/docs/api"
+
   def test_static_is_not_mounted(self, client) -> None:
     assert client.get("/static/swagger-init.js").status_code == 404
 
