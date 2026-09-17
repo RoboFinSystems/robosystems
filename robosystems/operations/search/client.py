@@ -18,6 +18,15 @@ from robosystems.logger import logger
 # The normalization processor maps both to [0,1] before combining.
 HYBRID_PIPELINE_NAME = "hybrid-search-pipeline"
 
+# Candidates each hybrid sub-query contributes per shard, independent of the
+# page asked for. min_max normalizes over this pool, so a pool that tracked
+# `size` gave the same document different scores at different page sizes;
+# held constant, a smaller page is a prefix of a larger one. It is also the
+# hybrid query's pagination_depth, which OpenSearch requires once `from` > 0.
+# 100 matches the Faiss default ef_search, so k=100 costs a query no extra
+# HNSW traversal.
+HYBRID_CANDIDATE_DEPTH = 100
+
 # A hit's snippet is highlight fragments joined with " ... ": the standard
 # shape is three of about 200 characters.
 HIGHLIGHT_FRAGMENT_SIZE = 200
@@ -470,9 +479,11 @@ class OpenSearchClient:
     large corpora without narrow filters. Best used with entity or
     section filters that reduce the KNN candidate set.
 
-    Pagination note: KNN candidates are capped at 100 to limit cost.
-    Deep pagination (offset + size > 100) may return fewer results
-    than expected. Prefer narrow filters over deep pagination.
+    Candidate pool: each sub-query contributes HYBRID_CANDIDATE_DEPTH
+    results whatever the page size, so scores and order are stable across
+    `size` and `offset`. Pages past that depth (offset + size > 100)
+    return fewer results than asked. Prefer narrow filters over deep
+    pagination.
 
     Tenant isolation: OpenSearch 2.x doesn't support top-level filters on
     hybrid queries (that's 3.0+). Instead, filters are applied inside each
@@ -485,9 +496,6 @@ class OpenSearchClient:
     highlights).
     """
     filter_clauses = self._build_filter_clauses(graph_id, filters)
-
-    # Over-fetch for KNN to support offset pagination, capped to limit cost
-    knn_k = min(size + offset, 100)
 
     filter_body: dict[str, Any] = {"bool": {"filter": filter_clauses}}
 
@@ -502,6 +510,7 @@ class OpenSearchClient:
     search_body: dict[str, Any] = {
       "query": {
         "hybrid": {
+          "pagination_depth": HYBRID_CANDIDATE_DEPTH,
           "queries": [
             {
               "bool": {
@@ -525,7 +534,7 @@ class OpenSearchClient:
               "knn": {
                 "embedding": {
                   "vector": query_embedding,
-                  "k": knn_k,
+                  "k": HYBRID_CANDIDATE_DEPTH,
                   "filter": filter_body,
                 }
               }

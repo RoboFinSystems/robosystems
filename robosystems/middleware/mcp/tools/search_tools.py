@@ -163,6 +163,12 @@ class SearchDocumentsTool(_SearchToolMixin):
 - Filing fields every hit shares (entity_ticker, entity_name, form_type,
   filing_date, fiscal_year) appear once at the result root; when the hits span
   filings they stay on each hit
+- The same section from a filer's successive filings comes back once, as its
+  best-ranked (then newest) filing; `also_in_filings` counts the other filings
+  folded into it. With `entity` set nothing is folded, so pass a ticker or CIK
+  to see one filer's filings of a section side by side
+- `total` counts matching documents before any folding (OpenSearch stops
+  counting at 10,000), not the distinct results a page can show
 - A snippet is an excerpt around the match, not the passage — read the section
   with get-document-section before quoting a figure from it
 - A long section (an MD&A, a commitments note) is indexed in parts of about 25K
@@ -178,7 +184,11 @@ class SearchDocumentsTool(_SearchToolMixin):
   resolve-element, then read-graph-cypher for its structured values. Note
   resolve-element is only published on graphs with semantic enrichment
 - Natural language queries work well ("depreciation policy", "month end close procedures")
-- Use entity filter to focus on one company's filings
+- Use entity filter to focus on one company's filings. Only a CIK selects
+  exactly one filer. A company name is a loose word match that takes in other
+  filers sharing a word ("Acme Holdings" also matches every filer with
+  "Holdings" in its name), and so is a ticker that is also a word ("ON" also
+  matches filers with "On" in their names) — pass the CIK when it matters
 - Use section filter (item_1a, item_7) to target specific filing sections, or an
   element qname (us-gaap:CommitmentsAndContingenciesDisclosureTextBlock) to
   target one iXBRL disclosure across filings; the `element` filter finds the
@@ -192,7 +202,7 @@ class SearchDocumentsTool(_SearchToolMixin):
           },
           "entity": {
             "type": "string",
-            "description": "Optional: filter by ticker, CIK, or company name",
+            "description": "Optional: filter by CIK (exactly one filer), ticker, or company name. A name, or a ticker that is also a word, is a loose word match that can include other filers",
           },
           "form_type": {
             "type": "string",
@@ -252,6 +262,7 @@ class SearchDocumentsTool(_SearchToolMixin):
       element=arguments.get("element"),
       fiscal_year=arguments.get("fiscal_year"),
       semantic=arguments.get("semantic", False),
+      group=True,
       size=min(arguments.get("size", 10), 50),
       snippet_chars=max(SNIPPET_CHARS_MIN, min(snippet_chars, SNIPPET_CHARS_MAX)),
     )

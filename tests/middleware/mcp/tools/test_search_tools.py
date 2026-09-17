@@ -104,6 +104,7 @@ class TestSearchDocumentsTool:
       mock_service.search_documents.assert_called_once()
       request = mock_service.search_documents.call_args[0][1]
       assert request.snippet_chars == SNIPPET_CHARS_DEFAULT
+      assert request.group is True
 
   @pytest.mark.asyncio
   @pytest.mark.parametrize(
@@ -340,6 +341,13 @@ class TestCompactSearchResponse:
     assert (compact["part"], compact["part_count"]) == (2, 4)
     assert compact["parent_document_id"] == "p"
     assert compact["next_document_id"] == "p3"
+
+  def test_folded_filing_count_rides_on_the_hit_only_when_set(self):
+    hits = compact_search_response(
+      _response(_hit("lead", also_in_filings=3), _hit("single"))
+    )["hits"]
+    assert hits[0]["also_in_filings"] == 3
+    assert "also_in_filings" not in hits[1]
 
   def test_payload_shrinks_by_more_than_half_on_a_single_filing_search(self):
     """The measured shape: ten iXBRL hits from one 10-K, each carrying its

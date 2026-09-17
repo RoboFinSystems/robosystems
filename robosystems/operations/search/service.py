@@ -22,13 +22,60 @@ from robosystems.models.api.search import (
   SearchResponse,
 )
 
-from .client import OpenSearchClient
+from .client import HYBRID_CANDIDATE_DEPTH, OpenSearchClient
 
 if TYPE_CHECKING:
   from .embeddings import EmbeddingService
 
 # Snippet fallback length when no highlights available
 SNIPPET_FALLBACK_LENGTH = 300
+
+# A grouped search over-fetches so a page still fills once repeats fold, from
+# a window no deeper than the hybrid candidate pool. Over-fetching leaves the
+# ranking unchanged only because that pool is fixed.
+GROUP_FETCH_FACTOR = 4
+GROUP_FETCH_WINDOW = HYBRID_CANDIDATE_DEPTH
+
+# (entity_cik, section_id, part): the same disclosure, or the same part of a
+# long section, from a filer's successive filings.
+GroupKey = tuple[str, str, int]
+
+
+def group_successive_filings(
+  hits: list[SearchHit], keys: list[GroupKey | None]
+) -> list[SearchHit]:
+  """Fold hits that share a group key into one, in ranked order.
+
+  The group sits where its best-ranked member ranked. Its lead is that
+  member, or the newest filing among members tied with it — identical
+  boilerplate scores identically — and carries how many others it folded.
+  A hit without a key (an uploaded document has no filer) is never folded.
+  """
+  groups: dict[GroupKey, list[SearchHit]] = {}
+  order: list[SearchHit | GroupKey] = []
+  for hit, key in zip(hits, keys, strict=True):
+    if key is None:
+      order.append(hit)
+      continue
+    if key not in groups:
+      groups[key] = []
+      order.append(key)
+    groups[key].append(hit)
+
+  grouped: list[SearchHit] = []
+  for item in order:
+    if isinstance(item, SearchHit):
+      grouped.append(item)
+      continue
+    members = groups[item]
+    best = members[0].score
+    lead = max(
+      (m for m in members if m.score == best), key=lambda m: m.filing_date or ""
+    )
+    if len(members) > 1:
+      lead = lead.model_copy(update={"also_in_filings": len(members) - 1})
+    grouped.append(lead)
+  return grouped
 
 
 class SearchService:
@@ -54,7 +101,20 @@ class SearchService:
     Default mode is BM25-only (fast keyword search). When request.semantic
     is True, uses hybrid BM25 + KNN search which adds vector similarity
     scoring at the cost of higher latency on large corpora.
+
+    With request.group, hits from a filer's successive filings of the same
+    section fold into one (group_successive_filings); the page is drawn from
+    an over-fetched window. An entity filter turns grouping off.
     """
+    grouping = request.group and not request.entity
+    if grouping:
+      fetch_size = min(
+        GROUP_FETCH_WINDOW, (request.offset + request.size) * GROUP_FETCH_FACTOR
+      )
+      fetch_offset = 0
+    else:
+      fetch_size, fetch_offset = request.size, request.offset
+
     filters: dict[str, Any] = {}
     if request.entity:
       filters["entity"] = request.entity
@@ -80,8 +140,8 @@ class SearchService:
         query_embedding=query_embedding,
         graph_id=graph_id,
         filters=filters if filters else None,
-        size=request.size,
-        offset=request.offset,
+        size=fetch_size,
+        offset=fetch_offset,
         snippet_chars=request.snippet_chars,
       )
     else:
@@ -89,12 +149,13 @@ class SearchService:
         query=request.query,
         graph_id=graph_id,
         filters=filters if filters else None,
-        size=request.size,
-        offset=request.offset,
+        size=fetch_size,
+        offset=fetch_offset,
         snippet_chars=request.snippet_chars,
       )
 
-    hits = []
+    hits: list[SearchHit] = []
+    keys: list[GroupKey | None] = []
     for hit in result.get("hits", {}).get("hits", []):
       source = hit.get("_source", {})
       highlight = hit.get("highlight", {})
@@ -140,6 +201,14 @@ class SearchService:
           folder=source.get("folder"),
         )
       )
+      cik, section_id = source.get("entity_cik"), source.get("section_id")
+      keys.append(
+        (cik, section_id, source.get("part") or 1) if cik and section_id else None
+      )
+
+    if grouping:
+      hits = group_successive_filings(hits, keys)
+      hits = hits[request.offset : request.offset + request.size]
 
     total = result.get("hits", {}).get("total", {})
     total_count = total.get("value", 0) if isinstance(total, dict) else total
