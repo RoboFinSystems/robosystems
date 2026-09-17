@@ -25,7 +25,8 @@ Transport rules:
   query string. The graph-agnostic ``POST /v1/mcp`` (``agnostic_router``)
   is OAuth-only: the consent grant names the graph, and the transport
   dispatches on that resolved ``graph_id`` exactly as the per-graph route
-  dispatches on the URL's.
+  dispatches on the URL's. ``POST /v1/mcp/roboledger`` (``roboledger_router``)
+  is the same for RoboLedger graphs, with a product tool profile.
 - Excluded from the OpenAPI schema so the JSON-RPC envelope never lands in
   the generated SDK clients.
 """
@@ -46,6 +47,7 @@ from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import (
   get_current_user_with_graph_or_oauth,
   get_oauth_mcp_principal,
+  get_oauth_roboledger_mcp_principal,
 )
 from robosystems.middleware.auth.oauth import OAuthPrincipal
 from robosystems.middleware.graph import get_graph_repository
@@ -57,6 +59,7 @@ from robosystems.middleware.graph.query_telemetry import (
   record_shared_query_outcome,
 )
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.mcp.tools.manager import ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
@@ -84,6 +87,10 @@ from .streaming import aggregate_streamed_results, stream_mcp_tool_execution
 router = APIRouter()
 # The graph-agnostic transport, mounted at /v1/mcp (see routers/__init__.py).
 agnostic_router = APIRouter()
+# The RoboLedger transport, mounted at /v1/mcp/roboledger.
+roboledger_router = APIRouter()
+
+_NO_EXCLUSIONS: frozenset[str] = frozenset()
 
 # Protocol revisions this transport can negotiate. The server answers with the
 # client's requested revision when supported, else its own latest. Exactly the
@@ -238,7 +245,10 @@ async def _validate_read_access(graph_id: str, current_user: User) -> None:
 
 
 async def _handle_initialize(
-  graph_id: str, current_user: User, params: dict[str, Any]
+  graph_id: str,
+  current_user: User,
+  params: dict[str, Any],
+  excluded_tools: frozenset[str] = _NO_EXCLUSIONS,
 ) -> dict[str, Any]:
   requested = params.get("protocolVersion")
   protocol_version = (
@@ -255,7 +265,7 @@ async def _handle_initialize(
   repository = await get_graph_repository(graph_id, _get_mcp_operation_type(graph_id))
   handler = MCPHandler(repository, graph_id, current_user)
   try:
-    tools = await handler.get_tools()
+    tools = _without(await handler.get_tools(), excluded_tools)
     try:
       instructions = handler.get_instructions(tools)
     except Exception as instructions_error:
@@ -279,13 +289,27 @@ async def _handle_initialize(
   return result
 
 
-async def _handle_tools_list(graph_id: str, current_user: User) -> dict[str, Any]:
+def _without(
+  tools: list[dict[str, Any]], excluded_tools: frozenset[str]
+) -> list[dict[str, Any]]:
+  """The tool list minus a route's excluded names. Filtering before the
+  instructions are built keeps them from naming a withheld tool."""
+  if not excluded_tools:
+    return tools
+  return [t for t in tools if t.get("name") not in excluded_tools]
+
+
+async def _handle_tools_list(
+  graph_id: str,
+  current_user: User,
+  excluded_tools: frozenset[str] = _NO_EXCLUSIONS,
+) -> dict[str, Any]:
   await _validate_read_access(graph_id, current_user)
 
   repository = await get_graph_repository(graph_id, _get_mcp_operation_type(graph_id))
   handler = MCPHandler(repository, graph_id, current_user)
   try:
-    tools = await handler.get_tools()
+    tools = _without(await handler.get_tools(), excluded_tools)
   finally:
     await handler.close()
 
@@ -746,10 +770,17 @@ async def _handle_tools_call(
   current_user: User,
   msg_id: Any,
   params: dict[str, Any],
+  excluded_tools: frozenset[str] = _NO_EXCLUSIONS,
 ) -> Response:
   name = params.get("name")
   if not isinstance(name, str) or not name:
     return _rpc_error(msg_id, INVALID_PARAMS, "Invalid params: 'name' is required")
+  # A withheld tool is refused, not just hidden: a client can call a name it
+  # never listed.
+  if name in excluded_tools:
+    return _tool_error_result(
+      msg_id, f"Tool '{name}' is not available on this connection."
+    )
   arguments = params.get("arguments") or {}
   if not isinstance(arguments, dict):
     return _rpc_error(
@@ -980,9 +1011,16 @@ async def _handle_tools_call(
 
 
 async def dispatch_jsonrpc(
-  request: Request, graph_id: str, current_user: User
+  request: Request,
+  graph_id: str,
+  current_user: User,
+  excluded_tools: frozenset[str] = _NO_EXCLUSIONS,
 ) -> Response:
-  """Parse and dispatch one JSON-RPC message (the transport's whole surface)."""
+  """Parse and dispatch one JSON-RPC message (the transport's whole surface).
+
+  ``excluded_tools`` is the route's tool profile: withheld from
+  ``initialize`` and ``tools/list`` and refused on ``tools/call``.
+  """
   try:
     message = await request.json()
   except Exception:
@@ -1052,14 +1090,19 @@ async def dispatch_jsonrpc(
   try:
     if method == "initialize":
       return _rpc_result(
-        msg_id, await _handle_initialize(graph_id, current_user, params)
+        msg_id,
+        await _handle_initialize(graph_id, current_user, params, excluded_tools),
       )
     elif method == "ping":
       return _rpc_result(msg_id, {})
     elif method == "tools/list":
-      return _rpc_result(msg_id, await _handle_tools_list(graph_id, current_user))
+      return _rpc_result(
+        msg_id, await _handle_tools_list(graph_id, current_user, excluded_tools)
+      )
     elif method == "tools/call":
-      return await _handle_tools_call(request, graph_id, current_user, msg_id, params)
+      return await _handle_tools_call(
+        request, graph_id, current_user, msg_id, params, excluded_tools
+      )
     else:
       return _rpc_error(msg_id, METHOD_NOT_FOUND, f"Method not found: {method}")
   except HTTPException as e:
@@ -1108,3 +1151,28 @@ async def mcp_agnostic_transport(
   per-call access checks, same isolation keys as the per-graph route.
   """
   return await dispatch_jsonrpc(request, principal.graph_id, principal.user)
+
+
+@roboledger_router.post("", include_in_schema=False, response_model=None)
+@endpoint_metrics_decorator(
+  "/v1/mcp/roboledger", business_event_type="mcp_remote_request"
+)
+async def mcp_roboledger_transport(
+  request: Request,
+  _transport: None = Depends(_transport_gate),
+  principal: OAuthPrincipal = Depends(get_oauth_roboledger_mcp_principal),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+) -> Response:
+  """Streamable-HTTP MCP endpoint (JSON-RPC 2.0) for RoboLedger graphs,
+  OAuth-only.
+
+  The graph-agnostic transport with the RoboLedger tool profile: the grant's
+  graph (a RoboLedger graph, checked at consent) is the resolved
+  ``graph_id``, and ``ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS`` is withheld.
+  """
+  return await dispatch_jsonrpc(
+    request,
+    principal.graph_id,
+    principal.user,
+    excluded_tools=ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
+  )

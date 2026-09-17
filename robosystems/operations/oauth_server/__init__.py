@@ -2,8 +2,9 @@
 
 The wire surface (``routers/oauth``) is thin; every decision lives here:
 
-- ``resources`` — the two protected resources (``/v1/mcp`` and the per-graph
-  URLs), their canonical form, and the RFC 8414 / RFC 9728 metadata.
+- ``resources`` — the three protected resources (``/v1/mcp``,
+  ``/v1/mcp/roboledger`` and the per-graph URLs), their canonical form, and
+  the RFC 8414 / RFC 9728 metadata.
 - ``clients`` — redirect-URI matching, RFC 7591 registration validation,
   client authentication at the token endpoint.
 - ``authorization`` — the authorize → login home → consent → code leg

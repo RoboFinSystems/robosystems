@@ -288,6 +288,8 @@ Every graph is an MCP server, and the graph's URL is the preferred way to connec
 
 **OAuth — sign in and pick a graph.** The graph-agnostic endpoint `https://api.robosystems.ai/v1/mcp` accepts OAuth only: an OAuth-capable client (claude.ai, Claude Code, ChatGPT, VS Code, Cursor) discovers the authorization server from the endpoint, you sign in and choose the graph the connection covers, and the client holds a revocable token bound to that graph — no key to paste. Per-graph URLs accept OAuth too, alongside the key header. (Deployment flag: `MCP_OAUTH_ENABLED`.)
 
+**RoboLedger endpoint.** `https://api.robosystems.ai/v1/mcp/roboledger` is the same OAuth flow for RoboLedger graphs only: sign-in offers only your RoboLedger graphs, and the connection serves the accounting tool set without workspace and platform-administration tools (subgraphs, backups, materialization, write policy). It is the endpoint for RoboLedger directory listings, which freeze one tool list per URL.
+
 ```bash
 claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
 ```

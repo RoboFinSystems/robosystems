@@ -33,6 +33,11 @@ class PendingAuthorizationResponse(BaseModel):
     description="Graph fixed by the resource URL; null on the graph-agnostic route, "
     "where the user picks one",
   )
+  product: str | None = Field(
+    None,
+    description="Product whose graphs the resource serves (e.g. 'roboledger'); "
+    "only those graphs may be chosen. Null on the general routes",
+  )
   scope: str = Field(..., description="Scope that will be granted")
 
 

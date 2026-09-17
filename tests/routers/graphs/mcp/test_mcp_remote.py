@@ -920,3 +920,84 @@ class TestToolFailureOutcomes:
     assert body["result"]["isError"] is False
     breaker.record_success.assert_called_once()
     breaker.record_failure.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestRouteToolProfile:
+  """A route's excluded tools are withheld from initialize and tools/list and
+  refused on tools/call — a client can call a name it never listed."""
+
+  EXCLUDED = frozenset({"write-graph-cypher"})
+
+  @staticmethod
+  def _handler():
+    return _make_handler(
+      tools=[
+        {"name": "read-graph-cypher", "description": "read"},
+        {"name": "write-graph-cypher", "description": "write"},
+      ]
+    )
+
+  async def test_tools_list_withholds_excluded_tools(self):
+    handler = self._handler()
+    with (
+      patch.object(remote, "_validate_read_access", AsyncMock()),
+      patch.object(remote, "get_graph_repository", AsyncMock(return_value=Mock())),
+      patch.object(remote, "MCPHandler", Mock(return_value=handler)),
+    ):
+      request = _make_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+      body = _body(
+        await dispatch_jsonrpc(request, KG, _make_user(), excluded_tools=self.EXCLUDED)
+      )
+    assert [t["name"] for t in body["result"]["tools"]] == ["read-graph-cypher"]
+
+  async def test_default_route_keeps_every_tool(self):
+    handler = self._handler()
+    with (
+      patch.object(remote, "_validate_read_access", AsyncMock()),
+      patch.object(remote, "get_graph_repository", AsyncMock(return_value=Mock())),
+      patch.object(remote, "MCPHandler", Mock(return_value=handler)),
+    ):
+      request = _make_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+      body = _body(await dispatch_jsonrpc(request, KG, _make_user()))
+    assert {t["name"] for t in body["result"]["tools"]} == {
+      "read-graph-cypher",
+      "write-graph-cypher",
+    }
+
+  async def test_initialize_builds_instructions_from_the_filtered_list(self):
+    handler = self._handler()
+    with (
+      patch.object(remote, "_validate_read_access", AsyncMock()),
+      patch.object(remote, "get_graph_repository", AsyncMock(return_value=Mock())),
+      patch.object(remote, "MCPHandler", Mock(return_value=handler)),
+    ):
+      request = _make_request(
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+      )
+      await dispatch_jsonrpc(request, KG, _make_user(), excluded_tools=self.EXCLUDED)
+    (tools,) = handler.get_instructions.call_args.args
+    assert [t["name"] for t in tools] == ["read-graph-cypher"]
+
+  async def test_excluded_tool_call_is_refused_before_the_gauntlet(self):
+    authorize = AsyncMock(return_value="write")
+    with (
+      patch.object(remote, "circuit_breaker", Mock()),
+      patch.object(remote, "authorize_mcp_tool_call", authorize),
+    ):
+      request = _make_request(
+        {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "method": "tools/call",
+          "params": {"name": "write-graph-cypher", "arguments": {"query": "x"}},
+        }
+      )
+      response = await dispatch_jsonrpc(
+        request, KG, _make_user(), excluded_tools=self.EXCLUDED
+      )
+    body = _body(response)
+    assert response.status_code == 200
+    assert body["result"]["isError"] is True
+    assert "not available on this connection" in body["result"]["content"][0]["text"]
+    authorize.assert_not_awaited()

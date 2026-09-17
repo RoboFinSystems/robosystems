@@ -30,7 +30,8 @@ class OAuthGrant(Model):
     String, ForeignKey("oauth_clients.id"), nullable=False, index=True
   )
   # The one graph this consent covers. The consent page is where it is
-  # chosen (the picker on /v1/mcp; fixed by the URL on a per-graph route).
+  # chosen (the picker on /v1/mcp and /v1/mcp/roboledger — RoboLedger graphs
+  # only on the latter; fixed by the URL on a per-graph route).
   graph_id = Column(String, nullable=False, index=True)
   # Canonical resource URL the tokens are bound to — audience. A token
   # presented at any other route is refused.

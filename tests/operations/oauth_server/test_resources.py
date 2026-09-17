@@ -12,6 +12,8 @@ from robosystems.operations.oauth_server.resources import (
   prm_url,
   protected_resource_metadata,
   resolve_resource,
+  roboledger_target,
+  route_target,
 )
 
 KG = "kg19fb490f76871d22e835"
@@ -35,6 +37,29 @@ class TestResolveResource:
   def test_trailing_slash_is_tolerated(self):
     assert resolve_resource("https://api.test.example/v1/mcp/") == agnostic_target()
 
+  def test_roboledger_url(self):
+    target = resolve_resource("https://api.test.example/v1/mcp/roboledger")
+    assert target == roboledger_target()
+    assert target.resource == "https://api.test.example/v1/mcp/roboledger"
+    assert target.product == "roboledger"
+    # Graph-agnostic like /v1/mcp — the grant names the graph — but a
+    # distinct audience: the two targets must never compare equal.
+    assert target.is_agnostic
+    assert target != agnostic_target()
+
+  def test_roboledger_trailing_slash_is_tolerated(self):
+    assert (
+      resolve_resource("https://api.test.example/v1/mcp/roboledger/")
+      == roboledger_target()
+    )
+
+  def test_route_target_picks_the_route_resource(self):
+    assert route_target() == agnostic_target()
+    assert route_target(product="roboledger") == roboledger_target()
+    assert route_target(KG) == graph_target(KG)
+    # A URL-named graph wins: the per-graph route never carries a product.
+    assert route_target(KG, product="roboledger") == graph_target(KG)
+
   def test_per_graph_url(self):
     target = resolve_resource(f"https://api.test.example/v1/graphs/{KG}/mcp")
     assert target == graph_target(KG)
@@ -48,6 +73,9 @@ class TestResolveResource:
       "http://api.test.example/v1/mcp",
       "https://api.test.example/v1/mcp?x=1",
       "https://api.test.example/v1/mcp#frag",
+      "https://api.test.example/v1/mcp/roboinvestor",
+      "https://api.test.example/v1/mcp/roboledger/extra",
+      "https://api.test.example/v1/mcp/roboledger?x=1",
       "https://api.test.example/v1/graphs",
       f"https://api.test.example/v1/graphs/{KG}/query",
       "https://api.test.example/v1/graphs/../mcp",
@@ -95,6 +123,21 @@ class TestDiscoveryDocuments:
     assert doc["authorization_servers"] == ["https://api.test.example"]
     assert doc["bearer_methods_supported"] == ["header"]
     assert "mcp" in doc["scopes_supported"]
+
+  def test_roboledger_discovery(self):
+    assert prm_url(roboledger_target()) == (
+      "https://api.test.example/.well-known/oauth-protected-resource/v1/mcp/roboledger"
+    )
+    doc = protected_resource_metadata(roboledger_target())
+    assert doc["resource"] == "https://api.test.example/v1/mcp/roboledger"
+    assert doc["resource_name"] == "RoboLedger MCP"
+    assert protected_resource_metadata(agnostic_target())["resource_name"] == (
+      "RoboSystems MCP"
+    )
+    assert bearer_challenge(roboledger_target()).startswith(
+      'Bearer resource_metadata="https://api.test.example/.well-known/'
+      'oauth-protected-resource/v1/mcp/roboledger"'
+    )
 
   def test_authorization_server_metadata_flags(self):
     doc = authorization_server_metadata()

@@ -329,6 +329,26 @@ def begin_authorization(params: AuthorizeParams, session: Session) -> str:
   return consent_url(request_id)
 
 
+def graph_serves_product(graph_id: str, product: str, session: Session) -> bool:
+  """Whether ``graph_id`` is a tenant graph provisioned for ``product``.
+
+  The extension alone is not the test: shared repositories declare product
+  extensions too (the SEC manifest lists ``roboledger``), and subgraphs
+  inherit their parent's. The same three conditions as the extensions
+  command gate (``middleware.extensions.require_graph_extension``).
+  """
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+  from robosystems.middleware.graph.utils.subgraph import is_subgraph
+  from robosystems.models.core import Graph
+
+  if is_subgraph(graph_id) or is_shared_repository_or_subgraph(graph_id):
+    return False
+  graph = Graph.get_by_id(graph_id, session)
+  if graph is None or graph.is_repository or graph.graph_type == "repository":
+    return False
+  return product in (graph.schema_extensions or [])
+
+
 class ConsentError(Exception):
   """A consent decision that cannot be honored (HTTP status + detail)."""
 
@@ -400,6 +420,19 @@ async def record_decision(
     await validate_mcp_access(chosen, user, session, "read")
   except HTTPException as exc:
     raise ConsentError(403, "You do not have access to that graph") from exc
+
+  # A product resource serves that product's tenant graphs only. Checked
+  # after access, so the answer never tells a user what a graph they cannot
+  # read is.
+  target = resolve_resource(pending.resource)
+  if (
+    target is not None
+    and target.product is not None
+    and not graph_serves_product(chosen, target.product, session)
+  ):
+    raise ConsentError(
+      403, f"This connection is for {target.product} graphs; choose one of those"
+    )
 
   client = OAuthClient.get_by_id(pending.client_row_id, session)
   if client is None or not client.is_usable:

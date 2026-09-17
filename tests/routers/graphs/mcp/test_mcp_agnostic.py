@@ -35,3 +35,37 @@ def test_agnostic_router_is_exported():
   from robosystems.routers.graphs.mcp import agnostic_router
 
   assert agnostic_router is remote.agnostic_router
+
+
+async def test_roboledger_transport_dispatches_on_the_grant_graph_with_the_profile():
+  from robosystems.middleware.mcp.tools.manager import (
+    ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
+  )
+
+  user = User(id="user-1", email="u@example.com", is_active=True)
+  principal = OAuthPrincipal(
+    user=user,
+    token_id="oat_1",
+    grant_id="oag_1",
+    client_row_id="oac_1",
+    graph_id=KG,
+    resource="https://api.test.example/v1/mcp/roboledger",
+    scope="mcp",
+  )
+  request = Mock()
+  with patch.object(
+    remote, "dispatch_jsonrpc", new=AsyncMock(return_value="resp")
+  ) as dispatch:
+    result = await remote.mcp_roboledger_transport(
+      request, _transport=None, principal=principal, _rate_limit=None
+    )
+  assert result == "resp"
+  dispatch.assert_awaited_once_with(
+    request, KG, user, excluded_tools=ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
+  )
+
+
+def test_roboledger_router_is_exported():
+  from robosystems.routers.graphs.mcp import roboledger_router
+
+  assert roboledger_router is remote.roboledger_router

@@ -58,6 +58,8 @@ from robosystems.operations.oauth_server.resources import (
   authorization_server_metadata,
   graph_target,
   protected_resource_metadata,
+  resolve_resource,
+  roboledger_target,
 )
 from robosystems.operations.oauth_server.tokens import (
   TokenError,
@@ -116,6 +118,16 @@ async def protected_resource_agnostic() -> JSONResponse:
   _require_enabled()
   return JSONResponse(
     protected_resource_metadata(agnostic_target()), headers=_METADATA_CACHE
+  )
+
+
+@router.get(
+  "/.well-known/oauth-protected-resource/v1/mcp/roboledger", include_in_schema=False
+)
+async def protected_resource_roboledger() -> JSONResponse:
+  _require_enabled()
+  return JSONResponse(
+    protected_resource_metadata(roboledger_target()), headers=_METADATA_CACHE
   )
 
 
@@ -223,6 +235,7 @@ async def pending_authorization(
     is_loopback_redirect=pending.is_loopback,
     resource=pending.resource,
     graph_id=pending.graph_id,
+    product=target.product if (target := resolve_resource(pending.resource)) else None,
     scope=pending.scope,
   )
 

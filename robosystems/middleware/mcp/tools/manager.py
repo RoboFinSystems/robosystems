@@ -92,6 +92,42 @@ SUBGRAPH_TOOL_PROFILE = frozenset(
 )
 
 
+# The tools the RoboLedger MCP route (`/v1/mcp/roboledger`) withholds. That
+# route exists for directory listings that freeze one tool list per URL (the
+# ChatGPT plugin), so it serves the accounting workflow and leaves out what a
+# chat client cannot use or should not drive. An exclusion list, not an
+# allowlist, so a new ledger tool appears there by default. Applied by the
+# transport (`routers/graphs/mcp/remote.py`) to `tools/list`, `initialize`'s
+# instructions and `tools/call`; `/v1/mcp` and the per-graph route keep all of
+# them.
+ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
+  {
+    # Subgraph-only. On a parent graph they answer `subgraph_required` and
+    # point at a subgraph connector, which a chat user cannot add mid-conversation.
+    "write-graph-cypher",
+    "add-node-table",
+    "add-relationship-table",
+    # Workspace administration — a new subgraph needs its own connector.
+    "create-subgraph",
+    "delete-subgraph",
+    "list-subgraphs",
+    # Platform operations. `materialize` already runs on staleness, can clear
+    # the graph (`rebuild=true`), and answers with a stream URL a chat client
+    # cannot follow.
+    "create-backup",
+    "materialize",
+    # Turns on write-back to the customer's QuickBooks: an owner decision in
+    # the app, not a chat action.
+    "set-write-policy",
+    # Maintenance and onboarding repair, not the close.
+    "rebuild-schedule",
+    "backfill-plan-history",
+    # The most destructive tool on the surface (`cascade_facts=true`).
+    "delete-taxonomy-block",
+  }
+)
+
+
 def resolve_schema_extensions(graph_id: str) -> list[str]:
   """Resolve schema extensions for a graph.
 
