@@ -18,6 +18,11 @@ the caller commits.
   waiting as a captured ``external_transfer`` on this connection is merged
   with it into one ``internal_transfer``. Everything else is captured through
   the kernel.
+- **a replaced Item** — Plaid's ids are Item-scoped, so after a re-Link (a
+  dead Item replaced in place, or a reconnect after a disconnect) the same
+  bank transactions come back under new ids. A replay re-keys the events the
+  feed already holds to the new ids instead of capturing the history again
+  beside the posted originals (``rekey_replaced_events``).
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.orm import Session
 
-from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex
+from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex, name_key
 from robosystems.adapters.bank_feed.load import (
   LoadReport,
   capture_event,
@@ -97,6 +102,7 @@ SOURCE_STATE_KEYS = frozenset(
 @dataclass
 class PlaidLoadReport(LoadReport):
   events_removed: int = 0
+  events_rekeyed: int = 0
   transfers_matched: int = 0
   reconciling_items: int = 0
 
@@ -104,6 +110,7 @@ class PlaidLoadReport(LoadReport):
     return {
       **super().as_counts(),
       "events_removed": self.events_removed,
+      "events_rekeyed": self.events_rekeyed,
       "transfers_matched": self.transfers_matched,
       "reconciling_items": self.reconciling_items,
     }
@@ -121,7 +128,11 @@ def load_sync(
   account_elements: dict[str, str],
   chart: ChartIndex,
   since: date | None = None,
+  rekey_replaced: bool = False,
 ) -> PlaidLoadReport:
+  """``rekey_replaced`` is set on a replay (no cursor): only then does every
+  id the feed still has arrive in one batch, which is what makes an event
+  under another Item's id safe to re-key."""
   report = PlaidLoadReport()
   by_account = {account.account_id: account for account in accounts}
 
@@ -174,6 +185,13 @@ def load_sync(
   report.classification = result.classification
   report.resolved = result.resolved
   report.earliest_occurred_at = earliest_plausible(result.events)
+
+  if rekey_replaced:
+    singles.update(
+      rekey_replaced_events(
+        session, result.events, known=singles, item_id=item_id, report=report
+      )
+    )
 
   for payload in result.events:
     prior = singles.get(str(payload["external_id"]))
@@ -400,6 +418,174 @@ def source_view(event: Event) -> tuple[int, date | None]:
   if stored:
     return amount, date.fromisoformat(str(stored)[:10])
   return amount, event.occurred_at.date() if event.occurred_at else None
+
+
+# ── a replaced Item ──────────────────────────────────────────────────────────
+
+# The identity a re-key moves to the new Item. Everything else the event
+# holds — its classification, its books, its trail — is untouched.
+IDENTITY_KEYS = (
+  "transaction_id",
+  "account_id",
+  "item_id",
+  "connection_id",
+  "legs",
+  "from_account_id",
+  "to_account_id",
+)
+# A posted line's column date can lag the date the bank last reported (a
+# resolved date change); the candidate window allows for it.
+REKEY_DATE_SLACK_DAYS = 7
+
+
+def rekey_replaced_events(
+  session: Session,
+  payloads: list[dict[str, Any]],
+  *,
+  known: dict[str, Event],
+  item_id: str | None,
+  report: PlaidLoadReport,
+) -> dict[str, Event]:
+  """Give events captured under an earlier Item the ids the new one uses.
+
+  Only a replay calls this: every id the feed still has is in the batch, so
+  an event carrying another Item's id (or none, after a purge) that no
+  payload identifies is one the new Item re-issued. It is matched on the
+  chart account, the posting date and amount the bank last reported, and
+  the bank's description where both sides have one — a pair also on its
+  ``from`` account. Two lines alike on everything but description never
+  cross. Returns ``{new_external_id: event}`` for the main loop to reconcile
+  as existing.
+  """
+  fresh = [p for p in payloads if str(p["external_id"]) not in known]
+  if not fresh:
+    return {}
+  elements = {
+    str(p["resource_element_id"]) for p in fresh if p.get("resource_element_id")
+  }
+  days = [_parse(str(p["occurred_at"])).date() for p in fresh]
+  identified = {str(event.id) for event in known.values()}
+  by_key: dict[tuple[Any, ...], list[Event]] = {}
+  for event in _replay_candidates(session, elements, min(days), max(days)):
+    same_item = str((event.metadata_ or {}).get("item_id") or "") == str(item_id or "")
+    if same_item or str(event.id) in identified:
+      continue
+    by_key.setdefault(_event_fingerprint(event), []).append(event)
+  if not by_key:
+    return {}
+
+  rekeyed: dict[str, Event] = {}
+  now = datetime.now(UTC).isoformat()
+  pending = list(fresh)
+  # Pass 1: the bank's description agrees. Pass 2: one side has none (a
+  # purged line, a bank that sends none) and the account, date and amount do.
+  for exact in (True, False):
+    for payload in list(pending):
+      pool = by_key.get(_payload_fingerprint(payload))
+      match = _pick(pool or [], payload, exact=exact)
+      if match is None:
+        continue
+      cast("list[Event]", pool).remove(match)
+      _rekey(match, payload, at=now)
+      rekeyed[str(payload["external_id"])] = match
+      pending.remove(payload)
+  if rekeyed:
+    session.flush()
+    report.events_rekeyed += len(rekeyed)
+    logger.info(
+      "Plaid replay re-keyed %d events to Item %s", len(rekeyed), item_id or ""
+    )
+  return rekeyed
+
+
+def _replay_candidates(
+  session: Session, element_ids: set[str], lo: date, hi: date
+) -> list[Event]:
+  """This feed's events on the batch's chart accounts around its dates."""
+  if not element_ids:
+    return []
+  slack = timedelta(days=REKEY_DATE_SLACK_DAYS)
+  return list(
+    session.execute(
+      select(Event).where(
+        Event.source == SOURCE,
+        Event.resource_element_id.in_(sorted(element_ids)),
+        Event.occurred_at >= datetime.combine(lo - slack, time.min),
+        Event.occurred_at < datetime.combine(hi + slack + timedelta(days=1), time.min),
+      )
+    )
+    .scalars()
+    .all()
+  )
+
+
+def _event_fingerprint(event: Event) -> tuple[Any, ...]:
+  metadata = event.metadata_ or {}
+  if event.status in POSTED_STATUSES:
+    amount, day = source_view(event)
+  else:
+    amount = int(event.amount or 0)
+    day = event.occurred_at.date() if event.occurred_at else None
+  pair = str(event.event_type) == "internal_transfer"
+  return (
+    pair,
+    str(event.resource_element_id or ""),
+    str(metadata.get("from_element_id") or "") if pair else "",
+    day.isoformat() if day else "",
+    amount,
+  )
+
+
+def _payload_fingerprint(payload: dict[str, Any]) -> tuple[Any, ...]:
+  metadata = payload.get("metadata") or {}
+  pair = payload.get("event_type") == "internal_transfer"
+  return (
+    pair,
+    str(payload.get("resource_element_id") or ""),
+    str(metadata.get("from_element_id") or "") if pair else "",
+    str(payload["occurred_at"])[:10],
+    int(payload["amount"]),
+  )
+
+
+def _description(metadata: dict[str, Any] | None) -> str:
+  return name_key(str((metadata or {}).get("bank_description") or ""))
+
+
+def _pick(pool: list[Event], payload: dict[str, Any], *, exact: bool) -> Event | None:
+  wanted = _description(payload.get("metadata"))
+  for event in pool:
+    have = _description(event.metadata_)
+    if exact and wanted and have == wanted:
+      return event
+    if not exact and (not wanted or not have):
+      return event
+  return None
+
+
+def _rekey(event: Event, payload: dict[str, Any], *, at: str) -> None:
+  metadata = dict(event.metadata_ or {})
+  incoming = payload.get("metadata") or {}
+  trail = list(metadata.get("rekeyed_from") or [])
+  trail.append(
+    {
+      "external_id": event.external_id,
+      "at": at,
+      **{
+        key: metadata[key]
+        for key in ("transaction_id", "item_id", "connection_id", "legs")
+        if metadata.get(key) is not None
+      },
+    }
+  )
+  for key in IDENTITY_KEYS:
+    if key in incoming:
+      metadata[key] = incoming[key]
+    else:
+      metadata.pop(key, None)
+  metadata["rekeyed_from"] = trail
+  event.metadata_ = metadata
+  event.external_id = str(payload["external_id"])
 
 
 # ── existing events ─────────────────────────────────────────────────────────

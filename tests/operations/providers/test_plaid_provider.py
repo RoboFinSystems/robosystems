@@ -101,6 +101,22 @@ async def test_create_opens_a_pending_connection_with_the_sync_config():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_create_pins_the_default_window_when_none_is_given():
+  from robosystems.adapters.bank_feed.window import default_backfill_start
+  from robosystems.operations.providers.plaid_provider import create_plaid_connection
+
+  with patch(
+    f"{MODULE}.ConnectionService.create_connection",
+    new_callable=AsyncMock,
+    return_value={"connection_id": "conn_1"},
+  ) as create:
+    await create_plaid_connection("kg_1", None, "usr_1", "kg_1", MagicMock())
+  stored = create.call_args.kwargs["credentials"]["sync_config"]["since_date"]
+  assert stored == default_backfill_start().isoformat()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 class TestLinkToken:
   async def test_new_item(self):
     from robosystems.operations.providers.plaid_provider import create_link_token
@@ -118,6 +134,38 @@ class TestLinkToken:
     kwargs = client.create_link_token.call_args.kwargs
     assert kwargs["access_token"] is None and kwargs["client_user_id"] == "usr_1"
     client.close.assert_called_once()
+
+  async def test_a_connection_without_a_window_asks_for_the_default_history(self):
+    """A row from before the window was pinned at connect: Link still asks
+    for the documented default, never Plaid's 90 days."""
+    from robosystems.adapters.bank_feed.window import default_backfill_start
+    from robosystems.operations.providers.plaid_provider import create_link_token
+
+    client = _client()
+    with (
+      patch(
+        f"{MODULE}._credentials", return_value={"sync_config": {"since_date": None}}
+      ),
+      patch(f"{MODULE}.plaid_client", return_value=client),
+    ):
+      await create_link_token("conn_1", "usr_1", MagicMock())
+    expected = min((date.today() - default_backfill_start()).days + 1, 730)
+    assert client.create_link_token.call_args.kwargs["days_requested"] == expected
+
+  async def test_a_stored_window_sets_the_history(self):
+    from robosystems.operations.providers.plaid_provider import create_link_token
+
+    client = _client()
+    with (
+      patch(
+        f"{MODULE}._credentials",
+        return_value={"sync_config": {"since_date": "2026-01-01"}},
+      ),
+      patch(f"{MODULE}.plaid_client", return_value=client),
+    ):
+      await create_link_token("conn_1", "usr_1", MagicMock())
+    days = client.create_link_token.call_args.kwargs["days_requested"]
+    assert days == (date.today() - date(2026, 1, 1)).days + 1
 
   async def test_update_mode_on_the_connections_item(self):
     from robosystems.operations.providers.plaid_provider import create_link_token

@@ -29,6 +29,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from ...adapters.bank_feed.window import default_backfill_start
 from ...adapters.plaid.client import PlaidClient, PlaidError
 from ...config import env
 from ...logger import logger
@@ -78,8 +79,19 @@ def days_requested(since_date: str | None, today: date | None = None) -> int | N
 
 
 def _sync_config(config: PlaidConnectionConfig | None) -> dict[str, Any]:
+  """The connect-time window, pinned: the default is materialized here so
+  Link asks Plaid for the same history the sync keeps (Plaid pulls 90 days
+  when asked for nothing, and the window cannot be widened on the Item
+  afterwards), and the date does not drift a year every January."""
   since = config.since_date if config is not None else None
-  return {"since_date": since.isoformat() if since else None}
+  return {"since_date": (since or default_backfill_start()).isoformat()}
+
+
+def _window_start(credentials: dict[str, Any]) -> str:
+  """The stored window, or the default for a connection made before it was
+  pinned at connect."""
+  stored = (credentials.get("sync_config") or {}).get("since_date")
+  return str(stored) if stored else default_backfill_start().isoformat()
 
 
 def _credentials(connection_id: str, db: Session) -> dict[str, Any]:
@@ -120,7 +132,7 @@ async def create_link_token(
   """
   credentials = _credentials(connection_id, db)
   access_token = credentials.get("access_token")
-  history = days_requested((credentials.get("sync_config") or {}).get("since_date"))
+  history = days_requested(_window_start(credentials))
   client = plaid_client()
   try:
     try:

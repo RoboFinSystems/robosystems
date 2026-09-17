@@ -218,6 +218,7 @@ def _run_plaid_sync(
       account_elements=link_result.links,
       chart=chart,
       since=since,
+      rekey_replaced=cursor is None,
     )
     session.commit()
 
@@ -249,7 +250,8 @@ def _run_plaid_sync(
     f"Accounts: {link_result.linked} linked, {link_result.created} created. "
     f"Events: {report.events_created} captured, {report.events_existing} existing, "
     f"{report.events_updated} refreshed, {report.events_removed} removed, "
-    f"{report.transfers_matched} transfers matched, {report.events_failed} failed; "
+    f"{report.events_rekeyed} re-keyed, {report.transfers_matched} transfers "
+    f"matched, {report.events_failed} failed; "
     f"skipped {dict(report.skipped)}; classified {dict(report.classification)}"
   )
   for error in report.errors:
@@ -293,6 +295,7 @@ def _run_plaid_sync(
       "events_existing": report.events_existing,
       "events_updated": report.events_updated,
       "events_removed": report.events_removed,
+      "events_rekeyed": report.events_rekeyed,
       "transfers_matched": report.transfers_matched,
       "events_failed": report.events_failed,
       "history_complete": sync.history_complete,
