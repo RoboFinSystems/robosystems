@@ -167,6 +167,8 @@ class SearchDocumentsTool(_SearchToolMixin):
   best-ranked (then newest) filing; `also_in_filings` counts the other filings
   folded into it. With `entity` set nothing is folded, so pass a ticker or CIK
   to see one filer's filings of a section side by side
+- `total` counts matching documents before any folding (OpenSearch stops
+  counting at 10,000), not the distinct results a page can show
 - A snippet is an excerpt around the match, not the passage — read the section
   with get-document-section before quoting a figure from it
 - A long section (an MD&A, a commitments note) is indexed in parts of about 25K
@@ -182,10 +184,11 @@ class SearchDocumentsTool(_SearchToolMixin):
   resolve-element, then read-graph-cypher for its structured values. Note
   resolve-element is only published on graphs with semantic enrichment
 - Natural language queries work well ("depreciation policy", "month end close procedures")
-- Use entity filter to focus on one company's filings: a ticker or CIK selects
-  exactly that filer, while a company name is a loose word match that can take
-  in other filers sharing a word ("Acme Holdings" also matches every filer
-  with "Holdings" in its name)
+- Use entity filter to focus on one company's filings. Only a CIK selects
+  exactly one filer. A company name is a loose word match that takes in other
+  filers sharing a word ("Acme Holdings" also matches every filer with
+  "Holdings" in its name), and so is a ticker that is also a word ("ON" also
+  matches filers with "On" in their names) — pass the CIK when it matters
 - Use section filter (item_1a, item_7) to target specific filing sections, or an
   element qname (us-gaap:CommitmentsAndContingenciesDisclosureTextBlock) to
   target one iXBRL disclosure across filings; the `element` filter finds the
@@ -199,7 +202,7 @@ class SearchDocumentsTool(_SearchToolMixin):
           },
           "entity": {
             "type": "string",
-            "description": "Optional: filter by ticker or CIK (exactly one filer), or by company name (a loose word match that can include other filers)",
+            "description": "Optional: filter by CIK (exactly one filer), ticker, or company name. A name, or a ticker that is also a word, is a loose word match that can include other filers",
           },
           "form_type": {
             "type": "string",

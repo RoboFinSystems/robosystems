@@ -9,8 +9,9 @@ class SearchRequest(BaseModel):
   query: str = Field(..., min_length=1, max_length=500, description="Search query")
   entity: str | None = Field(
     None,
-    description="Filter by ticker or CIK (exactly one filer), or by entity name "
-    "(a loose word match that can include other filers)",
+    description="Filter by CIK (exactly one filer), ticker, or entity name. A name, "
+    "or a ticker that is also a word, is a loose word match that can include other "
+    "filers",
   )
   form_type: str | None = Field(
     None, description="Filter by SEC form type (10-K, 10-Q)"
@@ -101,7 +102,12 @@ class SearchHit(BaseModel):
 class SearchResponse(BaseModel):
   """Response model for document search."""
 
-  total: int
+  total: int = Field(
+    ...,
+    description="Matching documents before any grouping, as OpenSearch counts them "
+    "(it stops counting at 10,000). Not the number of distinct results a grouped "
+    "search can page through.",
+  )
   hits: list[SearchHit]
   query: str
   graph_id: str

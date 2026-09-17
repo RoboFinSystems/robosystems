@@ -346,6 +346,19 @@ class TestGroupSuccessiveFilings:
       ("acme-leases", None),
     ]
 
+  def test_total_stays_the_raw_match_count(self, service, mock_client):
+    """A grouped count past the fetch window is not knowable cheaply, so total
+    keeps meaning what OpenSearch counted, as the field documents."""
+    mock_client.search.return_value = _os_result(
+      _os_hit("acme-26", 0.6, ACME, filed="2026-03-01"),
+      _os_hit("acme-25", 0.6, ACME, filed="2025-03-01"),
+      _os_hit("zenith", 0.5, ZENITH),
+    )
+
+    response = service.search_documents("sec", SearchRequest(query="x", group=True))
+
+    assert (response.total, len(response.hits)) == (3, 2)
+
   def test_a_better_score_leads_over_a_newer_filing(self, service, mock_client):
     mock_client.search.return_value = _os_result(
       _os_hit("acme-24", 0.9, ACME, filed="2024-03-01"),
