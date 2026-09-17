@@ -274,6 +274,16 @@ class TestCompleteLink:
     assert exc_info.value.existing_connection_id == "conn_other"
     client.remove_item.assert_called_once_with("access-new")
 
+  async def test_a_duplicate_is_refused_even_when_removal_fails(self):
+    from robosystems.operations.providers.plaid_provider import (
+      DuplicateBankConnectionError,
+    )
+
+    client = _client()
+    client.remove_item.side_effect = PlaidError("down", code="INTERNAL_SERVER_ERROR")
+    with pytest.raises(DuplicateBankConnectionError):
+      await self._complete(client, {}, duplicate="conn_other")
+
   async def test_a_failed_credential_write_is_an_error(self):
     with pytest.raises(RuntimeError, match="could not be stored"):
       await self._complete(_client(), {}, stored=False)
@@ -324,6 +334,20 @@ class TestFindDuplicate:
     assert (
       self._find(stored, fingerprint=[{"mask": "3032", "subtype": "checking"}]) is None
     )
+
+  def test_without_masks_accounts_are_known_by_name(self):
+    stored = {
+      "institution_id": "ins_1",
+      "accounts": [{"mask": None, "name": "Operating", "subtype": "checking"}],
+    }
+    same = [{"mask": None, "name": "operating", "subtype": "checking"}]
+    other = [{"mask": None, "name": "Reserve", "subtype": "checking"}]
+    assert self._find(stored, fingerprint=same) == "conn_other"
+    assert self._find(stored, fingerprint=other) is None
+
+  def test_an_item_with_no_booked_accounts_is_never_a_duplicate(self):
+    stored = {"institution_id": "ins_1", "accounts": []}
+    assert self._find(stored, fingerprint=[]) is None
 
   def test_other_institutions_and_providers_are_ignored(self):
     stored = {

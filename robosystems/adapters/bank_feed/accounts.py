@@ -104,7 +104,14 @@ def link_bank_accounts(
     link = (element.metadata_ or {}).get(BANK_FEED_KEY) or {}
     if link.get("provider") == provider and link.get("account_id"):
       by_feed[str(link["account_id"])] = element
-    if element.name and element.is_active:
+    # An account another connection feeds is never claimed by name: two
+    # feeds sharing one chart account would overwrite each other's link on
+    # every sync. The same connection may re-claim its own (a replaced Plaid
+    # Item brings new account ids for the same accounts).
+    owned_elsewhere = bool(link) and (
+      link.get("provider") != provider or link.get("connection_id") != connection_id
+    )
+    if element.name and element.is_active and not owned_elsewhere:
       by_name.setdefault(name_key(str(element.name)), element)
 
   links: dict[str, str] = {}

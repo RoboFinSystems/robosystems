@@ -194,7 +194,7 @@ async def complete_plaid_link(
         db=db,
       )
       if duplicate is not None:
-        await asyncio.to_thread(client.remove_item, access_token)
+        await _remove_item_quietly(client, access_token, connection_id)
         raise DuplicateBankConnectionError(duplicate, institution_name)
       if prior_access:
         await _remove_item_quietly(client, str(prior_access), connection_id)
@@ -284,26 +284,35 @@ def find_duplicate_item(
   db: Session,
 ) -> str | None:
   """Another live Plaid connection on the graph at the same institution
-  sharing an account (same mask and subtype) — Plaid's duplicate-Item test."""
+  sharing an account — Plaid's duplicate-Item test. An account is known by
+  its mask and subtype, or by its name and subtype where the institution
+  sends no mask."""
   from ...models.core.connection.connection import Connection
 
-  if not institution_id:
+  wanted = _account_keys(fingerprint)
+  if not institution_id or not wanted:
     return None
-  wanted = {(a.get("mask"), a.get("subtype")) for a in fingerprint if a.get("mask")}
   for other in Connection.get_all_for_graph(graph_id, db):
     if (other.provider or "").lower() != PROVIDER or str(other.id) == connection_id:
       continue
     stored = _credentials(str(other.id), db)
     if stored.get("institution_id") != institution_id:
       continue
-    theirs = {
-      (a.get("mask"), a.get("subtype"))
-      for a in stored.get("accounts") or []
-      if a.get("mask")
-    }
-    if not wanted or not theirs or wanted & theirs:
+    if wanted & _account_keys(stored.get("accounts") or []):
       return str(other.id)
   return None
+
+
+def _account_keys(accounts: list[dict[str, Any]]) -> set[tuple[str, str | None]]:
+  keys: set[tuple[str, str | None]] = set()
+  for account in accounts:
+    mask = account.get("mask")
+    name = str(account.get("name") or "").strip().lower()
+    if mask:
+      keys.add((f"mask:{mask}", account.get("subtype")))
+    elif name:
+      keys.add((f"name:{name}", account.get("subtype")))
+  return keys
 
 
 async def _remove_item_quietly(

@@ -54,6 +54,7 @@ def _event(**fields):
   base = {
     "id": "evt_1",
     "status": "captured",
+    "event_type": "bank_transaction",
     "amount": -1240,
     "occurred_at": datetime(2026, 3, 14),
     "description": "Harbor Coffee Co",
@@ -110,20 +111,81 @@ class TestReconcileExisting:
     reconcile_existing(event, _payload(), report)
     assert (report.events_existing, report.events_updated) == (1, 0)
 
-  def test_posted_event_records_the_change_and_keeps_the_books(self):
-    event, report = _event(status="committed"), PlaidLoadReport()
-    reconcile_existing(event, _payload(amount=-1300), report)
-    assert event.amount == -1240
-    change = event.metadata_["source_change"]
-    assert change["amount"] == -1300 and "detected_at" in change
-    assert report.source_changes == 1
-    assert not event.payload_drift
+  def test_classified_event_takes_the_amount_but_keeps_its_hints(self):
+    event = _event(
+      status="classified",
+      metadata_={
+        "connection_id": "conn_1",
+        "suggested_element_id": "e_te",
+        "accept_suggestion": True,
+      },
+    )
+    report = PlaidLoadReport()
+    reconcile_existing(
+      event, _payload(amount=-1300, suggested_element_id="e_other"), report
+    )
+    assert event.amount == -1300
+    assert event.metadata_["suggested_element_id"] == "e_te"
+    assert report.events_updated == 1 and not event.payload_drift
+
+  def test_posted_change_is_a_reconciling_item_with_the_entry_it_should_have(self):
+    event = _event(
+      status="committed",
+      metadata_={
+        "connection_id": "conn_1",
+        "transaction_id": "t_coffee",
+        "classified_element_id": "e_te",
+        "reconciliation_history": [{"disposition": "accept"}],
+      },
+    )
+    report = PlaidLoadReport()
+    reconcile_existing(event, _payload(amount=-1300, day="2026-03-15"), report)
+    assert event.amount == -1240  # the books are untouched
+    assert event.payload_drift is True and report.reconciling_items == 1
+    accepted = event.metadata_["drift_payload"]
+    assert accepted["source_amount"] == -1300
+    assert accepted["source_posted_date"] == "2026-03-15"
+    assert accepted["posting_date"] == "2026-03-15"
+    assert "reconciliation_history" not in accepted
+    # Money out: DR the classified account, CR the bank leg, at the new amount.
+    assert accepted["line_items"] == [
+      {"element_id": "e_te", "debit_amount": 1300, "credit_amount": 0},
+      {"element_id": "e_card", "debit_amount": 0, "credit_amount": 1300},
+    ]
+
+  def test_a_change_already_raised_or_resolved_is_not_raised_again(self):
+    pending = _event(status="committed", payload_drift=True)
+    pending.metadata_ = {
+      "connection_id": "conn_1",
+      "drift_payload": {"source_amount": -1300, "source_posted_date": "2026-03-14"},
+    }
+    resolved = _event(
+      status="committed",
+      metadata_={"source_amount": -1300, "source_posted_date": "2026-03-14"},
+    )
+    for event in (pending, resolved):
+      report = PlaidLoadReport()
+      reconcile_existing(event, _payload(amount=-1300), report)
+      assert report.events_existing == 1 and report.reconciling_items == 0
+
+  def test_a_rule_posted_line_is_flagged_with_no_entry_to_restate(self):
+    event = _event(status="committed")
+    reconcile_existing(event, _payload(amount=-1300), PlaidLoadReport())
+    accepted = event.metadata_["drift_payload"]
+    assert event.payload_drift is True
+    assert accepted["source_amount"] == -1300 and "line_items" not in accepted
 
   def test_posted_event_with_only_hint_changes_is_existing(self):
     event, report = _event(status="committed"), PlaidLoadReport()
     reconcile_existing(event, _payload(suggested_account_name="Rent"), report)
     assert report.events_existing == 1
     assert "suggested_account_name" not in event.metadata_
+    assert not event.payload_drift
+
+  def test_a_voided_event_is_left_alone(self):
+    event, report = _event(status="voided"), PlaidLoadReport()
+    reconcile_existing(event, _payload(amount=-9999), report)
+    assert event.amount == -1240 and report.events_existing == 1
 
 
 @pytest.mark.unit
@@ -264,6 +326,30 @@ class TestTransferLegsAcrossSyncs:
     assert capture.call_args.args[1]["event_type"] == "internal_transfer"
     assert report.transfers_matched == 1
 
+  def test_a_rollback_at_the_error_cap_keeps_every_earlier_error(self):
+    earlier = [f"e{i}" for i in range(10)]
+    report = PlaidLoadReport(errors=list(earlier))
+
+    def capped_capture(session, payload, *, graph_id, created_by, report):
+      report.events_failed += 1
+      return False
+
+    with (
+      patch(f"{MODULE}._delete_events"),
+      patch(f"{MODULE}.capture_event", side_effect=capped_capture),
+    ):
+      _merge_into_pair(
+        _Session(),
+        self._waiting(),
+        self._incoming(),
+        graph_id="kg_1",
+        connection_id="conn_1",
+        item_id=ITEM_ID,
+        created_by="usr_1",
+        report=report,
+      )
+    assert report.errors == earlier
+
   def test_a_merge_that_cannot_capture_rolls_back(self):
     report = PlaidLoadReport(events_failed=2, errors=["earlier"])
 
@@ -366,4 +452,4 @@ class TestLoadSync:
 def test_report_counts_include_the_plaid_outcomes():
   counts = PlaidLoadReport(events_removed=2, transfers_matched=1).as_counts()
   assert counts["events_removed"] == 2 and counts["transfers_matched"] == 1
-  assert {"reconciling_items", "source_changes", "events_captured"} <= set(counts)
+  assert {"reconciling_items", "events_captured"} <= set(counts)

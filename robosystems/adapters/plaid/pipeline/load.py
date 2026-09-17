@@ -9,20 +9,22 @@ the caller commits.
   flagged a reconciling item (``payload_drift`` with ``source_removed`` in the
   stashed payload) and never touched. A transfer pair that loses one leg
   goes back to a single-leg event for the leg that remains.
-- **added / modified** — an event already on the graph is refreshed while
-  still captured (hints, amount, date, description); once classified or
-  posted, a changed amount or date is recorded on the event
-  (``metadata.source_change``) instead. A new transfer-shaped line whose leg
-  is already waiting as a captured ``external_transfer`` on this connection
-  is merged with it into one ``internal_transfer``. Everything else is
-  captured through the kernel.
+- **added / modified** — an event already on the graph takes a changed
+  amount or date in place while it is unposted (a captured one also takes the
+  refreshed hints). A posted one whose amount or date changed becomes a
+  reconciling item: the stashed payload carries the entry the line should now
+  have, rebuilt from its own classification, so the plan shows the difference
+  rather than a reversal. A new transfer-shaped line whose leg is already
+  waiting as a captured ``external_transfer`` on this connection is merged
+  with it into one ``internal_transfer``. Everything else is captured through
+  the kernel.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import array
@@ -70,6 +72,10 @@ HINT_KEYS = (
 )
 UNPOSTED_STATUSES = frozenset({"captured", "classified"})
 POSTED_STATUSES = frozenset({"committed", "fulfilled"})
+# Reconciling-item bookkeeping that is never part of an accepted payload.
+DRIFT_BOOKKEEPING_KEYS = frozenset(
+  {"drift_payload", "drift_detected_at", "reconciliation_history"}
+)
 
 
 @dataclass
@@ -77,7 +83,6 @@ class PlaidLoadReport(LoadReport):
   events_removed: int = 0
   transfers_matched: int = 0
   reconciling_items: int = 0
-  source_changes: int = 0
 
   def as_counts(self) -> dict[str, Any]:
     return {
@@ -85,7 +90,6 @@ class PlaidLoadReport(LoadReport):
       "events_removed": self.events_removed,
       "transfers_matched": self.transfers_matched,
       "reconciling_items": self.reconciling_items,
-      "source_changes": self.source_changes,
     }
 
 
@@ -292,19 +296,93 @@ def _flag_removed(event: Event, transaction_ids: list[str]) -> None:
   The stashed payload carries no entry, so the reconciling-item plan nets the
   posted entry against nothing — its catch-up is the reversal.
   """
-  now = datetime.now(UTC).isoformat()
-  metadata = dict(event.metadata_ or {})
-  accepted = {
-    key: value
-    for key, value in metadata.items()
-    if key not in ("drift_payload", "drift_detected_at")
-  }
+  accepted = _accepted_payload(event)
   accepted["source_removed"] = True
   accepted["source_removed_transaction_ids"] = transaction_ids
+  _flag(event, accepted)
+
+
+def _flag_changed(event: Event, payload: dict[str, Any]) -> None:
+  """A posted line whose amount or date the bank changed: a reconciling item.
+
+  The stashed payload records what the bank now says (``source_amount``,
+  ``source_posted_date``) and, when the line was posted from its own
+  classification, the entry it should now have. The reconciling-item plan
+  nets the posted entry against that one, so its catch-up is the difference.
+  A line posted through a tenant rule has no classification to rebuild from;
+  its payload carries no entry and the plan shows the reversal, for the
+  operator to re-post.
+  """
+  from robosystems.operations.event_block.python_handlers.bank_feed import (
+    BankFeedMetadata,
+    plan_lines,
+  )
+  from robosystems.operations.event_block.python_handlers.types import (
+    HandlerMetadataValidationError,
+  )
+
+  amount = int(payload["amount"])
+  posted_date = str(payload["occurred_at"])[:10]
+  accepted = _accepted_payload(event)
+  accepted["source_amount"] = amount
+  accepted["source_posted_date"] = posted_date
+  try:
+    lines = plan_lines(
+      event_type=str(event.event_type),
+      resource_element_id=event.resource_element_id,
+      amount=amount,
+      metadata=BankFeedMetadata.model_validate(dict(event.metadata_ or {})),
+    )
+  except HandlerMetadataValidationError:
+    lines = None
+  if lines:
+    accepted["posting_date"] = posted_date
+    accepted["memo"] = event.description
+    accepted["line_items"] = [
+      {
+        "element_id": line.element_id,
+        "debit_amount": line.debit_amount,
+        "credit_amount": line.credit_amount,
+      }
+      for line in lines
+    ]
+  _flag(event, accepted)
+
+
+def _accepted_payload(event: Event) -> dict[str, Any]:
+  return {
+    key: value
+    for key, value in (event.metadata_ or {}).items()
+    if key not in DRIFT_BOOKKEEPING_KEYS
+  }
+
+
+def _flag(event: Event, accepted: dict[str, Any]) -> None:
+  metadata = dict(event.metadata_ or {})
   metadata["drift_payload"] = accepted
-  metadata["drift_detected_at"] = now
+  metadata["drift_detected_at"] = datetime.now(UTC).isoformat()
   event.metadata_ = metadata
   event.payload_drift = True
+
+
+def source_view(event: Event) -> tuple[int, date | None]:
+  """The amount and posting date the bank last reported for a posted line.
+
+  A pending reconciling item's stashed payload, else an accepted one (a
+  resolved item leaves its payload as the live metadata), else the event's
+  own columns — so a change already raised, or already resolved, is not
+  raised again on the next sync.
+  """
+  metadata: dict[str, Any] = {**(event.metadata_ or {})}
+  drift: Any = metadata.get("drift_payload")
+  view: dict[str, Any] = metadata
+  if bool(event.payload_drift) and isinstance(drift, dict) and "source_amount" in drift:
+    view = cast("dict[str, Any]", drift)
+  amount = int(view.get("source_amount", event.amount or 0))
+  stored = view.get("source_posted_date")
+  if stored:
+    return amount, date.fromisoformat(str(stored)[:10])
+  return amount, event.occurred_at.date() if event.occurred_at else None
 
 
 # ── existing events ─────────────────────────────────────────────────────────
@@ -342,17 +420,19 @@ def reconcile_existing(
   prior: Event, payload: dict[str, Any], report: PlaidLoadReport
 ) -> None:
   occurred = _parse(payload["occurred_at"])
-  amount_changed = int(prior.amount or 0) != int(payload["amount"])
-  date_changed = (
-    prior.occurred_at is None or prior.occurred_at.date() != occurred.date()
-  )
+  amount = int(payload["amount"])
 
-  if prior.status == "captured":
-    changed = refresh_hints(prior, payload["metadata"], HINT_KEYS)
-    if amount_changed:
-      prior.amount = int(payload["amount"])
+  if prior.status in UNPOSTED_STATUSES:
+    # A classified line keeps its hints: an accepted suggestion must post
+    # what the operator accepted. A split that no longer adds up is refused
+    # at commit, with the reason.
+    changed = prior.status == "captured" and refresh_hints(
+      prior, payload["metadata"], HINT_KEYS
+    )
+    if int(prior.amount or 0) != amount:
+      prior.amount = amount
       changed = True
-    if date_changed:
+    if prior.occurred_at is None or prior.occurred_at.date() != occurred.date():
       prior.occurred_at = occurred
       changed = True
     if payload.get("description") and prior.description != payload["description"]:
@@ -367,22 +447,17 @@ def reconcile_existing(
       report.events_existing += 1
     return
 
-  if amount_changed or date_changed:
-    metadata = dict(prior.metadata_ or {})
-    metadata["source_change"] = {
-      "amount": int(payload["amount"]),
-      "posted_date": payload["metadata"].get("posted_date"),
-      "detected_at": datetime.now(UTC).isoformat(),
-    }
-    prior.metadata_ = metadata
-    report.source_changes += 1
-    logger.warning(
-      "Plaid changed the amount or date of %s event %s (%s) after it left the inbox",
-      prior.status,
-      prior.id,
-      prior.external_id,
-    )
-    return
+  if prior.status in POSTED_STATUSES:
+    known_amount, known_date = source_view(prior)
+    if known_amount != amount or known_date != occurred.date():
+      _flag_changed(prior, payload)
+      report.reconciling_items += 1
+      logger.info(
+        "Plaid changed posted event %s (%s): a reconciling item",
+        prior.id,
+        prior.external_id,
+      )
+      return
   report.events_existing += 1
 
 
@@ -448,6 +523,7 @@ def _merge_into_pair(
   captured, the waiting leg stays and the new leg is captured on its own."""
   merged = merge_legs(waiting, payload, connection_id=connection_id, item_id=item_id)
   failed_before = report.events_failed
+  errors_before = list(report.errors)
   try:
     with session.begin_nested():
       _delete_events(session, [str(waiting.id)])
@@ -457,7 +533,7 @@ def _merge_into_pair(
         raise _MergeFailed
   except _MergeFailed:
     report.events_failed = failed_before
-    report.errors = report.errors[: max(len(report.errors) - 1, 0)]
+    report.errors = errors_before
     return False
   report.transfers_matched += 1
   return True

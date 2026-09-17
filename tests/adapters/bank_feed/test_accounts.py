@@ -242,3 +242,63 @@ def test_another_providers_link_does_not_claim_the_account():
   assert (result.linked, result.created) == (0, 1)
   link = update.call_args.args[1].elements_to_add[0].metadata[BANK_FEED_KEY]
   assert link["provider"] == "plaid" and link["institution"] == "Mercury"
+
+
+@pytest.mark.unit
+def test_an_account_another_connection_feeds_is_not_claimed_by_name():
+  owned = _element(
+    "e1",
+    "Mercury Checking ••1234",
+    qname="coa:MercuryChecking1234",
+    metadata={
+      BANK_FEED_KEY: {
+        "provider": "mercury",
+        "account_id": "merc_1",
+        "connection_id": "conn_mercury",
+      }
+    },
+  )
+  created = _element("e2", "Mercury Checking ••1234", qname="coa:MercuryChecking12342")
+  session = _Session([owned], [created])
+  with (
+    patch(f"{MODULE}.active_chart_id", return_value="tax_1"),
+    patch(f"{MODULE}.update_chart_block") as update,
+  ):
+    result = link_bank_accounts(
+      session,
+      [_checking()],
+      provider="plaid",
+      connection_id="conn_plaid",
+      created_by="u",
+    )
+  assert (result.linked, result.created) == (0, 1)
+  assert result.links == {"acct_1": "e2"}
+  # The other feed's link is untouched.
+  assert owned.metadata_[BANK_FEED_KEY]["provider"] == "mercury"
+  assert update.call_args.args[1].elements_to_add[0].qname == "coa:MercuryChecking12342"
+
+
+@pytest.mark.unit
+def test_a_connection_reclaims_its_own_account_under_a_new_account_id():
+  own = _element(
+    "e1",
+    "Mercury Checking ••1234",
+    metadata={
+      BANK_FEED_KEY: {
+        "provider": "plaid",
+        "account_id": "old_item_acct",
+        "connection_id": "conn_plaid",
+      }
+    },
+  )
+  session = _Session([own])
+  with patch(f"{MODULE}.active_chart_id", return_value="tax_1"):
+    result = link_bank_accounts(
+      session,
+      [_checking()],
+      provider="plaid",
+      connection_id="conn_plaid",
+      created_by="u",
+    )
+  assert result.links == {"acct_1": "e1"} and result.created == 0
+  assert own.metadata_[BANK_FEED_KEY]["account_id"] == "acct_1"
