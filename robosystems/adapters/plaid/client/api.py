@@ -14,8 +14,11 @@ state.
 
 API notes, verified against the sandbox 2026-09-16: ``/transactions/sync``
 answers ``transactions_update_status: NOT_READY`` with an empty page until the
-Item's initial pull lands (seconds in the sandbox); amounts are positive for
-money leaving the account; ``personal_finance_category`` arrives as v2.
+Item's initial pull lands (seconds in the sandbox), then
+``INITIAL_UPDATE_COMPLETE`` while only the most recent ~30 days are in and the
+historical pull to ``days_requested`` is still running, and
+``HISTORICAL_UPDATE_COMPLETE`` once it all is; amounts are positive for money
+leaving the account; ``personal_finance_category`` arrives as v2.
 Docs: https://plaid.com/docs/api/
 """
 
@@ -62,6 +65,10 @@ REAUTH_ERROR_CODES = frozenset(
 # The Item itself is gone; update mode cannot revive it, only a fresh Link.
 ITEM_GONE_ERROR_CODES = frozenset({"INVALID_ACCESS_TOKEN", "ITEM_NOT_FOUND"})
 MUTATION_DURING_PAGINATION = "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION"
+HISTORY_COMPLETE = "HISTORICAL_UPDATE_COMPLETE"
+# The Item's pull is still running: nothing has landed (NOT_READY), or only
+# the most recent ~30 days have (INITIAL_UPDATE_COMPLETE).
+PULL_PENDING_STATUSES = frozenset({"NOT_READY", "INITIAL_UPDATE_COMPLETE"})
 
 
 class PlaidError(Exception):
@@ -127,6 +134,27 @@ class TransactionsSync:
   def ready(self) -> bool:
     """False while the Item's initial pull has not landed at Plaid."""
     return self.update_status != "NOT_READY"
+
+  @property
+  def pull_pending(self) -> bool:
+    """True while Plaid is still pulling the Item's history."""
+    return self.update_status in PULL_PENDING_STATUSES
+
+  @property
+  def history_complete(self) -> bool:
+    """True once the whole requested history is at Plaid."""
+    return self.update_status == HISTORY_COMPLETE
+
+  def extend(self, other: TransactionsSync) -> None:
+    """Fold a later page set into this one; the cursor moves to the other's."""
+    self.added.extend(other.added)
+    self.modified.extend(other.modified)
+    self.removed.extend(other.removed)
+    if other.accounts:
+      self.accounts = list(other.accounts)
+    if other.next_cursor:
+      self.next_cursor = other.next_cursor
+    self.update_status = other.update_status or self.update_status
 
 
 class PlaidClient:

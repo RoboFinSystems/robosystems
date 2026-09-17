@@ -18,6 +18,14 @@ The classification lives in the event's metadata, patched through
 - ``from_element_id`` / ``to_element_id`` — an internal transfer's two bank
   legs; the feed sets both when it pairs the legs.
 
+The bank's record can change after the line posts. A reconciling item's
+accepted payload carries what the bank now says as ``source_amount`` /
+``source_posted_date``, or ``source_removed`` when the bank retracted the
+line. Restate regenerates the entry from that metadata, so the handler
+posts the bank's amount on the bank's date when they are present, and
+refuses a retracted line outright — reversing it is the catch-up
+disposition's job.
+
 Money in (``amount > 0``): DR bank / CR contra. Money out: DR contra / CR
 bank. The entry is a draft on the event's posting date, in the local lane
 (a bank line is never published anywhere), and posts at close like any
@@ -36,7 +44,7 @@ never matched) is refused there, with the reason, not later at commit.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -112,6 +120,11 @@ class BankFeedMetadata(BaseModel):
   classified_by: str | None = None
   basis: str | None = None
   connection_id: str | None = None
+  # What the bank now says, when it differs from the captured row — set by
+  # the feed when it flags a posted line as a reconciling item.
+  source_amount: int | None = None
+  source_posted_date: date | None = None
+  source_removed: bool = False
 
 
 def contra_allocations(
@@ -323,27 +336,79 @@ def _apply_dsl_floor(
   return HandlerResult(entry_ids=entry_ids, transaction_ids=transaction_ids)
 
 
+def source_amount(metadata: BankFeedMetadata, amount: int | None) -> int | None:
+  """The amount to post: what the bank now says, else the captured amount."""
+  return metadata.source_amount if metadata.source_amount is not None else amount
+
+
+def source_posting_date(
+  metadata: BankFeedMetadata,
+  *,
+  effective_at: datetime | None,
+  occurred_at: datetime | None,
+) -> date:
+  """The posting date: what the bank now says, else the event's own."""
+  if metadata.source_posted_date is not None:
+    return metadata.source_posted_date
+  return posting_date_for_event(effective_at=effective_at, occurred_at=occurred_at)
+
+
+def source_refusal(metadata: BankFeedMetadata, *, unclassified: bool) -> str | None:
+  """Why the bank's current record stops this line posting, or ``None``.
+
+  A retracted line never posts. A line with no classification of its own
+  would post through a tenant rule, and a rule re-posts the captured amount
+  and date rather than the bank's — so when the bank's record differs it is
+  refused too. Both are the catch-up disposition's job.
+  """
+  if metadata.source_removed:
+    return (
+      "The bank retracted this line; it cannot be posted. Resolve the "
+      "reconciling item as catch_up to reverse it."
+    )
+  if unclassified and (
+    metadata.source_amount is not None or metadata.source_posted_date is not None
+  ):
+    return (
+      "This line was posted through a tenant rule, which would re-post the "
+      "captured amount and date rather than the bank's. Resolve the "
+      "reconciling item as catch_up."
+    )
+  return None
+
+
 def dispatch(
   session: Session,
   event: Event,
   metadata: BankFeedMetadata,
   created_by: str,
 ) -> HandlerResult:
-  """Write the classified bank line as a draft entry, or refuse."""
+  """Write the classified bank line as a draft entry, or refuse.
+
+  Fires at the first commit and again when a reconciling item is restated,
+  so it posts what the bank *now* says whenever the metadata carries it.
+  """
+  refusal = source_refusal(metadata, unclassified=False)
+  if refusal:
+    raise HandlerMetadataValidationError(f"Bank event {event.id}: {refusal}")
+  amount = source_amount(metadata, event.amount)
   lines = plan_lines(
     event_type=event.event_type,
     resource_element_id=event.resource_element_id,
-    amount=event.amount,
+    amount=amount,
     metadata=metadata,
   )
   if lines is None:
+    refusal = source_refusal(metadata, unclassified=True)
+    if refusal:
+      raise HandlerMetadataValidationError(f"Bank event {event.id}: {refusal}")
     _pin_to_local_lane(event)
     return _apply_dsl_floor(session, event, created_by, metadata=metadata)
 
   _pin_to_local_lane(event)
   journal = _journal_metadata(
-    posting_date=posting_date_for_event(
-      effective_at=event.effective_at, occurred_at=event.occurred_at
+    posting_date=source_posting_date(
+      metadata, effective_at=event.effective_at, occurred_at=event.occurred_at
     ),
     memo=_memo(event),
     lines=lines,
@@ -365,25 +430,32 @@ def dispatch_preview(
   body: CreateEventBlockRequest,
   metadata: BankFeedMetadata,
 ) -> HandlerPreview:
-  """The entry the commit would write — the inbox's preview of an approve."""
+  """The entry the commit would write — the inbox's preview of an approve.
+
+  Refuses exactly what ``dispatch`` refuses, so preview and commit agree.
+  """
+  refusal = source_refusal(metadata, unclassified=False)
+  if refusal:
+    return HandlerPreview(would_succeed=False, validation_errors=[refusal])
   try:
     lines = plan_lines(
       event_type=body.event_type,
       resource_element_id=body.resource_element_id,
-      amount=body.amount,
+      amount=source_amount(metadata, body.amount),
       metadata=metadata,
     )
   except HandlerMetadataValidationError as exc:
     return HandlerPreview(would_succeed=False, validation_errors=[str(exc)])
   if lines is None:
+    refusal = source_refusal(metadata, unclassified=True)
     return HandlerPreview(
       would_succeed=False,
-      validation_errors=[unclassified_reason(metadata)],
+      validation_errors=[refusal or unclassified_reason(metadata)],
       computed_values={"suggested_element_id": metadata.suggested_element_id},
     )
   journal = _journal_metadata(
-    posting_date=posting_date_for_event(
-      effective_at=body.effective_at, occurred_at=body.occurred_at
+    posting_date=source_posting_date(
+      metadata, effective_at=body.effective_at, occurred_at=body.occurred_at
     ),
     memo=(body.description or body.event_type)[:255],
     lines=lines,

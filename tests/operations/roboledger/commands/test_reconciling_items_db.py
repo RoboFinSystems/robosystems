@@ -704,3 +704,127 @@ def test_the_gate_lookup_finds_flagged_events_by_entry_date(session):
   ]
   # A June close says nothing about a July difference.
   assert find_unresolved_reconciling_items(session, as_of=date(2026, 6, 30)) == []
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Bank-feed lines: restate posts what the bank now says, never the old row
+# ───────────────────────────────────────────────────────────────────────────
+
+
+def _post_bank_line(db, ids: dict[str, str]) -> Event:
+  """A Plaid line classified and committed the way the inbox does it, with
+  its draft entry posted at close."""
+  from robosystems.operations.event_block.commands import fire_handler_on_commit
+
+  event, _envelope = create_event_block_in_session(
+    db,
+    CreateEventBlockRequest(
+      event_type="bank_transaction",
+      event_category="purchase",
+      event_class="economic",
+      event_action="transfer",
+      resource_type="money",
+      source="plaid",
+      external_id="plaid_txn_t1",
+      occurred_at=datetime(2026, 7, 9),
+      amount=-1240,
+      resource_element_id=ids[CASH],
+      apply_handlers=False,
+      metadata={
+        "connection_id": CONNECTION_ID,
+        "transaction_id": "t1",
+        "classified_element_id": ids[OLD_EXPENSE],
+      },
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  event.status = "committed"
+  fire_handler_on_commit(db, event, "user_test")
+  db.flush()
+  db.query(Entry).filter(Entry.triggered_by_event_id == str(event.id)).update(
+    {"status": "posted"}, synchronize_session=False
+  )
+  db.flush()
+  return event
+
+
+def test_restate_reposts_a_bank_line_at_the_banks_amount_and_date(session):
+  from robosystems.adapters.plaid.pipeline.load import (
+    PlaidLoadReport,
+    reconcile_existing,
+  )
+
+  ids = _seed_elements(session)
+  _seed_periods(session)
+  event = _post_bank_line(session, ids)
+  assert _line_nets(session, str(event.id)) == {
+    ids[CASH]: -1240,
+    ids[OLD_EXPENSE]: 1240,
+  }
+
+  # The bank now says $15.00 on the 10th; the feed flags a reconciling item.
+  reconcile_existing(
+    event,
+    {"amount": -1500, "occurred_at": "2026-07-10T00:00:00Z", "metadata": {}},
+    PlaidLoadReport(),
+  )
+  session.flush()
+  plan = plan_reconciling_item(session, str(event.id), graph_id=GRAPH_ID)
+  assert plan.default_disposition == "restate" and not plan.restate_blockers
+
+  resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(event_id=str(event.id), disposition="restate"),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+  assert not event.payload_drift
+  assert _line_nets(session, str(event.id)) == {
+    ids[CASH]: -1500,
+    ids[OLD_EXPENSE]: 1500,
+  }
+  entry = (
+    session.query(Entry).filter(Entry.triggered_by_event_id == str(event.id)).one()
+  )
+  assert entry.posting_date == date(2026, 7, 10)
+
+
+def test_a_retracted_bank_line_is_reversed_never_restated(session):
+  from robosystems.adapters.plaid.pipeline.load import _flag_removed
+
+  ids = _seed_elements(session)
+  _seed_periods(session)
+  event = _post_bank_line(session, ids)
+  _flag_removed(event, ["t1"])
+  session.flush()
+
+  plan = plan_reconciling_item(session, str(event.id), graph_id=GRAPH_ID)
+  assert plan.default_disposition == "catch_up"
+  assert any("retracted" in blocker for blocker in plan.restate_blockers)
+  with pytest.raises(RestateBlockedError, match="retracted"):
+    resolve_reconciling_item(
+      session,
+      ResolveReconcilingItemRequest(event_id=str(event.id), disposition="restate"),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+  # The books are exactly as they were.
+  assert _line_nets(session, str(event.id)) == {
+    ids[CASH]: -1240,
+    ids[OLD_EXPENSE]: 1240,
+  }
+
+  result = resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(event_id=str(event.id), disposition="catch_up"),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  assert {line.element_id: line.delta for line in result.delta} == {
+    ids[CASH]: 1240,
+    ids[OLD_EXPENSE]: -1240,
+  }
+  assert result.catch_up is not None
+  assert not event.payload_drift

@@ -453,3 +453,69 @@ def test_report_counts_include_the_plaid_outcomes():
   counts = PlaidLoadReport(events_removed=2, transfers_matched=1).as_counts()
   assert counts["events_removed"] == 2 and counts["transfers_matched"] == 1
   assert {"reconciling_items", "events_captured"} <= set(counts)
+
+
+@pytest.mark.unit
+class TestFlagPayloads:
+  """Every flag rebuilds the bank's state; nothing from the last one rides along."""
+
+  def _resolved(self, **extra):
+    """A posted line whose earlier change was resolved: the accepted payload
+    is the live metadata now, entry and all."""
+    return _event(
+      status="committed",
+      metadata_={
+        "connection_id": "conn_1",
+        "transaction_id": "t_coffee",
+        "classified_element_id": "e_te",
+        "source_amount": -1300,
+        "source_posted_date": "2026-03-15",
+        "posting_date": "2026-03-15",
+        "memo": "Harbor Coffee Co",
+        "line_items": [
+          {"element_id": "e_te", "debit_amount": 1300, "credit_amount": 0},
+          {"element_id": "e_card", "debit_amount": 0, "credit_amount": 1300},
+        ],
+        "reconciliation_history": [{"disposition": "catch_up"}],
+        **extra,
+      },
+    )
+
+  def test_a_removal_after_a_resolved_change_stashes_no_entry(self):
+    event = self._resolved()
+    _flag_removed(event, ["t_coffee"])
+    accepted = event.metadata_["drift_payload"]
+    assert accepted["source_removed"] is True
+    assert accepted["classified_element_id"] == "e_te"
+    for key in (
+      "line_items",
+      "posting_date",
+      "memo",
+      "source_amount",
+      "source_posted_date",
+      "reconciliation_history",
+    ):
+      assert key not in accepted, key
+
+  def test_a_second_change_replans_from_scratch(self):
+    event = self._resolved()
+    report = PlaidLoadReport()
+    reconcile_existing(event, _payload(amount=-1500, day="2026-03-16"), report)
+    accepted = event.metadata_["drift_payload"]
+    assert report.reconciling_items == 1
+    assert (accepted["source_amount"], accepted["source_posted_date"]) == (
+      -1500,
+      "2026-03-16",
+    )
+    assert accepted["posting_date"] == "2026-03-16"
+    assert accepted["line_items"] == [
+      {"element_id": "e_te", "debit_amount": 1500, "credit_amount": 0},
+      {"element_id": "e_card", "debit_amount": 0, "credit_amount": 1500},
+    ]
+
+  def test_a_change_that_cannot_be_replanned_drops_the_stale_entry(self):
+    event = self._resolved(classified_element_id=None)  # posted through a rule
+    reconcile_existing(event, _payload(amount=-1500), PlaidLoadReport())
+    accepted = event.metadata_["drift_payload"]
+    assert accepted["source_amount"] == -1500
+    assert "line_items" not in accepted and "posting_date" not in accepted

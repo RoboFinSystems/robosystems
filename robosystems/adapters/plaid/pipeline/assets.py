@@ -7,9 +7,25 @@ the load commits, so a failed run replays the same window (every write is
 idempotent on the event's natural key).
 
 A full rebuild, or an explicit ``since_date``, drops the cursor and replays
-the Item's whole history. A fresh Item's first pull may not have landed at
-Plaid yet (``NOT_READY``); the asset waits a little, and if it still has
-nothing, finishes without storing a cursor so the next sync starts over.
+the Item's whole history.
+
+Plaid pulls a new Item in two steps: the most recent ~30 days first
+(``INITIAL_UPDATE_COMPLETE``), the rest of the requested history later
+(``HISTORICAL_UPDATE_COMPLETE``), and nothing at all for the first seconds
+(``NOT_READY``). The asset waits for the history: up to ten minutes on the
+Item's first sync, a minute on any later run (a run with a cursor already
+captured what had landed; a short recheck is enough, and a worker is never
+held long on a scheduled sync). A run that still has nothing fails, so the
+connection never reads as synced with zero data. A run that has only the recent window captures it and stores the cursor
+— the rest arrives as ``added`` on a later sync — but leaves the fiscal
+calendar alone: bootstrapping it on 30 days would close every earlier month
+before its transactions arrived, and the closed-period gate would then refuse
+them. The calendar opens on the first run that sees the history complete.
+
+A row that fails to capture is retried, not lost: the cursor is not advanced
+and the run fails naming it, so the next sync replays the same window (the
+rows that did capture are found as existing). ``/transactions/sync`` never
+resends a window on its own.
 
 The body keeps the shared bank-feed discipline (``adapters/bank_feed/sync.py``).
 A login the customer has to repair marks the connection ``needs_reauth`` and
@@ -43,8 +59,13 @@ from robosystems.adapters.bank_feed.sync import (
 
 SOURCE = "plaid"
 SOURCE_LABEL = "Plaid"
-INITIAL_PULL_WAIT_SECONDS = 120
-INITIAL_PULL_POLL_SECONDS = 10
+# How long a run waits for Plaid to finish pulling the Item's history: the
+# first sync (no cursor yet) waits the long bound, a later run rechecks briefly.
+PULL_WAIT_SECONDS = 600
+PULL_RECHECK_SECONDS = 60
+PULL_POLL_SECONDS = 10
+# How many extra cursors the first run to see the history complete drains.
+SETTLE_ROUNDS = 10
 
 
 class PlaidSyncConfig(BankFeedSyncConfig):
@@ -117,6 +138,7 @@ def _run_plaid_sync(
   sync_config = dict(credentials.get("sync_config") or {})
   since = since_date(config, sync_config)
   cursor = sync_cursor(config, credentials)
+  history_seen = bool(credentials.get("history_complete_at"))
   item_id = credentials.get("item_id")
   context.log.info(
     f"Plaid sync for graph={config.graph_id} connection={config.connection_id} "
@@ -128,11 +150,16 @@ def _run_plaid_sync(
     accounts_body = client.get_accounts(access_token)
     sync = client.sync_transactions(access_token, cursor)
     waited = 0
-    while not cursor and not sync.ready and waited < INITIAL_PULL_WAIT_SECONDS:
-      context.log.info("Plaid's first pull for this Item has not landed; waiting")
-      time.sleep(INITIAL_PULL_POLL_SECONDS)
-      waited += INITIAL_PULL_POLL_SECONDS
-      sync = client.sync_transactions(access_token, None)
+    budget = PULL_WAIT_SECONDS if cursor is None else PULL_RECHECK_SECONDS
+    while sync.pull_pending and waited < budget:
+      context.log.info(
+        f"Plaid is still pulling this Item's history ({sync.update_status}); waiting"
+      )
+      time.sleep(PULL_POLL_SECONDS)
+      waited += PULL_POLL_SECONDS
+      sync = client.sync_transactions(access_token, cursor)
+    if sync.history_complete and not history_seen:
+      sync = settle_after_history(context, client, access_token, sync)
   except PlaidError as exc:
     if exc.needs_reauth:
       mark_needs_reauth(config.connection_id)
@@ -143,6 +170,21 @@ def _run_plaid_sync(
     raise
   finally:
     client.close()
+
+  if not sync.ready:
+    raise Failure(
+      description=(
+        f"Plaid has not finished this Item's first pull after {waited} s; "
+        "sync again in a few minutes."
+      ),
+      metadata={"plaid_update_status": sync.update_status or ""},
+    )
+  if not sync.history_complete:
+    context.log.warning(
+      f"Plaid's historical pull has not completed ({sync.update_status}): this "
+      "run captures what has landed, the rest arrives on a later sync, and the "
+      "fiscal calendar waits for it"
+    )
 
   institution = str(
     credentials.get("institution_name")
@@ -179,9 +221,29 @@ def _run_plaid_sync(
     )
     session.commit()
 
-  cursor_stored = bool(sync.ready and sync.next_cursor)
+  if report.events_failed:
+    # The rows that captured are committed; the cursor stays where it was so
+    # the next run replays this window and tries the failed rows again.
+    mark_graph_stale(context, config, source_label=SOURCE_LABEL)
+    for error in report.errors:
+      context.log.warning(f"Capture failed: {error}")
+    raise Failure(
+      description=(
+        f"{report.events_failed} of this window's transactions failed to "
+        "capture; the cursor was not advanced, so the next sync retries them. "
+        f"First: {report.errors[0] if report.errors else 'no detail'}"
+      ),
+      metadata={
+        "events_failed": report.events_failed,
+        "events_captured": report.events_created,
+      },
+    )
+
+  cursor_stored = bool(sync.next_cursor)
   if cursor_stored:
-    store_cursor(config.connection_id, sync.next_cursor)
+    store_cursor(
+      config.connection_id, sync.next_cursor, history_complete=sync.history_complete
+    )
 
   context.log.info(
     f"Accounts: {link_result.linked} linked, {link_result.created} created. "
@@ -206,13 +268,19 @@ def _run_plaid_sync(
       "accounts_created": link_result.created,
     },
     "source_status": sync.update_status,
+    "history_complete": sync.history_complete,
     "cursor_stored": cursor_stored,
     "errors": list(report.errors[:10]),
   }
   update_last_sync(context, config, summary)
-  bootstrap_fiscal_calendar_if_needed(
-    context, config, report.earliest_occurred_at, source_label=SOURCE_LABEL
-  )
+  if sync.history_complete:
+    bootstrap_fiscal_calendar_if_needed(
+      context, config, report.earliest_occurred_at, source_label=SOURCE_LABEL
+    )
+  else:
+    context.log.info(
+      "Fiscal calendar bootstrap deferred until Plaid's historical pull completes"
+    )
   mark_graph_stale(context, config, source_label=SOURCE_LABEL)
 
   return MaterializeResult(
@@ -227,9 +295,37 @@ def _run_plaid_sync(
       "events_removed": report.events_removed,
       "transfers_matched": report.transfers_matched,
       "events_failed": report.events_failed,
+      "history_complete": sync.history_complete,
       "cursor_stored": cursor_stored,
     }
   )
+
+
+def settle_after_history(
+  context: AssetExecutionContext,
+  client: Any,
+  access_token: str,
+  sync: Any,
+) -> Any:
+  """Drain what lands with the history-complete flag.
+
+  Observed against the sandbox 2026-09-16: the status flipped to
+  ``HISTORICAL_UPDATE_COMPLETE`` on a page holding the recent window, and the
+  historical rows answered the *next* cursor a beat later. The first run to
+  see the flag keeps pulling until a cursor returns nothing, so the calendar
+  opens on the whole history; the credential bundle then records
+  ``history_complete_at`` and later runs never pay for it.
+  """
+  for _round in range(SETTLE_ROUNDS):
+    more = client.sync_transactions(access_token, sync.next_cursor)
+    if not (more.added or more.modified or more.removed):
+      return sync
+    context.log.info(
+      f"Plaid delivered {len(more.added)} added, {len(more.modified)} modified, "
+      f"{len(more.removed)} removed after the history flag; folding them in"
+    )
+    sync.extend(more)
+  return sync
 
 
 def since_date(config: PlaidSyncConfig, sync_config: dict[str, Any]) -> date:
@@ -263,9 +359,12 @@ def load_credentials(connection_id: str) -> dict[str, Any]:
     return dict(row.get_credentials()) if row is not None else {}
 
 
-def store_cursor(connection_id: str, cursor: str) -> None:
+def store_cursor(
+  connection_id: str, cursor: str, *, history_complete: bool = False
+) -> None:
   """Advance the stored cursor, re-reading the bundle so a concurrent re-link
-  that replaced the access token is never overwritten."""
+  that replaced the access token is never overwritten. The first time the
+  history is complete, stamp ``history_complete_at``."""
   from robosystems.database import SessionFactory
   from robosystems.models.core.connection.connection_credentials import (
     ConnectionCredentials,
@@ -276,14 +375,11 @@ def store_cursor(connection_id: str, cursor: str) -> None:
     if row is None:
       return
     current = dict(row.get_credentials())
-    row.update_credentials(
-      {
-        **current,
-        "cursor": cursor,
-        "cursor_updated_at": datetime.now(UTC).isoformat(),
-      },
-      session,
-    )
+    now = datetime.now(UTC).isoformat()
+    updated = {**current, "cursor": cursor, "cursor_updated_at": now}
+    if history_complete and not current.get("history_complete_at"):
+      updated["history_complete_at"] = now
+    row.update_credentials(updated, session)
 
 
 def mark_needs_reauth(connection_id: str) -> None:

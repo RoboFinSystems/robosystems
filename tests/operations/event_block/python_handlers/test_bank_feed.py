@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -499,3 +499,96 @@ class TestValidateClassification:
     validate_classification(
       event, BankFeedMetadata(from_element_id="e_chk", to_element_id="e_sav")
     )
+
+
+@pytest.mark.unit
+class TestSourceOverrides:
+  """A restate posts what the bank now says, not what was captured."""
+
+  def test_metadata_parses_the_source_fields(self):
+    parsed = BankFeedMetadata.model_validate(
+      {"source_amount": -5000, "source_posted_date": "2026-03-15"}
+    )
+    assert parsed.source_amount == -5000
+    assert parsed.source_posted_date == date(2026, 3, 15)
+    assert parsed.source_removed is False
+
+  def test_dispatch_posts_the_banks_amount_on_the_banks_date(self):
+    event = _event(metadata={"connection_id": "conn_1"})
+    metadata = BankFeedMetadata(
+      classified_element_id="elem_office",
+      source_amount=-5000,
+      source_posted_date=date(2026, 3, 15),
+    )
+    with patch(f"{MODULE}.journal_dispatch") as journal:
+      journal.return_value = MagicMock(entry_ids=["je_2"], transaction_ids=["txn_2"])
+      dispatch(MagicMock(), event, metadata, "usr_1")
+    journal_meta = journal.call_args.args[2]
+    assert journal_meta.posting_date == date(2026, 3, 15)
+    assert _lines_as_tuples(journal_meta.line_items) == [
+      ("elem_office", 5000, 0),
+      ("elem_card", 0, 5000),
+    ]
+
+  def test_without_overrides_the_captured_row_posts_as_before(self):
+    event = _event()
+    metadata = BankFeedMetadata(classified_element_id="elem_office")
+    with patch(f"{MODULE}.journal_dispatch") as journal:
+      journal.return_value = MagicMock(entry_ids=[], transaction_ids=[])
+      dispatch(MagicMock(), event, metadata, "usr_1")
+    journal_meta = journal.call_args.args[2]
+    assert journal_meta.posting_date == date(2026, 3, 14)
+    assert _lines_as_tuples(journal_meta.line_items)[0] == ("elem_office", 4250, 0)
+
+  def test_a_retracted_line_is_refused(self):
+    metadata = BankFeedMetadata(
+      classified_element_id="elem_office", source_removed=True
+    )
+    with patch(f"{MODULE}.journal_dispatch") as journal:
+      with pytest.raises(HandlerMetadataValidationError, match="retracted"):
+        dispatch(MagicMock(), _event(), metadata, "usr_1")
+    journal.assert_not_called()
+
+  def test_a_rule_posted_line_with_a_changed_source_is_refused(self):
+    metadata = BankFeedMetadata(source_amount=-5000)
+    with patch(f"{MODULE}._apply_dsl_floor") as floor:
+      with pytest.raises(HandlerMetadataValidationError, match="tenant rule"):
+        dispatch(MagicMock(), _event(), metadata, "usr_1")
+    floor.assert_not_called()
+
+  def test_preview_refuses_a_retracted_line_like_dispatch(self):
+    body = CreateEventBlockRequest(
+      event_type="bank_transaction",
+      event_category="purchase",
+      event_class="economic",
+      event_action="transfer",
+      resource_type="money",
+      source="plaid",
+      external_id="plaid_txn_p1",
+      occurred_at=datetime(2026, 3, 14, tzinfo=UTC),
+      amount=-4250,
+      resource_element_id="elem_card",
+    )
+    metadata = BankFeedMetadata(
+      classified_element_id="elem_office", source_removed=True
+    )
+    preview = dispatch_preview(MagicMock(), body, metadata)
+    assert preview.would_succeed is False
+    assert "retracted" in preview.validation_errors[0]
+
+  def test_preview_names_the_rule_refusal_like_dispatch(self):
+    body = CreateEventBlockRequest(
+      event_type="bank_transaction",
+      event_category="purchase",
+      event_class="economic",
+      event_action="transfer",
+      resource_type="money",
+      source="plaid",
+      external_id="plaid_txn_p2",
+      occurred_at=datetime(2026, 3, 14, tzinfo=UTC),
+      amount=-4250,
+      resource_element_id="elem_card",
+    )
+    preview = dispatch_preview(MagicMock(), body, BankFeedMetadata(source_amount=-5000))
+    assert preview.would_succeed is False
+    assert "tenant rule" in preview.validation_errors[0]

@@ -76,6 +76,22 @@ POSTED_STATUSES = frozenset({"committed", "fulfilled"})
 DRIFT_BOOKKEEPING_KEYS = frozenset(
   {"drift_payload", "drift_detected_at", "reconciliation_history"}
 )
+# What the last flag said the bank and the entry should be. A resolution
+# leaves these in the live metadata; every new flag rebuilds them from
+# scratch, never carries them forward — a stale entry would make the planner
+# net against lines the bank no longer sends.
+SOURCE_STATE_KEYS = frozenset(
+  {
+    "source_amount",
+    "source_posted_date",
+    "source_removed",
+    "source_removed_transaction_ids",
+    "posting_date",
+    "memo",
+    "line_items",
+    "entries",
+  }
+)
 
 
 @dataclass
@@ -350,10 +366,11 @@ def _flag_changed(event: Event, payload: dict[str, Any]) -> None:
 
 
 def _accepted_payload(event: Event) -> dict[str, Any]:
+  """The live metadata less the bookkeeping and the previous flag's verdict."""
   return {
     key: value
     for key, value in (event.metadata_ or {}).items()
-    if key not in DRIFT_BOOKKEEPING_KEYS
+    if key not in DRIFT_BOOKKEEPING_KEYS and key not in SOURCE_STATE_KEYS
   }
 
 
