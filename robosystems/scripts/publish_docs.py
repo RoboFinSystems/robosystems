@@ -310,11 +310,12 @@ def resolve_wiki_target(
   asset_base: str,
   build: Build,
 ) -> str:
-  if target.startswith(WIKI_URL):
+  if target == WIKI_URL or target.startswith((f"{WIKI_URL}/", f"{WIKI_URL}#")):
     rest = target[len(WIKI_URL) :].lstrip("/")
-    return resolve_wiki_target(
-      rest or "Home", source, pages, anchors, asset_base, build
-    )
+    # The wiki root is Home, so a bare `#anchor` after it is Home's anchor.
+    if not rest or rest.startswith("#"):
+      rest = f"Home{rest}"
+    return resolve_wiki_target(rest, source, pages, anchors, asset_base, build)
   if target.startswith(("http://", "https://", "mailto:")):
     return target
   if target.startswith("#"):

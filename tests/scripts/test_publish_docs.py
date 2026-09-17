@@ -129,11 +129,20 @@ class TestWikiLinks:
     text = (
       "# Core Concepts\n\n- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)\n"
       "- [QS](https://github.com/RoboFinSystems/robosystems/wiki/Quick-Start)\n"
+      "- [Home anchor](https://github.com/RoboFinSystems/robosystems/wiki#overview)\n"
+      "- [Not the wiki](https://github.com/RoboFinSystems/robosystems/wikis)\n"
     )
-    build = _build_wiki(_wiki(tmp_path, _pages(**{"Core-Concepts": text})))
+    pages = _pages(
+      **{"Core-Concepts": text, "Home": "# Welcome\n\nIntro.\n\n## Overview\n"}
+    )
+    build = _build_wiki(_wiki(tmp_path, pages))
     body = build.files["technical/core-concepts.md"].decode()
     assert "[Wiki](/docs/technical)" in body
     assert "[QS](/docs/technical/quick-start)" in body
+    assert "[Home anchor](/docs/technical#overview)" in body
+    assert "[Not the wiki](https://github.com/RoboFinSystems/robosystems/wikis)" in body
+    assert build.errors == []
+    assert build.warnings == []
 
   def test_code_and_external_links_are_untouched(self, tmp_path):
     text = (
