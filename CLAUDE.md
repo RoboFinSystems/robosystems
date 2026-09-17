@@ -79,7 +79,7 @@ Common mistakes:
 | `POST /v1/graphs/{g}/backups`         | `POST /v1/graphs/{g}/operations/create-backup`                             | Create backup        |
 | `POST /v1/graphs/{g}/materialize`     | `POST /v1/graphs/{g}/operations/materialize`                               | Materialize graph    |
 
-- **Root `/`** serves the Swagger UI (HTML); don't use it for health checks.
+- **Root `/`** serves the Swagger UI (HTML) in every environment — it is the interactive tool, kept for its try-it panel and marked `noindex`; don't use it for health checks. **`/docs` is retired**: it answers `301` to `robosystems.ai/docs/api`, where the reference is rendered per operation. (ReDoc lives on only in the Graph API microservice.)
 - **`/openapi.json`** is the live OpenAPI spec — useful when SDK generation drifts from the server.
 - **All authenticated endpoints** take `X-API-Key` for local testing (not `Authorization: Bearer`). Read the key from `.local/config.json` after running `just demo-user`.
 - **Frontend-facing auth** (JWT/Bearer) is a frontend concern; backend testing with `curl` should use the API key.
@@ -531,6 +531,8 @@ Two lanes, both published to the content CDN by `.github/workflows/publish-docs.
 
 - **Product docs live in `docs/product/{site}/`** — `roboledger/` serves `roboledger.ai/docs`, `robosystems/` serves `robosystems.ai/docs/guides`. Every page is a public claim: describe what the product does today, name an MCP tool only where the reader has to recognise one (`tests/scripts/test_product_docs.py` checks each backticked name against the server's tools), and keep the front matter's `title` and `order`. See `docs/product/README.md`.
 - **Technical docs are the GitHub wiki**, published at `robosystems.ai/docs/technical`. Their examples are written for the hosted API; local development lives on one page there. Preview either lane with `just docs-build`.
+
+A third surface does not go through that workflow: **the REST API reference at `robosystems.ai/docs/api`**, which robosystems-app renders from the live `/openapi.json`, one page per operation. Nothing here publishes it — an operation's `summary`, `description` and response models *are* its page, so the prose in a router is public copy. It is read-only by design; to run a call, use the Swagger page at the API root (`localhost:8000/` in development, `api.robosystems.ai/` in production).
 
 ## Key READMEs
 

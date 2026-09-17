@@ -18,7 +18,12 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (
+  HTMLResponse,
+  JSONResponse,
+  PlainTextResponse,
+  RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -88,7 +93,6 @@ from robosystems.routers.admin import (
 from robosystems.routers.oauth import router as oauth_router
 from robosystems.utils.docs_template import (
   generate_robosystems_docs,
-  generate_robosystems_redoc,
 )
 
 logger = get_logger("robosystems.api")
@@ -110,17 +114,21 @@ _SENSITIVE_PATH_PREFIXES = (
 def csp_variant_for_path(path: str, *, graphiql_enabled: bool = False) -> str:
   """Which CSP variant a path gets.
 
-  - "docs": Swagger UI / ReDoc pages and their assets, self-hosted from
-    /static — no third-party script origins and no 'unsafe-inline' script.
+  - "docs": the Swagger UI page at ``/`` and its assets under ``/static``,
+    self-hosted — no third-party script origins and no 'unsafe-inline'
+    script. Swagger sets inline style attributes at runtime, so this variant
+    keeps ``style-src 'unsafe-inline'``; it is the reason the page is kept
+    as a tool rather than a document.
   - "graphiql": the GraphiQL playground, which loads React/GraphiQL from
     CDNs and needs the historical relaxed policy. Returned only while the
     playground is actually served (``graphiql_enabled`` — development
     only); elsewhere the graph-scoped GraphQL path answers with JSON and
     gets the strict policy like every other API route. The default is
-    closed so a caller that omits the flag can never relax production.
-  - "api": everything else — strict policy.
+    closed, so a caller that omits it can never relax production.
+  - "api": everything else — strict policy. ``/docs`` is now a redirect and
+    is in this group: nothing it returns needs a relaxed policy.
   """
-  if path in ("/", "/docs") or path.startswith("/static"):
+  if path == "/" or path.startswith("/static"):
     return "docs"
   if graphiql_enabled and path.startswith("/extensions/") and path.endswith("/graphql"):
     return "graphiql"
@@ -212,6 +220,8 @@ def create_app() -> FastAPI:
   setup_telemetry(app)
   app.state.current_time = datetime.now(UTC)
 
+  # The /static mount serves the Swagger page's vendored bundle. The
+  # well-known routes below read their files at startup rather than through it.
   if Path("static").exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -246,14 +256,29 @@ def create_app() -> FastAPI:
     async def openai_apps_challenge() -> PlainTextResponse:
       return PlainTextResponse(openai_challenge_token)
 
-  # Custom dark-themed Swagger + ReDoc (served inline from docs_template).
+  # Two surfaces, split by what they are for.
+  #
+  # `/` keeps Swagger UI everywhere, because its try-it panel is a tool and
+  # there is no other way to run a call against a deployed API from a
+  # browser. It is marked noindex below: a tool, not a document.
+  #
+  # `/docs` was ReDoc — a read-only renderer of the same spec, which the
+  # per-operation pages on the app's domain now do far better, and which a
+  # crawler could never read because it renders in the browser from a
+  # ~950 KB file. It redirects, so every README, CONTRIBUTING file and
+  # outside link keeps working and its link equity moves with it.
   @app.get("/", response_class=HTMLResponse, include_in_schema=False)
   async def custom_docs():
     return HTMLResponse(content=generate_robosystems_docs())
 
-  @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
-  async def custom_redoc():
-    return HTMLResponse(content=generate_robosystems_redoc())
+  published_reference = f"{env.ROBOSYSTEMS_URL}/docs/api"
+
+  # HEAD as well as GET: this path exists to be followed, and the link
+  # checkers and crawlers that probe with HEAD would otherwise be answered
+  # 405 and never see the redirect. FastAPI does not imply HEAD from GET.
+  @app.api_route("/docs", methods=["GET", "HEAD"], include_in_schema=False)
+  async def docs_redirect() -> RedirectResponse:
+    return RedirectResponse(published_reference, status_code=301)
 
   # Configure CORS with specific domains for security
   main_cors_origins = env.get_main_cors_origins()
@@ -385,22 +410,32 @@ def create_app() -> FastAPI:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
+    # Nothing on this origin is the reference any more: the rendered pages
+    # live on the app's domain. The raw specification stays served (both SDK
+    # generators read it) and Swagger stays as a tool, but neither should
+    # compete with those pages in an index, and a browser-rendered shell over
+    # a ~950 KB file is what left these URLs crawled-not-indexed to begin with.
+    path = request.url.path
+    if path in ("/", "/openapi.json") or path.startswith("/static"):
+      response.headers["X-Robots-Tag"] = "noindex"
+
     # HSTS for production/staging
     if env.ENVIRONMENT in ["prod", "staging"]:
       response.headers["Strict-Transport-Security"] = (
         "max-age=31536000; includeSubDomains"
       )
 
-    # Path-based CSP — strict for API, self-hosted policy for docs,
-    # relaxed (CDN) policy only for the GraphiQL playground, and only
-    # where it is served (development — see the GraphQLRouter mount).
-    path = request.url.path
+    # Path-based CSP — strict for API, self-hosted policy for the Swagger
+    # page and its assets, relaxed (CDN) policy only for the GraphiQL
+    # playground, and only where it is served (development — see the
+    # GraphQLRouter mount).
     csp_variant = csp_variant_for_path(path, graphiql_enabled=env.is_development())
     if csp_variant == "docs":
-      # Swagger UI / ReDoc served entirely from this origin (/static/vendor).
-      # Both UIs inject inline <style> at runtime, so style-src keeps
-      # 'unsafe-inline'; script-src does not need it (init lives in
-      # /static/swagger-init.js) and no third-party origin is allowed.
+      # Swagger UI served entirely from this origin (/static/vendor). It
+      # injects inline <style> at runtime, so style-src keeps 'unsafe-inline';
+      # script-src does not need it (init lives in /static/swagger-init.js)
+      # and no third-party origin is allowed. ReDoc's blob worker is gone
+      # with ReDoc itself.
       csp_directives = [
         "default-src 'self'",
         "script-src 'self'",
@@ -408,7 +443,6 @@ def create_app() -> FastAPI:
         "img-src 'self' data: blob:",
         "font-src 'self' data:",
         "connect-src 'self'",
-        "worker-src 'self' blob:",  # ReDoc renders via a blob web worker
         "object-src 'none'",
         "frame-ancestors 'none'",
         "base-uri 'self'",

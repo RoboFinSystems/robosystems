@@ -16,7 +16,6 @@ from robosystems.utils.docs_template import (
   generate_lbug_docs,
   generate_redoc_docs,
   generate_robosystems_docs,
-  generate_robosystems_redoc,
   generate_swagger_docs,
 )
 
@@ -294,20 +293,6 @@ class TestConvenienceFunctions:
     mock_env.is_development.return_value = False
     generate_robosystems_docs()
     assert mock_generate.call_args.kwargs["persist_auth"] is False
-
-  @patch("robosystems.utils.docs_template.generate_redoc_docs")
-  def test_generate_robosystems_redoc(self, mock_generate):
-    """Test RoboSystems-specific ReDoc generation."""
-    mock_generate.return_value = "robosystems redoc"
-
-    result = generate_robosystems_redoc()
-
-    assert result == "robosystems redoc"
-    mock_generate.assert_called_once_with(title="RoboSystems API")
-
-
-class TestFallbackTemplates:
-  """Test suite for fallback template functions."""
 
   def test_get_fallback_template(self):
     """Test Swagger fallback template generation."""
