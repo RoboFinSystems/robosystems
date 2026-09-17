@@ -525,6 +525,13 @@ Parameters are stored at `/robosystems/{env}/{category}/{NAME}` in SSM Parameter
 - Monthly rotation via GitHub Actions (`secrets-rotation.yml`) using Lambda functions
 - Never commit secrets to code
 
+## Public Documentation
+
+Two lanes, both published to the content CDN by `.github/workflows/publish-docs.yml` and rendered on the sites:
+
+- **Product docs live in `docs/product/{site}/`** — `roboledger/` serves `roboledger.ai/docs`, `robosystems/` serves `robosystems.ai/docs/guides`. Every page is a public claim: describe what the product does today, name an MCP tool only where the reader has to recognise one (`tests/scripts/test_product_docs.py` checks each backticked name against the server's tools), and keep the front matter's `title` and `order`. See `docs/product/README.md`.
+- **Technical docs are the GitHub wiki**, published at `robosystems.ai/docs/technical`. Their examples are written for the hosted API; local development lives on one page there. Preview either lane with `just docs-build`.
+
 ## Key READMEs
 
 Before working in a directory, read its README:

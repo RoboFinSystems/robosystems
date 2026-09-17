@@ -55,7 +55,10 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "`RETURN DISTINCT` anchored on the Entity. `read-graph-cypher`'s "
     "description spells them out.\n"
     "- This is shared public data: period close, chart-of-accounts mapping, and "
-    "all write operations are unavailable here."
+    "all write operations are unavailable here.\n"
+    "- Public documentation, citable by URL: "
+    "https://robosystems.ai/docs/guides/sec-filings — what to ask of the "
+    "filings and the rules that decide whether a number is right."
   ),
   cypher_query_guidance=(
     "**SEC DATA RULES — a query that ignores these returns a plausible wrong "
