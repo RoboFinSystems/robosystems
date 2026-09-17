@@ -874,8 +874,8 @@ jobs:
 
           ### Next Steps
 
-          - [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) - Initial setup
-          - [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) - System architecture
+          - [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide) - Initial setup
+          - [Architecture Overview](https://robosystems.ai/docs/technical/architecture-overview) - System architecture
           EOF
 
       - name: Update Deployment Status

@@ -333,7 +333,7 @@ Logs: `just logs api`, `just logs worker`.
 - [API Documentation](https://api.robosystems.ai/docs) — REST API reference
 - [Graph API README](../robosystems/graph_api/README.md) — graph database system
 - [Schema System](../robosystems/schemas/README.md) — schema definitions
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki) — guides and tutorials
+- [Documentation](https://robosystems.ai/docs/technical) — guides and tutorials
 - SDKs: [Python](https://github.com/RoboFinSystems/robosystems-python-client) ·
   [TypeScript](https://github.com/RoboFinSystems/robosystems-typescript-client) ·
   [MCP](https://github.com/RoboFinSystems/robosystems-mcp-client)
