@@ -599,7 +599,7 @@ SYNCED_LEDGER_PROVIDERS: frozenset[str] = SEVERABLE_SOURCES
 
 # Providers that capture bank activity into the inbox of natively-kept
 # books. They need a chart to resolve against and no synced GL in the way.
-BANK_FEED_PROVIDERS: frozenset[str] = frozenset({"mercury"})
+BANK_FEED_PROVIDERS: frozenset[str] = frozenset({"mercury", "plaid"})
 
 
 class ProviderConflictError(Exception):

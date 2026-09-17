@@ -54,7 +54,7 @@ router = APIRouter()
   status_code=status.HTTP_201_CREATED,
   operation_id="createConnection",
   summary="Create Connection",
-  description="QuickBooks and Mercury: returns a pending connection — complete the OAuth flow to activate (Mercury may instead connect at once with a personal API token where the deployment allows it). External: registers a source namespace for an integration that writes through the public API. One connection allowed per provider per graph, except 'external' which allows one per source_name. A bank feed (Mercury) is refused (409) beside a live QuickBooks connection or on a graph with no chart of accounts.",
+  description="QuickBooks and Mercury: returns a pending connection — complete the OAuth flow to activate (Mercury may instead connect at once with a personal API token where the deployment allows it). External: registers a source namespace for an integration that writes through the public API. One connection allowed per provider per graph, except 'external' which allows one per source_name and 'plaid' which allows one per bank login (a connection still waiting on Link is returned instead of a second). Plaid: returns a pending connection — `POST /oauth/init` returns a `link_token` for Plaid Link. A bank feed (Mercury, Plaid) is refused (409) beside a live QuickBooks connection or on a graph with no chart of accounts.",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     409: {"description": "Connection already exists for this provider"},
@@ -128,6 +128,8 @@ async def create_connection(
       config = request.external_config
     elif request.provider == "mercury":
       config = request.mercury_config
+    elif request.provider == "plaid":
+      config = request.plaid_config
     # Validate provider is enabled before any database operations
     provider_registry.get_provider(request.provider)
 
@@ -157,6 +159,12 @@ async def create_connection(
         c
         for c in existing_connections
         if c.get("source_name") == request.external_config.source_name
+      ]
+    # Plaid: one connection per bank login, so a graph holds several. Only a
+    # connection still waiting on Link is resumed, never a connected one.
+    if request.provider == "plaid":
+      existing_connections = [
+        c for c in existing_connections if c.get("status") == "pending_oauth"
       ]
     if existing_connections:
       existing = existing_connections[0]

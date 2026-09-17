@@ -27,7 +27,7 @@ MERCURY_PARTNER_URL = "https://mercury.com/partner/robosystems"
   "/options",
   response_model=ConnectionOptionsResponse,
   summary="List Connection Options",
-  description="Returns available providers and their requirements. Only enabled providers are included (gated by feature flags). QuickBooks and Mercury require OAuth 2.0; external connections require no auth.",
+  description="Returns available providers and their requirements. Only enabled providers are included (gated by feature flags). QuickBooks and Mercury require OAuth 2.0; Plaid authorizes through Plaid Link (auth_type `link`); external connections require no auth.",
   operation_id="getConnectionOptions",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
@@ -121,7 +121,46 @@ async def get_connection_options(
       )
     )
 
-  # External integration provider (source-namespace registration)
+  # Plaid bank feed — the aggregator feed, one connection per bank login.
+  if env.CONNECTION_PLAID_ENABLED:
+    providers.append(
+      ConnectionProviderInfo(
+        provider="plaid",
+        display_name="Bank account (Plaid)",
+        description=(
+          "Capture every posted transaction from nearly any US bank or card "
+          "into the ledger inbox with an account suggestion attached. A bank "
+          "feed is native accounting: it needs a chart of accounts and cannot "
+          "sit beside a live QuickBooks connection."
+        ),
+        auth_type="link",
+        auth_flow=(
+          "Plaid Link — sign in to your bank inside the app and choose the "
+          "accounts to share (read-only). One connection per bank login."
+        ),
+        required_config=[],
+        optional_config=["since_date"],
+        features=[
+          "bank_transactions",
+          "internal_transfers",
+          "credit_card",
+          "tier0_suggestions",
+          "multi_institution",
+        ],
+        sync_frequency="On-demand; each sync continues from the last one",
+        data_types=["Accounts", "Transactions", "Cards"],
+        setup_instructions=(
+          "Initialize a chart of accounts first (or sever a QuickBooks "
+          "connection to keep its chart), then click 'Connect' and sign in to "
+          "your bank through Plaid. Each account you share is linked to a "
+          "chart account by name, or one is added for it. Connect each bank "
+          "login separately."
+        ),
+        documentation_url="https://plaid.com/how-we-handle-data/",
+      )
+    )
+
+    # External integration provider (source-namespace registration)
   if env.CONNECTION_EXTERNAL_ENABLED:
     providers.append(
       ConnectionProviderInfo(

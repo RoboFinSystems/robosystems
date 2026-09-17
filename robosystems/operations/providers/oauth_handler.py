@@ -91,7 +91,13 @@ class OAuthState:
     return f"{_STATE_KEY_PREFIX}{hashlib.sha256(state.encode()).hexdigest()}"
 
   @classmethod
-  def create(cls, connection_id: str, user_id: str, redirect_uri: str) -> str:
+  def create(
+    cls,
+    connection_id: str,
+    user_id: str,
+    redirect_uri: str,
+    ttl_seconds: int = STATE_TTL_SECONDS,
+  ) -> str:
     """Mint a state token and record what the callback should resume.
 
     Raises if the store is unreachable: a flow whose state was never
@@ -105,12 +111,12 @@ class OAuthState:
       "user_id": user_id,
       "redirect_uri": redirect_uri,
       "created_at": now.isoformat(),
-      "expires_at": (now + timedelta(seconds=STATE_TTL_SECONDS)).isoformat(),
+      "expires_at": (now + timedelta(seconds=ttl_seconds)).isoformat(),
     }
 
     try:
       client = create_redis_client(ValkeyDatabase.AUTH)
-      client.setex(cls._key(state), STATE_TTL_SECONDS, json.dumps(payload))
+      client.setex(cls._key(state), ttl_seconds, json.dumps(payload))
     except Exception as exc:
       logger.error(f"Failed to persist OAuth state: {exc}")
       raise HTTPException(

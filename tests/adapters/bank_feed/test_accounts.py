@@ -221,3 +221,24 @@ class TestHelpers:
   def test_build_chart_index_without_chart_is_empty(self):
     with patch(f"{MODULE}.active_chart_id", return_value=None):
       assert build_chart_index(MagicMock()).resolve("cash") is None
+
+
+@pytest.mark.unit
+def test_another_providers_link_does_not_claim_the_account():
+  mercury_linked = _element(
+    "e1",
+    "Operating cash",
+    metadata={BANK_FEED_KEY: {"provider": "mercury", "account_id": "acct_1"}},
+  )
+  created = _element("e2", "Mercury Checking ••1234", qname="coa:MercuryChecking1234")
+  session = _Session([mercury_linked], [created])
+  with (
+    patch(f"{MODULE}.active_chart_id", return_value="tax_1"),
+    patch(f"{MODULE}.update_chart_block") as update,
+  ):
+    result = link_bank_accounts(
+      session, [_checking()], provider="plaid", connection_id="conn_2", created_by="u"
+    )
+  assert (result.linked, result.created) == (0, 1)
+  link = update.call_args.args[1].elements_to_add[0].metadata[BANK_FEED_KEY]
+  assert link["provider"] == "plaid" and link["institution"] == "Mercury"

@@ -108,6 +108,9 @@ function create_production_secret() {
         "MERCURY_CLIENT_ID": "your_mercury_production_client_id",
         "MERCURY_CLIENT_SECRET": "your_mercury_production_client_secret_here",
         "MERCURY_ENVIRONMENT": "production",
+        "PLAID_CLIENT_ID": "your_plaid_client_id",
+        "PLAID_SECRET": "your_plaid_production_secret_here",
+        "PLAID_ENVIRONMENT": "production",
         "SEC_GOV_USER_AGENT": "YourCompany/1.0 (your-email@example.com)",
         "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
         "STRIPE_SECRET_KEY": "sk_live_your_stripe_secret_key_here",
@@ -167,6 +170,9 @@ function create_staging_secret() {
         "MERCURY_CLIENT_ID": "your_mercury_sandbox_client_id",
         "MERCURY_CLIENT_SECRET": "your_mercury_sandbox_client_secret_here",
         "MERCURY_ENVIRONMENT": "sandbox",
+        "PLAID_CLIENT_ID": "your_plaid_client_id",
+        "PLAID_SECRET": "your_plaid_sandbox_secret_here",
+        "PLAID_ENVIRONMENT": "sandbox",
         "SEC_GOV_USER_AGENT": "YourCompany-Staging/1.0 (your-email@example.com)",
         "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
         "STRIPE_SECRET_KEY": "sk_test_your_stripe_test_secret_key_here",
@@ -238,6 +244,7 @@ function create_ssm_feature_flags() {
         "CONNECTION_EXTERNAL_ENABLED=true"
         "CONNECTION_MERCURY_ENABLED=false"
         "MERCURY_API_KEY_CONNECTIONS_ENABLED=false"
+        "CONNECTION_PLAID_ENABLED=false"
         "SEMANTIC_MEMORY_ENABLED=false"
         "MCP_GRAPHQL_ENABLED=true"
         "OPERATOR_POST_ENABLED=true"

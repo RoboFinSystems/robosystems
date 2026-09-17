@@ -29,6 +29,7 @@ def _make_mock_env(
   external_enabled: bool = True,
   mercury_enabled: bool = False,
   mercury_api_key_enabled: bool = False,
+  plaid_enabled: bool = False,
 ):
   """Create a mock env object with connection feature flags."""
   mock_env = MagicMock()
@@ -36,6 +37,7 @@ def _make_mock_env(
   mock_env.CONNECTION_EXTERNAL_ENABLED = external_enabled
   mock_env.CONNECTION_MERCURY_ENABLED = mercury_enabled
   mock_env.MERCURY_API_KEY_CONNECTIONS_ENABLED = mercury_api_key_enabled
+  mock_env.CONNECTION_PLAID_ENABLED = plaid_enabled
   return mock_env
 
 
@@ -397,3 +399,32 @@ class TestMercuryOption:
     assert MERCURY_PARTNER_URL == "https://mercury.com/partner/robosystems"
     assert mercury.documentation_url == MERCURY_PARTNER_URL
     assert MERCURY_PARTNER_URL in (mercury.setup_instructions or "")
+
+
+# ---------------------------------------------------------------------------
+# Plaid — the aggregator bank feed, authorized in Link
+# ---------------------------------------------------------------------------
+
+
+class TestPlaidOption:
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_plaid_absent_when_disabled(self):
+    with patch(f"{OPTIONS_MODULE}.env", _make_mock_env(plaid_enabled=False)):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID, current_user=_make_mock_user(), _rate_limit=None
+      )
+    assert "plaid" not in [p.provider for p in result.providers]
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_plaid_authorizes_in_link(self):
+    with patch(f"{OPTIONS_MODULE}.env", _make_mock_env(plaid_enabled=True)):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID, current_user=_make_mock_user(), _rate_limit=None
+      )
+    plaid = next(p for p in result.providers if p.provider == "plaid")
+    assert plaid.auth_type == "link"
+    assert plaid.required_config == []
+    assert plaid.optional_config == ["since_date"]
+    assert "multi_institution" in plaid.features

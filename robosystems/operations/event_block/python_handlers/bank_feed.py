@@ -1,6 +1,6 @@
 """Bank-feed event handlers — post a classified bank line.
 
-A bank feed (Mercury today) captures every posted transaction as an event
+A bank feed (Mercury, Plaid) captures every posted transaction as an event
 with the bank leg on ``resource_element_id`` and a Tier-0 suggestion on
 ``metadata.suggested_element_id``. Nothing posts at capture: the inbox is
 where a person, or Claude over MCP, chooses the account. This module is

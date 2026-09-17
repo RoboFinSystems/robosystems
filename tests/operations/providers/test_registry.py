@@ -15,10 +15,11 @@ def _make_mock_env(
   quickbooks_enabled=True,
   external_enabled=False,
   mercury_enabled=False,
+  plaid_enabled=False,
 ):
   """Create a mock env object with connection feature flags.
 
-  ``external_enabled`` and ``mercury_enabled`` default False so the
+  ``external_enabled``, ``mercury_enabled`` and ``plaid_enabled`` default False so the
   pre-external assertions (empty registry, provider counts) stay literal;
   provider-specific tests opt in.
   """
@@ -26,6 +27,7 @@ def _make_mock_env(
   mock_env.CONNECTION_QUICKBOOKS_ENABLED = quickbooks_enabled
   mock_env.CONNECTION_EXTERNAL_ENABLED = external_enabled
   mock_env.CONNECTION_MERCURY_ENABLED = mercury_enabled
+  mock_env.CONNECTION_PLAID_ENABLED = plaid_enabled
   # QuickBooks provider needs these
   mock_env.INTUIT_ENVIRONMENT = "sandbox"
   return mock_env
@@ -567,3 +569,28 @@ class TestMercuryProviderRegistration:
       assert not registry.is_enabled("mercury")
       with pytest.raises(ValueError, match="Mercury provider is not enabled"):
         registry.get_provider("mercury")
+
+
+@pytest.mark.unit
+class TestPlaidProviderRegistration:
+  def test_plaid_registered_when_enabled(self):
+    from robosystems.models.api.graphs.connections import PlaidConnectionConfig
+    from robosystems.operations.providers.plaid_provider import (
+      cleanup_plaid_connection,
+      create_plaid_connection,
+      sync_plaid_connection,
+    )
+
+    registry = _build_registry(_make_mock_env(plaid_enabled=True))
+    entry = registry._providers["plaid"]
+    assert entry["create"] is create_plaid_connection
+    assert entry["sync"] is sync_plaid_connection
+    assert entry["cleanup"] is cleanup_plaid_connection
+    assert entry["config_class"] is PlaidConnectionConfig
+    assert registry.is_enabled("plaid")
+
+  def test_plaid_disabled_is_an_actionable_error(self):
+    with _registry_context(_make_mock_env(plaid_enabled=False)) as (registry, _):
+      assert not registry.is_enabled("plaid")
+      with pytest.raises(ValueError, match="Plaid provider is not enabled"):
+        registry.get_provider("plaid")

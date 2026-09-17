@@ -46,6 +46,7 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
         mock_env.CONNECTION_EXTERNAL_ENABLED = False
         mock_env.CONNECTION_MERCURY_ENABLED = False
+        mock_env.CONNECTION_PLAID_ENABLED = False
 
         # Mock ConnectionService to prevent database access in case route matching fails
         with patch(
@@ -74,6 +75,7 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
         mock_env.CONNECTION_EXTERNAL_ENABLED = True
         mock_env.CONNECTION_MERCURY_ENABLED = False
+        mock_env.CONNECTION_PLAID_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -104,6 +106,7 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
         mock_env.CONNECTION_EXTERNAL_ENABLED = False
         mock_env.CONNECTION_MERCURY_ENABLED = False
+        mock_env.CONNECTION_PLAID_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -132,6 +135,7 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
         mock_env.CONNECTION_EXTERNAL_ENABLED = True
         mock_env.CONNECTION_MERCURY_ENABLED = False
+        mock_env.CONNECTION_PLAID_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -163,6 +167,7 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
         mock_env.CONNECTION_EXTERNAL_ENABLED = True
         mock_env.CONNECTION_MERCURY_ENABLED = False
+        mock_env.CONNECTION_PLAID_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -190,6 +195,7 @@ class TestProviderRegistry:
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
       mock_env.CONNECTION_MERCURY_ENABLED = False
+      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
       assert len(registry._providers) == 0
@@ -200,6 +206,7 @@ class TestProviderRegistry:
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = True
       mock_env.CONNECTION_MERCURY_ENABLED = False
+      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
       assert "external" in registry._providers
@@ -211,6 +218,7 @@ class TestProviderRegistry:
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
       mock_env.CONNECTION_MERCURY_ENABLED = False
+      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
       assert "external" not in registry._providers
@@ -222,6 +230,7 @@ class TestProviderRegistry:
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
       mock_env.CONNECTION_MERCURY_ENABLED = False
+      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -236,6 +245,7 @@ class TestProviderRegistry:
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
       mock_env.CONNECTION_MERCURY_ENABLED = False
+      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -250,6 +260,7 @@ class TestProviderRegistry:
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
       mock_env.CONNECTION_MERCURY_ENABLED = False
+      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -265,6 +276,7 @@ class TestProviderRegistry:
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
       mock_env.CONNECTION_MERCURY_ENABLED = False
+      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
       mock_db = MagicMock(spec=Session)
@@ -288,6 +300,7 @@ class TestProviderRegistry:
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
       mock_env.CONNECTION_MERCURY_ENABLED = False
+      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -315,6 +328,7 @@ class TestProviderRegistry:
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
       mock_env.CONNECTION_MERCURY_ENABLED = False
+      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
 

@@ -14,6 +14,7 @@ from ...middleware.otel.metrics import get_endpoint_metrics
 from ...models.api.graphs.connections import (
   ExternalConnectionConfig,
   MercuryConnectionConfig,
+  PlaidConnectionConfig,
   QuickBooksConnectionConfig,
 )
 from .external_provider import (
@@ -25,6 +26,11 @@ from .mercury_provider import (
   cleanup_mercury_connection,
   create_mercury_connection,
   sync_mercury_connection,
+)
+from .plaid_provider import (
+  cleanup_plaid_connection,
+  create_plaid_connection,
+  sync_plaid_connection,
 )
 from .quickbooks_provider import (
   cleanup_quickbooks_connection,
@@ -93,6 +99,15 @@ class ProviderRegistry:
         "config_class": MercuryConnectionConfig,
       }
 
+    # Plaid bank feed — the aggregator feed, one connection per Item
+    if env.CONNECTION_PLAID_ENABLED:
+      self._providers["plaid"] = {
+        "create": create_plaid_connection,
+        "sync": sync_plaid_connection,
+        "cleanup": cleanup_plaid_connection,
+        "config_class": PlaidConnectionConfig,
+      }
+
   def _record_feature_flag_status(self):
     """Emit the flag state once at construction, so dashboards can tell a
     disabled provider from a broken one."""
@@ -102,6 +117,7 @@ class ProviderRegistry:
         ("quickbooks", env.CONNECTION_QUICKBOOKS_ENABLED),
         ("external", env.CONNECTION_EXTERNAL_ENABLED),
         ("mercury", env.CONNECTION_MERCURY_ENABLED),
+        ("plaid", env.CONNECTION_PLAID_ENABLED),
       ]:
         metrics.record_business_event(
           endpoint="provider_registry",
@@ -149,6 +165,11 @@ class ProviderRegistry:
         self._record_disabled_provider_request(provider_lower)
         raise ValueError(
           "Mercury provider is not enabled. Please contact support to enable this connection type."
+        )
+      elif provider_lower == "plaid" and not env.CONNECTION_PLAID_ENABLED:
+        self._record_disabled_provider_request(provider_lower)
+        raise ValueError(
+          "Plaid provider is not enabled. Please contact support to enable this connection type."
         )
       else:
         raise ValueError(f"Unknown provider type: {provider_type}")

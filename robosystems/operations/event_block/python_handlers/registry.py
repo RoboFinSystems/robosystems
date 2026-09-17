@@ -50,7 +50,7 @@ EVENT_BLOCK_PYTHON_REGISTRY: dict[str, EventBlockPythonHandler] = {
   "credit_card_refund": JOURNAL_ENTRY_RECORDED_HANDLER,
   "deposit_received": JOURNAL_ENTRY_RECORDED_HANDLER,
   "inventory_adjusted": JOURNAL_ENTRY_RECORDED_HANDLER,
-  # Bank-feed events (Mercury): captured with a suggestion, posted only once
+  # Bank-feed events (Mercury, Plaid): captured with a suggestion, posted only once
   # classified — the handler builds the entry from the account choice and
   # refuses an unclassified commit.
   **BANK_FEED_HANDLERS,
