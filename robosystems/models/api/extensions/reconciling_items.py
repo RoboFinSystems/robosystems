@@ -140,7 +140,7 @@ class ReconcilingItemPlan(BaseModel):
     ...,
     description=(
       "What resolve would do with no disposition given: restate while every "
-      "affected period is open, catch_up once one is closed."
+      "affected period is open and nothing blocks it, catch_up otherwise."
     ),
   )
   default_posting_date: date | None = Field(

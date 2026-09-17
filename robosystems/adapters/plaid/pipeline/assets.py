@@ -7,9 +7,23 @@ the load commits, so a failed run replays the same window (every write is
 idempotent on the event's natural key).
 
 A full rebuild, or an explicit ``since_date``, drops the cursor and replays
-the Item's whole history. A fresh Item's first pull may not have landed at
-Plaid yet (``NOT_READY``); the asset waits a little, and if it still has
-nothing, finishes without storing a cursor so the next sync starts over.
+the Item's whole history.
+
+Plaid pulls a new Item in two steps: the most recent ~30 days first
+(``INITIAL_UPDATE_COMPLETE``), the rest of the requested history later
+(``HISTORICAL_UPDATE_COMPLETE``), and nothing at all for the first seconds
+(``NOT_READY``). The asset waits for the history, up to a bound. A run that
+still has nothing fails, so the connection never reads as synced with zero
+data. A run that has only the recent window captures it and stores the cursor
+— the rest arrives as ``added`` on a later sync — but leaves the fiscal
+calendar alone: bootstrapping it on 30 days would close every earlier month
+before its transactions arrived, and the closed-period gate would then refuse
+them. The calendar opens on the first run that sees the history complete.
+
+A row that fails to capture is retried, not lost: the cursor is not advanced
+and the run fails naming it, so the next sync replays the same window (the
+rows that did capture are found as existing). ``/transactions/sync`` never
+resends a window on its own.
 
 The body keeps the shared bank-feed discipline (``adapters/bank_feed/sync.py``).
 A login the customer has to repair marks the connection ``needs_reauth`` and
@@ -43,8 +57,9 @@ from robosystems.adapters.bank_feed.sync import (
 
 SOURCE = "plaid"
 SOURCE_LABEL = "Plaid"
-INITIAL_PULL_WAIT_SECONDS = 120
-INITIAL_PULL_POLL_SECONDS = 10
+# How long a run waits for Plaid to finish pulling the Item's history.
+PULL_WAIT_SECONDS = 600
+PULL_POLL_SECONDS = 10
 
 
 class PlaidSyncConfig(BankFeedSyncConfig):
@@ -128,11 +143,13 @@ def _run_plaid_sync(
     accounts_body = client.get_accounts(access_token)
     sync = client.sync_transactions(access_token, cursor)
     waited = 0
-    while not cursor and not sync.ready and waited < INITIAL_PULL_WAIT_SECONDS:
-      context.log.info("Plaid's first pull for this Item has not landed; waiting")
-      time.sleep(INITIAL_PULL_POLL_SECONDS)
-      waited += INITIAL_PULL_POLL_SECONDS
-      sync = client.sync_transactions(access_token, None)
+    while sync.pull_pending and waited < PULL_WAIT_SECONDS:
+      context.log.info(
+        f"Plaid is still pulling this Item's history ({sync.update_status}); waiting"
+      )
+      time.sleep(PULL_POLL_SECONDS)
+      waited += PULL_POLL_SECONDS
+      sync = client.sync_transactions(access_token, cursor)
   except PlaidError as exc:
     if exc.needs_reauth:
       mark_needs_reauth(config.connection_id)
@@ -143,6 +160,21 @@ def _run_plaid_sync(
     raise
   finally:
     client.close()
+
+  if not sync.ready:
+    raise Failure(
+      description=(
+        f"Plaid has not finished this Item's first pull after {waited} s; "
+        "sync again in a few minutes."
+      ),
+      metadata={"plaid_update_status": sync.update_status or ""},
+    )
+  if not sync.history_complete:
+    context.log.warning(
+      f"Plaid's historical pull has not completed ({sync.update_status}): this "
+      "run captures what has landed, the rest arrives on a later sync, and the "
+      "fiscal calendar waits for it"
+    )
 
   institution = str(
     credentials.get("institution_name")
@@ -179,7 +211,25 @@ def _run_plaid_sync(
     )
     session.commit()
 
-  cursor_stored = bool(sync.ready and sync.next_cursor)
+  if report.events_failed:
+    # The rows that captured are committed; the cursor stays where it was so
+    # the next run replays this window and tries the failed rows again.
+    mark_graph_stale(context, config, source_label=SOURCE_LABEL)
+    for error in report.errors:
+      context.log.warning(f"Capture failed: {error}")
+    raise Failure(
+      description=(
+        f"{report.events_failed} of this window's transactions failed to "
+        "capture; the cursor was not advanced, so the next sync retries them. "
+        f"First: {report.errors[0] if report.errors else 'no detail'}"
+      ),
+      metadata={
+        "events_failed": report.events_failed,
+        "events_captured": report.events_created,
+      },
+    )
+
+  cursor_stored = bool(sync.next_cursor)
   if cursor_stored:
     store_cursor(config.connection_id, sync.next_cursor)
 
@@ -206,13 +256,19 @@ def _run_plaid_sync(
       "accounts_created": link_result.created,
     },
     "source_status": sync.update_status,
+    "history_complete": sync.history_complete,
     "cursor_stored": cursor_stored,
     "errors": list(report.errors[:10]),
   }
   update_last_sync(context, config, summary)
-  bootstrap_fiscal_calendar_if_needed(
-    context, config, report.earliest_occurred_at, source_label=SOURCE_LABEL
-  )
+  if sync.history_complete:
+    bootstrap_fiscal_calendar_if_needed(
+      context, config, report.earliest_occurred_at, source_label=SOURCE_LABEL
+    )
+  else:
+    context.log.info(
+      "Fiscal calendar bootstrap deferred until Plaid's historical pull completes"
+    )
   mark_graph_stale(context, config, source_label=SOURCE_LABEL)
 
   return MaterializeResult(
@@ -227,6 +283,7 @@ def _run_plaid_sync(
       "events_removed": report.events_removed,
       "transfers_matched": report.transfers_matched,
       "events_failed": report.events_failed,
+      "history_complete": sync.history_complete,
       "cursor_stored": cursor_stored,
     }
   )

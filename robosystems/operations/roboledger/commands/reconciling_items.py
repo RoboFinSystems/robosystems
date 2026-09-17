@@ -318,6 +318,22 @@ def _restate_blockers(
       "is 'fulfilled' — resolve it as catch_up, or correct the payload's status"
     )
 
+  # Restate regenerates the rows from the accepted payload. A payload with no
+  # entry in it — the source retracted the line, or the line was posted
+  # through a rule the feed could not re-plan — has nothing to regenerate to,
+  # and the handler would rebuild the old rows from the event's own columns.
+  if not _entry_specs(accepted):
+    if accepted.get("source_removed"):
+      blockers.append(
+        "the source retracted this line — restate would recreate it; catch up "
+        "reverses it"
+      )
+    else:
+      blockers.append(
+        "the accepted payload carries no entry to restate to — catch up posts "
+        "the difference"
+      )
+
   closed = _closed_period_names(session, [e.posting_date for e in entries])
   if closed:
     blockers.append(
@@ -546,7 +562,8 @@ def _plan_with_stamp(
     drift_detected_at=drift_detected_at
     if isinstance(drift_detected_at, datetime)
     else None,
-    default_disposition="catch_up" if closed_periods else "restate",
+    # Never default to a disposition the plan already knows is blocked.
+    default_disposition="catch_up" if (closed_periods or blockers) else "restate",
     default_posting_date=_default_catch_up_date(session, graph_id),
     affected_posting_dates=posting_dates,
     closed_periods=closed_periods,

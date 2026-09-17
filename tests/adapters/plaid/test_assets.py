@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,6 +12,8 @@ from dagster import Failure, MaterializeResult, build_asset_context
 from robosystems.adapters.bank_feed.sync import default_backfill_start
 from robosystems.adapters.plaid.client import PlaidError, TransactionsSync
 from robosystems.adapters.plaid.pipeline.assets import (
+  PULL_POLL_SECONDS,
+  PULL_WAIT_SECONDS,
   PlaidSyncConfig,
   get_dagster_components,
   plaid_feed,
@@ -130,53 +133,115 @@ class TestBody:
     mark.assert_not_called()
 
   def test_the_cursor_advances_only_when_plaid_was_ready(self):
-    from robosystems.adapters.plaid.pipeline.assets import _run_plaid_sync
-
-    client = MagicMock()
-    client.get_accounts.return_value = {"accounts": [], "item": {}}
-    client.sync_transactions.return_value = TransactionsSync(
-      next_cursor="c9", update_status="HISTORICAL_UPDATE_COMPLETE"
-    )
-    session = MagicMock()
-    extensions = MagicMock()
-    extensions.return_value.__enter__.return_value = session
-    link_result = MagicMock(links={}, linked=0, created=0)
-    report = MagicMock(
-      events_created=0,
-      events_existing=0,
-      events_updated=0,
-      events_removed=0,
-      transfers_matched=0,
-      events_failed=0,
-      errors=[],
-      earliest_occurred_at=None,
-    )
-    report.as_counts.return_value = {}
-    with (
-      patch(
-        f"{MODULE}.load_credentials",
-        return_value={"access_token": "access-1", "cursor": "c8", "item_id": "i1"},
-      ),
-      patch(
-        "robosystems.operations.providers.plaid_provider.plaid_client",
-        return_value=client,
-      ),
-      patch("robosystems.db.extensions.extensions_session", extensions),
-      patch(
-        "robosystems.adapters.bank_feed.accounts.link_bank_accounts",
-        return_value=link_result,
-      ),
-      patch("robosystems.adapters.bank_feed.accounts.build_chart_index"),
-      patch("robosystems.adapters.plaid.pipeline.load.load_sync", return_value=report),
-      patch(f"{MODULE}.store_cursor") as store,
-      patch(f"{MODULE}.update_last_sync") as update,
-      patch(f"{MODULE}.bootstrap_fiscal_calendar_if_needed"),
-      patch(f"{MODULE}.mark_graph_stale"),
-    ):
-      _run_plaid_sync(build_asset_context(), _config())
-    client.sync_transactions.assert_called_once_with("access-1", "c8")
-    store.assert_called_once_with("conn_1", "c9")
-    session.commit.assert_called_once()
-    summary = update.call_args.args[2]
+    run = _run_body([_sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9")])
+    run.client.sync_transactions.assert_called_once_with("access-1", "c8")
+    run.store.assert_called_once_with("conn_1", "c9")
+    run.session.commit.assert_called_once()
+    summary = run.update.call_args.args[2]
     assert summary["cursor_stored"] is True
+    assert summary["history_complete"] is True
     assert summary["window"]["full_rebuild"] is False
+    run.bootstrap.assert_called_once()
+
+  def test_the_body_waits_for_the_historical_pull(self):
+    run = _run_body(
+      [
+        _sync("NOT_READY"),
+        _sync("INITIAL_UPDATE_COMPLETE", next_cursor="c1"),
+        _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c2"),
+      ]
+    )
+    assert run.client.sync_transactions.call_count == 3
+    assert run.clock.sleep.call_count == 2
+    run.store.assert_called_once_with("conn_1", "c2")
+    run.bootstrap.assert_called_once()
+
+  def test_a_first_pull_still_empty_after_the_wait_fails_and_writes_nothing(self):
+    run = _run_body(lambda *args: _sync("NOT_READY"), expect=Failure)
+    assert "has not finished" in str(run.error)
+    polls = PULL_WAIT_SECONDS // PULL_POLL_SECONDS + 1
+    assert run.client.sync_transactions.call_count == polls
+    run.session.commit.assert_not_called()
+    run.store.assert_not_called()
+    run.update.assert_not_called()
+
+  def test_a_partial_history_is_captured_but_the_calendar_waits(self):
+    run = _run_body(lambda *args: _sync("INITIAL_UPDATE_COMPLETE", next_cursor="c1"))
+    run.session.commit.assert_called_once()
+    run.store.assert_called_once_with("conn_1", "c1")
+    run.bootstrap.assert_not_called()
+    assert run.update.call_args.args[2]["history_complete"] is False
+
+  def test_failed_captures_hold_the_cursor_and_fail_the_run(self):
+    run = _run_body(
+      [_sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9")],
+      failed=2,
+      errors=["plaid_txn_x: boom"],
+      expect=Failure,
+    )
+    assert "failed to capture" in str(run.error) and "plaid_txn_x" in str(run.error)
+    run.session.commit.assert_called_once()  # the rows that captured are kept
+    run.store.assert_not_called()
+    run.update.assert_not_called()
+    run.stale.assert_called_once()
+
+
+def _sync(status: str, *, next_cursor: str = "") -> TransactionsSync:
+  return TransactionsSync(next_cursor=next_cursor, update_status=status)
+
+
+def _run_body(syncs, *, failed=0, errors=(), expect=None):
+  """Run the body against a mocked Plaid client and tenant session.
+
+  ``syncs`` is the sequence ``sync_transactions`` answers, or a callable that
+  answers every call; the clock is stubbed so the wait loop runs at once.
+  """
+  from robosystems.adapters.plaid.pipeline.assets import _run_plaid_sync
+
+  client = MagicMock()
+  client.get_accounts.return_value = {"accounts": [], "item": {}}
+  client.sync_transactions.side_effect = syncs
+  session = MagicMock()
+  extensions = MagicMock()
+  extensions.return_value.__enter__.return_value = session
+  report = MagicMock(
+    events_created=3,
+    events_existing=0,
+    events_updated=0,
+    events_removed=0,
+    transfers_matched=0,
+    events_failed=failed,
+    errors=list(errors),
+    earliest_occurred_at="2026-08-20T00:00:00Z",
+  )
+  report.as_counts.return_value = {}
+  run = SimpleNamespace(client=client, session=session, error=None, result=None)
+  credentials = {"access_token": "access-1", "cursor": "c8", "item_id": "i1"}
+  with (
+    patch(f"{MODULE}.load_credentials", return_value=credentials),
+    patch(
+      "robosystems.operations.providers.plaid_provider.plaid_client",
+      return_value=client,
+    ),
+    patch("robosystems.db.extensions.extensions_session", extensions),
+    patch(
+      "robosystems.adapters.bank_feed.accounts.link_bank_accounts",
+      return_value=MagicMock(links={}, linked=0, created=0),
+    ),
+    patch("robosystems.adapters.bank_feed.accounts.build_chart_index"),
+    patch("robosystems.adapters.plaid.pipeline.load.load_sync", return_value=report),
+    patch(f"{MODULE}.time") as clock,
+    patch(f"{MODULE}.store_cursor") as store,
+    patch(f"{MODULE}.update_last_sync") as update,
+    patch(f"{MODULE}.bootstrap_fiscal_calendar_if_needed") as bootstrap,
+    patch(f"{MODULE}.mark_graph_stale") as stale,
+  ):
+    run.clock, run.store, run.update = clock, store, update
+    run.bootstrap, run.stale = bootstrap, stale
+    if expect is None:
+      run.result = _run_plaid_sync(build_asset_context(), _config())
+    else:
+      with pytest.raises(expect) as excinfo:
+        _run_plaid_sync(build_asset_context(), _config())
+      run.error = excinfo.value
+  return run
