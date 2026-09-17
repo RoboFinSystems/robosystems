@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
 
@@ -16,10 +16,13 @@ from robosystems.adapters.plaid.pipeline.load import (
   _flag_removed,
   _merge_into_pair,
   apply_removed,
+  find_waiting_leg,
   load_sync,
   merge_legs,
   reconcile_existing,
+  reconcile_pairs,
   rekey_replaced_events,
+  settle_with_counterpart,
   survivor_payload,
 )
 from robosystems.adapters.plaid.pipeline.transform import bank_accounts
@@ -218,6 +221,8 @@ class TestRemovals:
         "from_element_id": "e_chk",
         "to_element_id": "e_sav",
         "from_account_name": "Checking",
+        "from_date": "2026-03-17",
+        "to_date": "2026-03-19",
         "bank_description": "ONLINE TRANSFER",
       },
     )
@@ -249,6 +254,40 @@ class TestRemovals:
     assert survivor["amount"] == -50000
     assert survivor["resource_element_id"] == "e_chk"
     assert survivor["metadata"]["transfer_candidate"] is True
+    # The outflow keeps its own date, not the pair's later one.
+    assert survivor["occurred_at"] == "2026-03-17T00:00:00Z"
+
+  def test_a_posted_pair_losing_a_leg_releases_the_survivor(self):
+    pair = _pair(status="committed")
+    report = PlaidLoadReport()
+    with (
+      patch(f"{MODULE}.existing_events", return_value={}),
+      patch(f"{MODULE}.pair_events_by_leg", return_value={"t_xfer_in": pair}),
+      patch(f"{MODULE}._delete_events") as delete,
+      patch(f"{MODULE}.capture_event") as capture,
+    ):
+      consumed = apply_removed(
+        _Session(),
+        report,
+        ["t_xfer_in"],
+        graph_id="kg_1",
+        connection_id="conn_1",
+        created_by="usr_1",
+      )
+    assert consumed == set() and report.reconciling_items == 1
+    delete.assert_not_called()
+    # The pair is flagged for reversal and no longer claims the surviving leg.
+    assert pair.payload_drift is True
+    accepted = pair.metadata_["drift_payload"]
+    assert accepted["source_removed"] is True and accepted["legs"] == ["t_xfer_in"]
+    assert accepted["released_legs"] == ["t_xfer_out"]
+    assert pair.metadata_["legs"] == ["t_xfer_in"]
+    assert pair.metadata_["released_legs"] == ["t_xfer_out"]
+    # The leg still real at the bank lives on as its own line, on its own date.
+    survivor = capture.call_args.args[1]
+    assert survivor["external_id"] == "plaid_txn_t_xfer_out"
+    assert survivor["amount"] == -50000
+    assert survivor["occurred_at"] == "2026-03-17T00:00:00Z"
 
   def test_a_pair_that_loses_both_legs_leaves_nothing(self):
     pair = _event(amount=50000, metadata_={"legs": ["x", "y"]})
@@ -494,7 +533,313 @@ class TestLoadSync:
 def test_report_counts_include_the_plaid_outcomes():
   counts = PlaidLoadReport(events_removed=2, transfers_matched=1).as_counts()
   assert counts["events_removed"] == 2 and counts["transfers_matched"] == 1
-  assert {"reconciling_items", "events_captured"} <= set(counts)
+  assert {
+    "reconciling_items",
+    "events_captured",
+    "events_rekeyed",
+    "pairs_dissolved",
+    "legs_voided",
+  } <= set(counts)
+
+
+def _pair(status="captured", **meta):
+  """The fixture's checking → savings pair as the inbox holds it."""
+  return _event(
+    id="evt_pair",
+    status=status,
+    event_type="internal_transfer",
+    amount=50000,
+    occurred_at=datetime(2026, 3, 19),
+    resource_element_id="e_sav",
+    external_id="plaid_xfer_t_xfer_in",
+    description="Transfer Checking to Savings",
+    metadata_={
+      "connection_id": "conn_1",
+      "item_id": ITEM_ID,
+      "legs": ["t_xfer_out", "t_xfer_in"],
+      "from_account_id": CHECKING_ID,
+      "to_account_id": SAVINGS_ID,
+      "from_element_id": "e_chk",
+      "to_element_id": "e_sav",
+      "from_account_name": "Checking",
+      "to_account_name": "Savings",
+      "from_date": "2026-03-17",
+      "to_date": "2026-03-19",
+      "bank_description": "ONLINE TRANSFER FROM CHK 1234",
+      **meta,
+    },
+  )
+
+
+def _legs(**changes):
+  """The pair's two fixture transactions, with ``amount`` / ``date`` overrides
+  keyed by transaction id."""
+  legs = {t["transaction_id"]: t for t in transactions()}
+  out = [legs["t_xfer_out"], legs["t_xfer_in"]]
+  for leg in out:
+    for key, value in changes.get(leg["transaction_id"], {}).items():
+      leg[key] = value
+  return out
+
+
+@pytest.mark.unit
+class TestReconcilePairs:
+  """A modified leg of a pair reconciles the pair, or dissolves it."""
+
+  def _run(self, pair, txns, *, consumed=None):
+    report = PlaidLoadReport()
+    consumed = set() if consumed is None else consumed
+    with patch(f"{MODULE}._delete_events") as delete:
+      released = reconcile_pairs(
+        _Session(),
+        {t["transaction_id"]: pair for t in txns},
+        {t["transaction_id"]: t for t in txns},
+        by_account={
+          a.account_id: a for a in bank_accounts(accounts(), institution=INSTITUTION)
+        },
+        account_elements=ELEMENTS,
+        chart=ChartIndex(),
+        agent_ids={},
+        connection_id="conn_1",
+        item_id=ITEM_ID,
+        report=report,
+        consumed=consumed,
+      )
+    return released, report, delete
+
+  def test_an_unposted_pair_takes_a_change_its_legs_still_share(self):
+    pair = _pair()
+    both = {
+      "t_xfer_out": {"amount": 600.0},
+      "t_xfer_in": {"amount": -600.0, "date": "2026-03-20"},
+    }
+    released, report, delete = self._run(pair, _legs(**both))
+    assert released == [] and report.events_updated == 1
+    delete.assert_not_called()
+    assert pair.amount == 60000
+    assert pair.occurred_at == datetime(2026, 3, 20)
+    assert (pair.metadata_["from_date"], pair.metadata_["to_date"]) == (
+      "2026-03-17",
+      "2026-03-20",
+    )
+
+  def test_an_unchanged_leg_is_existing(self):
+    released, report, delete = self._run(_pair(), _legs())
+    assert released == [] and report.events_existing == 1
+    delete.assert_not_called()
+
+  def test_an_unposted_pair_whose_legs_part_dissolves(self):
+    pair = _pair()
+    consumed: set[str] = set()
+    released, report, delete = self._run(
+      pair, _legs(t_xfer_in={"date": "2026-03-25"}), consumed=consumed
+    )
+    delete.assert_called_once_with(ANY, ["evt_pair"])
+    assert consumed == {"evt_pair"} and report.pairs_dissolved == 1
+    by_id = {p["external_id"]: p for p in released}
+    assert set(by_id) == {"plaid_txn_t_xfer_out", "plaid_txn_t_xfer_in"}
+    # The changed leg from the bank's new record; the other from the pair.
+    assert by_id["plaid_txn_t_xfer_in"]["occurred_at"] == "2026-03-25T00:00:00Z"
+    assert by_id["plaid_txn_t_xfer_in"]["amount"] == 50000
+    assert by_id["plaid_txn_t_xfer_out"]["occurred_at"] == "2026-03-17T00:00:00Z"
+    assert by_id["plaid_txn_t_xfer_out"]["amount"] == -50000
+    for payload in released:
+      assert payload["event_type"] == "external_transfer"
+      assert payload["metadata"]["transfer_candidate"] is True
+
+  def test_a_posted_pair_whose_legs_moved_together_is_a_reconciling_item(self):
+    pair = _pair(status="committed")
+    both = {"t_xfer_out": {"amount": 600.0}, "t_xfer_in": {"amount": -600.0}}
+    released, report, delete = self._run(pair, _legs(**both))
+    assert released == [] and report.reconciling_items == 1
+    delete.assert_not_called()
+    assert pair.payload_drift is True and pair.amount == 50000  # books untouched
+    accepted = pair.metadata_["drift_payload"]
+    assert accepted["source_amount"] == 60000
+    assert accepted["source_posted_date"] == "2026-03-19"
+    assert [leg["amount"] for leg in accepted["source_legs"]] == [-60000, 60000]
+    assert accepted["posting_date"] == "2026-03-19"
+    assert accepted["line_items"] == [
+      {"element_id": "e_sav", "debit_amount": 60000, "credit_amount": 0},
+      {"element_id": "e_chk", "debit_amount": 0, "credit_amount": 60000},
+    ]
+
+  def test_a_posted_pair_whose_legs_part_is_reversed_and_releases_both(self):
+    pair = _pair(status="committed")
+    released, report, delete = self._run(pair, _legs(t_xfer_out={"amount": 450.0}))
+    delete.assert_not_called()
+    assert report.reconciling_items == 1 and report.pairs_dissolved == 1
+    accepted = pair.metadata_["drift_payload"]
+    assert accepted["pair_dissolved"] is True and "line_items" not in accepted
+    assert accepted["legs"] == [] and pair.metadata_["legs"] == []
+    assert set(accepted["released_legs"]) == {"t_xfer_out", "t_xfer_in"}
+    assert {p["external_id"] for p in released} == {
+      "plaid_txn_t_xfer_out",
+      "plaid_txn_t_xfer_in",
+    }
+    out = next(p for p in released if p["external_id"] == "plaid_txn_t_xfer_out")
+    assert out["amount"] == -45000
+
+  def test_a_change_already_raised_is_not_raised_again(self):
+    pair = _pair(status="committed")
+    pair.payload_drift = True
+    pair.metadata_["drift_payload"] = {
+      "source_legs": [
+        {"transaction_id": "t_xfer_out", "amount": -60000, "date": "2026-03-17"},
+        {"transaction_id": "t_xfer_in", "amount": 60000, "date": "2026-03-19"},
+      ]
+    }
+    both = {"t_xfer_out": {"amount": 600.0}, "t_xfer_in": {"amount": -600.0}}
+    released, report, _delete = self._run(pair, _legs(**both))
+    assert released == [] and report.events_existing == 1
+    assert report.reconciling_items == 0
+
+
+class _QuerySession(_Session):
+  def __init__(self, rows):
+    super().__init__()
+    self.rows = rows
+
+  def execute(self, _statement):
+    rows = self.rows
+    return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: rows))
+
+
+@pytest.mark.unit
+class TestCounterparts:
+  """The other side of a leg is already on the graph."""
+
+  def _other(self, status, contra="e_sav", **meta):
+    return _event(
+      id="evt_other",
+      status=status,
+      event_type="external_transfer",
+      amount=-50000,
+      occurred_at=datetime(2026, 3, 17),
+      resource_element_id="e_chk",
+      external_id="plaid_txn_t_out",
+      metadata_={
+        "connection_id": "conn_1",
+        "transaction_id": "t_out",
+        "account_id": CHECKING_ID,
+        "account_name": "Checking",
+        "transfer_candidate": True,
+        **({"classified_element_id": contra} if contra else {}),
+        **meta,
+      },
+    )
+
+  def _incoming(self):
+    return {
+      "external_id": "plaid_txn_t_in",
+      "event_type": "external_transfer",
+      "amount": 50000,
+      "occurred_at": "2026-03-19T00:00:00Z",
+      "resource_element_id": "e_sav",
+      "metadata": {
+        "connection_id": "conn_1",
+        "transaction_id": "t_in",
+        "account_id": SAVINGS_ID,
+        "account_name": "Savings",
+        "transfer_candidate": True,
+      },
+    }
+
+  def _settle(self, other, payload=None, **patches):
+    payload = payload or self._incoming()
+    report = PlaidLoadReport()
+    consumed: set[str] = set()
+    with (
+      patch(f"{MODULE}._merge_into_pair", return_value=True) as merge,
+      patch(f"{MODULE}.capture_event", return_value=True) as capture,
+      patch(
+        f"{MODULE}.existing_events",
+        return_value={
+          "plaid_txn_t_in": _event(id="evt_new", external_id="plaid_txn_t_in")
+        },
+      ),
+      patch("robosystems.operations.event_block.commands.update_event_block") as void,
+    ):
+      handled = settle_with_counterpart(
+        _Session(),
+        other,
+        payload,
+        graph_id="kg_1",
+        connection_id="conn_1",
+        item_id=ITEM_ID,
+        created_by="usr_1",
+        report=report,
+        consumed=consumed,
+      )
+    return SimpleNamespace(
+      handled=handled,
+      payload=payload,
+      report=report,
+      consumed=consumed,
+      merge=merge,
+      capture=capture,
+      void=void,
+    )
+
+  def test_a_captured_leg_merges(self):
+    run = self._settle(self._other("captured", contra=None))
+    assert run.handled and run.consumed == {"evt_other"}
+    run.merge.assert_called_once()
+    run.capture.assert_not_called()
+
+  def test_a_leg_classified_to_this_legs_bank_account_merges(self):
+    run = self._settle(self._other("classified", contra="e_sav"))
+    assert run.handled and run.merge.call_count == 1
+
+  def test_a_leg_classified_elsewhere_leaves_this_one_to_the_operator(self):
+    run = self._settle(self._other("classified", contra="e_draw"))
+    assert not run.handled
+    run.merge.assert_not_called()
+    run.capture.assert_not_called()  # the main loop captures it
+    metadata = run.payload["metadata"]
+    assert metadata["counterpart_event_id"] == "evt_other"
+    assert metadata["counterpart_status"] == "classified"
+    assert metadata["classification_source"] == "counterpart"
+
+  def test_a_leg_posted_to_this_legs_bank_account_voids_this_one(self):
+    run = self._settle(self._other("committed", contra="e_sav"))
+    assert run.handled and run.report.legs_voided == 1
+    run.merge.assert_not_called()
+    run.capture.assert_called_once()
+    body = run.void.call_args.args[1]
+    assert body.event_id == "evt_new" and body.transition_to == "voided"
+    assert "evt_other" in body.metadata_patch["voided_reason"]
+    assert run.void.call_args.kwargs["graph_id"] == "kg_1"
+
+  def test_a_leg_posted_elsewhere_or_through_a_rule_is_captured_with_its_counterpart(
+    self,
+  ):
+    for other in (
+      self._other("fulfilled", contra="e_draw"),
+      self._other("committed", contra=None),
+    ):
+      run = self._settle(other)
+      assert not run.handled
+      run.void.assert_not_called()
+      assert run.payload["metadata"]["counterpart_event_id"] == "evt_other"
+
+  def test_a_still_captured_leg_outranks_a_closer_posted_one(self):
+    posted = _event(
+      id="evt_posted", status="committed", occurred_at=datetime(2026, 3, 19)
+    )
+    captured = _event(
+      id="evt_captured", status="captured", occurred_at=datetime(2026, 3, 16)
+    )
+    classified = _event(
+      id="evt_classified", status="classified", occurred_at=datetime(2026, 3, 18)
+    )
+    found = find_waiting_leg(
+      _QuerySession([posted, classified, captured]),
+      self._incoming(),
+      connection_id="conn_1",
+      consumed=set(),
+    )
+    assert found is captured
 
 
 @pytest.mark.unit

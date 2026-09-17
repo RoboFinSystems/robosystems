@@ -13,6 +13,7 @@ from robosystems.adapters.plaid.pipeline.transform import (
   bank_accounts,
   cents,
   counterparties,
+  is_transfer_candidate,
   pair_legs,
   transform,
 )
@@ -26,6 +27,7 @@ from tests.adapters.plaid.fixtures import (
   SAVINGS_ID,
   accounts,
   transactions,
+  txn,
 )
 
 ELEMENTS = {CHECKING_ID: "e_chk", SAVINGS_ID: "e_sav", CARD_ID: "e_card"}
@@ -185,8 +187,58 @@ class TestTransform:
     meta = pair["metadata"]
     assert (meta["from_element_id"], meta["to_element_id"]) == ("e_chk", "e_sav")
     assert meta["legs"] == ["t_xfer_out", "t_xfer_in"]
+    # Each leg keeps its own date, for the leg that outlives the pair.
+    assert (meta["from_date"], meta["to_date"]) == ("2026-03-17", "2026-03-19")
     assert meta["item_id"] == ITEM_ID
     assert "plaid_txn_t_xfer_out" not in events
+
+  @pytest.mark.parametrize(
+    ("primary", "detailed", "candidate"),
+    [
+      ("TRANSFER_IN", "TRANSFER_IN_DEPOSIT", False),
+      ("TRANSFER_OUT", "TRANSFER_OUT_WITHDRAWAL", False),
+      ("TRANSFER_IN", "TRANSFER_IN_ACCOUNT_TRANSFER", True),
+      ("TRANSFER_OUT", "TRANSFER_OUT_SAVINGS", True),
+      ("LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT", True),
+      ("TRANSFER_OUT", None, True),
+      ("FOOD_AND_DRINK", "FOOD_AND_DRINK_COFFEE", False),
+    ],
+  )
+  def test_only_lines_with_a_visible_other_side_are_transfer_candidates(
+    self, primary, detailed, candidate
+  ):
+    line = {"personal_finance_category": {"primary": primary, "detailed": detailed}}
+    assert is_transfer_candidate(line) is candidate
+
+  def test_a_deposit_and_a_withdrawal_never_pair(self):
+    # A $2,000 check deposited to savings on Monday and $2,000 drawn from
+    # checking at an ATM on Tuesday are two lines, not one transfer.
+    lines = [
+      txn(
+        "t_dep",
+        SAVINGS_ID,
+        -2000.00,
+        "2026-03-16",
+        name="MOBILE CHECK DEPOSIT",
+        primary="TRANSFER_IN",
+        detailed="TRANSFER_IN_DEPOSIT",
+      ),
+      txn(
+        "t_atm",
+        CHECKING_ID,
+        2000.00,
+        "2026-03-17",
+        name="ATM WITHDRAWAL",
+        primary="TRANSFER_OUT",
+        detailed="TRANSFER_OUT_WITHDRAWAL",
+      ),
+    ]
+    events = _by_external_id(_run(transactions=lines))
+    assert set(events) == {"plaid_txn_t_dep", "plaid_txn_t_atm"}
+    for event in events.values():
+      assert event["event_type"] == "bank_transaction"
+      assert "transfer_candidate" not in event["metadata"]
+      assert "suggested_account_name" not in event["metadata"]
 
   def test_a_transfer_with_no_second_leg_is_an_external_transfer_candidate(self):
     draw = _by_external_id(_run())["plaid_txn_t_owner_draw"]

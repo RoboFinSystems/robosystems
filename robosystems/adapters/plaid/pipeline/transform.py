@@ -15,6 +15,9 @@ classification made once. The event types are the bank-feed contract's:
   to an account the feed cannot see: an owner, another entity, a card at
   another bank). It carries no suggestion and is marked a transfer
   candidate, so a leg that posts on a later sync can still pair with it.
+  A cash or check deposit and an ATM or teller withdrawal are not
+  transfer-shaped: nothing the feed can see is their other side, and a
+  customer's check is revenue. They are ordinary ``bank_transaction`` lines.
 
 Pending transactions are deferred, as on every feed: an event is written once,
 when the transaction posts. Plaid retires a pending id when it posts and
@@ -49,6 +52,9 @@ SOURCE = "plaid"
 BOOKED_ACCOUNT_TYPES = frozenset({"depository", "credit"})
 TRANSFER_PRIMARIES = frozenset({"TRANSFER_IN", "TRANSFER_OUT"})
 CARD_PAYMENT = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"
+# Transfer-shaped by primary, but with no other leg any connected account can
+# show: cash and check deposits, ATM and teller withdrawals.
+NOT_A_TRANSFER_DETAILED = frozenset({"TRANSFER_IN_DEPOSIT", "TRANSFER_OUT_WITHDRAWAL"})
 MOVEMENT_PRIMARIES = frozenset({"LOAN_PAYMENTS", "LOAN_DISBURSEMENTS"})
 TREASURY_DETAILED = frozenset({"INCOME_INTEREST_EARNED", "INCOME_DIVIDENDS"})
 TRANSFER_WINDOW_DAYS = 3
@@ -116,7 +122,10 @@ _GENERIC_INSTITUTION_WORDS = re.compile(
 
 
 def is_transfer_candidate(txn: dict[str, Any]) -> bool:
+  """A line whose other side may be on another of the Item's accounts."""
   primary, detailed, _confidence = category(txn)
+  if detailed in NOT_A_TRANSFER_DETAILED:
+    return False
   return primary in TRANSFER_PRIMARIES or detailed == CARD_PAYMENT
 
 
@@ -243,7 +252,8 @@ def _leg_order(leg: Leg) -> tuple[str, str]:
 def transfer_event(
   out_leg: Leg, in_leg: Leg, *, connection_id: str, item_id: str | None
 ) -> dict[str, Any]:
-  """One ``internal_transfer`` for both legs — money arrives on the later date."""
+  """One ``internal_transfer`` for both legs — money arrives on the later
+  date; each leg's own date rides along, for the leg that outlives the pair."""
   from_name = out_leg.account_name or "account"
   to_name = in_leg.account_name or "account"
   later = max(out_leg.day, in_leg.day)
@@ -258,6 +268,8 @@ def transfer_event(
       "to_account_name": in_leg.account_name,
       "from_element_id": out_leg.element_id,
       "to_element_id": in_leg.element_id,
+      "from_date": out_leg.day,
+      "to_date": in_leg.day,
       "legs": [out_leg.transaction_id, in_leg.transaction_id],
       "bank_description": in_leg.description or out_leg.description,
       "classification_source": "transfer",
