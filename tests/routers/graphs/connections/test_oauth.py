@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from robosystems.operations.providers.types import SyncOutcome
 from robosystems.routers.graphs.connections.oauth import init_oauth, oauth_callback
 
 OAUTH_MODULE = "robosystems.routers.graphs.connections.oauth"
@@ -351,10 +350,7 @@ class TestOAuthCallback:
     )
     mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
 
-    mock_provider_registry = MagicMock()
-    mock_provider_registry.sync_connection = AsyncMock(
-      return_value=SyncOutcome(status="dispatched", task_id="task_123")
-    )
+    sync_mock = AsyncMock(return_value="task_123")
 
     with (
       patch(
@@ -386,7 +382,7 @@ class TestOAuthCallback:
         "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_provider",
         mock_oauth_provider,
       ),
-      patch(f"{OAUTH_MODULE}.provider_registry", mock_provider_registry),
+      patch(f"{OAUTH_MODULE}.dispatch_first_sync", sync_mock),
     ):
       result = await oauth_callback(
         provider="quickbooks",
@@ -447,10 +443,7 @@ class TestOAuthCallback:
     )
     mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
 
-    mock_provider_registry = MagicMock()
-    mock_provider_registry.sync_connection = AsyncMock(
-      return_value=SyncOutcome(status="dispatched", task_id="task_revived")
-    )
+    sync_mock = AsyncMock(return_value="task_revived")
 
     with (
       patch(
@@ -483,7 +476,7 @@ class TestOAuthCallback:
         "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_provider",
         mock_oauth_provider,
       ),
-      patch(f"{OAUTH_MODULE}.provider_registry", mock_provider_registry),
+      patch(f"{OAUTH_MODULE}.dispatch_first_sync", sync_mock),
     ):
       result = await oauth_callback(
         provider="quickbooks",
@@ -536,8 +529,7 @@ class TestOAuthCallback:
     mock_oauth_provider.extract_provider_data = MagicMock(
       return_value={"realm_id": "9341452700148642"}
     )
-    mock_provider_registry = MagicMock()
-    mock_provider_registry.sync_connection = AsyncMock()
+    sync_mock = AsyncMock()
 
     with (
       patch(
@@ -567,7 +559,7 @@ class TestOAuthCallback:
         "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_provider",
         mock_oauth_provider,
       ),
-      patch(f"{OAUTH_MODULE}.provider_registry", mock_provider_registry),
+      patch(f"{OAUTH_MODULE}.dispatch_first_sync", sync_mock),
     ):
       with pytest.raises(HTTPException) as exc_info:
         await oauth_callback(
@@ -580,7 +572,7 @@ class TestOAuthCallback:
         )
 
     assert exc_info.value.status_code == 404
-    mock_provider_registry.sync_connection.assert_not_called()
+    sync_mock.assert_not_called()
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -914,11 +906,7 @@ class TestOAuthCallback:
     )
     mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
 
-    mock_provider_registry = MagicMock()
-    sync_mock = AsyncMock(
-      return_value=SyncOutcome(status="dispatched", task_id="task_sync_999")
-    )
-    mock_provider_registry.sync_connection = sync_mock
+    sync_mock = AsyncMock(return_value="task_sync_999")
 
     with (
       patch(
@@ -935,6 +923,11 @@ class TestOAuthCallback:
         new_callable=AsyncMock,
       ),
       patch(
+        "robosystems.models.core.connection.connection.Connection."
+        "find_soft_deleted_for_realm",
+        return_value=None,
+      ),
+      patch(
         "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_handler",
         mock_oauth_handler,
       ),
@@ -942,7 +935,7 @@ class TestOAuthCallback:
         "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_provider",
         mock_oauth_provider,
       ),
-      patch(f"{OAUTH_MODULE}.provider_registry", mock_provider_registry),
+      patch(f"{OAUTH_MODULE}.dispatch_first_sync", sync_mock),
     ):
       result = await oauth_callback(
         provider="quickbooks",
@@ -954,7 +947,10 @@ class TestOAuthCallback:
       )
 
     sync_mock.assert_awaited_once_with(
-      "quickbooks", connection_dict, {"full_rebuild": True}, GRAPH_ID
+      graph_id=GRAPH_ID,
+      connection_id=CONNECTION_ID,
+      user_id=USER_ID,
+      full_rebuild=True,
     )
     assert result["auto_sync_task_id"] == "task_sync_999"
 
@@ -995,11 +991,7 @@ class TestOAuthCallback:
     )
     mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
 
-    mock_provider_registry = MagicMock()
-    sync_mock = AsyncMock(
-      return_value=SyncOutcome(status="dispatched", task_id="task_sync_resync")
-    )
-    mock_provider_registry.sync_connection = sync_mock
+    sync_mock = AsyncMock(return_value="task_sync_resync")
 
     with (
       patch(
@@ -1016,6 +1008,11 @@ class TestOAuthCallback:
         new_callable=AsyncMock,
       ),
       patch(
+        "robosystems.models.core.connection.connection.Connection."
+        "find_soft_deleted_for_realm",
+        return_value=None,
+      ),
+      patch(
         "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_handler",
         mock_oauth_handler,
       ),
@@ -1023,7 +1020,7 @@ class TestOAuthCallback:
         "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_provider",
         mock_oauth_provider,
       ),
-      patch(f"{OAUTH_MODULE}.provider_registry", mock_provider_registry),
+      patch(f"{OAUTH_MODULE}.dispatch_first_sync", sync_mock),
     ):
       await oauth_callback(
         provider="quickbooks",
@@ -1036,7 +1033,12 @@ class TestOAuthCallback:
 
     # No `full_rebuild` override — subsequent syncs use the default
     # incremental window.
-    sync_mock.assert_awaited_once_with("quickbooks", connection_dict, None, GRAPH_ID)
+    sync_mock.assert_awaited_once_with(
+      graph_id=GRAPH_ID,
+      connection_id=CONNECTION_ID,
+      user_id=USER_ID,
+      full_rebuild=False,
+    )
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -1091,10 +1093,7 @@ class TestOAuthCallback:
     )
     mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
 
-    mock_provider_registry = MagicMock()
-    mock_provider_registry.sync_connection = AsyncMock(
-      return_value=SyncOutcome(status="dispatched", task_id="task_abc")
-    )
+    sync_mock = AsyncMock(return_value="task_abc")
 
     with (
       patch(
@@ -1118,7 +1117,7 @@ class TestOAuthCallback:
         "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_provider",
         mock_oauth_provider,
       ),
-      patch(f"{OAUTH_MODULE}.provider_registry", mock_provider_registry),
+      patch(f"{OAUTH_MODULE}.dispatch_first_sync", sync_mock),
     ):
       await oauth_callback(
         provider="quickbooks",

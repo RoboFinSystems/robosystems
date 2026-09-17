@@ -191,6 +191,18 @@ class TestBody:
     run.store.assert_not_called()
     run.update.assert_not_called()
 
+  def test_plaids_older_not_ready_error_waits_like_the_status(self):
+    run = _run_body(
+      [
+        PlaidError("not yet", code="PRODUCT_NOT_READY"),
+        _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c1", added=3),
+        _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c1"),
+      ],
+      credentials=FIRST_SYNC,
+    )
+    assert run.clock.sleep.call_count == 1
+    run.store.assert_called_once_with("conn_1", "c1", history_complete=True)
+
   def test_a_later_run_rechecks_a_pending_history_only_briefly(self):
     run = _run_body(
       lambda *args: _sync("INITIAL_UPDATE_COMPLETE", next_cursor="c9"),

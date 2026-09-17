@@ -218,8 +218,17 @@ class PlaidClient:
     return self._post("/link/token/create", body)
 
   def exchange_public_token(self, public_token: str) -> dict[str, Any]:
-    """``{access_token, item_id}`` for the public token Link handed back."""
-    return self._post("/item/public_token/exchange", {"public_token": public_token})
+    """``{access_token, item_id}`` for the public token Link handed back.
+
+    Never retried on a transport error: a public token exchanges once, and
+    a retry after a lost response would fail against an Item that now
+    exists with no record of it.
+    """
+    return self._post(
+      "/item/public_token/exchange",
+      {"public_token": public_token},
+      retry_transport=False,
+    )
 
   def get_item(self, access_token: str) -> dict[str, Any]:
     return self._post("/item/get", {"access_token": access_token})
@@ -304,14 +313,16 @@ class PlaidClient:
     if self._owns_http:
       self._http.close()
 
-  def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+  def _post(
+    self, path: str, body: dict[str, Any], *, retry_transport: bool = True
+  ) -> dict[str, Any]:
     for attempt in range(self._max_attempts):
       try:
         response = self._http.post(
           f"{self._base_url}{path}", json={**self._auth, **body}
         )
       except httpx.HTTPError as exc:
-        if attempt < self._max_attempts - 1:
+        if retry_transport and attempt < self._max_attempts - 1:
           self._sleep(float(2**attempt))
           continue
         raise PlaidError(f"Could not reach Plaid ({path}): {exc}") from exc

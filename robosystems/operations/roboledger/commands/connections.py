@@ -7,6 +7,8 @@ tenant goes native, the chart QuickBooks created becomes the tenant's own.
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -74,6 +76,7 @@ BANK_FEED_PAYLOAD_KEYS: frozenset[str] = frozenset(
     "external_memo",
     "from_account_id",
     "from_account_name",
+    "from_date",
     "gl_allocations",
     "item_id",
     "legs",
@@ -87,6 +90,9 @@ BANK_FEED_PAYLOAD_KEYS: frozenset[str] = frozenset(
     "payment_channel",
     "plaid_category_confidence",
     "rekeyed_from",
+    "released_legs",
+    "source_legs",
+    "source_removed_transaction_ids",
     "plaid_category_detailed",
     "plaid_category_primary",
     "split",
@@ -94,12 +100,32 @@ BANK_FEED_PAYLOAD_KEYS: frozenset[str] = frozenset(
     "suggested_account_name",
     "to_account_id",
     "to_account_name",
+    "to_date",
     "transaction_code",
     "transaction_id",
     "website",
   }
 )
 _UNPOSTED_STATUSES: tuple[str, ...] = ("captured", "classified", "voided")
+
+
+def scrub_payload_keys(value: Any) -> Any:
+  """Drop the feed's payload keys wherever they sit in the metadata.
+
+  A reconciling item stashes a whole payload under ``drift_payload`` and a
+  resolution writes the trail under ``reconciliation_history``, so the keys
+  live nested as well as at the top level — and a resolution after the purge
+  would copy a nested payload back into the live metadata.
+  """
+  if isinstance(value, dict):
+    return {
+      k: scrub_payload_keys(v)
+      for k, v in value.items()
+      if k not in BANK_FEED_PAYLOAD_KEYS
+    }
+  if isinstance(value, list):
+    return [scrub_payload_keys(v) for v in value]
+  return value
 
 
 def purge_bank_feed(
@@ -110,8 +136,9 @@ def purge_bank_feed(
   The deletion a bank partnership's data agreement asks for on disconnect:
   events the feed captured that were never posted are hard-deleted (their
   dimension junctions first); events that were accepted into the books keep
-  their accounting content but lose the provider's payload keys and the
-  deep link back to it; counterparties the feed created and nothing
+  their accounting content but lose the provider's payload keys — at the top
+  level and inside any stashed payload or trail — and the deep link back to
+  it; counterparties the feed created and nothing
   references are deleted; the link on the chart accounts the feed linked or
   created is cleared. Flushes; the caller commits.
 
@@ -152,7 +179,7 @@ def purge_bank_feed(
     if str(event.id) in unposted_ids:
       continue
     metadata = dict(event.metadata_ or {})
-    kept = {k: v for k, v in metadata.items() if k not in BANK_FEED_PAYLOAD_KEYS}
+    kept = scrub_payload_keys(metadata)
     if kept != metadata or event.external_url:
       event.metadata_ = kept
       event.external_url = None

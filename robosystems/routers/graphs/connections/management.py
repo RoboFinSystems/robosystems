@@ -166,6 +166,17 @@ async def create_connection(
       existing_connections = [
         c for c in existing_connections if c.get("status") == "pending_oauth"
       ]
+      if existing_connections:
+        from robosystems.operations.providers.plaid_provider import (
+          refresh_pending_window,
+        )
+
+        await refresh_pending_window(
+          existing_connections[0]["connection_id"],
+          request.plaid_config,
+          str(current_user.id),
+          db,
+        )
     if existing_connections:
       existing = existing_connections[0]
       return ConnectionResponse(

@@ -34,7 +34,7 @@ from ...adapters.plaid.client import PlaidClient, PlaidError
 from ...config import env
 from ...logger import logger
 from ...models.api.graphs.connections import PlaidConnectionConfig
-from ...operations.connection_service import ConnectionService
+from ...operations.connection_service import ConnectionService, dispatch_first_sync
 from .bank_feed import (
   purge_bank_feed_connection,
   record_bank_feed_consent,
@@ -121,6 +121,25 @@ async def create_plaid_connection(
   return str(connection_data["connection_id"])
 
 
+async def refresh_pending_window(
+  connection_id: str, config: PlaidConnectionConfig | None, user_id: str, db: Session
+) -> None:
+  """A second create for a row still waiting on Link carries the newer
+  window; an explicit ``since_date`` replaces the one parked on the row."""
+  if config is None or config.since_date is None:
+    return
+  credentials = _credentials(connection_id, db)
+  wanted = _sync_config(config)
+  if credentials.get("sync_config") == wanted:
+    return
+  await ConnectionService.update(
+    connection_id=connection_id,
+    user_id=user_id,
+    credentials={**credentials, "sync_config": wanted},
+    db_session=db,
+  )
+
+
 async def create_link_token(
   connection_id: str, user_id: str, db: Session
 ) -> dict[str, Any]:
@@ -166,9 +185,12 @@ async def complete_plaid_link(
   user_id: str,
   db: Session,
 ) -> dict[str, Any]:
-  """Finish Link: exchange, de-duplicate, store, record the consent, sync."""
-  from .registry import provider_registry
+  """Finish Link: exchange, de-duplicate, store, record the consent, sync.
 
+  The credential is stored before anything else changes: the row turns
+  ``connected`` only once the token is durable, and the Item it replaces is
+  removed at Plaid only after that.
+  """
   credentials = _credentials(connection_id, db)
   prior_access = credentials.get("access_token")
   prior_item = credentials.get("item_id")
@@ -208,8 +230,6 @@ async def complete_plaid_link(
       if duplicate is not None:
         await _remove_item_quietly(client, access_token, connection_id)
         raise DuplicateBankConnectionError(duplicate, institution_name)
-      if prior_access:
-        await _remove_item_quietly(client, str(prior_access), connection_id)
   finally:
     client.close()
 
@@ -227,6 +247,17 @@ async def complete_plaid_link(
       "cursor": None if new_item else credentials.get("cursor"),
       "linked_at": datetime.now(UTC).isoformat(),
     },
+    graph_id=graph_id,
+    db_session=db,
+  )
+  if not stored:
+    raise RuntimeError(
+      f"The Plaid Item for connection {connection_id} could not be stored; "
+      "run Link again."
+    )
+  await ConnectionService.update(
+    connection_id=connection_id,
+    user_id=user_id,
     metadata={
       "item_id": item_id,
       "institution_name": institution_name,
@@ -236,11 +267,12 @@ async def complete_plaid_link(
     graph_id=graph_id,
     db_session=db,
   )
-  if not stored:
-    raise RuntimeError(
-      f"The Plaid Item for connection {connection_id} could not be stored; "
-      "run Link again."
-    )
+  if new_item and prior_access:
+    replaced = plaid_client()
+    try:
+      await _remove_item_quietly(replaced, str(prior_access), connection_id)
+    finally:
+      replaced.close()
 
   record_bank_feed_consent(
     provider=PROVIDER,
@@ -254,21 +286,24 @@ async def complete_plaid_link(
   )
 
   first_sync = new_item or (connection.get("metadata") or {}).get("last_sync") is None
-  outcome = await provider_registry.sync_connection(
-    PROVIDER, connection, {"full_rebuild": True} if first_sync else None, graph_id
+  task_id = await dispatch_first_sync(
+    graph_id=graph_id,
+    connection_id=connection_id,
+    user_id=user_id,
+    full_rebuild=first_sync,
   )
   logger.info(
     "Plaid Link complete for connection %s (item=%s, new_item=%s); sync %s",
     connection_id,
     item_id,
     new_item,
-    outcome.task_id,
+    task_id,
   )
   return {
     "success": True,
     "message": f"{institution_name or 'Bank'} connected through Plaid",
     "connection_id": connection_id,
-    "auto_sync_task_id": outcome.task_id,
+    "auto_sync_task_id": task_id,
   }
 
 

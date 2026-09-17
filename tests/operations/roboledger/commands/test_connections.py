@@ -183,6 +183,39 @@ class TestPurgeBankFeed:
     )
     assert session.flushes == 2
 
+  def test_nested_payloads_are_scrubbed_too(self):
+    from robosystems.operations.roboledger.commands.connections import (
+      scrub_payload_keys,
+    )
+
+    metadata = {
+      "connection_id": "conn_1",
+      "classified_element_id": "elem_x",
+      "transaction_id": "t1",
+      "drift_payload": {
+        "transaction_id": "t1",
+        "bank_description": "PRIVATE",
+        "source_amount": -1500,
+        "line_items": [{"element_id": "elem_x", "debit_amount": 1500}],
+        "legs": ["a", "b"],
+      },
+      "reconciliation_history": [
+        {"disposition": "catch_up", "prior_dispatch_state": {"account_id": "acc"}}
+      ],
+      "rekeyed_from": [{"external_id": "plaid_txn_old"}],
+    }
+    assert scrub_payload_keys(metadata) == {
+      "connection_id": "conn_1",
+      "classified_element_id": "elem_x",
+      "drift_payload": {
+        "source_amount": -1500,
+        "line_items": [{"element_id": "elem_x", "debit_amount": 1500}],
+      },
+      "reconciliation_history": [
+        {"disposition": "catch_up", "prior_dispatch_state": {}}
+      ],
+    }
+
   def test_a_sibling_connections_rows_are_never_read(self):
     """The queries carry the connection scope, so a second live feed on the
     same graph (should the create path ever allow one) is untouched."""
