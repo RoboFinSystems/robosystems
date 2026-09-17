@@ -330,7 +330,7 @@ Logs: `just logs api`, `just logs worker`.
 ## Related Documentation
 
 - [Main README](../README.md) — platform overview and setup
-- [API Documentation](https://api.robosystems.ai/docs) — REST API reference
+- [API reference](https://robosystems.ai/docs/api) — every REST endpoint, with its schemas
 - [Graph API README](../robosystems/graph_api/README.md) — graph database system
 - [Schema System](../robosystems/schemas/README.md) — schema definitions
 - [Documentation](https://robosystems.ai/docs/technical) — guides and tutorials

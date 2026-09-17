@@ -18,7 +18,12 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (
+  HTMLResponse,
+  JSONResponse,
+  PlainTextResponse,
+  RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -107,20 +112,28 @@ _SENSITIVE_PATH_PREFIXES = (
 )
 
 
-def csp_variant_for_path(path: str, *, graphiql_enabled: bool = False) -> str:
+def csp_variant_for_path(
+  path: str, *, graphiql_enabled: bool = False, docs_enabled: bool = False
+) -> str:
   """Which CSP variant a path gets.
 
   - "docs": Swagger UI / ReDoc pages and their assets, self-hosted from
     /static — no third-party script origins and no 'unsafe-inline' script.
+    Returned only while those pages are served (``docs_enabled`` —
+    development only). The rendered reference lives on robosystems.ai, so
+    in production these paths redirect and get the strict policy with
+    everything else, which is what retires the relaxed style-src.
   - "graphiql": the GraphiQL playground, which loads React/GraphiQL from
     CDNs and needs the historical relaxed policy. Returned only while the
     playground is actually served (``graphiql_enabled`` — development
     only); elsewhere the graph-scoped GraphQL path answers with JSON and
-    gets the strict policy like every other API route. The default is
-    closed so a caller that omits the flag can never relax production.
+    gets the strict policy like every other API route.
   - "api": everything else — strict policy.
+
+  Both flags default closed, so a caller that omits one can never relax
+  production.
   """
-  if path in ("/", "/docs") or path.startswith("/static"):
+  if docs_enabled and (path in ("/", "/docs") or path.startswith("/static")):
     return "docs"
   if graphiql_enabled and path.startswith("/extensions/") and path.endswith("/graphql"):
     return "graphiql"
@@ -212,7 +225,10 @@ def create_app() -> FastAPI:
   setup_telemetry(app)
   app.state.current_time = datetime.now(UTC)
 
-  if Path("static").exists():
+  # The /static mount exists for the Swagger and ReDoc pages alone — the
+  # well-known routes below read their files at startup rather than through
+  # it — so it is mounted only where those pages are served.
+  if env.is_development() and Path("static").exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
   # RFC 9116 vulnerability disclosure pointer (mirrors the frontend apps).
@@ -246,14 +262,32 @@ def create_app() -> FastAPI:
     async def openai_apps_challenge() -> PlainTextResponse:
       return PlainTextResponse(openai_challenge_token)
 
-  # Custom dark-themed Swagger + ReDoc (served inline from docs_template).
-  @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-  async def custom_docs():
-    return HTMLResponse(content=generate_robosystems_docs())
+  # The published reference is rendered per operation on the app's domain,
+  # where a crawler and an answer engine can read it; these pages render in
+  # the browser from a ~950 KB spec and cannot be. Development keeps them,
+  # because the try-it panel is useful against a local stack and is safe on
+  # localhost; production redirects so every README, CONTRIBUTING file and
+  # outside link keeps working and its link equity moves with it.
+  if env.is_development():
 
-  @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
-  async def custom_redoc():
-    return HTMLResponse(content=generate_robosystems_redoc())
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def custom_docs():
+      return HTMLResponse(content=generate_robosystems_docs())
+
+    @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
+    async def custom_redoc():
+      return HTMLResponse(content=generate_robosystems_redoc())
+
+  else:
+    published_reference = f"{env.ROBOSYSTEMS_URL}/docs/api"
+
+    @app.get("/", include_in_schema=False)
+    async def docs_root_redirect() -> RedirectResponse:
+      return RedirectResponse(published_reference, status_code=301)
+
+    @app.get("/docs", include_in_schema=False)
+    async def docs_redirect() -> RedirectResponse:
+      return RedirectResponse(published_reference, status_code=301)
 
   # Configure CORS with specific domains for security
   main_cors_origins = env.get_main_cors_origins()
@@ -385,6 +419,12 @@ def create_app() -> FastAPI:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
+    # The raw specification stays served — both SDK generators read it — but
+    # it is not the reference a person or an answer engine should be given,
+    # so it does not compete with the rendered pages in an index.
+    if request.url.path == "/openapi.json":
+      response.headers["X-Robots-Tag"] = "noindex"
+
     # HSTS for production/staging
     if env.ENVIRONMENT in ["prod", "staging"]:
       response.headers["Strict-Transport-Security"] = (
@@ -395,7 +435,11 @@ def create_app() -> FastAPI:
     # relaxed (CDN) policy only for the GraphiQL playground, and only
     # where it is served (development — see the GraphQLRouter mount).
     path = request.url.path
-    csp_variant = csp_variant_for_path(path, graphiql_enabled=env.is_development())
+    csp_variant = csp_variant_for_path(
+      path,
+      graphiql_enabled=env.is_development(),
+      docs_enabled=env.is_development(),
+    )
     if csp_variant == "docs":
       # Swagger UI / ReDoc served entirely from this origin (/static/vendor).
       # Both UIs inject inline <style> at runtime, so style-src keeps

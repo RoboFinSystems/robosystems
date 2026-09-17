@@ -40,13 +40,15 @@ BYPASS_ORIGINS = [
 
 class TestCorsOriginAllowlist:
   def test_exact_origin_allowed_with_credentials(self, client):
-    response = client.get("/", headers={"Origin": ALLOWED_ORIGIN})
+    response = client.get(
+      "/", headers={"Origin": ALLOWED_ORIGIN}, follow_redirects=False
+    )
     assert response.headers.get("access-control-allow-origin") == ALLOWED_ORIGIN
     assert response.headers.get("access-control-allow-credentials") == "true"
 
   @pytest.mark.parametrize("origin", BYPASS_ORIGINS)
   def test_bypass_variants_refused(self, client, origin):
-    response = client.get("/", headers={"Origin": origin})
+    response = client.get("/", headers={"Origin": origin}, follow_redirects=False)
     assert "access-control-allow-origin" not in response.headers
 
   def test_preflight_refused_for_disallowed_origin(self, client):
@@ -71,8 +73,11 @@ class TestCorsOriginAllowlist:
 
 
 class TestResponseHeaderBaseline:
+  # `/` is the unauthenticated path the assessment probed. It now answers a
+  # 301 to the published reference, so these follow no redirect: the headers
+  # are asserted on the response this origin actually returns.
   def test_baseline_headers_present(self, client):
-    response = client.get("/")
+    response = client.get("/", follow_redirects=False)
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
@@ -89,12 +94,12 @@ class TestResponseHeaderBaseline:
     assert "object-src 'none'" in csp
 
   def test_hsts_absent_in_development(self, client):
-    response = client.get("/")
+    response = client.get("/", follow_redirects=False)
     assert "strict-transport-security" not in response.headers
 
   def test_hsts_emitted_outside_development(self, client, monkeypatch):
     monkeypatch.setattr(env, "ENVIRONMENT", "prod", raising=False)
-    response = client.get("/")
+    response = client.get("/", follow_redirects=False)
     assert response.headers["strict-transport-security"] == (
       "max-age=31536000; includeSubDomains"
     )

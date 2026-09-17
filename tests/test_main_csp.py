@@ -4,7 +4,10 @@ The matcher decides which Content-Security-Policy header a path gets:
 
 - "docs": Swagger UI / ReDoc pages and /static assets. Everything is
   self-hosted (static/vendor), so the policy allows no third-party script
-  origins and no 'unsafe-inline' script.
+  origins and no 'unsafe-inline' script. Those pages are served in
+  development only — the published reference is rendered on the app's
+  domain — so the variant is too, and the default is closed. That is what
+  leaves production with the strict policy on every path.
 - "graphiql": the GraphiQL playground, which loads React/GraphiQL from
   CDNs and needs the relaxed policy. The post-cutover URL change
   (graph-scoping the GraphQL endpoint) silently broke the original
@@ -25,17 +28,44 @@ from main import csp_variant_for_path
 
 class TestCspVariantForPath:
   def test_root_swagger_ui_docs_variant(self) -> None:
-    assert csp_variant_for_path("/") == "docs"
+    assert csp_variant_for_path("/", docs_enabled=True) == "docs"
 
   def test_docs_page_docs_variant(self) -> None:
-    assert csp_variant_for_path("/docs") == "docs"
+    assert csp_variant_for_path("/docs", docs_enabled=True) == "docs"
 
   def test_static_assets_docs_variant(self) -> None:
-    assert csp_variant_for_path("/static/swagger-custom.css") == "docs"
-    assert csp_variant_for_path("/static/vendor/swagger-ui-5.9.0/swagger-ui.css") == (
+    assert csp_variant_for_path("/static/swagger-custom.css", docs_enabled=True) == (
       "docs"
     )
-    assert csp_variant_for_path("/static") == "docs"
+    assert csp_variant_for_path(
+      "/static/vendor/swagger-ui-5.9.0/swagger-ui.css", docs_enabled=True
+    ) == ("docs")
+    assert csp_variant_for_path("/static", docs_enabled=True) == "docs"
+
+  def test_docs_paths_strict_where_the_pages_are_not_served(self) -> None:
+    """Outside development these paths redirect, so they get the strict policy.
+
+    This is the retirement of the relaxed style-src on this origin: with the
+    pages gone from production, nothing there needs 'unsafe-inline' style or
+    a blob worker. The default is closed, so a caller that omits the flag
+    cannot relax it.
+    """
+    for path in (
+      "/",
+      "/docs",
+      "/static",
+      "/static/swagger-custom.css",
+      "/static/vendor/redoc-2.5.3/redoc.standalone.js",
+    ):
+      assert csp_variant_for_path(path, docs_enabled=False) == "api"
+      assert csp_variant_for_path(path) == "api"
+
+  def test_the_two_flags_do_not_relax_each_other(self) -> None:
+    """A playground-enabled deployment does not thereby serve the docs pages."""
+    assert csp_variant_for_path("/docs", graphiql_enabled=True) == "api"
+    assert (
+      csp_variant_for_path("/extensions/kg01a2b3c/graphql", docs_enabled=True) == "api"
+    )
 
   def test_graph_scoped_graphiql_relaxed(self) -> None:
     """The graph-scoped GraphQL endpoint must get the graphiql variant.
