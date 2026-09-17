@@ -15,7 +15,7 @@ RoboLedger connects your QuickBooks books to Claude, ChatGPT and any other MCP c
 ## Working with your books
 
 - [Reports and sharing](reports-and-sharing.md): build statements, download them, and share them without sharing the ledger.
-- [Nothing writes to QuickBooks until you post](quickbooks-write-back.md): what write-back does, and how to control it.
+- [Nothing writes to QuickBooks until you post](quickbooks-write-back.md): what gets written back, and when.
 - [Close the month with Claude](month-end-close.md): blockers, drafts, approval and the receipt.
 - [Troubleshooting](troubleshooting.md): what each message means and what to do.
 

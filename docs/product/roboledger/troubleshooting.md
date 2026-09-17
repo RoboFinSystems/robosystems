@@ -12,7 +12,7 @@ QuickBooks hasn't synced since the month ended. Ask Claude to sync, or press **S
 
 ## "QuickBooks rejected the credential refresh… Reconnect the account"
 
-The connection to QuickBooks has expired or was revoked in Intuit. Open **Entity → Connections**, disconnect QuickBooks and choose **Disconnect** (not *Sever and go native*), then connect the same QuickBooks company again. It picks up the existing connection, so your history stays attached.
+The connection to QuickBooks has expired or was revoked in Intuit. Open **Entity → Connections**, disconnect QuickBooks and choose **Disconnect**, not *Sever and go native*, which can't be undone. Then connect the same QuickBooks company again. It picks up the existing connection, so your history stays attached.
 
 ## "Sync already in progress"
 
