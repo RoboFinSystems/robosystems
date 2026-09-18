@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from robosystems.config.operators import BedrockModel, ModelProfile, OperatorConfig
+from robosystems.config.operators import ModelProfile, OperatorConfig, OperatorModel
 
 # Module paths for patching
 AI_CLIENT_MODULE = "robosystems.operations.operators.ai_client"
@@ -631,16 +631,16 @@ class TestAIClientCreateMessage:
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
 
-    spec = OperatorConfig.MODEL_REGISTRY[BedrockModel.SONNET_4_6]
+    spec = OperatorConfig.MODEL_REGISTRY[OperatorModel.SONNET_4_6]
     monkeypatch.setitem(
       OperatorConfig.MODEL_REGISTRY,
-      BedrockModel.SONNET_4_6,
+      OperatorModel.SONNET_4_6,
       replace(spec, max_output_tokens=1000),
     )
     mock_bedrock.converse.return_value = _text_response("hi")
     await client.create_message(
       messages=[AIMessage(role="user", content="hi")],
-      model=BedrockModel.SONNET_4_6,
+      model=OperatorModel.SONNET_4_6,
       max_tokens=8000,
     )
     assert mock_bedrock.converse.call_args.kwargs["inferenceConfig"]["maxTokens"] == (

@@ -1079,6 +1079,52 @@ class EnvConfig:
   AWS_BEDROCK_ACCESS_KEY_ID = get_str_env("AWS_BEDROCK_ACCESS_KEY_ID", "")
   AWS_BEDROCK_SECRET_ACCESS_KEY = get_str_env("AWS_BEDROCK_SECRET_ACCESS_KEY", "")
 
+  # Self-hosted inference: an OpenAI-compatible Chat Completions endpoint
+  # (vLLM, Ollama, LM Studio, NVIDIA NIM), so the open-source stack can run on
+  # open weights with no proprietary model service. Off by default and off in
+  # hosted prod; a dedicated tenant turns it on when it asks for it. Off means
+  # the model row does not exist, so nothing can route to it, and nothing
+  # below is read. SSM: features/OPENAI_COMPAT_ENABLED.
+  OPENAI_COMPAT_ENABLED = get_bool_env(
+    "OPENAI_COMPAT_ENABLED",
+    get_parameter_value("OPENAI_COMPAT_ENABLED", "false").lower() == "true",
+  )
+  # Read through the secret lookup (env var first, then the deployment's
+  # secret in prod/staging) so a deployment can point at an endpoint without
+  # a template change.
+  OPENAI_COMPAT_BASE_URL = (
+    get_secret_value("OPENAI_COMPAT_BASE_URL", "") if OPENAI_COMPAT_ENABLED else ""
+  )
+  OPENAI_COMPAT_MODEL = (
+    get_secret_value("OPENAI_COMPAT_MODEL", "") if OPENAI_COMPAT_ENABLED else ""
+  )
+  # Empty for servers that take no key (a local Ollama or vLLM).
+  OPENAI_COMPAT_API_KEY = (
+    get_secret_value("OPENAI_COMPAT_API_KEY", "") if OPENAI_COMPAT_ENABLED else ""
+  )
+  # The model's own output cap, when it is below what the execution profiles
+  # ask for (EXTENDED asks 8,000). 0 = no cap that binds.
+  OPENAI_COMPAT_MAX_OUTPUT_TOKENS = get_int_env("OPENAI_COMPAT_MAX_OUTPUT_TOKENS", 0)
+  # A local model on modest hardware can take minutes per call.
+  OPENAI_COMPAT_TIMEOUT_SECONDS = get_int_env("OPENAI_COMPAT_TIMEOUT_SECONDS", 300)
+  # Credits per 1K tokens. The rate card is a cost passthrough and a
+  # self-hosted GPU has no per-token vendor cost, so 0 is the honest default;
+  # a deployment pointed at a paid endpoint sets its own rates.
+  OPENAI_COMPAT_CREDITS_PER_1K_INPUT = get_str_env(
+    "OPENAI_COMPAT_CREDITS_PER_1K_INPUT", "0"
+  )
+  OPENAI_COMPAT_CREDITS_PER_1K_OUTPUT = get_str_env(
+    "OPENAI_COMPAT_CREDITS_PER_1K_OUTPUT", "0"
+  )
+
+  # Which registered model backs each operator tier in this deployment
+  # (a short name from config/operators.py, e.g. "openai-compat" or
+  # "claude-sonnet-5"). Unset keeps the platform's mapping. Deployment-scoped,
+  # never customer-set; an unknown name fails the boot.
+  OPERATOR_PROFILE_ECONOMY = get_str_env("OPERATOR_PROFILE_ECONOMY", "")
+  OPERATOR_PROFILE_BALANCED = get_str_env("OPERATOR_PROFILE_BALANCED", "")
+  OPERATOR_PROFILE_QUALITY = get_str_env("OPERATOR_PROFILE_QUALITY", "")
+
   # S3-specific credentials
   # Use secrets manager for prod/staging, environment variables for local dev
   AWS_S3_ACCESS_KEY_ID = get_secret_value("AWS_S3_ACCESS_KEY_ID", "")

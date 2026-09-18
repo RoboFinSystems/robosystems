@@ -5,11 +5,14 @@ profiles and mode limits, orchestrator routing, and operator capabilities.
 "Operator" is the AI-executor concept (Claude/MCP), distinct from REA ``Agent``
 (counterparty) in ``models/extensions/roboledger/agent.py``.
 
-Every model runs through Bedrock's Converse API (``operations/operators/
+Platform models run through Bedrock's Converse API (``operations/operators/
 ai_client.py``), so a model swap is a registry row here, not a code change
-there. Customer-facing surfaces name a *profile* (economy / balanced /
-quality) rather than a model id: the catalog churns, and a concrete-model
-enum would churn the published SDKs with it.
+there. A deployment may also turn on one self-hosted model behind an
+OpenAI-compatible endpoint (``OPENAI_COMPAT_ENABLED``) — the open-source
+runtime's alternative to Bedrock; it is off in hosted prod. Customer-facing
+surfaces name a *profile* (economy / balanced / quality) rather than a model
+id: the catalog churns, and a concrete-model enum would churn the published
+SDKs with it.
 """
 
 from dataclasses import dataclass, field
@@ -28,7 +31,15 @@ class ModelProfile(Enum):
   QUALITY = "quality"
 
 
-class BedrockModel(Enum):
+class ModelProvider(Enum):
+  """Where a model is served."""
+
+  BEDROCK = "bedrock"
+  # A self-hosted OpenAI-compatible endpoint (vLLM, Ollama, LM Studio, NIM).
+  OPENAI_COMPAT = "openai_compat"
+
+
+class OperatorModel(Enum):
   """Registered models, by short name. The wire id lives in the registry."""
 
   SONNET_5 = "claude-sonnet-5"
@@ -37,6 +48,9 @@ class BedrockModel(Enum):
   SONNET_4 = "claude-sonnet-4-20250514"  # Last resort fallback
   OPUS_5 = "claude-opus-5"
   GPT_5_6_LUNA = "gpt-5.6-luna"
+  # The deployment's self-hosted model; which model that is, is the
+  # deployment's choice (OPENAI_COMPAT_MODEL). Registered only when enabled.
+  OPENAI_COMPAT = "openai-compat"
 
 
 @dataclass(frozen=True)
@@ -70,6 +84,7 @@ class ModelSpec:
   # Model-specific request fields passed through Converse's
   # additionalModelRequestFields verbatim.
   additional_request_fields: dict[str, Any] = field(default_factory=dict)
+  provider: ModelProvider = ModelProvider.BEDROCK
 
 
 # Claude 5-family models run adaptive thinking unless it is explicitly
@@ -77,6 +92,152 @@ class ModelSpec:
 # off until adopted deliberately. (Bedrock also requires thinking disabled
 # whenever tool choice forces a tool.)
 _CLAUDE_5_REQUEST_FIELDS: dict[str, Any] = {"thinking": {"type": "disabled"}}
+
+
+# The Bedrock rows. Every one is a `us.` cross-region profile today. Most of
+# the open-weight catalog is In-Region only (no `us.` / `global.` profiles),
+# so the first such row brings a residency/failover field with it.
+#
+# Wire ids: Bedrock publishes the Claude 5 family and GPT-5.6 as
+# unversioned ids (`us.anthropic.claude-sonnet-5`, no `-v1:0`); the 4.x
+# rows keep the versioned form. Both shapes are verified against the
+# account's inference-profile list — do not "fix" one to match the other.
+_BEDROCK_MODELS: dict[OperatorModel, ModelSpec] = {
+  OperatorModel.SONNET_5: ModelSpec(
+    model_id="us.anthropic.claude-sonnet-5",
+    pricing_key="anthropic_claude_5_sonnet",
+    cache_points=True,
+    accepts_sampling_params=False,
+    additional_request_fields=_CLAUDE_5_REQUEST_FIELDS,
+  ),
+  OperatorModel.SONNET_4_6: ModelSpec(
+    model_id="us.anthropic.claude-sonnet-4-6",
+    pricing_key="anthropic_claude_4_sonnet",
+    cache_points=True,
+    accepts_sampling_params=True,
+  ),
+  OperatorModel.SONNET_4_5: ModelSpec(
+    model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    pricing_key="anthropic_claude_4_sonnet",
+    cache_points=True,
+    accepts_sampling_params=True,
+  ),
+  OperatorModel.SONNET_4: ModelSpec(
+    model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+    pricing_key="anthropic_claude_4_sonnet",
+    cache_points=True,
+    accepts_sampling_params=True,
+  ),
+  OperatorModel.OPUS_5: ModelSpec(
+    model_id="us.anthropic.claude-opus-5",
+    pricing_key="anthropic_claude_5_opus",
+    cache_points=True,
+    accepts_sampling_params=False,
+    additional_request_fields=_CLAUDE_5_REQUEST_FIELDS,
+  ),
+  # Verified over Converse 2026-09-15: tool use works, `temperature` and
+  # explicit cache points are rejected, implicit caching reports through
+  # usage. Not available In-Region on bedrock-runtime — the `us.` profile
+  # is the only regional address.
+  OperatorModel.GPT_5_6_LUNA: ModelSpec(
+    model_id="us.openai.gpt-5.6-luna",
+    pricing_key="openai_gpt_5_6_luna",
+    cache_points=False,
+    accepts_sampling_params=False,
+  ),
+}
+
+# Profile → model, platform-wide. A config value: re-point a profile at
+# next quarter's winner without touching any caller.
+_PLATFORM_PROFILE_MODELS: dict[ModelProfile, OperatorModel] = {
+  ModelProfile.ECONOMY: OperatorModel.GPT_5_6_LUNA,
+  ModelProfile.BALANCED: OperatorModel.SONNET_5,
+  ModelProfile.QUALITY: OperatorModel.OPUS_5,
+}
+
+
+def self_hosted_model_spec(model_id: str, max_output_tokens: int) -> ModelSpec:
+  """The row for a deployment's self-hosted model.
+
+  Sampling parameters are accepted by every OpenAI-compatible server we
+  target; there are no cache points to send (a server that caches prefixes
+  does it on its own and reports the reads in usage).
+  """
+  return ModelSpec(
+    model_id=model_id,
+    pricing_key="openai_compat",
+    cache_points=False,
+    accepts_sampling_params=True,
+    max_output_tokens=max_output_tokens or None,
+    provider=ModelProvider.OPENAI_COMPAT,
+  )
+
+
+def build_model_registry(
+  openai_compat_enabled: bool,
+  openai_compat_base_url: str,
+  openai_compat_model: str,
+  openai_compat_max_output_tokens: int,
+) -> dict[OperatorModel, ModelSpec]:
+  """The registry for this deployment. Raises on a half-configured
+  self-hosted model rather than booting with a row that cannot be called."""
+  registry = dict(_BEDROCK_MODELS)
+  if not openai_compat_enabled:
+    return registry
+  if not openai_compat_base_url or not openai_compat_model:
+    raise ValueError(
+      "OPENAI_COMPAT_ENABLED is on but OPENAI_COMPAT_BASE_URL or "
+      "OPENAI_COMPAT_MODEL is empty"
+    )
+  if openai_compat_max_output_tokens < 0:
+    raise ValueError("OPENAI_COMPAT_MAX_OUTPUT_TOKENS cannot be negative (0 = no cap)")
+  # Resolution matches short names, profile names and wire ids in turn, so a
+  # self-hosted id that equals any of them would resolve — and bill — as
+  # something else.
+  taken = (
+    {m.value for m in OperatorModel}
+    | {p.value for p in ModelProfile}
+    | {spec.model_id for spec in _BEDROCK_MODELS.values()}
+  )
+  if openai_compat_model in taken:
+    raise ValueError(
+      f"OPENAI_COMPAT_MODEL={openai_compat_model!r} collides with a registered "
+      "model or profile name"
+    )
+  registry[OperatorModel.OPENAI_COMPAT] = self_hosted_model_spec(
+    openai_compat_model, openai_compat_max_output_tokens
+  )
+  return registry
+
+
+def build_profile_models(
+  overrides: dict[ModelProfile, str],
+  registry: dict[OperatorModel, ModelSpec],
+) -> dict[ModelProfile, OperatorModel]:
+  """The platform profile map with this deployment's overrides applied.
+
+  An override names a registered short name. An unknown name, or one whose
+  row this deployment does not register, fails the boot: a tier that cannot
+  run is a configuration error, not something to fall back from quietly.
+  """
+  mapping = dict(_PLATFORM_PROFILE_MODELS)
+  for profile, name in overrides.items():
+    if not name:
+      continue
+    try:
+      model = OperatorModel(name)
+    except ValueError:
+      raise ValueError(
+        f"OPERATOR_PROFILE_{profile.name}={name!r} is not a registered model; "
+        f"registered: {sorted(m.value for m in OperatorModel)}"
+      ) from None
+    if model not in registry:
+      raise ValueError(
+        f"OPERATOR_PROFILE_{profile.name}={name!r} is not available in this "
+        "deployment (the self-hosted model needs OPENAI_COMPAT_ENABLED)"
+      )
+    mapping[profile] = model
+  return mapping
 
 
 class OperatorExecutionMode(Enum):
@@ -106,7 +267,7 @@ class ModelConfig:
   """Platform-wide model defaults."""
 
   default_profile: ModelProfile
-  fallback_model: BedrockModel | None = None
+  fallback_model: OperatorModel | None = None
   region: str = "us-east-1"
   temperature: float = 0.7
   max_retries: int = 3
@@ -120,75 +281,32 @@ class OperatorConfig:
   This is the single source of truth for all operator-related settings.
   """
 
-  # The model registry. One row per model the platform can run; the
-  # profile map below picks which rows customer surfaces reach by name.
-  # Every row is a `us.` cross-region profile today. The open-weight catalog
-  # is In-Region only (no `us.` / `global.` profiles), so the first such row
-  # brings a residency/failover field with it.
-  #
-  # Wire ids: Bedrock publishes the Claude 5 family and GPT-5.6 as
-  # unversioned ids (`us.anthropic.claude-sonnet-5`, no `-v1:0`); the 4.x
-  # rows keep the versioned form. Both shapes are verified against the
-  # account's inference-profile list — do not "fix" one to match the other.
-  MODEL_REGISTRY: dict[BedrockModel, ModelSpec] = {
-    BedrockModel.SONNET_5: ModelSpec(
-      model_id="us.anthropic.claude-sonnet-5",
-      pricing_key="anthropic_claude_5_sonnet",
-      cache_points=True,
-      accepts_sampling_params=False,
-      additional_request_fields=_CLAUDE_5_REQUEST_FIELDS,
-    ),
-    BedrockModel.SONNET_4_6: ModelSpec(
-      model_id="us.anthropic.claude-sonnet-4-6",
-      pricing_key="anthropic_claude_4_sonnet",
-      cache_points=True,
-      accepts_sampling_params=True,
-    ),
-    BedrockModel.SONNET_4_5: ModelSpec(
-      model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-      pricing_key="anthropic_claude_4_sonnet",
-      cache_points=True,
-      accepts_sampling_params=True,
-    ),
-    BedrockModel.SONNET_4: ModelSpec(
-      model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
-      pricing_key="anthropic_claude_4_sonnet",
-      cache_points=True,
-      accepts_sampling_params=True,
-    ),
-    BedrockModel.OPUS_5: ModelSpec(
-      model_id="us.anthropic.claude-opus-5",
-      pricing_key="anthropic_claude_5_opus",
-      cache_points=True,
-      accepts_sampling_params=False,
-      additional_request_fields=_CLAUDE_5_REQUEST_FIELDS,
-    ),
-    # Verified over Converse 2026-09-15: tool use works, `temperature` and
-    # explicit cache points are rejected, implicit caching reports through
-    # usage. Not available In-Region on bedrock-runtime — the `us.` profile
-    # is the only regional address.
-    BedrockModel.GPT_5_6_LUNA: ModelSpec(
-      model_id="us.openai.gpt-5.6-luna",
-      pricing_key="openai_gpt_5_6_luna",
-      cache_points=False,
-      accepts_sampling_params=False,
-    ),
-  }
+  # One row per model this deployment can run: the Bedrock rows always, the
+  # self-hosted row only when OPENAI_COMPAT_ENABLED is on. When it is off,
+  # nothing can resolve to that row and the meter refuses it.
+  MODEL_REGISTRY: dict[OperatorModel, ModelSpec] = build_model_registry(
+    openai_compat_enabled=env.OPENAI_COMPAT_ENABLED,
+    openai_compat_base_url=env.OPENAI_COMPAT_BASE_URL,
+    openai_compat_model=env.OPENAI_COMPAT_MODEL,
+    openai_compat_max_output_tokens=env.OPENAI_COMPAT_MAX_OUTPUT_TOKENS,
+  )
 
-  # Profile → model. A config value: re-point a profile at next quarter's
-  # winner without touching any caller. No default moves without an A/B on
-  # the real operator shape first (specs/ai-operators/llm-provider-abstraction
-  # §4.1).
-  PROFILE_MODELS: dict[ModelProfile, BedrockModel] = {
-    ModelProfile.ECONOMY: BedrockModel.GPT_5_6_LUNA,
-    ModelProfile.BALANCED: BedrockModel.SONNET_5,
-    ModelProfile.QUALITY: BedrockModel.OPUS_5,
-  }
+  # Profile → model. The platform mapping, re-pointed per deployment by
+  # OPERATOR_PROFILE_*. No platform default moves without an A/B on the real
+  # operator shape first (specs/ai-operators/llm-provider-abstraction §4.1).
+  PROFILE_MODELS: dict[ModelProfile, OperatorModel] = build_profile_models(
+    {
+      ModelProfile.ECONOMY: env.OPERATOR_PROFILE_ECONOMY,
+      ModelProfile.BALANCED: env.OPERATOR_PROFILE_BALANCED,
+      ModelProfile.QUALITY: env.OPERATOR_PROFILE_QUALITY,
+    },
+    MODEL_REGISTRY,
+  )
 
   # Default Model Configuration
   DEFAULT_MODEL_CONFIG = ModelConfig(
     default_profile=ModelProfile.BALANCED,
-    fallback_model=BedrockModel.SONNET_4_6,
+    fallback_model=OperatorModel.SONNET_4_6,
     region=env.AWS_BEDROCK_REGION,
     temperature=0.7,
     max_retries=3,
@@ -239,9 +357,9 @@ class OperatorConfig:
   # an explicit per-call choice and the platform default. The natural home
   # for running RFS's own graphs on the economy profile without any
   # customer-facing choice existing.
-  OPERATOR_MODEL_OVERRIDES: dict[str, ModelProfile | BedrockModel] = {
+  OPERATOR_MODEL_OVERRIDES: dict[str, ModelProfile | OperatorModel] = {
     # Example: "analyst": ModelProfile.ECONOMY,
-    # Example: "mapping": BedrockModel.SONNET_5,
+    # Example: "mapping": OperatorModel.SONNET_5,
   }
 
   # Orchestrator Configuration
@@ -269,8 +387,8 @@ class OperatorConfig:
 
   @classmethod
   def to_registered_model(
-    cls, choice: str | BedrockModel | ModelProfile
-  ) -> BedrockModel:
+    cls, choice: str | OperatorModel | ModelProfile
+  ) -> OperatorModel:
     """Map a profile, short name, or wire id onto a registry key.
 
     Raises ValueError for anything unregistered: an unknown model is a
@@ -278,14 +396,14 @@ class OperatorConfig:
     """
     if isinstance(choice, ModelProfile):
       return cls.PROFILE_MODELS[choice]
-    if isinstance(choice, BedrockModel):
+    if isinstance(choice, OperatorModel):
       return choice
     try:
       return cls.PROFILE_MODELS[ModelProfile(choice)]
     except ValueError:
       pass
     try:
-      return BedrockModel(choice)
+      return OperatorModel(choice)
     except ValueError:
       pass
     for model, spec in cls.MODEL_REGISTRY.items():
@@ -300,7 +418,7 @@ class OperatorConfig:
   @classmethod
   def resolve_model(
     cls,
-    model: str | BedrockModel | ModelProfile | None = None,
+    model: str | OperatorModel | ModelProfile | None = None,
     operator_type: str | None = None,
   ) -> ModelSpec:
     """Resolve what runs: most specific wins.
@@ -308,7 +426,7 @@ class OperatorConfig:
     An explicit per-call model or profile, then the operator class's
     override, then the platform default profile.
     """
-    choice: str | BedrockModel | ModelProfile | None = model
+    choice: str | OperatorModel | ModelProfile | None = model
     if choice is None and operator_type:
       choice = cls.OPERATOR_MODEL_OVERRIDES.get(operator_type)
     if choice is None:
@@ -318,7 +436,7 @@ class OperatorConfig:
   @classmethod
   def get_bedrock_model_id(
     cls,
-    model: str | BedrockModel | ModelProfile | None = None,
+    model: str | OperatorModel | ModelProfile | None = None,
     operator_type: str | None = None,
   ) -> str:
     """The wire id `resolve_model` lands on."""

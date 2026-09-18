@@ -137,16 +137,16 @@ AIBillingConfig.TOKEN_PRICING["anthropic_claude_4_sonnet"]
 
 ## Operators
 
-`operators.py` configures the model registry, the model profiles, and the execution profiles for the AI Operator system. Every model runs through Bedrock's Converse API, so adding or swapping a model is a registry row here, not a code change in the client.
+`operators.py` configures the model registry, the model profiles, and the execution profiles for the AI Operator system. Platform models run through Bedrock's Converse API, so adding or swapping a model is a registry row here, not a code change in the client.
 
-`MODEL_REGISTRY` maps each `BedrockModel` to a `ModelSpec`: the regional inference-profile id on the wire (`us.*`), the rate-card key it bills under (`AIBillingConfig.TOKEN_PRICING`), and the behaviour the client needs to know — whether it takes explicit cache points, whether it accepts sampling parameters, any model-specific request fields, an output cap. `PROFILE_MODELS` names which row `economy`, `balanced`, and `quality` reach; customer surfaces bind to those names, never to a model id.
+`MODEL_REGISTRY` maps each `OperatorModel` to a `ModelSpec`: the regional inference-profile id on the wire (`us.*`), the rate-card key it bills under (`AIBillingConfig.TOKEN_PRICING`), and the behaviour the client needs to know — whether it takes explicit cache points, whether it accepts sampling parameters, any model-specific request fields, an output cap. `PROFILE_MODELS` names which row `economy`, `balanced`, and `quality` reach; customer surfaces bind to those names, never to a model id.
 
 ```python
-from robosystems.config import BedrockModel, ModelProfile, OperatorConfig, OperatorExecutionMode
+from robosystems.config import OperatorModel, ModelProfile, OperatorConfig, OperatorExecutionMode
 
 OperatorConfig.resolve_model()                                 # default profile (balanced → Sonnet 5)
 OperatorConfig.resolve_model(ModelProfile.ECONOMY)             # a profile
-OperatorConfig.resolve_model(BedrockModel.OPUS_5)              # a pinned model
+OperatorConfig.resolve_model(OperatorModel.OPUS_5)              # a pinned model
 OperatorConfig.resolve_model(operator_type="analyst")          # honors OPERATOR_MODEL_OVERRIDES
 OperatorConfig.pricing_key_for("us.anthropic.claude-sonnet-5") # what the meter bills under
 
@@ -157,6 +157,8 @@ OperatorConfig.validate_configuration()  # {"valid": bool, "issues": [...], "sum
 ```
 
 Resolution is most-specific-wins: an explicit per-call model or profile, then the operator class's entry in `OPERATOR_MODEL_OVERRIDES`, then `DEFAULT_MODEL_CONFIG.default_profile`. An unregistered model or profile raises — the meter must never price an unknown model at some other model's rate. `validate_configuration()` checks every registry row against the rate card at startup.
+
+**The self-hosted model.** A deployment can run the operators on its own model behind any OpenAI-compatible Chat Completions endpoint (Ollama, LM Studio, vLLM, NVIDIA NIM). It is the open-source runtime's alternative to Bedrock and is off by default. Hosted prod leaves it off, and a dedicated tenant turns it on only when it asks. `OPENAI_COMPAT_ENABLED` registers one extra row, `openai-compat`, whose wire id is `OPENAI_COMPAT_MODEL`. With the flag off, that row does not exist, so nothing can resolve to it and the meter refuses it. `OPERATOR_PROFILE_ECONOMY` / `_BALANCED` / `_QUALITY` point a tier at any registered short name, this row included. An unknown name, or a tier pointed at the row while the flag is off, fails the boot. The row bills under `openai_compat` at `OPENAI_COMPAT_CREDITS_PER_1K_INPUT` / `_OUTPUT`, which default to 0 because a self-hosted GPU has no per-token vendor cost. The client (`operations/operators/openai_compat.py`) translates Converse blocks to Chat Completions and back, so the tool loop and the operators never see which provider answered. The `.env.example` block has the variables. Only a `dev` stack runs with no AWS credentials at all. Outside `dev`, the client still checks its AWS credentials at startup, and every non-`dev` deployment runs on AWS anyway (S3, the DynamoDB graph registries).
 
 Execution modes are `QUICK`, `STANDARD`, `EXTENDED`, and `STREAMING`; each has an `ExecutionProfile` bounding tool calls, tokens, and timeout. Re-point a profile in `PROFILE_MODELS` to move every caller of that profile; pin a single operator class by adding an entry to `OPERATOR_MODEL_OVERRIDES`.
 
