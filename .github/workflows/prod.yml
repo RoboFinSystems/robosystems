@@ -154,6 +154,10 @@ jobs:
       # Set DOCKERHUB_PUBLISHING_ENABLED to 'true' in GitHub variables when ready to publish
       # Supports: refs/tags/v*.*.* (releases) and refs/heads/release/* (hotfixes)
       publish_to_dockerhub: ${{ vars.DOCKERHUB_PUBLISHING_ENABLED == 'true' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')) }}
+      # Prod deploys from a version tag, and code scanning only shows the
+      # default branch — filing prod's container scans under main makes those
+      # alerts describe what is deployed. Staging keeps its own ref.
+      sarif_ref: refs/heads/main
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

@@ -17,6 +17,11 @@ on:
         type: boolean
         default: false
         description: "Whether to publish images to Docker Hub"
+      sarif_ref:
+        required: false
+        type: string
+        default: ""
+        description: "Ref the container scans are filed under (default: the calling ref)"
     outputs:
       image:
         description: "Full image reference with tag"
@@ -290,6 +295,8 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
           category: 'container-scan-api'
+          ref: ${{ inputs.sarif_ref || github.ref }}
+          sha: ${{ github.sha }}
 
   # Build Lambda container image
   lambda:
@@ -418,3 +425,5 @@ jobs:
         with:
           sarif_file: 'trivy-lambda-results.sarif'
           category: 'container-scan-lambda'
+          ref: ${{ inputs.sarif_ref || github.ref }}
+          sha: ${{ github.sha }}
