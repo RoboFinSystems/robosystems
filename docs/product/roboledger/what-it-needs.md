@@ -2,6 +2,7 @@
 title: What RoboLedger needs to work well
 description: Current books, a mapped chart of accounts, a fiscal calendar and schedules for recurring entries. What each one does, and how to check it with Claude.
 order: 3
+section: Get started
 ---
 
 Claude's answers are only as good as the books behind them. Four things decide that, and most are set up for you on the first sync.
@@ -12,6 +13,7 @@ RoboLedger syncs when you ask it to, not on a schedule. Press **Sync Now** on th
 
 - A regular sync picks up the last 60 days of changes. If something older changed in QuickBooks, choose a full sync in the sync options, or ask Claude to sync from a specific date.
 - A close is blocked until QuickBooks has synced after the month ended.
+- If a transaction was edited in QuickBooks after it synced, RoboLedger flags it and asks you how to treat it. See [When QuickBooks changes after a sync](changes-after-sync.md).
 
 Ask: "When did QuickBooks last sync, and is it current enough to close August?"
 
@@ -25,7 +27,7 @@ The first sync maps your accounts with AI:
 - less certain matches are flagged for you to review
 - the rest are left unmapped
 
-Review them in **Ledger → Chart of Accounts**. **Auto-Map** runs the AI mapping again, and it uses credits. Claude can also list what's unmapped, suggest a match for each, and apply the ones you agree with. Its suggestions use no credits.
+Review them in **Ledger → Chart of Accounts**. **Auto-Map** runs the AI mapping again, and it uses credits. Claude can also list what's unmapped, suggest a match for each, and apply the ones you agree with. Its suggestions use no credits. Accounts you add in QuickBooks later arrive unmapped, and mapping has to be right before a month closes. See [Map your chart of accounts](map-your-chart-of-accounts.md).
 
 Ask: "Which accounts aren't mapped yet? Suggest where each one belongs."
 
@@ -39,7 +41,11 @@ Ask: "Where does our fiscal calendar stand, and what's blocking the next close?"
 
 ## Schedules for recurring entries
 
-Depreciation, amortization and prepaid expenses that roll off each month are set up once as schedules, and every close drafts their entries. Without them, those adjustments have to be asked for by hand every month. See [Close the month with Claude](month-end-close.md).
+Depreciation, amortization and prepaid expenses that roll off each month are set up once as schedules, and every close drafts their entries. Without them, those adjustments have to be asked for by hand every month. Schedules also carry into every forecast. See [Schedules for recurring entries](schedules.md).
+
+## Closed months, if you want to plan
+
+A forecast starts from closed months. If your history came over from QuickBooks and you haven't closed month by month in RoboLedger, Claude can fill in that history for you. See [Plan and forecast with Claude](plan-and-forecast.md).
 
 ## A close procedures document, if you have one
 

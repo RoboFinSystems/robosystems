@@ -6,17 +6,30 @@ order: 0
 
 RoboLedger connects your QuickBooks books to Claude, ChatGPT and any other MCP client. You ask questions about your numbers, build reports and forecasts, compare your company with public filers, and when you trust it, close the month. Nothing is written to QuickBooks until you post an entry.
 
-## Start here
+## Get started
 
 1. [Connect your books to Claude](connect-your-books.md): create a graph, connect QuickBooks, add RoboLedger to your AI client.
 2. [What Claude can do with your books](what-claude-can-do.md): analyze, report, plan, compare, close.
 3. [What RoboLedger needs to work well](what-it-needs.md): current books, a mapped chart of accounts, a fiscal calendar, schedules.
+4. [Find your way around the app](the-roboledger-app.md): a tour, page by page, with screenshots.
 
-## Working with your books
+## Work with your books
 
+- [Ask about your books](ask-about-your-books.md): what Claude reads, which figures are live and which are locked, and how to ask so you can check the answer.
 - [Reports and sharing](reports-and-sharing.md): build statements, download them, and share them without sharing the ledger.
-- [Nothing writes to QuickBooks until you post](quickbooks-write-back.md): what gets written back, and when.
+- [Plan and forecast with Claude](plan-and-forecast.md): budgets and what-if scenarios that project all three statements, month by month.
+- [Compare with public companies](compare-with-public-companies.md): your margins and ratios next to SEC filers.
+
+## Keep the books right
+
+- [Map your chart of accounts](map-your-chart-of-accounts.md): tie each account to a reporting concept, and keep it current.
+- [Schedules for recurring entries](schedules.md): depreciation, amortization and prepaid expenses, set up once.
+- [When QuickBooks changes after a sync](changes-after-sync.md): restate, catch up, or mark it as handled.
 - [Close the month with Claude](month-end-close.md): blockers, drafts, approval and the receipt.
+- [Nothing writes to QuickBooks until you post](quickbooks-write-back.md): what gets written back, and when.
+
+## Reference
+
 - [Troubleshooting](troubleshooting.md): what each message means and what to do.
 
 ## Building on RoboLedger

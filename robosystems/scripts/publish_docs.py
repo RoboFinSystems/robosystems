@@ -16,6 +16,7 @@ The output directory is what the Publish Docs workflow syncs to the content CDN:
     technical/{slug}.md           one body per wiki page, links rewritten
     technical/images/...          images the wiki references
     product/{site}/{slug}.md      one body per product page
+    product/{site}/images/...     screenshots and clips the product pages show
 
 The apps read ``index.json`` with ISR and fetch each body by its ``body`` key.
 Nothing here renders HTML, so the bodies stay plain GitHub-flavored markdown:
@@ -434,7 +435,12 @@ def build_wiki(wiki_dir: Path, asset_base: str, build: Build) -> None:
 # ── Product pages ───────────────────────────────────────────────────────────
 
 
-def build_product(product_dir: Path, repo_root: Path, build: Build) -> None:
+def build_product(
+  product_dir: Path,
+  repo_root: Path,
+  build: Build,
+  asset_base: str = DEFAULT_ASSET_BASE,
+) -> None:
   for site_dir in sorted(p for p in product_dir.iterdir() if p.is_dir()):
     site = site_dir.name
     base_path = PRODUCT_BASE_PATHS.get(site)
@@ -443,7 +449,9 @@ def build_product(product_dir: Path, repo_root: Path, build: Build) -> None:
       continue
     files = sorted(p for p in site_dir.glob("*.md") if p.name != "README.md")
     slugs = {p.stem for p in files}
-    entries: list[tuple[int, str]] = []
+    media = product_media(site_dir)
+    shown: set[str] = set()
+    entries: list[tuple[int, str, str | None]] = []
     for path in files:
       meta, body = split_front_matter(path.read_text(encoding="utf-8"))
       label = path.relative_to(product_dir).as_posix()
@@ -463,7 +471,16 @@ def build_product(product_dir: Path, repo_root: Path, build: Build) -> None:
         )
         continue
       _, body = strip_title(body)
-      body = rewrite_product_links(body, label, base_path, slugs, build)
+      body = rewrite_product_links(
+        body,
+        label,
+        base_path,
+        slugs,
+        build,
+        media,
+        f"{asset_base}product/{site}/",
+        shown,
+      )
       slug = path.stem
       key = f"product/{site}/{slug}.md"
       build.files[key] = body.encode("utf-8")
@@ -486,24 +503,64 @@ def build_product(product_dir: Path, repo_root: Path, build: Build) -> None:
           source_url=f"{REPO_BLOB_URL}/{repo_path}",
         )
       )
-      entries.append((position, slug))
+      entries.append((position, slug, meta.get("section") or None))
+    for name in sorted(shown):
+      build.files[f"product/{site}/{name}"] = media[name].read_bytes()
+    unused = sorted(set(media) - shown)
+    if unused:
+      build.warnings.append(f"{site}: images no page shows: {', '.join(unused)}")
+    # A page's `section` groups it in the sidebar. Sections appear in the order
+    # of their first page, and a site that names none keeps one untitled list.
+    grouped: dict[str | None, list[str]] = {}
+    for _, slug, section in sorted(entries, key=lambda e: (e[0], e[1])):
+      grouped.setdefault(section, []).append(slug)
     build.collections.append(
       {
         "site": site,
         "layer": "product",
         "base_path": base_path,
-        "sections": [{"title": None, "slugs": [slug for _, slug in sorted(entries)]}],
+        "sections": [
+          {"title": title, "slugs": names} for title, names in grouped.items()
+        ],
       }
     )
 
 
+def product_media(site_dir: Path) -> dict[str, Path]:
+  """Files under a site's ``images/``, keyed the way a page names them."""
+  root = site_dir / "images"
+  if not root.is_dir():
+    return {}
+  return {
+    path.relative_to(site_dir).as_posix(): path
+    for path in sorted(root.glob("**/*"))
+    if path.is_file() and not path.name.startswith(".")
+  }
+
+
 def rewrite_product_links(
-  text: str, label: str, base_path: str, slugs: set[str], build: Build
+  text: str,
+  label: str,
+  base_path: str,
+  slugs: set[str],
+  build: Build,
+  media: dict[str, Path] | None = None,
+  media_base: str = "",
+  shown: set[str] | None = None,
 ) -> str:
   def replace(match: re.Match[str]) -> str:
     bang, text_, target, title = match.groups()
-    if bang or target.startswith(("http://", "https://", "mailto:", "#", "/")):
+    if target.startswith(("http://", "https://", "mailto:", "#", "/")):
       return match.group(0)
+    if bang:
+      if target not in (media or {}):
+        build.errors.append(
+          f"{label}: image must be a file under images/ that exists: {target}"
+        )
+        return match.group(0)
+      if shown is not None:
+        shown.add(target)
+      return f"![{text_}]({media_base}{target}{title})"
     name, _, anchor = target.partition("#")
     if not name.endswith(".md") or "/" in name:
       build.errors.append(
@@ -578,7 +635,7 @@ def main(argv: list[str] | None = None) -> int:
   if args.wiki:
     build_wiki(args.wiki, asset_base, build)
   if args.product and args.product.is_dir():
-    build_product(args.product, Path.cwd(), build)
+    build_product(args.product, Path.cwd(), build, asset_base)
   if not build.pages and not build.errors:
     build.errors.append("nothing to publish: pass --wiki and/or --product")
 
