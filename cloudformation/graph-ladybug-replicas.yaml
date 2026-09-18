@@ -537,12 +537,17 @@ Resources:
           # (prioritized), so the on-demand base lands on r7g.large, the type the
           # reserved instances cover.
           #
-          # The first five sit in heavily reclaimed Spot pools; r8gd, i4g, m8gd,
-          # im4gn and m7gd were added from the Spot Instance Advisor's low
-          # interruption bands at comparable Spot prices (2026-09). Their local
-          # NVMe is never mounted — the database downloads to the root volume — so
-          # instance-store size is irrelevant. Types whose Spot price runs above
-          # r7g.large on-demand (the c-family 2xlarge) are left out on purpose.
+          # The first five sit in heavily reclaimed Spot pools. r8gd and i4g come
+          # from the Spot Instance Advisor's lowest interruption band, and r9g
+          # (Graviton5) adds a newer pool; all three price near r8g.large on Spot
+          # (2026-09). Their local NVMe, where present, is never mounted — the
+          # database downloads to the root volume.
+          #
+          # Every entry's Spot price must stay below r7g.large on-demand.
+          # price-capacity-optimized ranks pools by capacity first and price
+          # second, so it will launch an expensive type whenever it judges that
+          # pool the deepest. That rules out the c-family 2xlarge and the
+          # storage- and m-family xlarge types that carry large local disks.
           Overrides:
             - InstanceType: !Ref InstanceType
             - InstanceType: r6g.large
@@ -551,9 +556,7 @@ Resources:
             - InstanceType: m6g.xlarge
             - InstanceType: r8gd.large
             - InstanceType: i4g.large
-            - InstanceType: m8gd.xlarge
-            - InstanceType: im4gn.xlarge
-            - InstanceType: m7gd.xlarge
+            - InstanceType: r9g.large
         InstancesDistribution:
           OnDemandBaseCapacity:
             !If [IsSpotEnabled, !Ref SpotOnDemandBaseCapacity, 0]
