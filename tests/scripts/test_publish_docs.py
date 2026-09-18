@@ -332,6 +332,91 @@ class TestProductPages:
       "roboledger/d.md: description is 161 characters (limit 160)",
     ]
 
+  def test_images_point_at_the_cdn_and_ship(self, tmp_path):
+    product = self._product(
+      tmp_path,
+      {
+        "plan.md": "---\ntitle: Plan\norder: 1\n---\n\n"
+        '![The Plan page](images/plan.png "The grid")\n\n'
+        "![A clip](images/clips/plan.mp4)\n\n"
+        "![Elsewhere](https://example.test/x.png)\n\n"
+        "```\n![not a link](images/gone.png)\n```\n",
+      },
+    )
+    images = product / "roboledger" / "images"
+    (images / "clips").mkdir(parents=True)
+    (images / "plan.png").write_bytes(b"png")
+    (images / "clips" / "plan.mp4").write_bytes(b"mp4")
+    (images / ".DS_Store").write_bytes(b"junk")
+    build = publish_docs.Build()
+    publish_docs.build_product(product, tmp_path, build, ASSET_BASE)
+    assert build.errors == []
+    assert build.warnings == []
+    body = build.files["product/roboledger/plan.md"].decode()
+    assert (
+      f'![The Plan page]({ASSET_BASE}product/roboledger/images/plan.png "The grid")'
+      in body
+    )
+    assert f"![A clip]({ASSET_BASE}product/roboledger/images/clips/plan.mp4)" in body
+    assert "![Elsewhere](https://example.test/x.png)" in body
+    assert "![not a link](images/gone.png)" in body
+    assert build.files["product/roboledger/images/plan.png"] == b"png"
+    assert build.files["product/roboledger/images/clips/plan.mp4"] == b"mp4"
+    assert "product/roboledger/images/.DS_Store" not in build.files
+
+  def test_a_missing_or_misplaced_image_is_an_error(self, tmp_path):
+    product = self._product(
+      tmp_path,
+      {
+        "a.md": "---\ntitle: A\norder: 1\n---\n\n"
+        "![gone](images/gone.png) ![outside](../shot.png)\n",
+      },
+    )
+    build = publish_docs.Build()
+    publish_docs.build_product(product, tmp_path, build)
+    assert build.errors == [
+      "roboledger/a.md: image must be a file under images/ that exists: images/gone.png",
+      "roboledger/a.md: image must be a file under images/ that exists: ../shot.png",
+    ]
+
+  def test_an_image_no_page_shows_is_a_warning_and_stays_home(self, tmp_path):
+    product = self._product(
+      tmp_path, {"a.md": "---\ntitle: A\norder: 1\n---\n\nNo pictures.\n"}
+    )
+    images = product / "roboledger" / "images"
+    images.mkdir()
+    (images / "old.png").write_bytes(b"png")
+    build = publish_docs.Build()
+    publish_docs.build_product(product, tmp_path, build)
+    assert build.errors == []
+    assert build.warnings == ["roboledger: images no page shows: images/old.png"]
+    assert "product/roboledger/images/old.png" not in build.files
+
+  def test_sections_group_the_sidebar_in_page_order(self, tmp_path):
+    def page(title, order, section=None):
+      line = f"section: {section}\n" if section else ""
+      return f"---\ntitle: {title}\norder: {order}\n{line}---\n\nBody.\n"
+
+    product = self._product(
+      tmp_path,
+      {
+        "index.md": page("Docs", 0),
+        "connect.md": page("Connect", 1, "Get started"),
+        "plan.md": page("Plan", 3, "Work with your books"),
+        "needs.md": page("Needs", 2, "Get started"),
+        "late.md": page("Late", 9, "Get started"),
+      },
+    )
+    build = publish_docs.Build()
+    publish_docs.build_product(product, tmp_path, build)
+    assert build.errors == []
+    assert build.collections[0]["sections"] == [
+      {"title": None, "slugs": ["index"]},
+      {"title": "Get started", "slugs": ["connect", "needs", "late"]},
+      {"title": "Work with your books", "slugs": ["plan"]},
+    ]
+    assert _page(build, "plan").section == "Work with your books"
+
   def test_an_unknown_site_is_an_error(self, tmp_path):
     root = tmp_path / "product" / "nowhere"
     root.mkdir(parents=True)
