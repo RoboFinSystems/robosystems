@@ -189,6 +189,8 @@ def build_model_registry(
       "OPENAI_COMPAT_ENABLED is on but OPENAI_COMPAT_BASE_URL or "
       "OPENAI_COMPAT_MODEL is empty"
     )
+  if openai_compat_max_output_tokens < 0:
+    raise ValueError("OPENAI_COMPAT_MAX_OUTPUT_TOKENS cannot be negative (0 = no cap)")
   # Resolution matches short names, profile names and wire ids in turn, so a
   # self-hosted id that equals any of them would resolve — and bill — as
   # something else.

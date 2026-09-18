@@ -105,6 +105,10 @@ class TestSelfHostedModel:
     with pytest.raises(ValueError, match="OPENAI_COMPAT_BASE_URL or"):
       build_model_registry(True, url, model, 0)
 
+  def test_negative_output_cap_fails(self):
+    with pytest.raises(ValueError, match="cannot be negative"):
+      build_model_registry(True, self.URL, "qwen3:32b", -1)
+
   @pytest.mark.parametrize(
     "model",
     ["claude-sonnet-5", "openai-compat", "balanced", "us.anthropic.claude-sonnet-5"],
