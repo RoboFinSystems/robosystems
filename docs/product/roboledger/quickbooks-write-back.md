@@ -1,7 +1,8 @@
 ---
 title: Nothing writes to QuickBooks until you post
 description: Reading, reporting, planning and syncing never write to QuickBooks. Entries RoboLedger posts do. What gets written back, and when.
-order: 5
+order: 24
+section: Keep the books right
 ---
 
 Connecting QuickBooks, syncing, asking questions, building reports and running forecasts never write anything to QuickBooks. Syncing only reads. You can use everything in [What Claude can do with your books](what-claude-can-do.md) short of the close without changing a single QuickBooks record.
@@ -14,6 +15,8 @@ Only entries RoboLedger posts:
 2. **Posting a single entry.** Claude can post one entry you've agreed on, outside a close, and it's written to QuickBooks when it posts.
 
 Before a close, the list of drafts shows which entries will be written to QuickBooks and which stay in RoboLedger. An entry can also be marked to stay in RoboLedger only.
+
+One kind of entry always stays in RoboLedger: a catch-up entry for a transaction that was edited in QuickBooks after it synced. QuickBooks already has that edit, so writing the entry back would apply it twice. See [When QuickBooks changes after a sync](changes-after-sync.md).
 
 If QuickBooks rejects an entry during a close, the close reports it. Entries that were already written aren't sent again when you retry.
 
