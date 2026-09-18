@@ -1,11 +1,15 @@
 """Model access via AWS Bedrock Converse.
 
-Bedrock is the only path, deliberately: it puts model spend in AWS Cost
+Bedrock is the platform's path, deliberately: it puts model spend in AWS Cost
 Explorer alongside everything else, emits CloudWatch token metrics, and lets
 IAM rather than a shared API key control who can call a model. Converse is
 the one request shape Bedrock serves every model through — Claude, GPT-5.6,
 the open-weight families — with a single tool protocol and usage block, so
 which model runs is a registry row (`config/operators.py`), not a code path.
+
+The one other path is a deployment's self-hosted model behind an
+OpenAI-compatible endpoint (`openai_compat.py`), registered only when the
+deployment turns it on. It speaks the same Converse blocks to its callers.
 
 Messages carry Converse content blocks: `{"text": ...}`, `{"toolUse": ...}`,
 `{"toolResult": ...}`, and whatever the model returned (a reasoning block
@@ -15,18 +19,22 @@ must be replayed verbatim or the transcript is rejected).
 import asyncio
 import threading
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
 from robosystems.config import (
-  BedrockModel,
   ModelProfile,
+  ModelProvider,
   ModelSpec,
   OperatorConfig,
+  OperatorModel,
   env,
 )
 from robosystems.logger import logger
+
+if TYPE_CHECKING:
+  from robosystems.operations.operators.openai_compat import OpenAICompatClient
 
 
 class AIProviderError(Exception):
@@ -120,7 +128,7 @@ _CACHE_POINT: dict[str, Any] = {"cachePoint": {"type": "default"}}
 
 
 class AIClient:
-  """Untracked Bedrock access.
+  """Untracked model access: Bedrock, plus the self-hosted model when enabled.
 
   Callers on a billable path use `TrackedAIClient`, which wraps this and
   consumes credits per call.
@@ -130,6 +138,7 @@ class AIClient:
     self.backend = "bedrock"
     self.client = self._initialize_bedrock_client()
     logger.info("Initialized AI client with AWS Bedrock")
+    self._self_hosted = self._initialize_self_hosted_client()
 
   def _initialize_bedrock_client(self):
     import boto3
@@ -172,13 +181,36 @@ class AIClient:
         "  AWS_BEDROCK_ACCESS_KEY_ID and AWS_BEDROCK_SECRET_ACCESS_KEY"
       )
 
+  @staticmethod
+  def _initialize_self_hosted_client() -> "OpenAICompatClient | None":
+    if not env.OPENAI_COMPAT_ENABLED:
+      return None
+    from robosystems.operations.operators.openai_compat import OpenAICompatClient
+
+    tiers = sorted(
+      profile.value
+      for profile, model in OperatorConfig.PROFILE_MODELS.items()
+      if model is OperatorModel.OPENAI_COMPAT
+    )
+    logger.info(
+      f"Self-hosted model enabled: {env.OPENAI_COMPAT_MODEL} "
+      f"(tiers: {tiers or 'none'}; credits per 1K in/out: "
+      f"{env.OPENAI_COMPAT_CREDITS_PER_1K_INPUT}/"
+      f"{env.OPENAI_COMPAT_CREDITS_PER_1K_OUTPUT})"
+    )
+    return OpenAICompatClient(
+      base_url=env.OPENAI_COMPAT_BASE_URL,
+      api_key=env.OPENAI_COMPAT_API_KEY,
+      timeout_seconds=env.OPENAI_COMPAT_TIMEOUT_SECONDS,
+    )
+
   async def create_message(
     self,
     messages: list[AIMessage],
     system: str | None = None,
     max_tokens: int = 4000,
     temperature: float = 0.7,
-    model: str | BedrockModel | ModelProfile | None = None,
+    model: str | OperatorModel | ModelProfile | None = None,
     operator_type: str | None = None,
     tools: list[dict[str, Any]] | None = None,
     cache_conversation: bool = False,
@@ -202,6 +234,18 @@ class AIClient:
     pay the 1.25x cache-write premium with nothing ever reading the entry.
     """
     spec = OperatorConfig.resolve_model(model, operator_type)
+    if spec.provider is ModelProvider.OPENAI_COMPAT:
+      # The row is registered only when enabled, which is also when the
+      # client is built; reaching here without one is a wiring fault.
+      if self._self_hosted is None:
+        raise AIProviderError(
+          f"{spec.model_id} is a self-hosted model but OPENAI_COMPAT_ENABLED is off"
+        )
+      logger.debug(f"Using self-hosted model: {spec.model_id}")
+      return await self._self_hosted.create_message(
+        spec, messages, system, max_tokens, temperature, tools
+      )
+
     logger.debug(f"Using Bedrock model: {spec.model_id}")
     request = self._build_request(
       spec, messages, system, max_tokens, temperature, tools, cache_conversation

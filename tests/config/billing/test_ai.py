@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from robosystems.config.billing.ai import AIBillingConfig
+from robosystems.config.billing.ai import AIBillingConfig, self_hosted_rates
 
 
 def test_token_pricing_matches_bedrock_us_profile_cost():
@@ -60,3 +60,32 @@ def test_minimum_charge():
   assert AIBillingConfig.apply_minimum_charge(Decimal("0")) == Decimal("0")
   assert AIBillingConfig.apply_minimum_charge(Decimal("0.5")) == Decimal("1")
   assert AIBillingConfig.apply_minimum_charge(Decimal("5")) == Decimal("5")
+
+
+class TestSelfHostedRates:
+  """A deployment's self-hosted model bills at the rates it configures; the
+  default 0 is the honest passthrough of a GPU with no per-token cost."""
+
+  def test_default_zero(self):
+    assert self_hosted_rates("0", "0") == {
+      "input": Decimal("0"),
+      "output": Decimal("0"),
+      "cache_read": Decimal("0"),
+      "cache_write": Decimal("0"),
+    }
+
+  def test_configured_rates_and_no_assumed_cache_discount(self):
+    rates = self_hosted_rates("0.5", "2")
+    assert rates["input"] == Decimal("0.5")
+    assert rates["output"] == Decimal("2")
+    assert rates["cache_read"] == rates["cache_write"] == Decimal("0.5")
+
+  @pytest.mark.parametrize(("inp", "out"), [("-1", "0"), ("0", "-0.1")])
+  def test_negative_rate_fails(self, inp, out):
+    with pytest.raises(ValueError, match="negative"):
+      self_hosted_rates(inp, out)
+
+  @pytest.mark.parametrize(("inp", "out"), [("free", "0"), ("0", "NaN"), ("inf", "0")])
+  def test_malformed_rate_fails(self, inp, out):
+    with pytest.raises(ValueError):
+      self_hosted_rates(inp, out)

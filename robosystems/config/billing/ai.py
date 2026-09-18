@@ -24,9 +24,40 @@ business (``config/operators.py`` ``MODEL_REGISTRY``, field ``pricing_key``);
 an unregistered model raises at billing time rather than underbilling.
 Never add a silent default entry here (see
 specs/ai-operators/llm-provider-abstraction).
+
+The ``openai_compat`` key exists only in a deployment that turns on its
+self-hosted model (``OPENAI_COMPAT_ENABLED``), at the rates it configures.
 """
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+
+from robosystems.config.env import env
+
+
+def self_hosted_rates(input_per_1k: str, output_per_1k: str) -> dict[str, Decimal]:
+  """Rates for a deployment's self-hosted model, credits per 1K tokens.
+
+  Cache reads and writes bill at the input rate: an OpenAI-compatible
+  server's caching discount, if it has one, is not ours to assume.
+  """
+  try:
+    input_rate = Decimal(input_per_1k)
+    output_rate = Decimal(output_per_1k)
+  except InvalidOperation:
+    raise ValueError(
+      f"Self-hosted model rates must be numbers, got {input_per_1k!r} / "
+      f"{output_per_1k!r}"
+    ) from None
+  if not (input_rate.is_finite() and output_rate.is_finite()):
+    raise ValueError("Self-hosted model rates must be finite")
+  if input_rate < 0 or output_rate < 0:
+    raise ValueError("Self-hosted model rates cannot be negative")
+  return {
+    "input": input_rate,
+    "output": output_rate,
+    "cache_read": input_rate,
+    "cache_write": input_rate,
+  }
 
 
 class AIBillingConfig:
@@ -62,6 +93,11 @@ class AIBillingConfig:
       "cache_write": Decimal("0.275"),
     },
   }
+  if env.OPENAI_COMPAT_ENABLED:
+    TOKEN_PRICING["openai_compat"] = self_hosted_rates(
+      env.OPENAI_COMPAT_CREDITS_PER_1K_INPUT,
+      env.OPENAI_COMPAT_CREDITS_PER_1K_OUTPUT,
+    )
 
   @classmethod
   def apply_minimum_charge(cls, cost: Decimal) -> Decimal:

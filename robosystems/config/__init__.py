@@ -19,13 +19,14 @@ from .constants import PrefixConstants, URIConstants, XBRLConstants
 from .credits import CreditConfig
 from .env import EnvConfig, env
 from .operators import (
-  BedrockModel,
   ExecutionProfile,
   ModelConfig,
   ModelProfile,
+  ModelProvider,
   ModelSpec,
   OperatorConfig,
   OperatorExecutionMode,
+  OperatorModel,
 )
 from .query_queue import QueryQueueConfig
 from .rate_limits import EndpointCategory, RateLimitConfig, RateLimitPeriod
@@ -34,7 +35,6 @@ from .validation import EnvValidator
 __all__ = [
   "DEFAULT_GRAPH_BILLING_PLANS",
   "AIBillingConfig",
-  "BedrockModel",
   # Billing exports
   "BillingConfig",
   # Credit exports
@@ -47,10 +47,12 @@ __all__ = [
   "ExecutionProfile",
   "ModelConfig",
   "ModelProfile",
+  "ModelProvider",
   "ModelSpec",
   # AI Operator exports
   "OperatorConfig",
   "OperatorExecutionMode",
+  "OperatorModel",
   "PrefixConstants",
   # Query configuration exports
   "QueryQueueConfig",

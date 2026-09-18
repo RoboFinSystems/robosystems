@@ -4,12 +4,15 @@ import pytest
 
 from robosystems.config.billing.ai import AIBillingConfig
 from robosystems.config.operators import (
-  BedrockModel,
   ExecutionProfile,
   ModelProfile,
+  ModelProvider,
   ModelSpec,
   OperatorConfig,
   OperatorExecutionMode,
+  OperatorModel,
+  build_model_registry,
+  build_profile_models,
 )
 
 
@@ -17,10 +20,14 @@ class TestModelRegistry:
   """Every model the platform can run is a registry row, and every row is
   priced. The registry is what the client and the meter both read."""
 
-  def test_every_model_has_a_spec(self):
-    for model in BedrockModel:
+  def test_every_platform_model_has_a_spec(self):
+    for model in OperatorModel:
+      if model is OperatorModel.OPENAI_COMPAT:
+        continue  # a deployment's own model; see TestSelfHostedModel
       assert model in OperatorConfig.MODEL_REGISTRY
-      assert isinstance(OperatorConfig.MODEL_REGISTRY[model], ModelSpec)
+      spec = OperatorConfig.MODEL_REGISTRY[model]
+      assert isinstance(spec, ModelSpec)
+      assert spec.provider is ModelProvider.BEDROCK
 
   def test_every_spec_bills_under_a_rate_card_key(self):
     for model, spec in OperatorConfig.MODEL_REGISTRY.items():
@@ -36,7 +43,7 @@ class TestModelRegistry:
       assert spec.model_id.startswith("us."), spec.model_id
 
   def test_claude_5_family_disables_thinking_and_takes_no_sampling_params(self):
-    for model in (BedrockModel.SONNET_5, BedrockModel.OPUS_5):
+    for model in (OperatorModel.SONNET_5, OperatorModel.OPUS_5):
       spec = OperatorConfig.MODEL_REGISTRY[model]
       assert spec.accepts_sampling_params is False
       assert spec.additional_request_fields == {"thinking": {"type": "disabled"}}
@@ -44,9 +51,9 @@ class TestModelRegistry:
 
   def test_claude_4_family_accepts_sampling_params(self):
     for model in (
-      BedrockModel.SONNET_4_6,
-      BedrockModel.SONNET_4_5,
-      BedrockModel.SONNET_4,
+      OperatorModel.SONNET_4_6,
+      OperatorModel.SONNET_4_5,
+      OperatorModel.SONNET_4,
     ):
       spec = OperatorConfig.MODEL_REGISTRY[model]
       assert spec.accepts_sampling_params is True
@@ -55,12 +62,97 @@ class TestModelRegistry:
   def test_luna_takes_no_cache_points_and_no_sampling_params(self):
     """Verified over Converse 2026-09-15: explicit cachePoint blocks and
     `temperature` are both rejected; implicit caching reports through usage."""
-    spec = OperatorConfig.MODEL_REGISTRY[BedrockModel.GPT_5_6_LUNA]
+    spec = OperatorConfig.MODEL_REGISTRY[OperatorModel.GPT_5_6_LUNA]
     assert spec.model_id == "us.openai.gpt-5.6-luna"
     assert spec.cache_points is False
     assert spec.accepts_sampling_params is False
     assert spec.additional_request_fields == {}
     assert spec.pricing_key == "openai_gpt_5_6_luna"
+
+
+class TestSelfHostedModel:
+  """The self-hosted model exists only in a deployment that turns it on. Off
+  — hosted prod — nothing can resolve to it and the meter refuses it."""
+
+  URL = "http://localhost:11434/v1"
+
+  def test_off_by_default(self):
+    assert OperatorModel.OPENAI_COMPAT not in OperatorConfig.MODEL_REGISTRY
+    assert "openai_compat" not in AIBillingConfig.TOKEN_PRICING
+    with pytest.raises(KeyError):
+      OperatorConfig.resolve_model("openai-compat")
+
+  def test_off_leaves_the_platform_registry_unchanged(self):
+    registry = build_model_registry(False, self.URL, "qwen3:32b", 0)
+    assert registry == OperatorConfig.MODEL_REGISTRY
+
+  def test_enabled_registers_the_deployment_model(self):
+    registry = build_model_registry(True, self.URL, "qwen3:32b", 0)
+    spec = registry[OperatorModel.OPENAI_COMPAT]
+    assert spec.provider is ModelProvider.OPENAI_COMPAT
+    assert spec.model_id == "qwen3:32b"
+    assert spec.pricing_key == "openai_compat"
+    assert spec.cache_points is False
+    assert spec.accepts_sampling_params is True
+    assert spec.max_output_tokens is None
+
+  def test_output_cap_is_carried(self):
+    registry = build_model_registry(True, self.URL, "glm-4.7-flash", 4096)
+    assert registry[OperatorModel.OPENAI_COMPAT].max_output_tokens == 4096
+
+  @pytest.mark.parametrize(("url", "model"), [("", "qwen3:32b"), (URL, "")])
+  def test_half_configured_fails(self, url, model):
+    with pytest.raises(ValueError, match="OPENAI_COMPAT_BASE_URL or"):
+      build_model_registry(True, url, model, 0)
+
+  @pytest.mark.parametrize(
+    "model",
+    ["claude-sonnet-5", "openai-compat", "balanced", "us.anthropic.claude-sonnet-5"],
+  )
+  def test_id_that_would_resolve_as_something_else_fails(self, model):
+    """Resolution matches short names, profiles and wire ids — a colliding
+    id would run and bill as another model."""
+    with pytest.raises(ValueError, match="collides"):
+      build_model_registry(True, self.URL, model, 0)
+
+
+class TestProfileOverrides:
+  """OPERATOR_PROFILE_* re-points a tier for one deployment."""
+
+  NONE = dict.fromkeys(ModelProfile, "")
+
+  def test_no_overrides_keeps_the_platform_map(self):
+    mapping = build_profile_models(self.NONE, OperatorConfig.MODEL_REGISTRY)
+    assert mapping == OperatorConfig.PROFILE_MODELS
+
+  def test_a_tier_can_point_at_the_self_hosted_model(self):
+    registry = build_model_registry(True, "http://h/v1", "qwen3:32b", 0)
+    mapping = build_profile_models(
+      {**self.NONE, ModelProfile.BALANCED: "openai-compat"}, registry
+    )
+    assert mapping[ModelProfile.BALANCED] is OperatorModel.OPENAI_COMPAT
+    assert mapping[ModelProfile.QUALITY] is OperatorModel.OPUS_5
+
+  def test_a_tier_can_point_at_another_platform_model(self):
+    mapping = build_profile_models(
+      {**self.NONE, ModelProfile.QUALITY: "claude-sonnet-5"},
+      OperatorConfig.MODEL_REGISTRY,
+    )
+    assert mapping[ModelProfile.QUALITY] is OperatorModel.SONNET_5
+
+  def test_unknown_name_fails_the_boot(self):
+    with pytest.raises(ValueError, match="OPERATOR_PROFILE_ECONOMY"):
+      build_profile_models(
+        {**self.NONE, ModelProfile.ECONOMY: "no-such-model"},
+        OperatorConfig.MODEL_REGISTRY,
+      )
+
+  def test_self_hosted_tier_without_the_provider_fails_the_boot(self):
+    with pytest.raises(ValueError, match="needs OPENAI_COMPAT_ENABLED"):
+      build_profile_models(
+        {**self.NONE, ModelProfile.BALANCED: "openai-compat"},
+        OperatorConfig.MODEL_REGISTRY,
+      )
 
 
 class TestProfiles:
@@ -69,13 +161,15 @@ class TestProfiles:
 
   def test_balanced_is_the_default_and_runs_sonnet_5(self):
     assert OperatorConfig.DEFAULT_MODEL_CONFIG.default_profile == ModelProfile.BALANCED
-    assert OperatorConfig.PROFILE_MODELS[ModelProfile.BALANCED] == BedrockModel.SONNET_5
+    assert (
+      OperatorConfig.PROFILE_MODELS[ModelProfile.BALANCED] == OperatorModel.SONNET_5
+    )
     assert OperatorConfig.get_bedrock_model_id() == "us.anthropic.claude-sonnet-5"
 
   def test_quality_and_economy_targets(self):
-    assert OperatorConfig.PROFILE_MODELS[ModelProfile.QUALITY] == BedrockModel.OPUS_5
+    assert OperatorConfig.PROFILE_MODELS[ModelProfile.QUALITY] == OperatorModel.OPUS_5
     assert (
-      OperatorConfig.PROFILE_MODELS[ModelProfile.ECONOMY] == BedrockModel.GPT_5_6_LUNA
+      OperatorConfig.PROFILE_MODELS[ModelProfile.ECONOMY] == OperatorModel.GPT_5_6_LUNA
     )
 
 
@@ -88,7 +182,7 @@ class TestResolveModel:
 
   def test_explicit_enum(self):
     assert (
-      OperatorConfig.resolve_model(BedrockModel.SONNET_4).model_id
+      OperatorConfig.resolve_model(OperatorModel.SONNET_4).model_id
       == "us.anthropic.claude-sonnet-4-20250514-v1:0"
     )
 
@@ -127,7 +221,7 @@ class TestResolveModel:
       OperatorConfig.OPERATOR_MODEL_OVERRIDES, "test_agent", ModelProfile.ECONOMY
     )
     assert OperatorConfig.get_bedrock_model_id(
-      model=BedrockModel.SONNET_4_6, operator_type="test_agent"
+      model=OperatorModel.SONNET_4_6, operator_type="test_agent"
     ) == ("us.anthropic.claude-sonnet-4-6")
 
   def test_unknown_operator_type_falls_through_to_default(self):
@@ -249,10 +343,10 @@ class TestValidateConfiguration:
     meter's fail-loud exists for; startup validation must name it."""
     from dataclasses import replace
 
-    spec = OperatorConfig.MODEL_REGISTRY[BedrockModel.SONNET_4]
+    spec = OperatorConfig.MODEL_REGISTRY[OperatorModel.SONNET_4]
     monkeypatch.setitem(
       OperatorConfig.MODEL_REGISTRY,
-      BedrockModel.SONNET_4,
+      OperatorModel.SONNET_4,
       replace(spec, pricing_key="nonexistent_key"),
     )
     result = OperatorConfig.validate_configuration()
@@ -283,7 +377,10 @@ class TestGetAllConfig:
     assert models["default_model_id"] == "us.anthropic.claude-sonnet-5"
     assert "fallback" in models
     assert "region" in models
-    assert set(models["available_models"]) == {m.value for m in BedrockModel}
+    assert set(models["available_models"]) == {
+      m.value for m in OperatorConfig.MODEL_REGISTRY
+    }
+    assert "openai-compat" not in models["available_models"]
     assert models["profiles"]["economy"] == "us.openai.gpt-5.6-luna"
 
   def test_execution_profiles_section(self):
