@@ -528,17 +528,32 @@ Resources:
           LaunchTemplateSpecification:
             LaunchTemplateId: !Ref ReplicaLaunchTemplate
             Version: !GetAtt ReplicaLaunchTemplate.LatestVersionNumber
-          # Spot pool diversification: 16 GB ARM64 memory-optimized alternatives to
-          # the primary (r7g.large). Every alternative MUST match the primary's
-          # 16 GB — 8 GB types (and burstable t4g) trip the admission-control memory
-          # guard on the ~110 GB sec graph under full-report reads, latching into
-          # 503s. Spread across Graviton2/3/4 + m/r families for capacity depth.
+          # Spot pool diversification: 16 GB ARM64 alternatives to the primary
+          # (r7g.large). Every alternative MUST match the primary's 16 GB — 8 GB
+          # types (and burstable t4g) trip the admission-control memory guard on
+          # the ~110 GB sec graph under full-report reads, latching into 503s.
+          #
+          # The primary stays first: on-demand capacity is allocated by list order
+          # (prioritized), so the on-demand base lands on r7g.large, the type the
+          # reserved instances cover.
+          #
+          # The first five sit in heavily reclaimed Spot pools; r8gd, i4g, m8gd,
+          # im4gn and m7gd were added from the Spot Instance Advisor's low
+          # interruption bands at comparable Spot prices (2026-09). Their local
+          # NVMe is never mounted — the database downloads to the root volume — so
+          # instance-store size is irrelevant. Types whose Spot price runs above
+          # r7g.large on-demand (the c-family 2xlarge) are left out on purpose.
           Overrides:
             - InstanceType: !Ref InstanceType
             - InstanceType: r6g.large
             - InstanceType: r8g.large
             - InstanceType: m7g.xlarge
             - InstanceType: m6g.xlarge
+            - InstanceType: r8gd.large
+            - InstanceType: i4g.large
+            - InstanceType: m8gd.xlarge
+            - InstanceType: im4gn.xlarge
+            - InstanceType: m7gd.xlarge
         InstancesDistribution:
           OnDemandBaseCapacity:
             !If [IsSpotEnabled, !Ref SpotOnDemandBaseCapacity, 0]
