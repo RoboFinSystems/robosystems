@@ -550,7 +550,10 @@ def rewrite_product_links(
 ) -> str:
   def replace(match: re.Match[str]) -> str:
     bang, text_, target, title = match.groups()
-    if target.startswith(("http://", "https://", "mailto:", "#", "/")):
+    if target.startswith(("http://", "https://", "mailto:", "#")):
+      return match.group(0)
+    # A site path is a fine link and a broken image: nothing serves it.
+    if target.startswith("/") and not bang:
       return match.group(0)
     if bang:
       if target not in (media or {}):

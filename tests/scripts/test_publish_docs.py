@@ -369,7 +369,8 @@ class TestProductPages:
       tmp_path,
       {
         "a.md": "---\ntitle: A\norder: 1\n---\n\n"
-        "![gone](images/gone.png) ![outside](../shot.png)\n",
+        "![gone](images/gone.png) ![outside](../shot.png) ![rooted](/images/shot.png)\n"
+        "[a site path](/pricing) still links.\n",
       },
     )
     build = publish_docs.Build()
@@ -377,6 +378,7 @@ class TestProductPages:
     assert build.errors == [
       "roboledger/a.md: image must be a file under images/ that exists: images/gone.png",
       "roboledger/a.md: image must be a file under images/ that exists: ../shot.png",
+      "roboledger/a.md: image must be a file under images/ that exists: /images/shot.png",
     ]
 
   def test_an_image_no_page_shows_is_a_warning_and_stays_home(self, tmp_path):
