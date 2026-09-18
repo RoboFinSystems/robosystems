@@ -42,7 +42,7 @@ curl https://api.robosystems.ai/v1/status
 }
 ```
 
-**Important:** `GET /v1/status` is the only health check. `GET /health`, `GET /v1/health`, and the root `/` do **not** return health JSON — the root path serves the Swagger UI. The live OpenAPI spec is at [api.robosystems.ai/openapi.json](https://api.robosystems.ai/openapi.json), and the interactive reference is at [api.robosystems.ai/docs](https://api.robosystems.ai/docs).
+**Important:** `GET /v1/status` is the only health check. `GET /health`, `GET /v1/health`, and the root `/` do **not** return health JSON — the root path serves the Swagger UI. The live OpenAPI spec is at [api.robosystems.ai/openapi.json](https://api.robosystems.ai/openapi.json), and the interactive reference is at [robosystems.ai/docs/api](https://robosystems.ai/docs/api).
 
 ## Step 2: Create an API Key
 
@@ -217,7 +217,7 @@ curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" https://api.robosystems.ai/v1/user
 
 **Reference:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 - **[RoboLedger Docs](https://roboledger.ai/docs)** - Product guides for running your books with RoboLedger
 
 ## Support

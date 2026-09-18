@@ -78,7 +78,7 @@ transfer, move, modify, combine, separate, copy
 
 ## The Event Block Envelope
 
-The Event Block is the envelope every write carries. It is created via the CQRS command surface at `POST /extensions/roboledger/{graph_id}/operations/create-event-block`, and the response is an `EventBlockEnvelope` wrapped in a standard `OperationEnvelope` (ULID `operationId`, `Idempotency-Key` support). The full request/response schema is published in the live API reference — see [the OpenAPI docs](https://api.robosystems.ai/docs).
+The Event Block is the envelope every write carries. It is created via the CQRS command surface at `POST /extensions/roboledger/{graph_id}/operations/create-event-block`, and the response is an `EventBlockEnvelope` wrapped in a standard `OperationEnvelope` (ULID `operationId`, `Idempotency-Key` support). The full request/response schema is published in the [API reference](https://robosystems.ai/docs/api/extensions-roboledger/create-event-block).
 
 **What the envelope carries:**
 
@@ -383,7 +383,7 @@ just lbug-query $GRAPH_ID "MATCH (e:Event)-[:EVENT_TRIGGERS_TRANSACTION]->(t:Tra
 - **[Architecture Overview](Architecture-Overview)** - How the extensions surface, GraphQL reads, and CQRS command writes fit the platform
 
 **Codebase Documentation:**
-- **[API Reference](https://api.robosystems.ai/docs)** - Live OpenAPI spec for every operation, request model, and response envelope
+- **[API Reference](https://robosystems.ai/docs/api)** - Live OpenAPI spec for every operation, request model, and response envelope
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business workflow orchestration and the reads/commands kernel
 - **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - The typed read surface and resolver patterns
 - **[Extensions Models](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/extensions/README.md)** - RoboLedger OLTP SQLAlchemy models with schema-per-graph tenancy

@@ -163,7 +163,7 @@ Swap `format: XBRL_2_1` for the filing package (`-o report.zip`) or `format: HOL
 
 **Note:** Reports published before serialization shipped have a `NULL` `bundle_url`. Any flavor requested for one of those raises `REPORT_BUNDLE_NOT_AVAILABLE` with a message to regenerate the report. There is no automatic backfill — run `regenerate-report` to stamp a current generation.
 
-The field also raises `REPORT_BUNDLE_SIGNING_FAILED` on a signing or materialization fault, and returns `null` when the `reportId` does not resolve at all. Introspect the full schema over the API, or browse [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) for the surrounding operations.
+The field also raises `REPORT_BUNDLE_SIGNING_FAILED` on a signing or materialization fault, and returns `null` when the `reportId` does not resolve at all. Introspect the full schema over the API, or browse [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api) for the surrounding operations.
 
 ## What's Inside Each Format
 
@@ -278,7 +278,7 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   -d '{"query":"{ reportDownloadUrl(reportId: \"'"$REPORT_ID"'\", format: JSONLD) { downloadUrl expiresAt generationCount } }"}'
 ```
 
-All of these operations return an `OperationEnvelope` and accept an `Idempotency-Key` header. For the exact request schemas of each operation, see [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs). For the mechanics of mapping a chart of accounts to framework concepts, see the [RoboLedger Operations](RoboLedger-Operations) guide.
+All of these operations return an `OperationEnvelope` and accept an `Idempotency-Key` header. For the exact request schemas of each operation, see [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api). For the mechanics of mapping a chart of accounts to framework concepts, see the [RoboLedger Operations](RoboLedger-Operations) guide.
 
 ## Troubleshooting
 
@@ -346,7 +346,7 @@ just demo-seattle-method-create-report
 
 **API & Codebase:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI spec for the report operations
+- **[API reference](https://robosystems.ai/docs/api)** - Live OpenAPI spec for the report operations
 - **[GraphQL Reads](GraphQL-Reads)** - The read surface `reportDownloadUrl` lives on
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business workflow orchestration in codebase
 - **[Models — Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/extensions/README.md)** - Extensions OLTP models in codebase

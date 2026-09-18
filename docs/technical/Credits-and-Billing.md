@@ -131,7 +131,7 @@ curl -X GET "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e/usage" \
 
 This returns a usage report that includes both a `credit_summary` and a `storage_summary`, so it is the right call when you want the storage and credit pictures together. A graph-level metrics endpoint is also available at `GET /v1/graphs/{graph_id}/metrics`.
 
-For the exact request parameters and response schemas of every endpoint on this page, see the live OpenAPI reference at [api.robosystems.ai/docs](https://api.robosystems.ai/docs) rather than re-deriving them here.
+For the exact request parameters and response schemas of every endpoint on this page, see the API reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api) rather than re-deriving them here.
 
 ## Public Pricing and Offerings
 
@@ -186,7 +186,7 @@ Each member holds one of three roles, and the role decides what they can do with
 
 Graph *access* is a separate, narrower grant on top of org membership — being in the org does not by itself put you in every graph. Org owners and admins are the exception: they hold implicit admin on every graph their org owns. The full model, the invitation flow, and the per-graph member endpoints are covered in [Authentication and API Keys](Authentication-and-API-Keys#organizations-and-roles).
 
-The organization carries one account-level limit, independent of credits and storage: a **maximum number of graphs** it can hold (`max_graphs`, defaulting to the configured `ORG_GRAPHS_DEFAULT_LIMIT`). This caps how many graphs the account can provision at once — distinct from each graph's own storage limit and credit pool. `GET /v1/orgs/{org_id}/limits` reports the cap and where you stand against it, and `GET /v1/orgs/{org_id}/usage` aggregates activity across every graph in the org (`days` sets the lookback, default 30). See the [OpenAPI reference](https://api.robosystems.ai/docs) for the exact request and response shapes.
+The organization carries one account-level limit, independent of credits and storage: a **maximum number of graphs** it can hold (`max_graphs`, defaulting to the configured `ORG_GRAPHS_DEFAULT_LIMIT`). This caps how many graphs the account can provision at once — distinct from each graph's own storage limit and credit pool. `GET /v1/orgs/{org_id}/limits` reports the cap and where you stand against it, and `GET /v1/orgs/{org_id}/usage` aggregates activity across every graph in the org (`days` sets the lookback, default 30). See the [API reference](https://robosystems.ai/docs/api) for the exact request and response shapes.
 
 ## Billing Endpoints
 
@@ -256,7 +256,7 @@ just admin dev credits repos bonus
 **Codebase Documentation:**
 - **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing)** - Subscription plans, AI token pricing, and storage limits
 - **[Shared Repository Registry](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/shared_repositories.py)** - Repository plans, rate limits, and credit costs
-- **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 
 ## Support
 

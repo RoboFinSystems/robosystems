@@ -234,7 +234,7 @@ For agent-driven reads, the same GraphQL surface is reachable through the MCP `q
 
 ## Operations Reference
 
-The full request and response schemas are published in the live OpenAPI spec — see [API Documentation](https://api.robosystems.ai/docs) rather than re-tabulating every field here. The six operations are:
+The full request and response schemas are published in the live OpenAPI spec — see [API reference](https://robosystems.ai/docs/api) rather than re-tabulating every field here. The six operations are:
 
 | Operation | Request model | Result in envelope |
 | --- | --- | --- |
@@ -321,7 +321,7 @@ GRAPH_ID=$(jq -r '.graphs.roboinvestor_demo.graph_id' .local/config.json)
 
 **API Reference:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - Full request and response schemas for all six operations.
+- **[API reference](https://robosystems.ai/docs/api)** - Full request and response schemas for all six operations.
 
 ## Support
 

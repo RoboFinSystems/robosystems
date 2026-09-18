@@ -51,7 +51,7 @@ export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
 export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 ```
 
-Every example below uses `https://api.robosystems.ai` and the `X-API-Key` header. The full endpoint and schema reference — request bodies, response models, every field — lives in the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs). This page carries the concepts and the worked examples; it does not re-tabulate the endpoint surface.
+Every example below uses `https://api.robosystems.ai` and the `X-API-Key` header. The full endpoint and schema reference — request bodies, response models, every field — lives in the API reference at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api). This page carries the concepts and the worked examples; it does not re-tabulate the endpoint surface.
 
 ## The Operation Envelope Contract
 
@@ -400,7 +400,7 @@ On your own stack, `just demo-roboledger` provisions a tenant with 16 months of 
 
 **API Reference:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI spec with every request body and response model
+- **[API reference](https://robosystems.ai/docs/api)** - Live OpenAPI spec with every request body and response model
 
 **Codebase Documentation:**
 

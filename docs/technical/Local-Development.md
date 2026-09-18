@@ -11,7 +11,8 @@ Every API guide in this wiki is written against the hosted platform at `https://
 | | Hosted ([robosystems.ai](https://robosystems.ai)) | Local stack |
 | --- | --- | --- |
 | **API base URL** | `https://api.robosystems.ai` | `http://localhost:8000` |
-| **API reference** | [api.robosystems.ai/docs](https://api.robosystems.ai/docs) | `http://localhost:8000/docs` |
+| **API reference** | [robosystems.ai/docs/api](https://robosystems.ai/docs/api) — a page per operation | Same pages; `http://localhost:8000/docs` redirects to them |
+| **Try a call in the browser** | [api.robosystems.ai](https://api.robosystems.ai) — Swagger UI | `http://localhost:8000/` — Swagger UI, against your own stack |
 | **Account and API key** | Sign up, then **Settings → API keys** | `just demo-user` writes both to `.local/config.json` |
 | **Graphs** | **Create Graph** in the app (needs a payment method) | `just demo-*` recipes provision and populate them |
 | **Billing and credits** | On | Off by default (`BILLING_ENABLED=false` in `.env`) |
@@ -88,7 +89,7 @@ curl http://localhost:8000/v1/status
 }
 ```
 
-**Important:** `GET /v1/status` is the only health check. `GET /health`, `GET /v1/health`, and the root `/` do **not** return health JSON — the root path serves the Swagger UI. The live OpenAPI spec is at `http://localhost:8000/openapi.json`, and the interactive docs are at `http://localhost:8000/docs`.
+**Important:** `GET /v1/status` is the only health check. `GET /health`, `GET /v1/health`, and the root `/` do **not** return health JSON — the root path serves the Swagger UI, where you can run a call against your own stack. The live OpenAPI spec is at `http://localhost:8000/openapi.json`, and `/docs` redirects to the rendered reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api).
 
 ## Step 2: Create a Demo User and API Key
 

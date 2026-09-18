@@ -79,7 +79,7 @@ Hands-on walkthroughs on a local stack — run one command, explore the result.
 ## Reference
 
 - **[Component READMEs](https://github.com/RoboFinSystems/robosystems?tab=readme-ov-file#documentation)** - Detailed technical docs in the codebase
-- **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 
 ## Support
 

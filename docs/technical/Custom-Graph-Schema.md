@@ -909,7 +909,7 @@ just install
 - **Schema Template**: `examples/custom_graph_demo/schema.json`
 - **G.V() Graph IDE**: [https://gdotv.com/](https://gdotv.com/)
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
-- **RoboSystems API**: http://localhost:8000/docs
+- **RoboSystems API**: `http://localhost:8000/` — Swagger UI, with try-it
 - **Graphs & Tenancy**: [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy) - The graph_id model, tiers, and subgraphs
 - **Query the graph**: [Querying the Analytical Graph](Querying-the-Analytical-Graph) - Ad-hoc Cypher and staging tables
 - **MCP & operators**: [AI Operators & MCP](AI-Operators-and-MCP) - Access your graph through MCP tools

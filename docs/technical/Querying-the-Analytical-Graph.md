@@ -126,7 +126,7 @@ curl -N "https://api.robosystems.ai/v1/operations/{operation_id}/stream" \
 
 Streaming result delivery is available by setting `Accept: application/x-ndjson` or `Accept: text/event-stream`, and `chunk_size` (10–10,000) tunes the streamed batch size.
 
-For the full request/response schema and every query parameter, see the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (operation `executeCypher`; its SQL peer below is `executeSql`).
+For the full request/response schema and every query parameter, see the API reference at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api) (operation `executeCypher`; its SQL peer below is `executeSql`).
 
 ## Querying the Staging Tables
 
@@ -352,7 +352,7 @@ None of them exercise the public API's authentication, rate limiting, or shared-
 - **[Middleware / Graph](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/graph/README.md)** - Routing, multi-tenancy, and execution strategies
 
 **API Reference:**
-- **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 - **Cypher Manual**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **MCP Protocol**: [Model Context Protocol](https://modelcontextprotocol.io/)
 

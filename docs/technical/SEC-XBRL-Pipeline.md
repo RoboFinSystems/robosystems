@@ -696,7 +696,7 @@ just sec-load NVDA 2025
 - **G.V()**: [https://gdotv.com/](https://gdotv.com/) - Recommended graph visualization tool for Ladybug
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **MCP Protocol**: [Model Context Protocol](https://modelcontextprotocol.io/)
-- **RoboSystems API**: http://localhost:8000/docs (when running locally)
+- **RoboSystems API**: `http://localhost:8000/` — Swagger UI, with try-it (when running locally)
 - **SEC EDGAR**: [SEC Website](https://www.sec.gov/edgar)
 - **DuckDB**: [Documentation](https://duckdb.org/docs/) - SQL database for staging
 - **Search SEC narratives**: [Search & AI Retrieval](Search-and-AI-Retrieval) - Full-text and semantic search over filing text

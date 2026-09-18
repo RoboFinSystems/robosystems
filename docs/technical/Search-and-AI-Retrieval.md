@@ -201,7 +201,7 @@ curl "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/documents/doc_abc123def456"
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
-The full request/response schema for every endpoint is published in the live OpenAPI spec — see [API Documentation](https://api.robosystems.ai/docs) rather than re-deriving it here.
+The full request/response schema for every endpoint is published in the live OpenAPI spec — see [API reference](https://robosystems.ai/docs/api) rather than re-deriving it here.
 
 **Important:** The document write operations (`index-document`, `delete-document`) require write access and are blocked on shared-repository graphs. You can `search` and `get-document-section` against the `sec` repository, but you cannot index documents into it — index into your own graph. See [Document Management](Document-Management) for the full document lifecycle.
 
@@ -297,7 +297,7 @@ A `search-documents` hit (`SearchHit`) includes the fields you need to rank and 
 
 A `get-document-section` response (`DocumentSection`) adds the full `content` string plus context such as `graph_id`, `entity_cik`, `fiscal_period`, and `accession_number`. A `content_url` is included when available.
 
-The authoritative, machine-readable definition of every field lives in the OpenAPI spec — see [API Documentation](https://api.robosystems.ai/docs).
+The authoritative, machine-readable definition of every field lives in the OpenAPI spec — see [API reference](https://robosystems.ai/docs/api).
 
 ## Troubleshooting
 
@@ -380,7 +380,7 @@ The `just search` recipe forces semantic mode by default, while the REST and MCP
 
 **API Reference:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 
 ## Support
 

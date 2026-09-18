@@ -325,7 +325,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/query/cypher" \
   -d '{"query": "MATCH (p:Person) RETURN count(p) AS people"}'
 ```
 
-For the full request and response schemas (`FileUploadRequest`, `IngestFileOp`, `DeleteFileOp`, `OperationEnvelope`, `GetFileInfoResponse`, `DeleteFileResponse`), see the live API reference at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs).
+For the full request and response schemas (`FileUploadRequest`, `IngestFileOp`, `DeleteFileOp`, `OperationEnvelope`, `GetFileInfoResponse`, `DeleteFileResponse`), see the API reference at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api).
 
 ## Gotchas and Pitfalls
 
@@ -358,7 +358,7 @@ On a local stack, `just demo-custom-graph` exercises the entire upload → stage
 
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business workflow orchestration, including OLTP→OLAP materialization
 - **[Graph API](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/README.md)** - LadybugDB staging tables, query, and materialize endpoints
-- **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 
 ## Support
 

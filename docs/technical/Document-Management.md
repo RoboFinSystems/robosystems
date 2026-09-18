@@ -71,7 +71,7 @@ The operation returns an `OperationEnvelope`; the indexing report sits inside `r
 
 Envelope keys are camelCase on the wire; the payload fields inside `result` keep their snake_case names.
 
-The full endpoint and schema surface is published in the live OpenAPI spec at [api.robosystems.ai/docs](https://api.robosystems.ai/docs). This guide covers the concepts and tasks; the OpenAPI spec is the authoritative reference for request and response shapes.
+The full endpoint and schema surface is published in the API reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api). This guide covers the concepts and tasks; the OpenAPI spec is the authoritative reference for request and response shapes.
 
 ## The Document Model
 
@@ -299,7 +299,7 @@ Document search is gated by `SEMANTIC_SEARCH_ENABLED`, and the flag gates both h
 
 **API Reference:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI spec with full request/response schemas
+- **[API reference](https://robosystems.ai/docs/api)** - Live OpenAPI spec with full request/response schemas
 
 ## Support
 

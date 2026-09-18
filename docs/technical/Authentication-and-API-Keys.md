@@ -45,7 +45,7 @@ Authentication in RoboSystems is credential-in-header, validated by a FastAPI de
 
 Access is layered. A valid credential authenticates *you*; access to a specific `graph_id` is checked separately by the graph-scoped dependency. That distinction drives the most important status-code rule on the platform: **401 means "no/invalid credential," 403 means "valid user, no access to that graph."** Keep them straight and most auth debugging resolves itself.
 
-The full endpoint surface — request/response schemas, every field, every status code — lives in the live [API Documentation](https://api.robosystems.ai/docs). This page covers the concepts and the day-to-day tasks; it does not re-tabulate the endpoint surface.
+The full endpoint surface — request/response schemas, every field, every status code — lives in the live [API reference](https://robosystems.ai/docs/api). This page covers the concepts and the day-to-day tasks; it does not re-tabulate the endpoint surface.
 
 ## Prerequisites
 
@@ -136,7 +136,7 @@ The `fiscalCalendar` query above is illustrative — substitute any field your d
 
 ## API Key Lifecycle
 
-API keys are managed under `/v1/user/api-keys`. The full request/response schemas are in the [OpenAPI docs](https://api.robosystems.ai/docs); the concepts you need to operate them are below.
+API keys are managed under `/v1/user/api-keys`. The full request/response schemas are in the [API reference](https://robosystems.ai/docs/api); the concepts you need to operate them are below.
 
 ### Key Format
 
@@ -518,7 +518,7 @@ Expected. Changing or resetting a password bumps the user's `session_version`, w
 
 **API Reference:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI reference with request/response schemas for every endpoint
+- **[API reference](https://robosystems.ai/docs/api)** - Live OpenAPI reference with request/response schemas for every endpoint
 - **OpenAPI spec**: [https://api.robosystems.ai/openapi.json](https://api.robosystems.ai/openapi.json) (machine-readable)
 
 **Codebase Documentation:**

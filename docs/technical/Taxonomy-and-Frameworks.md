@@ -166,7 +166,7 @@ POST /extensions/roboledger/{graph_id}/operations/{op_name}
 
 `auto-map-elements` is a worker-backed operation that returns `202` with a `pending` envelope, then streams progress over SSE. It auto-approves mappings with confidence at or above `0.90`, flags those between `0.70` and `0.89` for review, and skips anything below `0.70`.
 
-The request and response schemas (`CreateTaxonomyBlockRequest`, `TaxonomyBlockElementRequest`, `TaxonomyBlockAssociationRequest`, `TaxonomyBlockRuleRequest`, `TaxonomyBlockEnvelope`, and the rest) are published in the live OpenAPI spec rather than re-documented here. See [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs). A few load-bearing field facts to know before you call:
+The request and response schemas (`CreateTaxonomyBlockRequest`, `TaxonomyBlockElementRequest`, `TaxonomyBlockAssociationRequest`, `TaxonomyBlockRuleRequest`, `TaxonomyBlockEnvelope`, and the rest) are published in the live OpenAPI spec rather than re-documented here. See [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api). A few load-bearing field facts to know before you call:
 
 - **`qname` is the envelope-local reference token.** It is unique within the envelope's `elements` list, and `parent_ref`, `from_ref`, `to_ref`, and rule targets all reference elements by qname — never by id.
 - **List caps:** elements ≤ 5,000, structures ≤ 100, associations ≤ 20,000, rules ≤ 500.
@@ -288,7 +288,7 @@ The library fields cover taxonomies (`libraryTaxonomies`, `libraryTaxonomy`, `li
 POST /extensions/{graph_id}/graphql
 ```
 
-The two scopes differ in what the same fields see, not in which fields exist: `library` browses the public catalog only, while a tenant `graph_id` sees that tenant's rows with public fallback. The full field set is introspectable over the API, or browse the spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs).
+The two scopes differ in what the same fields see, not in which fields exist: `library` browses the public catalog only, while a tenant `graph_id` sees that tenant's rows with public fallback. The full field set is introspectable over the API, or browse the API reference at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api).
 
 ## Common Pitfalls
 
@@ -345,7 +345,7 @@ Validate the edit before you pay for a reseed. `just framework-validate` checks 
 - **[Schemas README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/schemas/README.md)** - Graph schema definitions, extension naming conventions, URL and flag topology
 - **[GraphQL README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL extensions surface, Pydantic auto-derivation, resolver patterns
 - **[Extensions Models README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/extensions/README.md)** - Extensions OLTP SQLAlchemy models with schema-per-graph tenancy
-- **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 
 ## Support
 

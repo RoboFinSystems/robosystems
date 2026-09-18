@@ -195,7 +195,7 @@ This page is the orientation hub. Each glossary term has a deeper home:
 | Information Blocks, Elements, Taxonomy/Event Blocks, frameworks | [Information Blocks](Information-Blocks) |
 | Operators, the REA Agent distinction, the MCP retrieval planes | [AI Operators and MCP](AI-Operators-and-MCP) |
 
-For the full, machine-readable endpoint surface, use the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs), rather than re-deriving routes by hand.
+For the full, machine-readable endpoint surface, use the API reference at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api), rather than re-deriving routes by hand.
 
 ## Related Documentation
 

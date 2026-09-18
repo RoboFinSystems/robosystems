@@ -132,7 +132,7 @@ The following tool names are the exact `name` strings for `tools/call`. Every to
 
 In addition, **write tools are auto-generated** from the operation specs of each enabled extension (mapping, schedule, and event writes, for example). These are derived from the same `OperationSpec`s that back the REST command surface, so the MCP write tools and the `/extensions/*/operations/*` endpoints stay in lockstep. The exact set depends on which extensions are enabled; enumerate it for a given graph with `tools/list`.
 
-Each tool's input schema comes back with `tools/list`. The MCP surface is deliberately absent from the OpenAPI spec — and therefore from the generated SDKs: the REST API at [api.robosystems.ai/docs](https://api.robosystems.ai/docs) is the human-and-SDK surface, the transport is the MCP-client surface.
+Each tool's input schema comes back with `tools/list`. The MCP surface is deliberately absent from the OpenAPI spec — and therefore from the generated SDKs: the REST API at [robosystems.ai/docs/api](https://robosystems.ai/docs/api) is the human-and-SDK surface, the transport is the MCP-client surface.
 
 ---
 
@@ -240,7 +240,7 @@ The Operator endpoint runs a Claude-driven executor against a graph. It is mount
 
 The Operator `POST` path can be disabled by deployment via `OPERATOR_POST_ENABLED=false` (returns 403). The GraphQL MCP tools have a separate kill switch, `MCP_GRAPHQL_ENABLED`.
 
-An `OperatorRequest` carries `message` (required), `mode`, optional `history` (a list of `{role, content}` turns), `context`, `enable_rag`, `force_extended_analysis`, `operator_type`, and `selection_criteria`. The `OperatorResponse` returns `content`, `operator_used`, `mode_used`, `metadata`, `tokens_used`, `confidence_score`, `execution_time`, and `error_details`. See [api.robosystems.ai/docs](https://api.robosystems.ai/docs) for the full field reference.
+An `OperatorRequest` carries `message` (required), `mode`, optional `history` (a list of `{role, content}` turns), `context`, `enable_rag`, `force_extended_analysis`, `operator_type`, and `selection_criteria`. The `OperatorResponse` returns `content`, `operator_used`, `mode_used`, `metadata`, `tokens_used`, `confidence_score`, `execution_time`, and `error_details`. See [robosystems.ai/docs/api](https://robosystems.ai/docs/api) for the full field reference.
 
 ---
 
@@ -391,7 +391,7 @@ A stack you run serves both MCP routes at `http://localhost:8000/v1/mcp` and `ht
 - **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, resolver patterns
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Operator framework and business-logic kernel
 - **[Authentication](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/auth/README.md)** - API keys, OAuth 2.1 for MCP clients, and access control
-- **[API Documentation](https://api.robosystems.ai/docs)** - Full endpoint and tool reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - Full endpoint and tool reference with machine-readable OpenAPI spec
 
 ---
 

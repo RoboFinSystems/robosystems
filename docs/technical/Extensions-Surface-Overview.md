@@ -41,7 +41,7 @@ A few details worth pinning down:
 - **Analytical view operations** share the same envelope contract as command writes but are read-only and routed to the materialized graph rather than the OLTP database. There are two: `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube) and `financial-statement-analysis`. These are gated independently of the OLTP domains, so a deployment without RoboLedger tenants can still use them.
 - **One more shape rides the command-operation transport.** A few RoboLedger operations are POST `…/operations/{name}` and return an `OperationEnvelope` like a command write, but read the OLTP database instead of writing to it. `live-financial-statement` generates an ad-hoc statement straight from the tenant's ledger using the active CoA→GAAP mapping, with no materialization step. Because it reads the same PostgreSQL database the ledger commands write, it is gated by `ROBOLEDGER_ENABLED` rather than `FACT_GRID_ENABLED`.
 
-For the full, machine-readable endpoint surface — every operation name, request schema, and response shape — see the live OpenAPI spec at [`https://api.robosystems.ai/docs`](https://api.robosystems.ai/docs). This page covers the concepts and tasks; the OpenAPI spec is the authoritative endpoint reference.
+For the full, machine-readable endpoint surface — every operation name, request schema, and response shape — see the API reference at [`https://robosystems.ai/docs/api`](https://robosystems.ai/docs/api). This page covers the concepts and tasks; the OpenAPI spec is the authoritative endpoint reference.
 
 ## Graph-Scoping at the URL
 
@@ -203,7 +203,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/opera
   -d '{"name": "Acme Common Stock", "security_type": "common_stock"}'
 ```
 
-For the exact request-body fields of any operation, consult the OpenAPI spec at [`https://api.robosystems.ai/docs`](https://api.robosystems.ai/docs) rather than guessing.
+For the exact request-body fields of any operation, consult the [API reference](https://robosystems.ai/docs/api) rather than guessing — it carries a page per operation, generated from the live specification.
 
 ## Gotchas
 
@@ -232,7 +232,7 @@ For the exact request-body fields of any operation, consult the OpenAPI spec at 
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - The reads/commands/views domain kernel that all sub-surfaces delegate to
 - **[Authentication](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/auth/README.md)** - API key and JWT authentication
 - **[API Models](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/api/README.md)** - Pydantic request/response models for the operation surface
-- **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI spec with the full endpoint surface
+- **[API reference](https://robosystems.ai/docs/api)** - Live OpenAPI spec with the full endpoint surface
 
 ## Support
 

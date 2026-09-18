@@ -96,7 +96,7 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/operations/cre
   -d '{"backup_format": "full_dump", "retention_days": 30}'
 ```
 
-The full surface — every field, every status code — is in the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs). This page carries the concepts and the worked tasks; the spec is the exhaustive reference.
+The full surface — every field, every status code — is in the API reference at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api). This page carries the concepts and the worked tasks; the spec is the exhaustive reference.
 
 ## The CQRS Command Surface
 
@@ -211,7 +211,7 @@ curl -s "https://api.robosystems.ai/v1/operations/op_01J9ZK7M3QABCDEF.../status"
 
 ## Operations Reference
 
-Each subsection lists the body fields that matter and the relevant guards. The OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) is authoritative for the full request and response models.
+Each subsection lists the body fields that matter and the relevant guards. The OpenAPI spec at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api) is authoritative for the full request and response models.
 
 ### create-subgraph
 
@@ -513,7 +513,7 @@ just lbug-query sec "MATCH (e:Entity) RETURN e.name LIMIT 10"
 
 **API Reference:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - Full request/response models and status codes (machine-readable OpenAPI spec)
+- **[API reference](https://robosystems.ai/docs/api)** - Full request/response models and status codes (machine-readable OpenAPI spec)
 
 ## Support
 

@@ -190,7 +190,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs" \
 
 **Note:** The response is an `OperationEnvelope` with an `operation_id`, not a finished graph. Track progress over Server-Sent Events at `GET /v1/operations/{operation_id}/stream`. The `entity_type` (such as `llc`, `corporation`, or `partnership`) drives the default reporting style for entity graphs.
 
-For the full request and response schema — every field, type, and validation rule — see the live OpenAPI docs rather than re-deriving it here: [api.robosystems.ai/docs](https://api.robosystems.ai/docs).
+For the full request and response schema — every field, type, and validation rule — see the live OpenAPI docs rather than re-deriving it here: [robosystems.ai/docs/api](https://robosystems.ai/docs/api).
 
 ## Schema Extensions and the Extensions Surface
 
@@ -470,7 +470,7 @@ Subgraphs allow writes, but only for `member` and `admin`. A `viewer` gets `403`
 
 **API Reference:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - Full endpoint and schema reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - Full endpoint and schema reference with machine-readable OpenAPI spec
 
 ## Support
 

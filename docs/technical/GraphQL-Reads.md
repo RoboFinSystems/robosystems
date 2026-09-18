@@ -76,7 +76,7 @@ POST /extensions/{graph_id}/graphql
 - The in-browser **GraphiQL** explorer (a GET on the same URL) is development-only and is not mounted on `api.robosystems.ai`. Introspection over POST works on the hosted API, with or without credentials — see [Discovering the Schema](#discovering-the-schema).
 - The endpoint is mounted only on deployments where `ROBOLEDGER_ENABLED` or `ROBOINVESTOR_ENABLED` is set, and a deployment can disable it entirely with `EXTENSIONS_GRAPHQL_ENABLED=false`. On robosystems.ai it is enabled.
 
-This page shows usage examples. For the full machine-readable endpoint contract, see the live OpenAPI spec at [api.robosystems.ai/docs](https://api.robosystems.ai/docs), and the GraphQL surface README in the codebase ([graphql/README.md](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)).
+This page shows usage examples. For the full machine-readable endpoint contract, see the API reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api), and the GraphQL surface README in the codebase ([graphql/README.md](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)).
 
 ## Authentication
 
@@ -344,7 +344,7 @@ For real synced data on your own stack, see [Connecting QuickBooks Locally](Conn
 
 - **[GraphQL Surface](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, Pydantic auto-derivation, resolver patterns
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business logic kernel the resolvers delegate to
-- **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 
 ## Support
 

@@ -135,7 +135,7 @@ This is why a statement is a view, not a stored artifact: the Report holds facts
 
 There are several addressable surfaces, depending on whether you want a saved Report, a live ad-hoc statement, or a pivot grid. All authenticated `curl` examples target `https://api.robosystems.ai` and send your API key from `$ROBOSYSTEMS_API_KEY` in the `X-API-Key` header; to get an account, a key, and a graph, see [Quick Start](Quick-Start). Replace `$GRAPH_ID` with your tenant graph id, or use `sec` for the shared SEC repository.
 
-Full request/response schemas live in the [live OpenAPI spec](https://api.robosystems.ai/docs) — this page shows usage, not the full endpoint surface.
+Full request/response schemas live in the [live OpenAPI spec](https://robosystems.ai/docs/api) — this page shows usage, not the full endpoint surface.
 
 ### Build a Fact Grid (Scoped Slice of the Hypercube)
 
@@ -282,7 +282,7 @@ If a number is wrong, the fix is almost never in the renderer — it is in the m
 
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business-logic kernel; the operations the renderer delegates to
 - **[GraphQL](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - The Strawberry extensions surface that serves `informationBlock` and `reportPackage`
-- **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 
 ## Support
 

@@ -74,7 +74,7 @@ The envelope carries:
 
 GraphQL field names are camelCase (`blockType`, `displayName`, `factSet`); the Pydantic and SDK names are snake_case (`block_type`, `display_name`, `fact_set`). The `artifact.mechanics` union is what makes the molecule genuinely self-describing: a consumer knows a block's shape **from its type alone**, with no runtime shape-guessing. A `schedule` carries `ScheduleMechanics`, a statement carries `StatementMechanics`, a `metric` carries `MetricMechanics`.
 
-The full field-by-field schema is published in the OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) — this page covers the concepts; the spec is the source of truth for exact types.
+The full field-by-field schema is published in the API reference at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api) — this page covers the concepts; the spec is the source of truth for exact types.
 
 ## FactSets — Block = Fact Set
 
@@ -233,7 +233,7 @@ Neither half means anything in isolation: a taxonomy without facts is an empty s
 - **[Architecture Overview](Architecture-Overview)** - How the extensions GraphQL, command, and analytical surfaces fit the platform
 
 **Codebase Documentation:**
-- **[API Documentation](https://api.robosystems.ai/docs)** - Full request/response schema and the live OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/api)** - Full request/response schema and the live OpenAPI spec
 - **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface and Pydantic auto-derivation
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business workflow orchestration and the operations kernel
 - **[API Models](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/api/README.md)** - Pydantic request/response models including the envelope shapes
