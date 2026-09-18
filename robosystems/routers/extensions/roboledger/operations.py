@@ -1215,7 +1215,7 @@ class AutoMapElementsOperation(BaseModel):
   response_model=OperationEnvelope,
   status_code=202,
   operation_id="autoMapElements",
-  summary="Auto-Map Elements via AI (async)",
+  summary="Auto-Map Elements via AI",
   description="Dispatches to the background worker — returns a `pending` envelope immediately. Monitor via SSE at `/v1/operations/{operation_id}/stream`. Confidence thresholds: ≥0.90 auto-approved, 0.70–0.89 flagged for review, <0.70 skipped.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -1703,7 +1703,7 @@ update_event_block_op = _registrar.register(
 execute_event_block_op = _registrar.register(
   OperationSpec(
     name="execute-event-block",
-    summary="Execute Event Block (publish to source-of-truth system)",
+    summary="Execute Event Block",
     description=(
       "For events on a connection with write_policy='qb_authoritative' "
       "or 'hybrid', publish the captured GL plan to the source-of-truth "
@@ -2009,7 +2009,7 @@ rebuild_schedule_op = _registrar.register(
 terminate_schedule_op = _registrar.register(
   OperationSpec(
     name="terminate-schedule",
-    summary="Terminate Schedule Early (No Entry)",
+    summary="Terminate Schedule Early",
     description=(
       "End a schedule early at a month-end cutoff without booking any "
       "entry. In one transaction: deletes forward facts past the cutoff "
