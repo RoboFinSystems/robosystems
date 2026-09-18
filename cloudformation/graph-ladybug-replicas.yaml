@@ -538,10 +538,12 @@ Resources:
           # reserved instances cover.
           #
           # The first five sit in heavily reclaimed Spot pools. r8gd and i4g come
-          # from the Spot Instance Advisor's lowest interruption band, and r9g
-          # (Graviton5) adds a newer pool; all three price near r8g.large on Spot
-          # (2026-09). Their local NVMe, where present, is never mounted — the
-          # database downloads to the root volume.
+          # from the Spot Instance Advisor's lowest interruption band, r9g
+          # (Graviton5) adds a newer pool, and r8gn and r6gd were added because
+          # they lifted the one zone still scoring low on Spot placement at full
+          # fleet size. All price near r8g.large on Spot (2026-09). Their local
+          # NVMe, where present, is never mounted — the database downloads to the
+          # root volume.
           #
           # Every entry's Spot price must stay below r7g.large on-demand.
           # price-capacity-optimized ranks pools by capacity first and price
@@ -557,6 +559,8 @@ Resources:
             - InstanceType: r8gd.large
             - InstanceType: i4g.large
             - InstanceType: r9g.large
+            - InstanceType: r8gn.large
+            - InstanceType: r6gd.large
         InstancesDistribution:
           OnDemandBaseCapacity:
             !If [IsSpotEnabled, !Ref SpotOnDemandBaseCapacity, 0]
