@@ -534,22 +534,24 @@ Resources:
           # the ~110 GB sec graph under full-report reads, latching into 503s.
           #
           # The primary stays first: on-demand capacity is allocated by list order
-          # (prioritized), so the on-demand base lands on r7g.large, the type the
-          # reserved instances cover.
+          # (OnDemandAllocationStrategy, pinned below), so the on-demand base
+          # lands on r7g.large, the type the reserved instances cover.
           #
           # The first five sit in heavily reclaimed Spot pools. r8gd and i4g come
           # from the Spot Instance Advisor's lowest interruption band, r9g
           # (Graviton5) adds a newer pool, and r8gn and r6gd were added because
           # they lifted the one zone still scoring low on Spot placement at full
-          # fleet size. All price near r8g.large on Spot (2026-09). Their local
-          # NVMe, where present, is never mounted — the database downloads to the
-          # root volume.
+          # fleet size (2026-09). Their local NVMe, where present, is never
+          # mounted — the database downloads to the root volume.
           #
           # Every entry's Spot price must stay below r7g.large on-demand.
           # price-capacity-optimized ranks pools by capacity first and price
           # second, so it will launch an expensive type whenever it judges that
           # pool the deepest. That rules out the c-family 2xlarge and the
-          # storage- and m-family xlarge types that carry large local disks.
+          # storage- and m-family xlarge types that carry large local disks. The
+          # 1-vCPU 16 GB types (x2gd.medium, x8g.medium) are cheap but also out:
+          # the replica is sized on r7g.large's 2 vCPUs, and one of them would
+          # serve full-report reads on half the CPU.
           Overrides:
             - InstanceType: !Ref InstanceType
             - InstanceType: r6g.large
@@ -562,6 +564,11 @@ Resources:
             - InstanceType: r8gn.large
             - InstanceType: r6gd.large
         InstancesDistribution:
+          # prioritized is the default for an Overrides list, but it is what keeps
+          # the on-demand base on the RI-covered primary. Pinned so that moving to
+          # attribute-based selection, where the default becomes lowest-price,
+          # cannot silently move it off.
+          OnDemandAllocationStrategy: prioritized
           OnDemandBaseCapacity:
             !If [IsSpotEnabled, !Ref SpotOnDemandBaseCapacity, 0]
           OnDemandPercentageAboveBaseCapacity:
