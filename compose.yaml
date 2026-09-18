@@ -186,6 +186,20 @@ services:
   pg:
     container_name: robosystems-pg
     image: postgres:16
+    # Pinned rather than left to initdb, which can size a data directory at
+    # its minimums (max_connections 20, shared_buffers 400kB). At those, the
+    # stack's idle pool plus a parallel test run exhausts the server.
+    # Command-line settings override postgresql.conf, so an existing data
+    # directory picks these up when the container is recreated.
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_locks_per_transaction=256
+    shm_size: 256mb
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
