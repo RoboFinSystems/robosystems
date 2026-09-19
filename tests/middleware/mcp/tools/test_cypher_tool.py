@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from robosystems.middleware.mcp.tools.constants import (
+  INVESTOR_AMOUNT_GUIDANCE,
   LEDGER_AMOUNT_GUIDANCE,
   LEDGER_STATUS_GUIDANCE,
 )
@@ -109,3 +110,35 @@ class TestLedgerAmountGuidance:
       "description"
     ]
     assert LEDGER_AMOUNT_GUIDANCE not in description
+
+
+class TestInvestorAmountGuidance:
+  """The graph's Position amounts are dollars; the investor API returns the
+  same field names in cents, so the unit is stated where Cypher is written."""
+
+  @staticmethod
+  def _description(graph_id: str, extensions: tuple[str, ...]) -> str:
+    tool = CypherTool(SimpleNamespace(graph_id=graph_id), schema_extensions=extensions)
+    return tool.get_tool_definition()["description"]
+
+  def test_investor_graph_states_dollars(self):
+    assert INVESTOR_AMOUNT_GUIDANCE in self._description(
+      "kg1a0b7042ceafb8156215", ("roboinvestor",)
+    )
+
+  def test_ledger_only_graph_omits_it(self):
+    assert INVESTOR_AMOUNT_GUIDANCE not in self._description(
+      "kg1a0b70352e2fdcc071f1", ("roboledger",)
+    )
+
+  def test_graph_with_both_extensions_states_both(self):
+    description = self._description(
+      "kg1a0b7042ceafb8156215", ("roboledger", "roboinvestor")
+    )
+    assert LEDGER_AMOUNT_GUIDANCE in description
+    assert INVESTOR_AMOUNT_GUIDANCE in description
+
+  def test_sec_repository_omits_it(self):
+    assert INVESTOR_AMOUNT_GUIDANCE not in self._description(
+      "sec", ("roboledger", "roboinvestor")
+    )

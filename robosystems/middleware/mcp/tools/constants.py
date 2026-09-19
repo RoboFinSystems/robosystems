@@ -103,3 +103,15 @@ LEDGER_AMOUNT_GUIDANCE = """**⚠️ LEDGER AMOUNTS ARE IN DOLLARS, NOT CENTS:**
 $2,835,000.00. Report them as returned and never divide by 100. Only the close
 and schedule tools (`list-period-drafts`, schedule and allocation inputs) work in
 integer cents; that convention does not apply to graph queries."""
+
+# Investor amount unit. The RoboInvestor API and GraphQL return a position's
+# cost_basis / current_value as integer cents (authoritative, with *_dollars
+# beside them); materialization divides by 100, so the graph's Position holds
+# dollars under the same property names. The ledger trap again, with the names
+# matching exactly across the two surfaces.
+INVESTOR_AMOUNT_GUIDANCE = """**⚠️ POSITION AMOUNTS ARE IN DOLLARS IN THE GRAPH:**
+`Position.cost_basis` and `Position.current_value` are decimal amounts in the
+position's `currency`: `125000.5` is $125,000.50. The RoboInvestor API and GraphQL
+return the same field names as integer cents, with `cost_basis_dollars` and
+`current_value_dollars` beside them. Never divide a graph amount by 100, and
+convert before comparing a graph amount with an API or GraphQL one."""
