@@ -8,6 +8,7 @@ from robosystems.logger import logger
 
 from .base_tool import BaseTool
 from .constants import (
+  LEDGER_AMOUNT_GUIDANCE,
   LEDGER_ANCHOR_GUIDANCE,
   LEDGER_STATUS_GUIDANCE,
   PERIOD_TYPE_GUIDANCE,
@@ -224,6 +225,12 @@ LIMIT 10""",
               "description": "⚠️ READ SECOND — ledger status filtering",
               "info": LEDGER_STATUS_GUIDANCE,
               "explanation": "The graph keeps voided/superseded/draft rows for audit; the examples below show the required live-row filters.",
+            },
+            {
+              "category": "ledger",
+              "description": "⚠️ READ THIRD — ledger amounts are dollars",
+              "info": LEDGER_AMOUNT_GUIDANCE,
+              "explanation": "The close and schedule tools speak integer cents; the graph does not. Dividing a graph amount by 100 reports a figure a hundred times too small with no error.",
             },
             {
               "category": "ledger",

@@ -89,3 +89,17 @@ Transaction returned **zero rows** against a real non-zero answer.
   legitimately have no Transaction and no Entry.
 
 `Fact` queries are unaffected — the hypercube is generated from posted entries already."""
+
+# Ledger amount unit. The OLTP ledger stores integer cents and the close and
+# schedule tools speak cents; materialization divides by 100, so the graph
+# holds dollars. A model that has read a cents rule in another tool's
+# description applies it here and reports every figure a hundred times too
+# small — fluent and silently wrong. Seen on two different models (GPT-5.6
+# Luna, gpt-oss-20b) on the same ledger; Claude and the frontier open-weight
+# models did not do it.
+LEDGER_AMOUNT_GUIDANCE = """**⚠️ LEDGER AMOUNTS ARE IN DOLLARS, NOT CENTS:**
+`LineItem.debit_amount`, `LineItem.credit_amount`, `Transaction.amount` and
+`Event.amount` are decimal amounts in the ledger's currency: `2835000.0` is
+$2,835,000.00. Report them as returned and never divide by 100. Only the close
+and schedule tools (`list-period-drafts`, schedule and allocation inputs) work in
+integer cents; that convention does not apply to graph queries."""

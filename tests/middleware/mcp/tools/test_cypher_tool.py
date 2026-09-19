@@ -8,8 +8,14 @@ those categories to the central security.cypher_analyzer (the same analyzer the
 REST /query endpoint uses).
 """
 
+from types import SimpleNamespace
+
 import pytest
 
+from robosystems.middleware.mcp.tools.constants import (
+  LEDGER_AMOUNT_GUIDANCE,
+  LEDGER_STATUS_GUIDANCE,
+)
 from robosystems.middleware.mcp.tools.cypher_tool import CypherTool
 
 
@@ -69,3 +75,37 @@ class TestValidateReadOnly:
   def test_allows_legitimate_reads(self, tool, query):
     """Pure reads pass, including bulk keywords quoted inside string literals."""
     tool._validate_read_only(query)  # should not raise
+
+
+class TestLedgerAmountGuidance:
+  """Graph ledger amounts are dollars; the close and schedule tools speak cents.
+
+  Two different models divided graph amounts by 100 after reading a cents rule
+  in another tool's description, so the unit is stated wherever a ledger query
+  is written.
+  """
+
+  @staticmethod
+  def _tool(graph_id: str, extensions: tuple[str, ...]) -> CypherTool:
+    return CypherTool(SimpleNamespace(graph_id=graph_id), schema_extensions=extensions)
+
+  def test_ledger_graph_states_dollars(self):
+    description = self._tool(
+      "kg1a0b70352e2fdcc071f1", ("roboledger",)
+    ).get_tool_definition()["description"]
+    assert LEDGER_AMOUNT_GUIDANCE in description
+    assert description.index(LEDGER_STATUS_GUIDANCE) < description.index(
+      LEDGER_AMOUNT_GUIDANCE
+    )
+
+  def test_non_ledger_graph_omits_it(self):
+    description = self._tool("kg1a0b70352e2fdcc071f1", ()).get_tool_definition()[
+      "description"
+    ]
+    assert LEDGER_AMOUNT_GUIDANCE not in description
+
+  def test_sec_repository_omits_it(self):
+    description = self._tool("sec", ("roboledger",)).get_tool_definition()[
+      "description"
+    ]
+    assert LEDGER_AMOUNT_GUIDANCE not in description
