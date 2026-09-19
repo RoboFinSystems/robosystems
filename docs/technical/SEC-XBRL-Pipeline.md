@@ -240,6 +240,8 @@ Clients with no field for a custom header — claude.ai and Claude Desktop custo
    - `disclosures` - The map of a filing's sections, one row per note or statement
    - `information-block` - One section read whole: its rows, breakdowns, footing checks and text
 
+   `disclosures` and `information-block` run xbrlkit's `disclosures` and `information_block` functions over the filing's published holon. [`xbrlkit serve`](https://xbrlkit.com/mcp), the free local MCP server, loads that same holon for a ticker when one is published, so it reads one filing's sections the same way on your own machine. Questions across filers need the graph.
+
    GraphQL reads are not part of this surface: the typed GraphQL tools serve a tenant graph's operational data, and a shared repository has none.
 
    **Graph Tools** (general purpose):

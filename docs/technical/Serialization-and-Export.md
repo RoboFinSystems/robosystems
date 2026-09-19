@@ -1,6 +1,6 @@
 # Serialization & Export
 
-This guide shows you how a published RoboLedger report is projected into portable file formats — JSON-LD, the dataset-form holon, and XBRL 2.1 — and how to download those artifacts from the platform.
+This guide shows you how a published RoboLedger report is projected into portable file formats — JSON-LD, the dataset-form holon, XBRL 2.1 and the Tavi compiled model — and how to download those artifacts from the platform.
 
 **Quick Start:** Publish a report with `create-report`, then query the `reportDownloadUrl` GraphQL field to get a presigned link to its bundle.
 
@@ -11,7 +11,7 @@ This guide shows you how a published RoboLedger report is projected into portabl
 A published report in RoboLedger isn't a single rendered document — it's a structured object that can be projected into different portable file formats without re-querying the database. That object is the **StatementBundle**, an in-memory envelope assembled from the report's facts, periods, framework slice, and per-statement [Information Blocks](Information-Blocks). Two encoder families walk that one envelope:
 
 - `serialize_to_rdf` produces **JSON-LD** in two flavors — the flat canonical artifact (`jsonld`), one file identified by global URIs that any JSON tool can read, and the dataset-form **holon** (`holon-jsonld`), which carries the same content as named graphs.
-- `serialize_to_xbrl` produces an **XBRL 2.1** package — the filing-grade, standards-blessed format for interop with regulators and downstream tooling.
+- `serialize_to_xbrl` produces an **XBRL 2.1** package — the filing-grade, standards-blessed format for interop with regulators and downstream tooling. Beside it, `serialize_to_tavi` produces the **Tavi** compiled model (`tavi`) through xbrlkit's writer, the same form the SEC pipeline publishes for each filing.
 
 End to end, this page covers:
 
@@ -20,8 +20,9 @@ End to end, this page covers:
 3. How generation-stamped bundles are stored in S3
 4. How to download a bundle in each flavor
 5. What each artifact contains
-6. How SHACL validation at publish and round-trip validation prove conformance
-7. How to contribute the Block content that gets serialized
+6. How someone without an account reads an export
+7. How SHACL validation at publish and round-trip validation prove conformance
+8. How to contribute the Block content that gets serialized
 
 ## Prerequisites
 
@@ -105,7 +106,7 @@ report-bundles/{graph_id}/{report_id}/g{generation_count}.jsonld
 
 So the first publish writes `g1.jsonld`, a regenerate writes `g2.jsonld`, and so on. Older generations stay in S3 — they are not overwritten — and the `Report.bundle_url` column always points at the current generation's full `s3://` URI. This gives you an immutable history of every projection the platform ever published for a report.
 
-The on-demand flavors cache beside it under the same generation stamp — `g{n}.zip` for the XBRL package and `g{n}.holon.jsonld` for the holon — written the first time each is requested and reused thereafter.
+The on-demand flavors cache beside it under the same generation stamp — `g{n}.zip` for the XBRL package, `g{n}.holon.jsonld` for the holon and `g{n}.tavi.json` for the Tavi model — written the first time each is requested and reused thereafter.
 
 ## Downloading a Bundle
 
@@ -119,7 +120,7 @@ POST /extensions/{graph_id}/graphql
 | Argument | Default | Notes |
 | --- | --- | --- |
 | `reportId` | — | Required; the `id` from the `create-report` response |
-| `format` | `JSONLD` | `JSONLD`, `HOLON_JSONLD`, or `XBRL_2_1` |
+| `format` | `JSONLD` | `JSONLD`, `HOLON_JSONLD`, `XBRL_2_1`, or `TAVI` |
 | `expiresIn` | `300` | Presigned-URL TTL in seconds (min `60`, max `3600`); out-of-range values raise `INVALID_EXPIRES_IN` |
 
 **Every flavor resolves to a presigned S3 URL** in the same `ReportBundleDownload` envelope — the API never streams bytes, because neither a GraphQL JSON response nor an `OperationEnvelope` can carry a raw binary zip. The resolver returns a URL; the client follows it to S3. What differs between flavors is only *when* the object was built:
@@ -129,6 +130,7 @@ POST /extensions/{graph_id}/graphql
 | `JSONLD` | `application/ld+json` | Stamped to S3 inside the publish transaction |
 | `HOLON_JSONLD` | `application/ld+json` | Materialized and cached on first request |
 | `XBRL_2_1` | `application/zip` | Materialized and cached on first request |
+| `TAVI` | `application/json` | Materialized and cached on first request |
 
 Each cached artifact is keyed by `generation_count`, and a generation is immutable — so the cache can never go stale.
 
@@ -159,7 +161,7 @@ Follow the presigned URL to fetch the artifact:
 curl -L "<downloadUrl from previous response>" -o report.jsonld
 ```
 
-Swap `format: XBRL_2_1` for the filing package (`-o report.zip`) or `format: HOLON_JSONLD` for the dataset-form holon — the query shape and the response envelope are identical.
+Swap `format: XBRL_2_1` for the filing package (`-o report.zip`), `format: HOLON_JSONLD` for the dataset-form holon, or `format: TAVI` for the Tavi model (`-o report.tavi.json`) — the query shape and the response envelope are identical.
 
 **Note:** Reports published before serialization shipped have a `NULL` `bundle_url`. Any flavor requested for one of those raises `REPORT_BUNDLE_NOT_AVAILABLE` with a message to regenerate the report. There is no automatic backfill — run `regenerate-report` to stamp a current generation.
 
@@ -197,6 +199,25 @@ The XBRL package is a zip containing standard XBRL 2.1 artifacts. Two files are 
 | `report-lab.xml` | When non-empty | Label linkbase |
 
 A report can therefore yield as few as two files (instance + schema) or as many as six.
+
+### Tavi
+
+`tavi` is the report as a Project Tavi compiled model: one compact JSON document, in the OIM-family form the SEC pipeline writes beside every filing's holon. The platform builds it from the same `StatementBundle` with xbrlkit's writer, so a RoboLedger report and an SEC filing come out in one shape and one renderer shows both. Like the holon, it is materialized on first request and cached as `g{n}.tavi.json`.
+
+The compiled model carries the statements and notes but has nowhere to put some of what the bundle holds: `ib_envelopes`, `definition_links`, `reporting_style`, `framework_pins`, `fact_sets` and `filing_lifecycle`. The download response names them in `omittedContent` rather than dropping them silently. The flat JSON-LD and the holon keep all of it.
+
+## Reading an Export Without the Platform
+
+Someone who receives a report file needs no RoboSystems account and no graph to read it. The holon and Tavi flavors open in [xbrlkit](https://xbrlkit.com), the open-source XBRL toolkit RoboSystems publishes under the MIT license:
+
+- **In a browser:** [xbrlkit.com/file](https://xbrlkit.com/file) renders the statements, notes and facts of a `.holon.jsonld` or `.tavi.json` file. The file stays on the reader's machine.
+- **In an AI client:** `xbrlkit serve` is a local MCP server. Ask the client to load the file by path or URL, then ask about it. Setup for each client is at [xbrlkit.com/mcp](https://xbrlkit.com/mcp).
+
+```bash
+uvx --from "xbrlkit[mcp]@latest" xbrlkit serve
+```
+
+The RoboLedger guide [Reports and sharing](https://roboledger.ai/docs/reports-and-sharing) covers the same hand-off from the app.
 
 ## Validation: SHACL at Publish + Round-Trip
 
@@ -299,7 +320,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 `format` is a GraphQL enum, so an unknown name fails validation before the resolver runs.
 
-**Solution:** Use `JSONLD`, `HOLON_JSONLD`, or `XBRL_2_1`.
+**Solution:** Use `JSONLD`, `HOLON_JSONLD`, `XBRL_2_1`, or `TAVI`.
 
 ### The First XBRL Download Is Slow on Large Reports
 
