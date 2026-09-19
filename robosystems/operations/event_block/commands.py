@@ -641,7 +641,8 @@ def update_event_block(
 
   When the requested transition is ``captured → committed`` or
   ``classified → committed``, the event's Python handler (if any) fires
-  against the captured metadata to produce the corresponding GL rows.
+  against the captured metadata to produce the corresponding GL rows,
+  unless it already wrote them when the event was created.
   Handler errors roll back the entire update, including the status
   change — a failed commit leaves the event in its pre-approval state.
   ``captured → classified`` gives the same handler a veto: a choice it
@@ -768,9 +769,10 @@ def update_event_block(
     # A handler that ran when the event was created has already written its
     # entry: a journal entry, bill or payment recorded as a draft arrives
     # `classified` with that draft linked. Firing again on approval would
-    # write a second one, and close would post both. As in
-    # `_assert_retractable`, what decides is whether anything landed, not the
-    # status.
+    # write a second one, and close would post both. What decides is whether
+    # the handler already wrote anything, draft or posted, not the status.
+    # Drafts must count: narrowing this to the posted and reversed statuses
+    # `_assert_retractable` checks would bring the duplicate back.
     fire_handler = (
       body.transition_to == "committed"
       and event.status in ("captured", "classified")
