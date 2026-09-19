@@ -11,14 +11,14 @@ These pages are for working on the graph itself: the tables it is loaded from, a
 
 **Data Lake** holds the selected graph's staging tables, which you can query with SQL.
 
-- **On a graph you model yourself**, upload Parquet files. Each becomes a staging table, and **Ingest to Graph** loads them into the graph.
+- **On a generic graph**, one you model yourself, upload Parquet files into a staging table you name, new or existing. **Ingest to Graph** loads them into the graph.
 - **On a RoboLedger or RoboInvestor graph**, there is nothing to upload. The staging tables are built from the graph's accounting or portfolio records, and **Sync to Graph** brings the graph up to date with them. Tick **Rebuild entire graph** to start it clean.
 
 Uploading, querying, ingesting and syncing use no credits.
 
 ## Schema
 
-**Schema** lists the node labels in the graph with their properties, and the relationship types with the nodes they connect. You can export it as JSON. On a graph you modeled yourself this is how you see what you loaded. On a RoboLedger or RoboInvestor graph the schema is the platform's.
+**Schema** lists the node labels in the graph with their properties, and the relationship types with the nodes they connect. The **Export Schema** tab shows it as JSON you can copy. On a generic graph this is how you see what you loaded. On a RoboLedger or RoboInvestor graph the schema is the platform's.
 
 ## Subgraphs
 
@@ -28,9 +28,9 @@ Open **Subgraphs** to list them and create one. A subgraph created here starts e
 
 ## Backups
 
-**Backups** creates a downloadable copy of the graph. Create one, choose how many days to keep it, wait for it to finish, and download it. On a repository you can download the system-generated backups only, up to a monthly limit.
+Every graph and subgraph is backed up automatically each night. **Backups** lists those copies and lets you make your own: create one, choose how many days to keep it (up to your tier's limit, 7 days on Standard), wait for it to finish, and download it. Downloads are limited per month on every graph, and on a repository you can download the system-generated backups only.
 
-There is no restore button in the app. A RoboLedger or RoboInvestor graph rebuilds from its own records with **Sync to Graph**. A graph you loaded yourself rebuilds when you upload its files again. For anything else, contact support.
+There is no restore button in the app. A RoboLedger or RoboInvestor graph rebuilds from its own records with **Sync to Graph**. A generic graph rebuilds from the files still in its data lake: run **Ingest to Graph** with **Rebuild entire graph**. For anything else, contact support.
 
 ## Try asking
 

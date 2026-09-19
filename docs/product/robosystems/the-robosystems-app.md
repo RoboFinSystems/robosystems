@@ -9,11 +9,11 @@ Most of the work in RoboSystems happens in a conversation with your AI assistant
 
 ## Graphs
 
-**Home** lists the graphs you can use. Organization owners and admins start a new one with **Create Graph**, on Home or in the graph selector. It asks what kind of graph you want, which extensions to turn on (RoboLedger, RoboInvestor, both or neither) and the tier. Creating it starts a subscription on the organization's payment method, and asks for one first if there isn't one. See [Graphs, tiers and credits](graphs-tiers-and-credits.md).
+**Home** lists the graphs you can use. Organization owners and admins start a new one with **Create Graph**, on Home or in the graph selector. It asks for the kind of graph. An entity graph then asks for the company, the products to turn on (RoboLedger, RoboInvestor, both or neither) and the tier. A generic graph, for data you model and load yourself, asks for its name and schema and is created on the Standard tier. Creating it starts a subscription on the organization's payment method, and asks for one first if there isn't one. See [Graphs, tiers and credits](graphs-tiers-and-credits.md).
 
 Pick a graph in the selector at the top. The rest of the menu follows that graph.
 
-**Dashboard** summarizes the selected graph: its size, its details and your role, with shortcuts to the other pages. The graph ID is here, which is what someone needs to share a report with you. Graph admins also get a **Members** button.
+**Dashboard** summarizes the selected graph: its size, its details and your role, with shortcuts to the other pages. The graph ID is here, which is what someone needs to share a report with your RoboLedger or RoboInvestor graph. Graph admins also get a **Members** button.
 
 ## MCP
 
@@ -29,7 +29,7 @@ Pick a graph in the selector at the top. The rest of the menu follows that graph
 
 ## Data lake, schema, subgraphs and backups
 
-**Data Lake** holds the graph's staging tables: Parquet files you upload to a graph you model yourself, or, on a RoboLedger or RoboInvestor graph, tables built from its accounting or portfolio records. **Schema** lists the node and relationship types in the graph. **Subgraphs** are separate workspaces on the same instance. **Backups** creates and downloads a copy of the graph. See [Data lake, subgraphs and backups](data-lake-and-subgraphs.md).
+**Data Lake** holds the graph's staging tables: Parquet files you upload to a generic graph, or, on a RoboLedger or RoboInvestor graph, tables built from its accounting or portfolio records. **Schema** lists the node and relationship types in the graph. **Subgraphs** are separate workspaces on the same instance. **Backups** creates and downloads a copy of the graph. See [Data lake, subgraphs and backups](data-lake-and-subgraphs.md).
 
 On a shared repository such as SEC filings, Knowledge Base, Memory, Data Lake, Schema and Subgraphs are hidden, and Backups is download-only.
 
@@ -41,6 +41,6 @@ On a shared repository such as SEC filings, Knowledge Base, Memory, Data Lake, S
 
 ## Your account
 
-Your organization's name at the top of the sidebar opens its page. Members and invitations are there, and owners and admins also see the organization's graphs and billing.
+Your organization's name at the top of the sidebar opens its page. Members are listed there. Owners and admins also invite people and see the organization's graphs and billing.
 
-The user menu at the top right reaches **User Settings** (your profile, password, passkeys, API keys and connected apps), these docs, and sign-out. The grid icon beside it switches to RoboLedger or RoboInvestor. **Support** and **Issues** at the bottom of the sidebar reach us.
+The user menu at the top right reaches **User Settings** (your profile, password, passkeys, API keys and connected apps), these docs, and sign-out. The grid icon beside it switches to RoboLedger or RoboInvestor. The icons at the bottom of the sidebar contact support and report an issue.

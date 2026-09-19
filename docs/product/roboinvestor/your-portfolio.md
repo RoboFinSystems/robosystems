@@ -17,23 +17,23 @@ Open **Portfolio**. You can:
 - add a security: its name, its type (common, preferred, a SAFE, a convertible note, LLC units and so on) and an optional subtype
 - give the new security a starting position: the quantity, its unit (shares, units or a percentage) and the cost basis
 
-Holdings are grouped by the company that issued them, once the security is linked to one. A security that isn't linked yet sits under **Unlinked Securities**. Only active positions are listed.
+The page lists holdings from their active positions, so a security added without a starting position doesn't show. Holdings are grouped by the company that issued them, once the security is linked to one. A security that isn't linked yet sits under **Unlinked Securities**.
 
-Changing a position after you add it, disposing of one, setting a portfolio's inception date, and deleting portfolios and securities are done through your AI assistant. See below.
+Adding a position to a security you already have, changing or disposing of a position, setting a portfolio's inception date, and deleting portfolios and securities are done through your AI assistant. See below.
 
-**Entity Info** shows the entity selected at the top, normally this graph's own company or fund, and the graph's ID. A company that wants to share reports with you needs that ID. **All Entities** lists the companies in all your RoboInvestor graphs, including every company that has shared a report with you.
+A company that wants to share reports with you needs this graph's ID. It is on the graph's **Dashboard** at [robosystems.ai](https://robosystems.ai). **All Entities** lists the companies in your RoboInvestor graphs, including each company that has shared a report with you, a minute or two after its first share.
 
 ## Link an issuer
 
 When a portfolio company keeps its books in RoboLedger, you can record its graph ID on the security, when you add it or later with the pencil beside it (**Link Security**). The two graphs stay separate.
 
-The company decides where its reports go, by adding your graph to a publish list. The link is how a report meets the holding. When that company first shares a report with this graph, it becomes a company you can pick, and every security carrying its graph ID is attached to it. See [Reports shared with you](reports-you-receive.md).
+The company decides where its reports go, by adding your graph to a publish list. The link is how a report meets the holding: when that company first shares a report with this graph, every security carrying its graph ID is attached to it. A graph ID you add after that first share is attached the next time the company shares. See [Reports shared with you](reports-you-receive.md).
 
 You do not need the link to track a position. Use it when both sides are on RoboSystems.
 
 ## Ask your AI assistant
 
-Connect the graph as in the [overview](index.md). Your assistant can list portfolios, positions and values, and read the reports companies have shared with you. It can also make the changes the Portfolio page doesn't: update a position's quantity, cost or current value, dispose of a position, set a portfolio's inception date, and delete portfolios and securities.
+Connect the graph as in the [overview](index.md). Your assistant can list portfolios, positions and values, and read the reports companies have shared with you. It can also make the changes the Portfolio page doesn't: add a position to an existing security, update a position's quantity, cost or current value, dispose of a position, set a portfolio's inception date, and delete portfolios and securities. Deleting a security retires it but keeps its positions, so dispose of the position to take it off the page.
 
 - "What are my largest positions by current value?"
 - "Which holdings aren't linked to a company yet?"

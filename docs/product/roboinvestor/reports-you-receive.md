@@ -9,9 +9,9 @@ A company that keeps its books in RoboLedger can send you a report. You receive 
 
 ## How they send it
 
-Give them your graph ID, from **Entity Info**. They add it to a publish list and share from the report; how is in the [RoboLedger reports guide](https://roboledger.ai/docs/reports-and-sharing). The company then appears in your graph, and the report arrives with its statements, facts and files. Nothing is copied the other way.
+Give them your graph ID, from the graph's **Dashboard** at [robosystems.ai](https://robosystems.ai). They add it to a publish list and share from the report; how is in the [RoboLedger reports guide](https://roboledger.ai/docs/reports-and-sharing). The company then appears in your graph, and the report arrives with its statements, facts and files. Nothing is copied the other way.
 
-If they withdraw the share, the report is removed from your graph. Your own graph does not have to run RoboLedger.
+If they withdraw the share, the report is removed from your graph. Your own graph does not have to run RoboLedger. RoboInvestor has no way to block a sender; to stop a company's reports, ask them to withdraw the share.
 
 ## In the app
 

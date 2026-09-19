@@ -68,7 +68,7 @@ The reporting concepts your accounts map to, with their definitions and how they
 
 ## Console
 
-Ask questions about your books inside the app. The Console runs on RoboLedger's own AI, so it uses credits from your plan's monthly allowance. Claude, ChatGPT and other clients you connect yourself don't use credits.
+Ask questions about your books inside the app. The Console runs on RoboLedger's own AI, so questions you ask it use credits from your plan's monthly allowance. Claude, ChatGPT and other clients you connect yourself don't use credits.
 
 ## Search
 

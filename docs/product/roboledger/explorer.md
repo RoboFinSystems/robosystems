@@ -30,10 +30,10 @@ Export the block's table as CSV or JSON. The export is the table whichever view 
 
 A metrics block is a set of ratios or other standing figures, one column a month. Enter a period-end date and choose **Compute** to add that month's column, or refresh it, from the closed statements. A metric that is missing an input is listed as skipped, with the reason. Computing uses no credits.
 
-Once a forecast exists, pick a scenario to see the same blocks on the forecast instead of actuals. See [Plan and forecast with your AI assistant](plan-and-forecast.md).
+Once a forecast exists, a scenario picker appears on statements and metrics. Pick a scenario to add its forecast months after the actual ones; **Actuals** shows history alone. See [Plan and forecast with your AI assistant](plan-and-forecast.md).
 
 ## Try asking
 
 - "Show me the income statement as a monthly series for the last year."
-- "Compute our standard ratios for each closed month and show me gross margin."
+- "Compute our standard ratios for each closed month and show me net profit margin."
 - "Why doesn't the balance sheet balance in June? Show me the checks."

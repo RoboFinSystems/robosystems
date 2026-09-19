@@ -16,7 +16,7 @@ RoboLedger connects your QuickBooks books to Claude, ChatGPT and any other MCP c
 ## Work with your books
 
 - [Ask about your books](ask-about-your-books.md): what your AI assistant reads, which figures are live and which are locked, and how to ask so you can check the answer.
-- [Review events in the Inbox](inbox.md): captured events wait here until you preview and approve them.
+- [Review events in the Inbox](inbox.md): approve or reject events, and see which ones the close will post on its own.
 - [Reports and sharing](reports-and-sharing.md): build statements, download them, and share them without sharing the ledger.
 - [Plan and forecast with your AI assistant](plan-and-forecast.md): budgets and what-if scenarios that project all three statements, month by month.
 - [Explore statements and metrics over time](explorer.md): any statement, note, schedule or scenario as a series.

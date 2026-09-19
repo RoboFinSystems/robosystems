@@ -9,7 +9,7 @@ A graph holds documents as well as numbers. Your AI assistant can search them, q
 
 ## Knowledge Base
 
-**Knowledge Base** lists the documents on the selected graph. Each is markdown, with an optional folder and tags. Create a document here, and edit or delete the ones you created. The list also shows content indexed from elsewhere, such as memories, filings and connected sources; those are read-only.
+**Knowledge Base** lists the documents on the selected graph, whether you created them here or your assistant saved them. Each is markdown, with an optional folder and tags. Anyone who can write to the graph can create, edit and delete them. Memories are kept separately, on the **Memory** page.
 
 Shared repositories such as SEC filings don't have a Knowledge Base of your own. Their filing text is searched through **Search** and through an MCP client connected to that graph.
 
@@ -17,7 +17,7 @@ Creating and editing documents uses no credits. Neither does search.
 
 ## Search
 
-**Search** finds text across the documents in the graph. On the SEC filings graph it searches filing narratives. It matches keywords; turn on **Semantic search** to search by meaning instead.
+**Search** finds text across the documents in the graph. On the SEC filings graph it searches filing narratives. It matches keywords; turn on **Semantic search** to also match by meaning.
 
 ## Memory
 

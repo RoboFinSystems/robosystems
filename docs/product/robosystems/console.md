@@ -9,7 +9,7 @@ The **Console** is an AI assistant that runs inside RoboSystems, on the graph yo
 
 It is the same idea as connecting Claude or ChatGPT, with one difference that matters for billing: **questions in the Console use credits**, from the graph's monthly allowance or, on the SEC filings, from your repository subscription. A client you connect yourself does not. The reasoning in Claude or ChatGPT happens in that product; RoboSystems only returns data.
 
-When a graph's credits can't cover a question, the Console refuses it until the monthly refill or a tier upgrade. MCP tools keep working. See [Graphs, tiers and credits](graphs-tiers-and-credits.md).
+When a graph's credits can't cover a question, the Console refuses it until the next monthly refill. MCP tools keep working. See [Graphs, tiers and credits](graphs-tiers-and-credits.md).
 
 ## What it can see
 
@@ -18,7 +18,7 @@ The Console follows the graph you picked. Its examples and the tools it uses cha
 - a **RoboLedger** graph: books, statements and close status
 - a **RoboInvestor** graph: portfolios, positions, received reports
 - the **SEC filings** repository: public-company statements and filing text
-- a graph you modeled yourself: schema and Cypher
+- a generic graph you modeled yourself: schema and Cypher
 
 It reads; it does not write. Posting entries or closing a period happens through your AI assistant or the RoboLedger app.
 

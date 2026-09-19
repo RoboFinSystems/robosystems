@@ -13,11 +13,13 @@ A **graph** is one company's own database: its books, reports, plans, documents 
 
 Graphs belong to an **organization**. Organization owners and admins create them with **Create Graph** in the app, and creating one starts a subscription on the organization's payment method. Members work on the graphs they've been given access to. An organization has a limit on how many graphs it can create; if you reach it, the app lets you ask for more.
 
-What a graph holds depends on what you turn on when you create it. You can turn on either, both or neither:
+**Create Graph** first asks for the kind of graph. An **entity graph** is built around a company, and you choose which products it runs, either, both or neither:
 
 - **RoboLedger** for accounting: QuickBooks sync, statements, forecasts, the month-end close. See the [RoboLedger docs](https://roboledger.ai/docs).
 - **RoboInvestor** for private-company portfolios, securities and positions, and for reports a RoboLedger company shares with you. See the [RoboInvestor docs](https://roboinvestor.ai/docs). RoboInvestor is in beta.
-- **Neither**, for a graph you model and load yourself.
+- **Neither**, for a company graph without either product yet.
+
+A **generic graph** is for data you model and load yourself, from files you upload. It is created on the Standard tier.
 
 **Shared repositories** are graphs you subscribe to rather than create. The SEC filings are one: read-only, the same for every subscriber. See [Analyze SEC filings](sec-filings.md).
 

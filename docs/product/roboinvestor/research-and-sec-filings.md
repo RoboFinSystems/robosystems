@@ -25,13 +25,13 @@ Connect it beside your portfolio as a second MCP connection, with the SEC graph'
 https://api.robosystems.ai/v1/graphs/sec/mcp
 ```
 
-Or add the general address a second time and choose **SEC EDGAR Filings** when you sign in. Give the two connectors names you'll recognize. Setup for each client is in [Connect Claude, ChatGPT or any MCP client](https://robosystems.ai/docs/guides/connect-an-mcp-client).
+Give the two connectors names you'll recognize. Setup for each client is in [Connect Claude, ChatGPT or any MCP client](https://robosystems.ai/docs/guides/connect-an-mcp-client).
 
 What you can ask of the filings, and the rules that decide whether a number is right, are in [Analyze SEC filings](https://robosystems.ai/docs/guides/sec-filings).
 
 ## Console and Search
 
-With a graph selected — your portfolio graph or the SEC filings — **Console** asks questions inside the app. It runs on RoboSystems' own AI and uses credits. **Search** finds text in the SEC filings, or, on your portfolio graph, in the documents and memories saved there.
+With a graph selected — your portfolio graph or the SEC filings — **Console** asks questions inside the app. It runs on RoboSystems' own AI and uses credits. **Search** finds text in the SEC filings, or, on your portfolio graph, in the documents saved there.
 
 Claude, ChatGPT and other clients you connect yourself don't use RoboSystems credits. See [Graphs, tiers and credits](https://robosystems.ai/docs/guides/graphs-tiers-and-credits).
 
