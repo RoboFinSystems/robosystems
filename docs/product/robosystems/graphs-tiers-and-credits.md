@@ -2,6 +2,7 @@
 title: Graphs, tiers and credits
 description: What a RoboSystems graph is, how tiers differ, what uses credits and what doesn't, and what happens when a graph runs out.
 order: 4
+section: Working with graphs
 ---
 
 Everything in RoboSystems lives in a graph, and every graph runs on its own tier with its own monthly credits. This page explains what you're choosing when you create one, and what you're spending when you use it.
@@ -12,7 +13,7 @@ A **graph** is one company's own database: its books, reports, plans, documents 
 
 Graphs belong to an **organization**. Organization owners and admins create them with **Create Graph** in the app, and creating one starts a subscription on the organization's payment method. Members work on the graphs they've been given access to. An organization has a limit on how many graphs it can create; if you reach it, the app lets you ask for more.
 
-What a graph holds depends on what you turn on when you create it:
+What a graph holds depends on what you turn on when you create it. You can turn on either, both or neither:
 
 - **RoboLedger** for accounting: QuickBooks sync, statements, forecasts, the month-end close. See the [RoboLedger docs](https://roboledger.ai/docs).
 - **RoboInvestor** for private-company portfolios, securities and positions, and for reports a RoboLedger company shares with you. See the [RoboInvestor docs](https://roboinvestor.ai/docs). RoboInvestor is in beta.

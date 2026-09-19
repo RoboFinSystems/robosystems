@@ -1,7 +1,7 @@
 ---
 title: Plan and forecast with your AI assistant
 description: Build budgets and what-if scenarios from your closed books. RoboLedger projects all three statements forward month by month, and every month has to balance.
-order: 12
+order: 13
 section: Work with your books
 ---
 

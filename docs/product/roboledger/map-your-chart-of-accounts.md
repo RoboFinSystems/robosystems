@@ -5,9 +5,9 @@ order: 20
 section: Keep the books right
 ---
 
-Your chart of accounts is yours: the names, the numbering, the accounts you added over the years. Mapping ties each of those accounts to a standard US GAAP reporting concept, like cash, accounts receivable or cost of revenue. It's how RoboLedger knows where an account belongs on the balance sheet, income statement, cash flow and statement of equity.
+Your chart of accounts is yours: the names, the numbering, the accounts you added over the years. Mapping ties each of those accounts to a standard reporting concept drawn from US GAAP, like cash, accounts receivable or cost of revenue. It's how RoboLedger knows where an account belongs on the balance sheet, income statement, cash flow and statement of equity.
 
-Everything built from statements depends on it: live statements, reports, the statements saved at each close, forecasts, and comparisons with public companies, which report in the same concepts.
+Everything built from statements depends on it: live statements, reports, the statements saved at each close, forecasts, and comparisons with public companies, which report in the same kind of concepts.
 
 ## The first sync maps your accounts
 
@@ -19,7 +19,7 @@ When QuickBooks first syncs, RoboLedger maps your chart of accounts with AI. Thi
 
 This runs once. Accounts you add in QuickBooks later arrive unmapped, so check mapping whenever your chart of accounts changes.
 
-If the graph keeps native books instead of QuickBooks, the Chart of Accounts page offers a template to start from. Mapping still has to be reviewed before you close.
+If the graph keeps native books instead of QuickBooks, an empty Chart of Accounts page offers templates to start from, with their mappings already in place. Review them, and map any account you add later.
 
 ## Review it
 

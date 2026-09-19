@@ -53,4 +53,4 @@ If your company does things its own way, like a specific accrual or an account t
 
 ## Credits
 
-Reading your books, building reports, running forecasts and closing the month use no credits. AI mapping does, from your plan's monthly allowance. The **Console** in the app, and **Ask about this report**, also use credits — they run on RoboLedger's own AI. Claude, ChatGPT and other clients you connect yourself don't. Check your balance on the **Usage** page at [robosystems.ai](https://robosystems.ai).
+Reading your books, building reports, running forecasts and closing the month use no credits. AI mapping does, from your plan's monthly allowance. So do questions you ask in the app's **Console** and in **Ask about this report**, which run on RoboLedger's own AI. Claude, ChatGPT and other clients you connect yourself don't. Check your balance on the **Usage** page at [robosystems.ai](https://robosystems.ai).

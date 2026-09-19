@@ -5,23 +5,25 @@ order: 2
 section: Get started
 ---
 
-A company that keeps its books in RoboLedger can send you a report. You receive the statements they published — the balance sheet, income statement, cash flow and notes — not their transactions, customers or journal. That is the point: they share a snapshot, not the ledger.
+A company that keeps its books in RoboLedger can send you a report. You receive the statements they chose to publish, such as the balance sheet, income statement, cash flow and statement of equity, with any notes attached. You do not receive their transactions, customers or journal. That is the point: they share a snapshot, not the ledger.
 
-How they send it is in the [RoboLedger reports guide](https://roboledger.ai/docs/reports-and-sharing). They add your RoboInvestor graph to a publish list and share from the report. Nothing is copied the other way.
+## How they send it
+
+Give them your graph ID, from **Entity Info**. They add it to a publish list and share from the report; how is in the [RoboLedger reports guide](https://roboledger.ai/docs/reports-and-sharing). The company then appears in your graph, and the report arrives with its statements, facts and files. Nothing is copied the other way.
+
+If they withdraw the share, the report is removed from your graph. Your own graph does not have to run RoboLedger.
 
 ## In the app
 
-**Portfolio Reports** lists reports that have been shared into this graph. Open one to read its statements. The viewer shows the publication they actually made, so what you see is what they sent.
+**Portfolio Reports** lists the reports that have been shared into this graph. Open one to read its statements and notes. The viewer shows the copy you received, with who shared it and when.
 
-A report that did not originate in this graph is marked as received. Your own graph does not have to run RoboLedger.
+**Ask about this report** answers questions from the report inside the app. It runs on RoboSystems' own AI, so it uses this graph's credits. Asking your own AI assistant doesn't.
 
-## What you can do with it
+A shared report is read-only. You cannot regenerate it, change it or share it on, and you cannot change their books from here.
 
-- Read the statements and notes in the app.
-- Ask your AI assistant about a report once it is in the graph: "What did [company] report for the third quarter?"
-- Download a copy they can also send as a file, and open it in the free viewer at [xbrlkit.com](https://xbrlkit.com) if someone without RoboInvestor needs to read it. That download lives on the sender's side; ask them if you don't have the file.
+## Getting the files
 
-You cannot change their books from here. A shared report is read-only.
+The app has no download button, but your graph holds a copy of the report files, so your AI assistant can fetch a download link for you. Or ask the sender for the holon or Tavi file, which opens in the free viewer at [xbrlkit.com](https://xbrlkit.com) with no account.
 
 ## Try asking
 

@@ -54,7 +54,7 @@ See [Reports and sharing](reports-and-sharing.md).
 
 ## Explorer
 
-Explorer opens any statement, note, schedule, set of ratios or scenario as a series over time. Switch between the rendered table, a chart, the facts behind it, the accounts and concepts it's built from, and the checks it passed. Export any view as CSV or JSON. See [Explore statements and metrics over time](explorer.md).
+Explorer opens any statement, note, schedule, set of ratios or scenario as a series over time. Switch between the rendered table, a chart, the facts behind it, the accounts and concepts it's built from, the checks it passed and the rules behind them. Export its table as CSV or JSON. See [Explore statements and metrics over time](explorer.md).
 
 ![Explorer showing key financial metrics as a table, one column a month](images/explorer.png)
 

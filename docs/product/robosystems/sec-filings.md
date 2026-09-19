@@ -2,6 +2,7 @@
 title: Analyze SEC filings with Claude or ChatGPT
 description: "Connect an AI client to the SEC filings graph: financial statements, cross-company comparisons, disclosures and filing text for 8,000+ companies."
 order: 3
+section: Working with graphs
 ---
 
 The SEC filings graph holds the XBRL financial filings of more than 8,000 public companies: annual and quarterly reports (10-K, 10-Q, 20-F and 40-F) filed since January 2024, updated daily. Every reported number is there with its concept, period and breakdown, and the text of each filing is searchable. Connect it to Claude, ChatGPT or another MCP client and ask about public companies in plain language.

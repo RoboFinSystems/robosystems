@@ -6,7 +6,7 @@ order: 0
 
 RoboInvestor is the holder's view of a company: what you own, in whom, and the statements they send you. It is in beta. Today it covers private-company portfolios, reports shared from a RoboLedger graph, the SEC filings of public companies, and research written from those filings.
 
-Sign up at [roboinvestor.ai](https://roboinvestor.ai/register). One account covers RoboSystems, RoboLedger and RoboInvestor. Creating a graph, billing, API keys and connecting an AI client happen in your RoboSystems account at [robosystems.ai](https://robosystems.ai).
+Sign up at [roboinvestor.ai](https://roboinvestor.ai/register). One account covers RoboSystems, RoboLedger and RoboInvestor. Creating a graph, your password, API keys and billing live in your RoboSystems account at [robosystems.ai](https://robosystems.ai). The SEC filings subscription can also be bought here, under **Repositories**.
 
 ## Start here
 
@@ -26,4 +26,4 @@ Step-by-step setup is in the [RoboSystems guides](https://robosystems.ai/docs/gu
 
 ## Building on RoboInvestor
 
-RoboInvestor runs on the open-source RoboSystems platform. The technical documentation, including the command surface for portfolios and securities, is at [robosystems.ai/docs](https://robosystems.ai/docs).
+RoboInvestor runs on the open-source RoboSystems platform. The technical documentation is at [robosystems.ai/docs](https://robosystems.ai/docs), and the command surface for portfolios and securities is in [RoboInvestor operations](https://robosystems.ai/docs/technical/roboinvestor-operations).

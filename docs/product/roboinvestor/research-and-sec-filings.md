@@ -11,7 +11,7 @@ RoboInvestor has two ways into public companies, and they are not the same graph
 
 **Research** (`/companies` once you are signed in, and [roboinvestor.ai/research](https://roboinvestor.ai/research) on the public site) reads a catalog of filings and research briefs. It does not use your investment graph. You can browse a company, open a filing, and read a brief where one has been published.
 
-This lane is for looking something up. It is not a live query of the SEC knowledge graph.
+Reading filings and briefs doesn't touch the SEC knowledge graph. The **Ask about this filing** box on a company page does: it needs the SEC subscription below, and it uses credits.
 
 ## The SEC filings graph
 
@@ -31,7 +31,7 @@ What you can ask of the filings, and the rules that decide whether a number is r
 
 ## Console and Search
 
-With a graph selected — your portfolio graph or the SEC filings — **Console** asks questions inside the app. It runs on RoboSystems' own AI and uses credits. **Search** finds text in that graph's documents and filings.
+With a graph selected — your portfolio graph or the SEC filings — **Console** asks questions inside the app. It runs on RoboSystems' own AI and uses credits. **Search** finds text in the SEC filings, or, on your portfolio graph, in the documents and memories saved there.
 
 Claude, ChatGPT and other clients you connect yourself don't use RoboSystems credits. See [Graphs, tiers and credits](https://robosystems.ai/docs/guides/graphs-tiers-and-credits).
 
