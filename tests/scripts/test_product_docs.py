@@ -14,6 +14,11 @@ declarations the registrar turns into write tools.
 The number of names the pages mention is pinned exactly. A floor would pass if
 the extraction silently stopped matching, which is how a guard like this goes
 vacuous without anyone noticing.
+
+The build reads front matter line by line and splits each line at its first
+colon, so it accepts a value that strict YAML rejects: an unquoted ``: `` inside
+a description. GitHub parses front matter as YAML and shows such a page with an
+error in place of its metadata, so the pages are held to strict YAML as well.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from robosystems.scripts import publish_docs
 
@@ -103,6 +109,28 @@ def test_product_pages_name_only_real_tools():
 @pytest.mark.unit
 def test_tool_mentions_are_pinned():
   assert len(_mentioned_tool_names()) == EXPECTED_TOOL_MENTIONS
+
+
+@pytest.mark.unit
+def test_front_matter_is_strict_yaml():
+  failures: dict[str, str] = {}
+  pages = sorted(p for p in PRODUCT_DIR.glob("*/*.md") if p.name != "README.md")
+  for path in pages:
+    text = path.read_text(encoding="utf-8")
+    end = text.find("\n---\n", 4)
+    if not text.startswith("---\n") or end == -1:
+      continue
+    try:
+      meta = yaml.safe_load(text[4:end])
+    except yaml.YAMLError as error:
+      failures[path.relative_to(PRODUCT_DIR).as_posix()] = str(error).splitlines()[0]
+      continue
+    if not isinstance(meta, dict):
+      failures[path.relative_to(PRODUCT_DIR).as_posix()] = "not a mapping"
+  assert pages
+  assert failures == {}, (
+    "front matter GitHub cannot parse (quote any value containing ': ')"
+  )
 
 
 @pytest.mark.unit

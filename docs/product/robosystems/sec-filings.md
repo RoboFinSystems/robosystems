@@ -1,6 +1,6 @@
 ---
 title: Analyze SEC filings with Claude or ChatGPT
-description: Connect an AI client to the SEC filings graph: financial statements, cross-company comparisons, disclosures and filing text for 8,000+ companies.
+description: "Connect an AI client to the SEC filings graph: financial statements, cross-company comparisons, disclosures and filing text for 8,000+ companies."
 order: 3
 ---
 
