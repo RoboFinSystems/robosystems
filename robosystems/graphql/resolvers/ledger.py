@@ -140,8 +140,12 @@ _schedule_svc = ScheduleService()
 
 # Reports can arrive on a graph that never provisioned `roboledger` — a
 # cross-graph share writes them there — so the report *reads* accept either
-# extension. Everything else on this resolver stays `roboledger`-only.
+# extension. Entity reads do too: an investor-only graph is created around its
+# own fund's entity row, and a share adds the sending company as a linked
+# entity, so Entity Info, the entity selector and the issuer picker all read
+# them. Everything else on this resolver stays `roboledger`-only.
 _REPORT_EXTENSIONS = ("roboledger", "roboinvestor")
+_ENTITY_EXTENSIONS = _REPORT_EXTENSIONS
 
 
 def _raise_ledger_not_initialized() -> NoReturn:
@@ -180,7 +184,7 @@ class LedgerQuery:
   def entity(self, info: Info[GraphQLContext, None]) -> LedgerEntity | None:
     """Return the parent ledger entity (company) for a graph."""
     try:
-      with _open_session(info, "roboledger") as session:
+      with _open_session_for_any(info, _ENTITY_EXTENSIONS) as session:
         response = reads_entity.get_parent_entity(session)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -196,7 +200,7 @@ class LedgerQuery:
   ) -> list[LedgerEntity]:
     """List entities for a graph, optionally filtered by source."""
     try:
-      with _open_session(info, "roboledger") as session:
+      with _open_session_for_any(info, _ENTITY_EXTENSIONS) as session:
         responses = reads_entity.list_entities(session, source=source)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
