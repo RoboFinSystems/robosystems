@@ -115,11 +115,14 @@ class TestExtensionGate:
       context_value=_ctx(schema_extensions=()),
     )
     assert result.errors is not None
-    assert any("roboledger is not provisioned" in str(e.message) for e in result.errors)
+    assert any(
+      "none of roboledger, roboinvestor is provisioned" in str(e.message)
+      for e in result.errors
+    )
 
   def test_graph_with_only_roboinvestor_rejects_ledger_queries(self) -> None:
     result = schema.execute_sync(
-      "query { entity { id name } }",
+      "query { fiscalCalendar { closedThrough } }",
       context_value=_ctx(schema_extensions=("roboinvestor",)),
     )
     assert result.errors is not None
@@ -243,6 +246,54 @@ class TestEntityResolver:
     err = result.errors[0]
     assert "Ledger not initialized" in err.message
     assert err.extensions == {"code": "LEDGER_NOT_INITIALIZED"}
+
+
+class TestEntityReadsOnInvestorGraphs:
+  """An investor-only graph holds its fund's entity row and the companies that
+  shared reports with it; Entity Info and the issuer picker read them."""
+
+  def test_entity_reads_on_an_investor_only_graph(self) -> None:
+    fund = LedgerEntityResponse(
+      id="ent_fund", name="Harbor Fund", status="active", is_parent=True
+    )
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        return_value=fund,
+      ),
+    ):
+      result = schema.execute_sync(
+        "query { entity { id name } }",
+        context_value=_ctx(schema_extensions=("roboinvestor",)),
+      )
+
+    assert result.errors is None
+    assert result.data == {"entity": {"id": "ent_fund", "name": "Harbor Fund"}}
+
+  def test_linked_entities_list_on_an_investor_only_graph(self) -> None:
+    linked = [
+      LedgerEntityResponse(
+        id="ent_issuer", name="Issuer Co", status="active", source="linked"
+      )
+    ]
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.entity.list_entities",
+        return_value=linked,
+      ) as list_entities,
+    ):
+      result = schema.execute_sync(
+        'query { entities(source: "linked") { id name source } }',
+        context_value=_ctx(schema_extensions=("roboinvestor",)),
+      )
+
+    assert result.errors is None
+    assert result.data == {
+      "entities": [{"id": "ent_issuer", "name": "Issuer Co", "source": "linked"}]
+    }
+    assert list_entities.call_args.kwargs == {"source": "linked"}
 
 
 class TestEntitiesResolver:
