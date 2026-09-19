@@ -377,6 +377,8 @@ Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSION
 
 A stack you run serves both MCP routes at `http://localhost:8000/v1/mcp` and `http://localhost:8000/v1/graphs/{graph_id}/mcp`. The OAuth route requires `MCP_OAUTH_ENABLED=true`; the per-graph route takes the key from `just demo-user` in `X-API-Key`. See [Local Development](Local-Development).
 
+Operators on a stack you run can use an open-weight model in place of Claude on Bedrock, through any OpenAI-compatible server. See [AI Models](Local-Development#ai-models).
+
 ---
 
 ## Related Documentation

@@ -283,6 +283,34 @@ The RoboSystems, RoboLedger, and RoboInvestor web apps are open source too, each
 
 To connect a real QuickBooks company to a local stack, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
 
+## AI Models
+
+The stack reaches a language model in two ways. You can run both on open-weight models you host, so no part of the platform depends on a proprietary AI service.
+
+**MCP clients bring their own model.** Any MCP client can connect to your stack's MCP routes (see [AI Operators and MCP](AI-Operators-and-MCP#self-hosted-deployments)), and the client decides which model drives the tools. That includes a client running an open-weight model.
+
+**Operators use the model you configure.** Operators are the server-side AI: the chat assistant and chart-of-accounts mapping. By default they call Claude through AWS Bedrock, using the `AWS_BEDROCK_*` credentials in `.env`. To run them on an open-weight model, point them at any server that implements the OpenAI Chat Completions API with tool calling, and map the model tiers to it in `.env`:
+
+```bash
+OPENAI_COMPAT_ENABLED=true
+OPENAI_COMPAT_BASE_URL=https://integrate.api.nvidia.com/v1   # or vLLM, Ollama, LM Studio
+OPENAI_COMPAT_MODEL=z-ai/glm-5.3-flash
+OPENAI_COMPAT_API_KEY=...                                    # blank if the server needs none
+OPERATOR_PROFILE_ECONOMY=openai-compat
+OPERATOR_PROFILE_BALANCED=openai-compat
+OPERATOR_PROFILE_QUALITY=openai-compat
+```
+
+Then run `just rebuild`, because a plain restart does not pick up environment changes.
+
+- **Tiers.** A tier you leave unmapped stays on Bedrock. Map all three and the stack needs no AWS credentials for AI.
+- **Validation at startup.** An unknown tier name, or a tier mapped while `OPENAI_COMPAT_ENABLED` is off, stops the stack at startup rather than failing on the first question.
+- **Servers on your machine.** From inside Docker, a model server on your host is at `host.docker.internal`, for example `http://host.docker.internal:11434/v1` for Ollama. `localhost` refers to the container.
+- **Credits.** Calls to your model cost 0 credits unless you set `OPENAI_COMPAT_CREDITS_PER_1K_INPUT` and `_OUTPUT`.
+- **Other settings.** `OPENAI_COMPAT_MAX_OUTPUT_TOKENS` caps output tokens per call, and `OPENAI_COMPAT_TIMEOUT_SECONDS` defaults to 300.
+
+**Which models work.** We tested the chat assistant against a demo ledger with questions whose answers we computed independently. Through NVIDIA's API catalog, Kimi K3, GLM 5.3, and GLM 5.3 Flash answered as accurately as Claude Sonnet 5. A smaller model that fits on a single workstation GPU (gpt-oss-20b) got some multi-step questions wrong. Treat frontier-size open weights, served from a GPU server or a hosted endpoint, as the tested configuration. The mapping operator has not been tested on open weights.
+
 ## Restarting and Iterating
 
 As you make changes, choose the right restart command:
