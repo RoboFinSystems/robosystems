@@ -199,6 +199,17 @@ _LANDED_ENTRY_STATUSES = LANDED_ENTRY_STATUSES
 _LANDED_TRANSACTION_STATUSES = frozenset({"posted"})
 
 
+def _has_linked_entries(session: Session, event_id: str) -> bool:
+  """Whether any journal entry, draft or posted, already points at the event."""
+  return bool(
+    session.execute(
+      select(func.count())
+      .select_from(Entry)
+      .where(Entry.triggered_by_event_id == event_id)
+    ).scalar_one()
+  )
+
+
 def _retraction_fence_dates(session: Session, event_id: str) -> list[date]:
   """Posting dates of every ledger row a retraction of this event would strand.
 
@@ -754,9 +765,16 @@ def update_event_block(
       event.replaced_by_event_id = successor.id
       successor.replaces_event_id = event.id
 
-    fire_handler = body.transition_to == "committed" and event.status in (
-      "captured",
-      "classified",
+    # A handler that ran when the event was created has already written its
+    # entry: a journal entry, bill or payment recorded as a draft arrives
+    # `classified` with that draft linked. Firing again on approval would
+    # write a second one, and close would post both. As in
+    # `_assert_retractable`, what decides is whether anything landed, not the
+    # status.
+    fire_handler = (
+      body.transition_to == "committed"
+      and event.status in ("captured", "classified")
+      and not _has_linked_entries(session, str(event.id))
     )
 
     event.status = body.transition_to

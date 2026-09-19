@@ -529,6 +529,29 @@ class TestApproveFiresHandler:
 
     fake_handler.dispatch.assert_called_once()
 
+  def test_committing_an_event_whose_draft_already_exists_does_not_refire(
+    self,
+  ) -> None:
+    """A journal entry recorded as a draft arrives `classified` with its entry
+    already written. Approving it moves the status and writes nothing more."""
+    event = self._journal_event(status="classified")
+    session = _session_with_events(event)
+    session.execute.return_value.scalar_one.return_value = 1
+
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="committed")
+    fake_handler = MagicMock()
+
+    with patch(
+      "robosystems.operations.event_block.commands.get_python_handler",
+      return_value=fake_handler,
+    ):
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    assert event.status == "committed"
+    fake_handler.dispatch.assert_not_called()
+
   def test_committed_to_fulfilled_does_not_fire_handler(self) -> None:
     """Handler fires only on the initial commit, not subsequent transitions."""
     event = self._journal_event(status="committed")
