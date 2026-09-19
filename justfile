@@ -17,6 +17,7 @@
 
 _env := ".env"
 _local_env := ".env.local"
+_store_volumes := "robosystems-pg-data robosystems-valkey-data robosystems-opensearch-data robosystems-localstack-data"
 
 # Default recipe (runs when `just` is invoked with no args) — lists all recipes
 default:
@@ -612,10 +613,13 @@ clean-data:
     rm -rf ./data/lbug-dbs
     rm -rf ./data/staging
     rm -rf ./data/lance
-    rm -rf ./data/localstack
-    rm -rf ./data/opensearch
-    rm -rf ./data/postgres
-    rm -rf ./data/valkey
+    docker volume rm -f {{_store_volumes}}
+    rm -rf ./.local/config.json
+
+# Wipe Postgres, Valkey, OpenSearch and LocalStack (stops the stack first; `just start` brings it back empty)
+clean-volumes:
+    @just teardown
+    docker volume rm -f {{_store_volumes}}
     rm -rf ./.local/config.json
 
 # Full local reset — tear down, wipe local data, rebuild the stack
