@@ -8,6 +8,7 @@ from robosystems.logger import logger
 
 from .base_tool import BaseTool
 from .constants import (
+  INVESTOR_AMOUNT_GUIDANCE,
   LEDGER_AMOUNT_GUIDANCE,
   LEDGER_ANCHOR_GUIDANCE,
   LEDGER_STATUS_GUIDANCE,
@@ -260,6 +261,18 @@ ORDER BY t.date DESC LIMIT 25""",
               "explanation": "A voided transaction still holds posted-looking rows; measure realized effect through its live Entry/LineItem (`e.is_live`) rather than summing Transaction.amount directly. To filter transactions themselves, use `t.is_live` (⇔ status <> 'void').",
             },
           ]
+        )
+
+      # Investor positions (tenant graphs with the roboinvestor extension; the
+      # SEC shared repository does not load it, so Position is tenant-only).
+      if "Position" in node_types and (not category or category == "investor"):
+        examples.append(
+          {
+            "category": "investor",
+            "description": "⚠️ Position amounts are dollars in the graph",
+            "info": INVESTOR_AMOUNT_GUIDANCE,
+            "explanation": "The RoboInvestor API and GraphQL return cost_basis and current_value in cents under the same names; the graph does not. Dividing a graph amount by 100 reports a figure a hundred times too small with no error.",
+          }
         )
 
       # Entity-based queries (common pattern)

@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from robosystems.middleware.mcp.tools.constants import LEDGER_AMOUNT_GUIDANCE
+from robosystems.middleware.mcp.tools.constants import (
+  INVESTOR_AMOUNT_GUIDANCE,
+  LEDGER_AMOUNT_GUIDANCE,
+)
 from robosystems.middleware.mcp.tools.example_queries_tool import ExampleQueriesTool
 
 
@@ -34,3 +37,18 @@ async def test_graph_without_ledger_spine_omits_it():
   examples = await _tool(["Entity", "Fact", "Element"]).execute({})
 
   assert all(e.get("info") != LEDGER_AMOUNT_GUIDANCE for e in examples)
+
+
+@pytest.mark.asyncio
+async def test_investor_graph_states_position_amounts_are_dollars():
+  examples = await _tool(["Portfolio", "Position", "Security"]).execute({})
+
+  investor = [e for e in examples if e["category"] == "investor"]
+  assert [e.get("info") for e in investor] == [INVESTOR_AMOUNT_GUIDANCE]
+
+
+@pytest.mark.asyncio
+async def test_graph_without_positions_omits_investor_guidance():
+  examples = await _tool(["Entry", "LineItem", "Element"]).execute({})
+
+  assert all(e.get("info") != INVESTOR_AMOUNT_GUIDANCE for e in examples)

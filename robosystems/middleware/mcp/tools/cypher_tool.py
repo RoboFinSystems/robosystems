@@ -9,6 +9,7 @@ from robosystems.logger import logger
 from ..exceptions import GraphAPIError
 from .base_tool import BaseTool
 from .constants import (
+  INVESTOR_AMOUNT_GUIDANCE,
   LEDGER_AMOUNT_GUIDANCE,
   LEDGER_ANCHOR_GUIDANCE,
   LEDGER_STATUS_GUIDANCE,
@@ -42,6 +43,15 @@ class CypherTool(BaseTool):
     """
     if "roboledger" not in self.schema_extensions:
       return False
+    return self._is_tenant_graph()
+
+  def _has_investor_positions(self) -> bool:
+    """True only for entity graphs that materialize RoboInvestor positions."""
+    if "roboinvestor" not in self.schema_extensions:
+      return False
+    return self._is_tenant_graph()
+
+  def _is_tenant_graph(self) -> bool:
     try:
       from robosystems.config.shared_repositories import (
         is_shared_repository_or_subgraph,
@@ -49,7 +59,7 @@ class CypherTool(BaseTool):
 
       return not is_shared_repository_or_subgraph(self.client.graph_id)
     except Exception as e:
-      logger.debug(f"Ledger-spine check failed for {self.client.graph_id}: {e}")
+      logger.debug(f"Tenant-graph check failed for {self.client.graph_id}: {e}")
       return False
 
   def get_tool_definition(self) -> dict[str, Any]:
@@ -96,6 +106,8 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
       description += "\n\n" + LEDGER_ANCHOR_GUIDANCE
       description += "\n\n" + LEDGER_STATUS_GUIDANCE
       description += "\n\n" + LEDGER_AMOUNT_GUIDANCE
+    if self._has_investor_positions():
+      description += "\n\n" + INVESTOR_AMOUNT_GUIDANCE
 
     return {
       "name": "read-graph-cypher",
