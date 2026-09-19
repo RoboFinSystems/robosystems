@@ -19,9 +19,11 @@ When QuickBooks first syncs, RoboLedger maps your chart of accounts with AI. Thi
 
 This runs once. Accounts you add in QuickBooks later arrive unmapped, so check mapping whenever your chart of accounts changes.
 
+If the graph keeps native books instead of QuickBooks, the Chart of Accounts page offers a template to start from. Mapping still has to be reviewed before you close.
+
 ## Review it
 
-**In the app.** Open **Ledger → Chart of Accounts** and choose **Show mappings**. It shows your accounts, what each one is mapped to, and how much of the chart is covered. Change or clear a mapping on any account. **Auto-Map** runs the AI mapping again over what's left, and it uses credits.
+**In the app.** Open **Ledger → Chart of Accounts** and choose **Show mappings**. It shows your accounts, what each one is mapped to, and how much of the chart is covered. Change or clear a mapping on any account. **Auto-Map** runs the AI mapping again over what's left, and it uses credits. The [reporting library](the-library.md) is the vocabulary those mappings point at.
 
 ![The chart of accounts with each account's reporting concept and a coverage bar reading 20 of 20](images/chart-of-accounts.png)
 

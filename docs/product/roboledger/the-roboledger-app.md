@@ -29,7 +29,7 @@ The people and companies you do business with: customers, vendors and employees.
 
 ![The chart of accounts with each account's reporting concept and a coverage bar reading 20 of 20](images/chart-of-accounts.png)
 
-**Inbox** holds events that have been captured and haven't posted to the ledger yet, so you can review and approve them first.
+**Inbox** holds events that have been captured and haven't posted to the ledger yet, so you can review and approve them first. See [Review events in the Inbox](inbox.md).
 
 **Journal** is every journal entry with its lines, in posting order, and a second tab for transactions. You can create a manual entry here.
 
@@ -54,7 +54,7 @@ See [Reports and sharing](reports-and-sharing.md).
 
 ## Explorer
 
-Explorer opens any statement, note, schedule, set of ratios or scenario as a series over time. Switch between the rendered table, a chart, the facts behind it, the accounts and concepts it's built from, and the checks it passed. Export any view as CSV or JSON.
+Explorer opens any statement, note, schedule, set of ratios or scenario as a series over time. Switch between the rendered table, a chart, the facts behind it, the accounts and concepts it's built from, and the checks it passed. Export any view as CSV or JSON. See [Explore statements and metrics over time](explorer.md).
 
 ![Explorer showing key financial metrics as a table, one column a month](images/explorer.png)
 
@@ -64,7 +64,7 @@ Your statements and a scenario's assumptions in one monthly grid, with actual mo
 
 ## Library
 
-The reporting concepts your accounts map to, with their definitions and how they roll up into each statement. Look here when you're deciding where an account belongs.
+The reporting concepts your accounts map to, with their definitions and how they roll up into each statement. Look here when you're deciding where an account belongs. See [The reporting library](the-library.md).
 
 ## Console
 

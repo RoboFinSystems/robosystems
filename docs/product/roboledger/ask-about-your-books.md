@@ -50,7 +50,7 @@ Right after a sync or a close, some answers take a little while to catch up. You
 
 - **Ledger → Statements** shows live statements for any period.
 - **Ledger → Trial Balance** and **Ledger → Journal** show the detail underneath.
-- **Explorer** opens any statement, note, schedule, set of ratios or scenario as a series over time. Switch between the table, a chart, the facts behind it and the checks it passed, and export to CSV or JSON.
+- **Explorer** opens any statement, note, schedule, set of ratios or scenario as a series over time. Switch between the table, a chart, the facts behind it and the checks it passed, and export to CSV or JSON. See [Explore statements and metrics over time](explorer.md).
 - **Search** finds text across the documents in your graph.
 - **Console** lets you ask questions inside the app. It runs on RoboLedger's own AI, so it uses credits. Claude, ChatGPT and other clients you connect yourself don't.
 

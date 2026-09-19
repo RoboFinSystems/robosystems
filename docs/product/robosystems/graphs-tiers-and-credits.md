@@ -15,7 +15,7 @@ Graphs belong to an **organization**. Organization owners and admins create them
 What a graph holds depends on what you turn on when you create it:
 
 - **RoboLedger** for accounting: QuickBooks sync, statements, forecasts, the month-end close. See the [RoboLedger docs](https://roboledger.ai/docs).
-- **RoboInvestor** for portfolios, securities and positions.
+- **RoboInvestor** for private-company portfolios, securities and positions, and for reports a RoboLedger company shares with you. See the [RoboInvestor docs](https://roboinvestor.ai/docs). RoboInvestor is in beta.
 - **Neither**, for a graph you model and load yourself.
 
 **Shared repositories** are graphs you subscribe to rather than create. The SEC filings are one: read-only, the same for every subscriber. See [Analyze SEC filings](sec-filings.md).
