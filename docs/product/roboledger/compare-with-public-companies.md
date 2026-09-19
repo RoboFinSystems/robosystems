@@ -1,11 +1,11 @@
 ---
 title: Compare with public companies
-description: Put your margins, growth and ratios next to public companies. Add the SEC filings graph as a second connection beside your books and ask Claude to compare.
+description: Put your margins, growth and ratios next to public companies. Add the SEC filings graph as a second connection beside your books and ask your AI to compare.
 order: 13
 section: Work with your books
 ---
 
-Public companies report their financials to the SEC in a structured format, tagged with the same kind of reporting concepts your chart of accounts is mapped to. RoboSystems keeps those filings in a graph of their own. Connect it beside your books, and Claude can put your gross margin, revenue growth or expense ratios next to companies in your industry, in one conversation.
+Public companies report their financials to the SEC in a structured format, tagged with the same kind of reporting concepts your chart of accounts is mapped to. RoboSystems keeps those filings in a graph of their own. Connect it beside your books, and your AI assistant can put your gross margin, revenue growth or expense ratios next to companies in your industry, in one conversation.
 
 ## Set it up
 
@@ -18,7 +18,7 @@ https://api.robosystems.ai/v1/graphs/sec/mcp
 
 You can also add the address you used for your books a second time and choose **SEC EDGAR Filings** when you sign in. Give the two connectors names you'll recognize, like "Our books" and "SEC filings".
 
-Your ledger stays in your graph. The SEC graph is shared and read-only, and nothing from your books is copied into it. Claude reads from both and does the comparison in the conversation.
+Your ledger stays in your graph. The SEC graph is shared and read-only, and nothing from your books is copied into it. Your assistant reads from both and does the comparison in the conversation.
 
 ## What you can compare
 
@@ -26,7 +26,7 @@ Your ledger stays in your graph. The SEC graph is shared and read-only, and noth
 - **Growth:** your revenue growth against a filer's, over the same quarters or years.
 - **Cost structure:** what share of revenue goes to cost of revenue, sales and marketing, research, and general and administrative expense.
 - **Balance sheet ratios:** current ratio, debt to equity, days sales outstanding.
-- **What they say about it:** Claude can search the text of filings, so after the numbers you can ask how a company explains its margin or describes a risk.
+- **What they say about it:** Your assistant can search the text of filings, so after the numbers you can ask how a company explains its margin or describes a risk.
 
 The SEC graph covers annual and quarterly reports from more than 8,000 companies. What it holds and how to ask about it is in the [SEC filings guide](https://robosystems.ai/docs/guides/sec-filings).
 
@@ -34,7 +34,7 @@ The SEC graph covers annual and quarterly reports from more than 8,000 companies
 
 - **Compare ratios, not dollars.** A company two hundred times your size is still a useful benchmark for gross margin. It isn't one for headcount cost.
 - **Pick companies with your business model,** not just your industry. A software company that sells through resellers has different margins from one that sells direct.
-- **Match the periods.** Public companies report by quarter and by fiscal year, and their fiscal years don't all end in December. Ask Claude to line your months up to their quarters.
+- **Match the periods.** Public companies report by quarter and by fiscal year, and their fiscal years don't all end in December. Ask your assistant to line your months up to their quarters.
 - **Check your mapping first.** If your cost of revenue is mapped as an operating expense, your gross margin compares against nothing. See [Map your chart of accounts](map-your-chart-of-accounts.md).
 - **Use closed months** for anything you'll show someone else.
 

@@ -5,7 +5,7 @@ order: 4
 section: Get started
 ---
 
-Most of the work in RoboLedger happens in a conversation with Claude. The app at [roboledger.ai](https://roboledger.ai) is where you connect your books, see what Claude is working from, and review what it did. Everything Claude reads and writes is visible here.
+Most of the work in RoboLedger happens in a conversation with your AI assistant: Claude, ChatGPT or any MCP client. The app at [roboledger.ai](https://roboledger.ai) is where you connect your books, see what your assistant is working from, and review what it did. Everything it reads and writes is visible here.
 
 The screens below show Cadence Labs, a made-up company used for demos.
 
@@ -17,7 +17,7 @@ The menu at the top right picks the company you're looking at, if you have more 
 
 - **Entity Info** holds your company's details.
 - **All Entities** lists every company across your graphs.
-- **Connections** is where you connect QuickBooks, press **Sync Now**, choose sync options, and disconnect. See [Connect your books to Claude](connect-your-books.md).
+- **Connections** is where you connect QuickBooks, press **Sync Now**, choose sync options, and disconnect. See [Connect your books to your AI assistant](connect-your-books.md).
 
 ## Agents
 
@@ -39,7 +39,7 @@ The people and companies you do business with: customers, vendors and employees.
 
 ![Live statements showing a balance sheet with current and prior columns](images/statements.png)
 
-**Closing Book** is where the month-end close lives. The period close view shows the last closed month, the month you're working towards, what's blocking it, and each schedule's entry for the month. Beneath it are your account mapping, your schedules and the trial balance. See [Close the month with Claude](month-end-close.md) and [Schedules for recurring entries](schedules.md).
+**Closing Book** is where the month-end close lives. The period close view shows the last closed month, the month you're working towards, what's blocking it, and each schedule's entry for the month. Beneath it are your account mapping, your schedules and the trial balance. See [Close the month with your AI assistant](month-end-close.md) and [Schedules for recurring entries](schedules.md).
 
 ![The Closing Book period close view, showing the last closed month, a blocker, and four schedule entries pending for August](images/closing-book.png)
 
@@ -60,7 +60,7 @@ Explorer opens any statement, note, schedule, set of ratios or scenario as a ser
 
 ## Plan
 
-Your statements and a scenario's assumptions in one monthly grid, with actual months on the left and forecast months on the right. See [Plan and forecast with Claude](plan-and-forecast.md).
+Your statements and a scenario's assumptions in one monthly grid, with actual months on the left and forecast months on the right. See [Plan and forecast with your AI assistant](plan-and-forecast.md).
 
 ## Library
 

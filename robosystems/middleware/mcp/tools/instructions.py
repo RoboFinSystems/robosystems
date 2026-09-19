@@ -132,7 +132,7 @@ def build_instructions(
       (
         "- Classify one → `update-event-block(event_id, "
         "transition_to='classified', metadata_patch={classified_element_id, "
-        "classified_by: 'claude', basis})`. A split: `classified_allocations: "
+        "classified_by: 'ai', basis})`. A split: `classified_allocations: "
         "[{element_id, amount}]` — positive cents summing to the line's "
         "absolute amount. To take the suggestion as-is: "
         "`metadata_patch={accept_suggestion: true}` (only when "

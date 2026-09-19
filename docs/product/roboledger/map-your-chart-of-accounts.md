@@ -25,7 +25,7 @@ This runs once. Accounts you add in QuickBooks later arrive unmapped, so check m
 
 ![The chart of accounts with each account's reporting concept and a coverage bar reading 20 of 20](images/chart-of-accounts.png)
 
-**With Claude.** Claude can list the accounts that aren't mapped, suggest a concept for each one, and apply the ones you agree with. Its suggestions come from matching on names and account types, not from AI inside RoboLedger, so they use no credits.
+**With your AI assistant.** It can list the accounts that aren't mapped, suggest a concept for each one, and apply the ones you agree with. Its suggestions come from matching on names and account types, not from AI inside RoboLedger, so they use no credits.
 
 Ask: "Which accounts aren't mapped yet? Suggest where each one belongs, and wait for me before applying anything."
 
@@ -40,7 +40,7 @@ Ask: "Which accounts aren't mapped yet? Suggest where each one belongs, and wait
 
 Closing a month saves that month's statements, and they're built through the mapping as it stood. After that, RoboLedger refuses to change the mapping of an account that has activity in a closed month, because the saved statements would stop agreeing with the live ones. The message names the earliest month affected.
 
-So map first, close second. If you need to change a mapping after the fact, reopen the months it touches, change it, and close them again. See [Close the month with Claude](month-end-close.md).
+So map first, close second. If you need to change a mapping after the fact, reopen the months it touches, change it, and close them again. See [Close the month with your AI assistant](month-end-close.md).
 
 ## Try asking
 

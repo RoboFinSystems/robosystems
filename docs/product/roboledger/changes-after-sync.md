@@ -11,11 +11,11 @@ RoboLedger doesn't quietly overwrite its records when that happens, because the 
 
 ## How a change shows up
 
-After a sync, Claude tells you how many transactions changed at the source. They also show up as a blocker when you ask what's in the way of a close, and on the period close view in **Ledger → Closing Book**. A close won't run over changes nobody has looked at.
+After a sync, your AI assistant tells you how many transactions changed at the source. They also show up as a blocker when you ask what's in the way of a close, and on the period close view in **Ledger → Closing Book**. A close won't run over changes nobody has looked at.
 
-For each one, Claude can show you what RoboLedger posted, what QuickBooks says now, and the difference for each account.
+For each one, your assistant can show you what RoboLedger posted, what QuickBooks says now, and the difference for each account.
 
-A regular sync looks back 60 days. If someone edited something older than that, ask Claude to sync from a date that covers it, or choose a full sync. Otherwise the change is missed.
+A regular sync looks back 60 days. If someone edited something older than that, ask your assistant to sync from a date that covers it, or choose a full sync. Otherwise the change is missed.
 
 ## Three ways to settle it
 
@@ -23,7 +23,7 @@ A regular sync looks back 60 days. If someone edited something older than that, 
 
 **Catch up.** The original month stays as it was, and the difference posts as one entry in an open month. Use this when the earlier months are locked: you've sent those statements to a lender, an investor or the board, and they should stand. The entry stays in RoboLedger and isn't written to QuickBooks, because QuickBooks already has the edit.
 
-**Mark it as handled.** You already booked the difference yourself. Nothing posts. Claude records a note saying why, and which entry covered it.
+**Mark it as handled.** You already booked the difference yourself. Nothing posts. Your assistant records a note saying why, and which entry covered it.
 
 Settling a change is what makes it stick. Until you do, the flag comes back on every sync.
 
@@ -35,7 +35,7 @@ Settling a change is what makes it stick. Until you do, the flag comes back on e
 | The month is closed and its statements have gone out | Catch up |
 | You already posted an entry for the difference | Mark it as handled |
 
-If you aren't sure, ask Claude what each choice would do to the figures before you pick. Looking at a change doesn't post anything.
+If you aren't sure, ask your assistant what each choice would do to the figures before you pick. Looking at a change doesn't post anything.
 
 ## Try asking
 
