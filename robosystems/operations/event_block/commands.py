@@ -199,6 +199,17 @@ _LANDED_ENTRY_STATUSES = LANDED_ENTRY_STATUSES
 _LANDED_TRANSACTION_STATUSES = frozenset({"posted"})
 
 
+def _has_linked_entries(session: Session, event_id: str) -> bool:
+  """Whether any journal entry, draft or posted, already points at the event."""
+  return bool(
+    session.execute(
+      select(func.count())
+      .select_from(Entry)
+      .where(Entry.triggered_by_event_id == event_id)
+    ).scalar_one()
+  )
+
+
 def _retraction_fence_dates(session: Session, event_id: str) -> list[date]:
   """Posting dates of every ledger row a retraction of this event would strand.
 
@@ -630,7 +641,8 @@ def update_event_block(
 
   When the requested transition is ``captured → committed`` or
   ``classified → committed``, the event's Python handler (if any) fires
-  against the captured metadata to produce the corresponding GL rows.
+  against the captured metadata to produce the corresponding GL rows,
+  unless it already wrote them when the event was created.
   Handler errors roll back the entire update, including the status
   change — a failed commit leaves the event in its pre-approval state.
   ``captured → classified`` gives the same handler a veto: a choice it
@@ -754,9 +766,17 @@ def update_event_block(
       event.replaced_by_event_id = successor.id
       successor.replaces_event_id = event.id
 
-    fire_handler = body.transition_to == "committed" and event.status in (
-      "captured",
-      "classified",
+    # A handler that ran when the event was created has already written its
+    # entry: a journal entry, bill or payment recorded as a draft arrives
+    # `classified` with that draft linked. Firing again on approval would
+    # write a second one, and close would post both. What decides is whether
+    # the handler already wrote anything, draft or posted, not the status.
+    # Drafts must count: narrowing this to the posted and reversed statuses
+    # `_assert_retractable` checks would bring the duplicate back.
+    fire_handler = (
+      body.transition_to == "committed"
+      and event.status in ("captured", "classified")
+      and not _has_linked_entries(session, str(event.id))
     )
 
     event.status = body.transition_to

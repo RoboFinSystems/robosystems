@@ -281,7 +281,9 @@ def _classify_dispatch_error(exc: BaseException) -> str:
   """Map a dispatch exception to a typed error code.
 
   The inbox UI uses this code to surface "fix and retry" prompts —
-  ``element_unmapped`` → "map account X in the CoA mapping",
+  ``element_unmapped`` → "account X is not in the chart of accounts yet;
+  sync the source" (an account missing from RoboLedger, not a reporting-
+  concept mapping gap),
   ``closed_period`` → "reopen the period or change the posting date",
   default ``unknown_error`` → generic retry button.
 
@@ -1849,7 +1851,7 @@ class OLTPLoader:
     # the loader hasn't seen yet) doesn't roll back the rest.
     #
     # Events that fail dispatch stay at ``status='captured'`` and surface
-    # in the inbox — the user fixes the underlying issue (CoA mapping,
+    # in the inbox — the user fixes the underlying issue (a missing account,
     # closed period, etc.) and re-approves from there. Re-syncs covered
     # under the existing idempotency rule: only ``captured`` /
     # ``classified`` events are touched, so previously-committed events

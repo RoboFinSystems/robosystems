@@ -261,8 +261,9 @@ def _resolve_nested_line_items(
     raise ElementResolutionError(
       f"Event {event.id}: {len(seen)} element_external_id(s) could not be "
       f"resolved against source='{event.source}', "
-      f"connection_id='{connection_id}': {summary}. Map these accounts in "
-      f"the CoA mapping before approving."
+      f"connection_id='{connection_id}': {summary}. These accounts are not in "
+      f"RoboLedger's chart of accounts yet; sync the source so they arrive, "
+      f"then approve again."
     )
 
   # Second pass: translate. Every line either has element_id or a
