@@ -5,14 +5,14 @@ order: 24
 section: Keep the books right
 ---
 
-Connecting QuickBooks, syncing, asking questions, building reports and running forecasts never write anything to QuickBooks. Syncing only reads. You can use everything in [What Claude can do with your books](what-claude-can-do.md) short of the close without changing a single QuickBooks record.
+Connecting QuickBooks, syncing, asking questions, building reports and running forecasts never write anything to QuickBooks. Syncing only reads. You can use everything in [What your AI assistant can do with your books](what-claude-can-do.md) short of the close without changing a single QuickBooks record.
 
 ## What does write to QuickBooks
 
 Only entries RoboLedger posts:
 
-1. **Closing a month.** The entries RoboLedger drafted for the month are written to QuickBooks when the month closes. That means schedule entries like depreciation, and one-off adjustments you asked Claude to draft. Transactions that came from QuickBooks are never sent back.
-2. **Posting a single entry.** Claude can post one entry you've agreed on, outside a close, and it's written to QuickBooks when it posts.
+1. **Closing a month.** The entries RoboLedger drafted for the month are written to QuickBooks when the month closes. That means schedule entries like depreciation, and one-off adjustments you asked your AI assistant to draft. Transactions that came from QuickBooks are never sent back.
+2. **Posting a single entry.** Your assistant can post one entry you've agreed on, outside a close, and it's written to QuickBooks when it posts.
 
 Before a close, the list of drafts shows which entries will be written to QuickBooks and which stay in RoboLedger. An entry can also be marked to stay in RoboLedger only.
 

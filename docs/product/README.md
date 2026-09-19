@@ -16,7 +16,7 @@ A file named `index.md` is the site's docs landing page.
 
 ```markdown
 ---
-title: Connect your books to Claude
+title: Connect your books to your AI assistant
 description: One sentence, under 160 characters, for search results and link previews.
 order: 1
 section: Get started

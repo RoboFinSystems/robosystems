@@ -1,6 +1,6 @@
 ---
 title: Reports and sharing
-description: Build financial statements from your books with Claude, download them as XBRL or JSON-LD, and share a report with another RoboLedger or RoboInvestor graph.
+description: Build financial statements from your books with your AI, download them as XBRL or JSON-LD, and share a report with another RoboLedger or RoboInvestor graph.
 order: 11
 section: Work with your books
 ---
@@ -11,7 +11,7 @@ A report is a snapshot. Live statements move with every sync and every entry, an
 
 ## Create a report
 
-Ask Claude, or open **Reports → Create Report**. The report is built from your mapped chart of accounts, so map your accounts first. See [Map your chart of accounts](map-your-chart-of-accounts.md).
+Ask your AI assistant, or open **Reports → Create Report**. The report is built from your mapped chart of accounts, so map your accounts first. See [Map your chart of accounts](map-your-chart-of-accounts.md).
 
 In the app, choose the period: this month or last, this quarter or last, monthly year to date, a full year by month, year over year, or dates of your own. Then choose which statements to include.
 
@@ -24,9 +24,9 @@ Open a report in **Reports → View Reports**. The statements, and any notes att
 
 ![An open report, with its statements and notes listed on the left and the balance sheet on the right](images/report.png)
 
-**Ask about this report** answers questions from the report inside the app. It runs on RoboLedger's own AI, so it uses credits. Asking Claude about the same report through your own connection doesn't.
+**Ask about this report** answers questions from the report inside the app. It runs on RoboLedger's own AI, so it uses credits. Asking your assistant about the same report through your own connection doesn't.
 
-If the ledger changed after you created a report, because of a late entry or a restated month, ask Claude to regenerate it. The report is rebuilt from the ledger as it stands now.
+If the ledger changed after you created a report, because of a late entry or a restated month, ask your assistant to regenerate it. The report is rebuilt from the ledger as it stands now.
 
 ## Download it
 
@@ -38,7 +38,7 @@ Open a report in **Reports → View Reports** to download it as:
 
 ## Share it
 
-Sharing happens in the app, not through Claude. Open a report, choose **Share**, and pick a publish list. A publish list is a set of graphs you send reports to, such as your investor's RoboInvestor graph or your advisor's RoboLedger graph. Manage lists under **Reports → Publish Lists**.
+Sharing happens in the app, not through your assistant. Open a report, choose **Share**, and pick a publish list. A publish list is a set of graphs you send reports to, such as your investor's RoboInvestor graph or your advisor's RoboLedger graph. Manage lists under **Reports → Publish Lists**.
 
 **The recipient gets the statement, never the ledger.** A shared report copies the report, its statements and their facts, and the report files. Your transactions, customers, vendors and journal entries stay in your graph.
 

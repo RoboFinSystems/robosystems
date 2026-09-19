@@ -18,7 +18,7 @@ A schedule books one amount, from one account to another, every month from a fir
 
 ## Set one up
 
-**With Claude.** Describe the asset or the prepaid, and Claude sets up the schedule with your accounts. It can read a past month's entries to find the amounts and accounts you already use. History shows what was booked, not why, so Claude asks you for what it can't see: the cost, the useful life, the method, and when it started. If you keep a depreciation or prepaid worksheet, give Claude the numbers from it.
+**With your AI assistant.** Describe the asset or the prepaid, and your assistant sets up the schedule with your accounts. It can read a past month's entries to find the amounts and accounts you already use. History shows what was booked, not why, so it asks you for what it can't see: the cost, the useful life, the method, and when it started. If you keep a depreciation or prepaid worksheet, give your assistant the numbers from it.
 
 **In the app.** Open **Ledger → Closing Book** and choose **Add schedule**. Pick the debit and credit accounts, the first and last period, and the monthly amount. For depreciation, add the original cost, useful life in months and salvage value. The preview shows the entry before you save.
 
@@ -26,7 +26,7 @@ Months that are already closed are treated as history. A schedule that began two
 
 ## What happens at each close
 
-When you close a month, every active schedule gets a draft entry for that month. Claude shows you the drafts with everything else, and they post when you approve the close. Entries from schedules are written to QuickBooks at the close, like other entries RoboLedger posts. See [Close the month with Claude](month-end-close.md) and [Nothing writes to QuickBooks until you post](quickbooks-write-back.md).
+When you close a month, every active schedule gets a draft entry for that month. Your assistant shows you the drafts with everything else, and they post when you approve the close. Entries from schedules are written to QuickBooks at the close, like other entries RoboLedger posts. See [Close the month with your AI assistant](month-end-close.md) and [Nothing writes to QuickBooks until you post](quickbooks-write-back.md).
 
 In **Ledger → Closing Book**, each schedule shows its months and amounts. The period close view lists the month's schedule entries and where each one stands, with a button to draft any that are still pending.
 
@@ -37,7 +37,7 @@ In **Ledger → Closing Book**, each schedule shows its months and amounts. The 
 An asset gets sold. A policy gets cancelled and refunded. End the schedule before you draft that month's entries, or the close drafts an entry that shouldn't exist.
 
 - **End it with no entry.** The schedule stops at the end of a month you choose. Use this when the sale or refund is already in your books.
-- **End it and book the disposal.** Claude posts the disposal entry and ends the schedule in one step. Use this when that entry still needs to be made.
+- **End it and book the disposal.** Your assistant posts the disposal entry and ends the schedule in one step. Use this when that entry still needs to be made.
 
 Ending a schedule keeps its history. Deleting a schedule erases it, so end a schedule that did real work and delete only one that was set up by mistake.
 
@@ -47,7 +47,7 @@ Changes apply going forward. Entries that already posted stay posted. To correct
 
 ## Schedules in a forecast
 
-Every scenario picks up your schedules. Depreciation and amortization continue at their scheduled amounts, the assets they belong to come down on the balance sheet, and the expense stops in the month the schedule ends. See [Plan and forecast with Claude](plan-and-forecast.md).
+Every scenario picks up your schedules. Depreciation and amortization continue at their scheduled amounts, the assets they belong to come down on the balance sheet, and the expense stops in the month the schedule ends. See [Plan and forecast with your AI assistant](plan-and-forecast.md).
 
 ## Try asking
 

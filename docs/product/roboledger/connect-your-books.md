@@ -1,11 +1,11 @@
 ---
-title: Connect your books to Claude
+title: Connect your books to your AI assistant
 description: Connect QuickBooks Online to RoboLedger, then add RoboLedger to Claude, ChatGPT, Cursor or VS Code as an MCP connector. What syncs, and how to add it.
 order: 1
 section: Get started
 ---
 
-RoboLedger keeps your QuickBooks books in a knowledge graph that Claude can read and work with. Getting there takes three steps: create a graph, connect QuickBooks, and add RoboLedger to the AI client you already use.
+RoboLedger keeps your QuickBooks books in a knowledge graph your AI assistant can read and work with. Getting there takes three steps: create a graph, connect QuickBooks, and add RoboLedger to the AI client you already use.
 
 ## 1. Create an account and a graph
 
@@ -25,9 +25,9 @@ The first sync starts on its own and brings over your full history:
 
 Large companies can take several minutes. The first sync also sets up your fiscal calendar and maps your chart of accounts to standard reporting concepts. That mapping is done by AI, and it's the one step here that uses credits. See [What RoboLedger needs to work well](what-it-needs.md).
 
-After the first sync, syncing is on demand. Press **Sync Now** on the QuickBooks card, or ask Claude to sync. RoboLedger doesn't sync on a schedule, so sync before you ask about recent activity.
+After the first sync, syncing is on demand. Press **Sync Now** on the QuickBooks card, or ask your assistant to sync. RoboLedger doesn't sync on a schedule, so sync before you ask about recent activity.
 
-A regular sync picks up the last 60 days of changes. If something older changed in QuickBooks, choose a full sync in the sync options, or ask Claude to sync from a specific date. When a transaction RoboLedger already recorded has been edited, it's flagged for you to settle. See [When QuickBooks changes after a sync](changes-after-sync.md).
+A regular sync picks up the last 60 days of changes. If something older changed in QuickBooks, choose a full sync in the sync options, or ask your assistant to sync from a specific date. When a transaction RoboLedger already recorded has been edited, it's flagged for you to settle. See [When QuickBooks changes after a sync](changes-after-sync.md).
 
 RoboLedger reads companies that keep their books in US dollars. A company with transactions in other currencies can't sync yet.
 
