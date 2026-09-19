@@ -1,6 +1,6 @@
 # Credits & Billing
 
-In RoboSystems, only AI operations consume credits — every database, graph, MCP, Cypher, import, sync, backup, and schema operation is free. Credits exist solely to meter the external model-inference cost of AI Operators (Anthropic Claude via AWS Bedrock), and each graph carries a monthly credit allocation tied to its tier.
+In RoboSystems, only AI operations consume credits — every database, graph, MCP, Cypher, import, sync, backup, and schema operation is free. Credits exist solely to meter the external model-inference cost of AI Operators (models served through AWS Bedrock), and each graph carries a monthly credit allocation tied to its tier.
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
@@ -26,7 +26,7 @@ The model has one rule worth memorizing: **credits meter AI, and nothing else.**
 
 ### What Consumes Credits
 
-Only operations that call an external AI model consume credits. In production, that means AI Operators running Claude (Anthropic) through AWS Bedrock — the natural-language Cypher operator, the autonomous chart-of-accounts mapping operator, and any other operator-driven workflow. Each call is metered on the tokens it actually uses once it completes, then debited from the graph's credit pool.
+Only operations that call an external AI model consume credits. In production, that means AI Operators calling a model through AWS Bedrock (Claude Sonnet 5 by default) — the natural-language Cypher operator, the autonomous chart-of-accounts mapping operator, and any other operator-driven workflow. Each call is metered on the tokens it actually uses once it completes, then debited from the graph's credit pool.
 
 ### What Is Free
 

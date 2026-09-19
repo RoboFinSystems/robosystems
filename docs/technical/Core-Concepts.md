@@ -121,7 +121,7 @@ The principle is the same as for Information Blocks: vocabulary changes go throu
 Two distinct concepts share the word "agent," and the platform keeps them separate on purpose.
 
 - **REA Agent** — an economic counterparty in a business event: a customer, vendor, or employee. This is the canonical ontology term, drawn from the Resources-Events-Agents accounting model. An REA Agent is data: a party an event happened *with*. It is distinct from the reporting `Entity`, which is the graph owner.
-- **Operator** — the AI executor layer (Claude- and MCP-driven), with concrete classes like `CypherOperator` (natural-language graph queries) and `MappingOperator` (autonomous chart-of-accounts mapping). Operators live at `POST /v1/graphs/{graph_id}/operator` and execute work.
+- **Operator** — the AI executor layer (model- and MCP-driven), with concrete classes like `CypherOperator` (natural-language graph queries) and `MappingOperator` (autonomous chart-of-accounts mapping). Operators live at `POST /v1/graphs/{graph_id}/operator` and execute work.
 
 The rename resolved an "agent operates on agent" naming collision: an AI Operator can act on REA Agent data. Marketing copy may still say "AI agent," but in the API and codebase the executor is always an **Operator**.
 

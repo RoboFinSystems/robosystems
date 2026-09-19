@@ -1026,11 +1026,12 @@ See individual app repositories for specific deployment workflows.
 - Dagster extract/transform/load assets
 - Full rebuild and incremental sync modes
 
-### Anthropic Claude (via AWS Bedrock)
+### AI Models (via AWS Bedrock)
 
 **Purpose**: AI-powered financial operations
 
-- AWS Bedrock for Claude model access (Sonnet 4.6/4.5)
+- AWS Bedrock (the Converse API) for model access: Claude Sonnet 5 by default, with Claude Opus 5 and OpenAI GPT-5.6 Luna configured as the other profiles
+- Self-hosted stacks can point operators at any OpenAI-compatible server instead (see [AI Models](Local-Development#ai-models))
 - Unified operator system: stateless operators with automatic credit tracking per call
 - CypherOperator for natural language graph queries, MappingOperator for autonomous CoA→rs-gaap taxonomy mapping
 - MCP tools provide operators with graph queries, taxonomy operations, SEC structure discovery, and document search

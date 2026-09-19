@@ -188,7 +188,7 @@ just demo-user --repositories sec
 
 You have multiple options for accessing and querying the loaded SEC data:
 
-1. **[MCP Client](#option-1-mcp-client-for-ai-agents)** - AI agent integration through Claude Desktop
+1. **[MCP Client](#option-1-mcp-client-for-ai-agents)** - AI agent integration through Claude, ChatGPT or any MCP client
 2. **[Direct Cypher Queries](#option-2-direct-cypher-queries-for-development)** - Command-line Cypher queries via `just graph-query`
 3. **[Query Staging Tables](#option-3-query-staging-tables-for-data-validation)** - SQL queries on DuckDB staging via `just tables-query`
 4. **[Python API](#option-4-python-api-for-applications)** - Programmatic access via RoboSystems Python client
@@ -684,7 +684,7 @@ just sec-load NVDA 2025
 - **Visualize with G.V()**: Use our favorite tool [G.V()](https://gdotv.com/) to explore graph relationships interactively
 - **Learn Cypher**: Explore graph query patterns with [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **Validate Staging**: Use DuckDB CLI or SQL IDEs to inspect staging tables before ingestion
-- **Build Analysis**: Use MCP client in Claude for financial analysis with your auto-generated API key
+- **Build Analysis**: Use an MCP client such as Claude or ChatGPT for financial analysis with your auto-generated API key
 - **Create Reports**: Build automated reporting with Python client
 - **Add More Data**: Load additional companies with `just sec-load TICKER YEAR`
 

@@ -1,6 +1,6 @@
 # AI Operators & MCP
 
-RoboSystems exposes its data and reasoning surface to AI through the [Model Context Protocol](https://modelcontextprotocol.io/). An **AI Operator** is a Claude-driven executor that answers a natural-language question by composing reads across three retrieval planes — operational, analytical, and unstructured — using the same MCP tool layer that any MCP client (Claude, Claude Code, Cursor, a custom orchestrator) can call directly.
+RoboSystems exposes its data and reasoning surface to AI through the [Model Context Protocol](https://modelcontextprotocol.io/). An **AI Operator** is a model-driven executor that answers a natural-language question by composing reads across three retrieval planes — operational, analytical, and unstructured — using the same MCP tool layer that any MCP client (Claude, ChatGPT, Claude Code, Cursor, a custom orchestrator) can call directly.
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
@@ -143,7 +143,7 @@ An Operator answers a question by reading across three planes. Each plane has a 
 ```text
                           ┌─────────────────────────────────┐
                           │           AI Operator           │
-                          │   (Claude reasoning over MCP)   │
+                          │   (model reasoning over MCP)    │
                           └────────────────┬────────────────┘
                                            │
         ┌──────────────────────────────────┼──────────────────────────────────┐
@@ -216,7 +216,7 @@ An Operator typically discovers a concept in prose, resolves it to a graph eleme
 
 ## The Operator Endpoint
 
-The Operator endpoint runs a Claude-driven executor against a graph. It is mounted at `/v1/graphs/{graph_id}/operator`.
+The Operator endpoint runs a model-driven executor against a graph. It is mounted at `/v1/graphs/{graph_id}/operator`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -248,13 +248,13 @@ An `OperatorRequest` carries `message` (required), `mode`, optional `history` (a
 
 Operators are not just behind the endpoint — they are themselves MCP-tool consumers, and they can be exposed as tools to any orchestrator.
 
-Each operator runs via an `OperatorContext` injected into its `run()` method. The context carries `graph_id`, `user_id`, `query`, `mode`, and `history`, plus three services: `ai` (a tracked Claude client), `progress` (a reporter for streaming), and `tools` (a `ToolAccess` handle). Every operator reaches every MCP tool through a single method:
+Each operator runs via an `OperatorContext` injected into its `run()` method. The context carries `graph_id`, `user_id`, `query`, `mode`, and `history`, plus three services: `ai` (a tracked model client), `progress` (a reporter for streaming), and `tools` (a `ToolAccess` handle). Every operator reaches every MCP tool through a single method:
 
 ```python
 await context.tools.call_tool(tool_name, arguments, return_raw)
 ```
 
-Because operators call the same `middleware/mcp/tools/` classes as the external entry points, the tool that Claude Desktop invokes over MCP is the identical implementation an in-process operator invokes. There is one tool surface, used three ways.
+Because operators call the same `middleware/mcp/tools/` classes as the external entry points, the tool an MCP client such as Claude or ChatGPT invokes is the identical implementation an in-process operator invokes. There is one tool surface, used three ways.
 
 Two operators ship today:
 
@@ -377,7 +377,7 @@ Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSION
 
 A stack you run serves both MCP routes at `http://localhost:8000/v1/mcp` and `http://localhost:8000/v1/graphs/{graph_id}/mcp`. The OAuth route requires `MCP_OAUTH_ENABLED=true`; the per-graph route takes the key from `just demo-user` in `X-API-Key`. See [Local Development](Local-Development).
 
-Operators on a stack you run can use an open-weight model in place of Claude on Bedrock, through any OpenAI-compatible server. See [AI Models](Local-Development#ai-models).
+Operators on a stack you run can use an open-weight model in place of the Bedrock models, through any OpenAI-compatible server. See [AI Models](Local-Development#ai-models).
 
 ---
 
