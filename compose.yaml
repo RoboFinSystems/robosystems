@@ -209,7 +209,7 @@ services:
     ports:
       - 5432:5432
     volumes:
-      - ./data/postgres/data:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql/data
       - ./bin/setup/postgres-init.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
@@ -234,7 +234,7 @@ services:
     ports:
       - 6379:6379
     volumes:
-      - ./data/valkey:/data
+      - valkey_data:/data
     command: valkey-server
       --appendonly yes
       --maxmemory 512mb
@@ -278,7 +278,7 @@ services:
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_DEFAULT_REGION=us-east-1
     volumes:
-      - "./data/localstack:/var/lib/localstack"
+      - localstack_data:/var/lib/localstack
       - "./bin/setup/localstack-init.sh:/etc/localstack/init/ready.d/init.sh"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
@@ -307,7 +307,7 @@ services:
     ports:
       - "9200:9200"
     volumes:
-      - ./data/opensearch:/usr/share/opensearch/data
+      - opensearch_data:/usr/share/opensearch/data
     healthcheck:
       test:
         [
@@ -476,3 +476,15 @@ services:
 volumes:
   prometheus_data:
   grafana_data:
+  # The stateful stores live in named volumes rather than bind mounts under
+  # ./data: on macOS a bind mount's emulated ownership can break Postgres's
+  # first-boot setup, so the robosystems database is never created. Fixed
+  # names so `just clean-volumes` can remove them.
+  pg_data:
+    name: robosystems-pg-data
+  valkey_data:
+    name: robosystems-valkey-data
+  opensearch_data:
+    name: robosystems-opensearch-data
+  localstack_data:
+    name: robosystems-localstack-data
