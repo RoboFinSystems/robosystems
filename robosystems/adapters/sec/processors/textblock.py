@@ -2,7 +2,11 @@ import hashlib
 from datetime import datetime
 from typing import Any
 
-from robosystems.config.storage.shared import get_public_data_url
+from robosystems.config.storage.shared import (
+  PUBLIC_ARTIFACT_CACHE_CONTROL,
+  PUBLIC_DATA_STORAGE_CLASS,
+  get_public_data_url,
+)
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
@@ -10,6 +14,13 @@ from robosystems.logger import logger
 FACT_ID_TRUNCATE_LENGTH = 8
 CONTENT_HASH_TRUNCATE_LENGTH = 12
 CONTENT_HASH_LOG_LENGTH = 8
+
+# The stored Content-Type per key extension. An object stored without one is
+# served as ``binary/octet-stream``, which the CDN does not compress.
+CONTENT_TYPES_BY_EXTENSION = {
+  ".html": "text/html; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+}
 
 
 class TextBlockExternalizer:
@@ -34,6 +45,9 @@ class TextBlockExternalizer:
     self.upload_queue: list[tuple[str, str, str]] = []
     self.upload_map: dict[str, dict[str, Any]] = {}
     self.content_cache: dict[str, dict[str, Any]] = {}
+    # The keys already in a filing's folder, listed once per folder. None marks
+    # a folder whose listing failed, which falls back to a HEAD per key.
+    self._folder_keys: dict[str, set[str] | None] = {}
 
     if self.enabled and self.bucket:
       logger.info(
@@ -136,11 +150,23 @@ class TextBlockExternalizer:
 
     logger.info(f"Starting batch upload of {len(self.upload_queue)} items to S3")
 
-    results = self.s3_client.batch_upload_strings(
-      items=self.upload_queue,
-      content_type=None,
-      max_workers=TuningConfig.get_max_workers(),
-    )
+    by_content_type: dict[str | None, list[tuple[str, str, str]]] = {}
+    for item in self.upload_queue:
+      extension = "." + item[2].rpartition(".")[2]
+      content_type = CONTENT_TYPES_BY_EXTENSION.get(extension)
+      by_content_type.setdefault(content_type, []).append(item)
+
+    results: dict[str, bool] = {}
+    for content_type, items in by_content_type.items():
+      results.update(
+        self.s3_client.batch_upload_strings(
+          items=items,
+          content_type=content_type,
+          max_workers=TuningConfig.get_max_workers(),
+          cache_control=PUBLIC_ARTIFACT_CACHE_CONTROL,
+          storage_class=PUBLIC_DATA_STORAGE_CLASS,
+        )
+      )
 
     successful = sum(1 for success in results.values() if success)
     failed = len(results) - successful
@@ -191,8 +217,29 @@ class TextBlockExternalizer:
     return s3_key
 
   def _check_s3_object_exists(self, s3_key: str) -> bool:
+    """Whether the block is already in the filing's folder.
+
+    One listing of the folder answers every block of the filing, where a HEAD
+    per block was the largest request count of a reprocess. A listing that
+    fails must not read as an empty folder — every block would upload again —
+    so that folder goes back to a HEAD per key.
+    """
     if not self.s3_client or not self.bucket:
       return False
+
+    folder = s3_key.rpartition("/")[0] + "/"
+    if folder not in self._folder_keys:
+      try:
+        self._folder_keys[folder] = set(
+          self.s3_client.iter_object_keys(self.bucket, folder)
+        )
+      except Exception as e:
+        logger.debug(f"Error listing {folder}, checking keys one at a time: {e}")
+        self._folder_keys[folder] = None
+
+    keys = self._folder_keys[folder]
+    if keys is not None:
+      return s3_key in keys
 
     try:
       return self.s3_client.object_exists(self.bucket, s3_key)

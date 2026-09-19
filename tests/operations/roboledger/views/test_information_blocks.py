@@ -616,6 +616,41 @@ class TestPublishedFiling:
     assert text["external"] is True and "preview" not in text
     assert "search-documents" in out["note"]
 
+  async def test_a_holon_stored_gzipped_reads_the_same(
+    self, published, no_cache, monkeypatch: pytest.MonkeyPatch
+  ) -> None:
+    """The published holon is ``Content-Encoding: gzip`` at rest, and boto3 hands
+    back the stored bytes. Read through the real ``S3Client``: an undecoded
+    holon would answer "not published" rather than fail."""
+    import gzip
+
+    from botocore.exceptions import ClientError
+
+    from robosystems.operations.aws.s3 import S3Client
+
+    stored = {
+      HOLON_KEY: gzip.compress(to_holon(_model()).encode(), mtime=0),
+      FRAGMENT_KEY: FRAGMENT.encode(),
+    }
+
+    def get_object(Bucket: str, Key: str) -> dict[str, Any]:
+      if Key not in stored:
+        raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+      return {"Body": MagicMock(read=lambda: stored[Key])}
+
+    with patch("robosystems.operations.aws.s3.boto3.client"):
+      client = S3Client()
+    client.s3_client = MagicMock(get_object=get_object)
+    monkeypatch.setattr(module, "S3Client", lambda: client)
+
+    out = await query_disclosures("sec", REPORT_ID)
+    assert [row["disclosure"] for row in out["disclosures"]] == [
+      "Balance Sheet",
+      "Segments",
+    ]
+    block = await query_information_block("sec", REPORT_ID, "SegmentsDetails")
+    assert block["text"][0]["preview"].startswith("The company reports one segment")
+
   async def test_a_filing_without_artifacts_is_not_published(
     self, published, no_cache
   ) -> None:

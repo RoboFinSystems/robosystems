@@ -275,6 +275,17 @@ FILING_CATALOG_PREFIX = "companies/"
 FILING_CATALOG_INDEX_KEY = "companies/index.json"
 FILING_ROBOTS_KEY = "robots.txt"
 
+# Every write to the public bucket names its storage class on the PUT rather
+# than leaving it to the bucket's day-0 lifecycle rule, which bills a transition
+# per object and leaves each one in Standard until it runs. Intelligent-Tiering's
+# three automatic tiers are all millisecond-access with no retrieval charge; its
+# opt-in Archive tiers need an async restore the CDN cannot wait for, and must
+# never be enabled on this bucket.
+PUBLIC_DATA_STORAGE_CLASS = "INTELLIGENT_TIERING"
+
+# The lifetime of everything in a filing's folder except its manifest.
+PUBLIC_ARTIFACT_CACHE_CONTROL = "public, max-age=86400"
+
 
 def get_filing_artifact_prefix(year: str | int, cik: str, accession: str) -> str:
   """A filing's public folder: filing year, the filer's CIK as the Entity row

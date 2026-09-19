@@ -3,6 +3,7 @@
 Covers:
 - _get_indexed_accessions() composite aggregation pagination
 - _part_document_ids() for unsplit sections and for parts
+- _narrative_keys() for the object a part is written to and the one it replaces
 """
 
 import hashlib
@@ -13,6 +14,7 @@ import pytest
 
 from robosystems.adapters.sec.pipeline.text_index import (
   _get_indexed_accessions,
+  _narrative_keys,
   _part_document_ids,
 )
 
@@ -208,3 +210,26 @@ class TestCell:
 
     assert _cell("MMM") == "MMM"
     assert _cell(66740) == "66740"
+
+
+@pytest.mark.unit
+class TestNarrativeKeys:
+  """Where a section part is written, and the stale object it replaces."""
+
+  COORDINATES = ("2026", "0000008670", "0000008670-26-000030")
+  FOLDER = "2026/0000008670/0000008670-26-000030"
+
+  def test_an_unsplit_section_replaces_nothing(self):
+    key, stale = _narrative_keys(*self.COORDINATES, _Section("item_1c"))
+    assert key == f"{self.FOLDER}/narrative_item_1c.txt"
+    assert stale is None
+
+  def test_the_first_part_names_the_unsplit_object_it_supersedes(self):
+    key, stale = _narrative_keys(*self.COORDINATES, _Section("item_7", 1, 3))
+    assert key == f"{self.FOLDER}/narrative_item_7_part1.txt"
+    assert stale == f"{self.FOLDER}/narrative_item_7.txt"
+
+  def test_later_parts_name_nothing(self):
+    key, stale = _narrative_keys(*self.COORDINATES, _Section("item_7", 3, 3))
+    assert key == f"{self.FOLDER}/narrative_item_7_part3.txt"
+    assert stale is None

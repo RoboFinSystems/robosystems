@@ -56,6 +56,26 @@ filed, and a `manifest.json` naming what was written. Gated by
 `SEC_FILING_ARTIFACTS_ENABLED`; never fails the filing
 (`processors/artifacts.py`). A backfill of the artifacts is a reprocess.
 
+The holon, the Tavi model and the filed document are stored gzipped, as
+`Content-Encoding: gzip` under the same key and media type — the CDN compresses
+neither `application/ld+json` nor anything over 10 MB itself, and serves a
+stored encoding as it is. A browser or an HTTP library decodes it before
+anything reads a byte; **boto3 does not**, so a reader that takes these objects
+straight from the bucket goes through `S3Client.download_string`, which does.
+The manifest stays plain (the catalog reads it with raw boto3) and its `bytes`
+are the decoded sizes. The bytes are deterministic (`gzip_artifact`: level 6,
+no timestamp), so a reprocess still rewrites the same object. Every write to
+the public bucket names `INTELLIGENT_TIERING` on the PUT rather than leaving it
+to the bucket's lifecycle rule; the opt-in Archive tiers need an async restore
+and must never be enabled there.
+
+`sec_public_gzip_backfill` is the one-off that brought the artifacts written
+before this into line, in place and without a reprocess — run config
+`prefixes` (a filing year or deeper), `mode` (`compress`, its inverse `restore`,
+or `sweep_narratives` for the unsplit narrative objects their `_part{n}`
+replacements superseded) and `dry_run`. Run it in the bucket's region: the same
+pass from outside AWS pays egress on every byte.
+
 Output layout:
 
 ```

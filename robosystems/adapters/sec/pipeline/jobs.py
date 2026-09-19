@@ -40,6 +40,7 @@ Workflow:
 from dagster import (
   AssetSelection,
   define_asset_job,
+  job,
 )
 
 from .artifact import sec_knowledge_artifacts
@@ -56,6 +57,7 @@ from .materialize import (
   sec_historical_materialized,
 )
 from .process import sec_processed_filings
+from .public_gzip_backfill import public_gzip_backfill
 from .r2_publish import sec_lbug_r2_published
 from .s3_publish import sec_historical_lbug_s3_published, sec_lbug_s3_published
 from .stage import (
@@ -574,3 +576,36 @@ sec_artifact_generation_job = define_asset_job(
     },
   },
 )
+
+
+# ============================================================================
+# One-off: gzip the public filing artifacts in place
+# ============================================================================
+# Manually triggered, with the prefixes and the mode as run config. Compression
+# is the work, so the task is sized for CPU (zlib releases the GIL across the
+# worker threads); memory covers the workers each holding one of the largest
+# documents. A retry after a Spot reclaim skips what is already done.
+
+
+@job(
+  name="sec_public_gzip_backfill",
+  description=(
+    "Rewrite the public filing artifacts gzipped in place, restore them, or sweep "
+    "the superseded unsplit narratives (one-off; prefixes and mode as run config)."
+  ),
+  tags={
+    "pipeline": "sec",
+    "phase": "maintenance",
+    "dagster/max_retries": 3,
+    "ecs/cpu": "4096",
+    "ecs/memory": "8192",
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
+      ],
+    },
+  },
+)
+def sec_public_gzip_backfill_job():
+  public_gzip_backfill()

@@ -18,6 +18,13 @@ renderer embeds the note from the CDN. The Tavi carries the text blocks
 inline — the draft has no external-value construct — and its gaps sidecar
 records what the filing carries that the draft has nowhere to put.
 
+The holon, the Tavi and the filed document are stored gzipped, as
+``Content-Encoding: gzip`` under the same key and media type: a browser or an
+HTTP library decodes that before anything reads a byte, and the CDN serves a
+stored encoding as it is — where it would compress neither ``application/ld+json``
+nor anything over 10 MB itself. The manifest's ``bytes`` stay the decoded size,
+and the manifest and the gaps sidecar stay plain.
+
 Every write is a whole object, and the emitters are deterministic, so a
 reprocessed filing rewrites the same bytes unless the emitter moved (a new
 Tavi draft, a holon vocabulary change) — which is exactly when a rewrite is
@@ -29,6 +36,7 @@ it is reprocessed.
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 from dataclasses import dataclass, field
@@ -45,6 +53,8 @@ from robosystems.config.storage.shared import (
   FILING_ARTIFACT_MANIFEST,
   FILING_ARTIFACT_TAVI,
   FILING_ARTIFACT_TAVI_GAPS,
+  PUBLIC_ARTIFACT_CACHE_CONTROL,
+  PUBLIC_DATA_STORAGE_CLASS,
   get_filing_artifact_key,
   get_filing_artifact_prefix,
   get_public_data_url,
@@ -56,7 +66,7 @@ MANIFEST_VERSION = 1
 # An artifact changes only when its filing is reprocessed, so a day at the
 # edge is safe. The manifest is what a catalog rebuild reads, so it turns
 # over faster.
-ARTIFACT_CACHE_CONTROL = "public, max-age=86400"
+ARTIFACT_CACHE_CONTROL = PUBLIC_ARTIFACT_CACHE_CONTROL
 MANIFEST_CACHE_CONTROL = "public, max-age=300"
 
 HOLON_MEDIA_TYPE = "application/ld+json"
@@ -68,6 +78,22 @@ DOCUMENT_MEDIA_TYPES = {
   ".txt": "text/plain",
   ".pdf": "application/pdf",
 }
+# The filed documents worth gzipping; a PDF is already compressed.
+GZIP_DOCUMENT_EXTENSIONS = (".htm", ".html", ".xml", ".txt")
+
+GZIP_ENCODING = "gzip"
+
+
+def gzip_artifact(data: bytes) -> bytes:
+  """``data`` gzipped to the same bytes every time.
+
+  ``mtime=0`` keeps a timestamp out of the header, so a reprocess still rewrites
+  the same bytes. The level is pinned because ``gzip.compress`` defaults to 9,
+  which is 5% smaller than 6 on a holon at half the speed. The backfill that
+  compressed the artifacts written before this shares the function, so the two
+  cannot produce different bytes for one filing.
+  """
+  return gzip.compress(data, compresslevel=6, mtime=0)
 
 
 @dataclass
@@ -231,7 +257,7 @@ class FilingArtifactWriter:
       document, gaps = to_tavi_report(model)
       text = json.dumps(document, separators=(",", ":"), default=str)
       key = get_filing_artifact_key(*coordinates, FILING_ARTIFACT_TAVI)
-      size = self._put_text(text, key, JSON_MEDIA_TYPE)
+      size = self._put_text(text, key, JSON_MEDIA_TYPE, compress=True)
       if size is None:
         errors.append("tavi: upload failed")
         return
@@ -264,7 +290,7 @@ class FilingArtifactWriter:
     try:
       text = to_holon(with_external_values(model, external_values))
       key = get_filing_artifact_key(*coordinates, FILING_ARTIFACT_HOLON)
-      size = self._put_text(text, key, HOLON_MEDIA_TYPE)
+      size = self._put_text(text, key, HOLON_MEDIA_TYPE, compress=True)
       if size is None:
         errors.append("holon: upload failed")
         return
@@ -294,20 +320,14 @@ class FilingArtifactWriter:
         os.path.splitext(name)[1].lower(), "application/octet-stream"
       )
       key = get_filing_artifact_key(*coordinates, name)
-      ok = self.s3_client.upload_file(
-        path,
-        self.bucket,
-        key,
-        content_type=media_type,
-        cache_control=ARTIFACT_CACHE_CONTROL,
-      )
-      if not ok:
+      with open(path, "rb") as f:
+        data = f.read()
+      compress = name.lower().endswith(GZIP_DOCUMENT_EXTENSIONS)
+      if not self._put(data, key, media_type, ARTIFACT_CACHE_CONTROL, compress):
         errors.append("document: upload failed")
         return
       representations.append(
-        Representation(
-          "document", name, media_type, os.path.getsize(path), self._url(key)
-        )
+        Representation("document", name, media_type, len(data), self._url(key))
       )
     except Exception as e:
       errors.append(f"document: {e}")
@@ -363,13 +383,26 @@ class FilingArtifactWriter:
     key: str,
     media_type: str,
     cache_control: str = ARTIFACT_CACHE_CONTROL,
+    compress: bool = False,
   ) -> int | None:
-    """Upload ``text`` and return its byte size, or None when the upload failed."""
+    """Upload ``text`` and return its decoded byte size, or None when the upload
+    failed."""
     data = text.encode("utf-8")
-    ok = self.s3_client.upload_bytes(
-      data, self.bucket, key, content_type=media_type, cache_control=cache_control
-    )
+    ok = self._put(data, key, media_type, cache_control, compress)
     return len(data) if ok else None
+
+  def _put(
+    self, data: bytes, key: str, media_type: str, cache_control: str, compress: bool
+  ) -> bool:
+    return self.s3_client.upload_bytes(
+      gzip_artifact(data) if compress else data,
+      self.bucket,
+      key,
+      content_type=media_type,
+      cache_control=cache_control,
+      content_encoding=GZIP_ENCODING if compress else None,
+      storage_class=PUBLIC_DATA_STORAGE_CLASS,
+    )
 
   def _url(self, key: str) -> str:
     assert self.bucket is not None

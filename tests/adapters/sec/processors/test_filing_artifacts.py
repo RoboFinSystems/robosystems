@@ -4,6 +4,7 @@ The model is synthetic (Arelle never runs); the S3 client is a mock that
 records every upload, so the tests read the artifacts back from the calls.
 """
 
+import gzip
 import json
 import os
 from datetime import date
@@ -160,12 +161,21 @@ def writer(s3):
 
 
 def _uploads(s3) -> dict[str, tuple[bytes, str | None, str | None]]:
-  """key → (body, content type, cache control) for every byte upload."""
+  """key → (decoded body, content type, cache control) for every byte upload."""
   out = {}
   for call in s3.upload_bytes.call_args_list:
     data, _bucket, key = call.args
+    if call.kwargs.get("content_encoding") == "gzip":
+      data = gzip.decompress(data)
     out[key] = (data, call.kwargs.get("content_type"), call.kwargs.get("cache_control"))
   return out
+
+
+def _stored(s3) -> dict[str, tuple[bytes, dict]]:
+  """key → (the bytes as stored, the upload's keyword arguments)."""
+  return {
+    call.args[2]: (call.args[0], call.kwargs) for call in s3.upload_bytes.call_args_list
+  }
 
 
 def _write(writer, model=None, **kwargs):
@@ -244,10 +254,75 @@ class TestFilingArtifactWriter:
     assert document[0].name == "nvda-20240128.htm"
     assert document[0].media_type == "text/html"
     assert document[0].bytes == len("<html>filed</html>")
-    args, kwargs = s3.upload_file.call_args
-    assert args == (str(instance), "public", f"{FOLDER}/nvda-20240128.htm")
-    assert kwargs["content_type"] == "text/html"
-    assert kwargs["cache_control"] == ARTIFACT_CACHE_CONTROL
+    body, content_type, cache_control = _uploads(s3)[f"{FOLDER}/nvda-20240128.htm"]
+    assert body == b"<html>filed</html>"
+    assert content_type == "text/html"
+    assert cache_control == ARTIFACT_CACHE_CONTROL
+    s3.upload_file.assert_not_called()
+
+  def test_the_representations_are_stored_gzipped_and_the_manifest_is_not(
+    self, writer, s3, tmp_path
+  ):
+    instance = tmp_path / "nvda-20240128.htm"
+    instance.write_text("<html>filed</html>")
+
+    _write(writer, instance_path=str(instance))
+
+    stored = _stored(s3)
+    for name in ("holon.jsonld", "tavi.json", "nvda-20240128.htm"):
+      data, kwargs = stored[f"{FOLDER}/{name}"]
+      assert kwargs["content_encoding"] == "gzip"
+      assert data[:2] == b"\x1f\x8b"
+    # The catalog reads the manifest with a client that does not decode.
+    for name in ("manifest.json", "tavi.gaps.json"):
+      data, kwargs = stored[f"{FOLDER}/{name}"]
+      assert kwargs["content_encoding"] is None
+      json.loads(data)
+    assert {kwargs["storage_class"] for _data, kwargs in stored.values()} == {
+      "INTELLIGENT_TIERING"
+    }
+
+  def test_the_manifest_records_decoded_sizes(self, writer, s3, tmp_path):
+    instance = tmp_path / "nvda-20240128.htm"
+    instance.write_text("<html>filed</html>" * 200)
+
+    _write(writer, instance_path=str(instance))
+
+    uploads, stored = _uploads(s3), _stored(s3)
+    manifest = json.loads(uploads[f"{FOLDER}/manifest.json"][0])
+    for representation in manifest["representations"]:
+      key = f"{FOLDER}/{representation['name']}"
+      assert representation["bytes"] == len(uploads[key][0])
+      assert representation["bytes"] > len(stored[key][0])
+
+  def test_a_second_write_stores_the_same_bytes(self, s3, tmp_path):
+    instance = tmp_path / "nvda-20240128.htm"
+    instance.write_text("<html>filed</html>")
+    first, second = MagicMock(), MagicMock()
+    for client in (first, second):
+      client.upload_bytes.return_value = True
+      writer = FilingArtifactWriter(s3_client=client, bucket="public", cdn_url=CDN)
+      _write(writer, instance_path=str(instance))
+
+    for name in ("holon.jsonld", "tavi.json", "nvda-20240128.htm"):
+      key = f"{FOLDER}/{name}"
+      assert _stored(first)[key][0] == _stored(second)[key][0]
+
+  def test_a_pdf_document_is_stored_as_it_is(self, writer, s3, tmp_path):
+    instance = tmp_path / "nvda-20240128.pdf"
+    instance.write_bytes(b"%PDF-1.7 filed")
+    model = _model()
+    model = model.model_copy(
+      update={
+        "filing": model.filing.model_copy(update={"primary_document": instance.name})
+      }
+    )
+
+    _write(writer, model=model, instance_path=str(instance))
+
+    data, kwargs = _stored(s3)[f"{FOLDER}/nvda-20240128.pdf"]
+    assert data == b"%PDF-1.7 filed"
+    assert kwargs["content_encoding"] is None
 
   def test_a_failed_upload_is_recorded_in_the_manifest_not_raised(self, writer, s3):
     def upload(data, bucket, key, **kwargs):

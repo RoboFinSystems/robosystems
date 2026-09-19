@@ -250,6 +250,93 @@ class TestS3ClientUploadString:
 
 
 @pytest.mark.unit
+class TestS3ClientEncodingAndStorageClass:
+  """``content_encoding`` and ``storage_class`` reach the PUT, and only when given."""
+
+  def _make_client(self):
+    with (
+      patch("robosystems.operations.aws.s3.boto3.client"),
+      patch("robosystems.operations.aws.s3.env") as mock_env,
+    ):
+      mock_env.AWS_DEFAULT_REGION = "us-east-1"
+      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.ENVIRONMENT = "dev"
+      mock_env.AWS_S3_ACCESS_KEY_ID = ""
+      mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
+      client = S3Client()
+    client.s3_client = MagicMock()
+    return client
+
+  def test_upload_bytes_forwards_both(self):
+    client = self._make_client()
+
+    client.upload_bytes(
+      b"\x1f\x8b",
+      "bucket",
+      "holon.jsonld",
+      content_encoding="gzip",
+      storage_class="INTELLIGENT_TIERING",
+    )
+
+    call_kwargs = client.s3_client.put_object.call_args[1]
+    assert call_kwargs["ContentEncoding"] == "gzip"
+    assert call_kwargs["StorageClass"] == "INTELLIGENT_TIERING"
+
+  def test_upload_string_forwards_both(self):
+    client = self._make_client()
+
+    client.upload_string(
+      "{}", "bucket", "k.json", content_encoding="gzip", storage_class="STANDARD_IA"
+    )
+
+    call_kwargs = client.s3_client.put_object.call_args[1]
+    assert call_kwargs["ContentEncoding"] == "gzip"
+    assert call_kwargs["StorageClass"] == "STANDARD_IA"
+
+  def test_upload_file_forwards_both(self):
+    client = self._make_client()
+
+    client.upload_file(
+      "/tmp/f.htm",
+      "bucket",
+      "f.htm",
+      content_encoding="gzip",
+      storage_class="INTELLIGENT_TIERING",
+    )
+
+    extra_args = client.s3_client.upload_file.call_args[1]["ExtraArgs"]
+    assert extra_args == {
+      "ContentEncoding": "gzip",
+      "StorageClass": "INTELLIGENT_TIERING",
+    }
+
+  def test_neither_is_sent_by_default(self):
+    client = self._make_client()
+
+    client.upload_bytes(b"data", "bucket", "key")
+
+    call_kwargs = client.s3_client.put_object.call_args[1]
+    assert "ContentEncoding" not in call_kwargs
+    assert "StorageClass" not in call_kwargs
+
+  @patch("robosystems.operations.aws.s3.TuningConfig.get_max_workers", return_value=1)
+  def test_batch_upload_forwards_cache_control_and_storage_class(
+    self, mock_max_workers
+  ):
+    client = self._make_client()
+
+    client.batch_upload_strings(
+      [("<p>x</p>", "bucket", "fact_1.html")],
+      content_type="text/html; charset=utf-8",
+      cache_control="public, max-age=86400",
+      storage_class="INTELLIGENT_TIERING",
+    )
+
+    call_kwargs = client.s3_client.put_object.call_args[1]
+    assert call_kwargs["CacheControl"] == "public, max-age=86400"
+    assert call_kwargs["StorageClass"] == "INTELLIGENT_TIERING"
+
+
 class TestS3ClientUploadFile:
   """Tests for S3Client.upload_file with retry logic."""
 
@@ -403,6 +490,31 @@ class TestS3ClientDownloadString:
     result = client.download_string("bucket", "key.txt")
 
     assert result == "hello world"
+
+  def test_download_string_decodes_an_object_stored_gzipped(self):
+    """``get_object`` returns the stored bytes whatever Content-Encoding says."""
+    client = self._make_client()
+    client.s3_client = MagicMock()
+    body_mock = MagicMock()
+    body_mock.read.return_value = gzip.compress('{"@context": "é"}'.encode())
+    client.s3_client.get_object.return_value = {
+      "Body": body_mock,
+      "ContentEncoding": "gzip",
+    }
+
+    result = client.download_string("bucket", "holon.jsonld")
+
+    assert result == '{"@context": "é"}'
+
+  def test_download_string_decodes_by_magic_bytes_not_by_header(self):
+    """The stored population is mixed, and a header can be missing."""
+    client = self._make_client()
+    client.s3_client = MagicMock()
+    body_mock = MagicMock()
+    body_mock.read.return_value = gzip.compress(b"hello world")
+    client.s3_client.get_object.return_value = {"Body": body_mock}
+
+    assert client.download_string("bucket", "key.txt") == "hello world"
 
   def test_download_string_no_such_key_returns_none(self):
     """NoSuchKey returns None."""

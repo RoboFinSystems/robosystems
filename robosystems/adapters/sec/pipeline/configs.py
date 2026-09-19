@@ -327,6 +327,30 @@ class SECFilingCatalogConfig(Config):
   )
 
 
+class SECPublicGzipBackfillConfig(Config):
+  """Configuration for the one-off rewrite of the public filing artifacts.
+
+  One mode per run: ``compress`` gzips the artifacts written before the writer
+  did, ``restore`` is its inverse (the bucket is unversioned, so this is the
+  only undo), and ``sweep_narratives`` deletes the unsplit narrative objects
+  their ``_part{n}`` replacements superseded. A run is safe to repeat — what is
+  already done is skipped.
+  """
+
+  prefixes: list[str] = Field(
+    description=(
+      "Key prefixes to walk, each a filing year ('2026/') or deeper, down to one "
+      "filing folder ('2026/0000008670/0000008670-26-000030/')"
+    ),
+  )
+  mode: Literal["compress", "restore", "sweep_narratives"] = "compress"
+  workers: int = Field(default=32, description="Concurrent object rewrites")
+  dry_run: bool = Field(
+    default=False,
+    description="Read and count, but write and delete nothing",
+  )
+
+
 class SECHFPublishConfig(Config):
   """Configuration for the manual Hugging Face dataset publish.
 

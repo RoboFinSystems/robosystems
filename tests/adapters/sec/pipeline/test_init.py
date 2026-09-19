@@ -53,7 +53,7 @@ class TestGetDagsterComponents:
     """Test that the expected number of jobs are registered."""
     components = get_dagster_components()
     # (shared_master wake/sleep jobs now live in the shared_repositories layer)
-    assert len(components["jobs"]) == 19
+    assert len(components["jobs"]) == 20
 
   def test_expected_number_of_sensors(self):
     """Test that the expected number of sensors are registered."""
