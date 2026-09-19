@@ -76,6 +76,10 @@ class BlockNotFoundError(ValueError):
   """No block (or disclosure family) by that name on the report."""
 
 
+class ReportTooLargeError(ValueError):
+  """The report exists, and is larger than this reader holds in memory."""
+
+
 # xbrlkit's own caps, restated for the request models that cannot import them.
 MAX_BLOCK_ROWS = xbrlkit_serve.MAX_BLOCK_ROWS
 MAX_BLOCK_MEMBERS = xbrlkit_serve.MAX_BLOCK_MEMBERS_CAP
@@ -85,10 +89,18 @@ MAX_BLOCK_MEMBERS = xbrlkit_serve.MAX_BLOCK_MEMBERS_CAP
 MODEL_CACHE_TTL_SHARED_SECONDS = 6 * 60 * 60
 MODEL_CACHE_TTL_TENANT_SECONDS = 5 * 60
 # Bump when the readers or the emitters change what a cached model holds:
-# v3 = xbrlkit 0.15.0 (targetRole read back, Calculations 1.1 as calculation).
-MODEL_CACHE_VERSION = "3"
-# Text-block fragments fetched from the public bucket per published filing.
+# v3 = xbrlkit 0.15.0 (targetRole read back, Calculations 1.1 as calculation);
+# v4 = a published filing's model is cached as its holon carries it, with each
+# text block still a pointer to its fragment.
+MODEL_CACHE_VERSION = "4"
+# Text-block fragments fetched from the public bucket per request.
 FRAGMENT_WORKERS = 8
+# What one response may read into the model: the text of the block or family
+# it returns, never the filing's. A fragment past the budget stays a pointer
+# and the entry says so.
+FRAGMENT_TEXT_BUDGET_CHARS = 8_000_000
+# The largest published holon read whole.
+HOLON_BUDGET_CHARS = 48_000_000
 
 # The filing's coordinates in the public bucket, from the report it is on the
 # graph: one anchored statement, the kind the shared replica answers in a
@@ -177,7 +189,9 @@ def _thaw(blob: bytes) -> XbrlModel:
 
 async def _published_model(graph_id: str, report_id: str) -> XbrlModel:
   """A shared repository's report from its published holon in the public
-  bucket, its text-block fragments read beside it."""
+  bucket. Its text blocks stay pointers to their fragments: a response reads
+  the ones it returns (``_inline_text``), so the cached model stays the size
+  of the holon."""
   repository = await get_graph_repository(graph_id, operation_type="read")
   rows = await repository.execute_query(COORDINATES_QUERY, {"report": report_id})
   if not rows:
@@ -199,6 +213,12 @@ async def _published_model(graph_id: str, report_id: str) -> XbrlModel:
       f"{accession} was processed before its filing artifacts existed; it is "
       "published on the next reprocess of the repository."
     )
+  if len(text) > HOLON_BUDGET_CHARS:
+    raise ReportTooLargeError(
+      f"{accession} is too large to read whole here; read it section by section "
+      "with `search-documents` and `get-document-section`, or load its published "
+      "holon with xbrlkit."
+    )
   try:
     # Reading a 10-K's holon into the model is a few hundred milliseconds of
     # CPU; the API runs one worker, so it stays off the loop like the fetch.
@@ -207,9 +227,6 @@ async def _published_model(graph_id: str, report_id: str) -> XbrlModel:
     raise ReportNotPublishedError(
       f"The published holon for {accession} could not be read: {exc}"
     ) from exc
-  inlined = await run_off_loop(_inline_fragments, s3, model)
-  if inlined:
-    logger.info(f"inlined {inlined} text-block fragments for {accession}")
   return model
 
 
@@ -222,15 +239,20 @@ def _fragment_key(url: str, bucket: str) -> str:
   return path
 
 
-def _inline_fragments(s3: S3Client, model: XbrlModel) -> int:
-  """Replace a text block's fragment URL with the fragment.
+def _inline_fragments(s3: S3Client, model: XbrlModel, concepts: set[str]) -> int:
+  """Replace these text blocks' fragment URLs with the fragments.
 
   The pipeline externalizes a large text block to the public bucket and the
   holon carries its URL; the block tool wants the text, for its preview and
-  its length, so the fragments are read here in parallel. One that cannot be
-  read stays a URL and the block says so.
+  its length, so the fragments of the concepts a response returns are read
+  here in parallel. One that cannot be read, or that would take the response
+  past its budget, stays a URL and the block says so.
   """
-  pending = [fact for fact in model.facts if _is_external_text(model, fact)]
+  pending = [
+    fact
+    for fact in model.facts
+    if fact.concept_qname in concepts and _is_external_text(model, fact)
+  ]
   if not pending:
     return 0
   bucket = env.PUBLIC_DATA_BUCKET
@@ -238,12 +260,25 @@ def _inline_fragments(s3: S3Client, model: XbrlModel) -> int:
   with ThreadPoolExecutor(max_workers=FRAGMENT_WORKERS) as pool:
     bodies = list(pool.map(lambda key: s3.download_string(bucket, key), keys))
   inlined = 0
+  budget = FRAGMENT_TEXT_BUDGET_CHARS
   for fact, body in zip(pending, bodies, strict=True):
-    if body:
+    if body and len(body) <= budget:
+      budget -= len(body)
       fact.value_str = body
       fact.raw_value = body
       inlined += 1
   return inlined
+
+
+async def _inline_text(model: XbrlModel, entries: list[dict[str, Any]]) -> bool:
+  """Read the fragments behind a response's text entries into the model.
+  True when any was read, and the response is worth building again."""
+  concepts = {str(entry.get("concept")) for entry in entries}
+  concepts &= _external_text_blocks(model)
+  if not concepts:
+    return False
+  inlined = await run_off_loop(_inline_fragments, S3Client(), model, concepts)
+  return inlined > 0
 
 
 def _is_external_text(model: XbrlModel, fact: Any) -> bool:
@@ -338,6 +373,14 @@ async def query_disclosures(
   model, _cached = await load_report_model(graph_id, report_id)
   try:
     out = xbrlkit_serve.disclosures(_loaded(graph_id, report_id, model), topic)
+    # A family's blocks carry each text block's length, which is the text's.
+    entries = [
+      entry
+      for block in out.get("blocks") or []
+      for entry in block.get("text_blocks") or []
+    ]
+    if await _inline_text(model, entries):
+      out = xbrlkit_serve.disclosures(_loaded(graph_id, report_id, model), topic)
   except ToolError as exc:
     raise BlockNotFoundError(str(exc)) from exc
   external = _external_text_blocks(model)
@@ -367,8 +410,9 @@ async def query_information_block(
     kwargs["max_rows"] = max_rows
   if offset:
     kwargs["offset"] = offset
-  try:
-    out = xbrlkit_serve.information_block(
+
+  def read() -> dict[str, Any]:
+    return xbrlkit_serve.information_block(
       _loaded(graph_id, report_id, model),
       block,
       periods=periods,
@@ -376,6 +420,11 @@ async def query_information_block(
       max_members=max_members,
       **kwargs,
     )
+
+  try:
+    out = read()
+    if await _inline_text(model, out.get("text") or []):
+      out = read()
   except ToolError as exc:
     raise BlockNotFoundError(str(exc)) from exc
   external = _external_text_blocks(model)

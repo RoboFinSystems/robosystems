@@ -71,6 +71,7 @@ from robosystems.operations.roboledger.views import (
   FactGridBuilder,
   ReportNotFoundError,
   ReportSelectorError,
+  ReportTooLargeError,
   deduplicate_facts,
   query_disclosures,
   query_fact_grid,
@@ -378,6 +379,8 @@ def _report_selector_errors(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
   if isinstance(exc, (ReportNotFoundError, BlockNotFoundError)):
     return HTTPException(status_code=404, detail=str(exc))
+  if isinstance(exc, ReportTooLargeError):
+    return HTTPException(status_code=422, detail=str(exc))
   raise exc
 
 

@@ -23,6 +23,7 @@ from robosystems.operations.roboledger.views import (
   BlockNotFoundError,
   ReportNotFoundError,
   ReportSelectorError,
+  ReportTooLargeError,
   query_disclosures,
   query_information_block,
   resolve_report,
@@ -142,7 +143,12 @@ class DisclosuresTool(BaseTool):
       result = await query_disclosures(
         graph_id, report_id, topic=_clean(arguments.get("topic"))
       )
-    except (ReportSelectorError, ReportNotFoundError, BlockNotFoundError) as exc:
+    except (
+      ReportSelectorError,
+      ReportNotFoundError,
+      ReportTooLargeError,
+      BlockNotFoundError,
+    ) as exc:
       return {"error": str(exc)}
     if resolved:
       result["resolved_report"] = resolved_report_info(resolved)
@@ -270,7 +276,12 @@ class InformationBlockTool(BaseTool):
         max_members=max_members,
         offset=offset or None,
       )
-    except (ReportSelectorError, ReportNotFoundError, BlockNotFoundError) as exc:
+    except (
+      ReportSelectorError,
+      ReportNotFoundError,
+      ReportTooLargeError,
+      BlockNotFoundError,
+    ) as exc:
       return {"error": str(exc)}
     if resolved:
       result["resolved_report"] = resolved_report_info(resolved)
