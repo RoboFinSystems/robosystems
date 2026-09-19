@@ -78,6 +78,7 @@ from robosystems.adapters.sec.pipeline.configs import (
   SECIncrementalStageConfig,
   SECMaterializeConfig,
   SECProcessConfig,
+  SECPublicGzipBackfillConfig,
   SECStageConfig,
   sec_quarter_partitions,
 )
@@ -105,6 +106,7 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_materialize_job,
   sec_narratives_index_job,
   sec_process_job,
+  sec_public_gzip_backfill_job,
   sec_stage_job,
   sec_staged_materialize_job,
 )
@@ -190,6 +192,7 @@ def get_dagster_components():
       sec_narratives_index_job,
       sec_ixbrl_index_job,
       sec_filing_catalog_job,
+      sec_public_gzip_backfill_job,
     ],
     "sensors": [
       sec_processing_sensor,
@@ -222,6 +225,7 @@ __all__ = [
   "SECIncrementalStageConfig",
   "SECMaterializeConfig",
   "SECProcessConfig",
+  "SECPublicGzipBackfillConfig",
   "SECStageConfig",
   "get_dagster_components",
   "sec_artifact_generation_job",
@@ -264,6 +268,7 @@ __all__ = [
   "sec_process_job",
   "sec_processed_filings",
   "sec_processing_sensor",
+  "sec_public_gzip_backfill_job",
   "sec_quarter_partitions",
   "sec_raw_filings",
   "sec_stage_job",

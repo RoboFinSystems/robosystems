@@ -20,6 +20,21 @@ from robosystems.config import env
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
+GZIP_MAGIC = b"\x1f\x8b"
+
+
+def gunzip_if_gzipped(data: bytes) -> bytes:
+  """Un-gzip a payload if it is gzipped, otherwise return it unchanged.
+
+  Detection is by magic bytes because gzip is self-identifying and the stored
+  populations are mixed: a key that was written plain can later be rewritten
+  gzipped in place, under the same name. boto3 hands back the stored bytes
+  whatever ``Content-Encoding`` says, so the payload answers the question itself.
+  """
+  if data[:2] == GZIP_MAGIC:
+    return gzip.decompress(data)
+  return data
+
 
 class S3Client:
   """Sync S3 client for general object storage (XBRL textblocks, temp files).
@@ -111,6 +126,8 @@ class S3Client:
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
     cache_control: str | None = None,
+    content_encoding: str | None = None,
+    storage_class: str | None = None,
   ) -> bool:
     """Upload a UTF-8 string as an S3 object. False on any failure.
 
@@ -132,6 +149,12 @@ class S3Client:
 
     if cache_control:
       put_args["CacheControl"] = cache_control
+
+    if content_encoding:
+      put_args["ContentEncoding"] = content_encoding
+
+    if storage_class:
+      put_args["StorageClass"] = storage_class
 
     security_errors = {"AccessDenied"}
 
@@ -165,6 +188,8 @@ class S3Client:
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
     cache_control: str | None = None,
+    content_encoding: str | None = None,
+    storage_class: str | None = None,
   ) -> bool:
     """Upload raw bytes as an S3 object. False on any failure.
 
@@ -185,6 +210,12 @@ class S3Client:
 
     if cache_control:
       put_args["CacheControl"] = cache_control
+
+    if content_encoding:
+      put_args["ContentEncoding"] = content_encoding
+
+    if storage_class:
+      put_args["StorageClass"] = storage_class
 
     security_errors = {"AccessDenied"}
 
@@ -216,6 +247,8 @@ class S3Client:
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
     cache_control: str | None = None,
+    content_encoding: str | None = None,
+    storage_class: str | None = None,
   ) -> bool:
     """Upload a local file to S3. False on any failure."""
     extra_args = {}
@@ -225,6 +258,10 @@ class S3Client:
       extra_args["Metadata"] = metadata
     if cache_control:
       extra_args["CacheControl"] = cache_control
+    if content_encoding:
+      extra_args["ContentEncoding"] = content_encoding
+    if storage_class:
+      extra_args["StorageClass"] = storage_class
 
     try:
       self.s3_client.upload_file(
@@ -267,10 +304,14 @@ class S3Client:
       return False
 
   def download_string(self, bucket: str, key: str) -> str | None:
-    """Download an S3 object as a UTF-8 string, or None if unavailable."""
+    """Download an S3 object as a UTF-8 string, or None if unavailable.
+
+    An object stored gzipped (``Content-Encoding: gzip``) is decoded: an HTTP
+    client would do that on its own, ``get_object`` does not.
+    """
     try:
       response = self.s3_client.get_object(Bucket=bucket, Key=key)
-      content = response["Body"].read().decode("utf-8")
+      content = gunzip_if_gzipped(response["Body"].read()).decode("utf-8")
       logger.debug(
         f"Successfully downloaded {len(content)} characters from s3://{bucket}/{key}"
       )
@@ -414,6 +455,8 @@ class S3Client:
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
     max_workers: int | None = None,
+    cache_control: str | None = None,
+    storage_class: str | None = None,
   ) -> dict[str, bool]:
     """Upload ``(content, bucket, key)`` triples in parallel, keyed by S3 key.
 
@@ -435,6 +478,8 @@ class S3Client:
         key=key,
         content_type=content_type,
         metadata=metadata,
+        cache_control=cache_control,
+        storage_class=storage_class,
       )
       return key, success
 
@@ -625,8 +670,6 @@ class S3BackupAdapter:
   # name. Every export format lands as a zip, so in practice this covers them all.
   _ALREADY_COMPRESSED_EXTENSIONS = (".zip", ".gz", ".zst")
 
-  _GZIP_MAGIC = b"\x1f\x8b"
-
   def _should_compress(self, file_extension: str | None) -> bool:
     """Whether to gzip a payload with this extension before storing it."""
     if not self.enable_compression:
@@ -652,9 +695,7 @@ class S3BackupAdapter:
     to answer the question itself. This also removes the old requirement that read
     and write agree on a setting that could be changed between them.
     """
-    if data[:2] == self._GZIP_MAGIC:
-      return gzip.decompress(data)
-    return data
+    return gunzip_if_gzipped(data)
 
   def _calculate_checksum(self, data: bytes) -> str:
     """SHA-256 of the *uncompressed* payload."""

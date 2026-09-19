@@ -36,6 +36,7 @@ from dagster import AssetExecutionContext, BackfillPolicy, MaterializeResult, as
 
 from robosystems.config import env
 from robosystems.config.storage.shared import (
+  PUBLIC_DATA_STORAGE_CLASS,
   DataSourceType,
   get_processed_key,
   get_public_data_url,
@@ -104,6 +105,23 @@ def _part_document_ids(
     else None
   )
   return own, _id(*section_key), next_id
+
+
+def _narrative_keys(
+  year: str, cik: str, accession: str, section: Any
+) -> tuple[str, str | None]:
+  """(the key this section part is written to, the stale key it replaces).
+
+  A section long enough to split is written as ``_part{n}`` objects. The
+  unsplit object a run before the split left beside them is no longer what the
+  index points at, so the first part names it for deletion. An unsplit section
+  replaces nothing.
+  """
+  unsplit = f"{year}/{cik}/{accession}/narrative_{section.section_id}.txt"
+  if section.part_count <= 1:
+    return unsplit, None
+  key = unsplit.removesuffix(".txt") + f"_part{section.part}.txt"
+  return key, unsplit if section.part == 1 else None
 
 
 def _cell(value: Any) -> str:
@@ -571,10 +589,7 @@ def sec_narratives_indexed(
           sections_extracted += 1
 
           # Externalize clean text to public S3 bucket, one object per part
-          part_suffix = f"_part{section.part}" if section.part_count > 1 else ""
-          narrative_key = (
-            f"{year}/{cik}/{accession}/narrative_{section.section_id}{part_suffix}.txt"
-          )
+          narrative_key, stale_key = _narrative_keys(year, cik, accession, section)
           content_url_value = ""
 
           if public_bucket:
@@ -584,12 +599,19 @@ def sec_narratives_indexed(
                 Key=narrative_key,
                 Body=section.content.encode("utf-8"),
                 ContentType="text/plain; charset=utf-8",
+                StorageClass=PUBLIC_DATA_STORAGE_CLASS,
               )
               content_url_value = get_public_data_url(
                 public_bucket, narrative_key, cdn_url
               )
             except Exception as e:
               context.log.debug(f"Failed to externalize {narrative_key}: {e}")
+
+            if stale_key and content_url_value:
+              try:
+                s3.delete_object(Bucket=public_bucket, Key=stale_key)
+              except Exception as e:
+                context.log.debug(f"Failed to delete stale {stale_key}: {e}")
 
           doc_id, parent_id, next_id = _part_document_ids(
             config.graph_id, "narr", accession, section

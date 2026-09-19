@@ -14,6 +14,7 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_incremental_stage_job,
   sec_materialize_job,
   sec_process_job,
+  sec_public_gzip_backfill_job,
   sec_stage_job,
   sec_staged_materialize_job,
 )
@@ -199,6 +200,32 @@ class TestSECArtifactJob:
     """
     assert sec_artifact_generation_job.tags.get("ecs/cpu") == "4096"
     assert sec_artifact_generation_job.tags.get("ecs/memory") == "24576"
+
+
+@pytest.mark.unit
+class TestSECPublicGzipBackfillJob:
+  """Tests for the one-off public-artifact rewrite job definition."""
+
+  def test_job_name_and_tags(self):
+    assert sec_public_gzip_backfill_job.name == "sec_public_gzip_backfill"
+    assert sec_public_gzip_backfill_job.tags.get("pipeline") == "sec"
+    assert sec_public_gzip_backfill_job.tags.get("phase") == "maintenance"
+
+  def test_job_is_sized_for_compression_and_retries_on_spot(self):
+    """Compression is CPU-bound across the worker threads; a retry after a Spot
+    reclaim skips what is already done."""
+    tags = sec_public_gzip_backfill_job.tags
+    assert tags.get("ecs/cpu") == "4096"
+    assert tags.get("ecs/memory") == "8192"
+    assert tags.get("dagster/max_retries") == "3"
+    assert "FARGATE_SPOT" in tags.get("ecs/run_task_kwargs", "")
+
+  def test_job_is_registered_with_the_pipeline(self):
+    from robosystems.adapters.sec.pipeline import get_dagster_components
+
+    names = [job.name for job in get_dagster_components()["jobs"]]
+    assert "sec_public_gzip_backfill" in names
+    assert len(names) == len(set(names))
 
 
 @pytest.mark.unit

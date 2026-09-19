@@ -35,6 +35,7 @@ from robosystems.config.storage.shared import (
   FILING_ARTIFACT_MANIFEST,
   FILING_CATALOG_INDEX_KEY,
   FILING_ROBOTS_KEY,
+  PUBLIC_DATA_STORAGE_CLASS,
   DataSourceType,
   get_filing_artifact_key,
   get_filing_catalog_key,
@@ -561,6 +562,7 @@ def sec_filing_catalog(
       get_filing_catalog_key(filer["ticker"]),
       content_type=CATALOG_MEDIA_TYPE,
       cache_control=CATALOG_CACHE_CONTROL,
+      storage_class=PUBLIC_DATA_STORAGE_CLASS,
     )
     written += int(ok)
     failed += int(not ok)
@@ -577,6 +579,7 @@ def sec_filing_catalog(
     FILING_CATALOG_INDEX_KEY,
     content_type=CATALOG_MEDIA_TYPE,
     cache_control=CATALOG_CACHE_CONTROL,
+    storage_class=PUBLIC_DATA_STORAGE_CLASS,
   )
 
   if not writer.object_exists(public_bucket, FILING_ROBOTS_KEY):
@@ -586,6 +589,7 @@ def sec_filing_catalog(
       FILING_ROBOTS_KEY,
       content_type="text/plain",
       cache_control=ROBOTS_CACHE_CONTROL,
+      storage_class=PUBLIC_DATA_STORAGE_CLASS,
     )
 
   # The reprocess that gives the corpus its artifacts lands filer by filer, so the
