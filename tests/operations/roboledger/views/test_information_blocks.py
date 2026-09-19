@@ -46,6 +46,7 @@ from robosystems.operations.roboledger.views.information_blocks import (
   ReportNotFoundError,
   ReportNotPublishedError,
   ReportSelectorError,
+  ReportTooLargeError,
   load_report_model,
   query_disclosures,
   query_information_block,
@@ -560,8 +561,9 @@ class TestPublishedFiling:
     ]
     assert out["disclosures"][0]["levels"] == {"statement": 1}
     assert out["disclosures"][1]["text_blocks"] == 1
-    # The holon and the fragment, nothing else, came out of the bucket.
-    assert published.reads == [HOLON_KEY, FRAGMENT_KEY]
+    # The map counts text blocks and shows none of their text, so the holon is
+    # all it reads: a filing's fragments run to tens of megabytes.
+    assert published.reads == [HOLON_KEY]
 
   async def test_a_familys_blocks_and_the_block_itself(
     self, published, no_cache
@@ -606,6 +608,33 @@ class TestPublishedFiling:
     assert rest["offset"] == 2 and rest["truncated"] is False
     assert [a["concept"] for a in rest["ancestors"]] == ["us-gaap:AssetsAbstract"]
     assert "calculation" in first and "calculation" not in rest
+
+  async def test_a_response_reads_only_the_fragments_it_returns(
+    self, published, no_cache
+  ) -> None:
+    await query_information_block("sec", REPORT_ID, "BalanceSheet")
+    assert published.reads == [HOLON_KEY]
+    published.reads.clear()
+    await query_information_block("sec", REPORT_ID, "SegmentsDetails")
+    assert published.reads == [HOLON_KEY, FRAGMENT_KEY]
+
+  async def test_a_fragment_past_the_budget_stays_a_pointer(
+    self, published, no_cache, monkeypatch: pytest.MonkeyPatch
+  ) -> None:
+    monkeypatch.setattr(module, "FRAGMENT_TEXT_BUDGET_CHARS", 10)
+    out = await query_information_block("sec", REPORT_ID, "SegmentsDetails")
+    [text] = out["text"]
+    assert text["external"] is True and "preview" not in text
+
+  async def test_a_holon_past_the_budget_is_refused_unparsed(
+    self, published, no_cache, monkeypatch: pytest.MonkeyPatch
+  ) -> None:
+    monkeypatch.setattr(module, "HOLON_BUDGET_CHARS", 100)
+    parse = MagicMock()
+    monkeypatch.setattr(module, "from_holon_report", parse)
+    with pytest.raises(ReportTooLargeError, match="too large to read whole"):
+      await query_disclosures("sec", REPORT_ID)
+    parse.assert_not_called()
 
   async def test_a_fragment_that_cannot_be_read_stays_marked(
     self, published, no_cache
@@ -747,6 +776,24 @@ class TestCache:
     assert cached_again is True
     assert len(published.reads) == reads
     assert again.model_dump() == model.model_dump()
+
+  async def test_the_cached_model_holds_pointers_not_the_text(
+    self, published, monkeypatch
+  ) -> None:
+    """The cache holds the model as the holon carries it; a response reads the
+    text it returns."""
+    redis = _FakeRedis()
+    monkeypatch.setattr(module, "_cache", lambda: redis)
+    first = await query_information_block("sec", REPORT_ID, "SegmentsDetails")
+    [blob] = redis.store.values()
+    assert FRAGMENT.encode() not in zlib.decompress(blob)
+    assert FRAGMENT_KEY.encode() in zlib.decompress(blob)
+    # Served from the cache, the block still reads its own text.
+    published.reads.clear()
+    again = await query_information_block("sec", REPORT_ID, "SegmentsDetails")
+    assert published.reads == [FRAGMENT_KEY]
+    assert again["text"] == first["text"]
+    assert again["text"][0]["preview"].startswith("The company reports one segment")
 
   async def test_a_tenant_model_is_cached_for_less_time(
     self, tenant, monkeypatch
