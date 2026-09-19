@@ -16,7 +16,15 @@ RoboSystems gives AI clients a financial knowledge graph to work on: your compan
 - [Analyze SEC filings with Claude or ChatGPT](sec-filings.md): statements, comparisons, disclosures and filing text for 8,000+ public companies.
 - [Graphs, tiers and credits](graphs-tiers-and-credits.md): what a graph is, how tiers differ, and what uses credits.
 
+## In the app
+
+- [Find your way around the app](the-robosystems-app.md): graphs, MCP, console, documents, the data lake, subgraphs, backups and billing.
+- [Ask questions in the Console](console.md): RoboSystems' own AI on a graph. It uses credits; Claude and ChatGPT do not.
+- [Documents and memory](documents-and-memory.md): policies and notes on a graph, search, and memories your assistant can recall.
+- [Data lake, subgraphs and backups](data-lake-and-subgraphs.md): stage files, try a model in a subgraph, download a copy of the graph.
+
 ## By product
 
 - **Your books:** the [RoboLedger docs](https://roboledger.ai/docs) cover connecting QuickBooks, reporting, planning and the month-end close.
+- **Your holdings:** the [RoboInvestor docs](https://roboinvestor.ai/docs) cover private-company portfolios, reports shared from RoboLedger, and public-company research. RoboInvestor is in beta.
 - **Building on the platform:** the [technical docs](https://robosystems.ai/docs/technical) cover the API, the MCP server in depth, and self-hosting.

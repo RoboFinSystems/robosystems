@@ -1,7 +1,7 @@
 ---
 title: Compare with public companies
 description: Put your margins, growth and ratios next to public companies. Add the SEC filings graph as a second connection beside your books and ask your AI to compare.
-order: 13
+order: 15
 section: Work with your books
 ---
 

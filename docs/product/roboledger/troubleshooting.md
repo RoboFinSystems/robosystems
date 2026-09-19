@@ -76,7 +76,7 @@ RoboLedger reads companies that keep their books in US dollars. A QuickBooks com
 
 ## "Insufficient credits for…"
 
-AI mapping needs more credits than your graph has left this month. Reading, reporting, forecasting and closing don't use credits. Check your balance on the **Usage** page at [robosystems.ai](https://robosystems.ai).
+Something that runs on RoboLedger's own AI (AI mapping, a question in the Console, or **Ask about this report**) needs more credits than your graph has left this month. Reading, reporting, forecasting and closing don't use credits. Check your balance on the **Usage** page at [robosystems.ai](https://robosystems.ai).
 
 ## "Rate limit exceeded"
 

@@ -16,12 +16,15 @@ RoboLedger connects your QuickBooks books to Claude, ChatGPT and any other MCP c
 ## Work with your books
 
 - [Ask about your books](ask-about-your-books.md): what your AI assistant reads, which figures are live and which are locked, and how to ask so you can check the answer.
+- [Review events in the Inbox](inbox.md): approve or reject events, and see which ones the close will post on its own.
 - [Reports and sharing](reports-and-sharing.md): build statements, download them, and share them without sharing the ledger.
 - [Plan and forecast with your AI assistant](plan-and-forecast.md): budgets and what-if scenarios that project all three statements, month by month.
+- [Explore statements and metrics over time](explorer.md): any statement, note, schedule or scenario as a series.
 - [Compare with public companies](compare-with-public-companies.md): your margins and ratios next to SEC filers.
 
 ## Keep the books right
 
+- [The reporting library](the-library.md): the concepts your accounts map to, and how they roll up.
 - [Map your chart of accounts](map-your-chart-of-accounts.md): tie each account to a reporting concept, and keep it current.
 - [Schedules for recurring entries](schedules.md): depreciation, amortization and prepaid expenses, set up once.
 - [When QuickBooks changes after a sync](changes-after-sync.md): restate, catch up, or mark it as handled.

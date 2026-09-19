@@ -2,6 +2,7 @@
 title: Sign-in and graph access
 description: What the RoboSystems consent screen asks, why one connection reaches one graph, how to switch graphs, and how to revoke an app's access.
 order: 2
+section: Start here
 ---
 
 When an AI client connects to RoboSystems, you sign in and approve it on a consent screen. Approving gives that client access to **one graph**, with the permissions your role on that graph already gives you. The client never sees your password, and you can revoke it at any time.

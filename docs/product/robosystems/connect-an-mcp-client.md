@@ -2,6 +2,7 @@
 title: Connect Claude, ChatGPT or any MCP client
 description: Add RoboSystems to Claude, ChatGPT, Claude Code, Cursor or VS Code with one address. Sign in, choose a graph, and start asking.
 order: 1
+section: Start here
 ---
 
 RoboSystems is a remote MCP server. There is nothing to install: you give your AI client one address, sign in to RoboSystems, and choose the graph the client may work on. From then on the client can read that graph, and act on it within your role.

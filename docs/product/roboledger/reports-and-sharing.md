@@ -1,7 +1,7 @@
 ---
 title: Reports and sharing
 description: Build financial statements from your books with your AI, download them as XBRL or JSON-LD, and share a report with another RoboLedger or RoboInvestor graph.
-order: 11
+order: 12
 section: Work with your books
 ---
 
@@ -38,7 +38,7 @@ Open a report in **Reports → View Reports** to download it as:
 
 ## Share it
 
-Sharing happens in the app, not through your assistant. Open a report, choose **Share**, and pick a publish list. A publish list is a set of graphs you send reports to, such as your investor's RoboInvestor graph or your advisor's RoboLedger graph. Manage lists under **Reports → Publish Lists**.
+Sharing happens in the app, not through your assistant. Open a report, choose **Share**, and pick a publish list. A publish list is a set of graphs you send reports to, such as your investor's RoboInvestor graph or your advisor's RoboLedger graph. Manage lists under **Reports → Publish Lists**, and add a recipient by their graph ID. The recipient can copy it from their graph's **Dashboard** at [robosystems.ai](https://robosystems.ai). What the investor sees is in the [RoboInvestor docs](https://roboinvestor.ai/docs/reports-you-receive).
 
 **The recipient gets the statement, never the ledger.** A shared report copies the report, its statements and their facts, and the report files. Your transactions, customers, vendors and journal entries stay in your graph.
 
