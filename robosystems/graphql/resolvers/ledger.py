@@ -201,7 +201,7 @@ class LedgerQuery:
     """List entities for a graph, optionally filtered by source.
 
     Args:
-    source: Filter by the system an entity came from, e.g. `quickbooks`.
+      source: Filter by the system an entity came from, e.g. `quickbooks`.
     """
     try:
       with _open_session_for_any(info, _ENTITY_EXTENSIONS) as session:
@@ -221,7 +221,7 @@ class LedgerQuery:
     """Fetch a single counterparty agent by id.
 
     Args:
-    id: The agent's id (`agt_`-prefixed).
+      id: The agent's id (`agt_`-prefixed).
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -245,9 +245,9 @@ class LedgerQuery:
     """List counterparty agents with optional filters.
 
     Args:
-    agent_type: Filter by counterparty role, e.g. `customer` or `vendor`.
-    source: Filter by originating system, e.g. `quickbooks`.
-    is_active: Filter on active status. Defaults to active only; pass null for both.
+      agent_type: Filter by counterparty role, e.g. `customer` or `vendor`.
+      source: Filter by originating system, e.g. `quickbooks`.
+      is_active: Filter on active status. Defaults to active only; pass null for both.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     try:
@@ -326,7 +326,7 @@ class LedgerQuery:
     """Fetch a single event block by id.
 
     Args:
-    id: The event block's id.
+      id: The event block's id.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -360,14 +360,14 @@ class LedgerQuery:
     changed after they were posted.
 
     Args:
-    event_type: Filter to one event type, e.g. `invoice_issued`.
-    event_category: Filter on the event's category label.
-    status: Filter by lifecycle state: `captured` is the unposted queue, `committed`
-      the audit trail.
-    agent_id: Filter to events involving one counterparty.
-    source: Filter by originating system: `quickbooks`, `schedule` or `manual`.
-    is_reconciling_item: True returns the post-sync reconciliation worklist -
-      committed events whose upstream payload changed after posting.
+      event_type: Filter to one event type, e.g. `invoice_issued`.
+      event_category: Filter on the event's category label.
+      status: Filter by lifecycle state: `captured` is the unposted queue, `committed`
+        the audit trail.
+      agent_id: Filter to events involving one counterparty.
+      source: Filter by originating system: `quickbooks`, `schedule` or `manual`.
+      is_reconciling_item: True returns the post-sync reconciliation worklist -
+        committed events whose upstream payload changed after posting.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     try:
@@ -463,9 +463,9 @@ class LedgerQuery:
     """Paginated Chart of Accounts listing.
 
     Args:
-    classification: Filter on the account's statement classification, e.g. `asset` or
-      `revenue`.
-    is_active: Filter on active status. Omit for both.
+      classification: Filter on the account's statement classification, e.g. `asset` or
+        `revenue`.
+      is_active: Filter on active status. Omit for both.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -495,8 +495,8 @@ class LedgerQuery:
     contexts.
 
     Args:
-    include_inactive: Include accounts deleted upstream but retained for journal-line
-      integrity. Defaults to false.
+      include_inactive: Include accounts deleted upstream but retained for journal-line
+        integrity. Defaults to false.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -521,10 +521,10 @@ class LedgerQuery:
     """CoA accounts grouped by reporting element with balances.
 
     Args:
-    mapping_id: The mapping whose associations group the accounts. Omit for the active
-      mapping.
-    start_date: Start of the balance window (inclusive).
-    end_date: End of the balance window (inclusive).
+      mapping_id: The mapping whose associations group the accounts. Omit for the active
+        mapping.
+      start_date: Start of the balance window (inclusive).
+      end_date: End of the balance window (inclusive).
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -552,8 +552,8 @@ class LedgerQuery:
     """Trial balance for posted entries in a date range.
 
     Args:
-    start_date: Start of the posting window (inclusive).
-    end_date: End of the posting window (inclusive).
+      start_date: Start of the posting window (inclusive).
+      end_date: End of the posting window (inclusive).
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -579,9 +579,9 @@ class LedgerQuery:
     """Paginated list of transactions.
 
     Args:
-    type: Filter by transaction type.
-    start_date: Start of the transaction-date window (inclusive).
-    end_date: End of the transaction-date window (inclusive).
+      type: Filter by transaction type.
+      start_date: Start of the transaction-date window (inclusive).
+      end_date: End of the transaction-date window (inclusive).
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -607,7 +607,7 @@ class LedgerQuery:
     """Single transaction with all entries and line items.
 
     Args:
-    transaction_id: The transaction's id.
+      transaction_id: The transaction's id.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -647,13 +647,13 @@ class LedgerQuery:
     `transactionId`.
 
     Args:
-    start_date: Start of the entry-date window (inclusive).
-    end_date: End of the entry-date window (inclusive).
-    status: Filter by entry status, e.g. `draft` or `posted`.
-    type: Filter by entry type: `adjusting` or `closing`.
-    provenance: Filter by what created the entry; `schedule_derived` is what the close
-      posted.
-    transaction_id: Filter to entries under one parent transaction.
+      start_date: Start of the entry-date window (inclusive).
+      end_date: End of the entry-date window (inclusive).
+      status: Filter by entry status, e.g. `draft` or `posted`.
+      type: Filter by entry type: `adjusting` or `closing`.
+      provenance: Filter by what created the entry; `schedule_derived` is what the close
+        posted.
+      transaction_id: Filter to entries under one parent transaction.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -684,7 +684,7 @@ class LedgerQuery:
     """List all active taxonomies, optionally filtered by type.
 
     Args:
-    taxonomy_type: Filter by taxonomy type.
+      taxonomy_type: Filter by taxonomy type.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -723,11 +723,11 @@ class LedgerQuery:
     """Paginated list of taxonomy elements.
 
     Args:
-    taxonomy_id: Filter to elements of one taxonomy.
-    source: Filter by the element's originating system.
-    classification: Filter on the element's statement classification.
-    is_abstract: True for abstract presentation nodes only, false for concrete
-      elements, omit for both.
+      taxonomy_id: Filter to elements of one taxonomy.
+      source: Filter by the element's originating system.
+      classification: Filter on the element's statement classification.
+      is_abstract: True for abstract presentation nodes only, false for concrete
+        elements, omit for both.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -760,8 +760,8 @@ class LedgerQuery:
     offers a target that would land a fact on an unreachable branch.
 
     Args:
-    classification: The CoA element's EFS classification - asset, liability, equity,
-      revenue, expense, gain or loss - whose eligible rs-gaap targets to return.
+      classification: The CoA element's EFS classification - asset, liability, equity,
+        revenue, expense, gain or loss - whose eligible rs-gaap targets to return.
     """
     # Narrow candidates to what the entity's Reporting Style actually renders,
     # keeping the picker in sync with the renderer. Resolved from the same
@@ -792,7 +792,7 @@ class LedgerQuery:
     """CoA elements not yet mapped to the reporting taxonomy.
 
     Args:
-    mapping_id: The mapping to measure against. Omit for the active mapping.
+      mapping_id: The mapping to measure against. Omit for the active mapping.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -815,8 +815,8 @@ class LedgerQuery:
     """List active structures.
 
     Args:
-    taxonomy_id: Filter to structures of one taxonomy.
-    block_type: Filter to one block type.
+      taxonomy_id: Filter to structures of one taxonomy.
+      block_type: Filter to one block type.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -846,7 +846,7 @@ class LedgerQuery:
     """Single mapping structure with all associations.
 
     Args:
-    mapping_id: The mapping structure's id.
+      mapping_id: The mapping structure's id.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -866,7 +866,7 @@ class LedgerQuery:
     """Coverage stats for a mapping.
 
     Args:
-    mapping_id: The mapping structure to report coverage for.
+      mapping_id: The mapping structure to report coverage for.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -886,10 +886,10 @@ class LedgerQuery:
     """Trial balance rolled up to reporting concepts via mapping associations.
 
     Args:
-    mapping_id: The mapping whose associations roll accounts up to reporting concepts.
-      Omit for the active mapping.
-    start_date: Start of the posting window (inclusive).
-    end_date: End of the posting window (inclusive).
+      mapping_id: The mapping whose associations roll accounts up to reporting concepts.
+        Omit for the active mapping.
+      start_date: Start of the posting window (inclusive).
+      end_date: End of the posting window (inclusive).
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -912,8 +912,8 @@ class LedgerQuery:
     """Close status for all schedules in a fiscal period.
 
     Args:
-    period_start: First day of the fiscal period, as `YYYY-MM-DD`.
-    period_end: Last day of the fiscal period, as `YYYY-MM-DD`.
+      period_start: First day of the fiscal period, as `YYYY-MM-DD`.
+      period_end: Last day of the fiscal period, as `YYYY-MM-DD`.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -986,7 +986,7 @@ class LedgerQuery:
     QuickBooks vs. post locally only.
 
     Args:
-    period: The fiscal period, as `YYYY-MM`.
+      period: The fiscal period, as `YYYY-MM`.
     """
     from robosystems.db.platform import platform_session
     from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
@@ -1047,7 +1047,7 @@ class LedgerQuery:
     """Single report definition with structures + entity name.
 
     Args:
-    report_id: The report's id.
+      report_id: The report's id.
     """
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
@@ -1071,7 +1071,7 @@ class LedgerQuery:
     round trip rather than one ``statement`` call per block.
 
     Args:
-    report_id: The report to rehydrate.
+      report_id: The report to rehydrate.
     """
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
@@ -1103,10 +1103,10 @@ class LedgerQuery:
     bundle yet.
 
     Args:
-    report_id: The published report whose bundle to link.
-    format: Serialization flavor. Defaults to JSON-LD.
-    expires_in: URL lifetime in seconds, 60-3600. Out of range raises
-      `INVALID_EXPIRES_IN`.
+      report_id: The published report whose bundle to link.
+      format: Serialization flavor. Defaults to JSON-LD.
+      expires_in: URL lifetime in seconds, 60-3600. Out of range raises
+        `INVALID_EXPIRES_IN`.
     """
     # Replaces the retired `GET .../reports/{id}/download`: a download is a
     # read of stored state, so it belongs on the read surface.
@@ -1158,8 +1158,8 @@ class LedgerQuery:
     """Rendered financial statement for a report + block_type.
 
     Args:
-    report_id: The report the statement belongs to.
-    block_type: Which statement to render, e.g. `income_statement`.
+      report_id: The report the statement belongs to.
+      block_type: Which statement to render, e.g. `income_statement`.
     """
     graph_id = require_graph_id(info)
     try:
@@ -1209,7 +1209,7 @@ class LedgerQuery:
     """Single publish list with enriched members, or null.
 
     Args:
-    list_id: The publish list's id.
+      list_id: The publish list's id.
     """
     try:
       with _open_session(info, "roboledger") as session:

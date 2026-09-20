@@ -53,7 +53,7 @@ class TaxonomyBlockQuery:
     """Fetch a single Taxonomy Block envelope by id.
 
     Args:
-    id: The taxonomy block's structure id.
+      id: The taxonomy block's structure id.
     """
     with _open_session(info) as session:
       envelope = get_taxonomy_block(session, str(id))
@@ -78,10 +78,10 @@ class TaxonomyBlockQuery:
     ``'Custom'``, ``'Close'``). Filters combine as AND.
 
     Args:
-    taxonomy_type: Filter to one registered type, e.g. `chart_of_accounts`.
-    parent_taxonomy_id: Filter to extensions of a specific library taxonomy.
-    category: Filter on the registry entry's category label: `Chart`, `Reporting`,
-      `Library`, `Custom` or `Close`.
+      taxonomy_type: Filter to one registered type, e.g. `chart_of_accounts`.
+      parent_taxonomy_id: Filter to extensions of a specific library taxonomy.
+      category: Filter on the registry entry's category label: `Chart`, `Reporting`,
+        `Library`, `Custom` or `Close`.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     graph_id = require_graph_id(info)

@@ -105,9 +105,9 @@ class InvestorQuery:
     """Paginated list of securities.
 
     Args:
-    entity_id: Filter to securities issued by one entity.
-    security_type: Filter by instrument type.
-    is_active: Filter on active status. Omit for both.
+      entity_id: Filter to securities issued by one entity.
+      security_type: Filter by instrument type.
+      is_active: Filter on active status. Omit for both.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -133,7 +133,7 @@ class InvestorQuery:
     """Single security by id.
 
     Args:
-    security_id: The security's id.
+      security_id: The security's id.
     """
     try:
       with _open_session(info, "roboinvestor") as session:
@@ -159,9 +159,9 @@ class InvestorQuery:
     """Paginated list of positions.
 
     Args:
-    portfolio_id: Filter to one portfolio.
-    security_id: Filter to holdings of one security.
-    status: Filter by position status.
+      portfolio_id: Filter to one portfolio.
+      security_id: Filter to holdings of one security.
+      status: Filter by position status.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -187,7 +187,7 @@ class InvestorQuery:
     """Single enriched position by id.
 
     Args:
-    position_id: The position's id.
+      position_id: The position's id.
     """
     try:
       with _open_session(info, "roboinvestor") as session:
@@ -209,7 +209,7 @@ class InvestorQuery:
     """Portfolio positions grouped by entity.
 
     Args:
-    portfolio_id: The portfolio whose positions are grouped by entity.
+      portfolio_id: The portfolio whose positions are grouped by entity.
     """
     try:
       with _open_session(info, "roboinvestor") as session:
@@ -231,7 +231,7 @@ class InvestorQuery:
     """Portfolio-centric molecule: portfolio + active positions + securities + entities.
 
     Args:
-    portfolio_id: The portfolio to assemble the molecule for.
+      portfolio_id: The portfolio to assemble the molecule for.
     """
     try:
       with _open_session(info, "roboinvestor") as session:

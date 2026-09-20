@@ -107,7 +107,7 @@ def _split_docstring(doc: str) -> tuple[str, dict[str, str]]:
   for line in lines:
     heading = _SECTION_HEADING.match(line.strip())
     if heading:
-      in_args = heading.group(1) in ("Arg", "Args", "Argument", "Arguments")
+      in_args = heading.group(1) in ("Args", "Arguments")
       current = None
       if not in_args:
         prose.append(line)

@@ -77,13 +77,13 @@ class InformationBlockQuery:
     the envelope scales with the screen, not the ledger's age.
 
     Args:
-    id: The block's structure id.
-    scenario_id: A forecast block's structure id. Omit for actuals.
-    series: Render a statement block as its whole report-set time series, one column
-      per period. Ignored by non-statement block types.
-    series_history: Cap the series at the last N actual columns. Omit for unbounded.
-    series_forecast: Cap the series at the first N forecast columns. Omit for
-      unbounded.
+      id: The block's structure id.
+      scenario_id: A forecast block's structure id. Omit for actuals.
+      series: Render a statement block as its whole report-set time series, one column
+        per period. Ignored by non-statement block types.
+      series_history: Cap the series at the last N actual columns. Omit for unbounded.
+      series_forecast: Cap the series at the first N forecast columns. Omit for
+        unbounded.
     """
     with _open_session(info) as session:
       envelope = get_information_block(
@@ -115,11 +115,11 @@ class InformationBlockQuery:
     Structure list itself is scenario-independent).
 
     Args:
-    block_type: Filter to one registered block type, e.g. `schedule`.
-    category: Filter on the registry entry's category label, e.g. `Close` or
-      `Reporting`.
-    scenario_id: A forecast block's structure id, threaded into each envelope's
-      FactSet binding.
+      block_type: Filter to one registered block type, e.g. `schedule`.
+      category: Filter on the registry entry's category label, e.g. `Close` or
+        `Reporting`.
+      scenario_id: A forecast block's structure id, threaded into each envelope's
+        FactSet binding.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     graph_id = require_graph_id(info)
