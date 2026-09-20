@@ -78,7 +78,7 @@ transfer, move, modify, combine, separate, copy
 
 ## The Event Block Envelope
 
-The Event Block is the envelope every write carries. It is created via the CQRS command surface at `POST /extensions/roboledger/{graph_id}/operations/create-event-block`, and the response is an `EventBlockEnvelope` wrapped in a standard `OperationEnvelope` (ULID `operationId`, `Idempotency-Key` support). The full request/response schema is published in the [API reference](https://robosystems.ai/docs/api/extensions-roboledger/create-event-block).
+The Event Block is the envelope every write carries. It is created via the CQRS command surface at `POST /extensions/roboledger/{graph_id}/operations/create-event-block`, and the response is an `EventBlockEnvelope` wrapped in a standard `OperationEnvelope` (ULID `operationId`, `Idempotency-Key` support). The full request/response schema is published in the [API reference](https://robosystems.ai/docs/api/roboledger-ledger-events/create-event-block).
 
 **What the envelope carries:**
 
