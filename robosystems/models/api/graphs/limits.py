@@ -77,7 +77,7 @@ class SubgraphLimits(BaseModel):
   """Subgraph count against the parent graph tier's cap.
 
   Subgraphs are refused at the tier cap regardless of how small they are,
-  so this is a count axis independent of the storage one — ``instance``
+  so this is a count axis independent of the storage one — `instance`
   already itemizes their footprint.
   """
 

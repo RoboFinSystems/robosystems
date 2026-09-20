@@ -1,7 +1,7 @@
 """API models for subgraph management.
 
 Every dedicated tier supports subgraphs; the per-graph maximum varies by tier
-(see ``.github/configs/graph.yml``).
+(see `.github/configs/graph.yml`).
 """
 
 import re

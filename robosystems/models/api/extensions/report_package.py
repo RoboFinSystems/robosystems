@@ -1,17 +1,17 @@
 """Report package mode — request/response models.
 
 A Report is the package container (see
-``models/extensions/roboledger/report.py``). Its items
-are its FactSets, found via ``fact_sets.report_id``. Reading a Report
+`models/extensions/roboledger/report.py`). Its items
+are its FactSets, found via `fact_sets.report_id`. Reading a Report
 in package mode rehydrates each FactSet into a full
-``InformationBlockEnvelope`` so the frontend renders the package
+`InformationBlockEnvelope` so the frontend renders the package
 without per-section refetches.
 
-Models live in their own file (instead of ``reports.py``) because
-``InformationBlockEnvelope`` lives in ``models.api.information_block``
-and that module already pulls from ``models.api.extensions.schedules``;
+Models live in their own file (instead of `reports.py`) because
+`InformationBlockEnvelope` lives in `models.api.information_block`
+and that module already pulls from `models.api.extensions.schedules`;
 importing the envelope at module load time of any file aggregated by
-``models/api/extensions/__init__.py`` would create a circular import.
+`models/api/extensions/__init__.py` would create a circular import.
 """
 
 from __future__ import annotations
@@ -26,13 +26,13 @@ from robosystems.models.api.information_block import InformationBlockEnvelope
 
 
 class FileReportRequest(BaseModel):
-  """Transition a Report to ``filed`` — locks the package.
+  """Transition a Report to `filed` — locks the package.
 
-  Acceptable from ``draft`` or ``under_review``. ``filed_by`` and
-  ``filed_at`` are stamped from the auth context + server clock; the
+  Acceptable from `draft` or `under_review`. `filed_by` and
+  `filed_at` are stamped from the auth context + server clock; the
   request itself carries no fields today (kept as a model for OpenAPI
   shape consistency and to avoid breaking changes if we add fields).
-  Use ``transition-filing-status`` for the non-file legs of the
+  Use `transition-filing-status` for the non-file legs of the
   lifecycle (`draft ↔ under_review`, `filed → archived`).
   """
 
@@ -50,9 +50,9 @@ class FileReportRequest(BaseModel):
 class TransitionFilingStatusRequest(BaseModel):
   """Generic filing-status transition — escape hatch for non-file moves.
 
-  Used for ``draft → under_review`` (submit for review) and
-  ``filed → archived`` (supersede / retire). Filing the package goes
-  through :class:`FileReportRequest` so ``filed_at`` / ``filed_by``
+  Used for `draft → under_review` (submit for review) and
+  `filed → archived` (supersede / retire). Filing the package goes
+  through :class:`FileReportRequest` so `filed_at` / `filed_by`
   audit fields land cleanly.
   """
 
@@ -94,7 +94,7 @@ class ReportPackageItem(BaseModel):
     None,
     description=(
       "The Structure shape this item renders. Comes from "
-      "``fact_sets.structure_id``; null only for legacy rows where the "
+      "`fact_sets.structure_id`; null only for legacy rows where the "
       "FactSet wasn't structure-linked."
     ),
   )
@@ -102,15 +102,15 @@ class ReportPackageItem(BaseModel):
     0,
     description=(
       "Display position in the package. Derived from "
-      "``Structure.block_type`` ordering (BS → IS → CF → Equity → "
-      "Schedule), with ties broken by ``fact_set.created_at``."
+      "`Structure.block_type` ordering (BS → IS → CF → Equity → "
+      "Schedule), with ties broken by `fact_set.created_at`."
     ),
   )
   block: InformationBlockEnvelope = Field(
     ...,
     description=(
-      "The rehydrated InformationBlockEnvelope for ``(structure_id, "
-      "fact_set_id)``. Pre-built server-side so package-mode renders "
+      "The rehydrated InformationBlockEnvelope for `(structure_id, "
+      "fact_set_id)`. Pre-built server-side so package-mode renders "
       "without per-item refetches."
     ),
   )

@@ -1,6 +1,6 @@
 """Request/response models for AI semantic memory (per-graph LanceDB store).
 
-Recall output reuses ``SearchHit``/``SearchResponse`` from ``models/api/search.py``
+Recall output reuses `SearchHit`/`SearchResponse` from `models/api/search.py`
 (the ranked-read contract) — memory recall is a scored top-k, the same shape as
 document search. These models cover the write + governance surfaces.
 """

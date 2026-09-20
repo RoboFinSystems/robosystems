@@ -1,8 +1,8 @@
 """Blocked-source-graph request and response models.
 
 Cross-graph report sharing is authorized capability-style: a sender who holds
-your ``graph_id`` can copy a published report into your tenant schema. A block
-is the recipient's refusal — ``share-report`` consults the list before copying
+your `graph_id` can copy a published report into your tenant schema. A block
+is the recipient's refusal — `share-report` consults the list before copying
 anything in, and a blocked sender receives an explicit per-target error rather
 than a silent drop.
 
@@ -24,7 +24,7 @@ class BlockSourceGraphRequest(BaseModel):
   """Block a source graph from sharing reports into this graph.
 
   Blocking is idempotent: re-blocking an already-blocked source succeeds and
-  leaves the original ``blocked_at`` in place, so a retry can't be used to
+  leaves the original `blocked_at` in place, so a retry can't be used to
   rewrite the record.
   """
 

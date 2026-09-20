@@ -6,12 +6,12 @@ here so per-domain routers stay thin:
 
 1. **Envelope** — wrap a command's Pydantic result in a uniform payload.
 2. **Idempotency** — cache completed envelopes in Valkey keyed by the
-   caller's ``Idempotency-Key`` header so retries are safe for 24 hours.
+   caller's `Idempotency-Key` header so retries are safe for 24 hours.
 3. **Audit** — one structured log line per operation call carrying the
    durations and identifiers a SOC-2-style audit trail needs.
 
-Operation IDs are ``op_``-prefixed ULIDs, matching the
-``^op_[0-9A-Z]{26}$`` pattern the ``/v1/operations/{operation_id}/stream``
+Operation IDs are `op_`-prefixed ULIDs, matching the
+`^op_[0-9A-Z]{26}$` pattern the `/v1/operations/{operation_id}/stream`
 SSE endpoint accepts.
 """
 
@@ -104,20 +104,20 @@ def _result_to_payload(
 class OperationEnvelope(BaseModel, Generic[TResult]):
   """Uniform response shape for every operation endpoint.
 
-  Every dispatch carries an ``op_<ULID>`` operation_id, which is the bridge
+  Every dispatch carries an `op_<ULID>` operation_id, which is the bridge
   to the monitoring surface: pass it to
-  ``GET /v1/operations/{operation_id}/stream`` (see ``routers/operations.py``)
+  `GET /v1/operations/{operation_id}/stream` (see `routers/operations.py`)
   to subscribe to SSE progress events. Sync commands complete in the envelope
-  itself (``status: "completed"``, HTTP 200); async commands
-  (``status: "pending"``, HTTP 202) hand off to a background worker and stream
+  itself (`status: "completed"`, HTTP 200); async commands
+  (`status: "pending"`, HTTP 202) hand off to a background worker and stream
   their tail through that SSE endpoint. Failed dispatches still mint an
-  ``operation_id`` so the audit log and any partial SSE events stay
+  `operation_id` so the audit log and any partial SSE events stay
   correlatable.
 
-  ``TResult`` parameterizes ``result`` so per-op response shapes surface in
-  OpenAPI. Operations that pin ``OperationSpec.result_type`` get
-  ``OperationEnvelope[YourEnvelope]`` as their response model; the rest keep
-  the default ``Any`` shape (``result: any | null`` on the wire).
+  `TResult` parameterizes `result` so per-op response shapes surface in
+  OpenAPI. Operations that pin `OperationSpec.result_type` get
+  `OperationEnvelope[YourEnvelope]` as their response model; the rest keep
+  the default `Any` shape (`result: any | null` on the wire).
   """
 
   model_config = ConfigDict(populate_by_name=True)
@@ -405,11 +405,11 @@ class IdempotencyCache:
   ) -> bool:
     """Claim the key for an in-flight run.
 
-    Atomic ``SET NX`` of a pending marker carrying the body fingerprint. Returns
-    ``True`` when this call now holds the key, ``False`` when another request
+    Atomic `SET NX` of a pending marker carrying the body fingerprint. Returns
+    `True` when this call now holds the key, `False` when another request
     already holds it (pending or completed) — the caller re-reads with
-    ``get`` to learn which. A cache outage answers ``True``: idempotency is
-    best-effort here exactly as it is for ``get``/``put``, and a Valkey blip
+    `get` to learn which. A cache outage answers `True`: idempotency is
+    best-effort here exactly as it is for `get`/`put`, and a Valkey blip
     must not turn every write into a 5xx.
     """
     cache_key = compute_idempotency_cache_key(
@@ -497,9 +497,9 @@ class IdempotencyCache:
       )
 
   async def bind_operation(self, operation_id: str, cache_key: str) -> None:
-    """Record that ``operation_id``'s pending envelope lives under ``cache_key``.
+    """Record that `operation_id`'s pending envelope lives under `cache_key`.
 
-    ``invalidate_operation`` reads this back when the operation reaches a
+    `invalidate_operation` reads this back when the operation reaches a
     terminal failure. Best-effort like every other write here: a Valkey blip
     leaves the pending envelope un-evictable for its TTL, not the request
     failed.
@@ -519,10 +519,10 @@ class IdempotencyCache:
       )
 
   async def invalidate_operation(self, operation_id: str) -> int:
-    """Evict every envelope bound to ``operation_id``; returns how many.
+    """Evict every envelope bound to `operation_id`; returns how many.
 
     Called when the operation fails or is cancelled, so a retry under the
-    same idempotency key dispatches again rather than replaying ``pending``
+    same idempotency key dispatches again rather than replaying `pending`
     for the rest of the day.
     """
     binding_key = _operation_binding_key(operation_id)
@@ -547,7 +547,7 @@ def _get_sync_idempotency_client() -> Any:
   """Sync client on the idempotency DB for the SSE store's sync write path.
 
   Dagster and background threads record terminal statuses through
-  ``store_event_sync``; they have no event loop to drive ``IdempotencyCache``.
+  `store_event_sync`; they have no event loop to drive `IdempotencyCache`.
   """
   global _sync_idempotency_client
   if _sync_idempotency_client is None:
@@ -569,7 +569,7 @@ async def invalidate_operation_idempotency(operation_id: str) -> int:
 
 
 def invalidate_operation_idempotency_sync(operation_id: str) -> int:
-  """Sync counterpart to ``invalidate_operation_idempotency``."""
+  """Sync counterpart to `invalidate_operation_idempotency`."""
   binding_key = _operation_binding_key(operation_id)
   try:
     client = _get_sync_idempotency_client()
@@ -615,16 +615,16 @@ def log_operation_audit(
   in prod, stdout in dev). Fields are picked to satisfy a SOC-2-style
   "who did what, to which tenant, when, with what result" review.
 
-  ``event`` names the event in the audit payload and log message:
-  ``"extensions.operation"`` for extension ops, ``"graph.operation"`` for
-  graph lifecycle ops. ``surface`` names the entry point — ``"rest"`` for
-  the HTTP operation routes, ``"mcp"`` for tool calls — so the same command
+  `event` names the event in the audit payload and log message:
+  `"extensions.operation"` for extension ops, `"graph.operation"` for
+  graph lifecycle ops. `surface` names the entry point — `"rest"` for
+  the HTTP operation routes, `"mcp"` for tool calls — so the same command
   reached two ways is distinguishable in the stream.
 
-  *Who* is more than ``user_id``: when the call runs inside a request the
-  payload also carries ``request_id`` (correlates to the access-log line and
-  to any security event of the same request) and ``auth_method`` /
-  ``api_key_prefix`` (from `security.request_context`), so a leaked-key
+  *Who* is more than `user_id`: when the call runs inside a request the
+  payload also carries `request_id` (correlates to the access-log line and
+  to any security event of the same request) and `auth_method` /
+  `api_key_prefix` (from `security.request_context`), so a leaked-key
   incident can be scoped to the credential rather than the whole account.
   """
   payload: dict[str, Any] = {
@@ -718,20 +718,20 @@ async def check_idempotency(
 ) -> OperationEnvelope | None:
   """Check idempotency cache for async (pending) operations.
 
-  Returns a cached envelope (with ``idempotent_replay=True``) on a cache hit,
-  ``None`` on a miss. Raises ``HTTPException 409`` when the key is reused with
+  Returns a cached envelope (with `idempotent_replay=True`) on a cache hit,
+  `None` on a miss. Raises `HTTPException 409` when the key is reused with
   a different body, or while the first request with this key is still
-  between its check and its ``put``.
+  between its check and its `put`.
 
-  A miss **claims the key** — the same ``SET NX`` reservation
-  ``execute_operation`` takes — so two identical requests inside one
+  A miss **claims the key** — the same `SET NX` reservation
+  `execute_operation` takes — so two identical requests inside one
   another's dispatch window cannot both enqueue. That makes the caller
   responsible for either recording an envelope under the key or releasing
-  it on every failure path; ``idempotent_dispatch`` does both, and is what
+  it on every failure path; `idempotent_dispatch` does both, and is what
   routes should use rather than calling this directly.
 
-  The ``event`` parameter is forwarded to ``log_operation_audit``; pass
-  ``"extensions.operation"`` for extension ops.
+  The `event` parameter is forwarded to `log_operation_audit`; pass
+  `"extensions.operation"` for extension ops.
   """
   if idempotency_key is None:
     return None
@@ -780,10 +780,10 @@ async def check_idempotency(
 
 
 class PendingDispatch:
-  """Handle yielded by ``idempotent_dispatch``.
+  """Handle yielded by `idempotent_dispatch`.
 
-  ``replay`` is the cached envelope when the key has already been used;
-  ``record`` stores the envelope this request produced and, for a pending
+  `replay` is the cached envelope when the key has already been used;
+  `record` stores the envelope this request produced and, for a pending
   one, binds it to its operation so a terminal failure can evict it.
   """
 
@@ -808,7 +808,7 @@ class PendingDispatch:
     self.recorded = False
 
   async def record(self, envelope: OperationEnvelope) -> None:
-    """Cache ``envelope`` under the key and bind a pending one to its operation."""
+    """Cache `envelope` under the key and bind a pending one to its operation."""
     self.recorded = True
     if self._idempotency_key is None:
       return
@@ -839,13 +839,13 @@ async def idempotent_dispatch(
   body_fingerprint: str,
   event: str = "graph.operation",
 ) -> AsyncIterator[PendingDispatch]:
-  """Idempotency guard for a route that enqueues work and returns ``pending``.
+  """Idempotency guard for a route that enqueues work and returns `pending`.
 
-  Enter it before any side effect. ``replay`` set means the key was already
+  Enter it before any side effect. `replay` set means the key was already
   used — return it. Otherwise the key is now reserved for this request:
-  every exit that did not ``record`` an envelope — a validation 4xx, a
+  every exit that did not `record` an envelope — a validation 4xx, a
   dispatch failure, a cancellation — releases the reservation so the
-  caller's retry can run, exactly as ``execute_operation`` does for sync
+  caller's retry can run, exactly as `execute_operation` does for sync
   operations. Without this, a failed request would answer 409 to its own
   retry until the reservation expired.
 
@@ -884,9 +884,9 @@ _runner_limiter: anyio.CapacityLimiter | None = None
 def _get_runner_limiter() -> anyio.CapacityLimiter:
   """Bound on operation runners executing concurrently in worker threads.
 
-  Sized to the extensions OLTP pool (``pool_size + max_overflow``): every
+  Sized to the extensions OLTP pool (`pool_size + max_overflow`): every
   sync runner opens one tenant session, so a wider limiter would only turn
-  a burst into ``QueuePool limit ... reached`` after ``pool_timeout`` where
+  a burst into `QueuePool limit ... reached` after `pool_timeout` where
   the pre-threadpool code merely queued the request on the event loop.
   Excess runners wait on the limiter instead — same latency shape as before,
   without freezing the loop while they wait.
@@ -904,7 +904,7 @@ def _get_runner_limiter() -> anyio.CapacityLimiter:
 
 
 async def run_off_loop(func: Callable[..., Any], *args: Any) -> Any:
-  """Run ``func`` without blocking the event loop.
+  """Run `func` without blocking the event loop.
 
   A coroutine function is awaited directly. Anything else is a sync callable
   doing database or network work — it runs in a worker thread (with the
@@ -912,23 +912,23 @@ async def run_off_loop(func: Callable[..., Any], *args: Any) -> Any:
   same way it does on the loop) under the runner limiter. A sync callable that
   hands back an awaitable gets that awaited on the loop.
 
-  This is what keeps ``/v1/status`` answering while a close posts to
+  This is what keeps `/v1/status` answering while a close posts to
   QuickBooks or a bounded lock wait sits on a busy row: the API runs one
   uvicorn worker, so an operation's SQL and HTTP must not run on the loop.
 
   The worker-thread run is **shielded** from native asyncio cancellation.
-  ``anyio.to_thread.run_sync`` shields only anyio-flavoured cancellation;
-  ``asyncio.wait_for`` / ``asyncio.timeout`` / ``Task.cancel()`` — which the
+  `anyio.to_thread.run_sync` shields only anyio-flavoured cancellation;
+  `asyncio.wait_for` / `asyncio.timeout` / `Task.cancel()` — which the
   MCP transports and the worker's operator budget use — raise straight
-  through it, and anyio then releases the ``CapacityLimiter`` token while the
+  through it, and anyio then releases the `CapacityLimiter` token while the
   thread (and its still-open DB connection) runs on to completion. That
   uncouples the limiter from the real thread count: under timeouts the pool
-  overflows into ``pool_timeout`` failures, and a "timed out" write still
+  overflows into `pool_timeout` failures, and a "timed out" write still
   commits later. Shielding ties the token's lifetime to the thread's, not the
   caller's — a timeout means *abandoned, still running*, and the limiter keeps
   bounding runner threads. (A Python thread cannot be cancelled anyway, so
-  this only makes the accounting honest.) Matches ``execute_operation``'s use
-  of ``asyncio.shield``.
+  this only makes the accounting honest.) Matches `execute_operation`'s use
+  of `asyncio.shield`.
   """
   if inspect.iscoroutinefunction(func):
     return await func(*args)

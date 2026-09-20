@@ -22,7 +22,7 @@ class LedgerTransactionSummaryResponse(BaseModel):
 
   Transaction is the business-event level (what happened in the real
   world). Entries (journal entries) live one level down and are loaded
-  in the detail view. ``source`` distinguishes integration-imported
+  in the detail view. `source` distinguishes integration-imported
   rows (quickbooks / xero / plaid) from native-created ones.
   """
 
@@ -67,8 +67,8 @@ class LedgerEntryResponse(BaseModel):
   """A journal entry — accounting interpretation of a transaction.
 
   Each transaction has 1+ entries; each entry has 2+ line items that
-  must balance. ``status`` is the draft/posted/reversed lifecycle;
-  ``type`` is the entry classification ('standard' | 'adjusting' |
+  must balance. `status` is the draft/posted/reversed lifecycle;
+  `type` is the entry classification ('standard' | 'adjusting' |
   'closing' | 'reversing').
   """
 

@@ -1,7 +1,7 @@
 """Publish list request and response models.
 
 A publish list is a saved set of recipient graph IDs that
-``share-report`` distributes to. Members can be other tenant graphs
+`share-report` distributes to. Members can be other tenant graphs
 inside the same RoboSystems deployment — typically downstream
 consumers (parent companies, audit firms, lender portals).
 
@@ -78,7 +78,7 @@ class UpdatePublishListRequest(BaseModel):
 class AddMembersRequest(BaseModel):
   """Add one or more recipient graphs to a publish list.
 
-  Each ``target_graph_id`` must reference an existing graph in the
+  Each `target_graph_id` must reference an existing graph in the
   same deployment that has the same extension enabled (e.g.,
   roboledger). Adding your own graph is rejected (422). Adding a
   graph that is already a member is rejected (409).

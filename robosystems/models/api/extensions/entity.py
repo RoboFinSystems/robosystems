@@ -4,7 +4,7 @@ The Entity is the legal/operating subject the ledger reports for —
 the company whose books we're keeping. One graph typically maps to
 one primary entity (e.g. a single LLC, corp, or LP); multi-entity
 consolidation uses parent/child entity hierarchy via
-``parent_entity_id``.
+`parent_entity_id`.
 """
 
 from pydantic import BaseModel, ConfigDict, Field

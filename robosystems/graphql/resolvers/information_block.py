@@ -3,11 +3,11 @@
 Mirrors the :class:`LibraryQuery` pattern: always composed into the
 Query root regardless of which per-domain extension flags are on.
 Uses :func:`open_library_session` so the endpoint works on both the
-library sentinel (``graph_id='library'``) and any tenant graph_id —
-reads are driven by the session's ``search_path``, no per-graph
+library sentinel (`graph_id='library'`) and any tenant graph_id —
+reads are driven by the session's `search_path`, no per-graph
 extension gate needed.
 
-Writes stay on ``POST /extensions/roboledger/{g}/operations/create-information-block``
+Writes stay on `POST /extensions/roboledger/{g}/operations/create-information-block`
 where the existing registrar pattern mounts them; this module is
 read-only.
 """

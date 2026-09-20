@@ -1,11 +1,11 @@
 """API response models for the Information Block envelope.
 
 Wire-facing types for the cross-domain Information Block construct.
-Used by the REST ``create-information-block`` operation, the GraphQL ``informationBlock``/
-``informationBlocks`` fields, and the MCP read tools.
+Used by the REST `create-information-block` operation, the GraphQL `informationBlock`/
+`informationBlocks` fields, and the MCP read tools.
 
-Adding a block type: register its ``*Mechanics`` model and add it to
-the ``ArtifactMechanics`` discriminated union here. The envelope shape
+Adding a block type: register its `*Mechanics` model and add it to
+the `ArtifactMechanics` discriminated union here. The envelope shape
 stays invariant — a union-arm edit, not an envelope redesign.
 """
 
@@ -138,7 +138,7 @@ class ConnectionLite(BaseModel):
   """Connection (= Association) projection.
 
   "Connection" is the ontology term used on the wire; the storage table is
-  ``associations`` (``models/extensions/association.py``).
+  `associations` (`models/extensions/association.py`).
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -200,8 +200,8 @@ class FactLite(BaseModel):
 class FactSetLite(BaseModel):
   """FactSet projection — period-specific instantiation of the Structure.
 
-  The envelope carries one ``FactSetLite`` per block when a FactSet row exists
-  for the requested period, and leaves ``fact_set`` null when none does.
+  The envelope carries one `FactSetLite` per block when a FactSet row exists
+  for the requested period, and leaves `fact_set` null when none does.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -214,14 +214,14 @@ class FactSetLite(BaseModel):
     ...,
     description=(
       "'report' | 'schedule' | 'custom' | 'disclosure' | 'metric'. Enum "
-      "closure enforced by the ``public.fact_sets`` CHECK constraint."
+      "closure enforced by the `public.fact_sets` CHECK constraint."
     ),
   )
   entity_id: str
   report_id: str | None = Field(
     None,
     description=(
-      "Back-pointer to the parent row in ``reports``. Null when the FactSet "
+      "Back-pointer to the parent row in `reports`. Null when the FactSet "
       "does not belong to a report package."
     ),
   )
@@ -236,7 +236,7 @@ class FactSetLite(BaseModel):
   provenance: dict | None = Field(
     None,
     description=(
-      "Typed ``FactProvenance`` descriptor (discriminated on ``origin``: "
+      "Typed `FactProvenance` descriptor (discriminated on `origin`: "
       "pivot | schedule | derived | asserted | document | forecast | filed) "
       "recording how this FactSet's facts were constructed. Surfaced as "
       "JSON, mirroring how mechanics is exposed. Null when the FactSet "
@@ -255,14 +255,14 @@ class RuleTargetLite(BaseModel):
     description=(
       "Which atom type the rule targets — 'structure' | 'element' | "
       "'association' | 'taxonomy'. Enum closure enforced by the "
-      "``public.rules`` CHECK constraint."
+      "`public.rules` CHECK constraint."
     ),
   )
   target_ref_id: str = Field(
     ...,
     description=(
       "UUID of the target atom — structure_id, element_id, "
-      "association_id, or taxonomy_id depending on ``target_kind``."
+      "association_id, or taxonomy_id depending on `target_kind`."
     ),
   )
 
@@ -295,9 +295,9 @@ class RuleVariableLite(BaseModel):
 class VerificationResultLite(BaseModel):
   """Persisted outcome of one Rule evaluation.
 
-  One row per ``public.verification_results`` entry the rule engine
+  One row per `public.verification_results` entry the rule engine
   writes. The envelope surfaces them so the block viewer's
-  "Verification Results" tab and MCP ``list-verification-failures``
+  "Verification Results" tab and MCP `list-verification-failures`
   tool can render + aggregate without a second round-trip.
   """
 
@@ -311,7 +311,7 @@ class VerificationResultLite(BaseModel):
     ...,
     description=(
       "'pass' | 'fail' | 'error' | 'skipped'. Enum closure enforced by "
-      "the ``public.verification_results`` CHECK constraint."
+      "the `public.verification_results` CHECK constraint."
     ),
   )
   message: str | None = None
@@ -321,11 +321,11 @@ class VerificationResultLite(BaseModel):
 
 
 class VerificationCategorySummary(BaseModel):
-  """Pass/fail/skip counts for one ``rule_category`` within a block's
+  """Pass/fail/skip counts for one `rule_category` within a block's
   verification results.
 
   Drives the per-category accordions in the Verification Results panel.
-  ``category`` is the rule's ``rule_category``
+  `category` is the rule's `rule_category`
   (one of the cm:VerificationRule subclasses), resolved by joining each
   result to its Rule.
   """
@@ -341,13 +341,13 @@ class VerificationCategorySummary(BaseModel):
 
 
 class VerificationSummary(BaseModel):
-  """Server-computed aggregate of a block's ``verification_results``.
+  """Server-computed aggregate of a block's `verification_results`.
 
-  Overall counts plus a per-``rule_category`` breakdown, so the viewer
+  Overall counts plus a per-`rule_category` breakdown, so the viewer
   renders the grouped Verification Results panel
   without a client-side results→rules join. Status closure is
-  ``pass | fail | error | skipped`` (the ``public.verification_results``
-  CHECK); ``total`` is their sum.
+  `pass | fail | error | skipped` (the `public.verification_results`
+  CHECK); `total` is their sum.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -363,8 +363,8 @@ class VerificationSummary(BaseModel):
 class RuleLite(BaseModel):
   """Rule projection for the Information Block envelope.
 
-  One row per ``public.rules`` entry scoped to this block. The rule
-  engine consumes ``rule_expression`` + ``rule_variables`` to evaluate
+  One row per `public.rules` entry scoped to this block. The rule
+  engine consumes `rule_expression` + `rule_variables` to evaluate
   against the in-scope fact set; the envelope surfaces the rules so
   the UI can render them as a checklist alongside any persisted
   verification results.
@@ -414,7 +414,7 @@ class RuleLite(BaseModel):
     "error",
     description=(
       "Failure severity — 'info' | 'warning' | 'error'. Enum closure "
-      "enforced by the ``public.rules`` CHECK constraint."
+      "enforced by the `public.rules` CHECK constraint."
     ),
   )
   rule_origin: str = Field(
@@ -422,7 +422,7 @@ class RuleLite(BaseModel):
     description=(
       "Provenance — 'forked' (from an upstream artifact, e.g. Seattle "
       "Method) or 'native' (authored in this seed or by a tenant). Enum "
-      "closure enforced by the ``public.rules`` CHECK constraint."
+      "closure enforced by the `public.rules` CHECK constraint."
     ),
   )
 
@@ -431,11 +431,11 @@ class RuleLite(BaseModel):
 
 
 class ScheduleMechanics(BaseModel):
-  """Closing-entry generator mechanics for ``block_type='schedule'``.
+  """Closing-entry generator mechanics for `block_type='schedule'`.
 
-  Reads the typed ``structures.artifact_mechanics`` JSONB column, falling back
-  to ``structures.metadata_`` for Schedule rows that lack it.
-  ``entry_template`` and ``schedule_metadata`` reuse the wire-level request
+  Reads the typed `structures.artifact_mechanics` JSONB column, falling back
+  to `structures.metadata_` for Schedule rows that lack it.
+  `entry_template` and `schedule_metadata` reuse the wire-level request
   shapes so OpenAPI emits one canonical type per concept.
   """
 
@@ -466,7 +466,7 @@ class ScheduleMechanics(BaseModel):
 
 
 class MetricMechanics(BaseModel):
-  """Derivative mechanics for ``block_type='metric'``.
+  """Derivative mechanics for `block_type='metric'`.
 
   A metric block composes its facts from one or more source blocks at
   read time — covenant tests, ratios, KPI trend computations. The typed
@@ -475,10 +475,10 @@ class MetricMechanics(BaseModel):
   derivation evaluator that actually computes facts from source-block
   FactSets is not yet implemented.
 
-  ``source_block_ids`` is the ordered list of Structure ids this metric
-  derives from; ``derivation_type`` names the kind of computation
-  (``ratio``, ``trailing_twelve_month``, ``covenant_test``, …), and
-  ``expression`` carries the agent-authored derivation string that the
+  `source_block_ids` is the ordered list of Structure ids this metric
+  derives from; `derivation_type` names the kind of computation
+  (`ratio`, `trailing_twelve_month`, `covenant_test`, …), and
+  `expression` carries the agent-authored derivation string that the
   evaluator will consume at envelope build time.
   """
 
@@ -519,7 +519,7 @@ class MetricMechanics(BaseModel):
 
 
 class RollforwardMechanics(BaseModel):
-  """Filter-based attribution mechanics for ``block_type='rollforward'``.
+  """Filter-based attribution mechanics for `block_type='rollforward'`.
 
   Filter-based attribution: each block decomposes one BS source
   element's period delta into a list of flow concepts via declared
@@ -528,10 +528,10 @@ class RollforwardMechanics(BaseModel):
   attributed fact per filter per period, and arbitrates any residual
   against the default change tag fallback.
 
-  Reads directly from the typed ``structures.artifact_mechanics`` JSONB
-  column. ``attribution_filters`` rides as nested JSON; the predicate
+  Reads directly from the typed `structures.artifact_mechanics` JSONB
+  column. `attribution_filters` rides as nested JSON; the predicate
   union widens as new predicate shapes are added — currently only
-  ``line_item_metadata_field`` is carried.
+  `line_item_metadata_field` is carried.
   """
 
   kind: Literal["rollforward"] = "rollforward"
@@ -539,7 +539,7 @@ class RollforwardMechanics(BaseModel):
     ...,
     description=(
       "Element id of the balance-sheet source whose period delta this "
-      "block decomposes. Resolved from ``bs_source_qname`` at create "
+      "block decomposes. Resolved from `bs_source_qname` at create "
       "time."
     ),
   )
@@ -547,8 +547,8 @@ class RollforwardMechanics(BaseModel):
     ...,
     description=(
       "QName of the BS source element (e.g. "
-      "``mini:CashAndCashEquivalents``). Round-tripped for caller "
-      "convenience; ``bs_source_element_id`` is authoritative."
+      "`mini:CashAndCashEquivalents`). Round-tripped for caller "
+      "convenience; `bs_source_element_id` is authoritative."
     ),
   )
   default_change_tag_element_id: str | None = Field(
@@ -557,17 +557,17 @@ class RollforwardMechanics(BaseModel):
       "Element id of the default change tag — the fallback flow "
       "concept that receives any residual (Δ BS − Σ filter matches). "
       "Null when no default is declared; behavior on residual then "
-      "follows ``validation_mode``."
+      "follows `validation_mode`."
     ),
   )
   default_change_tag_qname: str | None = Field(
     None,
     description=(
       "QName of the default change tag (e.g. "
-      "``rs-gaap:IncreaseDecreaseInCashAndCashEquivalents``). "
+      "`rs-gaap:IncreaseDecreaseInCashAndCashEquivalents`). "
       "Round-tripped for caller convenience and operator-readable "
-      "envelopes; ``default_change_tag_element_id`` is authoritative. "
-      "Null iff ``default_change_tag_element_id`` is null."
+      "envelopes; `default_change_tag_element_id` is authoritative. "
+      "Null iff `default_change_tag_element_id` is null."
     ),
   )
   attribution_filters: list[AttributionFilter] = Field(
@@ -583,22 +583,22 @@ class RollforwardMechanics(BaseModel):
     "residual_as_default",
     description=(
       "Renderer arbitration policy when Σ filter matches != Δ BS. "
-      "``strict`` raises; ``residual_as_default`` emits the residual "
-      "as a default-tag fact (the common case); ``warn_only`` logs and "
+      "`strict` raises; `residual_as_default` emits the residual "
+      "as a default-tag fact (the common case); `warn_only` logs and "
       "lets the imbalance pass."
     ),
   )
 
 
 class LeverAssertionLite(BaseModel):
-  """One lever's persisted assertion inside ``ForecastMechanics``.
+  """One lever's persisted assertion inside `ForecastMechanics`.
 
-  The create handler expands the wire-level assertion (uniform ``value``
-  + per-month overrides) into the explicit ``values_by_period`` map so
+  The create handler expands the wire-level assertion (uniform `value`
+  + per-month overrides) into the explicit `values_by_period` map so
   compute never interpolates — every asserted month is stated. The
   values are duplicated as authored facts in the scenario's lever
   FactSet (rules for mechanics, **facts for values** — the facts are
-  what ``compute-forecast`` binds); this mechanics copy is the
+  what `compute-forecast` binds); this mechanics copy is the
   operator-legible round-trip shape.
   """
 
@@ -610,26 +610,26 @@ class LeverAssertionLite(BaseModel):
   )
   values_by_period: dict[str, float] = Field(
     ...,
-    description="Expanded per-month assertions keyed by ``YYYY-MM``.",
+    description="Expanded per-month assertions keyed by `YYYY-MM`.",
   )
 
 
 class LineAssertionLite(BaseModel):
   """One statement line's persisted direct assertion inside
-  ``ForecastMechanics``.
+  `ForecastMechanics`.
 
   The manual-override sibling of :class:`LeverAssertionLite`: a lever
   asserts a *driver* whose rule derives a line; a line assertion pins
   the **line itself** (a calc-DAG leaf) to typed values for the months
   it names — winning over driver rules and carry-forward for exactly
   those months (a displaced rule surfaces in the compute response's
-  ``skipped`` list). Subtotals stay calc-DAG-derived, so a manual line
+  `skipped` list). Subtotals stay calc-DAG-derived, so a manual line
   still articulates through RollUps, RE, balancing cash, and derived
   CF, and stays verification-gated.
 
   Same persistence doctrine as levers: values are duplicated as
   authored facts in the scenario's lever FactSet (facts are what
-  ``compute-forecast`` binds); this mechanics copy is the
+  `compute-forecast` binds); this mechanics copy is the
   operator-legible round-trip shape.
   """
 
@@ -648,25 +648,25 @@ class LineAssertionLite(BaseModel):
   )
   values_by_period: dict[str, float] = Field(
     ...,
-    description="Expanded per-month assertions keyed by ``YYYY-MM``.",
+    description="Expanded per-month assertions keyed by `YYYY-MM`.",
   )
 
 
 class LineGrowthLite(BaseModel):
   """One statement line's persisted growth trajectory inside
-  ``ForecastMechanics``.
+  `ForecastMechanics`.
 
   The generic per-line form of the revenue growth lever: grows an
   income-statement leaf month-over-month at the asserted rate
-  (``line[t] = line[t-1] * (1 + rate[t])``), compounding from the base
+  (`line[t] = line[t-1] * (1 + rate[t])`), compounding from the base
   month's value. Months without a rate keep the engine's carry-forward.
-  Duration leaves only; disjoint from ``line_assertions`` and from any
+  Duration leaves only; disjoint from `line_assertions` and from any
   active catalog rule's target (one owner per line).
 
   Persistence deviates from levers/assertions deliberately: rates are
   NOT duplicated as facts in the scenario FactSet — a growth rate on a
   monetary statement element would be a unit-lying fact. This mechanics
-  copy is the single authored store; ``compute-forecast`` binds rates
+  copy is the single authored store; `compute-forecast` binds rates
   from here.
   """
 
@@ -678,22 +678,22 @@ class LineGrowthLite(BaseModel):
   )
   values_by_period: dict[str, float] = Field(
     ...,
-    description="Expanded per-month growth rates keyed by ``YYYY-MM``.",
+    description="Expanded per-month growth rates keyed by `YYYY-MM`.",
   )
 
 
 class ForecastMechanics(BaseModel):
-  """Authored scenario container for ``block_type='forecast'``.
+  """Authored scenario container for `block_type='forecast'`.
 
-  The block IS the scenario: its structure id is the ``scenario_id``
+  The block IS the scenario: its structure id is the `scenario_id`
   every derived forward FactSet carries (NULL = actuals). The authored
   surface is exactly this — scenario identity, horizon, base period,
   lever assertions; everything downstream is derived by
-  ``compute-forecast`` (levers → driven rs-gaap anchors via the
+  `compute-forecast` (levers → driven rs-gaap anchors via the
   rs-driver Derive rules → carry-forward for unmodeled IS lines →
   calc-DAG subtotals), landing in the EXISTING statement/metric block
   types stamped with the scenario. Reads directly from the typed
-  ``structures.artifact_mechanics`` JSONB column.
+  `structures.artifact_mechanics` JSONB column.
   """
 
   kind: Literal["forecast"] = "forecast"
@@ -710,23 +710,23 @@ class ForecastMechanics(BaseModel):
   base_period: str = Field(
     ...,
     description=(
-      "Origin month (``YYYY-MM``) of the authored horizon window — "
+      "Origin month (`YYYY-MM`) of the authored horizon window — "
       "resolved at create time (request → fiscal calendar "
       "closed-through → newest actual report month) and stored so "
       "recompute is deterministic. Every lever, line assertion and "
-      "growth rate is keyed to a month in ``base_period + 1 … "
-      "base_period + horizon_months``, so this never moves on its own; "
-      "``base_anchor`` decides whether the *walk* still seeds here."
+      "growth rate is keyed to a month in `base_period + 1 … "
+      "base_period + horizon_months`, so this never moves on its own; "
+      "`base_anchor` decides whether the *walk* still seeds here."
     ),
   )
   base_anchor: Literal["seam", "fixed"] = Field(
     "seam",
     description=(
-      "Where the walk takes its opening balances. ``seam`` (default) "
+      "Where the walk takes its opening balances. `seam` (default) "
       "re-anchors on the newest closed month at or after "
-      "``base_period``, so a scenario survives a period close without "
+      "`base_period`, so a scenario survives a period close without "
       "being rebuilt and its first forward month rolls off real "
-      "balances. ``fixed`` pins the walk to ``base_period`` — the "
+      "balances. `fixed` pins the walk to `base_period` — the "
       "deliberate counterfactual (“if we had restarted in July”), "
       "whose balances diverge from actuals on purpose."
     ),
@@ -764,10 +764,10 @@ class ForecastMechanics(BaseModel):
 class StatementMechanics(BaseModel):
   """Renderer mechanics for the statement family of block types.
 
-  Covers ``balance_sheet``, ``income_statement``, ``cash_flow_statement``,
-  and ``equity_statement``. All fields are optional so library-seeded
+  Covers `balance_sheet`, `income_statement`, `cash_flow_statement`,
+  and `equity_statement`. All fields are optional so library-seeded
   rows that haven't been enriched yet still validate against an empty
-  tagged body. The existing ``statement(...)`` GraphQL field continues
+  tagged body. The existing `statement(...)` GraphQL field continues
   to serve rendered output; this mechanics model is the source of truth
   for future renderer configuration.
   """
@@ -867,7 +867,7 @@ class RenderingRowLite(BaseModel):
 
   Mirrors :class:`FactRow` in
   :mod:`robosystems.operations.roboledger.reports.fact_grid`, restated at the
-  API boundary so envelope consumers don't depend on that module. ``values``
+  API boundary so envelope consumers don't depend on that module. `values`
   holds one entry per period column in :class:`RenderingLite.periods`.
   """
 
@@ -929,7 +929,7 @@ class ValidationLite(BaseModel):
   """Outcome of guard-rail validation on a rendered statement.
 
   Distinct from :class:`VerificationResultLite` (which surfaces the
-  rule-engine outcomes from ``public.verification_results``). This lite
+  rule-engine outcomes from `public.verification_results`). This lite
   type carries the synchronous guard-rail checks computed at
   envelope-build time — accounting equation, totals foot, etc.
   """
@@ -937,8 +937,8 @@ class ValidationLite(BaseModel):
   model_config = ConfigDict(from_attributes=True)
 
   passed: bool = True
-  # ``passed`` | ``failed`` | ``inconclusive`` (no rules for the block type —
-  # nothing was checked, and ``passed`` is False rather than vacuously True).
+  # `passed` | `failed` | `inconclusive` (no rules for the block type —
+  # nothing was checked, and `passed` is False rather than vacuously True).
   status: str = "passed"
   checks: list[str] = Field(default_factory=list)
   failures: list[str] = Field(default_factory=list)
@@ -950,8 +950,8 @@ class RenderingLite(BaseModel):
 
   Computed server-side at envelope-build time for blocks where rendering
   is deterministic (the statement family today; future block types add
-  their own rendering builders). The frontend's ``BlockView``
-  ``Rendering`` projection consumes this directly — no client-side
+  their own rendering builders). The frontend's `BlockView`
+  `Rendering` projection consumes this directly — no client-side
   rollup, depth computation, or calculation walk needed.
   """
 
@@ -967,9 +967,9 @@ class ChartSeriesLite(BaseModel):
   """One plottable series in a chart panel.
 
   Carries structure and identity only — the values live in the sibling
-  ``rendering.rows`` (join on ``element_id``), so the chart arm never
-  duplicates the value matrix. ``key`` is the stable series identity for
-  client state (colors, toggles); today it equals ``element_id``, and
+  `rendering.rows` (join on `element_id`), so the chart arm never
+  duplicates the value matrix. `key` is the stable series identity for
+  client state (colors, toggles); today it equals `element_id`, and
   future axes (the forecast scenario) arrive as new fields on this
   model, never a new arm shape.
   """
@@ -985,8 +985,8 @@ class ChartPanelLite(BaseModel):
   """One chart panel — series sharing a y-axis format family.
 
   Mixed-unit catalogs are unplottable on one axis, so the server groups
-  rows into panels by ``item_type`` family (NULL falls back to
-  ``is_monetary``). The x-axis is always ``rendering.periods``.
+  rows into panels by `item_type` family (NULL falls back to
+  `is_monetary`). The x-axis is always `rendering.periods`.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -1008,9 +1008,9 @@ class ChartPanelLite(BaseModel):
 class ChartLite(BaseModel):
   """Server-shaped chart projection — panel/series CONFIG, never values.
 
-  The second real server-computed View arm (after ``rendering``). Values
-  come from ``rendering.rows`` joined by ``element_id``; the x-axis is
-  ``rendering.periods``. Renderers (report-components) turn one panel
+  The second real server-computed View arm (after `rendering`). Values
+  come from `rendering.rows` joined by `element_id`; the x-axis is
+  `rendering.periods`. Renderers (report-components) turn one panel
   into one chart.
   """
 
@@ -1020,21 +1020,21 @@ class ChartLite(BaseModel):
 
 
 class ViewProjections(BaseModel):
-  """Charlie's six ``type-of View`` arms, surfaced at the envelope boundary.
+  """Charlie's six `type-of View` arms, surfaced at the envelope boundary.
 
   Each projection is computed server-side at envelope-build time when
-  its source data is available. The frontend's ``BlockView`` dispatcher
+  its source data is available. The frontend's `BlockView` dispatcher
   routes to the projection component matching the user's selected view
   mode; missing projections (those still in backlog) render as empty
   states without breaking the dispatcher.
 
-  Today: ``rendering`` is computed for the statement family, and
-  ``chart`` (the 7th arm — panel/series config over the rendering's
+  Today: `rendering` is computed for the statement family, and
+  `chart` (the 7th arm — panel/series config over the rendering's
   rows and periods) for metric blocks.
-  Other arms (``fact_table``, ``model_structure``, ``verification_results``,
-  ``report_elements``, ``business_rules``) come online as their backend
-  support lands; ``fact_table`` is trivially derivable from
-  ``InformationBlockEnvelope.facts`` and may stay as a frontend-only
+  Other arms (`fact_table`, `model_structure`, `verification_results`,
+  `report_elements`, `business_rules`) come online as their backend
+  support lands; `fact_table` is trivially derivable from
+  `InformationBlockEnvelope.facts` and may stay as a frontend-only
   projection.
   """
 
@@ -1115,7 +1115,7 @@ class InformationBlockEnvelope(BaseModel):
   verification_summary: VerificationSummary | None = Field(
     None,
     description=(
-      "Server-computed aggregate over ``verification_results`` — overall "
+      "Server-computed aggregate over `verification_results` — overall "
       "pass/fail/error/skip counts plus a per-rule_category breakdown for "
       "the grouped Verification Results panel. Null when the block has no "
       "verification results."
@@ -1126,7 +1126,7 @@ class InformationBlockEnvelope(BaseModel):
     default_factory=ViewProjections,
     description=(
       "Server-computed view projections (Charlie's six type-of View "
-      "arms). ``view.rendering`` carries pre-computed rows + periods + "
+      "arms). `view.rendering` carries pre-computed rows + periods + "
       "validation for blocks where rendering is deterministic (the "
       "statement family today). Other projections come online as "
       "their backend support lands — see :class:`ViewProjections`."
@@ -1231,7 +1231,7 @@ class _CreateLegacyArm(BaseModel):
 
 
 class _CreateRollforwardArm(BaseModel):
-  """Create-information-block body for ``block_type="rollforward"``.
+  """Create-information-block body for `block_type="rollforward"`.
 
   Carries a typed rollforward payload. The block decomposes the period
   change in a BS source element across the declared attribution
@@ -1274,11 +1274,11 @@ class _CreateRollforwardArm(BaseModel):
 
 
 class _CreateForecastArm(BaseModel):
-  """Create-information-block body for ``block_type="forecast"``.
+  """Create-information-block body for `block_type="forecast"`.
 
   Carries a typed forecast payload — the authored scenario container:
   scenario identity, horizon, base period, lever assertions on
-  ``rs-driver:*`` catalog elements. Run ``compute-forecast`` after
+  `rs-driver:*` catalog elements. Run `compute-forecast` after
   creating to derive the forward months.
   """
 
@@ -1406,7 +1406,7 @@ class _UpdateLegacyArm(BaseModel):
 
 
 class _UpdateRollforwardArm(BaseModel):
-  """Update-information-block body for ``block_type="rollforward"``.
+  """Update-information-block body for `block_type="rollforward"`.
 
   Carries a typed rollforward update payload. Mutable fields: name,
   default_change_tag_qname, attribution_filters, validation_mode.
@@ -1437,10 +1437,10 @@ class _UpdateRollforwardArm(BaseModel):
 
 
 class _UpdateForecastArm(BaseModel):
-  """Update-information-block body for ``block_type="forecast"``.
+  """Update-information-block body for `block_type="forecast"`.
 
   Mutable: name, scenario_kind, horizon_months, base_period, levers
-  (full replace). Updating does not recompute — run ``compute-forecast``
+  (full replace). Updating does not recompute — run `compute-forecast`
   to refresh the scenario's derived months.
   """
 
@@ -1560,7 +1560,7 @@ class _DeleteLegacyArm(BaseModel):
 
 
 class _DeleteRollforwardArm(BaseModel):
-  """Delete-information-block body for ``block_type="rollforward"``.
+  """Delete-information-block body for `block_type="rollforward"`.
 
   Cascades through any synthetic facts produced by this block's filter
   evaluations. The underlying ledger LineItems are not touched.
@@ -1588,7 +1588,7 @@ class _DeleteRollforwardArm(BaseModel):
 
 
 class _DeleteForecastArm(BaseModel):
-  """Delete-information-block body for ``block_type="forecast"``.
+  """Delete-information-block body for `block_type="forecast"`.
 
   Removes the scenario's entire parallel universe — the lever FactSet
   and every computed scenario FactSet. Actuals are never touched.
@@ -1644,7 +1644,7 @@ class DeleteInformationBlockRequest(RootModel[_DeleteInformationBlockArms]):
 
 
 class DeleteInformationBlockResponse(BaseModel):
-  """Response for ``delete-information-block``.
+  """Response for `delete-information-block`.
 
   The envelope is gone once the block is deleted, so the response is a
   thin confirmation instead — structure_id + block_type + name for
@@ -1658,15 +1658,15 @@ class DeleteInformationBlockResponse(BaseModel):
 
 
 class EvaluateRulesRequest(BaseModel):
-  """Request body for the ``evaluate-rules`` operation.
+  """Request body for the `evaluate-rules` operation.
 
-  Runs every rule scoped to ``structure_id`` (plus element/association-
-  scoped rules for the structure's atoms), binds ``$Variable`` references
+  Runs every rule scoped to `structure_id` (plus element/association-
+  scoped rules for the structure's atoms), binds `$Variable` references
   to facts via qname lookup, and writes one
   :class:`VerificationResult` row per rule.
 
-  Optional ``period_start`` / ``period_end`` narrow the fact-binding
-  window; without them the engine uses the most recent ``in_scope`` fact
+  Optional `period_start` / `period_end` narrow the fact-binding
+  window; without them the engine uses the most recent `in_scope` fact
   for each element regardless of period.
   """
 
@@ -1716,10 +1716,10 @@ class EvaluateRulesRequest(BaseModel):
 
 
 class EvaluateRulesResponse(BaseModel):
-  """Response for the ``evaluate-rules`` operation.
+  """Response for the `evaluate-rules` operation.
 
-  ``results`` is the full list of :class:`VerificationResultLite` rows
-  written by this evaluation run. ``summary`` gives counts keyed by
+  `results` is the full list of :class:`VerificationResultLite` rows
+  written by this evaluation run. `summary` gives counts keyed by
   status for quick display without iterating the list.
   """
 
@@ -1729,13 +1729,13 @@ class EvaluateRulesResponse(BaseModel):
     default_factory=dict,
     description=(
       "Status counts keyed by outcome string: "
-      "``{'pass': N, 'fail': N, 'error': N, 'skipped': N}``."
+      "`{'pass': N, 'fail': N, 'error': N, 'skipped': N}`."
     ),
   )
 
 
 class ComputedMetricLite(BaseModel):
-  """One metric computed by a ``compute-metrics`` run."""
+  """One metric computed by a `compute-metrics` run."""
 
   rule_id: str = Field(..., description="Derive rule that produced the value.")
   element_id: str = Field(..., description="Metric element the fact was written for.")
@@ -1758,7 +1758,7 @@ class ComputedMetricLite(BaseModel):
 
 
 class SkippedMetricLite(BaseModel):
-  """One metric a ``compute-metrics`` run could not compute.
+  """One metric a `compute-metrics` run could not compute.
 
   Soft-fail by design: a missing operand fact (e.g. InterestExpense for a
   debt-free entity) or an undefined ratio (division by zero) skips the
@@ -1777,12 +1777,12 @@ class SkippedMetricLite(BaseModel):
 
 
 class ComputeMetricsRequest(BaseModel):
-  """Request body for the ``compute-metrics`` operation.
+  """Request body for the `compute-metrics` operation.
 
-  Resolves the ``Derive`` rules scoped to the metric block, binds each
+  Resolves the `Derive` rules scoped to the metric block, binds each
   rule's operands to the entity's most recent persisted report facts at
-  ``period_end``, evaluates, and upserts the period's standing
-  ``factset_type='metric'`` FactSet (re-running a period replaces its
+  `period_end`, evaluates, and upserts the period's standing
+  `factset_type='metric'` FactSet (re-running a period replaces its
   facts). One standing FactSet per (structure, entity, period_end) — the
   accumulating time series.
   """
@@ -1840,7 +1840,7 @@ class ComputeMetricsRequest(BaseModel):
 
 
 class ComputeMetricsResponse(BaseModel):
-  """Response for the ``compute-metrics`` operation."""
+  """Response for the `compute-metrics` operation."""
 
   structure_id: str
   entity_id: str
@@ -1857,7 +1857,7 @@ class ComputeMetricsResponse(BaseModel):
 
 
 class MetricObservation(BaseModel):
-  """One externally-observed value in an ``assert-metrics`` request."""
+  """One externally-observed value in an `assert-metrics` request."""
 
   qname: str = Field(
     ...,
@@ -1871,7 +1871,7 @@ class MetricObservation(BaseModel):
 
 
 class AssertedMetricLite(BaseModel):
-  """One metric written by an ``assert-metrics`` run."""
+  """One metric written by an `assert-metrics` run."""
 
   element_id: str = Field(..., description="Metric element the fact was written for.")
   element_qname: str = Field(..., description="Metric element qname.")
@@ -1891,17 +1891,17 @@ class AssertedMetricLite(BaseModel):
 
 
 class AssertMetricsRequest(BaseModel):
-  """Request body for the ``assert-metrics`` operation.
+  """Request body for the `assert-metrics` operation.
 
-  The observation sibling of ``compute-metrics``: writes externally-
+  The observation sibling of `compute-metrics`: writes externally-
   observed values (usage counts, marketing numbers, hand-carried
-  figures) into the period's standing ``factset_type='metric'`` FactSet
-  with ``AssertedProvenance``. Re-asserting a period replaces its facts
+  figures) into the period's standing `factset_type='metric'` FactSet
+  with `AssertedProvenance`. Re-asserting a period replaces its facts
   — one standing FactSet per (structure, entity, period_end), the
   accumulating time series.
 
-  Structures carrying ``Derive`` rules are compute-owned
-  (``compute-metrics``) and rejected — asserted and derived metric
+  Structures carrying `Derive` rules are compute-owned
+  (`compute-metrics`) and rejected — asserted and derived metric
   series keep disjoint structures. Asserted series are actuals; there
   is no scenario axis.
   """
@@ -1969,7 +1969,7 @@ class AssertMetricsRequest(BaseModel):
 
 
 class AssertMetricsResponse(BaseModel):
-  """Response for the ``assert-metrics`` operation."""
+  """Response for the `assert-metrics` operation."""
 
   structure_id: str
   entity_id: str
@@ -1989,9 +1989,9 @@ class AssertMetricsResponse(BaseModel):
 
 
 class ForecastMonthLite(BaseModel):
-  """One computed forward month in a ``compute-forecast`` response."""
+  """One computed forward month in a `compute-forecast` response."""
 
-  period: str = Field(..., description="Month key (``YYYY-MM``).")
+  period: str = Field(..., description="Month key (`YYYY-MM`).")
   period_start: date
   period_end: date
   income_statement_fact_set_id: str | None = Field(
@@ -2020,9 +2020,9 @@ class ForecastMonthLite(BaseModel):
     None,
     description=(
       "Whether every rule evaluated against the month's scenario sets "
-      "passed. Three states, and the third is not the first: ``true`` = "
-      "rules ran and all passed; ``false`` = at least one failed or "
-      "errored, which halts the walk (see ``halted_at``); ``null`` = **no "
+      "passed. Three states, and the third is not the first: `true` = "
+      "rules ran and all passed; `false` = at least one failed or "
+      "errored, which halts the walk (see `halted_at`); `null` = **no "
       "rules ran**, so the month is unverified rather than verified. "
       "Treat null as absence of evidence, never as a pass."
     ),
@@ -2034,7 +2034,7 @@ class ForecastMonthLite(BaseModel):
 
 
 class SkippedForecastLite(BaseModel):
-  """One rule/month soft-skip in a ``compute-forecast`` response.
+  """One rule/month soft-skip in a `compute-forecast` response.
 
   A skipped rule never aborts the walk — its target falls back to the
   carry-forward value for that month (when a prior value exists).
@@ -2042,20 +2042,20 @@ class SkippedForecastLite(BaseModel):
 
   rule_id: str | None = None
   element_qname: str | None = None
-  period: str = Field(..., description="Month key (``YYYY-MM``) of the skip.")
+  period: str = Field(..., description="Month key (`YYYY-MM`) of the skip.")
   reason: str
   missing: list[str] = Field(default_factory=list)
 
 
 class ComputeForecastRequest(BaseModel):
-  """Request body for the ``compute-forecast`` operation.
+  """Request body for the `compute-forecast` operation.
 
   Walks the scenario's driver cascade month-by-month forward from the
-  forecast block's ``base_period``: lever-driven Derive rules in
+  forecast block's `base_period`: lever-driven Derive rules in
   dependency order, carry-forward for unmodeled IS lines, calc-DAG
   subtotals — upserting one scenario IS FactSet (+ a working-capital BS
   set) per forward month, all keyed by the forecast block's
-  ``scenario_id``. Re-running replaces each month's values (the
+  `scenario_id`. Re-running replaces each month's values (the
   compute-metrics drift semantics). Deterministic and non-AI — no
   credits consumed.
   """
@@ -2092,7 +2092,7 @@ class ComputeForecastRequest(BaseModel):
 
 
 class ComputeForecastResponse(BaseModel):
-  """Response for the ``compute-forecast`` operation."""
+  """Response for the `compute-forecast` operation."""
 
   structure_id: str
   scenario_id: str = Field(
@@ -2107,7 +2107,7 @@ class ComputeForecastResponse(BaseModel):
     ...,
     description=(
       "Origin month of the block's authored horizon window — where its "
-      "levers are keyed from. Equal to ``anchor_period`` unless the walk "
+      "levers are keyed from. Equal to `anchor_period` unless the walk "
       "re-anchored at the seam."
     ),
   )
@@ -2115,10 +2115,10 @@ class ComputeForecastResponse(BaseModel):
     ...,
     description=(
       "Month the walk actually seeded its opening balances from. With "
-      "``base_anchor='seam'`` this advances to the newest closed month "
+      "`base_anchor='seam'` this advances to the newest closed month "
       "as periods close, so the first forward month rolls off real "
-      "balances instead of a stale base; with ``'fixed'`` it always "
-      "equals ``base_period``."
+      "balances instead of a stale base; with `'fixed'` it always "
+      "equals `base_period`."
     ),
   )
   months: int = Field(..., description="Forward months requested.")
@@ -2126,12 +2126,12 @@ class ComputeForecastResponse(BaseModel):
   halted_at: str | None = Field(
     None,
     description=(
-      "Month (``YYYY-MM``) where the walk stopped because verification "
+      "Month (`YYYY-MM`) where the walk stopped because verification "
       "failed, or null if it ran the full horizon. Each month's opening "
       "balances are the previous month's closing balances, so computing "
       "past a failure yields months derived from a known-wrong one rather "
-      "than merely unverified months. When set, ``months_computed`` ends "
-      "at this month and is shorter than ``months``; the failing month's "
+      "than merely unverified months. When set, `months_computed` ends "
+      "at this month and is shorter than `months`; the failing month's "
       "facts are kept so the failure can be inspected."
     ),
   )

@@ -3,8 +3,8 @@ API models for AI Operator endpoints.
 
 Defines request and response models for the multi-operator system.
 "Operator" is the AI-executor concept (Claude/MCP-driven), distinct from
-the REA ``Agent`` (counterparty) modeled in
-``models/extensions/roboledger/agent.py``.
+the REA `Agent` (counterparty) modeled in
+`models/extensions/roboledger/agent.py`.
 """
 
 from datetime import datetime

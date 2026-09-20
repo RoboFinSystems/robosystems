@@ -2,40 +2,40 @@
 
 Every fact is produced through a known, typed construction path (the
 no-raw-fact-writes envelope/registry discipline), so a fact's origin is
-always *recoverable*. ``FactProvenance`` makes it *recorded*: a typed,
+always *recoverable*. `FactProvenance` makes it *recorded*: a typed,
 discriminated descriptor stamped on each FactSet at emission so a number
 can be walked back to how it was made — or honestly marked as a
 projection that never had a posted event behind it.
 
-The union is discriminated on ``origin`` (the same typed-boundary
-discipline as ``ArtifactMechanics``, which discriminates on ``kind``):
+The union is discriminated on `origin` (the same typed-boundary
+discipline as `ArtifactMechanics`, which discriminates on `kind`):
 
-* ``pivot``    — facts pivoted from the posted ledger (statements/reports);
+* `pivot`    — facts pivoted from the posted ledger (statements/reports);
                  re-derivable from posted actuals.
-* ``schedule`` — forward facts generated from a schedule template
+* `schedule` — forward facts generated from a schedule template
                  (straight-line depreciation, amortization); projected,
                  no posted event yet.
-* ``derived``  — computed from other facts via a formula/computation
+* `derived`  — computed from other facts via a formula/computation
                  (subtotals, retained-earnings close, metrics).
-* ``asserted`` — provided/manual/external/cross-graph-share; the value is
+* `asserted` — provided/manual/external/cross-graph-share; the value is
                  the assertion, with no ledger lineage in this graph.
-* ``document`` — text-block fact bound from a platform Document; the
+* `document` — text-block fact bound from a platform Document; the
                  document is the editable source of truth and
-                 ``content_hash`` is the drift signal.
-* ``forecast`` — forward facts derived by the forecast engine's driver
-                 cascade (scenario slice, ``fact_sets.scenario_id`` set);
+                 `content_hash` is the drift signal.
+* `forecast` — forward facts derived by the forecast engine's driver
+                 cascade (scenario slice, `fact_sets.scenario_id` set);
                  deterministic recompute from lever assertions + actual
                  seeds, no posted event behind any forward month.
-* ``filed``    — as-filed public disclosure filed with a regulator/authority
+* `filed`    — as-filed public disclosure filed with a regulator/authority
                  (SEC EDGAR XBRL); the filing itself is the source of record,
                  citable by accession + filing date. No posted-ledger lineage
-                 in this graph — distinct from ``asserted`` (manual/custom).
+                 in this graph — distinct from `asserted` (manual/custom).
 
 Carried at the **FactSet grain** (one descriptor per period-construction);
 facts inherit their parent FactSet's provenance. Stamping is mandatory at
-emission — see ``operations/roboledger/fact_set.create_fact_set`` (the
-blessed construction path) and the ``before_insert`` backstop on the
-``FactSet`` model.
+emission — see `operations/roboledger/fact_set.create_fact_set` (the
+blessed construction path) and the `before_insert` backstop on the
+`FactSet` model.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ class DerivedProvenance(BaseModel):
   """Facts computed from other facts via a formula/computation.
 
   Subtotals and the retained-earnings close; metrics will use it too. At
-  least one of ``formula`` / ``computation`` / ``source_fact_ids`` must be
+  least one of `formula` / `computation` / `source_fact_ids` must be
   present — computation-only covers auto-derived facts with no single source
   row (retained earnings, persisted subtotals).
   """
@@ -143,11 +143,11 @@ class DocumentProvenance(BaseModel):
   """Text-block fact bound from a platform Document (markdown).
 
   The document is the editable source of truth; the fact snapshots its
-  text (or one section's) at bind time. ``content_hash`` is the drift
+  text (or one section's) at bind time. `content_hash` is the drift
   signal: if the document moved underneath a bound or filed fact,
   re-binding surfaces the mismatch — the same staleness signal a
-  backdated ledger edit gives a ``pivot`` fact. A document-specialized
-  sibling of ``asserted``: a human or Operator originated the intent,
+  backdated ledger edit gives a `pivot` fact. A document-specialized
+  sibling of `asserted`: a human or Operator originated the intent,
   with no posted-ledger lineage.
   """
 
@@ -172,12 +172,12 @@ class DocumentProvenance(BaseModel):
 class ForecastProvenance(BaseModel):
   """Forward facts derived by the forecast engine (scenario slice).
 
-  ``compute-forecast`` walks a scenario's driver cascade month-by-month
+  `compute-forecast` walks a scenario's driver cascade month-by-month
   from the last closed actuals and emits the results into scenario-keyed
-  standing FactSets (``fact_sets.scenario_id`` = the owning forecast
-  block). A forecast-specialized sibling of ``derived``: deterministic
+  standing FactSets (`fact_sets.scenario_id` = the owning forecast
+  block). A forecast-specialized sibling of `derived`: deterministic
   recompute from lever assertions + actual seed values, with no posted
-  event behind any forward month. Distinct from ``schedule`` (a single
+  event behind any forward month. Distinct from `schedule` (a single
   self-projecting template) — this is the multi-driver cascade.
   """
 
@@ -204,9 +204,9 @@ class FiledProvenance(BaseModel):
 
   SEC EDGAR XBRL filings are the canonical case: the filing itself is the
   source of record, citable by accession + filing date. Distinct from
-  ``asserted`` — the value is not a manual/custom assertion but a public,
+  `asserted` — the value is not a manual/custom assertion but a public,
   regulator-filed disclosure. There is no posted-ledger lineage in this
-  graph; the filing IS the origin. ``source`` stays generic so other
+  graph; the filing IS the origin. `source` stays generic so other
   regulator feeds can reuse the arm.
   """
 

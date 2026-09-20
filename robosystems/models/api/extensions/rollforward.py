@@ -1,15 +1,15 @@
-"""API request models for the ``rollforward`` Information Block type.
+"""API request models for the `rollforward` Information Block type.
 
-Mirrors the shape of ``schedules.py`` — request bodies live here, the
-typed ``RollforwardMechanics`` envelope lives in
-``robosystems.models.api.information_block`` alongside the other block-
+Mirrors the shape of `schedules.py` — request bodies live here, the
+typed `RollforwardMechanics` envelope lives in
+`robosystems.models.api.information_block` alongside the other block-
 type mechanics shapes.
 
 The rollforward block-type implements **Tier 2 filter-based attribution**
 — the operator authors filter predicates that match ledger LineItems by
 metadata field, and at render time the engine decomposes a BS account's
 period delta across the declared flow concepts. A single predicate kind
-(``line_item_metadata_field``) is implemented; additional predicate
+(`line_item_metadata_field`) is implemented; additional predicate
 shapes (dimension, counter-account, classification, expression) are not
 yet supported.
 """
@@ -26,16 +26,16 @@ from pydantic import BaseModel, ConfigDict, Field
 class LineItemMetadataPredicate(BaseModel):
   """Filter ledger LineItems by flow concept.
 
-  The single predicate kind shipped to date. ``values`` are flow-concept
-  qnames — mini's ``TransactionDescriptionCode`` values, rs-gaap flow
+  The single predicate kind shipped to date. `values` are flow-concept
+  qnames — mini's `TransactionDescriptionCode` values, rs-gaap flow
   concepts (what the enrichment classifier emits for QuickBooks data),
-  future XBRL GL ``GenericFlowCategory`` codes. The engine resolves them
-  to element_ids and matches the first-class ``LineItem.flow_element_id``
+  future XBRL GL `GenericFlowCategory` codes. The engine resolves them
+  to element_ids and matches the first-class `LineItem.flow_element_id`
   FK; matched lines aggregate signed into the attributed fact for the
   period.
 
-  ``field`` is accepted but ignored: the flow tag lives in the typed
-  ``flow_element_id`` FK, not in JSONB metadata. It stays on the wire so
+  `field` is accepted but ignored: the flow tag lives in the typed
+  `flow_element_id` FK, not in JSONB metadata. It stays on the wire so
   existing request bodies keep validating.
   """
 
@@ -47,7 +47,7 @@ class LineItemMetadataPredicate(BaseModel):
     "transaction_description_code",
     description=(
       "Accepted but ignored. The flow tag lives in the typed "
-      "``flow_element_id`` FK, not JSONB metadata. Retained for "
+      "`flow_element_id` FK, not JSONB metadata. Retained for "
       "wire-compatibility."
     ),
   )
@@ -56,7 +56,7 @@ class LineItemMetadataPredicate(BaseModel):
     min_length=1,
     description=(
       "Flow-concept qnames that route to this filter's target concept. "
-      "A LineItem matches when its ``flow_element_id`` is one of the "
+      "A LineItem matches when its `flow_element_id` is one of the "
       "elements named here AND the line falls within the rollforward's "
       "period."
     ),
@@ -77,11 +77,11 @@ class AttributionFilter(BaseModel):
 
   Pairs a target concept (the flow leaf the matched amount counts
   toward) with a predicate (which LineItems match). The rollforward's
-  ``attribution_filters: list[AttributionFilter]`` declares every flow
+  `attribution_filters: list[AttributionFilter]` declares every flow
   the BS source decomposes into; the renderer evaluates them all per
   period.
 
-  ``target_element_id`` is resolved at create time from ``target_qname``
+  `target_element_id` is resolved at create time from `target_qname`
   via the rs-gaap library + tenant taxonomy lookup. Authors only need
   to provide the qname; the element_id is filled in by the create
   handler and the resolved value is what the envelope round-trips.
@@ -91,14 +91,14 @@ class AttributionFilter(BaseModel):
     ...,
     description=(
       "QName of the flow concept this filter produces facts for — e.g. "
-      "``rs-gaap:ProceedsFromIssuanceOfCommonStock``. Resolved to "
-      "``target_element_id`` at create time."
+      "`rs-gaap:ProceedsFromIssuanceOfCommonStock`. Resolved to "
+      "`target_element_id` at create time."
     ),
   )
   target_element_id: str | None = Field(
     None,
     description=(
-      "Resolved element id for ``target_qname``. Null at create time; "
+      "Resolved element id for `target_qname`. Null at create time; "
       "populated by the handler before persistence. Round-tripped in "
       "the envelope."
     ),
@@ -116,7 +116,7 @@ class CreateRollforwardRequest(BaseModel):
   """Create a rollforward Information Block.
 
   Mirrors :class:`CreateScheduleRequest` in shape. The block decomposes
-  the period change in ``bs_source_qname`` across the declared
+  the period change in `bs_source_qname` across the declared
   attribution filters. Residual (Δ BS - Σ filter matches) falls back to
   the default change tag — or, if no default is declared, surfaces as
   an unattributed fact tagged with a synthetic residual concept.
@@ -152,7 +152,7 @@ class CreateRollforwardRequest(BaseModel):
     ...,
     description=(
       "QName of the balance-sheet element whose period delta this "
-      "block decomposes. Resolved to ``bs_source_element_id`` at "
+      "block decomposes. Resolved to `bs_source_element_id` at "
       "create time."
     ),
   )
@@ -174,15 +174,15 @@ class CreateRollforwardRequest(BaseModel):
     "residual_as_default",
     description=(
       "How the renderer arbitrates when Σ filter matches != Δ BS. "
-      "``strict`` raises; ``residual_as_default`` emits the residual "
-      "as a default-tag fact (the common case); ``warn_only`` logs and "
+      "`strict` raises; `residual_as_default` emits the residual "
+      "as a default-tag fact (the common case); `warn_only` logs and "
       "lets the imbalance pass."
     ),
   )
   taxonomy_id: str | None = Field(
     None,
     description=(
-      "Owning taxonomy id (auto-resolved from ``bs_source_qname`` when omitted)."
+      "Owning taxonomy id (auto-resolved from `bs_source_qname` when omitted)."
     ),
   )
 
@@ -195,7 +195,7 @@ class UpdateRollforwardRequest(BaseModel):
   invalidate every period already rendered — so switching BS source means
   delete and re-create.
 
-  **Partial-update semantics**: an omitted (``None``) field means "leave
+  **Partial-update semantics**: an omitted (`None`) field means "leave
   unchanged". There is no wire-level way to *clear* the default change tag or
   empty the attribution_filters list; delete and re-create the block instead.
   The asymmetry is deliberate — a clear-sentinel costs wire-shape complexity
@@ -209,7 +209,7 @@ class UpdateRollforwardRequest(BaseModel):
     None,
     description=(
       "New default change tag qname. Pass a value to *change* the "
-      "default; omit (``None``) to leave unchanged. There is no "
+      "default; omit (`None`) to leave unchanged. There is no "
       "wire-level way to clear the default — see the class docstring."
     ),
   )

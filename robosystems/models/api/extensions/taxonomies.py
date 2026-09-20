@@ -16,10 +16,10 @@ class TaxonomyResponse(BaseModel):
   (elements, structures, associations, rules) are exposed via the
   Taxonomy Block envelope.
 
-  ``taxonomy_type`` discriminates: ``chart_of_accounts``,
-  ``reporting_standard``, ``reporting_extension``, ``custom_ontology``,
-  ``mapping``, ``schedule``. ``is_locked=True`` means library-origin
-  (immutable for tenants); ``is_shared=True`` means visible to multiple
+  `taxonomy_type` discriminates: `chart_of_accounts`,
+  `reporting_standard`, `reporting_extension`, `custom_ontology`,
+  `mapping`, `schedule`. `is_locked=True` means library-origin
+  (immutable for tenants); `is_shared=True` means visible to multiple
   graphs from a shared registry.
   """
 
@@ -50,7 +50,7 @@ class StructureResponse(BaseModel):
   """One structure header — a renderable section within a taxonomy
   (balance sheet, income statement, schedule, etc.).
 
-  ``block_type`` drives presentation: 'balance_sheet',
+  `block_type` drives presentation: 'balance_sheet',
   'income_statement', 'cash_flow_statement', 'equity_statement',
   'schedule', 'chart_of_accounts', 'coa_mapping', 'rollforward', etc.
   """
@@ -76,10 +76,10 @@ class AssociationResponse(BaseModel):
   """One edge between two elements within a structure (parent/child
   presentation, calculation rollup, mapping, equivalence).
 
-  ``association_type`` discriminates the edge semantics. Mapping edges
+  `association_type` discriminates the edge semantics. Mapping edges
   are the user-facing path (CoA → reporting concept); presentation /
   calculation edges express structure layout and roll-ups.
-  ``confidence`` is set on AI-suggested mappings (≥0.90 auto-approved,
+  `confidence` is set on AI-suggested mappings (≥0.90 auto-approved,
   0.70-0.89 flagged for review).
   """
 
@@ -348,7 +348,7 @@ class LinkEntityTaxonomyRequest(BaseModel):
   """Link an entity to a taxonomy (creates the ENTITY_HAS_TAXONOMY edge).
 
   This is how a graph declares "this entity reports under this taxonomy."
-  For ``chart_of_accounts`` taxonomies, this tells the platform which CoA
+  For `chart_of_accounts` taxonomies, this tells the platform which CoA
   the entity uses. For reporting taxonomies, which standard (us-gaap,
   ifrs). Idempotent — re-linking returns the existing edge unchanged.
 
@@ -477,9 +477,9 @@ class UpdateElementRequest(BaseModel):
   omit the field to leave unchanged, pass `null` to clear the parent
   (make root).
 
-  ``trait`` updates the element's primary FASB elementsOfFinancialStatements
-  trait assignment (in ``element_traits``, not a direct column on
-  ``elements``). Omit to leave unchanged. Passing a value replaces the
+  `trait` updates the element's primary FASB elementsOfFinancialStatements
+  trait assignment (in `element_traits`, not a direct column on
+  `elements`). Omit to leave unchanged. Passing a value replaces the
   current primary EFS trait; there is no set-to-null semantics (use the
   UI/admin path for full trait teardown — here we only support correction
   of a misclassified account)."""
