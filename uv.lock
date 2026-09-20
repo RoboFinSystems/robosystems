@@ -3804,7 +3804,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.34.2,<3.0" },
     { name = "retrying", specifier = ">=1.4.0,<2.0" },
     { name = "rich", marker = "extra == 'dev'", specifier = ">=15.0.0,<16.0" },
-    { name = "robosystems-client", marker = "extra == 'dev'", specifier = ">=1.17.2,<2.0" },
+    { name = "robosystems-client", marker = "extra == 'dev'", specifier = ">=2,<3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.0,<1.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0,<3.0" },
     { name = "sse-starlette", specifier = ">=3.3.0,<4.0" },
@@ -3831,7 +3831,7 @@ lambda = [
 
 [[package]]
 name = "robosystems-client"
-version = "1.17.2"
+version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -3839,9 +3839,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b6/6a/52a2b9fcbb9239752554fe937a05f60053ac707deb85acfbfdc0ef95329f/robosystems_client-1.17.2.tar.gz", hash = "sha256:877827b78f2cb8a0777c67b6e5c2a3969d6e2bd5e3de494ee3978160396726fc", size = 584566, upload-time = "2026-09-19T05:23:40.475Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/4f/322361ae5bc1c441b59bc7fc58810037d2d4cf5a8353eb995999fa063c11/robosystems_client-2.0.0.tar.gz", hash = "sha256:464b9810e6b0bf70c924a86f85932e521242c4b0f815d29cb268d3d7f6f00aea", size = 584208, upload-time = "2026-09-20T01:05:46.428Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/e8/d3269ae59465a71be675af4dd1914fc1f32970c4619888b1fd0908a5bc5a/robosystems_client-1.17.2-py3-none-any.whl", hash = "sha256:a2dec287a1b6021828ca196912754b51804763e9826bc45a2f41461e934a860d", size = 1332235, upload-time = "2026-09-19T05:23:38.617Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/8f/43e09dbde1823eb706d6a335710346a5465257dcc56f9eeefd45cb7b12d9/robosystems_client-2.0.0-py3-none-any.whl", hash = "sha256:c65d3f23d56e8be549d64169503b6990a8b2fb78d5d1fd6efc83df528b7965c8", size = 1334598, upload-time = "2026-09-20T01:05:44.521Z" },
 ]
 
 [[package]]
