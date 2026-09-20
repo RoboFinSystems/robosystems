@@ -102,7 +102,13 @@ class InvestorQuery:
     limit: int | None = None,
     offset: int | None = None,
   ) -> SecurityList | None:
-    """Paginated list of securities."""
+    """Paginated list of securities.
+
+    Args:
+      entity_id: Filter to securities issued by one entity.
+      security_type: Filter by instrument type.
+      is_active: Filter on active status. Omit for both.
+    """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboinvestor") as session:
@@ -124,7 +130,11 @@ class InvestorQuery:
     info: Info[GraphQLContext, None],
     security_id: str,
   ) -> Security | None:
-    """Single security by id."""
+    """Single security by id.
+
+    Args:
+      security_id: The security's id.
+    """
     try:
       with _open_session(info, "roboinvestor") as session:
         response = reads_securities.get_security(session, security_id)
@@ -146,7 +156,13 @@ class InvestorQuery:
     limit: int | None = None,
     offset: int | None = None,
   ) -> PositionList | None:
-    """Paginated list of positions."""
+    """Paginated list of positions.
+
+    Args:
+      portfolio_id: Filter to one portfolio.
+      security_id: Filter to holdings of one security.
+      status: Filter by position status.
+    """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboinvestor") as session:
@@ -168,7 +184,11 @@ class InvestorQuery:
     info: Info[GraphQLContext, None],
     position_id: str,
   ) -> Position | None:
-    """Single enriched position by id."""
+    """Single enriched position by id.
+
+    Args:
+      position_id: The position's id.
+    """
     try:
       with _open_session(info, "roboinvestor") as session:
         response = reads_positions.get_position(session, position_id)
@@ -186,7 +206,11 @@ class InvestorQuery:
     info: Info[GraphQLContext, None],
     portfolio_id: str,
   ) -> HoldingsList | None:
-    """Portfolio positions grouped by entity."""
+    """Portfolio positions grouped by entity.
+
+    Args:
+      portfolio_id: The portfolio whose positions are grouped by entity.
+    """
     try:
       with _open_session(info, "roboinvestor") as session:
         response = reads_holdings.list_holdings(session, portfolio_id)
@@ -204,7 +228,11 @@ class InvestorQuery:
     info: Info[GraphQLContext, None],
     portfolio_id: str,
   ) -> PortfolioBlock | None:
-    """Portfolio-centric molecule: portfolio + active positions + securities + entities."""
+    """Portfolio-centric molecule: portfolio + active positions + securities + entities.
+
+    Args:
+      portfolio_id: The portfolio to assemble the molecule for.
+    """
     try:
       with _open_session(info, "roboinvestor") as session:
         response = reads_portfolio_block.get_portfolio_block(session, portfolio_id)

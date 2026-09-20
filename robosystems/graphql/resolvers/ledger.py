@@ -198,7 +198,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     source: str | None = None,
   ) -> list[LedgerEntity]:
-    """List entities for a graph, optionally filtered by source."""
+    """List entities for a graph, optionally filtered by source.
+
+    Args:
+      source: Filter by the system an entity came from, e.g. `quickbooks`.
+    """
     try:
       with _open_session_for_any(info, _ENTITY_EXTENSIONS) as session:
         responses = reads_entity.list_entities(session, source=source)
@@ -214,7 +218,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     id: str,
   ) -> Agent | None:
-    """Fetch a single counterparty agent by id."""
+    """Fetch a single counterparty agent by id.
+
+    Args:
+      id: The agent's id (`agt_`-prefixed).
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_agent.get_agent(session, id)
@@ -234,7 +242,13 @@ class LedgerQuery:
     limit: int | None = None,
     offset: int | None = None,
   ) -> list[Agent]:
-    """List counterparty agents with optional filters."""
+    """List counterparty agents with optional filters.
+
+    Args:
+      agent_type: Filter by counterparty role, e.g. `customer` or `vendor`.
+      source: Filter by originating system, e.g. `quickbooks`.
+      is_active: Filter on active status. Defaults to active only; pass null for both.
+    """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     try:
       with _open_session(info, "roboledger") as session:
@@ -257,7 +271,7 @@ class LedgerQuery:
     """Graph-wide open AR — total + counterparty count + open invoice count.
 
     Derived from the event duality chain: sum of unsettled
-    ``invoice_issued`` / ``sales_receipt_recorded`` amounts minus
+    `invoice_issued` / `sales_receipt_recorded` amounts minus
     discharges pointed at them.
     """
     try:
@@ -269,7 +283,7 @@ class LedgerQuery:
 
   @strawberry.field
   def open_payables(self, info: Info[GraphQLContext, None]) -> OpenBalanceAggregate:
-    """Graph-wide open AP — symmetric to ``open_receivables``."""
+    """Graph-wide open AP — symmetric to `open_receivables`."""
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_ar_ap.compute_open_payables(session)
@@ -309,7 +323,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     id: str,
   ) -> EventBlock | None:
-    """Fetch a single event block by id."""
+    """Fetch a single event block by id.
+
+    Args:
+      id: The event block's id.
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_event_block.get_event_block(session, id)
@@ -334,12 +352,22 @@ class LedgerQuery:
   ) -> list[EventBlock]:
     """List event blocks with optional filters.
 
-    Recent events first (``occurred_at`` descending). Filter by ``status``
-    (``captured`` is the unposted queue, ``committed`` the audit trail),
-    ``source`` (``quickbooks`` / ``schedule`` / ``manual``), ``eventType``,
-    and ``isReconcilingItem`` — ``true`` returns the post-sync
+    Recent events first (`occurred_at` descending). Filter by `status`
+    (`captured` is the unposted queue, `committed` the audit trail),
+    `source` (`quickbooks` / `schedule` / `manual`), `eventType`,
+    and `isReconcilingItem` — `true` returns the post-sync
     reconciliation worklist, committed events whose upstream payload
     changed after they were posted.
+
+    Args:
+      event_type: Filter to one event type, e.g. `invoice_issued`.
+      event_category: Filter on the event's category label.
+      status: Filter by lifecycle state: `captured` is the unposted queue, `committed`
+        the audit trail.
+      agent_id: Filter to events involving one counterparty.
+      source: Filter by originating system: `quickbooks`, `schedule` or `manual`.
+      is_reconciling_item: True returns the post-sync reconciliation worklist -
+        committed events whose upstream payload changed after posting.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     try:
@@ -432,7 +460,13 @@ class LedgerQuery:
     limit: int | None = None,
     offset: int | None = None,
   ) -> AccountList | None:
-    """Paginated Chart of Accounts listing."""
+    """Paginated Chart of Accounts listing.
+
+    Args:
+      classification: Filter on the account's statement classification, e.g. `asset` or
+        `revenue`.
+      is_active: Filter on active status. Omit for both.
+    """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboledger") as session:
@@ -455,10 +489,14 @@ class LedgerQuery:
   ) -> AccountTree | None:
     """Chart of Accounts as a recursive tree.
 
-    ``include_inactive`` defaults to ``False`` so deleted source-system
+    `include_inactive` defaults to `False` so deleted source-system
     accounts (still kept in OLTP for historical journal-line FK integrity)
-    don't clutter the standard CoA view. Set ``True`` for admin / cleanup
+    don't clutter the standard CoA view. Set `True` for admin / cleanup
     contexts.
+
+    Args:
+      include_inactive: Include accounts deleted upstream but retained for journal-line
+        integrity. Defaults to false.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -480,7 +518,14 @@ class LedgerQuery:
     start_date: date | None = None,
     end_date: date | None = None,
   ) -> AccountRollups | None:
-    """CoA accounts grouped by reporting element with balances."""
+    """CoA accounts grouped by reporting element with balances.
+
+    Args:
+      mapping_id: The mapping whose associations group the accounts. Omit for the active
+        mapping.
+      start_date: Start of the balance window (inclusive).
+      end_date: End of the balance window (inclusive).
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_account_rollups.get_account_rollups(
@@ -504,7 +549,12 @@ class LedgerQuery:
     start_date: date | None = None,
     end_date: date | None = None,
   ) -> TrialBalance | None:
-    """Trial balance for posted entries in a date range."""
+    """Trial balance for posted entries in a date range.
+
+    Args:
+      start_date: Start of the posting window (inclusive).
+      end_date: End of the posting window (inclusive).
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_trial_balance.get_trial_balance(
@@ -526,7 +576,13 @@ class LedgerQuery:
     limit: int | None = None,
     offset: int | None = None,
   ) -> LedgerTransactionList | None:
-    """Paginated list of transactions."""
+    """Paginated list of transactions.
+
+    Args:
+      type: Filter by transaction type.
+      start_date: Start of the transaction-date window (inclusive).
+      end_date: End of the transaction-date window (inclusive).
+    """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboledger") as session:
@@ -548,7 +604,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     transaction_id: str,
   ) -> LedgerTransactionDetail | None:
-    """Single transaction with all entries and line items."""
+    """Single transaction with all entries and line items.
+
+    Args:
+      transaction_id: The transaction's id.
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_transactions.get_transaction(session, transaction_id)
@@ -585,6 +645,15 @@ class LedgerQuery:
     Filter by `provenance` (`schedule_derived` for what the close
     posted), `type` (`adjusting` / `closing`), `status`, or a parent
     `transactionId`.
+
+    Args:
+      start_date: Start of the entry-date window (inclusive).
+      end_date: End of the entry-date window (inclusive).
+      status: Filter by entry status, e.g. `draft` or `posted`.
+      type: Filter by entry type: `adjusting` or `closing`.
+      provenance: Filter by what created the entry; `schedule_derived` is what the close
+        posted.
+      transaction_id: Filter to entries under one parent transaction.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -612,7 +681,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     taxonomy_type: str | None = None,
   ) -> TaxonomyList | None:
-    """List all active taxonomies, optionally filtered by type."""
+    """List all active taxonomies, optionally filtered by type.
+
+    Args:
+      taxonomy_type: Filter by taxonomy type.
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.list_taxonomies(
@@ -647,7 +720,15 @@ class LedgerQuery:
     limit: int | None = None,
     offset: int | None = None,
   ) -> ElementList | None:
-    """Paginated list of taxonomy elements."""
+    """Paginated list of taxonomy elements.
+
+    Args:
+      taxonomy_id: Filter to elements of one taxonomy.
+      source: Filter by the element's originating system.
+      classification: Filter on the element's statement classification.
+      is_abstract: True for abstract presentation nodes only, false for concrete
+        elements, omit for both.
+    """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboledger") as session:
@@ -670,13 +751,17 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     classification: str,
   ) -> list[Element]:
-    """rs-gaap concepts a CoA element of the given EFS ``classification``
-    (asset / liability / equity / revenue / expense / gain / loss) may map
-    to — limited to concepts that actually render under the active Reporting
-    Style (falling back to the rs-gaap-presentation set when no Style is
-    seeded), with statement-level subtotals excluded. This is the same
-    candidate set the MappingOperator picks from, so the mapping UI never
-    offers a target that would land a fact on an unreachable branch.
+    """The rs-gaap concepts a chart-of-accounts element may map to.
+
+    Limited to concepts that actually render under the active Reporting Style
+    — falling back to the rs-gaap-presentation set when no Style is seeded —
+    with statement-level subtotals excluded. It is the same candidate set the
+    mapping operator picks from, so a target that would land a fact on an
+    unreachable branch is never offered.
+
+    Args:
+      classification: The CoA element's EFS classification - asset, liability, equity,
+        revenue, expense, gain or loss - whose eligible rs-gaap targets to return.
     """
     # Narrow candidates to what the entity's Reporting Style actually renders,
     # keeping the picker in sync with the renderer. Resolved from the same
@@ -704,7 +789,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     mapping_id: str | None = None,
   ) -> list[UnmappedElement]:
-    """CoA elements not yet mapped to the reporting taxonomy."""
+    """CoA elements not yet mapped to the reporting taxonomy.
+
+    Args:
+      mapping_id: The mapping to measure against. Omit for the active mapping.
+    """
     try:
       with _open_session(info, "roboledger") as session:
         responses = reads_taxonomies.list_unmapped_elements(
@@ -723,7 +812,12 @@ class LedgerQuery:
     taxonomy_id: str | None = None,
     block_type: str | None = None,
   ) -> StructureList | None:
-    """List active structures."""
+    """List active structures.
+
+    Args:
+      taxonomy_id: Filter to structures of one taxonomy.
+      block_type: Filter to one block type.
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.list_structures(
@@ -749,7 +843,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     mapping_id: str,
   ) -> MappingDetail | None:
-    """Single mapping structure with all associations."""
+    """Single mapping structure with all associations.
+
+    Args:
+      mapping_id: The mapping structure's id.
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.get_mapping_detail(session, mapping_id)
@@ -765,7 +863,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     mapping_id: str,
   ) -> MappingCoverage | None:
-    """Coverage stats for a mapping."""
+    """Coverage stats for a mapping.
+
+    Args:
+      mapping_id: The mapping structure to report coverage for.
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.get_mapping_coverage(session, mapping_id)
@@ -781,7 +883,14 @@ class LedgerQuery:
     start_date: date | None = None,
     end_date: date | None = None,
   ) -> MappedTrialBalance | None:
-    """Trial balance rolled up to reporting concepts via mapping associations."""
+    """Trial balance rolled up to reporting concepts via mapping associations.
+
+    Args:
+      mapping_id: The mapping whose associations roll accounts up to reporting concepts.
+        Omit for the active mapping.
+      start_date: Start of the posting window (inclusive).
+      end_date: End of the posting window (inclusive).
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.get_mapped_trial_balance(
@@ -800,7 +909,12 @@ class LedgerQuery:
     period_start: date,
     period_end: date,
   ) -> PeriodCloseStatus | None:
-    """Close status for all schedules in a fiscal period."""
+    """Close status for all schedules in a fiscal period.
+
+    Args:
+      period_start: First day of the fiscal period, as `YYYY-MM-DD`.
+      period_end: Last day of the fiscal period, as `YYYY-MM-DD`.
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_schedules.get_period_close_status(
@@ -867,9 +981,12 @@ class LedgerQuery:
     """All draft entries for a fiscal period, ready for review before close.
 
     The close-review *outbox*: each draft is annotated with its QB
-    write-back disposition (``willPublishToQb``) and the response carries
+    write-back disposition (`willPublishToQb`) and the response carries
     a publish summary — which drafts `close-period` will push to
     QuickBooks vs. post locally only.
+
+    Args:
+      period: The fiscal period, as `YYYY-MM`.
     """
     from robosystems.db.platform import platform_session
     from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
@@ -927,7 +1044,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     report_id: str,
   ) -> Report | None:
-    """Single report definition with structures + entity name."""
+    """Single report definition with structures + entity name.
+
+    Args:
+      report_id: The report's id.
+    """
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
         response = reads_reports.get_report(session, report_id)
@@ -947,7 +1068,10 @@ class LedgerQuery:
 
     Report metadata plus one rendered Information Block envelope per
     attached FactSet, so a whole published report is read in a single
-    round trip rather than one ``statement`` call per block.
+    round trip rather than one `statement` call per block.
+
+    Args:
+      report_id: The report to rehydrate.
     """
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
@@ -971,12 +1095,18 @@ class LedgerQuery:
     The only way to download a report's bundle. Every format resolves to a
     short-lived presigned S3 URL which the client follows directly — the
     field returns the URL, never the bytes. JSON-LD is stamped at publish
-    time; XBRL is materialized and cached on first request. ``expiresIn``
+    time; XBRL is materialized and cached on first request. `expiresIn`
     is the URL's lifetime in seconds, bounded 60-3600.
 
     Returns null when the report doesn't exist; raises
-    ``REPORT_BUNDLE_NOT_AVAILABLE`` when it exists but has no published
+    `REPORT_BUNDLE_NOT_AVAILABLE` when it exists but has no published
     bundle yet.
+
+    Args:
+      report_id: The published report whose bundle to link.
+      format: Serialization flavor. Defaults to JSON-LD.
+      expires_in: URL lifetime in seconds, 60-3600. Out of range raises
+        `INVALID_EXPIRES_IN`.
     """
     # Replaces the retired `GET .../reports/{id}/download`: a download is a
     # read of stored state, so it belongs on the read surface.
@@ -1025,7 +1155,12 @@ class LedgerQuery:
     report_id: str,
     block_type: str,
   ) -> Statement | None:
-    """Rendered financial statement for a report + block_type."""
+    """Rendered financial statement for a report + block_type.
+
+    Args:
+      report_id: The report the statement belongs to.
+      block_type: Which statement to render, e.g. `income_statement`.
+    """
     graph_id = require_graph_id(info)
     try:
       with _open_session(info, "roboledger") as session:
@@ -1071,7 +1206,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     list_id: str,
   ) -> PublishListDetail | None:
-    """Single publish list with enriched members, or null."""
+    """Single publish list with enriched members, or null.
+
+    Args:
+      list_id: The publish list's id.
+    """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_publish_lists.get_publish_list(session, list_id)

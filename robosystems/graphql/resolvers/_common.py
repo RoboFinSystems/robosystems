@@ -29,11 +29,11 @@ def resolve_pagination(
 ) -> tuple[int, int]:
   """Default null pagination args, then bounds-check.
 
-  Generated SDK clients (graphql-codegen) pass explicit ``null`` for
+  Generated SDK clients (graphql-codegen) pass explicit `null` for
   every omitted variable, and GraphQL rejects explicit null for a
   non-null argument even when it declares a default — so pagination
-  args are declared nullable in the schema (``Int`` rather than
-  ``Int! = N``) and defaulted here instead.
+  args are declared nullable in the schema (`Int` rather than
+  `Int! = N`) and defaulted here instead.
   """
   resolved_limit = default_limit if limit is None else limit
   resolved_offset = 0 if offset is None else offset

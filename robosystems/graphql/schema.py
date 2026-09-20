@@ -21,6 +21,8 @@ facades expect.
 from __future__ import annotations
 
 import inspect
+import re
+import textwrap
 
 import strawberry
 from strawberry.extensions import (
@@ -66,6 +68,66 @@ class _BaseQuery:
     return f"hello, {user.email}"
 
 
+# `limit` and `offset` mean the same thing on all 31 fields that take them:
+# `resolvers/_common.py` validates every pair against one shared guard. Only the
+# per-field default varies, and that is resolved server-side, so one description
+# is accurate everywhere and beats 31 copies drifting apart. A docstring `Args:`
+# entry still wins where a field needs to say something else.
+COMMON_ARGUMENT_DESCRIPTIONS = {
+  "limit": (
+    "Maximum rows to return, 1-1000. Omit to use this field's own default; "
+    "out of range raises `INVALID_PAGINATION`."
+  ),
+  "offset": (
+    "Rows to skip before returning, 0 or greater. Out of range raises "
+    "`INVALID_PAGINATION`."
+  ),
+}
+
+_SECTION_HEADING = re.compile(
+  r"^(Args|Arguments|Returns|Raises|Yields|Note|Example)s?:\s*$"
+)
+_ARG_ENTRY = re.compile(r"^(\w+)\s*:\s*(.*)$")
+
+
+def _split_docstring(doc: str) -> tuple[str, dict[str, str]]:
+  """Separate a docstring's prose from its Google-style ``Args:`` block.
+
+  The prose becomes the field description and the entries become argument
+  descriptions, so both live in the one place a Python author already writes.
+  The ``Args:`` block is stripped from the prose rather than published twice —
+  the reference renders arguments as their own table.
+  """
+  lines = doc.splitlines()
+  prose: list[str] = []
+  args: dict[str, str] = {}
+  current: str | None = None
+  in_args = False
+
+  for line in lines:
+    heading = _SECTION_HEADING.match(line.strip())
+    if heading:
+      in_args = heading.group(1) in ("Args", "Arguments")
+      current = None
+      if not in_args:
+        prose.append(line)
+      continue
+    if not in_args:
+      prose.append(line)
+      continue
+    if not line.strip():
+      current = None
+      continue
+    entry = _ARG_ENTRY.match(line.strip())
+    if entry:
+      current = entry.group(1)
+      args[current] = entry.group(2).strip()
+    elif current:
+      args[current] = f"{args[current]} {line.strip()}".strip()
+
+  return textwrap.dedent("\n".join(prose)).strip(), args
+
+
 def _describe_from_docstrings(cls: type) -> type:
   """Publish each resolver's docstring as its GraphQL field description.
 
@@ -88,13 +150,22 @@ def _describe_from_docstrings(cls: type) -> type:
   inside the function, not in the docstring.
   """
   for field in cls.__strawberry_definition__.fields:
-    if field.description:
-      continue
     resolver = field.base_resolver
     func = getattr(resolver, "wrapped_func", None) if resolver is not None else None
     doc = inspect.getdoc(func) if func is not None else None
-    if doc:
-      field.description = doc
+    prose, arg_docs = _split_docstring(doc) if doc else ("", {})
+
+    if prose and not field.description:
+      field.description = prose
+
+    for argument in field.arguments:
+      if argument.description:
+        continue
+      text = arg_docs.get(argument.python_name) or COMMON_ARGUMENT_DESCRIPTIONS.get(
+        argument.python_name
+      )
+      if text:
+        argument.description = text
   return cls
 
 

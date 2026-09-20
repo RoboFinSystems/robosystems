@@ -1,158 +1,25 @@
-RoboSystems is an open-source, AI-native financial intelligence platform for accounting, financial reporting, and investment management. It gives AI agents and analysts a ledger-grade system of record they can both query and operate — closing the books, producing reports, and analyzing portfolios across accounting, market, and SEC data. The platform powers [RoboLedger](https://roboledger.ai) for accounting and [RoboInvestor](https://roboinvestor.ai) for investment research, with knowledge graphs managed through the [RoboSystems](https://robosystems.ai) app.
+The REST and GraphQL API for [RoboSystems](https://robosystems.ai) — an open-source, AI-native platform for accounting, financial reporting and investment management. It powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
 
-## Core Features
+This page is the **playground**: every operation below can be run against this deployment. The written reference lives on the docs site, linked under each surface.
 
-- **Unified Graph Architecture**: A transactional core with a materialized analytical graph under one schema and Cypher surface
-- **Graph Database**: Build knowledge graphs with LadybugDB for modeling financial relationships and multi-dimensional analytics
-- **Multi-Tenant Architecture**: Isolated database instances with tier-based resource allocation
-- **AI Operator System**: Autonomous financial Operators (Claude/MCP executors) with automatic credit tracking and SSE progress streaming
-- **DuckDB Staging**: Data validation and bulk ingestion pipeline with Parquet staging
-- **Data Integration**: Connect [QuickBooks](https://quickbooks.intuit.com/partners/affiliates?cid=par_pim_4TcakSEFQs73) and SEC XBRL filings in a unified graph
-- **Document Search**: Upload, index, and search documents with full-text and semantic search via OpenSearch
-- **Shared Repositories**: Access to curated SEC filing data and other shared knowledge graphs
-- **Credit-Based Billing**: AI operations consume token-based credits; database and MCP operations are free
+## Two surfaces
 
-## API Modules
+**Platform** — `/v1/…` — graphs, queries, schema, documents, search, memory, connections, billing and access. Reads are REST `GET`s; every write is a named operation at `/operations/{name}` returning an `OperationEnvelope`, accepting an `Idempotency-Key`, and streaming progress at `/v1/operations/{id}/stream`.
+→ [API reference](https://robosystems.ai/docs/api)
 
-### Graph Operations
+**Extensions** — `/extensions/…` — RoboLedger and RoboInvestor, scoped by `graph_id` in the URL. Reads are GraphQL at `POST /extensions/{graph_id}/graphql` and change nothing; writes are named operations at `/extensions/{domain}/{graph_id}/operations/{name}`; analytical views read the materialized graph.
+→ [Extensions reference](https://robosystems.ai/docs/extensions) · [every GraphQL query](https://robosystems.ai/docs/extensions/graphql)
 
-The core platform surface for querying and managing graphs. Reads are REST `GET`s; every write is a named `OperationEnvelope` operation (`/operations/{op_name}`) with `Idempotency-Key` support, audit logging, and SSE progress at `/v1/operations/{id}/stream`.
+## Authenticating
 
-**Query and data access:**
+`X-API-Key: rfs…` on REST, GraphQL and per-graph MCP. Browser sessions use JWTs from `POST /v1/auth/login`. The graph-agnostic MCP endpoint `/v1/mcp` takes OAuth 2.1 bearer tokens only.
 
-- **Query**: Execute Cypher queries with NDJSON streaming for large results
-- **Schema**: View node types, relationship types, and property definitions
-- **Tables**: DuckDB staging tables — file upload, SQL query, and import workflows
-- **Health**: Database connectivity, staleness indicators, and materialization status
+## Connecting an AI client
 
-**Graph and infrastructure state:**
-
-- **Subgraphs**: List subgraphs with per-subgraph storage information
-- **Backups**: List backups, download URLs, and storage statistics (each backup reports its `download_extension` — `.lbug.zip` or zstd `.lbug.zst`)
-- **Usage**: Graph content metrics and consumption usage (storage, credits)
-- **Limits**: Tier limits and capacity in one read — storage, queries, rate limits, and the count-based caps on documents and subgraphs
-
-**Lifecycle commands** (`/operations/{op_name}`):
-
-- **create-subgraph**: Initialize a subgraph with optional fork of parent data
-- **delete-subgraph**: Remove a subgraph with optional pre-delete backup
-- **create-backup**: Full-dump backup with configurable retention, downloadable via a signed URL
-- **change-tier**: Change graph infrastructure tier with Stripe billing integration
-- **materialize**: Ingest DuckDB-staged tables or OLTP data into the graph (direct or Dagster-orchestrated)
-- **update-graph-metadata**: Edit the graph's display name, description and tags (admin only; partial update)
-
-### Documents, Search & Memory
-
-Reads are REST `GET`s; content writes share the same `/operations/{op_name}` envelope as lifecycle commands.
-
-- **Documents**: List and retrieve documents attached to a graph; write via `index-document` / `delete-document`
-- **Search**: Full-text and semantic (BM25 + KNN) search across graph documents via OpenSearch, with section-level retrieval
-- **Files**: Stage uploaded files — `create-file-upload`, `ingest-file`, and `delete-file` commands with list and inspect reads
-- **Memory**: Per-graph semantic memory for AI agents — ranked `recall` plus list/get reads, with `remember` / `forget` / `update-memory` commands
-
-### MCP & AI Operators
-
-- **MCP**: Model Context Protocol — schema-aware graph tools and queries for AI agents. Every graph serves the MCP Streamable HTTP transport at `POST /v1/graphs/{graph_id}/mcp`, and the graph-agnostic `POST /v1/mcp` serves the same transport to OAuth clients
-- **AI Operators**: Autonomous Claude/MCP executors for financial analysis and report generation, with automatic credit tracking and SSE progress (sync, SSE, or background worker)
-
-### Data Synchronization
-
-- **Connections**: Provider connections with OAuth flows, sync triggers, and status
-- **QuickBooks**: Sync transactions, accounts, and counterparties
-- **External sources**: Register a source namespace for integrations that run outside the platform and write through the public API — registration only, no credentials and no sync
-
-### Extensions Surface
-
-Domain extensions (RoboLedger, RoboInvestor) bring their own schema and OLTP tables on a schema-per-tenant PostgreSQL database, and materialize to the graph for analytics. Content is authored as **block molecules** — self-describing envelopes bundling atomic facts with their structure, rules, and verification. The surface is **graph-scoped at the URL level** (`graph_id` is a path parameter, never a query argument), split by transport:
-
-- **Reads** → GraphQL at `POST /extensions/{graph_id}/graphql` — schema composed dynamically from enabled domains
-- **Writes** → `POST /extensions/{domain}/{graph_id}/operations/{operation_name}` — named `OperationEnvelope` commands with `Idempotency-Key` and SSE progress
-- **Views** → `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — read-only analytics over the materialized graph
-
-### RoboLedger
-
-[RoboLedger](https://roboledger.ai) is an accounting and financial reporting extension — a ledger-grade system of record that AI and analysts can both query and operate, broadly implementing the [Seattle Method](http://xbrlsite.com/seattlemethod/). Three block molecules are the authoring substrate:
-
-- **Information Blocks** — reportable content (schedules, statements, metrics) bundled with period-versioned fact sets, typed mechanics, and rules; `evaluate-rules` runs arithmetic checks over materialized facts, and `assert-metrics` writes asserted metric series
-- **Event Blocks** — REA event capture: record what happened via an action-verb vocabulary, and a handler registry derives debits/credits across the three-level ledger (Transaction → Entry → LineItem); external systems post events through registered event sources
-- **Taxonomy Blocks** — accounting frameworks as data: Elements, Associations (presentation / calculation / mapping), Structures, and structural rules in one write; ships `fac` (fundamentals) and `rs-gaap` (~2,000 curated US-GAAP concepts)
-
-Built on the blocks:
-
-- **Reads** (GraphQL) — chart of accounts and account trees, events/transactions, trial balances, financial statements, taxonomies, mappings, reports, schedules, and fiscal calendar
-- **Close lifecycle** — fiscal calendar (`closed_through` / `close_target`) with period close/reopen gated on the balance equation and QuickBooks sync-staleness
-- **Mapping** — CoA→GAAP associations plus AI-assisted bulk mapping via the **MappingOperator** (auto-approve / review / skip)
-- **Reporting** — multi-period statements through a Reporting Style, with a draft → under_review → filed → archived lifecycle and publish lists
-- **Forecasting** — operating-plan scenarios projected through the same statement structures: rule-driven forecasts, per-line growth trajectories, and manual line assertions, with forecast periods returned alongside actuals on statement reads
-- **Analytical views** — `live-financial-statement` from the OLTP ledger; `build-fact-grid` and `financial-statement-analysis` over the materialized XBRL graph hypercube
-- **Serialization** — reports to **JSON-LD** (SHACL-validatable) and **XBRL 2.1** (Arelle-validated)
-- **Pipelines** — QuickBooks ELT via dbt/Dagster with a configurable `write_policy`
-
-### RoboInvestor
-
-[RoboInvestor](https://roboinvestor.ai) is a portfolio management and investment tracking extension — tracks investor holdings and links them back to the companies behind them.
-
-- **Portfolio Blocks** — a portfolio with its positions and securities written as one validated envelope (cost basis as integer cents); positions move through an active / disposed / archived lifecycle. Reads expose `portfolios`, `positions`, `holdings` (rolled up by issuer), and the assembled `portfolioBlock`
-- **Securities** — ownership instruments (common stock, warrants, convertible notes, …) with an extensible `terms` blob for instrument-specific detail
-- **Cross-graph research** — a security links to its issuer via a mutual handshake (the issuer shares a report that materializes its entity in the investor's graph), joining private holdings to SEC public-company data in the shared repository
-
-### User & Access
-
-- **Authentication**: JWT sessions and API keys, plus WebAuthn passkeys as a second factor or a passwordless first factor. A deployment publishes which login methods it offers at `GET /v1/auth/providers`
-- **Enterprise identity** *(off by default; dedicated and self-hosted deployments)*: OIDC single sign-on and SCIM 2.0 user provisioning at `/scim/v2`, so an identity provider owns the account lifecycle. Login resolves SCIM-provisioned users only — there is no just-in-time account creation
-- **User Management**: Manage user account settings and profile
-- **Subscriptions**: Shared repository subscription access & AI credits
-- **Limits**: Rate limiting and usage tracking for shared repositories
-- **Organizations**: Multi-user orgs — invitations, member roles, org-billed subscriptions, and per-graph membership
-
-## Connect via MCP
-
-Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude, Claude Code, Cursor, or any MCP client that supports HTTP transports, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header. Access follows the graph: your own graphs need graph membership, and the public `sec` repository needs an **active repository subscription** (Starter or Advanced — plans and their MCP rate limits are published at `GET /v1/offering`). An API key alone does not open `sec`; the server answers `403` until the subscription exists, and tool calls count against the plan's MCP limits:
-
-```
-https://api.robosystems.ai/v1/graphs/{graph_id}/mcp
-```
-
-For example, in Claude Code:
-
-```
-claude mcp add --transport http robosystems-sec \
-  https://api.robosystems.ai/v1/graphs/sec/mcp \
-  --header "X-API-Key: <your key>"
-```
-
-**OAuth — sign in and pick a graph.** The graph-agnostic endpoint accepts OAuth only, and needs no key at all:
-
-```
-https://api.robosystems.ai/v1/mcp
-```
-
-An OAuth-capable client (claude.ai, Claude Code, ChatGPT, VS Code, Cursor) discovers the authorization server from the endpoint (`/.well-known/oauth-protected-resource/v1/mcp`), sends you to sign in, and the consent screen is where you choose the graph the connection covers — your own graphs or a subscribed repository such as `sec`. The client then holds a revocable token bound to that graph; revoke it at any time and the connection stops. Per-graph URLs accept OAuth too, alongside the `X-API-Key` header.
-
-Header-only clients (scripts, CI, editors without OAuth) put an API key in `X-API-Key` on a per-graph URL — the MCP page in the app (`/connect`) mints keys scoped to one graph for exactly that. Credentials never travel in the URL. Clients without HTTP transport support can use the [stdio bridge](https://www.npmjs.com/package/@robosystems/mcp) in proxy mode.
+Every graph is an MCP server at `POST /v1/graphs/{graph_id}/mcp`, and `POST /v1/mcp` serves OAuth clients that pick their graph at consent.
+→ [MCP guide](https://robosystems.ai/docs/technical/ai-operators-and-mcp)
 
 ## Clients
 
-Official clients for integrating with the API:
-
-### Python Client
-
-Python client library covering the API surface - [robosystems-client](https://pypi.org/project/robosystems-client/)
-
-**Installation**: `pip install robosystems-client`
-
-### TypeScript/JavaScript Client
-
-TypeScript client for Node.js and browser applications - [@robosystems/client](https://www.npmjs.com/package/@robosystems/client)
-
-**Installation**: `npm install @robosystems/client`
-
-## Authentication
-
-The REST, GraphQL and per-graph MCP endpoints authenticate with an API key in the request headers:
-
-```
-X-API-Key: rfs*
-```
-
-The graph-agnostic MCP endpoint (`/v1/mcp`) accepts OAuth 2.1 bearer tokens only — see **Connect via MCP** above. Browser sessions use JWTs issued by `POST /v1/auth/login`.
+[`robosystems-client`](https://pypi.org/project/robosystems-client/) for Python, [`@robosystems/client`](https://www.npmjs.com/package/@robosystems/client) for TypeScript.
+→ [Guides](https://robosystems.ai/docs/guides) · [Technical docs](https://robosystems.ai/docs/technical)

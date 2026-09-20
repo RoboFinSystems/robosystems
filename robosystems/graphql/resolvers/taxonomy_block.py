@@ -38,10 +38,10 @@ class TaxonomyBlockQuery:
 
   Both fields open a library-session so they work on the library
   sentinel AND on per-graph tenant endpoints. On a tenant graph_id the
-  session's ``search_path`` includes the tenant schema, so
+  session's `search_path` includes the tenant schema, so
   tenant-created blocks surface alongside chained library rows. On the
-  library sentinel, only block types with ``surfaces_in_library=True``
-  appear — today that's just ``reporting_standard``.
+  library sentinel, only block types with `surfaces_in_library=True`
+  appear — today that's just `reporting_standard`.
   """
 
   @strawberry.field
@@ -50,7 +50,11 @@ class TaxonomyBlockQuery:
     info: Info[GraphQLContext, None],
     id: strawberry.ID,
   ) -> TaxonomyBlock | None:
-    """Fetch a single Taxonomy Block envelope by id."""
+    """Fetch a single Taxonomy Block envelope by id.
+
+    Args:
+      id: The taxonomy block's structure id.
+    """
     with _open_session(info) as session:
       envelope = get_taxonomy_block(session, str(id))
       return TaxonomyBlock.from_pydantic(envelope) if envelope else None
@@ -67,11 +71,17 @@ class TaxonomyBlockQuery:
   ) -> list[TaxonomyBlock]:
     """List Taxonomy Blocks with optional filters.
 
-    ``taxonomyType`` narrows to one registered type (e.g.
-    ``'chart_of_accounts'``). ``parentTaxonomyId`` narrows to extensions
-    of a specific library taxonomy. ``category`` filters on the registry
-    entry's category label (``'Chart'``, ``'Reporting'``, ``'Library'``,
-    ``'Custom'``, ``'Close'``). Filters combine as AND.
+    `taxonomyType` narrows to one registered type (e.g.
+    `'chart_of_accounts'`). `parentTaxonomyId` narrows to extensions
+    of a specific library taxonomy. `category` filters on the registry
+    entry's category label (`'Chart'`, `'Reporting'`, `'Library'`,
+    `'Custom'`, `'Close'`). Filters combine as AND.
+
+    Args:
+      taxonomy_type: Filter to one registered type, e.g. `chart_of_accounts`.
+      parent_taxonomy_id: Filter to extensions of a specific library taxonomy.
+      category: Filter on the registry entry's category label: `Chart`, `Reporting`,
+        `Library`, `Custom` or `Close`.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     graph_id = require_graph_id(info)

@@ -173,10 +173,23 @@ endpoints and app-internal call sites belong in a comment inside the function �
 them had to be moved out when the shim landed. An explicit `description=` still wins, for
 the case where the public wording should differ from the docstring.
 
-**Argument descriptions are still empty.** Strawberry takes those from
-`strawberry.argument(description=...)`, which nothing here passes yet, so the reference
-renders an em dash in the Description column of every argument table. Until that is filled
-in, describe an argument's meaning in the field's own docstring — several already do.
+**Arguments are documented in the same docstring.** A Google-style `Args:` block is
+parsed out of the docstring, applied to the matching arguments by their Python names, and
+stripped from the field's own description so it is not published twice. `limit` and
+`offset` need no entry: they mean the same thing on all 31 fields that take them —
+`resolvers/_common.py` validates every pair against one shared guard — so
+`COMMON_ARGUMENT_DESCRIPTIONS` covers them, and an `Args:` entry still wins where a field
+needs to say something else.
+
+```python
+@strawberry.field
+def agents(self, info, agent_type: str | None = None, limit: int | None = None) -> list[Agent]:
+  """List counterparty agents with optional filters.
+
+  Args:
+    agent_type: Filter by counterparty role, e.g. `customer` or `vendor`.
+  """
+```
 
 ## Hand-written types
 
