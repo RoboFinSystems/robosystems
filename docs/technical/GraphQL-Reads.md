@@ -76,7 +76,7 @@ POST /extensions/{graph_id}/graphql
 - The in-browser **GraphiQL** explorer (a GET on the same URL) is development-only and is not mounted on `api.robosystems.ai`. Introspection over POST works on the hosted API, with or without credentials — see [Discovering the Schema](#discovering-the-schema).
 - The endpoint is mounted only on deployments where `ROBOLEDGER_ENABLED` or `ROBOINVESTOR_ENABLED` is set, and a deployment can disable it entirely with `EXTENSIONS_GRAPHQL_ENABLED=false`. On robosystems.ai it is enabled.
 
-This page shows usage examples. For the full machine-readable endpoint contract, see the API reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api), and the GraphQL surface README in the codebase ([graphql/README.md](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)).
+This page shows usage examples. Every query the schema serves is documented field by field at [robosystems.ai/docs/graphql](https://robosystems.ai/docs/graphql); the endpoint's own request and response contract is in the API reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api). How the surface is built is in the codebase ([graphql/README.md](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)).
 
 ## Authentication
 
@@ -204,23 +204,31 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
 
 The `agents` resolver accepts `agentType`, `source`, `isActive`, `limit`, and `offset`. Pagination is bounded: `limit` must be between 1 and 1000 and `offset` must be 0 or greater, otherwise the query returns an `INVALID_PAGINATION` error.
 
-### The available ledger reads
+### What is available, and where the list lives
 
-The ledger query root exposes a wide set of reads. Discover the full, deployment-specific list through introspection, but the available fields include:
+**The full field list is published at [robosystems.ai/docs/graphql](https://robosystems.ai/docs/graphql)** — one page per query, with its arguments, its return type and every field of that type, and an example call. It is generated from the schema the API is actually serving, so it is deployment-accurate and cannot drift from the code. Every query field carries a description, which means introspection answers the same question offline: `{ __schema { queryType { fields { name description } } } }`.
 
-- **Entity / agents** — `entity`, `entities`, `agent`, `agents`
-- **Receivables / payables** — `openReceivables`, `openPayables`, `openReceivablesByAgent`, `openPayablesByAgent`
-- **Events** — `eventBlock`, `eventBlocks`, `summary`
-- **Chart of accounts / balances** — `accounts`, `accountTree`, `accountRollups`, `trialBalance`, `mappedTrialBalance`
-- **Transactions** — `transactions`, `transaction`
-- **Taxonomy / mappings** — `taxonomies`, `reportingTaxonomy`, `elements`, `mappingCandidates`, `unmappedElements`, `structures`, `mappings`, `mapping`, `mappingCoverage`
-- **Close / fiscal** — `periodCloseStatus`, `fiscalCalendar`, `periodDrafts`, `closingBookStructures`
-- **Reports** — `reports`, `report`, `reportPackage`, `reportDownloadUrl`, `statement`
-- **Publishing / cross-graph sharing** — `publishLists`, `publishList`, `blockedSourceGraphs` (the recipient's block list — source graphs barred from sharing reports *into* this graph, managed by the `block-source-graph` / `unblock-source-graph` operations)
+This page does not repeat that list. What follows is the orientation the generated reference cannot give you: which read to reach for, given a question.
 
-`reportDownloadUrl(reportId, format, expiresIn)` is worth calling out: it is the **only** way to download a published report's serialization bundle. The REST download route was retired, and a download is a read of stored state, so it lives here on the read surface rather than as a REST resource or a named operation. Every format resolves to a short-lived presigned S3 URL — JSON-LD is stamped at publish time, XBRL is materialized and cached on first request — and the resolver returns that URL, never the bytes. The client follows it to S3. `format` defaults to JSON-LD; `expiresIn` is the URL's lifetime in seconds, bounded between 60 and 3600, and an out-of-range value returns an `INVALID_EXPIRES_IN` error. A report that exists but has no published bundle yet raises `REPORT_BUNDLE_NOT_AVAILABLE`; a report id that doesn't exist returns `null`.
+| You want to know | Start with |
+| --- | --- |
+| What is blocking the month-end close | `fiscalCalendar` — `closedThrough`, `blockers`, `reconcilingItemCount`, `syncStaleDays` in one read |
+| Which schedules are drafted, posted or pending for a period | `periodCloseStatus`, then `periodDrafts` for the entries themselves |
+| Who owes us, and how concentrated it is | `agents(agentType: "customer")` with `openReceivable` on each — names and balances together. `openReceivablesByAgent` gives the same balances keyed by id only |
+| What a counterparty has done | `agent`, then the event and transaction history behind the balance |
+| The chart of accounts, and what is still unmapped | `accounts` / `accountTree`, then `unmappedElements` and `mappingCoverage` |
+| Balances rolled up to reporting concepts | `mappedTrialBalance`, or `accountRollups` for the CoA-level view |
+| A published report, whole | `reportPackage` — metadata plus every rendered block in one round trip |
+| A single statement out of a report | `statement(reportId:, blockType:)` |
+| A rendered schedule, rollforward or statement block | `informationBlock`; pass `scenarioId` for a forecast slice and `series` for the whole period series |
+| The books' scale and sync freshness | `summary` |
+| What the taxonomy says about a concept | `libraryElement` / `searchLibraryElements`, then `libraryElementTree` and `libraryElementClassifications` |
 
-On an investor-enabled deployment, the investor query root adds `portfolios`, `securities`, `security`, `positions`, `position`, `holdings`, and `portfolioBlock`.
+**Balances are in minor currency units.** `openBalanceCents` is cents. Convert once, on the way in.
+
+`reportDownloadUrl(reportId, format, expiresIn)` is worth calling out on its own: it is the **only** way to download a published report's serialization bundle. A download is a read of stored state, so it lives here rather than as a REST resource. Every format resolves to a short-lived presigned S3 URL — JSON-LD is stamped at publish time, XBRL is materialized and cached on first request — and the resolver returns that URL, never the bytes. `expiresIn` is bounded between 60 and 3600 seconds; out of range returns `INVALID_EXPIRES_IN`. A report with no published bundle raises `REPORT_BUNDLE_NOT_AVAILABLE`; an unknown id returns `null`.
+
+On an investor-enabled deployment the investor query root adds `portfolios`, `securities`, `security`, `positions`, `position`, `holdings` and `portfolioBlock`. On any deployment, the taxonomy library reads (`library*`, `searchLibraryElements`) are always present — browse them with the `library` graph id.
 
 ## Discovering the Schema
 
@@ -236,7 +244,13 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   -d '{"query": "{ __schema { queryType { fields { name } } } }"}'
 ```
 
-This returns the names of every available top-level query field for that deployment — the authoritative answer to "what can I read here?"
+This returns every top-level query field for that deployment — the authoritative answer to "what can I read here?". Ask for `description` alongside `name` and you get each field's documentation with it, which is the same text the [published reference](https://robosystems.ai/docs/graphql) renders:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ __schema { queryType { fields { name description } } } }"}'
+```
 
 ## From an AI Agent: the MCP Tools
 
@@ -344,6 +358,7 @@ For real synced data on your own stack, see [Connecting QuickBooks Locally](Conn
 
 - **[GraphQL Surface](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, Pydantic auto-derivation, resolver patterns
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business logic kernel the resolvers delegate to
+- **[GraphQL reference](https://robosystems.ai/docs/graphql)** - Every query field, with its arguments, return type and an example call, generated from the live schema
 - **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 
 ## Support
