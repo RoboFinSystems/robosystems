@@ -2,7 +2,7 @@
 
 Wire shapes for capturing real-world business events and, via the handler
 registry, turning them into GL transactions. The storage model is
-``models/extensions/roboledger/event.py``.
+`models/extensions/roboledger/event.py`.
 """
 
 from __future__ import annotations

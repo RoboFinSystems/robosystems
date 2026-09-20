@@ -1,8 +1,8 @@
 """Text-block binding request and response models.
 
-The ``bind-text-block`` operation binds a platform Document (markdown) —
-or one of its sections — to a disclosure Element as a ``Nonnumeric``
-text-block Fact in a standing ``factset_type='disclosure'`` FactSet.
+The `bind-text-block` operation binds a platform Document (markdown) —
+or one of its sections — to a disclosure Element as a `Nonnumeric`
+text-block Fact in a standing `factset_type='disclosure'` FactSet.
 Report builds snapshot that standing set into the report's own FactSet,
 so a filed report stays immutable even if the document is later edited.
 """

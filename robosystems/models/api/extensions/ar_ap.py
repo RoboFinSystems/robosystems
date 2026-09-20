@@ -1,10 +1,10 @@
 """AR/AP response models — open-balance projections derived from the event
 duality chain.
 
-AR ("Accounts Receivable") = sum of ``invoice_issued`` events minus
-matching ``payment_received`` discharges. AP ("Accounts Payable") =
-sum of ``bill_received`` events minus matching ``bill_paid``
-discharges. Numbers come straight from ``events.amount`` — no GL roll
+AR ("Accounts Receivable") = sum of `invoice_issued` events minus
+matching `payment_received` discharges. AP ("Accounts Payable") =
+sum of `bill_received` events minus matching `bill_paid`
+discharges. Numbers come straight from `events.amount` — no GL roll
 required — so an open balance is auditable in one query.
 
 Amounts are stored in minor currency units (cents); response models
@@ -19,8 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class OpenBalanceAggregate(BaseModel):
   """Graph-wide open AR or open AP aggregate.
 
-  ``total_open_cents`` is the sum of unsettled originating-event
-  balances; ``counterparty_count`` is the number of distinct agents
+  `total_open_cents` is the sum of unsettled originating-event
+  balances; `counterparty_count` is the number of distinct agents
   with at least one open invoice or bill. The currency is uniform
   per graph today (mixed-currency books would need a per-currency
   breakdown — out of scope for v1).
@@ -44,7 +44,7 @@ class OpenBalanceByAgent(BaseModel):
   """Per-agent open balance row.
 
   Used for both the aging-by-counterparty list and the per-Agent
-  GraphQL field. ``open_balance_cents`` reflects only the unsettled
+  GraphQL field. `open_balance_cents` reflects only the unsettled
   remainder (sum of originating amounts minus sum of discharges) so
   partial-payment chains net out correctly.
   """

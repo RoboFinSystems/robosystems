@@ -44,14 +44,14 @@ class UpdateGraphMetadataOp(BaseModel):
 
   Partial update — only supplied (non-null) fields change, so a caller
   editing just the display name need not resend the description and tags.
-  Because ``None`` means "leave alone", clearing a field uses its empty
-  value instead: pass ``""`` to clear the description and ``[]`` to clear
-  the tags. ``graph_name`` cannot be cleared; it is the graph's label
+  Because `None` means "leave alone", clearing a field uses its empty
+  value instead: pass `""` to clear the description and `[]` to clear
+  the tags. `graph_name` cannot be cleared; it is the graph's label
   everywhere it is listed.
 
   This is the platform-level label for the graph, independent of the
   entity name shown on financial statements — change that through
-  ``POST /extensions/roboledger/{graph_id}/operations/update-entity``.
+  `POST /extensions/roboledger/{graph_id}/operations/update-entity`.
   """
 
   model_config = ConfigDict(
@@ -228,7 +228,7 @@ class ForgetOp(BaseModel):
 class UpdateMemoryOp(BaseModel):
   """Body for the update-memory operation (partial update of a stored memory).
 
-  Only supplied fields are changed; the memory is re-embedded when ``text``
+  Only supplied fields are changed; the memory is re-embedded when `text`
   changes.
   """
 
@@ -255,7 +255,7 @@ class UpdateMemoryOp(BaseModel):
 class IndexDocumentOp(BaseModel):
   """Body for index-document (corpus content-op).
 
-  Create a new document when ``document_id`` is absent; update the named
+  Create a new document when `document_id` is absent; update the named
   document (partial — only supplied fields) when present.
   """
 
@@ -286,7 +286,7 @@ class IngestFileOp(BaseModel):
   """Body for ingest-file (raw→staging content flow).
 
   Marks an uploaded file ready and triggers DuckDB staging. Set
-  ``ingest_to_graph`` to auto-chain graph materialization after staging.
+  `ingest_to_graph` to auto-chain graph materialization after staging.
   """
 
   file_id: str = Field(..., min_length=1, description="Uploaded file id to ingest")

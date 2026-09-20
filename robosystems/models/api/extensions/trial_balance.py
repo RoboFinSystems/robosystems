@@ -20,7 +20,7 @@ class TrialBalanceResponse(BaseModel):
   """Trial balance for posted entries in a date range — every CoA
   account that had activity, plus aggregate totals.
 
-  Ledger is balanced when ``total_debits == total_credits``. Used as
+  Ledger is balanced when `total_debits == total_credits`. Used as
   a sanity check before close-period; failure means an unposted /
   malformed entry slipped through.
   """

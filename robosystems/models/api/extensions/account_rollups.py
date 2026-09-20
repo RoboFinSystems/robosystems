@@ -36,7 +36,7 @@ class AccountRollupGroup(BaseModel):
 class AccountRollupsResponse(BaseModel):
   """Mapping rendered as account rollups — every reporting concept the
   mapping defines, with the CoA accounts that contribute to it and the
-  current balance for each. ``total_unmapped`` tracks gaps for UI.
+  current balance for each. `total_unmapped` tracks gaps for UI.
   """
 
   mapping_id: str

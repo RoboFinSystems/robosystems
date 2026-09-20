@@ -22,16 +22,16 @@ class InitializeLedgerRequest(BaseModel):
   """One-time setup for a graph's fiscal calendar.
 
   Creates the `FiscalCalendar` row, seeds `FiscalPeriod` rows from
-  ``earliest_data_period`` (or 24 months ago) through the current month,
-  and stamps periods on or before ``closed_through`` as already closed.
+  `earliest_data_period` (or 24 months ago) through the current month,
+  and stamps periods on or before `closed_through` as already closed.
   Subsequent calls return 409 — there's no re-initialize.
 
   The two pointers it sets up:
 
-  - ``closed_through`` (system-maintained): the latest period whose
+  - `closed_through` (system-maintained): the latest period whose
     books are locked. Set on init for businesses with prior close
     history; null for a fresh start.
-  - ``close_target`` (user-controlled): the goal date the user is
+  - `close_target` (user-controlled): the goal date the user is
     closing toward. Set independently via `set-close-target`.
   """
 
@@ -94,9 +94,9 @@ class SetCloseTargetRequest(BaseModel):
   """Set the user-controlled goal period the books should close through.
 
   The close target drives the catch-up sequence (every period between
-  ``closed_through`` and ``close_target`` becomes a candidate for
+  `closed_through` and `close_target` becomes a candidate for
   closing) and is auto-advanced when reached. Independent from
-  ``closed_through``: setting a target doesn't close anything — call
+  `closed_through`: setting a target doesn't close anything — call
   `close-period` for that.
   """
 
@@ -126,14 +126,14 @@ class ClosePeriodRequest(BaseModel):
   """Lock a single fiscal period — the final commit action of close.
 
   Closes the next period in the catch-up sequence (must be exactly
-  ``closed_through + 1`` — sequence violations get rejected). Posts
+  `closed_through + 1` — sequence violations get rejected). Posts
   draft entries, runs balance-sheet equation check, advances
-  ``closed_through`` by one, and auto-advances ``close_target`` if
+  `closed_through` by one, and auto-advances `close_target` if
   this close caught up to it. Operation rejects with 422 + structured
-  ``blockers`` when gates fail (sync stale, draft entries unbalanced,
+  `blockers` when gates fail (sync stale, draft entries unbalanced,
   etc).
 
-  ``period`` is supplied separately on the wire — pass it as part of
+  `period` is supplied separately on the wire — pass it as part of
   the operation's request body. The path identifies the graph; the
   body identifies the period.
   """
@@ -175,10 +175,10 @@ class ClosePeriodRequest(BaseModel):
 class ReopenPeriodRequest(BaseModel):
   """Un-lock a closed period for adjustment.
 
-  Reopening the current ``closed_through`` decrements it by one.
+  Reopening the current `closed_through` decrements it by one.
   Reopening an earlier period is a prior-period adjustment: the
   watermark stays put, and the re-close restores the period without
-  advancing it. The ``reason`` is required and captured in the audit
+  advancing it. The `reason` is required and captured in the audit
   log. Use sparingly — reopen invalidates downstream artifacts that
   trusted the closed state (reports, shared filings).
   """
@@ -201,14 +201,14 @@ class BackfillPlanHistoryRequest(BaseModel):
   balance validation, statement rules, and audit events all apply.
   Feeds the plan's monthly historical columns.
 
-  Chunked: each call processes at most ``max_periods`` months (oldest
-  first) and reports what's left in ``remaining_periods`` — loop until
+  Chunked: each call processes at most `max_periods` months (oldest
+  first) and reports what's left in `remaining_periods` — loop until
   it comes back empty. Idempotent: months that already have canonical
-  sets are never touched, so re-running is safe (``restamp=true``
+  sets are never touched, so re-running is safe (`restamp=true`
   deliberately trades this away to re-derive existing sets).
 
   The backfill never reaches past the tenant's earliest ledger data —
-  ``start_period`` is clamped to the first month with entries.
+  `start_period` is clamped to the first month with entries.
   """
 
   start_period: str | None = Field(
@@ -287,8 +287,8 @@ class BackfillPlanHistoryRequest(BaseModel):
 class FiscalPeriodSummary(BaseModel):
   """One fiscal period row — header view used in calendar listings.
 
-  Status lifecycle: ``open`` → ``closing`` → ``closed``. ``closing``
-  is the transient state during a close run; ``closed_at`` stamps when
+  Status lifecycle: `open` → `closing` → `closed`. `closing`
+  is the transient state during a close run; `closed_at` stamps when
   the lock landed.
   """
 

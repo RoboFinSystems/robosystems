@@ -3,9 +3,9 @@
 A graph with no chart of accounts — a company that never synced
 QuickBooks — initializes one from a shipped template. The operation is
 one-time (409 once a chart exists) and creates the chart, its
-``coa_mapping`` structure and the template's CoA → rs-gaap mapping
+`coa_mapping` structure and the template's CoA → rs-gaap mapping
 associations atomically. Customization afterwards is
-``update-taxonomy-block``.
+`update-taxonomy-block`.
 """
 
 from __future__ import annotations
@@ -20,10 +20,10 @@ ChartTemplateKey = Literal["saas", "services", "product"]
 class InitializeChartOfAccountsRequest(BaseModel):
   """Create the graph's chart of accounts from a shipped template.
 
-  Refused (409) when the graph already has an active ``chart_of_accounts``
+  Refused (409) when the graph already has an active `chart_of_accounts`
   taxonomy — a QuickBooks-synced tenant never needs this, and a chart is
   never replaced. The template's equity rows are mapped by the entity's
-  legal form (``entity_type``: corporation / llc / partnership); omit it
+  legal form (`entity_type`: corporation / llc / partnership); omit it
   to use the graph's primary entity, falling back to corporation.
   """
 

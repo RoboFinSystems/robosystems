@@ -1,14 +1,14 @@
 """API models for Event Handler — the dynamic event → transaction rule registry.
 
-EventHandlers map ``event_type`` plus optional match expressions onto a
-transaction template. When ``create-event-block`` runs with
-``apply_handlers=True``, the registry resolves the matching handler and the
+EventHandlers map `event_type` plus optional match expressions onto a
+transaction template. When `create-event-block` runs with
+`apply_handlers=True`, the registry resolves the matching handler and the
 engine evaluates its template to produce GL rows.
 
-``TransactionTemplate`` is the DSL shape: immediate postings only
-(debit/credit legs + ``{{ expr }}`` interpolation). Recurring / schedule-block
+`TransactionTemplate` is the DSL shape: immediate postings only
+(debit/credit legs + `{{ expr }}` interpolation). Recurring / schedule-block
 templates are not yet implemented — periodic side effects are produced today
-via the obligation register (``schedule_entry_due`` events), not via DSL
+via the obligation register (`schedule_entry_due` events), not via DSL
 template recurrence.
 """
 
@@ -76,16 +76,16 @@ class TransactionTemplate(BaseModel):
 class CreateEventHandlerRequest(BaseModel):
   """Register a new event-type → transaction-template rule.
 
-  When ``create-event-block`` runs with ``apply_handlers=True``, the
+  When `create-event-block` runs with `apply_handlers=True`, the
   registry resolves the *highest-priority active* handler whose match
   criteria all match the event, then evaluates the
-  ``transaction_template`` to produce GL rows. Match precedence: among
-  active handlers for the same ``event_type``, the one with the most
+  `transaction_template` to produce GL rows. Match precedence: among
+  active handlers for the same `event_type`, the one with the most
   specific match (more match fields satisfied) wins; ties broken by
-  ``priority`` desc, then ``created_at`` asc.
+  `priority` desc, then `created_at` asc.
 
-  All match fields except ``event_type`` are optional — leaving them
-  unset matches anything. Use ``match_metadata_expression`` for
+  All match fields except `event_type` are optional — leaving them
+  unset matches anything. Use `match_metadata_expression` for
   fine-grained discrimination (e.g. only payroll categories).
   """
 
@@ -228,12 +228,12 @@ class CreateEventHandlerRequest(BaseModel):
 
 class UpdateEventHandlerRequest(BaseModel):
   """Update an existing event handler. All fields except
-  ``event_handler_id`` are optional — pass only what changes.
+  `event_handler_id` are optional — pass only what changes.
 
-  ``transaction_template`` is **fully replaced** when supplied (no
-  partial template patches). ``metadata_patch`` does deep-merge into
-  the existing metadata. ``approve=true`` sets ``approved_by`` and
-  ``approved_at``; ``approve=false`` clears them.
+  `transaction_template` is **fully replaced** when supplied (no
+  partial template patches). `metadata_patch` does deep-merge into
+  the existing metadata. `approve=true` sets `approved_by` and
+  `approved_at`; `approve=false` clears them.
   """
 
   event_handler_id: str = Field(..., description="The handler to update.")

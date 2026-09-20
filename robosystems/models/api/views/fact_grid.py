@@ -41,8 +41,8 @@ class FactGrid(BaseModel):
 
   Deliberately *not* a pivot: cells are not collapsed and nothing is
   aggregated. Arranging facts into a table is the consumer's job — see
-  ``@robosystems/report-components``, whose pivot engine keys cells on a
-  fact's full aspect signature rather than on ``(element, period)``.
+  `@robosystems/report-components`, whose pivot engine keys cells on a
+  fact's full aspect signature rather than on `(element, period)`.
   """
 
   dimensions: list[Dimension] = Field(..., description="Dimensions in the grid")

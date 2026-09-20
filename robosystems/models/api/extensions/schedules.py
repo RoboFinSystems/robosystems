@@ -123,15 +123,15 @@ class CreateScheduleRequest(BaseModel):
 class PromoteObligationsRequest(BaseModel):
   """On-demand trigger for the obligation-promotion sweep.
 
-  Mirrors what the ``scheduled_obligation_promoter`` Dagster sensor does
+  Mirrors what the `scheduled_obligation_promoter` Dagster sensor does
   on its tick, but lets an interactive caller or an MCP close co-pilot
   run it now instead of waiting for the background cadence — required to
   drive a schedule-driven close to completion in a single session.
-  Flips matured ``pending`` ``schedule_entry_due`` events (period boundary
-  passed) to ``classified``; with ``dispatch_handlers`` it also drafts the
+  Flips matured `pending` `schedule_entry_due` events (period boundary
+  passed) to `classified`; with `dispatch_handlers` it also drafts the
   closing entries in the same transaction (idempotent — reconciles to an
   existing draft). The sweep also reaches *stranded* obligations —
-  already ``classified`` (by an earlier flip-only sweep) but with no
+  already `classified` (by an earlier flip-only sweep) but with no
   closing entry ever drafted — dispatching them in the same pass.
   """
 
@@ -184,10 +184,10 @@ class PromoteObligationsResponse(BaseModel):
 
 class PeriodCloseItemResponse(BaseModel):
   """One schedule's contribution to a period close — drafted closing
-  entry plus its reversal (when ``auto_reverse=True``).
+  entry plus its reversal (when `auto_reverse=True`).
 
-  ``status`` is the closing entry's draft/posted lifecycle. The
-  reversal mirrors the same shape with ``reversal_*`` fields.
+  `status` is the closing entry's draft/posted lifecycle. The
+  reversal mirrors the same shape with `reversal_*` fields.
   """
 
   structure_id: str
@@ -251,8 +251,8 @@ class PeriodCloseStatusResponse(BaseModel):
   """Period-close dashboard view — every schedule in scope for the
   period plus drafted/posted entry totals.
 
-  Use to drive the close-period UI: schedules with ``status='draft'``
-  are pending close; ``period_status`` reflects the calendar's lock
+  Use to drive the close-period UI: schedules with `status='draft'`
+  are pending close; `period_status` reflects the calendar's lock
   state for the period.
   """
 

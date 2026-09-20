@@ -91,11 +91,11 @@ _ARG_ENTRY = re.compile(r"^(\w+)\s*:\s*(.*)$")
 
 
 def _split_docstring(doc: str) -> tuple[str, dict[str, str]]:
-  """Separate a docstring's prose from its Google-style ``Args:`` block.
+  """Separate a docstring's prose from its Google-style `Args:` block.
 
   The prose becomes the field description and the entries become argument
   descriptions, so both live in the one place a Python author already writes.
-  The ``Args:`` block is stripped from the prose rather than published twice —
+  The `Args:` block is stripped from the prose rather than published twice —
   the reference renders arguments as their own table.
   """
   lines = doc.splitlines()
@@ -132,7 +132,7 @@ def _describe_from_docstrings(cls: type) -> type:
   """Publish each resolver's docstring as its GraphQL field description.
 
   Strawberry reads a description only from an explicit
-  ``@strawberry.field(description=...)``; it ignores ``__doc__``. Every
+  `@strawberry.field(description=...)`; it ignores `__doc__`. Every
   resolver here already carries a docstring written as API copy, so without
   this pass the 66 entry points ship with no description at all while the
   types they return are richly documented — the index into the schema blank
@@ -141,8 +141,8 @@ def _describe_from_docstrings(cls: type) -> type:
   Running it once over the composed root means a resolver is documented the
   moment someone writes an ordinary docstring, on every surface that reads
   the schema: GraphiQL, introspection, the SDK snapshot, the
-  ``get-graphql-schema`` MCP tool and the published reference. An explicit
-  ``description=`` still wins, so a field whose public wording should differ
+  `get-graphql-schema` MCP tool and the published reference. An explicit
+  `description=` still wins, so a field whose public wording should differ
   from its docstring can say so.
 
   **A resolver docstring is therefore public API copy.** Implementation
@@ -225,3 +225,61 @@ schema = strawberry.Schema(
     MaskUnexpectedErrors,
   ],
 )
+
+
+_SNAKE_REFERENCE = re.compile(r"`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`")
+
+
+def _camel(name: str) -> str:
+  head, *rest = name.split("_")
+  return head + "".join(word[:1].upper() + word[1:] for word in rest)
+
+
+def _camelize_field_references(built: strawberry.Schema) -> strawberry.Schema:
+  """Rewrite `snake_case` field references in descriptions to the wire name.
+
+  Most of these descriptions are Pydantic class docstrings and
+  `Field(description=...)` text, and those models serve REST as well, where
+  `balance_type` *is* the property name. Strawberry's `auto_camel_case`
+  renames the field on the way through, but nothing renames the prose that
+  points at it — so `Account` shipped telling a GraphQL reader to ask for
+  `balance_type`, which the schema rejects. The same sentence is correct on
+  `/docs/api` and wrong on `/docs/extensions/graphql`.
+
+  Rewriting here rather than at the source is what keeps both true: the
+  docstring stays written in the model's own vocabulary, and the name is
+  translated on the surface that renamed it. A token is only rewritten when
+  its camelCase form is a real field (or argument) of the same type and the
+  snake_case form is not, so prose that happens to contain an underscored
+  word is left alone.
+  """
+  for gql_type in built._schema.type_map.values():
+    if gql_type.name.startswith("__"):
+      continue
+    fields = getattr(gql_type, "fields", None)
+    if not isinstance(fields, dict):
+      continue
+
+    def rewrite(text: str | None, names: set[str]) -> str | None:
+      if not text:
+        return text
+      return _SNAKE_REFERENCE.sub(
+        lambda m: (
+          f"`{_camel(m.group(1))}`"
+          if _camel(m.group(1)) in names and m.group(1) not in names
+          else m.group(0)
+        ),
+        text,
+      )
+
+    field_names = set(fields)
+    gql_type.description = rewrite(gql_type.description, field_names)
+    for field in fields.values():
+      args = getattr(field, "args", None) or {}
+      field.description = rewrite(field.description, field_names | set(args))
+      for argument in args.values():
+        argument.description = rewrite(argument.description, set(args))
+  return built
+
+
+schema = _camelize_field_references(schema)

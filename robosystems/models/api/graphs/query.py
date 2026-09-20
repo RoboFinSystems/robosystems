@@ -25,7 +25,7 @@ DEFAULT_QUERY_TIMEOUT = 60
 
 
 def translate_neo4j_to_lbug(query: str) -> str:
-  """Rewrite Neo4j ``CALL db.*()`` introspection into LadybugDB equivalents.
+  """Rewrite Neo4j `CALL db.*()` introspection into LadybugDB equivalents.
 
   Queries with no such call are returned unchanged. LadybugDB requires an
   explicit RETURN after the call, so one is appended when the query lacks it.

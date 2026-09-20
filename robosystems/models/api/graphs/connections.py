@@ -51,10 +51,10 @@ class MercuryConnectionConfig(BaseModel):
 
   A bank feed is native accounting: the graph must already have a chart of
   accounts and no live QuickBooks connection. Over OAuth (the hosted
-  default) the connection is created ``pending_oauth`` and activated by the
-  callback. ``api_key`` — a personal **read-only** Mercury token — connects
+  default) the connection is created `pending_oauth` and activated by the
+  callback. `api_key` — a personal **read-only** Mercury token — connects
   at once without a browser round-trip, but only on deployments that turn
-  on ``MERCURY_API_KEY_CONNECTIONS_ENABLED`` (self-hosted and local); the
+  on `MERCURY_API_KEY_CONNECTIONS_ENABLED` (self-hosted and local); the
   hosted product refuses it.
   """
 
@@ -83,9 +83,9 @@ class PlaidConnectionConfig(BaseModel):
 
   A bank feed is native accounting: the graph must already have a chart of
   accounts and no live QuickBooks connection. The connection is created
-  ``pending_oauth``; ``POST /oauth/init`` returns a ``link_token`` for Plaid
-  Link, and the ``public_token`` Link hands back completes it through
-  ``POST /oauth/callback/plaid`` (as ``code``). One connection per institution
+  `pending_oauth`; `POST /oauth/init` returns a `link_token` for Plaid
+  Link, and the `public_token` Link hands back completes it through
+  `POST /oauth/callback/plaid` (as `code`). One connection per institution
   login; a graph can hold several.
   """
 
@@ -106,7 +106,7 @@ class ExternalConnectionConfig(BaseModel):
   run: the connection is registration + telemetry, not execution config.
   The platform holds no credentials for the external source — the
   integration authenticates to its own source and writes here through
-  the public API, stamping ``source_name`` on everything it emits.
+  the public API, stamping `source_name` on everything it emits.
   """
 
   source_name: str = Field(

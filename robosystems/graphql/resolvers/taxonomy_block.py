@@ -3,12 +3,12 @@
 Mirrors :class:`InformationBlockQuery`. Always composed into the Query
 root regardless of per-domain extension flags. Uses
 :func:`open_library_session` so the endpoint works on both the library
-sentinel (``graph_id='library'``) and any tenant graph_id — reads are
-driven by the session's ``search_path``, no per-graph extension gate
+sentinel (`graph_id='library'`) and any tenant graph_id — reads are
+driven by the session's `search_path`, no per-graph extension gate
 needed.
 
-Writes stay on the ``POST /extensions/roboledger/{g}/operations/
-create-taxonomy-block`` surface mounted by the registrar; this module
+Writes stay on the `POST /extensions/roboledger/{g}/operations/
+create-taxonomy-block` surface mounted by the registrar; this module
 is read-only.
 """
 

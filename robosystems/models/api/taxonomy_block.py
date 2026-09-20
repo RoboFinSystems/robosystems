@@ -7,10 +7,10 @@ one transactional envelope — mirroring the Information Block pattern
 that curates business-logic artifacts.
 
 Four block types:
-  * ``reporting_standard`` — library-origin, read-only
-  * ``reporting_extension`` — tenant, extends a library ``reporting_standard``
-  * ``chart_of_accounts`` — tenant, CoA curation
-  * ``custom_ontology`` — tenant, declarative
+  * `reporting_standard` — library-origin, read-only
+  * `reporting_extension` — tenant, extends a library `reporting_standard`
+  * `chart_of_accounts` — tenant, CoA curation
+  * `custom_ontology` — tenant, declarative
 """
 
 from __future__ import annotations
@@ -25,10 +25,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class TaxonomyBlockElementRequest(BaseModel):
   """Element definition inside a Taxonomy Block envelope.
 
-  ``qname`` is the envelope-local identifier — must be unique within the
-  envelope's ``elements`` list and is used by association / rule / patch
-  payloads as the reference token. ``parent_ref`` may reference another
-  envelope-local qname or, for ``reporting_extension`` blocks, a library
+  `qname` is the envelope-local identifier — must be unique within the
+  envelope's `elements` list and is used by association / rule / patch
+  payloads as the reference token. `parent_ref` may reference another
+  envelope-local qname or, for `reporting_extension` blocks, a library
   element qname.
   """
 
@@ -36,7 +36,7 @@ class TaxonomyBlockElementRequest(BaseModel):
     ...,
     description=(
       "Envelope-local element identifier. Must be unique within the "
-      "envelope's ``elements`` list. Used as the reference token for "
+      "envelope's `elements` list. Used as the reference token for "
       "associations, rules, and update patches."
     ),
   )
@@ -48,7 +48,7 @@ class TaxonomyBlockElementRequest(BaseModel):
     None,
     description=(
       "FASB metamodel trait for the element. Required for "
-      "``chart_of_accounts`` blocks; optional for ``custom_ontology``."
+      "`chart_of_accounts` blocks; optional for `custom_ontology`."
     ),
   )
   balance_type: str | None = Field(
@@ -71,7 +71,7 @@ class TaxonomyBlockElementRequest(BaseModel):
     None,
     description=(
       "Optional chart-of-accounts code (e.g. '1000', '4100-02'). Only "
-      "meaningful for ``chart_of_accounts`` blocks."
+      "meaningful for `chart_of_accounts` blocks."
     ),
   )
   sub_classification: str | None = None
@@ -79,7 +79,7 @@ class TaxonomyBlockElementRequest(BaseModel):
     None,
     description=(
       "qname of the parent element — either another envelope-local qname "
-      "or, for ``reporting_extension`` blocks, a library element qname."
+      "or, for `reporting_extension` blocks, a library element qname."
     ),
   )
   metadata: dict[str, Any] = Field(default_factory=dict)
@@ -103,8 +103,8 @@ ConceptArrangement = Literal[
   "compound_fact",
 ]
 """Concept Arrangement Pattern (CAP) value domain — mirrors the
-``structures.concept_arrangement`` CHECK constraint
-(``CONCEPT_ARRANGEMENT_VALUES`` in ``models/extensions/structure.py``)."""
+`structures.concept_arrangement` CHECK constraint
+(`CONCEPT_ARRANGEMENT_VALUES` in `models/extensions/structure.py`)."""
 
 
 class TaxonomyBlockStructureRequest(BaseModel):
@@ -130,19 +130,19 @@ class TaxonomyBlockStructureRequest(BaseModel):
   ] = Field(
     ...,
     description=(
-      "DB ``structures.block_type`` enum. CoA blocks use "
-      "``chart_of_accounts``; reporting extensions use the statement "
-      "family, ``regulatory_disclosure`` (disclosure notes), or "
-      "``custom``; custom ontology uses ``custom``."
+      "DB `structures.block_type` enum. CoA blocks use "
+      "`chart_of_accounts`; reporting extensions use the statement "
+      "family, `regulatory_disclosure` (disclosure notes), or "
+      "`custom`; custom ontology uses `custom`."
     ),
   )
   concept_arrangement: ConceptArrangement | None = Field(
     None,
     description=(
       "Concept Arrangement Pattern (CAP) — how the structure's concepts "
-      "relate (mirrors the ``structures.concept_arrangement`` CHECK "
+      "relate (mirrors the `structures.concept_arrangement` CHECK "
       "vocabulary). A disclosure note footing members to a total is "
-      "``roll_up``. Null leaves the pattern unset."
+      "`roll_up`. Null leaves the pattern unset."
     ),
   )
   description: str | None = None
@@ -172,8 +172,8 @@ class TaxonomyBlockAssociationRequest(BaseModel):
   ] = Field(
     ...,
     description=(
-      "DB ``associations.association_type`` enum. ``presentation`` = "
-      "parent-child hierarchy; ``calculation`` = summation arc."
+      "DB `associations.association_type` enum. `presentation` = "
+      "parent-child hierarchy; `calculation` = summation arc."
     ),
   )
   order_value: float | None = None
@@ -191,17 +191,17 @@ class TaxonomyBlockAssociationRequest(BaseModel):
 class TaxonomyBlockRuleRequest(BaseModel):
   """Rule definition inside a Taxonomy Block envelope.
 
-  Exactly one of ``target_structure_ref``, ``target_element_qname``, or
-  ``target_taxonomy_self`` must be set (or all null for a global rule).
-  The ``model_validator`` enforces this contract at the Pydantic layer.
+  Exactly one of `target_structure_ref`, `target_element_qname`, or
+  `target_taxonomy_self` must be set (or all null for a global rule).
+  The `model_validator` enforces this contract at the Pydantic layer.
 
   Only **arithmetic** rule patterns are user-creatable via this API
-  (the ``rule_pattern`` Literal below). The 6 model-structure check
-  kinds (``NoCycles``, ``NoOrphanArcs``, ``ParentBeforeChild``,
-  ``LeafHasClassification``, ``LibraryOriginImmutability``,
-  ``UniqueQNameInTaxonomy``) are system-managed — they're auto-emitted
+  (the `rule_pattern` Literal below). The 6 model-structure check
+  kinds (`NoCycles`, `NoOrphanArcs`, `ParentBeforeChild`,
+  `LeafHasClassification`, `LibraryOriginImmutability`,
+  `UniqueQNameInTaxonomy`) are system-managed — they're auto-emitted
   by :func:`emit_auto_rules` at taxonomy-block creation time and
-  populate ``rules.rule_check_kind`` instead of ``rule_pattern``.
+  populate `rules.rule_check_kind` instead of `rule_pattern`.
   """
 
   name: str = Field(..., description="Rule identifier, unique within envelope.")
@@ -244,8 +244,8 @@ class TaxonomyBlockRuleRequest(BaseModel):
   variables: list[dict[str, Any]] = Field(
     default_factory=list,
     description=(
-      "``$Variable`` → qname bindings. Each entry is "
-      "``{'variable_name': str, 'variable_qname': str}``."
+      "`$Variable` → qname bindings. Each entry is "
+      "`{'variable_name': str, 'variable_qname': str}`."
     ),
   )
   severity: Literal["info", "warning", "error"] = "error"
@@ -267,7 +267,7 @@ class TaxonomyBlockRuleRequest(BaseModel):
     False,
     description=(
       "True iff the rule targets the envelope's own taxonomy row "
-      "(``target_kind='taxonomy'``). Mutually exclusive with the other "
+      "(`target_kind='taxonomy'`). Mutually exclusive with the other "
       "target_* fields."
     ),
   )
@@ -309,14 +309,14 @@ WritableTaxonomyType = Literal[
 
 
 class CreateTaxonomyBlockRequest(BaseModel):
-  """Request body for the ``create-taxonomy-block`` operation.
+  """Request body for the `create-taxonomy-block` operation.
 
-  One envelope per taxonomy instance. ``taxonomy_type`` discriminates
+  One envelope per taxonomy instance. `taxonomy_type` discriminates
   which block-type handler the command dispatcher routes to.
-  ``parent_taxonomy_id`` is required for ``reporting_extension`` (which
+  `parent_taxonomy_id` is required for `reporting_extension` (which
   extends a library taxonomy) and ignored otherwise.
 
-  The library path (seeding ``reporting_standard`` rows) does NOT flow
+  The library path (seeding `reporting_standard` rows) does NOT flow
   through this envelope; library content is not tenant-writable here.
   """
 
@@ -324,16 +324,16 @@ class CreateTaxonomyBlockRequest(BaseModel):
   taxonomy_type: WritableTaxonomyType = Field(
     ...,
     description=(
-      "Block-type discriminator. ``chart_of_accounts`` and "
-      "``custom_ontology`` construct from scratch; ``reporting_extension`` "
-      "extends an existing library ``reporting_standard``."
+      "Block-type discriminator. `chart_of_accounts` and "
+      "`custom_ontology` construct from scratch; `reporting_extension` "
+      "extends an existing library `reporting_standard`."
     ),
   )
   parent_taxonomy_id: str | None = Field(
     None,
     description=(
-      "Required when ``taxonomy_type == 'reporting_extension'`` — the id "
-      "of the library ``reporting_standard`` being extended."
+      "Required when `taxonomy_type == 'reporting_extension'` — the id "
+      "of the library `reporting_standard` being extended."
     ),
   )
   version: str | None = None
@@ -437,9 +437,9 @@ class ElementUpdatePatch(BaseModel):
 class StructureUpdatePatch(BaseModel):
   """Partial-update patch for a single structure, keyed by structure_id.
 
-  ``concept_arrangement`` makes a mis-CAP'd structure repairable in
-  place (e.g. promoting a ``set`` note to ``roll_up`` so it gains a
-  footing rule); ``block_type`` stays immutable — it drives block-type
+  `concept_arrangement` makes a mis-CAP'd structure repairable in
+  place (e.g. promoting a `set` note to `roll_up` so it gains a
+  footing rule); `block_type` stays immutable — it drives block-type
   routing, so changing it is a re-create, not an edit.
   """
 
@@ -452,7 +452,7 @@ class StructureUpdatePatch(BaseModel):
 
 
 class UpdateTaxonomyBlockRequest(BaseModel):
-  """Request body for the ``update-taxonomy-block`` operation.
+  """Request body for the `update-taxonomy-block` operation.
 
   Top-level fields (name / description / version) apply to the taxonomy
   row itself. The delta lists mutate atoms incrementally — the validator
@@ -518,12 +518,12 @@ class UpdateTaxonomyBlockRequest(BaseModel):
 
 
 class DeleteTaxonomyBlockRequest(BaseModel):
-  """Request body for the ``delete-taxonomy-block`` operation.
+  """Request body for the `delete-taxonomy-block` operation.
 
-  ``cascade_facts=False`` (default) fails the delete if any Fact rows
-  reference elements in this taxonomy. ``cascade_facts=True`` deletes the
+  `cascade_facts=False` (default) fails the delete if any Fact rows
+  reference elements in this taxonomy. `cascade_facts=True` deletes the
   referencing facts alongside the taxonomy; the response reports
-  ``facts_deleted``.
+  `facts_deleted`.
   """
 
   taxonomy_id: str = Field(..., description="The taxonomy to delete.")
@@ -580,7 +580,7 @@ class TaxonomyBlockElement(BaseModel):
     ...,
     description=(
       "Provenance — 'library' if the element's taxonomy is locked "
-      "(``is_locked=true``), else 'tenant'."
+      "(`is_locked=true`), else 'tenant'."
     ),
   )
 
@@ -615,9 +615,9 @@ class TaxonomyBlockAssociation(BaseModel):
 class TaxonomyBlockRule(BaseModel):
   """Rule projection for the Taxonomy Block envelope.
 
-  Exactly one of ``rule_pattern`` (arithmetic) or ``rule_check_kind``
+  Exactly one of `rule_pattern` (arithmetic) or `rule_check_kind`
   (model-structure) is non-null per row, enforced by the
-  ``check_rule_pattern_kind_xor`` DB constraint.
+  `check_rule_pattern_kind_xor` DB constraint.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -638,7 +638,7 @@ class TaxonomyBlockRule(BaseModel):
     None,
     description=(
       "Polymorphic display string — structure_id, element qname, "
-      "association_id, or taxonomy_id depending on ``target_kind``."
+      "association_id, or taxonomy_id depending on `target_kind`."
     ),
   )
 
@@ -648,7 +648,7 @@ class TaxonomyBlockEnvelope(BaseModel):
 
   One envelope per taxonomy instance. Carries identity + type,
   registry-sourced display metadata, the parent taxonomy pointer (for
-  ``reporting_extension`` blocks), and bundled atoms (elements,
+  `reporting_extension` blocks), and bundled atoms (elements,
   structures, associations, rules, verification results).
   """
 
@@ -682,7 +682,7 @@ class TaxonomyBlockEnvelope(BaseModel):
 
 
 class DeleteTaxonomyBlockResponse(BaseModel):
-  """Response for ``delete-taxonomy-block``."""
+  """Response for `delete-taxonomy-block`."""
 
   deleted: Literal[True] = True
   taxonomy_id: str

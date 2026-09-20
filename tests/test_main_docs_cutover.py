@@ -98,3 +98,46 @@ class TestNothingHereIsTheReference:
 
   def test_the_disclosure_route_survives(self, client) -> None:
     assert client.get("/.well-known/security.txt").status_code == 200
+
+
+class TestSpecProseIsMarkdown:
+  """The specification's prose is what `/docs/api` renders, verbatim.
+
+  An operation's `summary`, `description` and the descriptions on its schemas
+  are its page — nothing rewrites them between here and the published
+  reference, and the app renders them as markdown. So reStructuredText in a
+  Pydantic docstring is not a style question: ``foo`` reaches a reader as
+  literal backticks around the word, on a public page.
+
+  This went unnoticed because the markup is invisible in Python. It was found
+  on three live operation pages and in 93 schema descriptions.
+  """
+
+  @staticmethod
+  def _descriptions(spec: dict):
+    for name, schema in (spec.get("components", {}).get("schemas") or {}).items():
+      if isinstance(schema.get("description"), str):
+        yield name, schema["description"]
+      for prop, value in (schema.get("properties") or {}).items():
+        if isinstance(value, dict) and isinstance(value.get("description"), str):
+          yield f"{name}.{prop}", value["description"]
+    for path, item in (spec.get("paths") or {}).items():
+      for method, operation in item.items():
+        if isinstance(operation, dict) and isinstance(
+          operation.get("description"), str
+        ):
+          yield f"{method.upper()} {path}", operation["description"]
+
+  def test_the_sweep_is_not_vacuous(self, client) -> None:
+    spec = client.get("/openapi.json").json()
+    assert len(list(self._descriptions(spec))) > 200
+
+  def test_no_description_carries_rest_markup(self, client) -> None:
+    spec = client.get("/openapi.json").json()
+    offenders = sorted(
+      where for where, text in self._descriptions(spec) if "``" in text
+    )
+    assert offenders == [], (
+      f"Specification prose carries reStructuredText markup: {offenders}. "
+      "Use single backticks — the reference renders markdown."
+    )

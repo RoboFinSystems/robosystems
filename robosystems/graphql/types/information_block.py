@@ -1,18 +1,18 @@
 """Strawberry types for the Information Block GraphQL surface.
 
 Leaf types wrap Pydantic response models via
-``@pydantic_type(model=..., all_fields=True)``
+`@pydantic_type(model=..., all_fields=True)`
 — same pattern as :mod:`robosystems.graphql.types.library`. The
 top-level :class:`InformationBlock` is hand-written because its
-``artifact.mechanics`` field is a discriminated union on ``kind`` and
+`artifact.mechanics` field is a discriminated union on `kind` and
 Strawberry's pydantic decorator can't unwrap union types cleanly; the
-``from_pydantic`` classmethod does the construction explicitly.
+`from_pydantic` classmethod does the construction explicitly.
 
-The ``mechanics`` field is exposed as ``scalars.JSON`` with a ``kind``
+The `mechanics` field is exposed as `scalars.JSON` with a `kind`
 discriminator embedded in the payload. Promoting it to a typed
-``strawberry.union(...)`` is deferred until each mechanics arm grows
+`strawberry.union(...)` is deferred until each mechanics arm grows
 typed fields worth exposing as a union; until then, clients branch on
-the embedded ``kind`` tag.
+the embedded `kind` tag.
 """
 
 from __future__ import annotations
@@ -119,8 +119,8 @@ class InformationBlockFactSet:
   """Period-specific instantiation of the Structure."""
 
   # The typed FactProvenance descriptor is a discriminated union on
-  # ``origin``; exposed as ``scalars.JSON`` (same treatment as artifact
-  # mechanics) with the ``origin`` tag embedded in the payload.
+  # `origin`; exposed as `scalars.JSON` (same treatment as artifact
+  # mechanics) with the `origin` tag embedded in the payload.
   provenance: strawberry.scalars.JSON | None
 
 
@@ -199,7 +199,7 @@ class InformationBlockViewProjections:
   """Charlie's six type-of View arms surfaced in the envelope."""
 
 
-# Mechanics + template are exposed as ``scalars.JSON`` with a ``kind``
+# Mechanics + template are exposed as `scalars.JSON` with a `kind`
 # discriminator embedded in the payload — see the module docstring for
 # why this is preferred over a typed Strawberry union.
 MechanicsPayload = strawberry.scalars.JSON

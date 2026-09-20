@@ -3,7 +3,7 @@
 Two Strawberry schema extensions, both concerned with what one tenant's query
 can do to everyone else's — not with what it can read (that is `auth.py`).
 
-`OffloadSyncResolvers` — every resolver in `resolvers/` is a plain ``def``
+`OffloadSyncResolvers` — every resolver in `resolvers/` is a plain `def`
 that opens an extensions OLTP session, and Strawberry executes a sync
 resolver inline on the event loop. The API runs one uvicorn worker, so an
 OLTP statement running inside a resolver stalled every request on the task
@@ -15,11 +15,11 @@ resolvers Strawberry generates for plain fields stay inline (a thread hop
 per scalar field would cost more than it saves), as does introspection.
 
 `MaskUnexpectedErrors` — a resolver exception that is not a deliberate
-GraphQL error reached the client as ``str(exc)``: for a database fault that
+GraphQL error reached the client as `str(exc)`: for a database fault that
 string names tables, constraints, and schemas. Everything that is not a
 parse/validation error or a `GraphQLError` the code raised on purpose is
 replaced with a fixed message; a cancelled statement (the session's
-``statement_timeout``) gets its own code so a client can narrow or retry.
+`statement_timeout`) gets its own code so a client can narrow or retry.
 """
 
 from __future__ import annotations
@@ -112,10 +112,10 @@ def _is_deliberate(error: GraphQLError) -> bool:
 class MaskUnexpectedErrors(SchemaExtension):
   """Replace unintended resolver exceptions with a fixed message.
 
-  Deliberate errors — `StrawberryGraphQLError` with a ``code`` — pass through
-  untouched, so the documented codes (``LEDGER_NOT_INITIALIZED``,
-  ``UNAUTHENTICATED``, ``EXTENSION_NOT_PROVISIONED``, ...) still reach the
-  client. Everything else is masked; the request id rides in ``extensions``
+  Deliberate errors — `StrawberryGraphQLError` with a `code` — pass through
+  untouched, so the documented codes (`LEDGER_NOT_INITIALIZED`,
+  `UNAUTHENTICATED`, `EXTENSION_NOT_PROVISIONED`, ...) still reach the
+  client. Everything else is masked; the request id rides in `extensions`
   so a report can be matched to the server-side log line, which Strawberry's
   own `process_errors` already writes with the traceback.
   """

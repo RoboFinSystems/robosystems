@@ -1,7 +1,7 @@
 """Request/response models for the MCP OAuth 2.1 authorization server.
 
 The token, registration, and revocation endpoints speak RFC-shaped JSON /
-form bodies and are documented inline in ``routers/oauth/server.py``; the
+form bodies and are documented inline in `routers/oauth/server.py`; the
 models here are the consent leg the login home drives.
 """
 

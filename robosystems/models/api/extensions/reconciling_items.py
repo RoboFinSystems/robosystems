@@ -18,13 +18,13 @@ from pydantic import BaseModel, Field, model_validator
 # textbook treatments, and which is right is an accounting judgement about
 # the period, not a technical one:
 #
-# - ``restate`` — regenerate this event's entries from the accepted payload,
+# - `restate` — regenerate this event's entries from the accepted payload,
 #   in place. The prior months' figures change. Right when nothing external
 #   binds them (the usual case inside the current fiscal year).
-# - ``catch_up`` — leave the original entries alone and post the difference
+# - `catch_up` — leave the original entries alone and post the difference
 #   as a new entry in an open period. Prior statements stand. Right when a
 #   reporting cadence has locked the months the change would otherwise move.
-# - ``acknowledge`` — record that the difference was handled outside this
+# - `acknowledge` — record that the difference was handled outside this
 #   operation (an entry authored by hand, or a change that needs no entry)
 #   and clear the flag without touching the ledger.
 ReconcilingItemDisposition = Literal["restate", "catch_up", "acknowledge"]
@@ -92,7 +92,7 @@ class ReconcilingItemDeltaLine(BaseModel):
   """One account's net change between the posted entries and the new payload.
 
   Amounts are signed minor units in debit-positive convention: a positive
-  figure is a net debit, a negative one a net credit. ``delta`` is what a
+  figure is a net debit, a negative one a net credit. `delta` is what a
   catch-up entry would post to bring the books level.
   """
 

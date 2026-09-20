@@ -7,10 +7,10 @@ class ClosingBookItem(BaseModel):
   """One row in the closing book — a navigable artifact for the
   period (statement, schedule, rollup, etc.).
 
-  ``item_type`` discriminates: 'statement', 'schedule',
+  `item_type` discriminates: 'statement', 'schedule',
   'account_rollups', 'period_close', 'trial_balance'. Statement items
-  carry ``report_id`` to fetch the rendered facts; schedule items
-  carry ``status`` ('complete' | 'draft' | 'pending').
+  carry `report_id` to fetch the rendered facts; schedule items
+  carry `status` ('complete' | 'draft' | 'pending').
   """
 
   id: str
@@ -31,7 +31,7 @@ class ClosingBookCategory(BaseModel):
 
 class ClosingBookStructuresResponse(BaseModel):
   """The closing book navigation tree — categories + items the UI
-  uses to render the period-close workspace. ``has_data=False`` when
+  uses to render the period-close workspace. `has_data=False` when
   the graph has no posted entries yet."""
 
   categories: list[ClosingBookCategory]

@@ -297,7 +297,7 @@ class Agent:
   def open_payable(self, info: strawberry.Info) -> OpenBalanceByAgent | None:
     """This agent's open AP balance, or null when fully settled.
 
-    Same N+1 caveat as ``open_receivable``.
+    Same N+1 caveat as `open_receivable`.
     """
     from robosystems.graphql.resolvers._common import open_extensions_session
     from robosystems.operations.roboledger.reads import ar_ap as reads_ar_ap
@@ -703,16 +703,16 @@ class ReportList:
 class ReportDownloadFormat(Enum):
   """Serialization flavor for a Report bundle download.
 
-  Names map to the operations-layer ``RdfFlavor`` / ``XbrlFlavor``
-  string values (``jsonld``, ``holon-jsonld``, ``xbrl-2.1``, ``tavi``).
+  Names map to the operations-layer `RdfFlavor` / `XbrlFlavor`
+  string values (`jsonld`, `holon-jsonld`, `xbrl-2.1`, `tavi`).
   The hyphenated values aren't valid GraphQL enum *names*, so the wire
-  names are ``HOLON_JSONLD`` / ``XBRL_2_1`` while the resolver forwards
-  the ``.value`` to the ops read.
+  names are `HOLON_JSONLD` / `XBRL_2_1` while the resolver forwards
+  the `.value` to the ops read.
 
-  ``JSONLD`` is the flat canonical bundle stamped at publish;
-  ``HOLON_JSONLD`` is the dataset-form named-graph holon (scene /
+  `JSONLD` is the flat canonical bundle stamped at publish;
+  `HOLON_JSONLD` is the dataset-form named-graph holon (scene /
   boundary / projection), materialized on demand off the same bundle;
-  ``TAVI`` is the Project Tavi compiled model — the same report in the
+  `TAVI` is the Project Tavi compiled model — the same report in the
   standards form the SEC pipeline publishes per filing, materialized on
   demand the same way and rendered by report-components with no RDF
   step.

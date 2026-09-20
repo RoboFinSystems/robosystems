@@ -1,6 +1,6 @@
 """Pydantic request/response models for the API routers.
 
-These shapes generate ``/openapi.json`` and, from it, the published Python and
+These shapes generate `/openapi.json` and, from it, the published Python and
 TypeScript SDKs — changing a field name or type here is a client-visible
 contract change.
 """

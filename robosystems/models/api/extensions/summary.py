@@ -10,9 +10,9 @@ class LedgerSummaryResponse(BaseModel):
   date-range bookends and integration sync timestamp.
 
   Used by dashboards and the onboarding wizard to answer "is this
-  graph populated yet?" without walking every transaction. ``connection_count``
+  graph populated yet?" without walking every transaction. `connection_count`
   reflects active integrations (QuickBooks / Plaid / etc.); a non-null
-  ``last_sync_at`` means at least one connection has run.
+  `last_sync_at` means at least one connection has run.
   """
 
   graph_id: str

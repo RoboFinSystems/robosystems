@@ -106,7 +106,7 @@ class HealthStatus(BaseModel):
 class DeleteResult(BaseModel):
   """Shared response shape for delete / soft-delete operations.
 
-  ``deleted=True`` means the operation succeeded (a row was deleted or
+  `deleted=True` means the operation succeeded (a row was deleted or
   flipped). A row that never existed gets a 404 — this shape never carries
   "not found".
 
@@ -147,7 +147,7 @@ def create_error_response(
   code: str | None = None,
   request_id: str | None = None,
 ) -> HTTPException:
-  """Build an ``HTTPException`` whose detail is an ``ErrorResponse`` body."""
+  """Build an `HTTPException` whose detail is an `ErrorResponse` body."""
   error = ErrorResponse(
     detail=detail,
     code=code,
@@ -161,7 +161,7 @@ def create_error_response(
 
 
 def create_pagination_info(total: int, limit: int, offset: int) -> PaginationInfo:
-  """Build a ``PaginationInfo``, deriving ``has_more`` from the window."""
+  """Build a `PaginationInfo`, deriving `has_more` from the window."""
   return PaginationInfo(
     total=total, limit=limit, offset=offset, has_more=(offset + limit) < total
   )
@@ -206,7 +206,7 @@ OPERATION_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
   # pydantic validation), but our routes also raise
   # `HTTPException(422, "...")` for business-validation failures with a
   # plain string detail. The runtime `RequestValidationError` handler in
-  # ``main.py`` normalizes both shapes into the `ErrorResponse` shape;
+  # `main.py` normalizes both shapes into the `ErrorResponse` shape;
   # this declaration aligns the OpenAPI spec so SDK generators get the
   # correct response model.
   422: {"model": ErrorResponse, "description": "Validation error"},

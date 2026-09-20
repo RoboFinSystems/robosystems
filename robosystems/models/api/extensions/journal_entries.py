@@ -44,13 +44,13 @@ class JournalEntryLineItemInput(BaseModel):
   metadata: dict[str, Any] | None = Field(
     None,
     description=(
-      "Optional per-line metadata stamped on ``LineItem.metadata_``. "
+      "Optional per-line metadata stamped on `LineItem.metadata_`. "
       "Used to carry source-system fields the standard columns don't "
       "cover — e.g. an external flow-tag code that drives rollforward "
-      "attribution (``transaction_description_code``), an external "
+      "attribution (`transaction_description_code`), an external "
       "memo, or a cost-center hint. Pass-through is non-validating; "
       "the renderer / filter engine reads keys it knows about and "
-      "ignores the rest. ``None`` is normalized to ``{}`` at persist "
+      "ignores the rest. `None` is normalized to `{}` at persist "
       "time."
     ),
   )
@@ -110,18 +110,18 @@ class CreateJournalEntryRequest(BaseModel):
   status: Literal["draft", "posted"] = "draft"
   transaction_id: str | None = None
   # Source-system provenance for the resulting Transaction row. Defaults
-  # to ``native`` (manually-created entries). Source-of-truth adapters
+  # to `native` (manually-created entries). Source-of-truth adapters
   # (QuickBooks, Xero, ...) propagate their own source + connection_id
   # so re-syncs can scope deletes correctly and reports can attribute
   # entries to their originating system.
   source: str | None = None
   connection_id: str | None = None
-  # Type of business event the Transaction represents (e.g. ``bill_paid``,
-  # ``cash_expense_recorded``, ``invoice_issued``). Defaults to
-  # ``"journal_entry"`` for native manual entries. Adapter handlers
+  # Type of business event the Transaction represents (e.g. `bill_paid`,
+  # `cash_expense_recorded`, `invoice_issued`). Defaults to
+  # `"journal_entry"` for native manual entries. Adapter handlers
   # (bill_paid, payment_received, ...) pass the source event_type through
   # so reporting can filter / group by business-event kind. Distinct from
-  # the entry-level ``type`` field, which captures accounting role
+  # the entry-level `type` field, which captures accounting role
   # (standard / adjusting / closing / reversing).
   transaction_type: str = "journal_entry"
 

@@ -166,7 +166,7 @@ That text is published on five surfaces at once:
 | Introspection | any client, credentials or not |
 | `schema.graphql` | the Python SDK's checked-in snapshot |
 | `get-graphql-schema` | the MCP tool an AI agent reads before querying |
-| robosystems.ai/docs/graphql | the published reference, generated from live introspection |
+| robosystems.ai/docs/extensions/graphql | the published reference, generated from live introspection |
 
 So write the docstring for a consumer, not for a maintainer. Implementation notes, retired
 endpoints and app-internal call sites belong in a comment inside the function — five of
@@ -190,6 +190,30 @@ def agents(self, info, agent_type: str | None = None, limit: int | None = None) 
     agent_type: Filter by counterparty role, e.g. `customer` or `vendor`.
   """
 ```
+
+### Write names in Python; the surface translates them
+
+`auto_camel_case` renames `balance_type` to `balanceType` on the way onto the wire, but
+nothing renames a sentence that points at it. Most of this prose is Pydantic class
+docstrings and `Field(description=...)` text, and those same models serve REST, where
+`balance_type` *is* the property name — so one sentence is correct on `/docs/api` and
+wrong on `/docs/extensions/graphql`. It shipped that way: 36 descriptions told a GraphQL
+reader to ask for a name the schema rejects.
+
+`_camelize_field_references` in `schema.py` closes that, rewriting a backticked
+`snake_case` token only when its camelCase form is a real field or argument *of the same
+type* and the snake_case form is not. That scoping is what keeps it precise — an event
+type like `invoice_issued` is a value, not a field, and is left alone.
+
+**So keep writing names in the model's own vocabulary.** Do not hand-camelize a docstring
+to work around this; the pass is what keeps the REST and GraphQL copies of the same
+sentence both true, and `tests/graphql/extensions/test_schema_descriptions.py` fails if
+either one drifts.
+
+**Markdown, not reStructuredText.** Every surface in the table above renders the text as
+markdown, so ``foo`` arrives as literal backticks around the word. Use single backticks.
+679 RST spans had to be swept out of the models when this was found, and it was invisible
+until someone read a rendered page.
 
 ## Hand-written types
 

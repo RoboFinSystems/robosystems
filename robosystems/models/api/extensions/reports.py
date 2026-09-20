@@ -12,8 +12,8 @@ class PeriodSpec(BaseModel):
   """A single reporting period column.
 
   Reports render facts in N period columns side-by-side. Each
-  ``PeriodSpec`` is one column — its ``start``/``end`` define the
-  window the report's facts roll up into; ``label`` is what the renderer
+  `PeriodSpec` is one column — its `start`/`end` define the
+  window the report's facts roll up into; `label` is what the renderer
   prints in the column header. For year-over-year statements, supply two
   PeriodSpecs (current + comparative); for YTD by quarter, supply four.
   """
@@ -38,15 +38,15 @@ class CreateReportRequest(BaseModel):
 
   The report is materialized synchronously: we resolve the taxonomy +
   CoA mapping, roll up GL facts into reportable concepts, attach them
-  to a fresh ``Report`` row, evaluate any reporting-rule structures
-  (cell-level checks), and stamp ``generation_status='published'``.
-  Subsequent ``regenerate-report`` calls re-run the same pipeline against
+  to a fresh `Report` row, evaluate any reporting-rule structures
+  (cell-level checks), and stamp `generation_status='published'`.
+  Subsequent `regenerate-report` calls re-run the same pipeline against
   the latest ledger state without creating a new Report row.
 
-  ``period_start``/``period_end``/``comparative`` is the simple path
+  `period_start`/`period_end`/`comparative` is the simple path
   (auto-derives current + prior period). For multi-column reports
-  (YTD-by-quarter, multi-year) supply ``periods`` explicitly — when
-  set, ``period_start``/``period_end``/``comparative`` are ignored as
+  (YTD-by-quarter, multi-year) supply `periods` explicitly — when
+  set, `period_start`/`period_end`/`comparative` are ignored as
   inputs to period generation.
   """
 
@@ -152,10 +152,10 @@ class RegenerateReportRequest(BaseModel):
 
   Same pipeline as `create-report` but re-uses the existing Report row.
   All previously persisted facts for the report are dropped and replaced
-  — rule evaluation re-runs and ``last_generated`` is stamped. Useful
+  — rule evaluation re-runs and `last_generated` is stamped. Useful
   after correcting GL data or adjusting the mapping. To change the
-  reporting window, pass any of ``period_start`` / ``period_end`` /
-  ``periods``; omit them to regenerate against the same window stored on
+  reporting window, pass any of `period_start` / `period_end` /
+  `periods`; omit them to regenerate against the same window stored on
   the report.
   """
 
@@ -183,11 +183,11 @@ class RegenerateReportRequest(BaseModel):
 class ShareReportRequest(BaseModel):
   """Push a published report to every member of a publish list.
 
-  Only reports with ``generation_status='published'`` are shareable.
+  Only reports with `generation_status='published'` are shareable.
   Each share is an independent copy: the report row + all its facts are
-  cloned into the recipient's tenant schema with ``source_graph_id`` /
-  ``source_report_id`` provenance fields populated. Per-target results
-  surface in the response (``ShareReportResponse``).
+  cloned into the recipient's tenant schema with `source_graph_id` /
+  `source_report_id` provenance fields populated. Per-target results
+  surface in the response (`ShareReportResponse`).
   """
 
   publish_list_id: str = Field(
@@ -203,7 +203,7 @@ class RevokeReportShareRequest(BaseModel):
   """Withdraw a report previously shared to one recipient graph.
 
   The sender's half of the share controls: deletes the copy from that
-  recipient's tenant schema and stamps the share record ``revoked_at``. Scoped
+  recipient's tenant schema and stamps the share record `revoked_at`. Scoped
   to a single target — revoking a distribution to a whole publish list means
   one call per member, so a withdrawal is always a deliberate act.
   """
@@ -258,7 +258,7 @@ class ValidationCheckResponse(BaseModel):
 
   Every rule runs once per rendered period column; on a multi-column
   statement each failure and warning is prefixed with the column it was
-  found in (``[Prior] …``).
+  found in (`[Prior] …`).
   """
 
   passed: bool = Field(
@@ -313,10 +313,10 @@ class StructureSummary(BaseModel):
 class ReportResponse(BaseModel):
   """Report definition summary — header metadata, no facts.
 
-  Returned by ``create-report``, ``regenerate-report``,
-  ``file-report``, and ``transition-filing-status``. Use the package
+  Returned by `create-report`, `regenerate-report`,
+  `file-report`, and `transition-filing-status`. Use the package
   read endpoint to retrieve a Report rehydrated with its rendered
-  ``InformationBlockEnvelope`` items.
+  `InformationBlockEnvelope` items.
   """
 
   id: str = Field(..., description="Report identifier (ULID).")
@@ -481,7 +481,7 @@ class StatementResponse(BaseModel):
 
   Returned by report read endpoints when a single statement is
   requested. The package mode endpoint returns a list of these
-  rehydrated as ``InformationBlockEnvelope`` items instead.
+  rehydrated as `InformationBlockEnvelope` items instead.
   """
 
   report_id: str = Field(
@@ -536,8 +536,8 @@ class ReportBundleDownloadResponse(BaseModel):
 
   Every flavor resolves to a short-lived presigned URL pointing at the
   bundle in S3 — JSON-LD is stamped at publish time, XBRL is
-  materialized on first download and cached by ``generation_count``.
-  The client follows ``download_url`` to fetch the artifact directly
+  materialized on first download and cached by `generation_count`.
+  The client follows `download_url` to fetch the artifact directly
   from S3 (the API never streams the bytes). Mirrors the
   backup-download shape the frontend already consumes.
   """
@@ -555,7 +555,7 @@ class ReportBundleDownloadResponse(BaseModel):
     ...,
     description=(
       "Serialization flavor delivered by this URL — one of the "
-      "``RdfFlavor`` / ``XbrlFlavor`` values (e.g. ``jsonld``, ``xbrl-2.1``)."
+      "`RdfFlavor` / `XbrlFlavor` values (e.g. `jsonld`, `xbrl-2.1`)."
     ),
   )
   generation_count: int = Field(
@@ -565,15 +565,15 @@ class ReportBundleDownloadResponse(BaseModel):
     default_factory=list,
     description=(
       "Content the Report carries that this flavor does not. "
-      "``disclosure_notes``: the XBRL 2.1 zip ships statements only — "
+      "`disclosure_notes`: the XBRL 2.1 zip ships statements only — "
       "tenant-authored disclosure notes render on screen and ride the "
       "JSON-LD and holon flavors, but are excluded from this file. "
       "The Tavi compiled model carries the statements and notes but has no "
-      "home for ``ib_envelopes`` (the per-Network Information Block "
-      "payloads), ``definition_links`` (equivalence, general-special, "
-      "essence-alias and mapping arcs), ``reporting_style``, "
-      "``framework_pins``, ``fact_sets`` (the FactSet partition and each "
-      "fact's structure pin) or ``filing_lifecycle`` (filing status, "
+      "home for `ib_envelopes` (the per-Network Information Block "
+      "payloads), `definition_links` (equivalence, general-special, "
+      "essence-alias and mapping arcs), `reporting_style`, "
+      "`framework_pins`, `fact_sets` (the FactSet partition and each "
+      "fact's structure pin) or `filing_lifecycle` (filing status, "
       "supersession, share provenance); all of it rides the JSON-LD and "
       "holon flavors."
     ),
@@ -590,7 +590,7 @@ class LiveFinancialStatementRequest(BaseModel):
     ...,
     description=(
       "income_statement | balance_sheet | cash_flow_statement | equity_statement. "
-      "``equity_statement`` is provisional — equity balances, not a rollforward "
+      "`equity_statement` is provisional — equity balances, not a rollforward "
       "— and is not offered on the MCP surface until it articulates."
     ),
   )
@@ -637,7 +637,7 @@ class LiveFinancialStatementResponse(BaseModel):
   periods: list[PeriodSpec] = Field(
     ...,
     description=(
-      "Rendered columns, aligned with each row's ``values``. Current and "
+      "Rendered columns, aligned with each row's `values`. Current and "
       "prior for income_statement and balance_sheet; current only for "
       "cash_flow_statement — the prior period is pivoted as the "
       "indirect-method delta basis and not rendered."
@@ -719,13 +719,13 @@ class FinancialStatementAnalysisResponse(BaseModel):
 
 # ── Information-block views (disclosures + information-block) ────────────────
 #
-# The two shaped tools ``xbrlkit serve`` offers over a loaded filing, served
+# The two shaped tools `xbrlkit serve` offers over a loaded filing, served
 # over a report the platform holds whole (the published filing on a shared
 # repository, the ledger's own report on a tenant). The payload is xbrlkit's own — the same keys the
 # local tool returns — under the envelope, with the graph and report stamped
-# on it; ``extra="allow"`` keeps a key xbrlkit adds later from being dropped.
+# on it; `extra="allow"` keeps a key xbrlkit adds later from being dropped.
 
-# xbrlkit's caps (``xbrlkit.serve.MAX_BLOCK_ROWS`` / ``MAX_BLOCK_MEMBERS_CAP``),
+# xbrlkit's caps (`xbrlkit.serve.MAX_BLOCK_ROWS` / `MAX_BLOCK_MEMBERS_CAP`),
 # restated here so the request models need not import the tool module; the
 # view tests pin the two pairs equal.
 INFORMATION_BLOCK_MAX_ROWS = 400
@@ -815,8 +815,8 @@ class DisclosuresResponse(BaseModel):
   """The disclosures view op's result: xbrlkit's map, stamped with the graph
   and report it was read from.
 
-  Without ``topic``: ``disclosures`` / ``count``. With ``topic``:
-  ``disclosure`` / ``category`` / ``blocks`` / ``block_count``.
+  Without `topic`: `disclosures` / `count`. With `topic`:
+  `disclosure` / `category` / `blocks` / `block_count`.
   """
 
   model_config = ConfigDict(extra="allow")

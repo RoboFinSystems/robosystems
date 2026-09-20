@@ -2,13 +2,13 @@
 
 The Report is the package container; its items are its FactSets, each
 rehydrated as an :class:`InformationBlock`. The resolver lives in
-``resolvers/ledger.py`` next to the existing ``report`` field; types
+`resolvers/ledger.py` next to the existing `report` field; types
 are split into this file because they're hand-written rather than
-auto-derived from Pydantic (the ``block`` field needs the manual
-``InformationBlock.from_pydantic`` projection).
+auto-derived from Pydantic (the `block` field needs the manual
+`InformationBlock.from_pydantic` projection).
 
 Date / datetime fields use Strawberry's native scalar types so the
-GraphQL schema is consistent with the auto-derived ``Report`` type
+GraphQL schema is consistent with the auto-derived `Report` type
 (which exposes them via Strawberry's pydantic integration). Codegen
 on the client side maps these to typed Date / DateTime values.
 """
@@ -31,7 +31,7 @@ from robosystems.models.api.extensions.report_package import (
 @strawberry.type
 class ReportPackageItem:
   """One item in a Report package — a pinned FactSet rendered as an
-  ``InformationBlock`` envelope plus assembly metadata."""
+  `InformationBlock` envelope plus assembly metadata."""
 
   fact_set_id: str
   structure_id: str | None
