@@ -36,11 +36,11 @@ from robosystems.operations.information_block import (
 class InformationBlockQuery:
   """Query root for the Information Block read surface.
 
-  Both fields open a library-session (``open_library_session``) so they
+  Both fields open a library-session (`open_library_session`) so they
   work on the library sentinel AND on per-graph tenant endpoints. On a
-  tenant graph_id the session's ``search_path`` includes the tenant
+  tenant graph_id the session's `search_path` includes the tenant
   schema, so tenant-created blocks surface. On the library sentinel,
-  only block types with ``surfaces_in_library=True`` appear — Schedule
+  only block types with `surfaces_in_library=True` appear — Schedule
   is tenant-only, so it returns [] on the sentinel.
   """
 
@@ -60,18 +60,18 @@ class InformationBlockQuery:
   ) -> InformationBlock | None:
     """Fetch a single Information Block envelope by id.
 
-    ``scenarioId`` selects the FactSet slice: omitted = actuals; a
+    `scenarioId` selects the FactSet slice: omitted = actuals; a
     forecast block's structure id = that scenario's parallel universe
     (statement envelopes bind its latest computed month, metric
     envelopes extend the series with its forward columns, labeled
     "(forecast)").
 
-    ``series`` renders a statement block as its whole report-set time
+    `series` renders a statement block as its whole report-set time
     series — one column per period, actuals-preferred at the seam when
-    combined with ``scenarioId``; forecast columns carry
-    ``periods[].forecast = true``. Non-statement block types ignore it.
+    combined with `scenarioId`; forecast columns carry
+    `periods[].forecast = true`. Non-statement block types ignore it.
 
-    ``seriesHistory`` / ``seriesForecast`` window the series to its
+    `seriesHistory` / `seriesForecast` window the series to its
     seam-adjacent columns — the last N actual columns and the first N
     forecast columns; omitted = unbounded. Pass the visible window so
     the envelope scales with the screen, not the ledger's age.
@@ -108,10 +108,10 @@ class InformationBlockQuery:
   ) -> list[InformationBlock]:
     """List Information Blocks with optional block_type + category filters.
 
-    ``blockType`` filters to one registered block type (e.g.
-    ``'schedule'``). ``category`` filters on the registry entry's
+    `blockType` filters to one registered block type (e.g.
+    `'schedule'`). `category` filters on the registry entry's
     category label ('Close', 'Reporting', …). Both combine as AND.
-    ``scenarioId`` threads into each envelope's FactSet binding (the
+    `scenarioId` threads into each envelope's FactSet binding (the
     Structure list itself is scenario-independent).
 
     Args:

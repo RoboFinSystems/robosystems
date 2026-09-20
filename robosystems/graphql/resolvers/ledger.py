@@ -271,7 +271,7 @@ class LedgerQuery:
     """Graph-wide open AR — total + counterparty count + open invoice count.
 
     Derived from the event duality chain: sum of unsettled
-    ``invoice_issued`` / ``sales_receipt_recorded`` amounts minus
+    `invoice_issued` / `sales_receipt_recorded` amounts minus
     discharges pointed at them.
     """
     try:
@@ -283,7 +283,7 @@ class LedgerQuery:
 
   @strawberry.field
   def open_payables(self, info: Info[GraphQLContext, None]) -> OpenBalanceAggregate:
-    """Graph-wide open AP — symmetric to ``open_receivables``."""
+    """Graph-wide open AP — symmetric to `open_receivables`."""
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_ar_ap.compute_open_payables(session)
@@ -352,10 +352,10 @@ class LedgerQuery:
   ) -> list[EventBlock]:
     """List event blocks with optional filters.
 
-    Recent events first (``occurred_at`` descending). Filter by ``status``
-    (``captured`` is the unposted queue, ``committed`` the audit trail),
-    ``source`` (``quickbooks`` / ``schedule`` / ``manual``), ``eventType``,
-    and ``isReconcilingItem`` — ``true`` returns the post-sync
+    Recent events first (`occurred_at` descending). Filter by `status`
+    (`captured` is the unposted queue, `committed` the audit trail),
+    `source` (`quickbooks` / `schedule` / `manual`), `eventType`,
+    and `isReconcilingItem` — `true` returns the post-sync
     reconciliation worklist, committed events whose upstream payload
     changed after they were posted.
 
@@ -489,9 +489,9 @@ class LedgerQuery:
   ) -> AccountTree | None:
     """Chart of Accounts as a recursive tree.
 
-    ``include_inactive`` defaults to ``False`` so deleted source-system
+    `include_inactive` defaults to `False` so deleted source-system
     accounts (still kept in OLTP for historical journal-line FK integrity)
-    don't clutter the standard CoA view. Set ``True`` for admin / cleanup
+    don't clutter the standard CoA view. Set `True` for admin / cleanup
     contexts.
 
     Args:
@@ -751,13 +751,13 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     classification: str,
   ) -> list[Element]:
-    """rs-gaap concepts a CoA element of the given EFS ``classification``
-    (asset / liability / equity / revenue / expense / gain / loss) may map
-    to — limited to concepts that actually render under the active Reporting
-    Style (falling back to the rs-gaap-presentation set when no Style is
-    seeded), with statement-level subtotals excluded. This is the same
-    candidate set the MappingOperator picks from, so the mapping UI never
-    offers a target that would land a fact on an unreachable branch.
+    """The rs-gaap concepts a chart-of-accounts element may map to.
+
+    Limited to concepts that actually render under the active Reporting Style
+    — falling back to the rs-gaap-presentation set when no Style is seeded —
+    with statement-level subtotals excluded. It is the same candidate set the
+    mapping operator picks from, so a target that would land a fact on an
+    unreachable branch is never offered.
 
     Args:
       classification: The CoA element's EFS classification - asset, liability, equity,
@@ -981,7 +981,7 @@ class LedgerQuery:
     """All draft entries for a fiscal period, ready for review before close.
 
     The close-review *outbox*: each draft is annotated with its QB
-    write-back disposition (``willPublishToQb``) and the response carries
+    write-back disposition (`willPublishToQb`) and the response carries
     a publish summary — which drafts `close-period` will push to
     QuickBooks vs. post locally only.
 
@@ -1068,7 +1068,7 @@ class LedgerQuery:
 
     Report metadata plus one rendered Information Block envelope per
     attached FactSet, so a whole published report is read in a single
-    round trip rather than one ``statement`` call per block.
+    round trip rather than one `statement` call per block.
 
     Args:
       report_id: The report to rehydrate.
@@ -1095,11 +1095,11 @@ class LedgerQuery:
     The only way to download a report's bundle. Every format resolves to a
     short-lived presigned S3 URL which the client follows directly — the
     field returns the URL, never the bytes. JSON-LD is stamped at publish
-    time; XBRL is materialized and cached on first request. ``expiresIn``
+    time; XBRL is materialized and cached on first request. `expiresIn`
     is the URL's lifetime in seconds, bounded 60-3600.
 
     Returns null when the report doesn't exist; raises
-    ``REPORT_BUNDLE_NOT_AVAILABLE`` when it exists but has no published
+    `REPORT_BUNDLE_NOT_AVAILABLE` when it exists but has no published
     bundle yet.
 
     Args:

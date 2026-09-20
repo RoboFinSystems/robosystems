@@ -78,3 +78,39 @@ class TestSchemaDescriptions:
       if f["description"] and "Args:" in f["description"]
     )
     assert leaked == []
+
+  def test_descriptions_are_markdown_not_rest(self, query_fields: list[dict]) -> None:
+    """Double backticks are reStructuredText and nothing renders them.
+
+    These descriptions are published to GraphiQL, MCP clients and the SDK
+    snapshot, all of which treat the text as markdown — so ``foo`` reaches a
+    reader as literal backticks around the word.
+    """
+    offenders = sorted(
+      f["name"] for f in query_fields if f["description"] and "``" in f["description"]
+    )
+    assert offenders == [], (
+      f"Descriptions carry reStructuredText markup: {offenders}. "
+      "Use single backticks — every surface renders markdown."
+    )
+
+  def test_the_first_paragraph_is_a_summary(self, query_fields: list[dict]) -> None:
+    """A field's opening paragraph is what a listing shows.
+
+    References render it as the one-line summary beside the field name, so a
+    whole argument delivered as the opening paragraph becomes a wall of text
+    in a list of one-liners. Detail belongs after a blank line.
+    """
+    overlong = 200
+    offenders = []
+    for field in query_fields:
+      description = field["description"]
+      if not description:
+        continue
+      first = description.split("\n\n")[0].replace("\n", " ").strip()
+      if len(first) > overlong:
+        offenders.append((field["name"], len(first)))
+    assert offenders == [], (
+      f"Opening paragraphs read as detail rather than a summary: {sorted(offenders)}. "
+      "Lead with one sentence and put the rest after a blank line."
+    )

@@ -153,7 +153,7 @@ class LibraryQuery:
     contributes, not concepts. Each entry includes the from/to element
     qname + name so the UI can render the arc directly.
 
-    Pass ``structure_id`` to scope to a single structure (one
+    Pass `structure_id` to scope to a single structure (one
     presentation/calculation hierarchy).
 
     Args:
@@ -301,7 +301,7 @@ class LibraryQuery:
   ) -> LibraryElementTreeNode | None:
     """Walk presentation arcs down from an element.
 
-    Pass ``structureId`` to scope the walk to one presentation
+    Pass `structureId` to scope the walk to one presentation
     structure — required when the element participates in multiple
     statement variants (e.g. classified vs unclassified balance sheet)
     and a blended tree would misrepresent any single layout.
@@ -414,8 +414,8 @@ class LibraryQuery:
   ) -> LibraryStructure | None:
     """Get a single structure (extended link role) by id.
 
-    The singular of ``libraryStructures``. Pair it with
-    ``libraryElementTree(structureId:)`` to walk one statement layout's
+    The singular of `libraryStructures`. Pair it with
+    `libraryElementTree(structureId:)` to walk one statement layout's
     presentation hierarchy rather than a blend of every variant.
 
     Args:
