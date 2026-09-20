@@ -93,6 +93,11 @@ class LibraryQuery:
 
     On the library sentinel returns only shared/canonical taxonomies.
     On a tenant graph_id also returns tenant-owned taxonomies (e.g. CoA).
+
+    Args:
+    standard: Filter to one standard, e.g. `us-gaap`.
+    include_element_count: Include each taxonomy's element count. Costs an extra
+      aggregate per row.
     """
     is_sentinel = require_graph_id(info) == LIBRARY_GRAPH_ID
     with _open_session(info) as session:
@@ -113,7 +118,14 @@ class LibraryQuery:
     version: str | None = None,
     include_element_count: bool | None = None,
   ) -> LibraryTaxonomy | None:
-    """Get a taxonomy by id or (standard, version)."""
+    """Get a taxonomy by id or (standard, version).
+
+    Args:
+    id: The taxonomy's id. Give this or the standard/version pair.
+    standard: The standard, used with `version` when no id is given.
+    version: The version, used with `standard` when no id is given.
+    include_element_count: Include the taxonomy's element count.
+    """
     with _open_session(info) as session:
       row = get_taxonomy(
         session,
@@ -143,6 +155,12 @@ class LibraryQuery:
 
     Pass ``structure_id`` to scope to a single structure (one
     presentation/calculation hierarchy).
+
+    Args:
+    taxonomy_id: The taxonomy whose arcs to list.
+    association_type: Filter to one arc type, e.g. presentation or calculation.
+    structure_id: Scope the listing to a single structure - one presentation or
+      calculation hierarchy.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=200)
     with _open_session(info) as session:
@@ -164,7 +182,13 @@ class LibraryQuery:
     association_type: str | None = None,
     structure_id: strawberry.ID | None = None,
   ) -> int:
-    """Count of arcs contributed by a taxonomy."""
+    """Count of arcs contributed by a taxonomy.
+
+    Args:
+    taxonomy_id: The taxonomy whose arcs to count.
+    association_type: Count only arcs of this type.
+    structure_id: Count only arcs within this structure.
+    """
     with _open_session(info) as session:
       return count_taxonomy_arcs(
         session,
@@ -197,6 +221,17 @@ class LibraryQuery:
     investingActivity, financingActivity). Both apply independently and can
     be combined.
     `isAbstract=true` → abstract only; `false` → concrete only; omit for both.
+
+    Args:
+    taxonomy_id: Filter to elements of one taxonomy.
+    source: Filter by originating standard.
+    classification: Filter on the FASB elementsOfFinancialStatements axis.
+    activity_type: Filter on the cash-flow activity axis: `operatingActivity`,
+      `investingActivity` or `financingActivity`.
+    element_type: Filter by the element's data type.
+    is_abstract: True for abstract only, false for concrete only, omit for both.
+    include_labels: Include each element's label set.
+    include_references: Include each element's authoritative references.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     with _open_session(info) as session:
@@ -222,7 +257,12 @@ class LibraryQuery:
     id: strawberry.ID | None = None,
     qname: str | None = None,
   ) -> LibraryElement | None:
-    """Get a single element by id or by qname ('fac:Assets', etc)."""
+    """Get a single element by id or by qname ('fac:Assets', etc).
+
+    Args:
+    id: The element's id. Give this or `qname`.
+    qname: The element's qualified name, e.g. `fac:Assets`.
+    """
     with _open_session(info) as session:
       if id is not None:
         row = get_element(session, element_id=str(id))
@@ -240,7 +280,12 @@ class LibraryQuery:
     source: str | None = None,
     limit: int | None = None,
   ) -> list[LibraryElement]:
-    """Substring search across qname, name, and standard label text."""
+    """Substring search across qname, name, and standard label text.
+
+    Args:
+    query: Substring matched against qname, name and standard label text.
+    source: Restrict the search to one standard.
+    """
     limit, _ = _resolve_pagination(limit, None, default_limit=50)
     with _open_session(info) as session:
       rows = search_elements(session, query_text=query, limit=limit, source=source)
@@ -260,6 +305,13 @@ class LibraryQuery:
     structure — required when the element participates in multiple
     statement variants (e.g. classified vs unclassified balance sheet)
     and a blended tree would misrepresent any single layout.
+
+    Args:
+    id: The element to walk down from.
+    max_depth: How many arc levels to follow. Omit for unbounded.
+    structure_id: Scope the walk to one presentation structure. Required where the
+      element appears in several statement variants, since a blended tree
+      misrepresents each.
     """
     max_depth = 5 if max_depth is None else max_depth
     if max_depth < 1 or max_depth > 10:
@@ -282,7 +334,11 @@ class LibraryQuery:
     info: Info[GraphQLContext, None],
     id: strawberry.ID,
   ) -> LibraryEquivalence | None:
-    """Return the equivalence fan-out (FAC ↔ us-gaap collapse)."""
+    """Return the equivalence fan-out (FAC ↔ us-gaap collapse).
+
+    Args:
+    id: The element whose equivalence fan-out to return.
+    """
     with _open_session(info) as session:
       row = get_element_equivalents(session, element_id=str(id))
       return LibraryEquivalence.from_pydantic(row) if row else None
@@ -298,6 +354,9 @@ class LibraryQuery:
     Covers every `taxonomy_type='mapping'` bridge — equivalence,
     general-special, rs-gaap-type-subtype. Each row is oriented from the
     element's perspective (`direction` = outgoing | incoming).
+
+    Args:
+    id: The element to return incoming and outgoing mapping arcs for.
     """
     with _open_session(info) as session:
       rows = get_element_arcs(session, element_id=str(id))
@@ -314,6 +373,9 @@ class LibraryQuery:
     A trait is a classification the taxonomy asserts about an element —
     its statement axis, its cash-flow activity, its balance nature —
     returned grouped by the category each belongs to.
+
+    Args:
+    id: The element whose traits to return.
     """
     # Field name kept for GraphQL schema stability; see
     # `LibraryElementClassification` in types/library.py.
@@ -330,7 +392,12 @@ class LibraryQuery:
     taxonomy_id: strawberry.ID | None = None,
     block_type: str | None = None,
   ) -> list[LibraryStructure]:
-    """List structures (extended link roles) — BS, IS, custom, etc."""
+    """List structures (extended link roles) — BS, IS, custom, etc.
+
+    Args:
+    taxonomy_id: Filter to structures of one taxonomy.
+    block_type: Filter to one block type.
+    """
     with _open_session(info) as session:
       rows = list_structures(
         session,
@@ -350,6 +417,9 @@ class LibraryQuery:
     The singular of ``libraryStructures``. Pair it with
     ``libraryElementTree(structureId:)`` to walk one statement layout's
     presentation hierarchy rather than a blend of every variant.
+
+    Args:
+    id: The structure's id.
     """
     with _open_session(info) as session:
       row = get_structure(session, structure_id=str(id))
