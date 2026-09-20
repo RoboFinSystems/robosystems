@@ -76,7 +76,7 @@ POST /extensions/{graph_id}/graphql
 - The in-browser **GraphiQL** explorer (a GET on the same URL) is development-only and is not mounted on `api.robosystems.ai`. Introspection over POST works on the hosted API, with or without credentials — see [Discovering the Schema](#discovering-the-schema).
 - The endpoint is mounted only on deployments where `ROBOLEDGER_ENABLED` or `ROBOINVESTOR_ENABLED` is set, and a deployment can disable it entirely with `EXTENSIONS_GRAPHQL_ENABLED=false`. On robosystems.ai it is enabled.
 
-This page shows usage examples. Every query the schema serves is documented field by field at [robosystems.ai/docs/graphql](https://robosystems.ai/docs/graphql); the endpoint's own request and response contract is in the API reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api). How the surface is built is in the codebase ([graphql/README.md](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)).
+This page shows usage examples. Every query the schema serves is documented field by field at [robosystems.ai/docs/extensions/graphql](https://robosystems.ai/docs/extensions/graphql); the endpoint's own request and response contract is in the API reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api). How the surface is built is in the codebase ([graphql/README.md](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)).
 
 ## Authentication
 
@@ -206,7 +206,7 @@ The `agents` resolver accepts `agentType`, `source`, `isActive`, `limit`, and `o
 
 ### What is available, and where the list lives
 
-**The full field list is published at [robosystems.ai/docs/graphql](https://robosystems.ai/docs/graphql)** — one page per query, with its arguments, its return type and every field of that type, and an example call. It is generated from the schema the API is actually serving, so it is deployment-accurate and cannot drift from the code. Every query field carries a description, which means introspection answers the same question offline: `{ __schema { queryType { fields { name description } } } }`.
+**The full field list is published at [robosystems.ai/docs/extensions/graphql](https://robosystems.ai/docs/extensions/graphql)** — one page per query, with its arguments, its return type and every field of that type, and an example call. It is generated from the schema the API is actually serving, so it is deployment-accurate and cannot drift from the code. Every query field carries a description, which means introspection answers the same question offline: `{ __schema { queryType { fields { name description } } } }`.
 
 This page does not repeat that list. What follows is the orientation the generated reference cannot give you: which read to reach for, given a question.
 
@@ -244,7 +244,7 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   -d '{"query": "{ __schema { queryType { fields { name } } } }"}'
 ```
 
-This returns every top-level query field for that deployment — the authoritative answer to "what can I read here?". Ask for `description` alongside `name` and you get each field's documentation with it, which is the same text the [published reference](https://robosystems.ai/docs/graphql) renders:
+This returns every top-level query field for that deployment — the authoritative answer to "what can I read here?". Ask for `description` alongside `name` and you get each field's documentation with it, which is the same text the [published reference](https://robosystems.ai/docs/extensions/graphql) renders:
 
 ```bash
 curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
@@ -358,7 +358,7 @@ For real synced data on your own stack, see [Connecting QuickBooks Locally](Conn
 
 - **[GraphQL Surface](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, Pydantic auto-derivation, resolver patterns
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business logic kernel the resolvers delegate to
-- **[GraphQL reference](https://robosystems.ai/docs/graphql)** - Every query field, with its arguments, return type and an example call, generated from the live schema
+- **[GraphQL reference](https://robosystems.ai/docs/extensions/graphql)** - Every query field, with its arguments, return type and an example call, generated from the live schema
 - **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 
 ## Support
