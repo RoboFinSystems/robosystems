@@ -334,12 +334,12 @@ class LedgerQuery:
   ) -> list[EventBlock]:
     """List event blocks with optional filters.
 
-    Drives the close-workspace inbox: defaulting to recent events first
-    (``occurred_at DESC``) with filters for ``status`` (``captured`` for
-    inbox queue, ``committed`` for the audit-trail view), ``source``
-    (``quickbooks`` / ``schedule`` / ``manual``), ``event_type``, and
-    ``is_reconciling_item`` (``true`` for the post-sync reconciliation
-    worklist — committed events whose upstream payload changed).
+    Recent events first (``occurred_at`` descending). Filter by ``status``
+    (``captured`` is the unposted queue, ``committed`` the audit trail),
+    ``source`` (``quickbooks`` / ``schedule`` / ``manual``), ``eventType``,
+    and ``isReconcilingItem`` — ``true`` returns the post-sync
+    reconciliation worklist, committed events whose upstream payload
+    changed after they were posted.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     try:
@@ -365,12 +365,14 @@ class LedgerQuery:
   def summary(self, info: Info[GraphQLContext, None]) -> LedgerSummary | None:
     """Ledger counts + date range + connection metadata.
 
-    Wire-compatible with the retired `GET /v1/ledger/{g}/summary` REST
-    endpoint — opens both an extensions session (for counts/dates) and
-    a platform DB session (for QB connection metadata) and merges them
-    into a single response. Connection-DB failures degrade gracefully
-    (zero count, null timestamp) rather than aborting the whole field.
+    Counts and dates come from the ledger itself; the connection fields
+    describe the source system feeding it. If connection metadata cannot be
+    read the field still resolves, reporting a zero count and a null
+    timestamp rather than failing the whole query.
     """
+    # Wire-compatible with the retired `GET /v1/ledger/{g}/summary`. Opens an
+    # extensions session (counts/dates) and a platform DB session (QB
+    # connection metadata) and merges them.
     import logging
 
     from sqlalchemy import func, select
@@ -941,10 +943,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     report_id: str,
   ) -> ReportPackage | None:
-    """Rehydrate a Report as a package — Report metadata + N rendered
-    Information Block envelopes (one per attached FactSet). Drives the
-    ``/reports/[id]`` package viewer; replaces the per-statement
-    ``getStatement`` round-trip path.
+    """Rehydrate a Report as a package.
+
+    Report metadata plus one rendered Information Block envelope per
+    attached FactSet, so a whole published report is read in a single
+    round trip rather than one ``statement`` call per block.
     """
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
@@ -965,14 +968,18 @@ class LedgerQuery:
   ) -> ReportBundleDownload | None:
     """Presigned download URL for a published Report's serialization bundle.
 
-    Replaces the retired `GET .../reports/{id}/download` REST resource —
-    a download is a read of stored state, so it lives on the read
-    surface. Every flavor resolves to a short-lived presigned S3 URL the
-    client follows directly; JSON-LD is stamped at publish time, XBRL is
-    materialized + cached on first request. Returns null when the report
-    doesn't exist; raises a typed error when it exists but has no
-    published bundle yet.
+    The only way to download a report's bundle. Every format resolves to a
+    short-lived presigned S3 URL which the client follows directly — the
+    field returns the URL, never the bytes. JSON-LD is stamped at publish
+    time; XBRL is materialized and cached on first request. ``expiresIn``
+    is the URL's lifetime in seconds, bounded 60-3600.
+
+    Returns null when the report doesn't exist; raises
+    ``REPORT_BUNDLE_NOT_AVAILABLE`` when it exists but has no published
+    bundle yet.
     """
+    # Replaces the retired `GET .../reports/{id}/download`: a download is a
+    # read of stored state, so it belongs on the read surface.
     if format is None:
       format = ReportDownloadFormat.JSONLD
     if expires_in is None:

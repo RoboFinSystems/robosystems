@@ -20,6 +20,8 @@ facades expect.
 
 from __future__ import annotations
 
+import inspect
+
 import strawberry
 from strawberry.extensions import (
   MaxAliasesLimiter,
@@ -64,6 +66,38 @@ class _BaseQuery:
     return f"hello, {user.email}"
 
 
+def _describe_from_docstrings(cls: type) -> type:
+  """Publish each resolver's docstring as its GraphQL field description.
+
+  Strawberry reads a description only from an explicit
+  ``@strawberry.field(description=...)``; it ignores ``__doc__``. Every
+  resolver here already carries a docstring written as API copy, so without
+  this pass the 66 entry points ship with no description at all while the
+  types they return are richly documented — the index into the schema blank
+  and the shapes it points at full.
+
+  Running it once over the composed root means a resolver is documented the
+  moment someone writes an ordinary docstring, on every surface that reads
+  the schema: GraphiQL, introspection, the SDK snapshot, the
+  ``get-graphql-schema`` MCP tool and the published reference. An explicit
+  ``description=`` still wins, so a field whose public wording should differ
+  from its docstring can say so.
+
+  **A resolver docstring is therefore public API copy.** Implementation
+  notes, retired endpoints and app-internal call sites belong in comments
+  inside the function, not in the docstring.
+  """
+  for field in cls.__strawberry_definition__.fields:
+    if field.description:
+      continue
+    resolver = field.base_resolver
+    func = getattr(resolver, "wrapped_func", None) if resolver is not None else None
+    doc = inspect.getdoc(func) if func is not None else None
+    if doc:
+      field.description = doc
+  return cls
+
+
 def _build_query_type() -> type:
   """Build the Query root from whichever domain mixins are enabled.
 
@@ -88,7 +122,7 @@ def _build_query_type() -> type:
     bases = (LedgerQuery, *bases)
   if env.ROBOINVESTOR_ENABLED:
     bases = (InvestorQuery, *bases)
-  return strawberry.type(type("Query", bases, {}))
+  return _describe_from_docstrings(strawberry.type(type("Query", bases, {})))
 
 
 Query = _build_query_type()
