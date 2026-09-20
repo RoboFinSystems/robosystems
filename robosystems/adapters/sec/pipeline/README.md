@@ -69,13 +69,6 @@ the public bucket names `INTELLIGENT_TIERING` on the PUT rather than leaving it
 to the bucket's lifecycle rule; the opt-in Archive tiers need an async restore
 and must never be enabled there.
 
-`sec_public_gzip_backfill` is the one-off that brought the artifacts written
-before this into line, in place and without a reprocess — run config
-`prefixes` (a filing year or deeper), `mode` (`compress`, its inverse `restore`,
-or `sweep_narratives` for the unsplit narrative objects their `_part{n}`
-replacements superseded) and `dry_run`. Run it in the bucket's region: the same
-pass from outside AWS pays egress on every byte.
-
 Output layout:
 
 ```
