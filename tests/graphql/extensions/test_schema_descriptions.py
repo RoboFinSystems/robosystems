@@ -22,11 +22,19 @@ not have.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 
 import pytest
+from strawberry.exceptions import StrawberryGraphQLError
 
-from robosystems.graphql.schema import _SNAKE_REFERENCE, _camel, schema
+from robosystems.graphql.resolvers._common import validate_pagination
+from robosystems.graphql.schema import (
+  _SNAKE_REFERENCE,
+  COMMON_ARGUMENT_DESCRIPTIONS,
+  _camel,
+  schema,
+)
 
 INTROSPECTION = """
 {
@@ -244,4 +252,211 @@ class TestDescriptionsAreWrittenForTheWire:
     assert sorted(offenders) == [], (
       "Descriptions name fields by their Python name, which the wire does "
       f"not answer to: {sorted(offenders)}."
+    )
+
+
+class TestThePublishedBoundsAreTheEnforcedOnes:
+  """The pagination text is a promise the validator has to keep.
+
+  `COMMON_ARGUMENT_DESCRIPTIONS` reaches GraphiQL, the published reference, the
+  SDK snapshot and the `get-graphql-schema` MCP tool, on all 16 fields that take
+  a `limit`. It used to spell "1-1000" out by hand, which would have gone on
+  asserting itself on every one of them after someone edited `_MAX_LIMIT`.
+
+  These tests check the published numbers against the guard's *behaviour* rather
+  than against its constants, so they would still fail if the interpolation were
+  reverted to a literal that no longer matched.
+  """
+
+  @staticmethod
+  def _numbers(text: str) -> list[int]:
+    return [int(n) for n in re.findall(r"\d+", text)]
+
+  def test_the_published_limit_range_is_the_accepted_range(self) -> None:
+    low, high = self._numbers(COMMON_ARGUMENT_DESCRIPTIONS["limit"])[:2]
+
+    validate_pagination(low, 0)
+    validate_pagination(high, 0)
+
+    for rejected in (low - 1, high + 1):
+      with pytest.raises(StrawberryGraphQLError) as caught:
+        validate_pagination(rejected, 0)
+      assert caught.value.extensions["code"] == "INVALID_PAGINATION"
+
+  def test_the_published_offset_floor_is_the_accepted_floor(self) -> None:
+    floor = self._numbers(COMMON_ARGUMENT_DESCRIPTIONS["offset"])[0]
+
+    validate_pagination(1, floor)
+
+    with pytest.raises(StrawberryGraphQLError) as caught:
+      validate_pagination(1, floor - 1)
+    assert caught.value.extensions["code"] == "INVALID_PAGINATION"
+
+  def test_every_paginated_field_publishes_that_same_promise(
+    self, query_fields: list[dict]
+  ) -> None:
+    """One wording, so a reader cannot find two answers on two fields."""
+    published = {
+      arg["description"]
+      for field in query_fields
+      for arg in field["args"]
+      if arg["name"] == "limit"
+    }
+    assert published == {COMMON_ARGUMENT_DESCRIPTIONS["limit"]}
+
+
+# Types whose fields are not yet documented, as of the day this guard landed.
+#
+# 579 fields across these 83 types, and the tail is long — the ten largest are
+# only 31% of it — so there is no subset worth sweeping. They are paid down by
+# whoever is already working in that domain and can write something true, rather
+# than in one pass that would produce "The id of the account" 579 times. A
+# vacuous description is worse than a blank one: it reads as done, so nobody
+# comes back to it, and it still reaches GraphiQL, the reference, the SDK
+# snapshot and the MCP schema tool.
+#
+# The list only shrinks. Documenting a type means deleting its line; a type not
+# on the list has to be fully documented, so the gap cannot grow and a new type
+# can never ship blank.
+UNDOCUMENTED_TYPES: frozenset[str] = frozenset(
+  {
+    "Account",
+    "AccountList",
+    "AccountRollupGroup",
+    "AccountRollupRow",
+    "AccountRollups",
+    "AccountTree",
+    "AccountTreeNode",
+    "Agent",
+    "Artifact",
+    "Association",
+    "ChartTemplate",
+    "CloseReceipt",
+    "ClosingBookCategory",
+    "ClosingBookItem",
+    "ClosingBookStructures",
+    "DraftEntry",
+    "DraftLineItem",
+    "Element",
+    "ElementList",
+    "EventBlock",
+    "FiscalCalendar",
+    "FiscalPeriodSummary",
+    "InformationBlock",
+    "InformationBlockChart",
+    "InformationBlockChartPanel",
+    "InformationBlockChartSeries",
+    "InformationBlockConnection",
+    "InformationBlockElement",
+    "InformationBlockFact",
+    "InformationBlockFactSet",
+    "InformationBlockRendering",
+    "InformationBlockRenderingPeriod",
+    "InformationBlockRenderingRow",
+    "InformationBlockRule",
+    "InformationBlockValidation",
+    "InformationBlockVerificationCategorySummary",
+    "InformationBlockVerificationResult",
+    "InformationBlockVerificationSummary",
+    "InformationBlockViewProjections",
+    "LedgerEntity",
+    "LedgerEntry",
+    "LedgerJournalEntry",
+    "LedgerJournalEntryList",
+    "LedgerLineItem",
+    "LedgerSummary",
+    "LedgerTransactionDetail",
+    "LedgerTransactionList",
+    "LedgerTransactionSummary",
+    "LibraryAssociation",
+    "LibraryElement",
+    "LibraryElementArc",
+    "LibraryElementTreeNode",
+    "LibraryEquivalence",
+    "LibraryStructure",
+    "LibraryTaxonomy",
+    "MappedTrialBalance",
+    "MappedTrialBalanceRow",
+    "MappingCoverage",
+    "MappingDetail",
+    "OpenBalanceByAgent",
+    "PendingObligationDetail",
+    "PeriodCloseItem",
+    "PeriodCloseStatus",
+    "PeriodDrafts",
+    "PublishListList",
+    "ReportPackage",
+    "ReportPackageItem",
+    "Security",
+    "SecurityList",
+    "Structure",
+    "StructureList",
+    "SuggestedTarget",
+    "Taxonomy",
+    "TaxonomyBlock",
+    "TaxonomyBlockAssociation",
+    "TaxonomyBlockElement",
+    "TaxonomyBlockRule",
+    "TaxonomyBlockStructure",
+    "TaxonomyList",
+    "TrialBalance",
+    "TrialBalanceRow",
+    "UnmappedElement",
+    "UnreachableMappingType",
+  }
+)
+
+
+class TestTheDocumentationGapOnlyShrinks:
+  """A ratchet over the return shapes, not a demand that they all be written.
+
+  `TestSchemaDescriptions` covers the 66 query fields — the index into the
+  schema, which is complete. This covers the types that index points at, which
+  are at 36%. Closing that is editorial work spread over whoever owns each
+  domain, so the guard here is directional: it refuses new gaps and records
+  progress, instead of failing until someone writes 579 descriptions.
+  """
+
+  def test_a_type_not_on_the_list_is_fully_documented(
+    self, schema_types: list[dict]
+  ) -> None:
+    regressed = sorted(
+      gql_type["name"]
+      for gql_type in schema_types
+      if gql_type["name"] not in UNDOCUMENTED_TYPES
+      and any(not f.get("description") for f in (gql_type.get("fields") or []))
+    )
+    assert regressed == [], (
+      f"These types have undocumented fields and are not on the allowlist: "
+      f"{regressed}. Give each field a description — on a Pydantic-derived "
+      "type that is `Field(description=...)`, which documents the REST schema "
+      "too; on a hand-written Strawberry type it is "
+      "`strawberry.field(description=...)`."
+    )
+
+  def test_the_list_carries_no_type_that_is_already_documented(
+    self, schema_types: list[dict]
+  ) -> None:
+    """Deleting the line is how progress is recorded, so stale entries fail."""
+    by_name = {t["name"]: t for t in schema_types}
+    done = sorted(
+      name
+      for name in UNDOCUMENTED_TYPES
+      if name in by_name
+      and all(f.get("description") for f in (by_name[name].get("fields") or []))
+    )
+    assert done == [], (
+      f"These types are fully documented and can come off the allowlist: {done}. "
+      "Delete their lines — the list is the record of what is left."
+    )
+
+  def test_the_list_carries_no_type_the_schema_no_longer_has(
+    self, schema_types: list[dict]
+  ) -> None:
+    """A renamed or deleted type must not leave a hole the ratchet ignores."""
+    present = {t["name"] for t in schema_types}
+    stale = sorted(name for name in UNDOCUMENTED_TYPES if name not in present)
+    assert stale == [], (
+      f"The allowlist names types this schema does not have: {stale}. "
+      "Remove them, or the ratchet silently exempts nothing."
     )
