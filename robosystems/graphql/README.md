@@ -146,7 +146,37 @@ For a whole new query rather than a new attribute:
 2. Add a read function in `operations/{domain}/reads/` or `operations/information_block/reads.py`.
 3. Add a Strawberry wrapper in `graphql/types/` — usually one decorator line.
 4. Add a resolver method on the appropriate mixin (gated for domain reads, unguarded for cross-domain).
-5. Add a test under `tests/graphql/extensions/`.
+5. **Write its docstring as API copy** — see below; it is published.
+6. Add a test under `tests/graphql/extensions/`.
+7. Add it to the reference's domain map in robosystems-app (`src/lib/graphql.ts`), or it renders under "Other".
+
+## A resolver docstring is public API copy
+
+`_describe_from_docstrings` in `schema.py` copies every resolver's `__doc__` onto its
+GraphQL field description as the schema is composed. Strawberry itself only reads an
+explicit `@strawberry.field(description=...)` and ignores `__doc__`, which is how all 66
+entry points came to ship with no description at all while the types they return carried
+581 of them — the index into the schema blank, the shapes it pointed at full.
+
+That text is published on five surfaces at once:
+
+| Surface | How it gets there |
+| ------- | ----------------- |
+| GraphiQL | the schema, in development |
+| Introspection | any client, credentials or not |
+| `schema.graphql` | the Python SDK's checked-in snapshot |
+| `get-graphql-schema` | the MCP tool an AI agent reads before querying |
+| robosystems.ai/docs/graphql | the published reference, generated from live introspection |
+
+So write the docstring for a consumer, not for a maintainer. Implementation notes, retired
+endpoints and app-internal call sites belong in a comment inside the function — five of
+them had to be moved out when the shim landed. An explicit `description=` still wins, for
+the case where the public wording should differ from the docstring.
+
+**Argument descriptions are still empty.** Strawberry takes those from
+`strawberry.argument(description=...)`, which nothing here passes yet, so the reference
+renders an em dash in the Description column of every argument table. Until that is filled
+in, describe an argument's meaning in the field's own docstring — several already do.
 
 ## Hand-written types
 

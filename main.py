@@ -836,6 +836,131 @@ def create_app() -> FastAPI:
       "Reusing the key with a different body returns HTTP 409 Conflict."
     )
 
+    _GRAPHQL_SURFACE_NOTE = (
+      "Queries are scoped by the URL: `graph_id` is a path parameter and "
+      "never a query argument, so a document cannot name a graph that "
+      "disagrees with the path it was sent to. Reads hit the operational "
+      "(OLTP) extensions database, so they reflect the books as they stand "
+      "now; the analytical projection is Cypher at "
+      "`POST /v1/graphs/{graph_id}/query/cypher`."
+      "\n\nThe schema is composed per deployment: ledger fields require "
+      "RoboLedger and investor fields require RoboInvestor, and a disabled "
+      "domain is absent from introspection rather than failing at runtime. "
+      "Every field carries a description, so introspection is the "
+      "authoritative, deployment-specific reference."
+      "\n\n**Auth**: pass `X-API-Key` (or a JWT `Authorization: Bearer` "
+      "header). Unauthenticated introspection queries are deliberately "
+      "allowed for SDK codegen; data queries require credentials and raise "
+      "`UNAUTHENTICATED`."
+      "\n\n**Error codes**: `LEDGER_NOT_INITIALIZED`, "
+      "`INVESTOR_NOT_INITIALIZED`, and `UNAUTHENTICATED` surface in the "
+      "GraphQL `errors[].extensions.code` field. GraphQL reports errors with "
+      "HTTP 200 and a populated `errors[]`, so check that array rather than "
+      "the status code."
+    )
+
+    _GRAPHQL_POST_DESCRIPTION = (
+      "The typed read surface for a graph's extensions data — RoboLedger and "
+      "RoboInvestor records as they stand right now. Writes are not here: "
+      "they are the named operations at "
+      "`POST /extensions/{domain}/{graph_id}/operations/{name}`."
+      "\n\nSend a standard GraphQL POST body: a `query` document, with "
+      "optional `variables` and `operationName`."
+      "\n\n" + _GRAPHQL_SURFACE_NOTE
+    )
+
+    _GRAPHQL_GET_DESCRIPTION = (
+      "Serves the in-browser GraphiQL explorer on deployments that enable it, "
+      "which is development only — it is not mounted on the hosted API. Run "
+      "queries with `POST` to the same URL."
+      "\n\n" + _GRAPHQL_SURFACE_NOTE
+    )
+
+    def _graphql_request_body() -> dict:
+      return {
+        "required": True,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["query"],
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "description": "The GraphQL document to execute.",
+                },
+                "variables": {
+                  "type": "object",
+                  "additionalProperties": True,
+                  "description": "Values for the document's variables.",
+                },
+                "operationName": {
+                  "type": "string",
+                  "description": (
+                    "Which operation to run, when the document declares more than one."
+                  ),
+                },
+              },
+            },
+            "examples": {
+              "fiscal_calendar": {
+                "summary": "What is blocking the close",
+                "value": {
+                  "query": (
+                    "{ fiscalCalendar { closedThrough closeTarget "
+                    "closeableNow blockers } }"
+                  )
+                },
+              },
+              "paginated_with_variables": {
+                "summary": "A filtered, paginated list",
+                "value": {
+                  "query": (
+                    "query Agents($type: String, $limit: Int) { "
+                    "agents(agentType: $type, limit: $limit) { id name } }"
+                  ),
+                  "variables": {"type": "customer", "limit": 10},
+                },
+              },
+              "introspect": {
+                "summary": "Discover this deployment's fields",
+                "value": {
+                  "query": (
+                    "{ __schema { queryType { fields { name description } } } }"
+                  )
+                },
+              },
+            },
+          }
+        },
+      }
+
+    def _graphql_response_content() -> dict:
+      return {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": True,
+                "nullable": True,
+                "description": "The query result, shaped like the document.",
+              },
+              "errors": {
+                "type": "array",
+                "description": (
+                  "Present when the query failed in whole or in part. Each "
+                  "entry carries `message`, `path`, and "
+                  "`extensions.code`."
+                ),
+                "items": {"type": "object", "additionalProperties": True},
+              },
+            },
+          }
+        }
+      }
+
     def _is_operation_path(p: str) -> bool:
       return ("/extensions/" in p and "/operations/" in p) or (
         "/graphs/" in p and "/operations/" in p
@@ -879,20 +1004,24 @@ def create_app() -> FastAPI:
             {"description": "Forbidden — caller cannot access this graph"},
           )
           existing_responses.setdefault("429", {"description": "Rate limit exceeded"})
-          _graphql_description_note = (
-            "\n\n**Auth**: pass `X-API-Key` (or a JWT `Authorization: "
-            "Bearer` header). Unauthenticated introspection queries are "
-            "deliberately allowed for SDK codegen; data queries require "
-            "credentials and raise `UNAUTHENTICATED`."
-            "\n\n**Error codes**: `LEDGER_NOT_INITIALIZED`, "
-            "`INVESTOR_NOT_INITIALIZED`, and `UNAUTHENTICATED` surface in "
-            "the GraphQL `errors[].extensions.code` field — see "
-            "`graphql/README.md` for the full vocabulary."
-          )
-          if _graphql_description_note not in _operation.get("description", ""):
-            _operation["description"] = (
-              _operation.get("description") or ""
-            ) + _graphql_description_note
+
+          # Strawberry registers its ASGI handlers as plain routes, so FastAPI
+          # names the operations after the handler methods and emits no request
+          # body. Left alone the reference publishes a page titled "Handle Http
+          # Post" with nothing to say what to send — see the docstrings at the
+          # top of this block for what each method actually is.
+          if _method_name == "post":
+            _operation["summary"] = "Run a GraphQL query"
+            _operation["description"] = _GRAPHQL_POST_DESCRIPTION
+            _operation.setdefault("requestBody", _graphql_request_body())
+            _ok = existing_responses.setdefault(
+              "200", {"description": "GraphQL response"}
+            )
+            if isinstance(_ok, dict):
+              _ok.setdefault("content", _graphql_response_content())
+          else:
+            _operation["summary"] = "GraphQL explorer (development only)"
+            _operation["description"] = _GRAPHQL_GET_DESCRIPTION
 
     # Declare API key + Bearer as accepted security schemes on every
     # non-public endpoint.
