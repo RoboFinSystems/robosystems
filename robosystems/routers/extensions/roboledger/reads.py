@@ -42,7 +42,7 @@ from robosystems.operations.roboledger.reads.reports import (
   get_live_financial_statement,
   resolve_reporting_window,
 )
-from robosystems.routers.extensions.roboledger.operations import (
+from robosystems.routers.extensions.roboledger._common import (
   _ctx,
   _dispatch,
   _ledger_404,
@@ -50,7 +50,7 @@ from robosystems.routers.extensions.roboledger.operations import (
 
 router = APIRouter()
 
-_OP_TAG = "Extensions: RoboLedger"
+_OP_TAG = "RoboLedger: Analytical Views"
 _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 
 _require_roboledger = require_graph_extension("roboledger")

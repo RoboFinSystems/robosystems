@@ -63,9 +63,7 @@ from robosystems.models.api.views import (
   ViewResponse,
 )
 from robosystems.models.core import User
-from robosystems.operations.roboledger.reads.reports import (
-  ANALYSIS_STATEMENT_TYPES,
-)
+from robosystems.operations.roboledger.reads.reports import ANALYSIS_STATEMENT_TYPES
 from robosystems.operations.roboledger.views import (
   BlockNotFoundError,
   FactGridBuilder,
@@ -82,13 +80,15 @@ from robosystems.operations.roboledger.views import (
   summarize_by_element,
 )
 
-# Import _dispatch from the sibling operations module so error
-# translation (idempotency conflict → 409, etc.) stays centralized.
-from robosystems.routers.extensions.roboledger.operations import _dispatch
+# Error translation (idempotency conflict → 409, etc.) is shared with the
+# command routers. Taken from `_common` rather than the operations package so
+# a FACT_GRID_ENABLED-only deployment does not import the ledger commands it
+# never mounts.
+from robosystems.routers.extensions.roboledger._common import _dispatch
 
 router = APIRouter()
 
-_OP_TAG = "Extensions: RoboLedger"
+_OP_TAG = "RoboLedger: Analytical Views"
 _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 
 

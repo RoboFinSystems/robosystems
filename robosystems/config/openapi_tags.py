@@ -73,16 +73,51 @@ MAIN_API_TAGS = [
     "description": "🗃️ Staging tables - Table metadata for the staging layer",
   },
   # ── Domain applications — extensions ──────────────────────────────────────
+  #
+  # RoboLedger is split one tag per workflow stage, in the order a ledger
+  # lives through them: set it up, teach it a taxonomy, author blocks, post
+  # events, close the month, build the report, send it, analyze it. A single
+  # tag held all 52 commands until 2026-09-19, which rendered on the public
+  # reference as one undifferentiated list a quarter of the whole API long.
+  # Adding a RoboLedger operation means picking the stage it belongs to.
   {
-    "name": "Extensions: GraphQL",
+    "name": "GraphQL",
     "description": "🧩 GraphQL endpoint - Unified GraphQL endpoint for extensions read queries",
   },
   {
-    "name": "Extensions: RoboLedger",
-    "description": "📒 RoboLedger operations - Named commands for accounting & reporting writes and analytical views",
+    "name": "RoboLedger: Setup",
+    "description": "📒 Ledger setup - Initialize a ledger, seed its chart of accounts, and edit the reporting entity",
   },
   {
-    "name": "Extensions: RoboInvestor",
+    "name": "RoboLedger: Taxonomy & Mapping",
+    "description": "🏷️ Taxonomy & mapping - Curate taxonomy blocks and map the chart of accounts to their elements",
+  },
+  {
+    "name": "RoboLedger: Information Blocks",
+    "description": "🧱 Information blocks - Author the units a report is built from, and compute rules, metrics and forecasts over them",
+  },
+  {
+    "name": "RoboLedger: Ledger & Events",
+    "description": "📓 Ledger & events - Agents, business events, the handlers that post them to the GL, and journal entry corrections",
+  },
+  {
+    "name": "RoboLedger: Fiscal Close",
+    "description": "📅 Fiscal close - Close and reopen periods, and drive the schedules that feed the close",
+  },
+  {
+    "name": "RoboLedger: Reports",
+    "description": "📄 Reports - Build, rebuild, and file a financial report",
+  },
+  {
+    "name": "RoboLedger: Report Distribution",
+    "description": "📬 Report distribution - Share reports, manage publish lists, and block unwanted senders",
+  },
+  {
+    "name": "RoboLedger: Analytical Views",
+    "description": "🔬 Analytical views - Read-shaped operations over the XBRL hypercube and published reports: fact grids, statements, and disclosures",
+  },
+  {
+    "name": "RoboInvestor",
     "description": "📈 RoboInvestor operations - Named commands for portfolio management writes and analytical views",
   },
   # ── Monitor & operate ─────────────────────────────────────────────────────

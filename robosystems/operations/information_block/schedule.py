@@ -44,15 +44,13 @@ from robosystems.operations.information_block.envelope import (
   fact_to_lite,
   load_base_envelope_atoms,
 )
-from robosystems.operations.roboledger.commands.schedules import (
-  create_schedule as cmd_create_schedule,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  delete_schedule as cmd_delete_schedule,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  update_schedule as cmd_update_schedule,
-)
+
+# `roboledger.commands.schedules` is imported inside the three handlers below
+# rather than here. That module imports this package's rule engine, so a
+# module-level import closes a cycle: schedules → information_block →
+# commands → registry → schedule → schedules, with the last hop landing on a
+# half-initialized module. Deferring to call time is the same idiom
+# `commands/schedules.py` already uses for its own back-references.
 
 # Shared display identity — values mirrored in the registry entry. Kept
 # here as constants so the envelope builder can fill the wire shape
@@ -75,6 +73,10 @@ def create(
   ``create_request_model`` (:class:`CreateScheduleRequest`) before
   invoking this handler, so the argument is already shape-correct.
   """
+  from robosystems.operations.roboledger.commands.schedules import (
+    create_schedule as cmd_create_schedule,
+  )
+
   response = cmd_create_schedule(session, payload, created_by=created_by)
   return response.structure_id
 
@@ -90,6 +92,10 @@ def update(
   superseding pending obligations when the entry template changes —
   record the right actor on the freshly emitted event rows.
   """
+  from robosystems.operations.roboledger.commands.schedules import (
+    update_schedule as cmd_update_schedule,
+  )
+
   response = cmd_update_schedule(session, payload, updated_by=updated_by)
   return response.structure_id
 
@@ -105,6 +111,10 @@ def delete(
   we surface the structure_id from the input payload for the unified
   response envelope.
   """
+  from robosystems.operations.roboledger.commands.schedules import (
+    delete_schedule as cmd_delete_schedule,
+  )
+
   cmd_delete_schedule(session, payload)
   return payload.structure_id
 

@@ -124,9 +124,17 @@ class TestFlagOn:
 
 class TestErrorMapWiring:
   def test_create_and_update_specs_map_disabled_to_403(self) -> None:
+    # Importing the package is what registers roboledger's specs; each
+    # operation module owns a registrar of its own, so the specs are
+    # collected across all of them rather than read off a single one.
+    from robosystems.middleware.extensions import OperationRegistrar
     from robosystems.routers.extensions.roboledger import operations as ops
 
-    specs = {s.name: s for s in ops._registrar.registered_specs}
+    assert ops.router.routes
+    specs = {
+      spec.name: spec
+      for _reg, spec in OperationRegistrar.specs_for_extension("roboledger")
+    }
     for name in ("create-taxonomy-block", "update-taxonomy-block"):
       assert specs[name].error_map.get(TaxonomyAuthoringDisabledError) == 403
     assert (

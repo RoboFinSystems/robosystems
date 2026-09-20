@@ -633,27 +633,25 @@ def create_app() -> FastAPI:
     app.include_router(
       graphql_router,
       prefix="/extensions/{graph_id}/graphql",
-      tags=["Extensions: GraphQL"],
+      tags=["GraphQL"],
       include_in_schema=True,
       dependencies=[_Depends(subscription_aware_rate_limit_dependency)],
     )
 
   # Extensions REST operation surface: POST /extensions/{domain}/{graph_id}/operations/{op}
+  #
+  # Three routers share the roboledger prefix, and the order they mount in is
+  # the order the published reference lists them in — operations are grouped
+  # by tag, and within a tag by route registration. Commands first, then the
+  # two analytical-view routers that share the `RoboLedger: Analytical Views`
+  # tag between them.
   if env.ROBOLEDGER_ENABLED:
     from robosystems.routers.extensions.roboledger.operations import (
       router as roboledger_operations_router,
     )
-    from robosystems.routers.extensions.roboledger.reads import (
-      router as roboledger_reads_router,
-    )
 
     app.include_router(
       roboledger_operations_router,
-      prefix="/extensions/roboledger/{graph_id}/operations",
-      include_in_schema=True,
-    )
-    app.include_router(
-      roboledger_reads_router,
       prefix="/extensions/roboledger/{graph_id}/operations",
       include_in_schema=True,
     )
@@ -670,6 +668,21 @@ def create_app() -> FastAPI:
 
     app.include_router(
       roboledger_views_router,
+      prefix="/extensions/roboledger/{graph_id}/operations",
+      include_in_schema=True,
+    )
+
+  # The OLTP-backed analytical read carries the same tag as the graph-backed
+  # views and mounts after them, so the tag leads with `build-fact-grid`
+  # rather than with this one endpoint. It needs a provisioned ledger, so it
+  # stays on ROBOLEDGER_ENABLED and cannot simply join views.py.
+  if env.ROBOLEDGER_ENABLED:
+    from robosystems.routers.extensions.roboledger.reads import (
+      router as roboledger_reads_router,
+    )
+
+    app.include_router(
+      roboledger_reads_router,
       prefix="/extensions/roboledger/{graph_id}/operations",
       include_in_schema=True,
     )
