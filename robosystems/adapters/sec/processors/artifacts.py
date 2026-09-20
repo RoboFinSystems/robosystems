@@ -89,9 +89,9 @@ def gzip_artifact(data: bytes) -> bytes:
 
   ``mtime=0`` keeps a timestamp out of the header, so a reprocess still rewrites
   the same bytes. The level is pinned because ``gzip.compress`` defaults to 9,
-  which is 5% smaller than 6 on a holon at half the speed. The backfill that
-  compressed the artifacts written before this shares the function, so the two
-  cannot produce different bytes for one filing.
+  which is 5% smaller than 6 on a holon at half the speed. Every artifact in the
+  bucket was written with these settings; changing either rewrites them all on
+  the next reprocess.
   """
   return gzip.compress(data, compresslevel=6, mtime=0)
 
