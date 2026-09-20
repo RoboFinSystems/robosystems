@@ -170,9 +170,29 @@ MAIN_API_TAGS = [
     "name": "User",
     "description": "👤 User management - Profile, settings, and account information",
   },
+  #
+  # Auth keeps the sign-in story together — register, login, session, email
+  # verification, password — because those are one narrative a reader follows.
+  # The three mechanisms below are carved out instead: each is self-contained,
+  # with its own multi-step flow, and none is on the path of a plain password
+  # login. Carving out rather than renaming the parent is deliberate — it keeps
+  # `api/auth/` in the Python SDK, where `login_user` and `register_user` are
+  # the only symbols any consumer imports.
   {
     "name": "Auth",
-    "description": "🔐 Authentication - Login, register, and access token management",
+    "description": "🔐 Authentication - Register, sign in, manage the session, verify email, and reset passwords",
+  },
+  {
+    "name": "Auth: Passkeys",
+    "description": "🔑 Passkeys - WebAuthn registration, passwordless login, and re-authentication",
+  },
+  {
+    "name": "Auth: MFA",
+    "description": "🛡️ Multi-factor auth - Assertion options, verification, status, and recovery codes",
+  },
+  {
+    "name": "Auth: SSO",
+    "description": "🎫 Single sign-on - Cross-app token exchange, and enterprise OIDC where enabled",
   },
   # ── Platform ──────────────────────────────────────────────────────────────
   {
