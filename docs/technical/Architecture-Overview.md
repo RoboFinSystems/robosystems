@@ -1031,7 +1031,7 @@ See individual app repositories for specific deployment workflows.
 **Purpose**: AI-powered financial operations
 
 - AWS Bedrock (the Converse API) for model access: Claude Sonnet 5 by default, with Claude Opus 5 and OpenAI GPT-5.6 Luna configured as the other profiles
-- Self-hosted stacks can point operators at any OpenAI-compatible server instead (see [AI Models](Local-Development#ai-models))
+- Self-hosted stacks can point operators at any OpenAI-compatible server instead (see [Self-Hosted AI Models](Self-Hosted-AI-Models))
 - Unified operator system: stateless operators with automatic credit tracking per call
 - CypherOperator for natural language graph queries, MappingOperator for autonomous CoA→rs-gaap taxonomy mapping
 - MCP tools provide operators with graph queries, taxonomy operations, SEC structure discovery, and document search

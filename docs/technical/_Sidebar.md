@@ -38,6 +38,7 @@
 
 ### Self-Hosting & Development
 - [Local Development](Local-Development)
+- [Self-Hosted AI Models](Self-Hosted-AI-Models)
 - [Windows Setup (WSL2)](Windows-Setup-with-WSL2)
 - [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)
 - [Bootstrap Guide](Bootstrap-Guide)

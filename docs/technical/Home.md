@@ -64,6 +64,7 @@ Unstructured content and retrieval — the institutional-knowledge layer that gr
 RoboSystems is open source: run the whole platform on your machine, contribute to it, or deploy it into your own AWS account.
 
 - **[Local Development](Local-Development)** - From `just start` to your first authenticated query in ten minutes, and how a local stack differs from hosted
+- **[Self-Hosted AI Models](Self-Hosted-AI-Models)** - Run the operators on open-weight models through any OpenAI-compatible endpoint
 - **[Windows Setup (WSL2)](Windows-Setup-with-WSL2)** - Set up WSL2 and run the stack on Windows
 - **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)** - Run real QB OAuth against a local stack via ngrok
 - **[Bootstrap Guide](Bootstrap-Guide)** - Set up AWS OIDC federation and GitHub Actions to deploy your own

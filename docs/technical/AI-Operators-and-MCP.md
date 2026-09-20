@@ -377,7 +377,7 @@ Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSION
 
 A stack you run serves both MCP routes at `http://localhost:8000/v1/mcp` and `http://localhost:8000/v1/graphs/{graph_id}/mcp`. The OAuth route requires `MCP_OAUTH_ENABLED=true`; the per-graph route takes the key from `just demo-user` in `X-API-Key`. See [Local Development](Local-Development).
 
-Operators on a stack you run can use an open-weight model in place of the Bedrock models, through any OpenAI-compatible server. See [AI Models](Local-Development#ai-models).
+Operators on a stack you run can use an open-weight model in place of the Bedrock models, through any OpenAI-compatible server. Which tiers it backs, which endpoints work, and which models we tested are in [Self-Hosted AI Models](Self-Hosted-AI-Models).
 
 ---
 
@@ -388,6 +388,7 @@ Operators on a stack you run can use an open-weight model in place of the Bedroc
 - **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - Cypher over LadybugDB in depth
 - **[GraphQL Reads](GraphQL-Reads)** - The typed operational read surface in depth
 - **[Search and AI Retrieval](Search-and-AI-Retrieval)** - The document index and hybrid search in depth
+- **[Self-Hosted AI Models](Self-Hosted-AI-Models)** - Running the operators on a model you choose
 
 **Codebase Documentation:**
 - **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, resolver patterns
