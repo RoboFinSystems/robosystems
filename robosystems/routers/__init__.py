@@ -170,7 +170,12 @@ mcp_agnostic_router_v1.include_router(mcp_agnostic_router, prefix="/mcp")
 mcp_agnostic_router_v1.include_router(mcp_roboledger_router, prefix="/mcp/roboledger")
 
 # Auth routes that don't require a graph_id
-auth_router_v1 = APIRouter(prefix="/v1/auth", tags=["Auth"])
+# No `tags` here: the auth sub-routers tag themselves, so the passkey, MFA
+# and SSO mechanisms can carve out their own groups. A tag set here would
+# merge into every route and win the grouping, since consumers read the
+# first tag — the reference's page layout and the Python SDK's module
+# directories both.
+auth_router_v1 = APIRouter(prefix="/v1/auth")
 auth_router_v1.include_router(auth_router)
 
 # Status routes that don't require a graph_id
