@@ -36,6 +36,11 @@ from strawberry.types import Info
 from robosystems.config import env
 from robosystems.graphql.context import GraphQLContext, require_user
 from robosystems.graphql.execution import MaskUnexpectedErrors, OffloadSyncResolvers
+from robosystems.graphql.resolvers._common import (
+  _MAX_LIMIT,
+  _MIN_LIMIT,
+  _MIN_OFFSET,
+)
 from robosystems.graphql.resolvers.information_block import InformationBlockQuery
 from robosystems.graphql.resolvers.investor import InvestorQuery
 from robosystems.graphql.resolvers.ledger import LedgerQuery
@@ -68,19 +73,24 @@ class _BaseQuery:
     return f"hello, {user.email}"
 
 
-# `limit` and `offset` mean the same thing on all 31 fields that take them:
+# `limit` and `offset` mean the same thing on all 31 arguments that take them:
 # `resolvers/_common.py` validates every pair against one shared guard. Only the
 # per-field default varies, and that is resolved server-side, so one description
 # is accurate everywhere and beats 31 copies drifting apart. A docstring `Args:`
 # entry still wins where a field needs to say something else.
+#
+# The bounds are interpolated from the guard rather than written out. They are a
+# public claim — this text reaches GraphiQL, the published reference, the SDK
+# snapshot and the `get-graphql-schema` MCP tool — and a hardcoded "1-1000" goes
+# on asserting itself after someone edits `_MAX_LIMIT`, on every field at once.
 COMMON_ARGUMENT_DESCRIPTIONS = {
   "limit": (
-    "Maximum rows to return, 1-1000. Omit to use this field's own default; "
-    "out of range raises `INVALID_PAGINATION`."
+    f"Maximum rows to return, {_MIN_LIMIT}-{_MAX_LIMIT}. Omit to use this "
+    "field's own default; out of range raises `INVALID_PAGINATION`."
   ),
   "offset": (
-    "Rows to skip before returning, 0 or greater. Out of range raises "
-    "`INVALID_PAGINATION`."
+    f"Rows to skip before returning, {_MIN_OFFSET} or greater. Out of range "
+    "raises `INVALID_PAGINATION`."
   ),
 }
 
