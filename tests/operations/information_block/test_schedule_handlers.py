@@ -23,6 +23,11 @@ from robosystems.operations.information_block import schedule as schedule_handle
 
 MODULE = "robosystems.operations.information_block.schedule"
 
+# The three `cmd_*` schedule commands are imported inside the handlers rather
+# than at module scope, to break an import cycle — so they are patched where
+# they are defined, not where they are used.
+COMMANDS = "robosystems.operations.roboledger.commands.schedules"
+
 
 def _exec_result(
   *, scalars_all: list[Any] | None = None, scalar: Any = None
@@ -88,7 +93,7 @@ class TestCreate:
       total_periods=3,
       total_facts=6,
     )
-    with patch(f"{MODULE}.cmd_create_schedule", return_value=expected) as mock_cmd:
+    with patch(f"{COMMANDS}.create_schedule", return_value=expected) as mock_cmd:
       result = schedule_handlers.create(session, _body(), "usr_test")
 
     assert result == "struct_abc"
@@ -111,7 +116,7 @@ class TestUpdate:
       total_periods=3,
       total_facts=6,
     )
-    with patch(f"{MODULE}.cmd_update_schedule", return_value=expected) as mock_cmd:
+    with patch(f"{COMMANDS}.update_schedule", return_value=expected) as mock_cmd:
       result = schedule_handlers.update(session, body, "usr_test")
 
     assert result == "struct_existing"
@@ -123,7 +128,7 @@ class TestDelete:
     session = MagicMock()
     body = DeleteScheduleRequest(structure_id="struct_gone")
     with patch(
-      f"{MODULE}.cmd_delete_schedule", return_value={"deleted": True}
+      f"{COMMANDS}.delete_schedule", return_value={"deleted": True}
     ) as mock_cmd:
       result = schedule_handlers.delete(session, body, "usr_test")
 

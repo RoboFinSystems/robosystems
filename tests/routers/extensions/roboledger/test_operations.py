@@ -1032,11 +1032,11 @@ class TestFileReportOp:
     body = FileReportRequest(report_id="rpt_01")
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_file_report",
+        "robosystems.routers.extensions.roboledger.operations.reports.cmd_file_report",
         return_value=_make_filed_report_response(),
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+        "robosystems.routers.extensions.roboledger.operations.reports.extensions_session"
       ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -1064,11 +1064,11 @@ class TestFileReportOp:
     body = FileReportRequest(report_id="rpt_missing")
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_file_report",
+        "robosystems.routers.extensions.roboledger.operations.reports.cmd_file_report",
         side_effect=ReportNotFoundError("rpt_missing"),
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+        "robosystems.routers.extensions.roboledger.operations.reports.extensions_session"
       ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -1094,13 +1094,13 @@ class TestFileReportOp:
     body = FileReportRequest(report_id="rpt_01")
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_file_report",
+        "robosystems.routers.extensions.roboledger.operations.reports.cmd_file_report",
         side_effect=InvalidFilingTransitionError(
           "Report 'rpt_01' is in 'archived'; can only file from 'draft' or 'under_review'."
         ),
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+        "robosystems.routers.extensions.roboledger.operations.reports.extensions_session"
       ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -1128,11 +1128,11 @@ class TestTransitionFilingStatusOp:
     )
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_transition_filing_status",
+        "robosystems.routers.extensions.roboledger.operations.reports.cmd_transition_filing_status",
         return_value=response,
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+        "robosystems.routers.extensions.roboledger.operations.reports.extensions_session"
       ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -1158,13 +1158,13 @@ class TestTransitionFilingStatusOp:
     body = TransitionFilingStatusRequest(report_id="rpt_01", target_status="filed")
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_transition_filing_status",
+        "robosystems.routers.extensions.roboledger.operations.reports.cmd_transition_filing_status",
         side_effect=InvalidFilingTransitionError(
           "Report 'rpt_01' cannot transition from 'under_review' to 'filed'."
         ),
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+        "robosystems.routers.extensions.roboledger.operations.reports.extensions_session"
       ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -1463,10 +1463,10 @@ class TestHandWrittenWriteRoleGate:
     """Structural, not behavioral: asserts the invariant rather than one
     instance, so a newly added hand-written op that forgets the gate fails
     here instead of shipping."""
-    from robosystems.routers.extensions.roboledger.operations import (
+    from robosystems.routers.extensions.roboledger._common import (
       _require_roboledger_write,
-      router,
     )
+    from robosystems.routers.extensions.roboledger.operations import router
 
     def _dependency_calls(dependant) -> list:
       calls = []
@@ -1493,12 +1493,12 @@ class TestHandWrittenWriteRoleGate:
     )
 
   def test_write_dependency_denies_a_viewer(self) -> None:
-    from robosystems.routers.extensions.roboledger.operations import (
+    from robosystems.routers.extensions.roboledger._common import (
       _require_roboledger_write,
     )
 
     with patch(
-      "robosystems.routers.extensions.roboledger.operations.require_graph_write_role",
+      "robosystems.routers.extensions.roboledger._common.require_graph_write_role",
       side_effect=HTTPException(
         status_code=403, detail="Write access denied; your role is read-only."
       ),
@@ -1511,13 +1511,13 @@ class TestHandWrittenWriteRoleGate:
     assert exc.value.status_code == 403
 
   def test_write_dependency_returns_the_user_for_a_writer(self) -> None:
-    from robosystems.routers.extensions.roboledger.operations import (
+    from robosystems.routers.extensions.roboledger._common import (
       _require_roboledger_write,
     )
 
     user = _make_user()
     with patch(
-      "robosystems.routers.extensions.roboledger.operations.require_graph_write_role",
+      "robosystems.routers.extensions.roboledger._common.require_graph_write_role",
       return_value=None,
     ) as gate:
       resolved = _require_roboledger_write(
@@ -1560,11 +1560,11 @@ class TestCrossGraphStalenessCallbacks:
 
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_share_report",
+        "robosystems.routers.extensions.roboledger.operations.distribution.cmd_share_report",
         return_value=result,
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+        "robosystems.routers.extensions.roboledger.operations.distribution.mark_graph_stale"
       ) as mark,
     ):
       envelope = await share_report_op(
@@ -1596,15 +1596,15 @@ class TestCrossGraphStalenessCallbacks:
 
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_revoke_report_share",
+        "robosystems.routers.extensions.roboledger.operations.distribution.cmd_revoke_report_share",
         return_value=result,
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.user_is_graph_admin",
+        "robosystems.routers.extensions.roboledger.operations.distribution.user_is_graph_admin",
         return_value=True,
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+        "robosystems.routers.extensions.roboledger.operations.distribution.mark_graph_stale"
       ) as mark,
     ):
       await revoke_report_share_op(
@@ -1632,15 +1632,15 @@ class TestCrossGraphStalenessCallbacks:
 
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_revoke_report_share",
+        "robosystems.routers.extensions.roboledger.operations.distribution.cmd_revoke_report_share",
         return_value=result,
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.user_is_graph_admin",
+        "robosystems.routers.extensions.roboledger.operations.distribution.user_is_graph_admin",
         return_value=True,
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+        "robosystems.routers.extensions.roboledger.operations.distribution.mark_graph_stale"
       ) as mark,
     ):
       await revoke_report_share_op(
@@ -1674,18 +1674,18 @@ class TestCrossGraphStalenessCallbacks:
 
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_block_source_graph",
+        "robosystems.routers.extensions.roboledger.operations.distribution.cmd_block_source_graph",
         return_value=self._block_result(3),
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.user_is_graph_admin",
+        "robosystems.routers.extensions.roboledger.operations.distribution.user_is_graph_admin",
         return_value=True,
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+        "robosystems.routers.extensions.roboledger.operations.distribution.extensions_session"
       ) as mock_session,
       patch(
-        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+        "robosystems.routers.extensions.roboledger.operations.distribution.mark_graph_stale"
       ) as mark,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -1710,19 +1710,21 @@ class TestCrossGraphStalenessCallbacks:
 
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_block_source_graph",
+        "robosystems.routers.extensions.roboledger.operations.distribution.cmd_block_source_graph",
         return_value=self._block_result(3),
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.user_is_graph_admin",
+        "robosystems.routers.extensions.roboledger.operations.distribution.user_is_graph_admin",
         return_value=True,
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+        "robosystems.routers.extensions.roboledger.operations.distribution.extensions_session"
       ) as mock_session,
-      patch("robosystems.routers.extensions.roboledger.operations.mark_graph_stale"),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.delete_report_artifacts"
+        "robosystems.routers.extensions.roboledger.operations.distribution.mark_graph_stale"
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.distribution.delete_report_artifacts"
       ) as drop,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -1747,18 +1749,18 @@ class TestCrossGraphStalenessCallbacks:
 
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_block_source_graph",
+        "robosystems.routers.extensions.roboledger.operations.distribution.cmd_block_source_graph",
         return_value=self._block_result(0),
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.user_is_graph_admin",
+        "robosystems.routers.extensions.roboledger.operations.distribution.user_is_graph_admin",
         return_value=True,
       ),
       patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+        "robosystems.routers.extensions.roboledger.operations.distribution.extensions_session"
       ) as mock_session,
       patch(
-        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+        "robosystems.routers.extensions.roboledger.operations.distribution.mark_graph_stale"
       ) as mark,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -1808,11 +1810,11 @@ class TestClosePeriodOp:
     )
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_close_period",
+        "robosystems.routers.extensions.roboledger.operations.close.cmd_close_period",
         return_value=_make_close_period_response(),
       ) as cmd,
       patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+        "robosystems.routers.extensions.roboledger.operations.close.extensions_session"
       ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
