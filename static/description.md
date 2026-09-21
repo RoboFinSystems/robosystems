@@ -1,7 +1,5 @@
 The REST and GraphQL API for [RoboSystems](https://robosystems.ai) — an open-source, AI-native platform for accounting, financial reporting and investment management. It powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
 
-This page is the **playground**: every operation below can be run against this deployment. The written reference lives on the docs site, linked under each surface.
-
 ## Two surfaces
 
 **Platform** — `/v1/…` — graphs, queries, schema, documents, search, memory, connections, billing and access. Reads are REST `GET`s; every write is a named operation at `/operations/{name}` returning an `OperationEnvelope`, accepting an `Idempotency-Key`, and streaming progress at `/v1/operations/{id}/stream`.
