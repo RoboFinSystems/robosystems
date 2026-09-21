@@ -1,0 +1,205 @@
+name: IndexNow Ping
+description: >-
+  Announce a site's new and changed URLs to IndexNow by diffing its live sitemap
+  against the previous run. Reaches Bing (and therefore Copilot and DuckDuckGo),
+  Yandex, Seznam, Naver and Yep within minutes. Google ignores IndexNow.
+
+inputs:
+  host:
+    description: 'The bare host the URLs belong to, e.g. "robosystems.ai". Not a URL.'
+    required: true
+  key:
+    description: >-
+      The IndexNow key. It is public by design — it is served at the host root —
+      so it belongs in a repository variable, never a secret.
+    required: true
+  sitemap_url:
+    description: "The sitemap to read. Defaults to the host's /sitemap.xml."
+    required: false
+    default: ""
+  max_urls:
+    description: >-
+      Cap on URLs sent in one run. IndexNow accepts 10,000 per request; the cap
+      exists so a sitemap that changes wholesale (a path scheme changing, a
+      catalog fetch failing and recovering) cannot turn into a flood.
+    required: false
+    default: "1000"
+  dry_run:
+    description: "Resolve and diff, report what would be sent, submit nothing."
+    required: false
+    default: "false"
+
+outputs:
+  submitted:
+    description: Number of URLs submitted (0 when there was nothing new).
+    value: ${{ steps.ping.outputs.submitted }}
+  total:
+    description: Number of URLs in the sitemap this run.
+    value: ${{ steps.ping.outputs.total }}
+
+runs:
+  using: composite
+  steps:
+    # The key file proves ownership of the host, and a submission for a host that
+    # cannot serve it is rejected. Checking first turns a silent no-op into a failed
+    # step that names the cause — the failure mode otherwise is a workflow that stays
+    # green for weeks while announcing nothing.
+    - name: Verify the key is served at the host root
+      shell: bash
+      env:
+        HOST: ${{ inputs.host }}
+        KEY: ${{ inputs.key }}
+      run: |
+        set -euo pipefail
+        if [[ ! "$KEY" =~ ^[A-Za-z0-9-]{8,128}$ ]]; then
+          echo "::error::IndexNow key must be 8-128 characters of [A-Za-z0-9-]."
+          exit 1
+        fi
+        LOCATION="https://${HOST}/${KEY}.txt"
+        if ! SERVED=$(curl -sS --max-time 30 --fail "$LOCATION"); then
+          echo "::error::${LOCATION} is not being served. The key file must be at the host root."
+          exit 1
+        fi
+        if [[ "$(printf '%s' "$SERVED" | tr -d '[:space:]')" != "$KEY" ]]; then
+          echo "::error::${LOCATION} does not contain the key it is named for."
+          exit 1
+        fi
+        echo "Key verified at ${LOCATION}"
+
+    - name: Read the sitemap
+      shell: bash
+      env:
+        HOST: ${{ inputs.host }}
+        SITEMAP_URL: ${{ inputs.sitemap_url }}
+      run: |
+        set -euo pipefail
+        SITEMAP="${SITEMAP_URL:-https://${HOST}/sitemap.xml}"
+        curl -sS --max-time 60 --fail "$SITEMAP" -o "${RUNNER_TEMP}/sitemap.xml"
+        # One <loc> per line, whatever the file's whitespace. A sitemap index is not
+        # followed: every site here publishes a flat sitemap, and quietly submitting
+        # nothing for an index would be worse than the empty diff that results.
+        grep -o '<loc>[^<]*</loc>' "${RUNNER_TEMP}/sitemap.xml" \
+          | sed -e 's|<loc>||g' -e 's|</loc>||g' \
+          | sed 's/[[:space:]]//g' \
+          | grep . \
+          | sort -u > "${RUNNER_TEMP}/indexnow-current.txt"
+        COUNT=$(wc -l < "${RUNNER_TEMP}/indexnow-current.txt" | tr -d ' ')
+        if [[ "$COUNT" -eq 0 ]]; then
+          echo "::error::${SITEMAP} yielded no URLs."
+          exit 1
+        fi
+        echo "${SITEMAP}: ${COUNT} URLs"
+
+    # Restored by prefix so the newest snapshot wins; saved under a run-unique key
+    # because a cache entry is immutable once written.
+    - name: Restore the previous snapshot
+      uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: ${{ runner.temp }}/indexnow-previous.txt
+        key: indexnow-${{ inputs.host }}-${{ github.run_id }}
+        restore-keys: indexnow-${{ inputs.host }}-
+
+    - name: Diff and submit
+      id: ping
+      shell: bash
+      env:
+        HOST: ${{ inputs.host }}
+        KEY: ${{ inputs.key }}
+        MAX_URLS: ${{ inputs.max_urls }}
+        DRY_RUN: ${{ inputs.dry_run }}
+      run: |
+        set -euo pipefail
+        CURRENT="${RUNNER_TEMP}/indexnow-current.txt"
+        PREVIOUS="${RUNNER_TEMP}/indexnow-previous.txt"
+        NEW_FILE="${RUNNER_TEMP}/indexnow-new.txt"
+        SEND_FILE="${RUNNER_TEMP}/indexnow-send.txt"
+
+        TOTAL=$(wc -l < "$CURRENT" | tr -d ' ')
+        echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
+
+        if [[ -f "$PREVIOUS" ]]; then
+          comm -13 "$PREVIOUS" "$CURRENT" > "$NEW_FILE"
+          echo "Previous run saw $(wc -l < "$PREVIOUS" | tr -d ' ') URLs."
+        else
+          # No snapshot: either the first run or a cache eviction. Announce the whole
+          # sitemap. Bing throttles repeated submission of unchanged URLs, which is why
+          # this is the exception rather than the every-run behaviour.
+          cp "$CURRENT" "$NEW_FILE"
+          echo "No previous snapshot — treating the whole sitemap as new."
+        fi
+
+        NEW=$(wc -l < "$NEW_FILE" | tr -d ' ')
+        {
+          echo "### IndexNow — ${HOST}"
+          echo ""
+          echo "- Sitemap: ${TOTAL} URLs"
+          echo "- New since the last run: ${NEW}"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [[ "$NEW" -eq 0 ]]; then
+          echo "Nothing new to announce."
+          echo "submitted=0" >> "$GITHUB_OUTPUT"
+          cp "$CURRENT" "$PREVIOUS"
+          exit 0
+        fi
+
+        if [[ "$NEW" -gt "$MAX_URLS" ]]; then
+          echo "::warning::${NEW} new URLs exceeds the ${MAX_URLS} cap; submitting the first ${MAX_URLS}."
+          echo "- **Capped** at ${MAX_URLS}; the rest go on the next run" >> "$GITHUB_STEP_SUMMARY"
+          head -n "$MAX_URLS" "$NEW_FILE" > "$SEND_FILE"
+        else
+          cp "$NEW_FILE" "$SEND_FILE"
+        fi
+
+        SEND=$(wc -l < "$SEND_FILE" | tr -d ' ')
+        echo "First few:"
+        head -n 5 "$SEND_FILE"
+
+        if [[ "$DRY_RUN" == "true" ]]; then
+          echo "Dry run — submitting nothing."
+          echo "- Dry run: nothing submitted" >> "$GITHUB_STEP_SUMMARY"
+          echo "submitted=0" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        jq -R -s 'split("\n") | map(select(length > 0))' "$SEND_FILE" > "${RUNNER_TEMP}/urls.json"
+        jq -n \
+          --arg host "$HOST" \
+          --arg key "$KEY" \
+          --arg keyLocation "https://${HOST}/${KEY}.txt" \
+          --slurpfile urls "${RUNNER_TEMP}/urls.json" \
+          '{host: $host, key: $key, keyLocation: $keyLocation, urlList: $urls[0]}' \
+          > "${RUNNER_TEMP}/indexnow-body.json"
+
+        # api.indexnow.org fans the submission out to every participating engine, so one
+        # POST reaches all of them. 200 and 202 are both success; 202 means the key is
+        # still being validated.
+        STATUS=$(curl -sS --max-time 60 -o "${RUNNER_TEMP}/indexnow-response.txt" -w '%{http_code}' \
+          -X POST 'https://api.indexnow.org/indexnow' \
+          -H 'Content-Type: application/json; charset=utf-8' \
+          --data-binary "@${RUNNER_TEMP}/indexnow-body.json")
+
+        echo "HTTP ${STATUS}"
+        cat "${RUNNER_TEMP}/indexnow-response.txt" || true
+
+        if [[ "$STATUS" != "200" && "$STATUS" != "202" ]]; then
+          echo "::error::IndexNow returned HTTP ${STATUS}."
+          echo "- Submission **failed**: HTTP ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        fi
+
+        echo "Submitted ${SEND} URLs (HTTP ${STATUS})."
+        echo "- Submitted **${SEND}** URLs (HTTP ${STATUS})" >> "$GITHUB_STEP_SUMMARY"
+        echo "submitted=${SEND}" >> "$GITHUB_OUTPUT"
+
+        # Only advance the snapshot once the submission is accepted, so a failed run
+        # re-announces the same URLs next time rather than dropping them.
+        cp "$CURRENT" "$PREVIOUS"
+
+    # No `always()`: a failed submit must not advance the snapshot, and the diff step
+    # writes the file on every path it exits 0 from.
+    - name: Save the snapshot
+      uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: ${{ runner.temp }}/indexnow-previous.txt
+        key: indexnow-${{ inputs.host }}-${{ github.run_id }}
