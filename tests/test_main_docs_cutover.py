@@ -141,3 +141,47 @@ class TestSpecProseIsMarkdown:
       f"Specification prose carries reStructuredText markup: {offenders}. "
       "Use single backticks — the reference renders markdown."
     )
+
+
+class TestTheSpecDescriptionDescribesTheApi:
+  """`info.description` is rendered on more than one surface, so it cannot be
+  written about any of them.
+
+  `static/description.md` reaches the Swagger page at the API root, the
+  rendered header of `robosystems.ai/docs/api`, and anything else that reads
+  the spec. It shipped saying "This page is the **playground**: every operation
+  below can be run against this deployment. The written reference lives on the
+  docs site" — true at the root, and on `/docs/api` a claim that the page can
+  run calls it cannot run, telling a reader already on the docs site to go
+  there.
+
+  The rule that makes it true everywhere is that it describes the API, never
+  the page it is being read on.
+  """
+
+  # Deixis, not vocabulary: each of these locates the reader rather than the API.
+  PAGE_RELATIVE = (
+    "this page",
+    "playground",
+    "the page below",
+    "you are here",
+    "on this site",
+    "above",
+  )
+
+  def test_it_makes_no_claim_about_the_page_it_is_rendered_on(self, client) -> None:
+    description = client.get("/openapi.json").json()["info"]["description"]
+    found = sorted(
+      phrase for phrase in self.PAGE_RELATIVE if phrase in description.lower()
+    )
+    assert found == [], (
+      f"The specification description locates the reader on a page: {found}. "
+      "It renders on the Swagger console *and* on robosystems.ai/docs/api, so "
+      "a sentence true of one is false on the other. Describe the API instead."
+    )
+
+  def test_it_still_carries_the_orientation_worth_having(self, client) -> None:
+    """Guard the rule above from being satisfied by deleting the content."""
+    description = client.get("/openapi.json").json()["info"]["description"]
+    for expected in ("/v1/", "/extensions/", "X-API-Key", "/docs/extensions"):
+      assert expected in description, f"the description no longer mentions {expected}"
