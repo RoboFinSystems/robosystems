@@ -208,10 +208,10 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
     Raises:
         ValueError: If query contains write, bulk, admin, or schema-DDL operations
     """
-    assert_read_only_cypher(query)
+    assert_read_only_cypher(query, self.client.graph_id)
 
 
-def assert_read_only_cypher(query: str) -> None:
+def assert_read_only_cypher(query: str, graph_id: str | None = None) -> None:
   """Refuse anything but a read for the read-graph-cypher tool.
 
   Module-level so every path that executes on the tool's behalf runs the
@@ -220,9 +220,13 @@ def assert_read_only_cypher(query: str) -> None:
   and kernel), and the queued strategies in the MCP routers, which submit
   the raw statement to the query queue without ever constructing the tool.
 
+  With ``graph_id``, a shared repository's declared read limits apply too —
+  the Operator path reaches the engine without the kernel that enforces
+  them everywhere else.
+
   Raises:
       ValueError: If the query contains write, bulk, admin, or schema-DDL
-          operations.
+          operations, or a read the graph's repository refuses.
   """
   # Route every category through the central security analyzer — the same
   # predicates the StatementKernel (REST /query/cypher) composes — so this
@@ -254,3 +258,13 @@ def assert_read_only_cypher(query: str) -> None:
       "Blocked write operation (CREATE/MERGE/SET/DELETE) in read-graph-cypher"
     )
     raise ValueError("Only read-only queries are allowed")
+
+  if graph_id:
+    from robosystems.middleware.graph.statement_kernel import (
+      shared_repository_read_refusal,
+    )
+
+    refusal = shared_repository_read_refusal(graph_id, query)
+    if refusal:
+      logger.warning(f"Refused read in read-graph-cypher on {graph_id}")
+      raise ValueError(refusal)

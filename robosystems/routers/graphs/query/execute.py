@@ -789,6 +789,7 @@ async def execute_cypher_query(
     record_shared_query_outcome(
       graph_id,
       current_user.id,
+      signal=getattr(exc, "telemetry_signal", None),
       status_code=exc.status_code,
       api_key_prefix=key_prefix,
       endpoint="/v1/graphs/{graph_id}/query/cypher",

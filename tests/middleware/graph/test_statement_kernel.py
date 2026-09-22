@@ -11,8 +11,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
+from robosystems.adapters.base import SharedRepositoryManifest
 from robosystems.middleware.graph.statement_kernel import (
+  SharedRepositoryReadRefused,
   StatementEngine,
+  shared_repository_read_refusal,
   statement_kernel,
 )
 
@@ -221,3 +224,56 @@ def test_sql_on_shared_repo_blocked():
       _authorize_sql("sec")
   assert e.value.status_code == 403
   assert "Shared repositories do not allow direct SQL" in e.value.detail
+
+
+# Shared-repository read limits use the real analyzer and the real registry —
+# the rule is a contract between the manifest and the predicate, so patching
+# either would test nothing.
+_GUARDED_READ = "MATCH (f:Fact) WHERE f.value CONTAINS 'going concern' RETURN f LIMIT 5"
+
+
+def test_guarded_string_match_refused_on_shared_repo():
+  with pytest.raises(SharedRepositoryReadRefused) as e:
+    _authorize("sec", _GUARDED_READ)
+  assert e.value.status_code == 400
+  assert "`Fact.value`" in e.value.detail
+  assert "search-documents" in e.value.detail
+  assert e.value.telemetry_signal == "string_match_refused"
+
+
+def test_guarded_string_match_refused_on_shared_repo_subgraph():
+  with pytest.raises(SharedRepositoryReadRefused):
+    _authorize("sec_historical", _GUARDED_READ)
+
+
+def test_same_statement_allowed_on_tenant_graph():
+  auth = _authorize("kg1234567890abcdef", _GUARDED_READ)
+  assert auth.is_write is False
+
+
+def test_other_reads_on_shared_repo_unaffected():
+  statement = (
+    "MATCH (e:Entity {ticker: 'NVDA'})<-[:FACT_HAS_ENTITY]-(f:Fact) "
+    "WHERE e.name CONTAINS 'NVIDIA' RETURN f.value LIMIT 10"
+  )
+  auth = _authorize("sec", statement)
+  assert auth.access_type == "read"
+
+
+def test_unlabelled_node_refusal_says_how_to_state_the_label():
+  statement = (
+    "MATCH (r:Report)-[:REPORT_HAS_FACT]->(n) WHERE n.value CONTAINS 'x' RETURN n"
+  )
+  refusal = shared_repository_read_refusal("sec", statement)
+  assert refusal is not None
+  assert "state its label" in refusal
+
+
+def test_shared_repo_declaring_nothing_refuses_nothing():
+  manifest = SharedRepositoryManifest(
+    id="sec", name="SEC", description="", data_source_type="sec_edgar"
+  )
+  with patch(
+    "robosystems.config.shared_repositories.get_manifest", return_value=manifest
+  ):
+    assert shared_repository_read_refusal("sec", _GUARDED_READ) is None

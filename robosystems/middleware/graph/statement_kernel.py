@@ -23,6 +23,7 @@ from starlette import status as http_status
 from robosystems.middleware.graph.utils import MultiTenantUtils, parse_subgraph_id
 from robosystems.models.core import User
 from robosystems.security.cypher_analyzer import (
+  find_guarded_string_match,
   has_opaque_statement_call,
   is_admin_operation,
   is_bulk_operation,
@@ -31,6 +32,52 @@ from robosystems.security.cypher_analyzer import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class SharedRepositoryReadRefused(HTTPException):
+  """A read refused by a shared repository's declared query limits."""
+
+  telemetry_signal = "string_match_refused"
+
+
+def shared_repository_read_refusal(graph_id: str, statement: str) -> str | None:
+  """Return why a shared repository refuses this read, or None if it serves it.
+
+  Reads the repository manifest's ``guarded_string_properties``; a graph that
+  is not a shared repository, or a repository that declares none, refuses
+  nothing. Shared by the kernel and the read-graph-cypher tool so the paths
+  that reach the engine without the kernel apply the same rule.
+  """
+  from robosystems.config.shared_repositories import (
+    get_manifest,
+    is_shared_repository_or_subgraph,
+    resolve_shared_repository_parent,
+  )
+
+  if not is_shared_repository_or_subgraph(graph_id.lower()):
+    return None
+  manifest = get_manifest(resolve_shared_repository_parent(graph_id.lower()))
+  if manifest is None or not manifest.guarded_string_properties:
+    return None
+
+  match = find_guarded_string_match(statement, manifest.guarded_string_properties)
+  if match is None:
+    return None
+
+  label, _, prop = match.guarded_property.partition(".")
+  reason = (
+    f"String matching (CONTAINS, STARTS WITH, ENDS WITH, =~) on "
+    f"`{match.guarded_property}` is not available through Cypher on the "
+    f"'{manifest.id}' repository."
+  )
+  if not match.label_resolved:
+    reason += (
+      f" The node carrying `{prop}` has no label in this statement; if it is "
+      f"not a {label}, state its label in the MATCH pattern."
+    )
+  if manifest.guarded_string_guidance:
+    reason += f" {manifest.guarded_string_guidance}"
+  return reason
 
 
 class StatementEngine(str, Enum):
@@ -162,6 +209,14 @@ class StatementKernel:
       raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,
         detail=f"Write operations not allowed on shared repository '{graph_id}'",
+      )
+
+    # Apply the read limits a shared repository declares
+    refusal = shared_repository_read_refusal(graph_id, statement)
+    if refusal:
+      logger.warning(f"User {user.id} sent a refused read on {graph_id}: {refusal}")
+      raise SharedRepositoryReadRefused(
+        status_code=http_status.HTTP_400_BAD_REQUEST, detail=refusal
       )
 
     # Enforce role-based write access on user subgraphs (viewer is read-only).

@@ -625,7 +625,7 @@ async def _stream_queued_call(
       # Same read-only guard the tool applies on the direct path; the queue
       # runs the raw statement, so it must be refused before submission.
       try:
-        assert_read_only_cypher(query)
+        assert_read_only_cypher(query, graph_id)
       except ValueError as exc:
         raise _ReadOnlyViolation(str(exc)) from exc
       queue_id = await queue_manager.submit_query(
@@ -800,6 +800,7 @@ async def _handle_tools_call(
     record_shared_query_outcome(
       graph_id,
       current_user.id,
+      signal=getattr(e, "telemetry_signal", None),
       status_code=e.status_code,
       api_key_prefix=key_prefix,
       endpoint="/v1/graphs/{graph_id}/mcp",

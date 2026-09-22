@@ -368,6 +368,31 @@ class TestToolsCall:
     assert body["result"]["isError"] is True
     assert "need a sub" in body["result"]["content"][0]["text"]
 
+  async def test_repository_read_refusal_records_its_own_signal(self):
+    from robosystems.middleware.graph.statement_kernel import (
+      SharedRepositoryReadRefused,
+    )
+
+    refusal = SharedRepositoryReadRefused(status_code=400, detail="not served here")
+    with (
+      patch.object(remote, "circuit_breaker", Mock()),
+      patch.object(remote, "authorize_mcp_tool_call", AsyncMock(side_effect=refusal)),
+      patch.object(remote, "record_shared_query_outcome") as record,
+    ):
+      request = _make_request(
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "tools/call",
+          "params": {"name": "read-graph-cypher", "arguments": {"query": "MATCH"}},
+        }
+      )
+      response = await dispatch_jsonrpc(request, "sec", _make_user())
+
+    assert _body(response)["result"]["isError"] is True
+    assert record.call_args.kwargs["signal"] == "string_match_refused"
+    assert record.call_args.kwargs["status_code"] == 400
+
   async def test_subgraph_urls_still_require_access_to_this_graph(self):
     """Learning a family's connector URLs is gated by the same gauntlet.
 
