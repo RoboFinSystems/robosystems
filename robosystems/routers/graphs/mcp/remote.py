@@ -625,7 +625,7 @@ async def _stream_queued_call(
       # Same read-only guard the tool applies on the direct path; the queue
       # runs the raw statement, so it must be refused before submission.
       try:
-        assert_read_only_cypher(query)
+        assert_read_only_cypher(query, graph_id)
       except ValueError as exc:
         raise _ReadOnlyViolation(str(exc)) from exc
       queue_id = await queue_manager.submit_query(

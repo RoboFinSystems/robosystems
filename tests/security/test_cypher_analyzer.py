@@ -627,6 +627,25 @@ class TestFindGuardedStringMatch:
       ("MATCH (f:Fact) WHERE f.x = '//' AND f.uri CONTAINS 'a' RETURN f", "Fact.uri"),
       # A backtick-quoted property name on a guarded label.
       ("MATCH (f:Fact) WHERE f.`value` CONTAINS 'abc' RETURN f", "Fact.value"),
+      # An alias carries its expression: direct, through a function, through
+      # a second alias, out of UNWIND, and into a function spelling.
+      ("MATCH (f:Fact) WITH f.value AS v WHERE v CONTAINS 'a' RETURN v", "Fact.value"),
+      (
+        "MATCH (f:Fact) WITH f, lower(f.value) AS v WHERE v CONTAINS 'a' RETURN f",
+        "Fact.value",
+      ),
+      (
+        "MATCH (f:Fact) WITH f.uri AS u WITH u AS w WHERE w STARTS WITH 'a' RETURN w",
+        "Fact.uri",
+      ),
+      (
+        "MATCH (f:Fact) UNWIND [f.value] AS v WITH v WHERE v =~ '.*a.*' RETURN v",
+        "Fact.value",
+      ),
+      (
+        "MATCH (f:Fact) WITH f.value AS v WHERE regexp_matches(v, 'a') RETURN v",
+        "Fact.value",
+      ),
     ],
   )
   def test_matches(self, query, expected):
@@ -674,6 +693,16 @@ class TestFindGuardedStringMatch:
       "MATCH (f:Fact) // f.value CONTAINS 'a'\nRETURN f.value LIMIT 1",
       # A parameter's field, not a node property.
       "UNWIND $rows AS row MATCH (e:Entity) WHERE e.name CONTAINS $row.value RETURN e",
+      # An alias of an unguarded property, even when a guarded one is returned
+      # under another alias.
+      "MATCH (e:Entity) WITH e.name AS v WHERE v CONTAINS 'a' RETURN v",
+      (
+        "MATCH (e:Entity) WITH e.name AS n WHERE n CONTAINS 'a' "
+        "MATCH (e)<-[:FACT_HAS_ENTITY]-(f:Fact) RETURN f.value AS v"
+      ),
+      # A guarded alias's name reused as a property or a parameter.
+      "MATCH (f:Fact) WITH f.value AS v MATCH (e:Entity) WHERE e.v CONTAINS 'a' RETURN v",
+      "MATCH (f:Fact) WITH f.value AS v MATCH (e:Entity) WHERE e.name CONTAINS $v RETURN v",
     ],
   )
   def test_does_not_match(self, query):

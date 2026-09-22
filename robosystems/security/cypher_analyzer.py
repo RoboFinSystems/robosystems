@@ -371,8 +371,10 @@ class CypherSecurityAnalyzer:
     CONTAINS / STARTS WITH / ENDS WITH / ``=~`` or in a call to one of
     STRING_MATCH_FUNCTIONS — so ``lower(f.value) CONTAINS ...`` matches, while
     a statement that string-matches one property and merely returns a guarded
-    one does not. The variable's label is read from the node patterns; when
-    it cannot be, the property name alone decides.
+    one does not. An alias carries its expression with it, so
+    ``WITH f.value AS v WHERE v CONTAINS ...`` matches too. The variable's
+    label is read from the node patterns; when it cannot be, the property
+    name alone decides.
 
     Returns None when nothing matches, and when analysis fails.
     """
@@ -388,8 +390,9 @@ class CypherSecurityAnalyzer:
 
       tokens = self._TOKEN_PATTERN.findall(self._clean_query(query))
       labels_by_variable = self._labels_by_variable(tokens)
+      aliases = self._guarded_aliases(tokens, guarded, labels_by_variable)
       for operand in self._string_match_operands(tokens):
-        match = self._guarded_reference(operand, guarded, labels_by_variable)
+        match = self._guarded_reference(operand, guarded, labels_by_variable, aliases)
         if match:
           return match
       return None
@@ -464,13 +467,43 @@ class CypherSecurityAnalyzer:
       operand.append(token)
     return operand
 
+  def _guarded_aliases(
+    self,
+    tokens: list[str],
+    guarded: dict[str, dict[str, str]],
+    labels_by_variable: dict[str, set[str] | None],
+  ) -> dict[str, GuardedStringMatch]:
+    """Map each ``expression AS alias`` whose expression reads a guarded property.
+
+    Read in statement order, so an alias of an alias carries through. An
+    alias stays mapped even if a later clause reuses the name.
+    """
+    aliases: dict[str, GuardedStringMatch] = {}
+    for i, token in enumerate(tokens[:-1]):
+      if token.upper() != "AS":
+        continue
+      expression = self._operand(tokens[:i][::-1], self._CLOSERS, self._OPENERS)
+      match = self._guarded_reference(
+        expression[::-1], guarded, labels_by_variable, aliases
+      )
+      if match:
+        aliases[tokens[i + 1].lower()] = match
+    return aliases
+
   def _guarded_reference(
     self,
     operand: list[str],
     guarded: dict[str, dict[str, str]],
     labels_by_variable: dict[str, set[str] | None],
+    aliases: dict[str, GuardedStringMatch],
   ) -> GuardedStringMatch | None:
-    """Find a ``variable.property`` reference to a guarded property."""
+    """Find a guarded ``variable.property`` reference, or an alias of one."""
+    for i, token in enumerate(operand):
+      # A bare name only: `x.v` is a property and `$v` a parameter.
+      before = operand[i - 1] if i else ""
+      after = operand[i + 1] if i + 1 < len(operand) else ""
+      if token.lower() in aliases and before not in (".", "$") and after != ".":
+        return aliases[token.lower()]
     for i in range(len(operand) - 2):
       # `$row.value` reads a parameter's field, not a node property.
       if operand[i + 1] != "." or (i and operand[i - 1] == "$"):
