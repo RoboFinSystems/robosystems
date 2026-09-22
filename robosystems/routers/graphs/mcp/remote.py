@@ -800,6 +800,7 @@ async def _handle_tools_call(
     record_shared_query_outcome(
       graph_id,
       current_user.id,
+      signal=getattr(e, "telemetry_signal", None),
       status_code=e.status_code,
       api_key_prefix=key_prefix,
       endpoint="/v1/graphs/{graph_id}/mcp",

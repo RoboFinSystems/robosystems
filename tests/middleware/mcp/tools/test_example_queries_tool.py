@@ -12,10 +12,12 @@ from robosystems.middleware.mcp.tools.constants import (
 from robosystems.middleware.mcp.tools.example_queries_tool import ExampleQueriesTool
 
 
-def _tool(labels: list[str]) -> ExampleQueriesTool:
+def _tool(
+  labels: list[str], graph_id: str = "kg1a0b70352e2fdcc071f1"
+) -> ExampleQueriesTool:
   schema = [{"label": label, "type": "node"} for label in labels]
   client = SimpleNamespace(
-    graph_id="kg1a0b70352e2fdcc071f1",
+    graph_id=graph_id,
     get_schema=AsyncMock(return_value=schema),
   )
   return ExampleQueriesTool(client)
@@ -52,3 +54,19 @@ async def test_graph_without_positions_omits_investor_guidance():
   examples = await _tool(["Entry", "LineItem", "Element"]).execute({})
 
   assert all(e.get("info") != INVESTOR_AMOUNT_GUIDANCE for e in examples)
+
+
+@pytest.mark.asyncio
+async def test_shared_repo_examples_pass_the_repository_read_limits():
+  """An example the repository would refuse teaches agents a refused shape."""
+  from robosystems.middleware.graph.statement_kernel import (
+    shared_repository_read_refusal,
+  )
+
+  labels = ["Entity", "Report", "Fact", "Element", "Period", "Dimension", "Structure"]
+  examples = await _tool(labels, graph_id="sec").execute({})
+
+  queries = [e["query"] for e in examples if e.get("query")]
+  assert any("Fact" in q for q in queries), "expected the financial examples"
+  refused = {q: r for q in queries if (r := shared_repository_read_refusal("sec", q))}
+  assert refused == {}

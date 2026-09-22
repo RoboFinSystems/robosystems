@@ -9,7 +9,9 @@ treated as a write.
 
 import logging
 import re
+from collections.abc import Iterable
 from enum import Enum
+from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,17 @@ logger = logging.getLogger(__name__)
 # the CALL-target checks can recognise "the name was quoted" without ever
 # reading the raw (unmasked) query.
 _IDENTIFIER_PLACEHOLDER = "IDENTIFIER"
+
+
+class GuardedStringMatch(NamedTuple):
+  """A string-match predicate applied to a guarded ``Label.property``.
+
+  ``label_resolved`` is False when the variable's node label could not be read
+  from the statement and the match rests on the property name alone.
+  """
+
+  guarded_property: str
+  label_resolved: bool
 
 
 class CypherOperationType(Enum):
@@ -147,6 +160,48 @@ class CypherSecurityAnalyzer:
     "ELSE",
     "END",
   }
+
+  # Function spellings of the string-match operators (CONTAINS, STARTS WITH,
+  # ENDS WITH, =~), matched case-insensitively when followed by `(`.
+  STRING_MATCH_FUNCTIONS = {
+    "starts_with",
+    "prefix",
+    "ends_with",
+    "suffix",
+    "regexp_matches",
+    "regexp_full_match",
+  }
+
+  # Tokens that end an operand expression at parenthesis depth zero.
+  OPERAND_BOUNDARIES = {
+    "AND",
+    "OR",
+    "XOR",
+    "NOT",
+    "WHERE",
+    "WITH",
+    "RETURN",
+    "MATCH",
+    "OPTIONAL",
+    "UNWIND",
+    "ORDER",
+    "BY",
+    "SKIP",
+    "LIMIT",
+    "CASE",
+    "WHEN",
+    "THEN",
+    "ELSE",
+    "END",
+    "AS",
+    "UNION",
+    "CALL",
+    "YIELD",
+  }
+
+  _TOKEN_PATTERN = re.compile(r"=~|[^\W\d]\w*|\d+(?:\.\d+)?|\S")
+  _OPENERS = frozenset("([{")
+  _CLOSERS = frozenset(")]}")
 
   def __init__(self):
     """Initialize the analyzer with compiled patterns."""
@@ -306,6 +361,135 @@ class CypherSecurityAnalyzer:
     except Exception as e:
       logger.warning(f"Opaque-statement call analysis failed: {e}")
       return True
+
+  def find_guarded_string_match(
+    self, query: str, guarded_properties: Iterable[str]
+  ) -> GuardedStringMatch | None:
+    """Find a string-match predicate applied to a guarded ``Label.property``.
+
+    A guarded property counts when it appears anywhere in either operand of
+    CONTAINS / STARTS WITH / ENDS WITH / ``=~`` or in a call to one of
+    STRING_MATCH_FUNCTIONS — so ``lower(f.value) CONTAINS ...`` matches, while
+    a statement that string-matches one property and merely returns a guarded
+    one does not. The variable's label is read from the node patterns; when
+    it cannot be, the property name alone decides.
+
+    Returns None when nothing matches, and when analysis fails.
+    """
+    try:
+      # property name -> {label -> the "Label.property" spelling as declared}
+      guarded: dict[str, dict[str, str]] = {}
+      for entry in guarded_properties:
+        label, _, prop = entry.partition(".")
+        if label and prop:
+          guarded.setdefault(prop.lower(), {})[label.lower()] = entry
+      if not guarded:
+        return None
+
+      tokens = self._TOKEN_PATTERN.findall(self._clean_query(query))
+      labels_by_variable = self._labels_by_variable(tokens)
+      for operand in self._string_match_operands(tokens):
+        match = self._guarded_reference(operand, guarded, labels_by_variable)
+        if match:
+          return match
+      return None
+    except Exception as e:
+      logger.warning(f"Guarded string-match analysis failed: {e}")
+      return None
+
+  def _labels_by_variable(self, tokens: list[str]) -> dict[str, set[str] | None]:
+    """Map each pattern variable to its labels; None when a label is quoted."""
+    labels: dict[str, set[str] | None] = {}
+    for i in range(len(tokens) - 3):
+      if tokens[i] not in ("(", "[") or tokens[i + 2] != ":":
+        continue
+      variable = tokens[i + 1].lower()
+      if not (variable[0].isalpha() or variable[0] == "_"):
+        continue
+      j = i + 3
+      while j < len(tokens):
+        name = tokens[j]
+        if name == _IDENTIFIER_PLACEHOLDER:
+          labels[variable] = None
+        elif name[0].isalpha() or name[0] == "_":
+          known = labels.setdefault(variable, set())
+          if known is not None:
+            known.add(name.lower())
+        else:
+          break
+        if j + 1 < len(tokens) and tokens[j + 1] in (":", "|"):
+          j += 2
+        else:
+          break
+    return labels
+
+  def _string_match_operands(self, tokens: list[str]) -> list[list[str]]:
+    """Collect the operand expressions of every string-match predicate."""
+    operands: list[list[str]] = []
+    for i, token in enumerate(tokens):
+      upper = token.upper()
+      following = tokens[i + 1] if i + 1 < len(tokens) else ""
+      if upper in ("STARTS", "ENDS") and following.upper() == "WITH":
+        right_start = i + 2
+      elif upper == "CONTAINS" or token == "=~":
+        right_start = i + 1
+      elif token.lower() in self.STRING_MATCH_FUNCTIONS and following == "(":
+        operands.append(self._operand(tokens[i + 1 :], self._OPENERS, self._CLOSERS))
+        continue
+      else:
+        continue
+      left = self._operand(tokens[:i][::-1], self._CLOSERS, self._OPENERS)
+      operands.append(left[::-1])
+      operands.append(self._operand(tokens[right_start:], self._OPENERS, self._CLOSERS))
+    return operands
+
+  def _operand(
+    self, tokens: list[str], openers: frozenset[str], closers: frozenset[str]
+  ) -> list[str]:
+    """Take tokens up to the first boundary outside any bracket pair.
+
+    Walks left when handed a reversed slice with the bracket roles swapped.
+    """
+    depth = 0
+    operand: list[str] = []
+    for token in tokens:
+      if token in openers:
+        depth += 1
+      elif token in closers:
+        if depth == 0:
+          break
+        depth -= 1
+      elif depth == 0 and (token == "," or token.upper() in self.OPERAND_BOUNDARIES):
+        break
+      operand.append(token)
+    return operand
+
+  def _guarded_reference(
+    self,
+    operand: list[str],
+    guarded: dict[str, dict[str, str]],
+    labels_by_variable: dict[str, set[str] | None],
+  ) -> GuardedStringMatch | None:
+    """Find a ``variable.property`` reference to a guarded property."""
+    for i in range(len(operand) - 2):
+      # `$row.value` reads a parameter's field, not a node property.
+      if operand[i + 1] != "." or (i and operand[i - 1] == "$"):
+        continue
+      variable, prop = operand[i].lower(), operand[i + 2]
+      labels = labels_by_variable.get(variable)
+      # A backtick-quoted property name is masked, so on a known label it may
+      # be any of that label's guarded properties.
+      quoted = prop == _IDENTIFIER_PLACEHOLDER
+      for name in guarded if quoted else (prop.lower(),):
+        declared = guarded.get(name)
+        if not declared:
+          continue
+        if labels:
+          for label in sorted(declared.keys() & labels):
+            return GuardedStringMatch(declared[label], label_resolved=True)
+        elif not quoted:
+          return GuardedStringMatch(declared[min(declared)], label_resolved=False)
+    return None
 
   def _validate_query_security(self, query: str) -> None:
     """
@@ -704,6 +888,19 @@ def has_opaque_statement_call(query: str) -> bool:
   them outright rather than classifying them.
   """
   return cypher_analyzer.has_opaque_statement_call(query)
+
+
+def find_guarded_string_match(
+  query: str, guarded_properties: Iterable[str]
+) -> GuardedStringMatch | None:
+  """
+  Find a string-match predicate applied to one of ``guarded_properties``.
+
+  Each entry is ``"Label.property"``. A repository declares the text columns
+  it does not serve through Cypher string matching; callers refuse a statement
+  this returns a match for.
+  """
+  return cypher_analyzer.find_guarded_string_match(query, guarded_properties)
 
 
 def is_schema_ddl(query: str) -> bool:

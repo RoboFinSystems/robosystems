@@ -6,6 +6,7 @@ from robosystems.security.cypher_analyzer import (
   CypherOperationType,
   CypherSecurityAnalyzer,
   analyze_cypher_query,
+  find_guarded_string_match,
   has_system_calls,
   is_admin_operation,
   is_bulk_operation,
@@ -590,3 +591,102 @@ class TestInStringCommentMarkerBypass:
     assert (
       analyzer.is_bulk_operation("MATCH (n) WHERE n.x = '//' LOAD FROM 'f'") is True
     )
+
+
+class TestFindGuardedStringMatch:
+  """String matching on a repository's declared ``Label.property`` columns."""
+
+  GUARDED = ("Fact.value", "Fact.uri")
+
+  @pytest.mark.parametrize(
+    "query, expected",
+    [
+      ("MATCH (f:Fact) WHERE f.uri CONTAINS 'abc' RETURN count(*)", "Fact.uri"),
+      ("MATCH (f:Fact) WHERE f.value CONTAINS 'abc' RETURN f LIMIT 5", "Fact.value"),
+      ("MATCH (f:Fact) WHERE f.value STARTS WITH 'abc' RETURN f", "Fact.value"),
+      ("MATCH (f:Fact) WHERE f.value ENDS  WITH 'abc' RETURN f", "Fact.value"),
+      ("MATCH (f:Fact) WHERE f.value =~ '.*abc.*' RETURN f", "Fact.value"),
+      ("match (F:fact) where F.VALUE contains 'abc' return F", "Fact.value"),
+      (
+        "MATCH (f:Fact) WHERE NOT f.value CONTAINS 'a' AND f.x > 1 RETURN f",
+        "Fact.value",
+      ),
+      # An anchor elsewhere in the statement changes nothing.
+      (
+        "MATCH (e:Entity {ticker: 'NVDA'})<-[:FACT_HAS_ENTITY]-(f:Fact) "
+        "WHERE f.value CONTAINS 'abc' RETURN f",
+        "Fact.value",
+      ),
+      # The property may sit inside a function call, or on the right-hand side.
+      ("MATCH (f:Fact) WHERE lower(f.value) CONTAINS 'abc' RETURN f", "Fact.value"),
+      ("MATCH (f:Fact) WHERE 'abc' CONTAINS f.value RETURN f", "Fact.value"),
+      # Function spellings of the same operators.
+      ("MATCH (f:Fact) WHERE contains(f.value, 'abc') RETURN f", "Fact.value"),
+      ("MATCH (f:Fact) WHERE regexp_matches(f.uri, 'abc') RETURN f", "Fact.uri"),
+      # A real operator after a closed string that holds a comment marker.
+      ("MATCH (f:Fact) WHERE f.x = '//' AND f.uri CONTAINS 'a' RETURN f", "Fact.uri"),
+      # A backtick-quoted property name on a guarded label.
+      ("MATCH (f:Fact) WHERE f.`value` CONTAINS 'abc' RETURN f", "Fact.value"),
+    ],
+  )
+  def test_matches(self, query, expected):
+    match = find_guarded_string_match(query, self.GUARDED)
+    assert match is not None
+    assert match.guarded_property == expected
+    assert match.label_resolved is True
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      # No label on the pattern.
+      "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f) WHERE f.value CONTAINS 'a' RETURN f",
+      # A backtick-quoted label is masked.
+      "MATCH (f:`Fact`) WHERE f.value CONTAINS 'a' RETURN f",
+      # Rebound through WITH.
+      "MATCH (f:Fact) WITH f AS g WHERE g.uri CONTAINS 'a' RETURN g",
+    ],
+  )
+  def test_unresolved_label_falls_back_to_the_property_name(self, query):
+    match = find_guarded_string_match(query, self.GUARDED)
+    assert match is not None
+    assert match.label_resolved is False
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      # The same property name on another label.
+      "MATCH (l:Label) WHERE l.value CONTAINS $search_term RETURN l",
+      "MATCH (e:Element) WHERE e.uri CONTAINS 'us-gaap' RETURN e LIMIT 10",
+      "MATCH (e:Entity)-[r:REL]->(x:Report) WHERE r.uri CONTAINS 'a' RETURN x",
+      # String matching one property while returning a guarded one.
+      (
+        "MATCH (e:Entity)<-[:FACT_HAS_ENTITY]-(f:Fact) "
+        "WHERE e.name CONTAINS 'NVIDIA' RETURN f.value LIMIT 10"
+      ),
+      (
+        "MATCH (e:Entity) WHERE e.name STARTS WITH 'N' WITH e "
+        "MATCH (e)<-[:FACT_HAS_ENTITY]-(f:Fact) RETURN f.value"
+      ),
+      # Not a string-match operator.
+      "MATCH (f:Fact) WHERE f.uri = 'abc' RETURN f",
+      # The operator only appears inside a literal or a comment.
+      "MATCH (f:Fact) WHERE f.value = 'CONTAINS f.value' RETURN f",
+      "MATCH (f:Fact) // f.value CONTAINS 'a'\nRETURN f.value LIMIT 1",
+      # A parameter's field, not a node property.
+      "UNWIND $rows AS row MATCH (e:Entity) WHERE e.name CONTAINS $row.value RETURN e",
+    ],
+  )
+  def test_does_not_match(self, query):
+    assert find_guarded_string_match(query, self.GUARDED) is None
+
+  def test_nothing_declared_matches_nothing(self):
+    query = "MATCH (f:Fact) WHERE f.value CONTAINS 'abc' RETURN f"
+    assert find_guarded_string_match(query, ()) is None
+
+  def test_analysis_failure_matches_nothing(self, analyzer, monkeypatch):
+    def boom(_query):
+      raise RuntimeError("scanner failed")
+
+    monkeypatch.setattr(analyzer, "_clean_query", boom)
+    query = "MATCH (f:Fact) WHERE f.value CONTAINS 'abc' RETURN f"
+    assert analyzer.find_guarded_string_match(query, self.GUARDED) is None

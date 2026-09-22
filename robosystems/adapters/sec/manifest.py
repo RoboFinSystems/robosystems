@@ -81,7 +81,16 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "`LIMIT`.\n"
     "- `RETURN DISTINCT`: a fact is restated in later filings and sits in more "
     "than one FactSet, so an un-deduplicated result repeats rows.\n"
+    "- Text is not a Cypher question here: string matching (`CONTAINS`, "
+    "`STARTS WITH`, `ENDS WITH`, `=~`) on `Fact.value` or `Fact.uri` is "
+    "refused. `search-documents` searches filing text; `disclosures` then "
+    "`information-block` reads one section whole.\n"
     "- `get-example-queries` carries these as working patterns; run it first."
+  ),
+  guarded_string_properties=("Fact.value", "Fact.uri"),
+  guarded_string_guidance=(
+    "For text inside filings use `search-documents`; to read one disclosure "
+    "whole use `disclosures`, then `information-block`."
   ),
   rate_limits={
     "starter": {

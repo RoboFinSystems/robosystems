@@ -17,14 +17,17 @@ from robosystems.middleware.mcp.tools.constants import (
   LEDGER_AMOUNT_GUIDANCE,
   LEDGER_STATUS_GUIDANCE,
 )
-from robosystems.middleware.mcp.tools.cypher_tool import CypherTool
+from robosystems.middleware.mcp.tools.cypher_tool import (
+  CypherTool,
+  assert_read_only_cypher,
+)
 
 
 @pytest.fixture
 def tool() -> CypherTool:
-  # _validate_read_only uses no instance state, so bypass __init__ (which needs
-  # a live GraphMCPClient) and exercise the validator directly.
-  return CypherTool.__new__(CypherTool)
+  # _validate_read_only reads only the client's graph_id, so a stand-in client
+  # exercises the validator without a live GraphMCPClient.
+  return CypherTool(SimpleNamespace(graph_id="kg1a0b70352e2fdcc071f1"))
 
 
 class TestValidateReadOnly:
@@ -76,6 +79,31 @@ class TestValidateReadOnly:
   def test_allows_legitimate_reads(self, tool, query):
     """Pure reads pass, including bulk keywords quoted inside string literals."""
     tool._validate_read_only(query)  # should not raise
+
+
+class TestSharedRepositoryReadLimits:
+  """The tool applies a shared repository's declared read limits itself.
+
+  The Operator path reaches the engine through this tool without the
+  StatementKernel, so the rule has to hold here too.
+  """
+
+  STATEMENT = "MATCH (f:Fact) WHERE f.value CONTAINS 'going concern' RETURN f LIMIT 5"
+
+  def test_refused_on_the_shared_repository(self):
+    tool = CypherTool(SimpleNamespace(graph_id="sec"))
+    with pytest.raises(ValueError, match="search-documents"):
+      tool._validate_read_only(self.STATEMENT)
+
+  def test_refused_on_a_shared_repository_subgraph(self):
+    with pytest.raises(ValueError, match=r"Fact\.value"):
+      assert_read_only_cypher(self.STATEMENT, "sec_historical")
+
+  def test_same_statement_allowed_on_a_tenant_graph(self, tool):
+    tool._validate_read_only(self.STATEMENT)  # should not raise
+
+  def test_no_graph_id_applies_no_repository_limits(self):
+    assert_read_only_cypher(self.STATEMENT)  # should not raise
 
 
 class TestLedgerAmountGuidance:

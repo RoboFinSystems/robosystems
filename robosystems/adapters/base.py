@@ -53,6 +53,12 @@ class SharedRepositoryManifest:
   # is the routing layer, and client-side skills reach only our own Claude.
   cypher_query_guidance: str | None = None
 
+  # Large text columns, as "Label.property", that this repository does not
+  # serve through Cypher string matching (CONTAINS, STARTS WITH, ENDS WITH,
+  # =~). `guarded_string_guidance` tells the caller where that question goes.
+  guarded_string_properties: tuple[str, ...] = ()
+  guarded_string_guidance: str | None = None
+
   # Status
   status: str = "available"  # available, coming_soon
 
