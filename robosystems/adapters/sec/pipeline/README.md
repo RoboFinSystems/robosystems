@@ -119,7 +119,13 @@ indexing into OpenSearch for hybrid BM25 + KNN search.
 - `sec_duckdb_s3_published` — the `.duckdb` file the offline knowledge-artifact
   build consumes
 - `sec_lbug_r2_published` — a Cloudflare R2 copy for zero-egress subscriber
-  downloads (manual or weekly)
+  downloads (manual or weekly). Just before the cut it counts the graph on the
+  master and, once the backup succeeds, writes `sec.stats.json` beside the
+  archive, paired to it by compressed size
+- `sec_lbug_hf_published` — copies the R2 snapshot to the public Hugging Face
+  dataset (manual only) and rewrites the dataset card from `dataset_card.md`
+  and those stats. A missing or mismatched stats file stops the run before the
+  copy starts; re-run the R2 publish to fix it
 
 `sec_knowledge_artifacts` builds the corpus-level artifacts from the published
 DuckDB file.

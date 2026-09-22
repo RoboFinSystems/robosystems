@@ -7,6 +7,7 @@ import pytest
 from dagster import MaterializeResult, build_asset_context
 
 from robosystems.adapters.sec.pipeline.configs import SECHFPublishConfig
+from robosystems.adapters.sec.pipeline.dataset_card import render_dataset_card
 from robosystems.adapters.sec.pipeline.hf_publish import (
   SEC_HF_PATH_IN_REPO,
   sec_lbug_hf_published,
@@ -124,6 +125,7 @@ class TestSecLbugHfPublished:
       job_flavor="cpu-xl",
       job_timeout="8h",
       prune_previous=False,
+      render_card=render_dataset_card,
     )
     assert isinstance(result, MaterializeResult)
 
@@ -235,6 +237,11 @@ class TestPublishToHuggingface:
     assert result.metadata["pruned_previous"] == 1
     assert result.metadata["snapshot_at"] == "2026-07-16T06:51:25+00:00"
 
+    # No renderer, no card: the stats file is not read and the README is untouched
+    r2_client.get_object.assert_not_called()
+    hf_api.upload_file.assert_not_called()
+    assert result.metadata["card_updated"] is False
+
   def test_prune_can_be_disabled(self, prod_env, r2_client, r2_destination, hf_api):
     result = publish_to_huggingface(
       build_asset_context(),
@@ -323,3 +330,103 @@ class TestPublishToHuggingface:
       build_asset_context(), graph_id="sec", repo_id=REPO, path_in_repo=PATH
     )
     assert result.metadata["hf_job_id"] == "job123"
+
+
+class _NoSuchKey(Exception):
+  pass
+
+
+def _stats_body(size=SIZE):
+  import io
+  import json
+
+  body = {
+    "graph_id": "sec",
+    "compressed_size_bytes": size,
+    "original_size_bytes": 3 * SIZE,
+    "stats": {"filers": 1},
+  }
+  return {"Body": io.BytesIO(json.dumps(body).encode())}
+
+
+@pytest.mark.unit
+class TestDatasetCard:
+  """The card is rendered from the stats file and written after the copy."""
+
+  def test_card_rendered_from_stats_and_uploaded_after_prune(
+    self, prod_env, r2_client, r2_destination, hf_api
+  ):
+    r2_client.get_object.return_value = _stats_body()
+    render = MagicMock(return_value="# SEC card")
+
+    result = publish_to_huggingface(
+      build_asset_context(),
+      graph_id="sec",
+      repo_id=REPO,
+      path_in_repo=PATH,
+      render_card=render,
+    )
+
+    r2_client.get_object.assert_called_once_with(
+      Bucket="robosystems-downloads", Key="downloads/sec/sec.stats.json"
+    )
+    snapshot = render.call_args.args[0]
+    assert snapshot["compressed_size_bytes"] == SIZE
+    assert snapshot["original_size_bytes"] == 3 * SIZE
+    assert snapshot["stats"] == {"filers": 1}
+    assert f"{snapshot['snapshot_at']:%Y-%m-%d}" == "2026-07-16"
+
+    hf_api.upload_file.assert_called_once_with(
+      path_or_fileobj=b"# SEC card",
+      path_in_repo="README.md",
+      repo_id=REPO,
+      repo_type="dataset",
+      commit_message="card: snapshot 2026-07-16",
+    )
+    names = [c[0] for c in hf_api.mock_calls]
+    assert names.index("upload_file") > names.index("permanently_delete_lfs_files")
+    assert result.metadata["card_updated"] is True
+
+  def test_stats_from_another_snapshot_stop_the_run_before_the_job(
+    self, prod_env, r2_client, r2_destination, hf_api
+  ):
+    r2_client.get_object.return_value = _stats_body(size=SIZE - 1)
+    with pytest.raises(RuntimeError, match="not the current"):
+      publish_to_huggingface(
+        build_asset_context(),
+        graph_id="sec",
+        repo_id=REPO,
+        path_in_repo=PATH,
+        render_card=MagicMock(),
+      )
+    hf_api.run_job.assert_not_called()
+    hf_api.upload_file.assert_not_called()
+
+  def test_missing_stats_stop_the_run_before_the_job(
+    self, prod_env, r2_client, r2_destination, hf_api
+  ):
+    r2_client.exceptions.NoSuchKey = _NoSuchKey
+    r2_client.get_object.side_effect = _NoSuchKey()
+    with pytest.raises(RuntimeError, match="No snapshot stats"):
+      publish_to_huggingface(
+        build_asset_context(),
+        graph_id="sec",
+        repo_id=REPO,
+        path_in_repo=PATH,
+        render_card=MagicMock(),
+      )
+    hf_api.run_job.assert_not_called()
+
+  def test_render_failure_stops_the_run_before_the_job(
+    self, prod_env, r2_client, r2_destination, hf_api
+  ):
+    r2_client.get_object.return_value = _stats_body()
+    with pytest.raises(ValueError, match="placeholders"):
+      publish_to_huggingface(
+        build_asset_context(),
+        graph_id="sec",
+        repo_id=REPO,
+        path_in_repo=PATH,
+        render_card=MagicMock(side_effect=ValueError("placeholders")),
+      )
+    hf_api.run_job.assert_not_called()

@@ -292,6 +292,7 @@ class GraphClient(BaseGraphClient):
     graph_id: str = "sec",
     parameters: dict[str, Any] | None = None,
     streaming: bool = False,
+    timeout: float | None = None,
   ) -> dict[str, Any] | AsyncGenerator[Any]:
     """Execute a Cypher query.
 
@@ -299,7 +300,8 @@ class GraphClient(BaseGraphClient):
     of NDJSON chunks produced by the server. Streaming lets the graph instance
     do the chunking rather than materializing the full result set in memory,
     and a malformed or empty response body degrades to an empty result rather
-    than raising.
+    than raising. ``timeout`` overrides the client default for a non-streaming
+    call.
     """
     payload: dict[str, Any] = {"cypher": cypher, "database": graph_id}
     if parameters:
@@ -309,7 +311,11 @@ class GraphClient(BaseGraphClient):
 
     if not streaming:
       response = await self._request(
-        "POST", f"/databases/{graph_id}/query", json_data=payload, params=params
+        "POST",
+        f"/databases/{graph_id}/query",
+        json_data=payload,
+        params=params,
+        timeout=timeout,
       )
       logger.debug(f"Response status: {response.status_code}")
       logger.debug(f"Response content type: {response.headers.get('content-type')}")

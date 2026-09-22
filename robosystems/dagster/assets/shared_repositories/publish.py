@@ -10,6 +10,7 @@ Two publish targets:
 """
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +22,9 @@ from robosystems.config.storage.graph import (
   get_r2_download_key,
   get_shared_repo_database_key,
 )
+
+# Written beside the R2 archive: the snapshot's counts, read by the HF publish.
+SNAPSHOT_STATS_EXTENSION = ".stats.json"
 
 
 def _validate_shared_graph_id(graph_id: str) -> None:
@@ -242,6 +246,7 @@ def publish_to_r2(
   context: AssetExecutionContext,
   graph_id: str,
   db_resource,
+  stats: dict[str, Any] | None = None,
 ) -> MaterializeResult:
   """Publish a shared repository .lbug to R2 for subscriber downloads.
 
@@ -249,6 +254,9 @@ def publish_to_r2(
   Cloudflare R2 instead of AWS S3. Creates/updates a GraphBackup record
   (via ``db_resource``) so the file appears in the backup list and can be
   downloaded via presigned URL with zero egress fees.
+
+  ``stats``, counted by the caller just before the cut, is written beside the
+  archive only once the backup has succeeded, paired to it by size.
   """
   context.log.info(f"Publishing {graph_id} database to R2 for subscriber downloads")
 
@@ -308,9 +316,31 @@ def publish_to_r2(
     dagster_run_id=context.run_id,
   )
 
+  stats_key = None
+  if stats is not None:
+    stats_key = get_r2_download_key(graph_id, SNAPSHOT_STATS_EXTENSION)
+    r2_client.put_object(
+      Bucket=bucket,
+      Key=stats_key,
+      Body=json.dumps(
+        {
+          "graph_id": graph_id,
+          "archive_key": r2_key,
+          "compressed_size_bytes": compressed_size,
+          "original_size_bytes": original_size,
+          "snapshot_at": last_modified.isoformat(),
+          "stats": stats,
+        },
+        indent=2,
+      ),
+      ContentType="application/json",
+    )
+    context.log.info(f"Snapshot stats written to r2://{bucket}/{stats_key}")
+
   return MaterializeResult(
     metadata={
       "r2_uri": r2_uri,
+      "stats_key": stats_key or "",
       "r2_bucket": bucket,
       "r2_key": r2_key,
       "original_size_bytes": original_size,
