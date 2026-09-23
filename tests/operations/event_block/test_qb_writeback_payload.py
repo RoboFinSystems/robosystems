@@ -4,9 +4,8 @@ An event's ``metadata`` is the capture; its ``Entry`` / ``LineItem`` rows are
 what the ledger posts at close. A draft corrected through
 `update-journal-entry` moves the rows and leaves the capture behind, so
 publishing the capture would put the original in QuickBooks and the
-correction in the books. `post_event_to_qb` publishes the rows whenever any
-exist and falls back to the capture only for an event that never
-materialized rows.
+correction in the books. `post_event_to_qb` publishes the rows, one QuickBooks
+JournalEntry per draft entry, and never the capture.
 """
 
 from __future__ import annotations
@@ -136,8 +135,8 @@ def _corrected_rows(session, event: Event) -> Entry:
   return entry
 
 
-def _publish(session, event: Event) -> list[dict]:
-  """Run the publish with the QB boundary faked; return the built payloads."""
+def _publish(session, event: Event, **kwargs) -> tuple[list[dict], dict[str, str]]:
+  """Run the publish with the QB boundary faked; return payloads and ids."""
   built: list[dict] = []
 
   def _fake_build(session_, *, posting_date, memo, line_items):
@@ -148,9 +147,8 @@ def _publish(session, event: Event) -> list[dict]:
     patch(f"{_MODULE}._build_qb_journal_entry", side_effect=_fake_build),
     patch(f"{_MODULE}._save_with_retry", return_value="77"),
   ):
-    ids = post_event_to_qb(session, event, qb_client=object())
-  assert ids == ["JournalEntry_77"]
-  return built
+    ids = post_event_to_qb(session, event, qb_client=object(), **kwargs)
+  return built, ids
 
 
 def test_publishes_the_ledger_rows_not_the_capture(ext_session):
@@ -159,8 +157,9 @@ def test_publishes_the_ledger_rows_not_the_capture(ext_session):
   entry = _corrected_rows(ext_session, event)
   ext_session.commit()
 
-  (payload,) = _publish(ext_session, event)
+  (payload,), ids = _publish(ext_session, event)
 
+  assert ids == {entry.id: "JournalEntry_77"}
   assert payload["posting_date"] == entry.posting_date == date(2026, 6, 20)
   assert payload["memo"] == "as corrected"
   assert [
@@ -172,23 +171,122 @@ def test_publishes_the_ledger_rows_not_the_capture(ext_session):
   ]
 
 
-def test_falls_back_to_the_capture_when_no_rows_exist(ext_session):
-  """An event that never materialized rows still publishes its capture."""
+def test_an_event_without_rows_publishes_nothing(ext_session):
+  """The capture alone is never published: the ledger holds nothing to mirror."""
   event = _event(ext_session, with_capture=True)
   ext_session.commit()
 
-  (payload,) = _publish(ext_session, event)
+  built, ids = _publish(ext_session, event)
 
-  assert payload["memo"] == "as captured"
-  assert payload["line_items"] == _CAPTURED_LINES
+  assert built == []
+  assert ids == {}
 
 
-def test_nothing_to_publish_is_a_rejection(ext_session):
+def _second_entry(session, event: Event, *, posting_date: date) -> Entry:
+  entry = Entry(
+    posting_date=posting_date,
+    status="draft",
+    memo="second",
+    created_by="usr_test",
+    triggered_by_event_id=event.id,
+  )
+  session.add(entry)
+  session.flush()
+  session.add_all(
+    [
+      LineItem(
+        entry_id=entry.id,
+        element_id="elem_cash",
+        debit_amount=100,
+        credit_amount=0,
+        line_order=1,
+      ),
+      LineItem(
+        entry_id=entry.id,
+        element_id="elem_rev",
+        debit_amount=0,
+        credit_amount=100,
+        line_order=2,
+      ),
+    ]
+  )
+  session.flush()
+  return entry
+
+
+def test_entry_ids_scope_the_publish(ext_session):
+  event = _event(ext_session, with_capture=False)
+  june = _corrected_rows(ext_session, event)
+  _second_entry(ext_session, event, posting_date=date(2026, 7, 1))
+  ext_session.commit()
+
+  built, ids = _publish(ext_session, event, entry_ids=[june.id])
+
+  assert [b["memo"] for b in built] == ["as corrected"]
+  assert list(ids) == [june.id]
+
+
+def test_recorded_entries_are_not_posted_again(ext_session):
+  event = _event(ext_session, with_capture=False)
+  first = _corrected_rows(ext_session, event)
+  second = _second_entry(ext_session, event, posting_date=date(2026, 6, 25))
+  event.metadata_ = {**event.metadata_, "qb_entry_ids": {first.id: "JournalEntry_1"}}
+  ext_session.commit()
+
+  built, ids = _publish(ext_session, event)
+
+  assert [b["memo"] for b in built] == ["second"]
+  assert list(ids) == [second.id]
+
+
+def test_a_rejection_mid_batch_reports_what_landed(ext_session):
   from robosystems.operations.event_block.qb_writeback import QBWritebackError
 
   event = _event(ext_session, with_capture=False)
+  first = _corrected_rows(ext_session, event)
+  _second_entry(ext_session, event, posting_date=date(2026, 6, 25))
   ext_session.commit()
 
-  with pytest.raises(QBWritebackError) as excinfo:
-    _publish(ext_session, event)
-  assert excinfo.value.payload["code"] == "no_line_items"
+  saves = iter(["77", QBWritebackError({"code": "qb_validation_error"})])
+
+  def _save(je, client, request_id, event_id):
+    result = next(saves)
+    if isinstance(result, Exception):
+      raise result
+    return result
+
+  with (
+    patch(f"{_MODULE}._build_qb_journal_entry", return_value=object()),
+    patch(f"{_MODULE}._save_with_retry", side_effect=_save),
+    pytest.raises(QBWritebackError) as excinfo,
+  ):
+    post_event_to_qb(ext_session, event, qb_client=object())
+
+  assert excinfo.value.published == {first.id: "JournalEntry_77"}
+
+
+def test_a_mapping_error_posts_nothing(ext_session):
+  """Every entry is built before the first POST."""
+  from robosystems.operations.event_block.qb_writeback import QBWritebackError
+
+  event = _event(ext_session, with_capture=False)
+  _corrected_rows(ext_session, event)
+  ext_session.get(Element, "elem_cash").external_id = "qb_1"
+  ext_session.get(Element, "elem_rev").external_id = "qb_2"
+  second = _second_entry(ext_session, event, posting_date=date(2026, 6, 25))
+  ext_session.add(
+    Element(id="elem_unmapped", name="Other", code="9", balance_type="debit")
+  )
+  ext_session.flush()
+  ext_session.query(LineItem).filter(
+    LineItem.entry_id == second.id, LineItem.line_order == 1
+  ).update({LineItem.element_id: "elem_unmapped"})
+  ext_session.commit()
+
+  with (
+    patch(f"{_MODULE}._save_with_retry") as save,
+    pytest.raises(QBWritebackError),
+  ):
+    post_event_to_qb(ext_session, event, qb_client=object())
+
+  save.assert_not_called()

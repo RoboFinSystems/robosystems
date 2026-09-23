@@ -607,26 +607,33 @@ class ExecuteEventBlockResponse(BaseModel):
   status: str = Field(
     ...,
     description=(
-      "Post-execute event status. `'classified'` when no write fired "
-      "(native policy or no-op). `'committed'` when the QB write was "
-      "in flight (intermediate state). `'fulfilled'` when QB accepted "
-      "and local GL drafts were promoted to posted. `'pending'` when "
-      "QB rejected — see `qb_error` for the rejection detail; retry "
-      "after fixing the underlying issue."
+      "The event's status after the call. Unchanged when no write fired "
+      "(native policy, a source that does not publish) or when drafts in a "
+      "later period are still unpublished. `'fulfilled'` once every draft "
+      "entry of the event is in QuickBooks and posted. `'pending'` when "
+      "QuickBooks rejected an entry — see `qb_error`; retry after fixing "
+      "the underlying issue."
     ),
   )
   qb_external_id: str | None = Field(
     None,
     description=(
-      "QB-side transaction ID returned by the JournalEntry API. Null "
-      "when no write fired (native policy) or when the write was "
-      "rejected before getting an ID."
+      "QuickBooks JournalEntry ID of the first entry this call published. "
+      "Null when nothing was published. When a call publishes several "
+      "entries, `qb_entry_ids` holds them all."
+    ),
+  )
+  qb_entry_ids: dict[str, str] | None = Field(
+    None,
+    description=(
+      "Every entry of the event now in QuickBooks: ledger entry ID → "
+      "QuickBooks JournalEntry ID. Null when none are."
     ),
   )
   qb_error: dict | None = Field(
     None,
     description=(
-      "QB rejection detail when status='pending'. Shape: "
+      "QB rejection detail when a publish failed. Shape: "
       "`{code, message, qb_response_at}`. Operator retries after "
       "fixing CoA mapping / amount validation / closed-period."
     ),

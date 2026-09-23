@@ -16,6 +16,7 @@ Functions are pure: ``(Session, RequestModel, created_by) → ResponseModel``.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -97,8 +98,12 @@ class EventNotPublishableError(Exception):
   JournalEntry for work the books already retracted.
   """
 
-  def __init__(self, event_id: str, status: str) -> None:
-    super().__init__(f"Event {event_id} is {status!r} and cannot be published.")
+  def __init__(self, event_id: str, status: str, reason: str | None = None) -> None:
+    super().__init__(
+      f"Event {event_id} cannot be published: {reason}."
+      if reason
+      else f"Event {event_id} is {status!r} and cannot be published."
+    )
     self.event_id = event_id
     self.status = status
 
@@ -1021,28 +1026,33 @@ def execute_event_block(
   *,
   graph_id: str,
   acquire_period_fence: bool = True,
+  entry_ids: list[str] | None = None,
 ) -> ExecuteEventBlockResponse:
   """Publish an event to its connection's source-of-truth system.
+
+  ``entry_ids`` limits the publish to those draft entries; close passes the
+  ones in the period it is closing, so an event whose entries span periods
+  publishes each with its own period.
 
   Flow:
   1. Load Event by id. Read `metadata.connection_id`.
   2. Resolve the connection's `write_policy` from the platform DB.
   3. If `'native'`: fast-path return — no QB write, status unchanged.
   4. If `'qb_authoritative'` / `'hybrid'`:
-     - Build a `quickbooks.objects.JournalEntry` from `event.metadata`
-       via `qb_writeback.post_event_to_qb`.
-     - On success: stamp `metadata.qb_external_id`,
-       `metadata.routed_via`, transition status to `'fulfilled'` (QB
-       acknowledged synchronously), promote linked draft Entry +
-       Transaction rows to `'posted'`.
-     - On rejection (`QBWritebackError`): stamp
-       `metadata.last_outbound_error`, transition status to
-       `'pending'`. Drafts stay draft for retry.
+     - Post each unpublished draft Entry linked to the event as its own
+       QB JournalEntry via `qb_writeback.post_event_to_qb`, recording
+       entry id → QB id in `metadata.qb_entry_ids` and promoting the
+       entries that landed to `'posted'`.
+     - When no draft of the event remains, transition to `'fulfilled'`
+       and promote its Transaction rows.
+     - On rejection (`QBWritebackError`): keep what landed, stamp
+       `metadata.last_outbound_error`, move to `'pending'` where that
+       transition is legal. The rest stay draft for retry.
 
-  Idempotency: the QB POST carries `request_id=event.id`. QB's
-  ~5-minute RequestId dedup window means our retry-after-network-blip
-  path is safe at the API layer. An event that already carries
-  ``qb_external_id`` (or is already ``fulfilled``) is returned as-is.
+  Idempotency: each QB POST carries the entry id as its RequestId, and an
+  entry already in `metadata.qb_entry_ids` is never posted again. An event
+  published before per-entry tracking (``qb_external_id`` without
+  ``qb_entry_ids``), or already ``fulfilled``, is returned as-is.
   ``voided`` / ``superseded`` raise :class:`EventNotPublishableError`
   before any external write.
 
@@ -1062,9 +1072,15 @@ def execute_event_block(
   from robosystems.models.extensions.roboledger.transaction import Transaction
   from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
     PUBLISH_TO_SOURCE_KEY,
+    WRITEBACK_EVENT_SOURCES,
   )
 
-  from .qb_writeback import QBWritebackError, post_event_to_qb
+  from .qb_writeback import (
+    QB_ENTRY_IDS_KEY,
+    QBWritebackError,
+    post_event_to_qb,
+    published_entry_ids,
+  )
 
   # Locked, and for a sharper reason than the other paths: between this read
   # and the status write below sits a POST to QuickBooks. A concurrent void or
@@ -1113,7 +1129,8 @@ def execute_event_block(
 
   metadata = dict(event.metadata_ or {})
   existing_qb_id = metadata.get("qb_external_id")
-  if existing_qb_id:
+  # Published before per-entry tracking: the whole event is in QuickBooks.
+  if existing_qb_id and QB_ENTRY_IDS_KEY not in metadata:
     primary = str(existing_qb_id).split(",", 1)[0]
     return ExecuteEventBlockResponse(
       event_id=str(event.id),
@@ -1130,14 +1147,21 @@ def execute_event_block(
       qb_external_id=None,
       qb_error=None,
     )
-  # An explicit publish_to_source=False pins the event to the local lane,
-  # and outranks the caller-supplied connection: close passes its
-  # writeback connection to every event in the batch, so checking this
-  # after resolving connection_id would publish the very entries the flag
-  # exists to hold back.
-  if metadata.get(PUBLISH_TO_SOURCE_KEY) is False:
+  # Same rule close selects by (`writeback_source_clause`): an explicit
+  # publish_to_source decides; otherwise only RL-originated sources publish.
+  # It outranks the caller-supplied connection — close passes its writeback
+  # connection to every event in the batch, and a synced-in QuickBooks event
+  # sent back would land in QuickBooks twice.
+  publish_flag = metadata.get(PUBLISH_TO_SOURCE_KEY)
+  publishes = (
+    publish_flag is True
+    if publish_flag is not None
+    else event.source in WRITEBACK_EVENT_SOURCES
+  )
+  if not publishes:
     logger.debug(
-      f"Event {event.id} carries publish_to_source=False — local lane, no QB write."
+      f"Event {event.id} (source={event.source}, publish_to_source="
+      f"{publish_flag}) stays local — no QB write."
     )
     return ExecuteEventBlockResponse(
       event_id=str(event.id),
@@ -1232,68 +1256,90 @@ def execute_event_block(
     # Surface to the caller — the operator must reconnect via OAuth.
     raise
 
-  # Build + post. On QB rejection, stamp the error onto event.metadata
-  # and transition status='pending' for retry without raising.
+  # The ledger rows are what publishes: an event whose handler never drafted
+  # any has nothing in the books to mirror, and posting its captured metadata
+  # would put an entry in QuickBooks that the ledger never holds.
+  has_rows = (
+    session.query(Entry.id).filter(Entry.triggered_by_event_id == event.id).first()
+    is not None
+  )
+  if not has_rows:
+    raise EventNotPublishableError(
+      str(event.id),
+      str(event.status),
+      reason="it has no drafted ledger entries; commit it first",
+    )
+
+  error_payload: dict[str, Any] | None = None
   try:
-    qb_txn_ids = post_event_to_qb(session, event, qb_client.client)
+    newly_published = post_event_to_qb(
+      session, event, qb_client.client, entry_ids=entry_ids
+    )
   except QBWritebackError as e:
-    new_meta = dict(event.metadata_ or {})
-    new_meta["last_outbound_error"] = e.payload
+    newly_published = e.published
+    error_payload = e.payload
+
+  now = datetime.now(UTC)
+  published = {**published_entry_ids(event.metadata_), **newly_published}
+  new_meta = dict(event.metadata_ or {})
+  if published:
+    new_meta[QB_ENTRY_IDS_KEY] = published
+    # Comma-joined for the cross-source matcher in the extensions loader,
+    # which compares incoming external_ids against this key.
+    new_meta["qb_external_id"] = ",".join(published.values())
+  if newly_published:
+    new_meta["routed_via"] = {
+      "connection_id": str(connection_id),
+      "sent_at": now.isoformat(),
+    }
+    session.query(Entry).filter(Entry.id.in_(list(newly_published))).update(
+      {Entry.status: "posted", Entry.posted_at: now},
+      synchronize_session=False,
+    )
+
+  if error_payload is not None:
+    new_meta["last_outbound_error"] = error_payload
     event.metadata_ = new_meta
-    event.status = "pending"
+    if "pending" in _VALID_TRANSITIONS.get(str(event.status), frozenset()):
+      event.status = "pending"
     session.flush()
     return ExecuteEventBlockResponse(
       event_id=str(event.id),
-      status="pending",
+      status=str(event.status),
       qb_external_id=None,
-      qb_error=e.payload,
+      qb_entry_ids=published or None,
+      qb_error=error_payload,
     )
 
-  # Success path. Multi-entry events get a list of qb_txn_ids; flatten
-  # to a single string (comma-joined) for the metadata stamp and
-  # take the first for the response field — the multi-entry case is
-  # rare today (QB ingest only) and the comma-joined form preserves
-  # the round-trip mapping for the cross-source matcher.
-  primary_qb_id = qb_txn_ids[0]
-  joined_qb_id = ",".join(qb_txn_ids)
-  new_meta = dict(event.metadata_ or {})
-  new_meta["qb_external_id"] = joined_qb_id
-  new_meta["routed_via"] = {
-    "connection_id": str(connection_id),
-    "qb_request_id": str(event.id),
-    "sent_at": datetime.now(UTC).isoformat(),
-  }
-  # Clear any prior error from a retry succeeding.
   new_meta.pop("last_outbound_error", None)
   event.metadata_ = new_meta
-  event.status = "fulfilled"
 
-  # Promote linked draft Entry + Transaction rows to posted. The split
-  # between Event lifecycle and Entry/Transaction status means we promote
-  # ledger-row status here (not in the handler — the handler stamps
-  # Entry.status='draft' at create, and execute promotes after QB
-  # confirms).
-  session.query(Entry).filter(Entry.triggered_by_event_id == event.id).update(
-    {Entry.status: "posted", Entry.posted_at: datetime.now(UTC)},
-    synchronize_session=False,
+  # Fulfilled once no draft of the event is left to publish; an entry in a
+  # later period keeps it open until that period closes.
+  remaining = (
+    session.query(Entry.id)
+    .filter(Entry.triggered_by_event_id == event.id, Entry.status == "draft")
+    .first()
   )
-  session.query(Transaction).filter(
-    Transaction.triggered_by_event_id == event.id
-  ).update(
-    {Transaction.status: "posted", Transaction.posted_at: datetime.now(UTC)},
-    synchronize_session=False,
-  )
+  if remaining is None:
+    event.status = "fulfilled"
+    session.query(Transaction).filter(
+      Transaction.triggered_by_event_id == event.id
+    ).update(
+      {Transaction.status: "posted", Transaction.posted_at: now},
+      synchronize_session=False,
+    )
 
   session.flush()
   logger.info(
     f"Event {event.id} published to QB via connection {connection_id}: "
-    f"qb_external_id={joined_qb_id}, status=fulfilled, "
-    f"drafts promoted"
+    f"{len(newly_published)} entr(y/ies), status={event.status}"
   )
 
   return ExecuteEventBlockResponse(
     event_id=str(event.id),
-    status="fulfilled",
-    qb_external_id=primary_qb_id,
+    status=str(event.status),
+    qb_external_id=next(iter(newly_published.values()), None),
+    qb_entry_ids=published or None,
     qb_error=None,
   )

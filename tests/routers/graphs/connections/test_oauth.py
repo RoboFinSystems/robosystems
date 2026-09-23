@@ -502,6 +502,64 @@ class TestOAuthCallback:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
+  async def test_oauth_callback_refuses_a_different_company(self):
+    """A connected connection re-authorized against another QuickBooks company
+    is refused before any token is stored or data synced."""
+    from fastapi import HTTPException
+
+    connection_dict = _make_connection_dict(status="connected")
+    connection_dict["metadata"]["realm_id"] = "1111111111"
+    state_data = {
+      "user_id": USER_ID,
+      "connection_id": CONNECTION_ID,
+      "redirect_uri": "http://localhost:3001/connections/qb-callback",
+    }
+    mock_oauth_handler = MagicMock()
+    mock_oauth_handler.exchange_code_for_tokens = AsyncMock(
+      return_value={"access_token": "a", "refresh_token": "r"}
+    )
+    mock_oauth_provider = MagicMock()
+    mock_oauth_provider.extract_provider_data = MagicMock(
+      return_value={"realm_id": "2222222222"}
+    )
+    sync_mock = AsyncMock()
+
+    with (
+      patch(
+        "robosystems.operations.providers.oauth_handler.OAuthState.validate",
+        return_value=state_data,
+      ),
+      patch(
+        f"{OAUTH_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+      patch(
+        "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_handler",
+        mock_oauth_handler,
+      ),
+      patch(
+        "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_provider",
+        mock_oauth_provider,
+      ),
+      patch(f"{OAUTH_MODULE}.dispatch_first_sync", sync_mock),
+      pytest.raises(HTTPException) as excinfo,
+    ):
+      await oauth_callback(
+        provider="quickbooks",
+        graph_id=GRAPH_ID,
+        request=_make_oauth_callback_request(realm_id="2222222222"),
+        current_user=_make_mock_user(),
+        db=MagicMock(),
+        _rate_limit=None,
+      )
+
+    assert excinfo.value.status_code == 409
+    mock_oauth_handler.store_tokens.assert_not_called()
+    sync_mock.assert_not_called()
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
   async def test_oauth_callback_revived_lookup_miss_is_404_not_crash(self):
     """If the revived connection cannot be re-read after the prior row was
     restored (it is stored, tokens are written), the callback answers a 404

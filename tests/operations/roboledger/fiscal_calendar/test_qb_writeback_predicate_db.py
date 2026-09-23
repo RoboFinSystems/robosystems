@@ -169,3 +169,36 @@ def test_the_row_query_and_the_id_query_agree(session):
   rows = select_writeback_eligible_entries(session, PERIOD_START, PERIOD_END)
 
   assert {str(entry.id) for entry, _event in rows} == _publishing(session)
+
+
+def _sibling(db, entry_id: str, *, posting_date: date) -> str:
+  """A second draft on the same event as ``entry_id``."""
+  first = db.get(Entry, entry_id)
+  entry = Entry(
+    posting_date=posting_date,
+    memo="sibling",
+    status="draft",
+    provenance="manual_entry",
+    triggered_by_event_id=first.triggered_by_event_id,
+    created_by="user_test",
+  )
+  db.add(entry)
+  db.flush()
+  return str(entry.id)
+
+
+def test_a_published_entry_does_not_hold_back_its_siblings(session):
+  """Publishing is recorded per entry: the unpublished sibling still goes."""
+  sent = _draft(session, label="split", source="schedule", metadata={})
+  unsent = _sibling(session, sent, posting_date=date(2026, 8, 31))
+  db_event = session.get(Event, session.get(Entry, sent).triggered_by_event_id)
+  db_event.metadata_ = {
+    "qb_entry_ids": {sent: "JournalEntry_1"},
+    "qb_external_id": "JournalEntry_1",
+  }
+  session.flush()
+
+  publishing = _publishing(session)
+
+  assert sent not in publishing
+  assert unsent in publishing
