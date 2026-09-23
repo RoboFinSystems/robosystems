@@ -51,8 +51,9 @@ Methods:
 
 - `check_circuit(graph_id, operation) -> bool` — call before the operation;
   raises `HTTPException(503)` with a `Retry-After` header if the circuit is open.
-- `record_success(graph_id, operation)` — resets the failure count and closes
-  the circuit.
+- `record_success(graph_id, operation)` — closes the circuit and forgets it.
+  Only circuits with a recorded failure are stored, so a caller-supplied
+  operation name cannot grow the map, and a healthy operation has no entry.
 - `record_failure(graph_id, operation, error=None)` — increments the failure
   count and opens the circuit at the threshold. **Client errors are ignored:**
   if `error` is a `GraphClientError` (e.g. bad Cypher syntax) it does not count
