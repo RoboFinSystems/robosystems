@@ -4,14 +4,18 @@ Note: TestWaitAndCreateGraphConfig and TestWaitAndCreate removed —
 wait-for-capacity graph creation replaced by worker task + sensor retry.
 """
 
-from unittest.mock import MagicMock, patch
+from contextlib import contextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from dagster import Failure, build_op_context
 
 from robosystems.dagster.jobs.graph import (
+  StageFileConfig,
   _emit_completion_sync,
   _emit_failure_sync,
   _emit_progress_sync,
+  stage_file_in_duckdb,
 )
 
 
@@ -217,3 +221,49 @@ class TestDeprovisionSuspendedGraphsSessionIsolation:
     session.rollback.assert_called_once()
     assert result["deprovisioned_count"] == 1
     assert any("kg_poison" in e for e in result["errors"])
+
+
+# stage_file_in_duckdb must not mark a file staged when staging failed.
+def _run_stage_op(graph_file, staging_result):
+  client = MagicMock(create_table=AsyncMock(return_value=staging_result))
+
+  @contextmanager
+  def _session_cm():
+    yield MagicMock()
+
+  db = MagicMock()
+  db.get_session = _session_cm
+
+  with (
+    patch("robosystems.models.core.GraphFile") as file_cls,
+    patch("robosystems.models.core.GraphTable") as table_cls,
+    patch(
+      "robosystems.graph_api.client.factory.GraphClientFactory.create_client",
+      AsyncMock(return_value=client),
+    ),
+  ):
+    file_cls.get_by_id.return_value = graph_file
+    file_cls.get_all_for_table.return_value = [graph_file]
+    table_cls.get_by_id.return_value = MagicMock(table_name="Entity")
+    config = StageFileConfig(file_id="gf_1", graph_id="kg1", table_id="gt_1")
+    return stage_file_in_duckdb(build_op_context(), db, MagicMock(), config)
+
+
+def _uploaded_file():
+  return MagicMock(id="gf_1", s3_key="k/file.parquet", upload_status="uploaded")
+
+
+@pytest.mark.unit
+def test_failed_staging_fails_the_op():
+  graph_file = _uploaded_file()
+  with pytest.raises(Failure, match="S3 read failed"):
+    _run_stage_op(graph_file, {"status": "failed", "error": "S3 read failed"})
+  graph_file.mark_duckdb_staged.assert_not_called()
+
+
+@pytest.mark.unit
+def test_completed_staging_marks_file_staged():
+  graph_file = _uploaded_file()
+  result = _run_stage_op(graph_file, {"status": "completed"})
+  assert result["duckdb_status"] == "staged"
+  graph_file.mark_duckdb_staged.assert_called_once()

@@ -78,6 +78,10 @@ class DuckDBConnectionPool:
 
     self._pools: dict[str, dict[str, DuckDBConnectionInfo]] = {}
     self._locks: dict[str, threading.RLock] = {}
+    # Lock order: a per-graph lock may be taken with nothing held, and the
+    # global lock is never held while waiting on a per-graph lock. The
+    # registry guard is a leaf: nothing else is acquired under it.
+    self._locks_guard = threading.Lock()
     self._global_lock = threading.RLock()
 
     self._stats = {
@@ -219,7 +223,7 @@ class DuckDBConnectionPool:
 
   def _get_database_lock(self, graph_id: str) -> threading.RLock:
     """Get or create a lock for a specific database."""
-    with self._global_lock:
+    with self._locks_guard:
       if graph_id not in self._locks:
         self._locks[graph_id] = threading.RLock()
       return self._locks[graph_id]
@@ -519,42 +523,42 @@ class DuckDBConnectionPool:
     # Database files are deliberately never reaped here — staging databases
     # persist as long as the graph does. See force_database_cleanup().
 
+  def _snapshot_connections(self) -> list[tuple[str, str, DuckDBConnectionInfo]]:
+    with self._global_lock:
+      return [
+        (db_name, conn_id, conn_info)
+        for db_name, pool in list(self._pools.items())
+        for conn_id, conn_info in list(pool.items())
+      ]
+
   def _cleanup_expired_connections(self):
     """Clean up expired connections."""
-    with self._global_lock:
-      expired_connections = []
+    expired = [
+      (db_name, conn_id)
+      for db_name, conn_id, conn_info in self._snapshot_connections()
+      if not self._is_connection_valid(conn_info)
+    ]
+    for db_name, conn_id in expired:
+      with self._get_database_lock(db_name):
+        self._close_connection(db_name, conn_id)
 
-      for db_name, pool in self._pools.items():
-        for conn_id, conn_info in pool.items():
-          if not self._is_connection_valid(conn_info):
-            expired_connections.append((db_name, conn_id))
-
-      for db_name, conn_id in expired_connections:
-        with self._get_database_lock(db_name):
-          self._close_connection(db_name, conn_id)
-
-      if expired_connections:
-        logger.info(f"Cleaned up {len(expired_connections)} expired DuckDB connections")
+    if expired:
+      logger.info(f"Cleaned up {len(expired)} expired DuckDB connections")
 
   def _check_connection_health(self):
     """Check health of all connections."""
-    with self._global_lock:
-      unhealthy_connections = []
-
-      for db_name, pool in self._pools.items():
-        for conn_id, conn_info in pool.items():
-          if not self._test_connection_health(conn_info):
-            conn_info.is_healthy = False
-            unhealthy_connections.append((db_name, conn_id))
-
-      for db_name, conn_id in unhealthy_connections:
-        with self._get_database_lock(db_name):
+    removed = 0
+    for db_name, conn_id, conn_info in self._snapshot_connections():
+      with self._get_database_lock(db_name):
+        if conn_id not in self._pools.get(db_name, {}):
+          continue
+        if not self._test_connection_health(conn_info):
+          conn_info.is_healthy = False
           self._close_connection(db_name, conn_id)
+          removed += 1
 
-      if unhealthy_connections:
-        logger.warning(
-          f"Removed {len(unhealthy_connections)} unhealthy DuckDB connections"
-        )
+    if removed:
+      logger.warning(f"Removed {removed} unhealthy DuckDB connections")
 
   def _test_connection_health(self, connection_info: DuckDBConnectionInfo) -> bool:
     """Test if a connection is healthy."""
@@ -578,7 +582,8 @@ class DuckDBConnectionPool:
           total_closed += 1
 
       self._pools.clear()
-      self._locks.clear()
+      with self._locks_guard:
+        self._locks.clear()
 
       if total_closed > 0:
         logger.info(f"Closed {total_closed} DuckDB connections on shutdown")
@@ -733,7 +738,7 @@ class DuckDBConnectionPool:
 
     Call this when a graph is deleted; nothing else removes the file.
     """
-    with self._global_lock:
+    with self._get_database_lock(graph_id):
       logger.info(f"Forcing cleanup for DuckDB database: {graph_id}")
 
       self.close_database_connections(graph_id)

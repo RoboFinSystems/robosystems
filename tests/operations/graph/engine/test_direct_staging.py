@@ -63,12 +63,49 @@ class TestStageFileDirectly:
     """Create a mock async Graph API client."""
     client = AsyncMock()
     client.list_tables = AsyncMock(return_value=[])
-    client.create_table = AsyncMock(return_value={"status": "created", "rows": 50})
+    client.create_table = AsyncMock(return_value={"status": "completed", "rows": 50})
     client.insert_into_table = AsyncMock(
-      return_value={"status": "inserted", "rows": 10}
+      return_value={"status": "completed", "rows": 10}
     )
     client.close = AsyncMock()
     return client
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_failed_staging_is_not_marked_staged(
+    self, mock_db_session, mock_graph_file, mock_graph_table, mock_graph_client
+  ):
+    """The client reports failure in its return value; the file must stay
+    unstaged so it is retried rather than silently dropped."""
+    mock_graph_client.create_table.return_value = {
+      "status": "failed",
+      "error": "S3 read failed",
+    }
+    with (
+      patch(FACTORY_PATH) as mock_factory,
+      patch(GRAPH_FILE_PATH) as mock_file_class,
+      patch(GRAPH_TABLE_PATH) as mock_table_class,
+      patch(f"{MODULE}.env") as mock_env,
+    ):
+      mock_env.USER_DATA_BUCKET = "robosystems-local"
+      mock_file_class.get_by_id.return_value = mock_graph_file
+      mock_table_class.get_by_id.return_value = mock_graph_table
+      mock_file_class.get_all_for_table.return_value = [mock_graph_file]
+      mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
+
+      result = await stage_file_directly(
+        db=mock_db_session,
+        file_id="gf_file1",
+        graph_id="kg1234567890abcdef",
+        table_id="gt_table1",
+        s3_key="graphs/kg1234/tables/entity/file1.parquet",
+        file_size_bytes=1024,
+        row_count=50,
+      )
+
+    assert result["status"] == "error"
+    assert "S3 read failed" in result["message"]
+    mock_graph_file.mark_duckdb_staged.assert_not_called()
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -771,7 +808,7 @@ class TestStageFileDirectlyDeduplicate:
       return_value=[{"table_name": "Entity", "row_count": 100}]
     )
     client.insert_into_table = AsyncMock(
-      return_value={"status": "inserted", "rows": 10}
+      return_value={"status": "completed", "rows": 10}
     )
     client.close = AsyncMock()
     return client
@@ -906,7 +943,7 @@ class TestStageFileDirectlyEdgeCases:
 
     mock_client = AsyncMock()
     mock_client.list_tables = AsyncMock(return_value=[])
-    mock_client.create_table = AsyncMock(return_value={"status": "ok"})
+    mock_client.create_table = AsyncMock(return_value={"status": "completed"})
     mock_client.close = AsyncMock()
 
     with (

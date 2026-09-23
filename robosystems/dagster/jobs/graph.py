@@ -572,6 +572,9 @@ def stage_file_in_duckdb(
     finally:
       loop.close()
 
+    if staging_result.get("status") != "completed":
+      raise Failure(f"DuckDB staging failed: {staging_result.get('error')}")
+
     graph_file.mark_duckdb_staged(session=session, row_count=graph_file.row_count or 0)
 
     context.log.info(f"File {config.file_id} staged successfully")

@@ -112,6 +112,9 @@ async def stage_file_directly(
     finally:
       await client.close()
 
+    if staging_result.get("status") != "completed":
+      raise RuntimeError(f"DuckDB staging failed: {staging_result.get('error')}")
+
     # Mark file as staged
     graph_file.mark_duckdb_staged(session=db, row_count=row_count or 0)
 
