@@ -183,8 +183,8 @@ automated chain; nothing runs on its own after a fresh deploy.
 | Sensor / schedule | Triggers | Role |
 |-------------------|----------|------|
 | `sec_incremental_download_schedule` | `sec_download_job` | 9pm EST weekdays |
-| `sec_incremental_pipeline_sensor` | `sec_process_job`, `sec_incremental_stage_job` | download → process (batched loop) → stage |
-| `sec_wake_to_stage_sensor` | staging jobs | resumes the chain after a sleep window |
+| `sec_incremental_pipeline_sensor` | `sec_process_job`, `shared_master_wake_job` | download → process (batched loop) → wake the shared master once drained |
+| `sec_wake_to_stage_sensor` | `sec_incremental_stage_job` | master awake → stage the tagged quarter |
 | `sec_stage_to_materialize_sensor` | `sec_materialize_job` | stage → full graph rebuild |
 | `sec_post_stage_index_sensor` | `sec_narratives_index_job`, `sec_ixbrl_index_job` | stage → OpenSearch indexing |
 | `sec_index_retry_sensor` | index jobs | retries failed index runs |
