@@ -619,6 +619,67 @@ class TestUserRepositoryCredits:
     assert credits.current_balance == Decimal("5000")
     assert self._transaction_sum(credits) == Decimal("4000")
 
+  def test_spending_between_plan_cycles_does_not_mint_credits(self):
+    """A downgrade cannot take back credits already spent, so re-upgrading in
+    the same period must not grant the difference again: the period can
+    credit no more than the highest allocation it has held."""
+    credits = UserRepositoryCredits.create_for_access(
+      access_id=self.repo_access.id,
+      repository_type="sec",
+      repository_plan="starter",
+      monthly_allocation=1000,
+      session=self.session,
+    )
+
+    for _ in range(3):
+      credits.update_monthly_allocation(
+        new_allocation=Decimal("5000"), session=self.session, immediate_credit=True
+      )
+      credits.current_balance = Decimal("0")  # spend everything
+      self.session.commit()
+      credits.update_monthly_allocation(
+        new_allocation=Decimal("1000"), session=self.session, immediate_credit=True
+      )
+
+    granted = sum(
+      (
+        row.amount
+        for row in self.session.query(UserRepositoryCreditTransaction)
+        .filter_by(credit_pool_id=credits.id)
+        .all()
+      ),
+      Decimal("0"),
+    )
+    assert granted == Decimal("5000")  # 1000 initial + one 4000 upgrade
+
+  def test_upgrade_grants_again_after_the_monthly_allocation(self):
+    """The cap is per period: a new monthly allocation starts a fresh one."""
+    from datetime import UTC, datetime, timedelta
+
+    credits = UserRepositoryCredits.create_for_access(
+      access_id=self.repo_access.id,
+      repository_type="sec",
+      repository_plan="starter",
+      monthly_allocation=1000,
+      session=self.session,
+    )
+    credits.update_monthly_allocation(
+      new_allocation=Decimal("5000"), session=self.session, immediate_credit=True
+    )
+    credits.update_monthly_allocation(
+      new_allocation=Decimal("1000"), session=self.session, immediate_credit=True
+    )
+
+    # Next month's allocation opens a new period.
+    credits.last_allocation_date = datetime.now(UTC) - timedelta(days=40)
+    self.session.commit()
+    assert credits.allocate_monthly_credits(self.session)
+
+    credits.update_monthly_allocation(
+      new_allocation=Decimal("5000"), session=self.session, immediate_credit=True
+    )
+    assert credits.current_balance == Decimal("5000")
+
   def test_downgrade_cannot_drive_the_balance_negative(self):
     """Credits already spent are not clawed back into an overage."""
     credits = self._make_pool(balance="200", allocation="5000")

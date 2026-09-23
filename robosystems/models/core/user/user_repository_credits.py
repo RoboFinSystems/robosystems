@@ -444,12 +444,27 @@ class UserRepositoryCredits(Base):
     old_allocation = self.monthly_allocation
     difference = new_allocation - old_allocation
 
+    # A downgrade cannot reclaim credits already spent, so an upgrade grants
+    # only what this period has not already credited: cycling plans can
+    # never credit more than the highest allocation held since the last
+    # monthly allocation.
+    grant = difference
+    if immediate_credit and difference > 0:
+      headroom = new_allocation - self._credited_this_period(session)
+      grant = min(difference, max(Decimal("0"), headroom))
+
     self.monthly_allocation = new_allocation
     self.updated_at = datetime.now(UTC)
 
-    if immediate_credit and difference > 0:
+    if immediate_credit and difference > 0 and grant == 0:
+      logger.info(
+        f"Upgrade on user pool {self.id} granted nothing: this period has "
+        f"already credited {new_allocation}"
+      )
+
+    elif immediate_credit and difference > 0:
       MAX_BALANCE = Decimal("99999999.99")  # Ceiling of the Numeric(10, 2) column
-      new_balance = self.current_balance + difference
+      new_balance = self.current_balance + grant
       if new_balance > MAX_BALANCE:
         logger.warning(
           f"Credit balance overflow prevented for user pool {self.id}. "
@@ -461,7 +476,7 @@ class UserRepositoryCredits(Base):
       UserRepositoryCreditTransaction.create_transaction(
         credit_pool_id=self.id,
         transaction_type=UserRepositoryCreditTransactionType.BONUS,
-        amount=difference,
+        amount=grant,
         description="Tier upgrade credit adjustment",
         metadata={
           "old_allocation": str(old_allocation),
@@ -504,6 +519,33 @@ class UserRepositoryCredits(Base):
     except SQLAlchemyError:
       session.rollback()
       raise
+
+  def _credited_this_period(self, session: Session) -> Decimal:
+    """Credits granted since the last monthly allocation: that allocation
+    plus every plan-change adjustment (net of downgrade deductions)."""
+    query = session.query(UserRepositoryCreditTransaction).filter(
+      UserRepositoryCreditTransaction.credit_pool_id == self.id,
+      UserRepositoryCreditTransaction.transaction_type.in_(
+        [
+          UserRepositoryCreditTransactionType.ALLOCATION.value,
+          UserRepositoryCreditTransactionType.BONUS.value,
+        ]
+      ),
+    )
+    if self.last_allocation_date is not None:
+      query = query.filter(
+        UserRepositoryCreditTransaction.created_at >= self.last_allocation_date
+      )
+
+    credited = Decimal("0")
+    for txn in query.all():
+      is_plan_change = "new_allocation" in txn.get_metadata()
+      if (
+        txn.transaction_type == UserRepositoryCreditTransactionType.ALLOCATION.value
+        or is_plan_change
+      ):
+        credited += cast(Decimal, txn.amount)
+    return credited
 
   def get_summary(self) -> dict[str, Any]:
     """Get credit summary for API responses."""
