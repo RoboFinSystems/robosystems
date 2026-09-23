@@ -1,6 +1,6 @@
 # Document Management
 
-This guide shows you how to manage the institutional-knowledge document store that lives over each entity graph — uploading policies, procedures, and notes as markdown, and feeding them into the search and retrieval layer your AI agents read from. Documents live in PostgreSQL as the source of truth and are projected into OpenSearch as a sectioned, searchable index.
+This guide shows you how to manage the institutional-knowledge document store that lives over each user graph — an entity graph or a custom graph alike — uploading policies, procedures, and notes as markdown, and feeding them into the search and retrieval layer your AI agents read from. Documents live in PostgreSQL as the source of truth and are projected into OpenSearch as a sectioned, searchable index.
 
 **Quick Start:** Create a markdown document with `POST /v1/graphs/{graph_id}/operations/index-document` (or the `create-document` MCP tool), and it is automatically split into sections and indexed for search. Creation, update, and deletion are **content operations**; the REST surface at `/v1/graphs/{graph_id}/documents` is read-only (list and get).
 
@@ -290,7 +290,7 @@ Document search is gated by `SEMANTIC_SEARCH_ENABLED`, and the flag gates both h
 
 - **[Search and AI Retrieval](Search-and-AI-Retrieval)** - How documents become searchable and how AI agents retrieve them
 - **[File Uploads](File-Uploads)** - Bulk tabular node and relationship data (parquet, CSV, JSON), a distinct surface from this markdown document store
-- **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)** - Sync structured ledger data into a graph
+- **[Custom Graph Schema](Custom-Graph-Schema)** - A custom-graph demo whose Step 6 indexes documents into this store
 
 **Codebase Documentation:**
 

@@ -93,16 +93,16 @@ curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/opera
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "entity_id": "ent_acme_holdings",
-    "name": "Common Stock Class A",
-    "security_type": "common_stock",
-    "security_subtype": "class_a",
-    "authorized_shares": 10000000,
-    "outstanding_shares": 6500000
+    "entity_id": "ent_driftline_robotics",
+    "name": "Series A Preferred Stock",
+    "security_type": "preferred_stock",
+    "security_subtype": "series_a",
+    "authorized_shares": 4000000,
+    "outstanding_shares": 3200000
   }'
 ```
 
-`entity_id` here is the **issuer** entity, and it must already exist in this graph — the placeholder `ent_acme_holdings` above will return HTTP 404 (`EntityNotFoundError`) on a graph that has no such entity. Omit the field entirely to create an unlinked security, or supply a real issuer id (see [Cross-Graph Issuer Linking](#cross-graph-issuer-linking)).
+`entity_id` here is the **issuer** entity, and it must already exist in this graph — the placeholder `ent_driftline_robotics` (a fictional private robotics company) above will return HTTP 404 (`EntityNotFoundError`) on a graph that has no such entity. Omit the field entirely to create an unlinked security, or supply a real issuer id (see [Cross-Graph Issuer Linking](#cross-graph-issuer-linking)).
 
 The response is an `OperationEnvelope` whose `result` is a `SecurityResponse`. It carries an `id` (shaped like `sec_...`), `is_active: true`, and `terms: {}` by default. `security_type` is an open vocabulary — common values include `common_stock`, `preferred_stock`, `warrant`, `convertible_note`, `safe`, `option`, `llc_unit`, `lp_interest`, and `restricted_stock_unit`. `security_subtype` is free text.
 
@@ -117,29 +117,29 @@ curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/opera
   -d '{
     "portfolio": {
       "name": "Q1 2026 Growth",
-      "description": "Mid-cap public equities",
+      "description": "Early-stage private robotics companies",
       "strategy": "growth",
       "inception_date": "2026-01-01",
       "base_currency": "USD",
-      "entity_id": "ent_acme_holdings"
+      "entity_id": "ent_harborlight_fund"
     },
     "positions": [
       {
-        "security_id": "sec_aapl",
-        "quantity": 100,
+        "security_id": "sec_driftline_series_a",
+        "quantity": 250000,
         "quantity_type": "shares",
-        "cost_basis": 1850000,
+        "cost_basis": 50000000,
         "currency": "USD",
-        "current_value": 2010000,
+        "current_value": 62500000,
         "valuation_date": "2026-04-30",
-        "valuation_source": "broker_statement",
+        "valuation_source": "priced_round",
         "acquisition_date": "2026-01-15"
       }
     ]
   }'
 ```
 
-`cost_basis` and `current_value` are integer cents — `1850000` is $18,500.00 and `2010000` is $20,100.00. The `result` is a `PortfolioBlockEnvelope` with dollar totals computed server-side (`total_cost_basis_dollars`, `total_current_value_dollars`) and an `active_position_count`.
+Here the portfolio's `entity_id` is the **owner** (a fictional fund, `ent_harborlight_fund`), while the security's `entity_id` in Step 1 was the **issuer** — the two links point at opposite sides of the holding. `cost_basis` and `current_value` are integer cents — `50000000` is $500,000.00 and `62500000` is $625,000.00. The `result` is a `PortfolioBlockEnvelope` with dollar totals computed server-side (`total_cost_basis_dollars`, `total_current_value_dollars`) and an `active_position_count`.
 
 ### Step 3: Update the Portfolio Block
 
@@ -151,11 +151,11 @@ curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/opera
   -H "Content-Type: application/json" \
   -d '{
     "portfolio_id": "port_q1_growth_2026",
-    "portfolio": {"description": "Pivoted toward defensive holdings"},
+    "portfolio": {"description": "Early-stage private robotics and automation companies"},
     "positions": {
       "add": [],
       "update": [
-        {"id": "pos_aapl_lot_1", "current_value": 1980000, "valuation_date": "2026-05-06", "valuation_source": "broker_statement"}
+        {"id": "pos_driftline_series_a_1", "current_value": 58000000, "valuation_date": "2026-06-30", "valuation_source": "quarterly_mark"}
       ],
       "dispose": [
         {"id": "pos_oldcorp_lot_3", "disposition_reason": "Liquidated; rotated capital"}

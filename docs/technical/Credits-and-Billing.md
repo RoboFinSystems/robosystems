@@ -26,7 +26,7 @@ The model has one rule worth memorizing: **credits meter AI, and nothing else.**
 
 ### What Consumes Credits
 
-Only operations that call an external AI model consume credits. In production, that means AI Operators calling a model through AWS Bedrock (Claude Sonnet 5 by default) — the natural-language Cypher operator, the autonomous chart-of-accounts mapping operator, and any other operator-driven workflow. Each call is metered on the tokens it actually uses once it completes, then debited from the graph's credit pool.
+Only operations that call an external AI model consume credits. In production, that means AI Operators calling a model through AWS Bedrock (Claude Sonnet 5 by default) — the analyst operator (which answers questions from a graph's read-only tools), the chart-of-accounts mapping operator, and any other operator-driven workflow. Each call is metered on the tokens it actually uses once it completes, then debited from the graph's credit pool.
 
 ### What Is Free
 
@@ -36,7 +36,7 @@ Everything that does not call an AI model is free and unmetered by credits:
 - GraphQL extension reads
 - MCP tool calls (`read-graph-cypher`, `query-graphql`, `search-documents`, schema introspection, and the rest)
 - Data imports, materialization, and connection syncs (SEC, QuickBooks)
-- Backups and restores
+- Backups
 - Schema operations and subgraph management
 - Connection setup and credential management
 
@@ -46,7 +46,7 @@ Everything that does not call an AI model is free and unmetered by credits:
 
 AI operations are priced on the tokens consumed by the model call, not as a flat per-call fee. Nothing is reserved up front: the charge is computed *after* the model responds, from the input and output token counts it actually reported, at a per-1,000-token rate for each direction. A **minimum charge of 1 credit** then applies, so a very small call still costs something — but a call that consumed nothing costs nothing rather than being rounded up. An unregistered model raises at billing time rather than guessing a rate, so a model has to be priced before it can be used.
 
-The current rates are served as `operation_costs.token_pricing` from `GET /v1/offering`, which is where to read them rather than from a copy on this page. The production model of record is Claude Sonnet served via AWS Bedrock, and a typical AI Operator call lands around 38 credits. Treat that as a rough planning figure — the charge is always the real measured token cost, never a fixed estimate.
+The current rates are served as `operation_costs.token_pricing` from `GET /v1/offering`, which is where to read them rather than from a copy on this page. What a call costs depends on how many tokens it uses, so the way to plan is to run representative calls and read their actual charges from the transaction history (see [Reviewing Usage and Transaction History](#reviewing-usage-and-transaction-history)); the charge is always the real measured token cost, never a fixed estimate.
 
 ## Monthly Allocations by Tier
 
@@ -61,8 +61,9 @@ infrastructure, so a copy on this page could only ever be a copy that goes stale
   and the per-tier limits, all computed from the authoritative config
 - **[robosystems.ai/pricing](https://robosystems.ai/pricing)** — the public pricing page
 
-To estimate operator calls from an allocation, divide the monthly credits by the ~38-credit typical-call
-figure above. That is a planning estimate only; the charge is always the real measured token cost.
+To estimate how many operator calls an allocation covers, divide the monthly credits by the average
+charge of your own calls, from the transaction history's per-operation `summary`. That is a planning
+estimate only; the charge is always the real measured token cost.
 
 A graph's **current balance** is its monthly allocation minus the credits consumed so far in the current calendar month. Subgraphs do not receive their own allocation — they draw from the parent graph's pool, so checking a subgraph's credits reports the parent pool's numbers. The single source of truth for these allocations is the [Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing) in the codebase.
 
@@ -217,14 +218,7 @@ Each guards itself with a `confirm` value that must equal the resource id — `d
 
 ## Rate Limits
 
-Rate limits are the third metering axis, alongside credits and storage — and the only one that throttles *free* operations. They are **burst-focused**: short sliding windows sized to absorb normal bursts while protecting shared infrastructure, rather than long-horizon quotas.
-
-- Limits are defined per **endpoint category** (queries, MCP, search, operator calls, and so on) crossed with **subscription tier** — higher tiers get higher limits.
-- A small **burst multiplier** (1.2×) allows brief spikes above the steady-state limit.
-- Tier scaling: the Large and XLarge tiers carry higher API rate multipliers than Standard — **2× and 4×** respectively. The multiplier is derived from the limit table the rate limiter actually enforces, and is served per tier as `api_rate_multiplier` from `GET /v1/graphs/tiers` and `GET /v1/offering`.
-- Every rate-limited response carries standard rate-limit headers (limit, remaining, reset), so a client can back off gracefully.
-
-Rate limits and credits are **independent** — hitting a rate limit does not consume credits, and an exhausted credit pool does not change your rate limits. Shared repositories carry their own per-plan rate limits; see [Shared Repositories](Shared-Repositories).
+Rate limits are the third metering axis, alongside credits and storage — and the only one that throttles *free* operations. They are short, per-category windows that absorb normal bursts, scaled by tier for the categories served by a graph's own instance, and independent of credits: hitting a rate limit consumes nothing, and an exhausted credit pool does not change a rate limit. The headers, the 429 response, and where the live limits are served are in [Errors and Rate Limits](Errors-and-Rate-Limits#rate-limits), along with the 402 an AI operation returns when the pool is empty ([Insufficient Credits](Errors-and-Rate-Limits#insufficient-credits)).
 
 ## Self-hosted deployments
 
@@ -251,6 +245,7 @@ just admin dev credits repos bonus
 **Wiki Guides:**
 - **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)** - How credits scope per graph, and how subgraphs share the parent pool
 - **[AI Operators and MCP](AI-Operators-and-MCP)** - The AI Operators that consume credits, and the free MCP tool surface
+- **[Errors and Rate Limits](Errors-and-Rate-Limits)** - Rate-limit headers, 429 handling, and the insufficient-credits response
 - **[Architecture Overview](Architecture-Overview)** - Platform architecture, tiers, and the operations layer
 
 **Codebase Documentation:**

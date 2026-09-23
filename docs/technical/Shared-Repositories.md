@@ -62,10 +62,10 @@ export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
 curl -X POST "https://api.robosystems.ai/v1/graphs/sec/subscriptions" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"plan_name": "sec-starter"}'
+  -d '{"plan_name": "starter"}'
 ```
 
-Plan names are repository-prefixed: `sec-starter` and `sec-advanced`. Checking your subscription uses the same endpoint, which auto-detects graphs versus repositories:
+A repository's plans are named in its manifest — for `sec`, `starter` and `advanced`. The repository-prefixed spellings (`sec-starter`, `sec-advanced`) are accepted as well, and the subscription records the bare plan name. Checking your subscription uses the same endpoint, which auto-detects graphs versus repositories:
 
 ```bash
 curl "https://api.robosystems.ai/v1/graphs/sec/subscriptions" \
@@ -79,7 +79,7 @@ Changing plan and cancelling are the other two verbs on the same path:
 curl -X PATCH "https://api.robosystems.ai/v1/graphs/sec/subscriptions" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"new_plan_name": "sec-advanced"}'
+  -d '{"new_plan_name": "advanced"}'
 
 # Cancel at period end (access stays until the period closes)
 curl -X POST "https://api.robosystems.ai/v1/graphs/sec/subscriptions/cancel" \
@@ -103,16 +103,14 @@ Database operations (query, MCP, search) are **free** — they draw down rate-li
 
 SEC EDGAR is the one shared repository available today — public-company filings and XBRL financial data, synced daily, with semantic enrichment for natural-language element resolution. Its plans are read-only and differ on throughput and backup-download allowance:
 
-| Plan | `plan_name` | Price | Monthly AI credits | Access |
-| --- | --- | --- | --- | --- |
-| **Starter** | `sec-starter` | $29/month | 5,000 | Read |
-| **Advanced** | `sec-advanced` | $99/month | 17,000 | Read |
+| Plan | `plan_name` | Access |
+| --- | --- | --- |
+| **Starter** | `starter` | Read |
+| **Advanced** | `advanced` | Read, with higher rate limits and a larger download allowance |
 
-Prices and credit allocations are served live and unauthenticated at **`GET /v1/offering`** — that response, not this table, is the authority if the two ever disagree.
+Prices, monthly AI credit allocations and download allowances are served live and unauthenticated at **`GET /v1/offering`**, and shown on the [pricing page](https://robosystems.ai/pricing). Rate limits apply per category — queries, MCP calls, searches, and AI agent calls each have their own per-minute / per-hour / per-day budgets.
 
-The Advanced plan carries roughly 5× the rate limits of Starter. Rate limits apply per category — queries, MCP calls, searches, and AI agent calls each have their own per-minute / per-hour / per-day budgets.
-
-The repository id is `sec`. For a hands-on walkthrough — querying filings with Cypher and MCP, and the data model — see the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) demo.
+The repository id is `sec`. For the data model and the rules a query must follow to return the right number, see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules); for loading filings into a local stack, the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) demo.
 
 ### Downloading a snapshot
 
@@ -152,7 +150,8 @@ There is no free hosted SEC tier; self-hosting is the free path. On a stack you 
 ## Related Documentation
 
 - **[Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy)** - The dedicated per-customer tiers, the other half of graph access
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Hands-on with the SEC shared repository
+- **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)** - The `sec` graph's model, the four query rules, and worked queries
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Loading SEC filings into a local stack
 - **[Pipeline Guide](Pipeline-Guide)** - How a shared repository's data is ingested and published
 - **[Credits & Billing](Credits-and-Billing)** - The credit model and subscription billing
 - **[AI Operators & MCP](AI-Operators-and-MCP)** - Querying a repository alongside your own graphs

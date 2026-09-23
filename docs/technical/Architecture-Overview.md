@@ -4,10 +4,10 @@ RoboSystems is an AI-native financial intelligence platform for accounting, fina
 
 ## Documentation Map
 
-This wiki is organized into seven areas:
+The main areas of this wiki, with a representative page or two from each (the sidebar lists every page):
 
 - **Getting Started & Platform** — orientation against the hosted platform ([Quick Start](Quick-Start), [Core Concepts](Core-Concepts), [Security & Compliance](Security-and-Compliance)).
-- **Operations Layer** — the core platform API and graph management ([Graph Operations](Graph-Operations), [Querying the Analytical Graph](Querying-the-Analytical-Graph), [AI Operators & MCP](AI-Operators-and-MCP)).
+- **Operations Layer** — the core platform API and graph management ([Graph Operations](Graph-Operations), [Querying the Analytical Graph](Querying-the-Analytical-Graph), [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules), [AI Operators & MCP](AI-Operators-and-MCP)).
 - **Extensions Layer** — RoboLedger and RoboInvestor ([Extensions Surface Overview](Extensions-Surface-Overview), [GraphQL Reads](GraphQL-Reads), [RoboLedger Operations](RoboLedger-Operations)).
 - **Content & Contribution Fabric** — the semantic content model ([Information Blocks](Information-Blocks), [Taxonomy & Frameworks](Taxonomy-and-Frameworks), [Event-Driven Ledger](Event-Driven-Ledger), [Reporting & Rendering](Reporting-and-Rendering)).
 - **Documents & Search** — unstructured content and retrieval ([Search & AI Retrieval](Search-and-AI-Retrieval), [Document Management](Document-Management)).
@@ -87,7 +87,7 @@ The FastAPI backend serves two distinct API surfaces:
 - **Versioned Endpoints**: Core platform routes under `/v1/` for API stability
 - **Multi-Tenant Routing**: Database-scoped endpoints at `/v1/graphs/{graph_id}/*`
 - **Authentication**: JWT tokens and API keys
-- **OpenAPI Documentation**: Auto-generated at `/docs`
+- **OpenAPI Documentation**: the live spec at `/openapi.json`; the API root (`/`) serves the Swagger UI with try-it, and `/docs` redirects (301) to the rendered reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api)
 - **Async Operations**: Non-blocking I/O for high throughput
 
 **Extensions API (GraphQL reads + named command writes):**
@@ -96,7 +96,7 @@ RoboLedger and RoboInvestor are product extensions served under a unified `/exte
 
 - **GraphQL Reads**: `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL endpoint. The schema is composed dynamically: `InformationBlockQuery`, `TaxonomyBlockQuery`, and `LibraryQuery` are always-on regardless of product flags — they are cross-domain, and their visibility follows the session `search_path` derived from the URL's `graph_id`. `LedgerQuery` and `InvestorQuery` are gated by `ROBOLEDGER_ENABLED` / `ROBOINVESTOR_ENABLED`. A ledger-only deployment exposes ledger fields plus the always-on roots but not investor fields — introspection never reveals disabled domains. Types auto-derive from Pydantic response models; adding a field on the backend exposes it on the wire with zero GraphQL-layer boilerplate.
 - **Named Command Operations**: `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{op_name}` — ledger commands (`close-period`, `share-report`, `create-mapping-association`, `create-information-block`, `evaluate-rules`, etc.) and roboinvestor commands. Writes are explicit command operations rather than resource CRUD, matching the multi-step domain operations they actually perform. Every response is wrapped in an `OperationEnvelope` with a ULID `operationId` and supports `Idempotency-Key` headers for safe retries. Long-running commands return `status: "pending"` with HTTP 202 and stream progress through `/v1/operations/{operationId}/stream`.
-- **Analytical View Operations**: `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed analytical operations that query LadybugDB rather than the extensions OLTP database. Share the same envelope contract as command operations but are read-only and routed to the materialized graph. `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube schema) is the first one; this is the seam for any analytical operation that needs columnar/graph query power beyond what a Postgres read can provide. Gated independently from the OLTP domains so deployments without the corresponding roboledger/roboinvestor tenants can still use them.
+- **Analytical View Operations**: `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed analytical operations that query LadybugDB rather than the extensions OLTP database. Share the same envelope contract as command operations but are read-only and routed to the materialized graph. `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube schema) and `financial-statement-analysis` read the graph; the pair `disclosures` (the map of a report's sections) and `information-block` (one section read whole) run xbrlkit over the report held whole rather than the graph. This is the seam for any analytical operation that needs columnar/graph query power beyond what a Postgres read can provide. Gated independently from the OLTP domains so deployments without the corresponding roboledger/roboinvestor tenants can still use them.
 
 Feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSIONS_GRAPHQL_ENABLED`, `FACT_GRID_ENABLED`) gate each surface at schema-construction time, not request time — disabled domains are simply absent from the schema rather than throwing runtime errors.
 
@@ -148,12 +148,12 @@ This resolution runs in the auth dependency before any handler executes, so ever
 
 Model Context Protocol server for AI integration:
 
-- **MCP Endpoints**: FastAPI router exposing MCP-compliant tool endpoints
+- **MCP Endpoints**: the JSON-RPC Streamable HTTP transport; the tool list is assembled per graph and returned by `tools/list`
 - **Specialized Tools**: Cypher queries, schema introspection, fact grids, workspace management, subgraph knowledge-graph writes (write Cypher, add node/relationship tables), semantic memory (`recall` / `remember` / `update-memory` / `forget`), canonical-concept element resolution (SEC-manifest-gated), and document search (OpenSearch full-text + semantic)
 - **Streaming Support**: SSE for memory-efficient large result processing
 - **Query Validation**: Complexity scoring and timeout enforcement
 
-**Client Integration**: MCP clients (Claude, Claude Code, Cursor) connect directly to a graph's MCP Streamable HTTP endpoint (`POST /v1/graphs/{graph_id}/mcp`) with an `X-API-Key` header — see [AI Operators and MCP](AI-Operators-and-MCP). A legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (`@robosystems/mcp` npm package) remains for stdio-only clients.
+**Client Integration**: MCP clients (Claude, ChatGPT, Cursor or any MCP client) connect to a graph's MCP Streamable HTTP endpoint (`POST /v1/graphs/{graph_id}/mcp`) with an `X-API-Key` header or OAuth, or sign in through the graph-agnostic OAuth routes (`/v1/mcp`, and `/v1/mcp/roboledger` for RoboLedger graphs) — see [AI Operators and MCP](AI-Operators-and-MCP). A legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (`@robosystems/mcp` npm package) remains for stdio-only clients.
 
 **See**: [MCP Middleware Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/mcp/README.md) in codebase
 
@@ -189,7 +189,7 @@ All three transports are thin adapters over `MemoryService`, which imports no Fa
 
 Storage is a single LanceDB `memory` table per graph, living on the graph API instance at `{LANCE_INDEX_PATH}/{graph_id}/memory/`. It is mutated row by row rather than rebuilt, and it is deliberately **not** part of the tar.gz replica-sync pipeline — every memory operation routes to the writer/master instance.
 
-This is distinct from a **memory subgraph** (see [Subgraphs](#subgraphs-workspaces)), which is a structural knowledge graph of Concept/Observation/Session nodes queried in Cypher. Semantic memory is the vector store: unstructured recollections retrieved by similarity.
+This is distinct from a **knowledge subgraph** (see [Subgraphs](#subgraphs-workspaces)), which is a structural knowledge graph of Concept/Observation/Session nodes queried in Cypher. Semantic memory is the vector store: unstructured recollections retrieved by similarity.
 
 The surface is gated by `SEMANTIC_MEMORY_ENABLED` (the master switch over REST, operations, and recall) with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on tool registration. Both are off by default.
 
@@ -245,7 +245,7 @@ adapters/custom_*/pipeline/ # Self-hosted-fork adapter namespace
 |----------|-------------|
 | **Billing** | Credit allocation, storage billing, usage collection |
 | **Infrastructure** | Auth cleanup, health checks, instance monitoring |
-| **Graph Operations** | Database creation, backup/restore, materialization |
+| **Graph Operations** | Database creation, backups, materialization |
 | **Data Pipelines** | Adapter pipelines (SEC XBRL: download, process, stage, materialize) |
 | **Event Triggers** | Graph lifecycle transitions, stale-graph rematerialization, repository sync, adapter sensors |
 
@@ -403,14 +403,15 @@ Subgraphs provide isolated database environments within a parent graph, availabl
 - **Development & Testing**: Experiment with schema changes or pipelines without affecting production
 - **Team Collaboration**: Give teams isolated workspaces that share the parent's infrastructure
 
-**Subgraph Types:**
-- **Static** (default): Empty subgraph inheriting the parent's base schema
-- **Memory**: Pre-built schema with Concept, Observation, and Session nodes plus relationship types — no base schema (Entity/Period), optimized for AI operator memory
+**Subgraph Types** (`subgraph_type` on `create-subgraph`):
+- **`static`** (default): inherits the parent's base schema and schema extensions
+- **`knowledge`**: the knowledge schema only — Concept, Observation, and Session nodes plus their relationship types, no base schema (Entity/Period); built for agent-constructed knowledge graphs (`memory` resolves to the same extension)
+- **`empty`**: a bare database with no base schema and no extensions; define your own tables
 
 **How Subgraphs Work:**
 - Created on the same EC2 instance as the parent graph (no additional infrastructure cost)
 - Share the parent's credit pool and subscription limits
-- Static subgraphs inherit base schema from parent; memory subgraphs use the memory extension schema
+- Static subgraphs inherit the parent's schema; knowledge subgraphs use the knowledge extension schema; empty subgraphs start with none
 - Optional `fork_parent` copies all parent data into the subgraph at creation
 - Schema can be dynamically extended via MCP tools (add node tables, relationship tables)
 - Fully isolated data - queries cannot cross subgraph boundaries
@@ -418,14 +419,9 @@ Subgraphs provide isolated database environments within a parent graph, availabl
 **Naming & Identification:**
 - Subgraph names must be alphanumeric, 1-20 characters (no hyphens or underscores)
 - Full ID format: `{parent_graph_id}_{subgraph_name}` (e.g., `kg123abc_dev`)
-- Switch between parent and subgraphs via MCP tools
+- Each subgraph is its own MCP connector URL; `list-subgraphs` returns each one's `connector_url`
 
-**Limits by Tier:**
-| Tier | Max Subgraphs | Total Databases |
-|------|---------------|-----------------|
-| Standard | 3 | 4 (1 parent + 3 subgraphs) |
-| Large | 10 | 11 (1 parent + 10 subgraphs) |
-| XLarge | 25 | 26 (1 parent + 25 subgraphs) |
+**Limits by Tier:** the maximum number of subgraphs is set per tier. The live values are in **`GET /v1/offering`** and on the [pricing page](https://robosystems.ai/pricing), both computed from the configuration below.
 
 For current tier specifications including instance types, memory allocation, subgraph limits, and pricing, see:
 - **[Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)** - Infrastructure specifications
@@ -1033,7 +1029,7 @@ See individual app repositories for specific deployment workflows.
 - AWS Bedrock (the Converse API) for model access: Claude Sonnet 5 by default, with Claude Opus 5 and OpenAI GPT-5.6 Luna configured as the other profiles
 - Self-hosted stacks can point operators at any OpenAI-compatible server instead (see [Self-Hosted AI Models](Self-Hosted-AI-Models))
 - Unified operator system: stateless operators with automatic credit tracking per call
-- CypherOperator for natural language graph queries, MappingOperator for autonomous CoA→rs-gaap taxonomy mapping
+- Two registered operators: `analyst` (`AnalystOperator`, answers a question from the graph's read-only tools) and `mapping` (`MappingOperator`, autonomous CoA→rs-gaap taxonomy mapping)
 - MCP tools provide operators with graph queries, taxonomy operations, SEC structure discovery, and document search
 - Dual execution: API (sync/SSE) for interactive queries, background worker for long-running tasks
 
@@ -1042,8 +1038,10 @@ See individual app repositories for specific deployment workflows.
 ### Multi-Tenancy
 
 - **Database Isolation**: Each entity gets a dedicated graph database on a dedicated instance
-- **Data Isolation**: Schema-per-graph isolation in PostgreSQL (`SET search_path` re-stamped per
-  session), enforced by application-layer scoping on every read and write
+- **Data Isolation**: Each graph's data is structurally separate — its own LadybugDB database, and
+  its own PostgreSQL schema in the extensions database, with no shared tenant tables to filter. The
+  platform binds each session to the schema of the `graph_id` it has already authorized
+  (`search_path`)
 - **Access Control**: Two nested boundaries — the org owns and pays, the graph is the unit of
   access. Org roles (`owner` / `admin` / `member`) compose with per-graph roles
   (`viewer` < `member` < `admin`) into one effective role, resolved before any handler runs

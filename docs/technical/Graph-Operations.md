@@ -33,7 +33,7 @@ Every one of these commands returns the same JSON shape, an **`OperationEnvelope
 
 Reads stay on the other side of the split as ordinary REST `GET`s — listing subgraphs, listing backups, checking operation status, and health checks are never tunneled through the command surface.
 
-Fifteen operations are mounted on this surface. The lifecycle group is the one most callers reach for:
+The lifecycle group is the one most callers reach for:
 
 | Operation | Mutates | Sync or async |
 | --- | --- | --- |
@@ -110,104 +110,22 @@ Funneling every write through one envelope means the same idempotency, auditing,
 
 **Sync vs async.** Each operation declares whether it runs to completion in the request or hands off to a background worker:
 
-- **Synchronous** operations finish in the response body and return **HTTP 200** with `status: "completed"`. The `result` field carries the command's output.
-- **Asynchronous** operations enqueue work and return **HTTP 202** with `status: "pending"`. The `result` carries an `operation_id` and a `monitoring` block pointing at the SSE endpoint. You watch the tail of the operation over [SSE](#monitoring-progress-with-sse).
+- **Synchronous** operations finish in the response body with `status: "completed"`, normally over **HTTP 200**. The `result` field carries the command's output.
+- **Asynchronous** operations enqueue work and return `status: "pending"`, normally over **HTTP 202**. You follow the operation's `operationId` over [SSE](#monitoring-progress-with-sse).
 
-Either way, the response is an `OperationEnvelope` and the `operation_id` is the through-line that ties the response to its audit log, its SSE stream, and its status snapshot.
+Either way, the response is an `OperationEnvelope`, and its `status` — not the HTTP code — says which you got. A request the operation refuses (validation, access, a conflict) is an HTTP error with a `detail` and `request_id` rather than an envelope; see [Operations Contract](Operations-Contract#when-an-operation-fails) and [Errors and Rate Limits](Errors-and-Rate-Limits).
 
 ## The OperationEnvelope
 
-Every operation — sync or async, success or failure — returns the same envelope. On the wire the field names are **camelCase**:
-
-| JSON field | Type | Meaning |
-| --- | --- | --- |
-| **`operation`** | string | The kebab-case operation name (e.g. `create-backup`) |
-| **`operationId`** | string | An `op_`-prefixed identifier. Always present. The correlation key for SSE, `/status`, and audit logs |
-| **`status`** | string | `completed` (sync done), `pending` (async accepted), or `failed` |
-| **`result`** | object or null | The command payload. For async ops this is `{status, message, monitoring}`; may be `null` while pending |
-| **`at`** | string | ISO-8601 UTC timestamp with a `Z` suffix |
-| **`createdBy`** | string or null | The initiating user id |
-| **`idempotentReplay`** | boolean | `true` when the envelope was served from the idempotency cache (the command did **not** re-run) |
-
-A representative async response:
-
-```json
-{
-  "operation": "create-backup",
-  "operationId": "op_01J9ZK7M3QABCDEF...",
-  "status": "pending",
-  "result": {
-    "status": "accepted",
-    "message": "Backup creation started",
-    "monitoring": { "sse_endpoint": "/v1/operations/op_01J9ZK7M3QABCDEF.../stream" }
-  },
-  "at": "2026-06-11T18:22:05Z",
-  "createdBy": "user_abc123",
-  "idempotentReplay": false
-}
-```
-
-**Note:** Python field names are snake_case internally, but clients should read the camelCase keys (`operationId`, `createdBy`, `idempotentReplay`) off the wire.
+Every operation on this surface returns an `OperationEnvelope` — `operation`, `operationId`, `status` (`completed`, `pending`, or `failed`), `result`, `at`, `createdBy`, `idempotentReplay`, camelCase on the wire. The field reference, success and pending examples, and what a failure looks like (an HTTP error body for a refused request, an `operation_error` event for async work that fails later) are in [Operations Contract](Operations-Contract#the-operationenvelope).
 
 ## Idempotency
 
-Every operation accepts an optional `Idempotency-Key` header. It is opt-in protection for retries on a flaky network — without it, a retried POST runs the command twice.
-
-The semantics:
-
-- **Same key + identical body, within the TTL** → the cached envelope is replayed with `idempotentReplay: true`. The command does **not** run again.
-- **Same key + a different body** → **HTTP 409 Conflict**. The key is bound to the first request body it saw.
-- **TTL** → 24 hours.
-- **Scope** → keys are user-scoped. You cannot replay another user's operation, even with the same key string.
-
-```bash
-# Retrying this exact call with the same key replays the cached result
-# rather than creating a second backup.
-curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/operations/create-backup" \
-  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
-  -H "Idempotency-Key: backup-2026-06-11-001" \
-  -H "Content-Type: application/json" \
-  -d '{"backup_format": "full_dump", "retention_days": 30}'
-```
-
-**Important:** A natural mistake is to reuse a key while changing the body (for example, bumping `retention_days`). That returns a 409, not a fresh operation. Pick a new key when the request changes.
+Every operation accepts an optional `Idempotency-Key` header: a retry with the same key and body within 24 hours replays the original envelope with `idempotentReplay: true`, and the same key with a different body is a **409**. The full rules — scope, in-flight retries, and what happens after a failure — are in [Operations Contract](Operations-Contract#idempotency-key).
 
 ## Monitoring Progress with SSE
 
-Async operations return an `operation_id`. Two endpoints let you follow it, both mounted under `/v1`:
-
-```text
-GET /v1/operations/{operation_id}/stream    # live SSE event stream (text/event-stream)
-GET /v1/operations/{operation_id}/status    # point-in-time JSON snapshot
-```
-
-**Live stream.** Connect to `/stream` to receive events as the operation progresses. The event types are:
-
-| Event type | Meaning |
-| --- | --- |
-| **`operation_started`** | The worker picked up the operation |
-| **`operation_progress`** | Incremental progress update (fractional, 0 to 1) |
-| **`operation_completed`** | Finished successfully; carries the result data |
-| **`operation_error`** | Failed; carries the error |
-| **`operation_cancelled`** | The operation was cancelled |
-
-```bash
-# Stream events live (-N disables curl buffering so events arrive as emitted)
-curl -N "https://api.robosystems.ai/v1/operations/op_01J9ZK7M3QABCDEF.../stream" \
-  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
-```
-
-On reconnect, pass `from_sequence` to replay events you missed rather than starting blind.
-
-**Snapshot.** If you do not want a long-lived connection, poll `/status` for a point-in-time JSON view — it returns the `operation_id`, `operation_type`, `status`, timestamps, `graph_id`, an optional `result` or `error`, and a `_links.stream` pointer back to the live endpoint.
-
-```bash
-# Point-in-time status (no streaming)
-curl -s "https://api.robosystems.ai/v1/operations/op_01J9ZK7M3QABCDEF.../status" \
-  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
-```
-
-**Note:** SSE streaming consumes no credits, but it is authenticated, enforces ownership (you can only stream your own operations), and is rate-limited to 5 concurrent SSE connections per user.
+Async operations are followed by `operationId` at `GET /v1/operations/{operation_id}/stream` (Server-Sent Events) or `GET /v1/operations/{operation_id}/status` (a snapshot). The event names, payloads, and reconnecting with `from_sequence` are in [Operations Contract](Operations-Contract#following-an-async-operation).
 
 ## Operations Reference
 
@@ -218,7 +136,7 @@ Each subsection lists the body fields that matter and the relevant guards. The O
 Adds a child graph under a parent. The resulting subgraph id is `{parent_graph_id}_{name}` (for example, `kg1a2b3c4d5_dev`).
 
 - **Body:** `name` (alphanumeric, 1–20 chars, lowercased), `display_name` (required), optional `description`, `schema_extensions`, `metadata`, `subgraph_type` (`static` — the parent's base schema plus extensions, and the default — or `knowledge` for a knowledge-only schema, or `empty` for a bare database), and `fork_parent`.
-- **Sync/async:** Creating an empty subgraph is **synchronous** (200). Setting `fork_parent: true` copies the parent's data and runs **asynchronously** (202 with an `operation_id`).
+- **Sync/async:** Creating an empty subgraph is **synchronous**. Setting `fork_parent: true` copies the parent's data and runs **asynchronously** — the envelope comes back `pending` (over HTTP 200) with an `operationId` to follow.
 - Subgraph count is capped by tier — see [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
 
 ```bash
@@ -298,7 +216,7 @@ Deletes the graph itself. **Asynchronous** (202).
 
 ### Content and Memory Operations
 
-The remaining eight operations share the surface and the contract, and are all synchronous:
+The content and memory operations share the surface and the contract, and are all synchronous:
 
 - **`create-file-upload` / `ingest-file` / `delete-file`** — the staging-file path: presign an upload target, stage the uploaded file into a columnar table, then `materialize` to move it into the graph.
 - **`index-document` / `delete-document`** — add and remove documents in the search index. See [Search and AI Retrieval](Search-and-AI-Retrieval).
@@ -502,6 +420,8 @@ just lbug-query sec "MATCH (e:Entity) RETURN e.name LIMIT 10"
 
 **Wiki Guides:**
 
+- **[Operations Contract](Operations-Contract)** - The envelope, `Idempotency-Key`, and SSE progress contract every operation here follows
+- **[Errors and Rate Limits](Errors-and-Rate-Limits)** - Error bodies, status codes, and rate-limit headers
 - **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)** - What `graph_id`, subgraphs, tiers, and shared repositories are — the things these operations act on
 - **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - Query the LadybugDB graph after a `materialize` rebuilds it
 - **[RoboLedger Operations](RoboLedger-Operations)** - The extensions analogue of this surface (`POST /extensions/roboledger/{g}/operations/{op}`), using the same `OperationEnvelope` and `Idempotency-Key` contract

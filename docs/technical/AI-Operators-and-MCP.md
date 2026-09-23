@@ -47,7 +47,7 @@ claude mcp add --transport http robosystems-sec \
 }
 ```
 
-Both routes speak JSON-RPC 2.0 and negotiate MCP revision **2025-06-18** — the only revision offered, because it is exactly the one this dispatch implements. Clients on other revisions negotiate to it at `initialize`. The transport is stateless (no session id), rejects JSON-RPC batching unconditionally, streams long-running tool calls over SSE with progress notifications when the client accepts `text/event-stream`, and runs the identical authorization chain as the rest of the API. A self-hosted stack serves the same routes — see [Self-hosted deployments](#self-hosted-deployments).
+Every MCP route (the three are listed [below](#the-mcp-tool-surface)) speaks JSON-RPC 2.0 and negotiates MCP revision **2025-06-18** — the only revision offered, because it is exactly the one this dispatch implements. Clients on other revisions negotiate to it at `initialize`. The transport is stateless (no session id), rejects JSON-RPC batching unconditionally, streams long-running tool calls over SSE with progress notifications when the client accepts `text/event-stream`, and runs the identical authorization chain as the rest of the API. A self-hosted stack serves the same routes — see [Self-hosted deployments](#self-hosted-deployments).
 
 ---
 
@@ -55,7 +55,7 @@ Both routes speak JSON-RPC 2.0 and negotiate MCP revision **2025-06-18** — the
 
 MCP is the shared tool layer. Every entry path — the in-product Operator endpoint, external MCP clients, and in-process operators — calls the *same* tool classes in `middleware/mcp/tools/`. There is one implementation per tool; only the transport differs.
 
-Three transport routes expose the surface:
+The surface is served on three routes of the same transport:
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
@@ -63,7 +63,7 @@ Three transport routes expose the surface:
 | `POST` | `/v1/graphs/{graph_id}/mcp` | `X-API-Key`, or an OAuth bearer bound to this URL | Graph fixed by the URL |
 | `POST` | `/v1/mcp/roboledger` | OAuth bearer | A RoboLedger tenant graph, chosen at consent, with the platform's write tools withheld. It exists because a directory listing freezes one tool list per URL, and a plugin gets one URL |
 
-Both take MCP JSON-RPC: `initialize`, `tools/list`, and `tools/call` with a tool `name` plus an `arguments` object.
+All three take MCP JSON-RPC: `initialize`, `tools/list`, and `tools/call` with a tool `name` plus an `arguments` object.
 
 ```json
 {
@@ -97,9 +97,11 @@ The following tool names are the exact `name` strings for `tools/call`. Every to
 | `search-documents` | Unstructured (hybrid BM25 + KNN) | `SEMANTIC_SEARCH_ENABLED` |
 | `get-document-section` | Unstructured (full section text) | `SEMANTIC_SEARCH_ENABLED` |
 | `financial-statement-analysis` | Curated analytical (LadybugDB) | `roboledger` schema extension |
-| `live-financial-statement` | Curated operational (OLTP) | `roboledger` extension; writable, non-shared graphs |
+| `live-financial-statement` | Curated operational (OLTP) | `roboledger` extension; tenant graphs only (not shared repositories) |
 | `build-fact-grid` | Curated analytical (XBRL hypercube) | `FACT_GRID_ENABLED` |
-| `resolve-element` | Cross-plane bridge (qname → graph) | `roboledger` extension **and** the repository manifest's `has_semantic_enrichment` flag |
+| `disclosures` | The map of a report's sections — one row per note or statement; with `topic`, one family's blocks | `roboledger` schema extension |
+| `information-block` | One section of a report read whole: rows, breakdowns by its own axes, calculation footing, text blocks | `roboledger` schema extension |
+| `resolve-element` | Cross-plane bridge (concept in plain words → the element qnames filers use) | `roboledger` extension **and** a shared-repository manifest with `has_semantic_enrichment` — today `sec` only |
 | `get-example-queries` | Discovery helper | `roboledger` schema extension |
 
 **Semantic memory** — a per-graph vector store that gives an Operator state across turns:
@@ -186,9 +188,11 @@ This plane runs graph traversals over historical and cross-period data: facts, e
 
 `read-graph-cypher` is strictly read-only. `CREATE`, `SET`, `DELETE`, `REMOVE`, `MERGE`, `DROP` (including `DETACH DELETE`), and procedure calls (`CALL db.`, `CALL apoc.`) are blocked — a write attempt raises "Only read-only queries are allowed". Bulk ingestion (loading data into the graph) is not part of the read tool surface at all; use the file-upload ingestion path instead.
 
-Two curated tools sit on top of this plane for ledger work:
+Two curated tools sit on top of this plane:
 - `financial-statement-analysis` — graph-backed statement analysis over LadybugDB (SEC + materialized tenants); historical and cross-period.
 - `build-fact-grid` — pivot tables over the XBRL hypercube.
+
+Beside them, `disclosures` and `information-block` read one report section by section. They run xbrlkit over the report held whole — the published filing on `sec`, the ledger's own report on a tenant — so the graph is not in their path. On `sec`, raw Cypher has four rules that decide whether a number is right; see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules).
 
 Note the distinct curated companion `live-financial-statement`, which reads the **OLTP** books of a tenant graph (current period, before materialization). Do not conflate the two: `financial-statement-analysis` is analytical/historical, `live-financial-statement` is operational/current.
 
@@ -203,11 +207,11 @@ For shared repositories, search resolves to the parent `graph_id` (`sec`, not a 
 
 ### The Cross-Plane Bridge
 
-The planes are most powerful in combination. iXBRL disclosures returned by `search-documents` carry `xbrl_elements` (for example `us-gaap:Goodwill`). The `resolve-element` tool looks those qnames up in the graph, and `read-graph-cypher` then pulls the structured fact. This bridges narrative context to structured numbers:
+The planes are most powerful in combination. iXBRL disclosures returned by `search-documents` carry `xbrl_elements` (for example `us-gaap:Goodwill`). On `sec`, `resolve-element` maps a concept named in the prose to the qnames and canonical concept the graph uses, and `read-graph-cypher` then pulls the structured fact. This bridges narrative context to structured numbers:
 
 ```text
 search-documents  →  resolve-element  →  read-graph-cypher
-(find the disclosure) (qname → graph) (fetch the fact value)
+(find the disclosure) (concept → qnames) (fetch the fact value)
 ```
 
 An Operator typically discovers a concept in prose, resolves it to a graph element, and reads the precise figure — composing all three planes to answer one question.
@@ -357,7 +361,7 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operator?mode=sy
 | Concern | Detail |
 | --- | --- |
 | `read-graph-cypher` is read-only | Write Cypher (`CREATE`/`SET`/`DELETE`/`REMOVE`/`MERGE`/`DROP`) raises "Only read-only queries are allowed" |
-| Write Cypher is a different tool | `write-graph-cypher` works on **subgraphs only** (memory), never the parent graph or shared repos; gated by `MCP_SUBGRAPH_OPS_ENABLED` |
+| Write Cypher is a different tool | `write-graph-cypher` works on **subgraphs only**, never the parent graph (which answers `subgraph_required`) or shared repos; gated by `MCP_SUBGRAPH_OPS_ENABLED` |
 | `query-graphql` is read-only | Mutations and subscriptions are rejected; depth/field/alias complexity is gated |
 | Discover schema first | `get-graph-schema` returns the **Cypher** schema; `get-graphql-schema` returns the **GraphQL SDL** — distinct tools, easy to confuse |
 | Tool catalog varies | Gated by feature flags and per-graph `schema_extensions`; call `tools/list` before assuming a tool exists |
@@ -375,7 +379,7 @@ Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSION
 
 ## Self-hosted deployments
 
-A stack you run serves both MCP routes at `http://localhost:8000/v1/mcp` and `http://localhost:8000/v1/graphs/{graph_id}/mcp`. The OAuth route requires `MCP_OAUTH_ENABLED=true`; the per-graph route takes the key from `just demo-user` in `X-API-Key`. See [Local Development](Local-Development).
+A stack you run serves the same MCP routes at `http://localhost:8000/v1/mcp`, `http://localhost:8000/v1/mcp/roboledger` and `http://localhost:8000/v1/graphs/{graph_id}/mcp`. The OAuth routes require `MCP_OAUTH_ENABLED=true`; the per-graph route takes the key from `just demo-user` in `X-API-Key`. See [Local Development](Local-Development).
 
 Operators on a stack you run can use an open-weight model in place of the Bedrock models, through any OpenAI-compatible server. Which tiers it backs, which endpoints work, and which models we tested are in [Self-Hosted AI Models](Self-Hosted-AI-Models).
 
@@ -386,6 +390,7 @@ Operators on a stack you run can use an open-weight model in place of the Bedroc
 **Wiki Guides:**
 - **[Architecture Overview](Architecture-Overview)** - The OLTP/OLAP split that the three planes sit on top of
 - **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - Cypher over LadybugDB in depth
+- **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)** - The `sec` graph's model and the four rules for reading its numbers
 - **[GraphQL Reads](GraphQL-Reads)** - The typed operational read surface in depth
 - **[Search and AI Retrieval](Search-and-AI-Retrieval)** - The document index and hybrid search in depth
 - **[Self-Hosted AI Models](Self-Hosted-AI-Models)** - Running the operators on a model you choose

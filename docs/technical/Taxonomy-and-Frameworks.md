@@ -15,6 +15,7 @@ RoboSystems treats accounting vocabulary as data, not code: concepts, hierarchie
 - [Contributing: The Taxonomy Block Write Path](#contributing-the-taxonomy-block-write-path)
 - [Worked Example](#worked-example)
 - [Reading the Library](#reading-the-library)
+- [Mapping](#mapping)
 - [Common Pitfalls](#common-pitfalls)
 - [Self-hosted deployments](#self-hosted-deployments)
 - [Related Documentation](#related-documentation)
@@ -290,6 +291,10 @@ POST /extensions/{graph_id}/graphql
 
 The two scopes differ in what the same fields see, not in which fields exist: `library` browses the public catalog only, while a tenant `graph_id` sees that tenant's rows with public fallback. The full field set is introspectable over the API, or browse the API reference at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api).
 
+## Mapping
+
+A tenant's chart of accounts reaches the statements through `mapping` associations: one arc from each chart-of-accounts element to an `rs-gaap` leaf concept, held in a `coa_mapping` Structure. Mapping arcs are written one at a time with `create-mapping-association` or in bulk by the AI MappingOperator, not through a Taxonomy Block. Candidate targets are limited to concepts that render under the entity's active Reporting Style, which is also the working set the tenant library keeps (see [The JSON-LD Package Library](#the-json-ld-package-library)). The mapping model, coverage vs. renderability, auto-map and its confidence thresholds, and the lock that protects closed months are on [Chart of Accounts Mapping](Chart-of-Accounts-Mapping).
+
 ## Common Pitfalls
 
 ### No Raw Element or Association CRUD
@@ -337,6 +342,7 @@ Validate the edit before you pay for a reseed. `just framework-validate` checks 
 **Wiki Guides:**
 
 - **[Information Blocks](Information-Blocks)** - Where Elements get their *values*; the Taxonomy Block reuses the same envelope, idempotency, audit, and auto-rule machinery
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)** - How chart-of-accounts elements are mapped to `rs-gaap` concepts
 - **[Reporting & Rendering](Reporting-and-Rendering)** - How statements render over these Elements; the renderer walks the `calculation` linkbase to derive and foot subtotals
 - **[Custom Graph Schema](Custom-Graph-Schema)** - A different layer: the LadybugDB **graph schema** (node and relationship table DDL via `schema.json`), not the accounting **vocabulary** described here. Do not conflate "custom graph schema" with "custom ontology"
 

@@ -59,8 +59,6 @@ the same file that drives provisioning — so they cannot fall out of step with 
 
 `ladybug-shared` is not a customer-selectable tier. It is the platform's read-only fleet that serves public repositories such as SEC filings, accessible to all users but owned by the platform. Customer graphs run on one of the three dedicated tiers.
 
-For live tier specifications — instance types, memory, subgraph limits, and pricing — see the [Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml) in codebase.
-
 → Deep-dive: [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)
 
 ## Subgraphs
@@ -121,7 +119,7 @@ The principle is the same as for Information Blocks: vocabulary changes go throu
 Two distinct concepts share the word "agent," and the platform keeps them separate on purpose.
 
 - **REA Agent** — an economic counterparty in a business event: a customer, vendor, or employee. This is the canonical ontology term, drawn from the Resources-Events-Agents accounting model. An REA Agent is data: a party an event happened *with*. It is distinct from the reporting `Entity`, which is the graph owner.
-- **Operator** — the AI executor layer (model- and MCP-driven), with concrete classes like `CypherOperator` (natural-language graph queries) and `MappingOperator` (autonomous chart-of-accounts mapping). Operators live at `POST /v1/graphs/{graph_id}/operator` and execute work.
+- **Operator** — the AI executor layer (model- and MCP-driven). Two are registered: `analyst` (`AnalystOperator`, which answers a question from the graph's read-only tools) and `mapping` (`MappingOperator`, autonomous chart-of-accounts mapping). Operators live at `POST /v1/graphs/{graph_id}/operator` and execute work; the former name `cypher` still resolves to `analyst`.
 
 The rename resolved an "agent operates on agent" naming collision: an AI Operator can act on REA Agent data. Marketing copy may still say "AI agent," but in the API and codebase the executor is always an **Operator**.
 
@@ -178,7 +176,7 @@ A few rules worth knowing up front:
 - `query-graphql` rejects mutations and subscriptions and takes `graph_id` from context, not as an argument. Run `get-graphql-schema` first.
 - `search-documents` returns a `document_id` per hit; pass it to `get-document-section` for the full section text. Semantic (KNN) ranking is opt-in via `semantic=true` (the default is keyword BM25).
 
-Retrieval is not the whole surface. Beyond the three planes, MCP also carries graph-lifecycle, subgraph-write, semantic-memory, and document-management tools — 25 in all on a standard entity graph.
+Retrieval is not the whole surface. Beyond the three planes, MCP also carries curated analytical views, graph-lifecycle, subgraph-write, semantic-memory, and document-management tools. The tool list is assembled per graph — from the graph's schema extensions, whether it is a shared repository or a subgraph, and the deployment's feature flags — so the authoritative list for a graph is what its MCP `tools/list` call returns.
 
 On shared repositories with semantic enrichment (SEC), a further tool, `resolve-element`, maps a natural-language financial concept to its XBRL Element name using vector search — useful for grounding a query before you run it. It is not registered on a customer entity graph.
 

@@ -48,7 +48,7 @@ When `just demo-roboledger` finishes (~60 seconds), the tenant has:
 After setup, the natural flow is:
 
 1. Open the frontend, browse the entity, mapping coverage, and the filed annual report
-2. Drop into the AI close workflow on the queued period via Claude Desktop or any MCP client
+2. Drop into the AI close workflow on the queued period from Claude, ChatGPT or any MCP client
 3. Inspect the verification output — the rules attached to each Information Block, plus the rule tallies the close itself returns
 4. Query the graph directly to explore the data shape
 
@@ -64,7 +64,7 @@ just start
 
 You don't need Intuit credentials, ngrok, or any external service. The demo is fully self-contained and runs entirely against the local stack.
 
-If you want to drive the AI close workflow at the end, you'll also want an MCP client (Claude Desktop, Claude Code, or a custom client). That's optional — everything else inspects via the frontend or the API.
+If you want to drive the AI close workflow at the end, you'll also want an MCP client (Claude, ChatGPT, Cursor, or a custom client). That's optional — everything else inspects via the frontend or the API.
 
 ## Quick Start
 
@@ -152,7 +152,11 @@ To inspect:
 
 ```bash
 API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=$(jq -r '.graphs | keys[0]' .local/config.json)
+GRAPH_ID=$(jq -r '.graphs.cascade_demo.graph_id' .local/config.json)   # the demo's slot; see below
+
+# `.graphs` maps a demo slot name to {graph_id, graph_created_at}. `just demo-roboledger`
+# writes the `cascade_demo` slot (`cascade_demo_<entity_type>` when you pick another
+# entity type with `--entity-type`); `--skeleton` writes `roboledger_skeleton`.
 
 # List reports — reads go through the graph-scoped GraphQL endpoint.
 # Note the double nesting: the `reports` root field returns a ReportList,
@@ -184,7 +188,7 @@ In the frontend, navigate to **Reports** → the filed FY report → view the re
 
 The fiscal calendar is initialized so the prior month's prior month is `closed_through` and the **last completed month is the close target** — exactly one period ready to close. This matches what a real business onboarding mid-year does: wall off pre-onboarding periods as `historical`, start running the close workflow from a clean boundary.
 
-The natural way to drive the close is via the AI workflow. With Claude Desktop or any MCP client connected to the local RoboSystems MCP server:
+The natural way to drive the close is via the AI workflow. With Claude, ChatGPT or any MCP client connected to the local RoboSystems MCP server:
 
 1. Paste the prompt from `examples/roboledger_demo/prompt.md` (or copy the close-month-specific prompt the setup script prints at the end)
 2. Ask: *"Close the books for the most recent completed month."*

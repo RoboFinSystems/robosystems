@@ -451,7 +451,7 @@ cypher> quit
 
 ## Accessing with MCP Client (For AI Agents)
 
-You can access the demo custom graph through any MCP-compatible AI tool (Claude Desktop, Claude Code, Cursor, Cline, etc.) using the MCP protocol.
+You can access the demo custom graph through Claude, ChatGPT, Cursor or any other MCP client.
 
 **Setup MCP Client:**
 
@@ -485,17 +485,17 @@ Clients with no field for a custom header — claude.ai and Claude Desktop custo
 
 4. Restart your MCP-compatible AI tool
 
-5. A custom graph serves 25 tools. The ones that matter most here:
+5. The tool list is assembled per graph; the MCP `tools/list` call returns the authoritative list for yours. The ones that matter most here:
 
-   **Schema and DDL** — the surface that makes a custom graph extensible after creation:
+   **Schema and DDL:**
    - `get-graph-schema` - View available node and relationship types
    - `get-graphql-schema` - The typed GraphQL schema served for this graph
-   - `add-node-table` - Add a new node type to the live graph
-   - `add-relationship-table` - Add a new relationship type to the live graph
+   - `add-node-table` - Add a new node type — on a subgraph only (see [Changing the Schema After Creation](#changing-the-schema-after-creation))
+   - `add-relationship-table` - Add a new relationship type — on a subgraph only
 
    **Querying:**
    - `read-graph-cypher` - Run Cypher reads
-   - `write-graph-cypher` - Run Cypher writes (subject to the graph's write policy)
+   - `write-graph-cypher` - Run Cypher writes — on a subgraph only; a parent graph answers `subgraph_required`
    - `query-graphql` - Typed GraphQL reads
    - `get-graph-info` - Inspect graph topology and node/relationship counts
 
@@ -748,6 +748,17 @@ Person (Alice Johnson, Software Engineer)
 
 This represents: *Alice works as a Senior Engineer at TechCorp, dedicating 40 hours/week to the Cloud Migration project, which TechCorp sponsors with $500k.*
 
+A multi-hop query follows the same edges — here, companies that collaborate through employees who share a project:
+
+```cypher
+MATCH (c1:Company)<-[:PERSON_WORKS_FOR_COMPANY]-(p:Person)
+      -[:PERSON_WORKS_ON_PROJECT]->(proj:Project)
+      <-[:PERSON_WORKS_ON_PROJECT]-(p2:Person)
+      -[:PERSON_WORKS_FOR_COMPANY]->(c2:Company)
+WHERE c1.identifier <> c2.identifier
+RETURN c1.name, c2.name, count(DISTINCT proj) AS shared_projects
+```
+
 ## Visualizing with G.V()
 
 [G.V()](https://gdotv.com/) is our recommended partner for exploring graph databases interactively.
@@ -782,73 +793,11 @@ RETURN c1, proj, c2
 LIMIT 10
 ```
 
-## Graph Database Benefits
+## Changing the Schema After Creation
 
-### 1. Flexible Data Modeling
+A graph's schema is fixed when the graph is created. The query surface blocks schema DDL (`CREATE`/`DROP`/`ALTER TABLE`) on every graph, and on a main graph Cypher is read-only: data enters through the staging pipeline (upload → ingest → materialize) against the tables declared in `schema.json`. To change a main graph's node or relationship types, edit the schema and create a new graph.
 
-Traditional databases require rigid schemas. Graph databases adapt easily:
-
-- Add new node types without migration
-- Add new relationships on the fly
-- Extend properties as needed
-
-### 2. Natural Relationship Representation
-
-```cypher
--- Find colleagues who work on the same projects
-MATCH (p1:Person)-[:PERSON_WORKS_ON_PROJECT]->(proj:Project)
-      <-[:PERSON_WORKS_ON_PROJECT]-(p2:Person)
-WHERE p1.identifier < p2.identifier
-RETURN p1.name, p2.name, proj.name
-```
-
-### 3. Multi-Hop Queries
-
-```cypher
--- Find companies that collaborate through shared employees
-MATCH (c1:Company)<-[:PERSON_WORKS_FOR_COMPANY]-(p:Person)
-      -[:PERSON_WORKS_ON_PROJECT]->(proj:Project)
-      <-[:PERSON_WORKS_ON_PROJECT]-(p2:Person)
-      -[:PERSON_WORKS_FOR_COMPANY]->(c2:Company)
-WHERE c1.identifier <> c2.identifier
-RETURN c1.name, c2.name, count(DISTINCT proj) AS shared_projects
-```
-
-### 4. Real-Time Analytics
-
-No pre-computed views needed. Analytics run instantly on current data:
-
-```cypher
--- Real-time collaboration index
-MATCH (p:Person)-[:PERSON_WORKS_ON_PROJECT]->(proj:Project)
-WITH p, count(DISTINCT proj) AS project_count
-RETURN p.name, project_count
-ORDER BY project_count DESC
-```
-
-## Common Use Cases
-
-The custom schema pattern works for many domains:
-
-### CRM Systems
-- **Nodes**: Customer, Contact, Opportunity, Account
-- **Relationships**: WORKS_FOR, OWNS, MANAGES
-
-### Supply Chain
-- **Nodes**: Supplier, Product, Warehouse, Order
-- **Relationships**: SUPPLIES, STORES, SHIPS_TO
-
-### Knowledge Graphs
-- **Nodes**: Concept, Document, Author, Topic
-- **Relationships**: MENTIONS, AUTHORED_BY, RELATED_TO
-
-### Social Networks
-- **Nodes**: User, Post, Group, Event
-- **Relationships**: FOLLOWS, POSTED, MEMBER_OF, ATTENDING
-
-### Project Management
-- **Nodes**: Task, Milestone, Resource, Team
-- **Relationships**: DEPENDS_ON, ASSIGNED_TO, PART_OF
+Subgraphs are the place to extend a schema live. On a subgraph, the MCP tools `add-node-table` and `add-relationship-table` add new types, and `write-graph-cypher` writes to them; on a parent graph all three answer `subgraph_required`. Create one with `POST /v1/graphs/{graph_id}/operations/create-subgraph` — `subgraph_type: "static"` starts from the parent's schema, `"knowledge"` from the Concept / Observation / Session schema that Step 7 uses, and `"empty"` from nothing. Anything written this way lives in the subgraph only. See [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy#subgraphs).
 
 ## Troubleshooting
 
@@ -913,7 +862,7 @@ just install
 - **Graphs & Tenancy**: [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy) - The graph_id model, tiers, and subgraphs
 - **Query the graph**: [Querying the Analytical Graph](Querying-the-Analytical-Graph) - Ad-hoc Cypher and staging tables
 - **MCP & operators**: [AI Operators & MCP](AI-Operators-and-MCP) - Access your graph through MCP tools
-- **Custom adapters**: [Pipeline Guide](Pipeline-Guide) - Ingest external data into a custom graph
+- **Data pipelines**: [Pipeline Guide](Pipeline-Guide) - How data reaches a graph: the staging path and the Dagster pipelines behind it
 
 ## Support
 

@@ -5,7 +5,8 @@ RoboSystems uses [Dagster](https://dagster.io) for all data orchestration. Data 
 **Related documentation:**
 - [Architecture Overview](Architecture-Overview) - System architecture
 - [Bootstrap Guide](Bootstrap-Guide) - Deployment instructions
-- [Custom Graph Schema](Custom-Graph-Schema) - Build a custom adapter and graph
+- [Custom Graph Schema](Custom-Graph-Schema) - Define a custom graph schema and load data into it through the staging path
+- [Building Custom Integrations](Building-Custom-Integrations) - Connect a custom data source through the public API, outside the core
 - [SEC XBRL Pipeline](SEC-XBRL-Pipeline) - The SEC ingestion pipeline in depth
 
 ---
@@ -45,7 +46,7 @@ API JSON → S3 Raw → dbt transforms → S3 Processed → DuckDB Staging → L
           (chunks)  (JSON → Parquet)  (graph-shaped)
 ```
 
-- **Used for**: API-based integrations (QuickBooks, custom ERPs)
+- **Used for**: API-based in-core adapters (QuickBooks, and a self-hosted fork's `custom_*` adapters). A custom source on a platform-operated deployment is an integration instead — see [Adding Custom Data Sources](#adding-custom-data-sources)
 - **Why**: Raw JSON needs transformation into graph-compatible node/relationship Parquet
 - **dbt provides**: SQL-based transforms, testing, documentation
 
@@ -318,7 +319,7 @@ All pipelines use DuckDB staging regardless of source. Patterns A and B enter st
 | **Fargate-only Dagster**          | Dagster orchestrates, Graph API computes; no EC2 capacity provider complexity   |
 | **DuckDB-only staging**           | Standardized validation layer for all pipelines                                 |
 | **Three pipeline patterns**       | Arelle for XBRL semantics (SEC), dbt for API JSON transforms (QuickBooks), postgres_scanner for OLTP materialization |
-| **GitHub repos for adapters**     | Customization is the value prop; dbt projects don't fit pip                     |
+| **Custom sources are integrations** | A custom source lives in its own repository and writes through the public API; the in-core adapter registry is platform-maintained, so every deployment runs an unmodified core and upgrades cleanly |
 | **S3 publish for replicas**       | Dagster publishes to S3, triggers rolling refresh; replicas download on boot    |
 
 ---

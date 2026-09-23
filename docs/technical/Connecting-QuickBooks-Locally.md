@@ -1,6 +1,12 @@
 # Connecting QuickBooks Locally
 
-This tutorial walks through connecting a QuickBooks Online company to a local RoboSystems stack and using the full close + reporting workflow against the synced data. It covers two distinct setup paths, the QB sync pipeline architecture, the mapping workflow, and how to generate your first financial report.
+This tutorial connects a QuickBooks Online company to a **self-hosted** RoboSystems stack: registering an Intuit app, exposing an OAuth callback, configuring the environment, completing the OAuth handshake, and seeing what the sync pipeline does on your machine. On robosystems.ai none of this is needed, because connecting QuickBooks is a button in the app.
+
+What happens *after* a connection exists is the same on either deployment and is documented once, for the hosted API:
+
+- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)**: sync windows, write policy, the close-time write-back outbox, reconciling items, disconnect vs. sever
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)**: auto-map on first sync, coverage vs. renderability, correcting a mapping
+- **[Period Close](Period-Close)**: closing the synced books
 
 ## Two Paths for Local Development
 
@@ -10,7 +16,7 @@ There are two ways to develop against QuickBooks data locally. Pick the path tha
 | --- | --- | --- | --- |
 | **A. Sandbox + localhost** | Intuit Sample Company (pre-populated canned data) | Minutes — no tunnel, no production keys | Validating the OAuth handshake, exploring the sync flow, demoing the close/report UX without your own books |
 | **B. Production + public tunnel** | Your own real QB Online companies | ~15 min mechanical setup **+ a one-time Intuit production-access approval** (app assessment questionnaire — see [Prerequisites](#prerequisites)) | Real-data smoke tests, customer-facing demos against your own QB, debugging adapter edge cases that only surface in messy real data |
-| _Neither_ — synthetic data only | N/A | One command | When you don't need Intuit at all — see the synthetic demo walkthrough (separate guide) for the `just demo-roboledger` workflow which generates fake books for testing close-period, reports, and rules without OAuth |
+| _Neither_ — synthetic data only | N/A | One command | When you don't need Intuit at all — see the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough) for the `just demo-roboledger` workflow which generates fake books for testing close-period, reports, and rules without OAuth |
 
 Both QB paths use the same RoboSystems stack, the same sync pipeline, and the same reporting surface. The only differences are which Intuit OAuth credentials you use and whether the redirect URI points at localhost or a public tunnel.
 
@@ -35,24 +41,21 @@ Pick whichever you prefer — Intuit and the RoboSystems backend don't care whic
 - [Running the Stack](#running-the-stack)
 - [Connecting Your First Company](#connecting-your-first-company)
 - [What Happens Under the Hood](#what-happens-under-the-hood)
-- [Write Policy and the QB Outbox](#write-policy-and-the-qb-outbox)
-- [Sync Patterns](#sync-patterns)
-- [The Mapping Workflow](#the-mapping-workflow)
-- [Generating Reports](#generating-reports)
 - [Inspecting the Graph](#inspecting-the-graph)
 - [Troubleshooting](#troubleshooting)
 - [Costs and Cleanup](#costs-and-cleanup)
+- [Next Steps](#next-steps)
 
 ## Overview
 
-When you connect QuickBooks to RoboSystems, four things happen end-to-end:
+When you connect QuickBooks to a local stack, four things happen end to end:
 
-1. **Sync** — A Dagster job pulls accounts, transactions, customers, vendors, employees, invoices, bills, payments, and purchases from the QB API, normalizes them with dbt, and loads them into a per-tenant OLTP database.
-2. **Materialize** — A sensor detects the stale graph state and projects the OLTP data into LadybugDB, the columnar graph backend used for analytical reads.
-3. **Map** — The MappingOperator proposes associations between your QB Chart of Accounts and canonical `rs-gaap:*` reporting concepts. You can accept, remap, or extend these.
-4. **Report** — `create-report` generates facts across Balance Sheet, Income Statement, Cash Flow, and Statement of Equity. The renderer walks the active Reporting Style's structures and stamps every reportable fact onto the right line item.
+1. **Sync.** A Dagster job pulls the chart of accounts, transactions, customers, vendors, employees and company info from the QuickBooks API, normalizes them with dbt, and loads them into the graph's tenant schema in the extensions database.
+2. **Materialize.** A sensor sees the graph marked stale and projects the OLTP data into LadybugDB, the graph backend used for analytical reads.
+3. **Map.** On the first sync, the MappingOperator maps the chart of accounts to `rs-gaap` reporting concepts. On a local stack this needs Bedrock credentials. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping).
+4. **Report.** Live statements, the close and saved reports read the synced ledger through that mapping. See [Reporting and Rendering](Reporting-and-Rendering).
 
-By the end of this guide you'll have all four working against either a QB sandbox or your own real company.
+This page covers steps 1 and 2 and the setup in front of them. Steps 3 and 4 behave exactly as they do on the hosted platform.
 
 ## Prerequisites
 
@@ -410,7 +413,7 @@ On Path B with ngrok, click through the interstitial warning page once per brows
 
 Intuit redirects back to your callback URL with the OAuth `code` parameter. The frontend exchanges it for tokens via the backend, stores them in `connection_credentials`, and creates a `Connection` row scoped to the graph.
 
-Trigger the initial sync from the Connections page UI or via the API:
+The callback starts the first sync on its own. To run another, use the Connections page or the API:
 
 ```bash
 API_KEY=$(jq -r .api_key .local/config.json)
@@ -423,9 +426,9 @@ curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/connections/$CONN_ID/syn
   -d '{"full_rebuild": true}'
 ```
 
-`full_rebuild: true` pulls all history from `2000-01-01`. Omit for an incremental 60-day sync.
+For a connection that has never synced, that first sync pulls full history. `full_rebuild: true` pulls all history, `{}` pulls the last 60 days, and `since_date` pulls from a date. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy#syncing) for what each window does.
 
-The response is a `pending` operation envelope with a status URL. The sync runs async in the worker; track progress at [localhost:8002](http://localhost:8002) (Dagster UI) or poll `/v1/operations/{op_id}/status`.
+The response is a `pending` envelope carrying the Dagster run id as `task_id`. Follow the run in the Dagster UI at [localhost:8002](http://localhost:8002). When it finishes, the outcome is on the connection's `metadata.last_sync_result`.
 
 ## What Happens Under the Hood
 
@@ -464,10 +467,12 @@ If any data test fails, the entire transform fails — surfacing data-quality is
 - Inserts `Element` rows (Chart of Accounts as graph elements)
 - Inserts `Agent` rows (customers, vendors, employees as parties)
 - For each transaction, creates an `Event` with `status='captured'` and rich metadata
-- For QB-authoritative connections (default), immediately fires the event handler which creates `Transaction → Entry → LineItem` rows in one transaction
-- Triggers `_bootstrap_fiscal_calendar_if_needed` (so close-period UX works on a fresh sync)
-- Triggers `_trigger_auto_map_if_needed` (the MappingOperator walks unmapped CoA elements)
-- Marks the graph stale (`graph_stale=true`) so the materializer knows there's new data
+- Because QuickBooks is the book of record for these transactions, immediately fires the event handler, which creates `Transaction → Entry → LineItem` rows in one transaction and lands the event `fulfilled`. A transaction that can't post stays `captured` in the inbox.
+- Flags any already-posted transaction whose payload changed upstream as a reconciling item instead of overwriting it (see [Reconciling Items](QuickBooks-Sync-and-Write-Policy#reconciling-items))
+- Records `last_sync` and `last_sync_result` on the connection
+- Triggers `_bootstrap_fiscal_calendar_if_needed` (so the close workflow works on a fresh sync)
+- Triggers `_trigger_auto_map_if_needed` (enqueues the MappingOperator when the mapping has no associations yet)
+- Marks the graph stale so the materializer knows there's new data
 
 After `qb_load` returns, the **stale graph sensor** (a Dagster sensor running every 60 seconds) picks up the stale flag, submits an `extensions_materialize_job`, and the materializer projects the OLTP data into LadybugDB:
 
@@ -491,165 +496,6 @@ associations ──────────────▶  Association nodes
 ```
 
 The graph is now queryable via Cypher. Reports, AI Operators, and analytical views read from LadybugDB; the OLTP database remains the source of truth for transactional reads and writes.
-
-## Write Policy and the QB Outbox
-
-A connection's **write policy** decides which system owns the general ledger, and therefore whether RoboLedger-originated entries flow *back* into QuickBooks. It is a property of the `Connection` row, and a new QuickBooks connection defaults to `qb_authoritative`:
-
-| Policy | Who is the source of truth | What happens to RoboLedger-originated entries |
-| --- | --- | --- |
-| `native` | RoboSystems | Manual JEs and schedule drafts post locally on dispatch. No outbound publish. |
-| `qb_authoritative` | QuickBooks | Drafts publish to QuickBooks — on `execute-event-block`, or at period close — and hold as DRAFT locally until QB accepts. Inbound QB sync auto-commits. |
-
-(`hybrid` is declared in the enum but not yet wired; only `native` and `qb_authoritative` are implemented.)
-
-The policy is switchable after the fact:
-
-```bash
-curl -X PUT "http://localhost:8000/v1/graphs/$GRAPH_ID/connections/$CONN_ID/write-policy" \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"write_policy": "native"}'
-```
-
-The same control is available on MCP as `set-write-policy --connection_id … --write_policy …`.
-
-Under `qb_authoritative`, close-period is the outbox flush. A draft publishes to QuickBooks on close when both halves of the predicate hold: the graph has a live QuickBooks connection with a write-back policy, **and** the draft's triggering event is RoboLedger-originated (`source` is `schedule` or `manual`) and not already in QB (no `qb_external_id`). Transactions that came *in* from QuickBooks are excluded — they already live there. Preview exactly what will publish with the MCP tool `list-period-drafts` before closing; it reads the same predicate the close does, so the preview cannot drift from the write.
-
-This is why `close-period` returns a split rather than a single count: `entries_published_to_qb` is what went out to QuickBooks (each promoted to posted at publish time), `entries_posted_locally` is what the local bulk transition posted, and `entries_posted` is the total. On a `native` connection the first number is always zero. See [RoboLedger Operations](RoboLedger-Operations) for the full close envelope.
-
-## Sync Patterns
-
-| Pattern | Trigger | Date range | Use when |
-| --- | --- | --- | --- |
-| **Incremental** | UI button or POST without flags | Last 60 days from today | Day-to-day; default |
-| **Full rebuild** | `{"full_rebuild": true}` | `2000-01-01` to today | First sync, after schema changes, after fixing an importer bug |
-| **Since-date** | `{"since_date": "2024-01-01"}` | From explicit date to today | Catching up after a gap |
-
-The sync is idempotent: events are upserted by `(source, external_id)`, so re-syncing the same data updates rather than duplicates. For full rebuilds, the loader first deletes existing CoA elements and associations scoped to the connection, then re-inserts — safe for QB-authoritative connections where the GL is a mirror of QB.
-
-There is no scheduled sync yet. The connection carries an `auto_sync_enabled` field (defaulting to `true`), but nothing currently consumes it — the QuickBooks pipeline registers no Dagster schedules. Syncs are triggered by hand: the Connections UI, `POST /v1/graphs/{graph_id}/connections/{connection_id}/sync`, or the `sync-connection` MCP tool.
-
-### Reconciling items
-
-Re-syncing is not always a no-op. When a re-sync surfaces a **changed** upstream payload for a transaction whose GL is already posted — someone edited it in QuickBooks after it was captured — the local books legitimately no longer mirror the source. RoboSystems does not silently overwrite the posted entry: it flags the event as a **reconciling item** (`isReconcilingItem` on the API), leaves the live payload and GL untouched, and stashes the incoming payload alongside for review. The sync outcome reports the count.
-
-List them with `list-event-blocks --is_reconciling_item=true` (also filterable on the GraphQL `eventBlocks` field), then agree an explicit disposition for each: **restate** the affected months by reopening and re-closing them — the usual default inside the current fiscal year — or book a **catch-up** entry in the open period when external reporting has already locked the prior months. This is normal customer behavior, not an alarm, but the close playbook gates on it: don't close over unreviewed reconciling items.
-
-## The Mapping Workflow
-
-Your QB Chart of Accounts uses tenant-specific account names ("Truist Checking 6764", "Consulting Services", "Subscription Services"). Financial reports need canonical concepts (`rs-gaap:CashCashEquivalentsAndShortTermInvestments`, `rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax`, etc.). The mapping workflow bridges the two.
-
-### The MappingOperator
-
-On first sync, RoboSystems auto-triggers the MappingOperator (`_trigger_auto_map_if_needed` in the QB loader). The Operator:
-
-1. Reads each unmapped CoA element along with its classification (asset / liability / equity / revenue / expense / gain / loss — derived from QB's `AccountType`)
-2. Asks the suggester (`suggest-mapping`) for renderable `rs-gaap:*` candidates that match the classification AND appear on the active Reporting Style's rendering structures
-3. Uses the LLM to pick the best candidate, with a confidence score
-4. Confidence ≥0.90 → auto-creates the association
-5. Confidence 0.70–0.89 → creates the association flagged for review
-6. Confidence <0.70 → skips (surfaces as unmapped in the CoA UI)
-
-### Mapping coverage
-
-Inspect via MCP:
-
-```bash
-# Through the MCP server (e.g., from Claude Code):
-list-mapping-structures              # find the mapping structure id
-get-mapping-summary --mapping_id=…   # see coverage stats + unreachable count
-get-unmapped-elements                # find CoA elements still needing mapping
-```
-
-Or via GraphQL — mapping reads live on the typed-read surface, not on `/v1`:
-
-```bash
-curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "{ mappingCoverage(mappingId: \"struct_…\") { mappedCount unmappedCount coveragePercent unreachableCount } }"}'
-```
-
-(`{ mappings { structures { id name } } }` finds the mapping structure id.)
-
-Key metric: **`unreachable_count`** — mappings to rs-gaap concepts that don't render under the active Reporting Style. Should be 0 after a clean auto-map run. If non-zero, either the mappings were created before the renderable filter was added or the Reporting Style structures have changed since.
-
-### Manual remap
-
-When the Operator picks the wrong target — e.g., `Precious Metals` mapped to `InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings` instead of `LongTermInvestmentsAndReceivablesNet` — fix via the MCP. Both halves are MCP tools, so the whole correction stays in one place:
-
-```bash
-# Get the source element id
-list-mapping-structures
-get-unmapped-elements    # or query the CoA UI / database
-
-# Delete the wrong mapping
-delete-mapping-association \
-  --mapping_id struct_… \
-  --association_id assoc_…
-
-# Create the correct one
-create-mapping-association \
-  --from_element_id elem_… \
-  --to_element_id <rs-gaap concept id> \
-  --mapping_id struct_… \
-  --confidence 1.0 \
-  --suggested_by manual_correction
-```
-
-The corrected mapping is durable across re-syncs (delete + re-insert of CoA elements doesn't disturb the mappings).
-
-### The Reporting Style and rendering structures
-
-The active **Reporting Style** determines which rendering structures the renderer walks. Three ship today: `Default Style — Composition` (the default), `Partnership Style — Composition (partners' capital equity)`, and `Limited Liability Company Style — Composition (members' equity)`. The two alternatives swap the balance-sheet and equity networks for their equity form; everything else is shared. Switch with the `change-reporting-style` operation. Under the Default Style the four standard structures are:
-
-- `rs-gaap — Balance Sheet — Classified`
-- `rs-gaap — Income Statement — Multi-step`
-- `rs-gaap — Cash Flow Statement — Indirect`
-- `rs-gaap — Statement of Changes in Equity — Roll Forward (Total)`
-
-Each carries a curated set of rs-gaap concepts — `get-mapping-summary` (or the GraphQL `mappingCoverage` field above) reports the live counts for your tenant. The Default Style is filing-grade aggregation — `Cash and Cash Equivalents and Short Term Investments` is one line for all bank accounts; `Selling, General and Administrative Expense` is one line for many expense categories. Detail belongs in supporting Information Blocks below the statement face, not in the statement itself.
-
-## Generating Reports
-
-Once mapping coverage is non-zero, generate a report:
-
-```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-report" \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "FY2025 Annual",
-    "mapping_id": "<your mapping structure id>",
-    "period_start": "2025-01-01",
-    "period_end": "2025-12-31",
-    "period_type": "annual",
-    "comparative": false
-  }'
-```
-
-`taxonomy_id` defaults to `"rs-gaap"` — accepts either the standard name (resolved server-side to the latest rs-gaap reporting taxonomy) or an exact tenant UUID. The operation runs synchronously and returns the `Report` with its facts already generated.
-
-To inspect what the report produced:
-
-```sql
--- Facts grouped by statement type
-SELECT
-  s.block_type AS statement,
-  REPLACE(e.qname, 'rs-gaap:', '') AS concept,
-  ROUND(f.value::numeric, 2) AS value
-FROM facts f
-JOIN fact_sets fs ON fs.id = f.fact_set_id
-JOIN elements e ON e.id = f.element_id
-JOIN structures s ON s.id = fs.structure_id
-WHERE fs.report_id = '<report id>'
-ORDER BY s.block_type, ABS(f.value) DESC;
-```
-
-Expected output: 20–30 facts per annual report, distributed across BS / IS / CF / SE.
-
-**Sanity check**: total assets should equal total liabilities + equity. If off, the most common cause is a CoA account mapped to a flow concept (dividend, distribution) without the close logic netting it into Retained Earnings — see the troubleshooting section below.
 
 ## Inspecting the Graph
 
@@ -745,20 +591,6 @@ npm run dev:webpack
 
 The rewrites are a standard Next feature and webpack proxies them deterministically. If a tunnel setup that previously worked breaks after a Next upgrade, try webpack before assuming the tunnel or env config is wrong.
 
-### `Invalid email or password` on login (Puppeteer / automation)
-
-If you're driving the login via Puppeteer or similar, ensure the form fill dispatches React `input` events — `puppeteer_fill` alone doesn't trigger React's `onChange` for controlled inputs:
-
-```javascript
-const setNativeValue = (el, value) => {
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-  setter.call(el, value);
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-};
-setNativeValue(document.querySelector('input[type="email"]'), 'demo_user_…@example.com');
-setNativeValue(document.querySelector('input[type="password"]'), '…');
-```
-
 ### Sync fails with `dbt build failed`
 
 Open the Dagster UI at [localhost:8002](http://localhost:8002), find the failed run, drill into the `qb_transform` step's stdout. Common causes:
@@ -767,28 +599,9 @@ Open the Dagster UI at [localhost:8002](http://localhost:8002), find the failed 
 - **New unseen transaction types** — drop counters in `qb_load` surface as `unbalanced_entries` and `empty_transactions`. Inspect parquet under `/tmp/qb_pipeline/<graph_id>/extract/` to see what came through.
 - **Trait coverage gap** — some staging columns expected by the model aren't in the raw extract. Update `flatten_company_info` and the dbt staging model in tandem.
 
-### Mapping coverage is 100% but reports show empty / mostly-zero values
+### Statements come out empty or unbalanced after a sync
 
-The mappings may all be **unreachable** — targeting rs-gaap concepts that aren't in the active Reporting Style's rendering structures. Check via `get-mapping-summary`:
-
-```bash
-get-mapping-summary --mapping_id <id>
-# Look for unreachable_count > 0
-```
-
-If unreachable, the MappingOperator ran against an earlier version of the renderable filter. Either:
-
-1. Re-run auto-map (delete the existing mappings first via SQL, then trigger `auto-map-elements`)
-2. Manually remap the unreachable accounts to renderable targets via `create-mapping-association`
-
-The renderable filter walks `reporting_style_networks → presentation arcs` to compute the actual set of concepts the renderer will walk. Mappings to concepts outside that set are durable but invisible to the report renderer.
-
-### Report doesn't balance — Assets ≠ Liabilities + Equity
-
-Common causes:
-
-- A CoA account mapped to a calculated subtotal (denylisted concept). The renderer ignores these to prevent double-counting; the account's facts won't show up at all.
-- Manual journal entries that don't balance (one debit without matching credit). The trial balance test should catch this in dbt; if it leaked through, query line_items for the offending entry.
+These are mapping problems, not sync problems, and they look the same on a local stack as on the hosted platform: unmapped accounts with balances, mappings to concepts the Reporting Style doesn't render (`unreachable_count > 0`), or a mapping to a subtotal. Diagnose with `get-mapping-summary` and `get-unmapped-elements`. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping). On a local stack, also confirm that auto-map actually ran: it needs Bedrock credentials, and without them the first sync leaves the chart unmapped.
 
 ### `endpoint already online` / `tunnel already in use` error
 
@@ -842,12 +655,13 @@ Intuit Developer Portal entries (apps, registered redirect URIs, keys) are durab
 
 ## Next Steps
 
-Now that you have a connected company, real data flowing, and a working report:
+Once a company is connected and synced, the rest of the workflow is the hosted one, pointed at `http://localhost:8000`:
 
-- Explore the **close-period** workflow — close the fiscal year, see what blocks the close (open AR, draft entries, missing mappings). See [RoboLedger Operations](RoboLedger-Operations).
-- Try the **rule engine** — `evaluate-rules` runs structural and arithmetic checks against your statements
-- Drive an **AI-assisted close** — use the MCP close co-pilot (e.g. Claude Desktop on the [AI Operators & MCP](AI-Operators-and-MCP) surface) to propose period-end accruals, depreciation, and reclassification entries
-- Connect a second company and explore **multi-entity reporting**
-- Read how the synced data is modeled — the [Event-Driven Ledger](Event-Driven-Ledger) and [GraphQL Reads](GraphQL-Reads) over the operational graph
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)**: check coverage and renderability before anything else
+- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)**: re-syncing, write-back, and settling transactions edited in QuickBooks
+- **[Period Close](Period-Close)**: close the synced months, and see what writes back to QuickBooks
+- **[Reporting and Rendering](Reporting-and-Rendering)**: live statements and saved reports over the synced ledger
+- **[AI Operators and MCP](AI-Operators-and-MCP)**: drive the close from an MCP client
+- **[Event-Driven Ledger](Event-Driven-Ledger)** and **[GraphQL Reads](GraphQL-Reads)**: how the synced data is modeled and read
 
-Each of these is covered in its own guide. For testing these surfaces without a connected QB account, see the synthetic demo walkthrough (which uses `just demo-roboledger` to generate fake books).
+To exercise the same surfaces without Intuit at all, `just demo-roboledger` generates synthetic books. See the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough).

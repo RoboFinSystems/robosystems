@@ -178,6 +178,7 @@ An empty graph becomes useful once data flows into it. Pick the route that match
 - **Documents** — add policies, procedures, and notes as markdown for search and AI retrieval: [Document Management](Document-Management).
 - **Accounting data** — connect QuickBooks through [RoboLedger](https://roboledger.ai/docs), or write ledger entries through [RoboLedger Operations](RoboLedger-Operations).
 - **Your own systems** — the SDKs, [`robosystems-client`](https://pypi.org/project/robosystems-client/) for Python and [`@robosystems/client`](https://www.npmjs.com/package/@robosystems/client) for TypeScript, and the patterns in [Building Custom Integrations](Building-Custom-Integrations).
+- **Next:** post events from your own system into a ledger with [Build a Ledger Integration](Build-a-Ledger-Integration), and read [Operations Contract](Operations-Contract) for the envelope and retry rules every write shares.
 
 ## Troubleshooting
 

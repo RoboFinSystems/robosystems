@@ -38,7 +38,7 @@ This surface lets you load bulk data — nodes and relationships — into a cust
 2. **Stage** it into a DuckDB table (queryable immediately).
 3. **Ingest** it into the LadybugDB graph, either per-file or in a single batch.
 
-This is a different surface from document management. The file pipeline moves **structured tabular data into the graph**; it does not store or index documents. For entity-graph document management (PDFs, policies, full-text and semantic search), see [Document Management](Document-Management) instead.
+This is a different surface from document management. The file pipeline moves **structured tabular data into the graph**; it does not store or index documents. For narrative content — policies, procedures and notes, uploaded as markdown and indexed for full-text and semantic search — see [Document Management](Document-Management) instead. That store takes markdown text, not binary files such as PDFs.
 
 ## When to Use This
 
@@ -189,7 +189,7 @@ The top-level `operationId` on a pending envelope is what you pass to `/v1/opera
 
 ### Step 4: Verify the Data
 
-Once the data is in the graph, query it. Reads run through `POST /v1/graphs/{graph_id}/query/cypher`, or through any MCP-compatible AI tool using the `read-graph-cypher` tool (run `get-graph-schema` first). See [Search and AI Retrieval](Search-and-AI-Retrieval) for the MCP path.
+Once the data is in the graph, query it. Reads run through `POST /v1/graphs/{graph_id}/query/cypher`, or through any MCP-compatible AI tool using the `read-graph-cypher` tool (run `get-graph-schema` first). See [Querying the Analytical Graph](Querying-the-Analytical-Graph) for both paths.
 
 ```bash
 curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/query/cypher" \
@@ -352,7 +352,7 @@ On a local stack, `just demo-custom-graph` exercises the entire upload → stage
 
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Design the schema and tables that file uploads populate
 - **[Search and AI Retrieval](Search-and-AI-Retrieval)** - Query the loaded graph with MCP tools (`read-graph-cypher`, `get-graph-schema`) after ingest
-- **[Document Management](Document-Management)** - For entity-graph markdown documents (the contrasting surface; this page is bulk tabular data)
+- **[Document Management](Document-Management)** - For markdown documents on any user graph (the contrasting surface; this page is bulk tabular data)
 
 **Codebase Documentation:**
 

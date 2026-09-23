@@ -358,9 +358,9 @@ Regardless of tier, three classes of statement are refused on the query endpoint
 
 ### Querying with MCP
 
-Any MCP-compatible AI tool (Claude Desktop, Claude Code, Cursor, Cline, and others) can query a graph through the RoboSystems MCP server. The `graph_id` comes from the connection's context, so it is never passed as a tool argument.
+Any MCP client (Claude, ChatGPT, Cursor, and others) can query a graph through the RoboSystems MCP server. The `graph_id` comes from the connection's context, so it is never passed as a tool argument.
 
-The tool set is not fixed — it is assembled from the graph's schema extensions, so a plain custom graph and a RoboLedger graph see very different lists. **`GET /v1/graphs/{graph_id}/mcp/tools` is the authoritative answer for a given graph;** what follows is the shape of it. On a plain graph the tools fall into six families:
+The tool set is not fixed — it is assembled from the graph's schema extensions, so a plain custom graph and a RoboLedger graph see very different lists. **The MCP `tools/list` call over the transport (`POST /v1/graphs/{graph_id}/mcp`) is the authoritative answer for a given graph** — the old REST listing endpoint was removed when OAuth landed; what follows is the shape of it. On a plain graph the tools fall into six families:
 
 | Family | Tools |
 | --- | --- |
@@ -371,7 +371,7 @@ The tool set is not fixed — it is assembled from the graph's schema extensions
 | **Memory** | `remember`, `recall`, `update-memory`, `forget` |
 | **Documents** | `create-document`, `get-document`, `list-documents`, `update-document`, `delete-document`, `search-documents`, `get-document-section` |
 
-`read-graph-cypher` is read-only: `CREATE`, `SET`, `DELETE`, `MERGE`, and `DROP`, along with `CALL db.` and `CALL apoc.`, are blocked — writes go through `write-graph-cypher`, and only where the main-graph read-only rule above allows them. `get-example-queries`, which returns sample queries tailored to a graph's schema, is contributed by the **RoboLedger extension** and is absent on a plain graph. Extension graphs add substantially more on top of this base. See [Custom Graph Schema](Custom-Graph-Schema) for a worked MCP example and [AI Operators and MCP](AI-Operators-and-MCP) for the full surface.
+`read-graph-cypher` is read-only: `CREATE`, `SET`, `DELETE`, `MERGE`, and `DROP`, along with `CALL db.` and `CALL apoc.`, are blocked — writes go through `write-graph-cypher`, which (like `add-node-table` and `add-relationship-table`) acts only on a subgraph and answers `subgraph_required` on a parent graph. `get-example-queries`, which returns sample queries tailored to a graph's schema, is contributed by the **RoboLedger extension** and is absent on a plain graph. Extension graphs add substantially more on top of this base. See [Custom Graph Schema](Custom-Graph-Schema) for a worked MCP example and [AI Operators and MCP](AI-Operators-and-MCP) for the full surface.
 
 **Connecting MCP to a subgraph gives you a deliberately smaller list.** Because a subgraph is not an extensions tenant, its tool list is trimmed to what is genuinely meaningful there: schema DDL, Cypher in both directions, per-graph memory, `get-graph-info`, and `list-subgraphs`. Tools that would need an OLTP schema or a materialization relationship are withheld rather than allowed to fail — the platform-lifecycle ones are the reason the cut exists, because they would otherwise fail *quietly by succeeding*, returning a confident sync status about a relationship the subgraph does not have.
 

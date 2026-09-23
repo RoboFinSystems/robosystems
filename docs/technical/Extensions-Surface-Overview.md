@@ -99,22 +99,7 @@ Because the schema is built at construction time, a ledger-only deployment liter
 
 ## The OperationEnvelope Contract
 
-Both command writes and analytical view operations return an `OperationEnvelope`. This is the same envelope/idempotency/SSE infrastructure used by graph lifecycle writes under `/v1/graphs/{graph_id}/operations/{op_name}`. On the wire, fields use camelCase aliases:
-
-| Field | Meaning |
-| --- | --- |
-| `operation` | The kebab-case operation name (e.g. `close-period`) |
-| `operationId` | A ULID prefixed with `op_`; the bridge to SSE progress streaming |
-| `status` | `"completed"` (HTTP 200, ran synchronously), `"pending"` (HTTP 202, async), or `"failed"` |
-| `result` | The operation's response payload, or `null` |
-| `at` | ISO-8601 UTC timestamp |
-| `createdBy` | The user ID that issued the operation |
-| `idempotentReplay` | `true` when the response was served from the idempotency cache without re-executing |
-
-Two behaviors fall out of this contract:
-
-- **Idempotency.** Every operation accepts an `Idempotency-Key` header for safe retries. Replaying an identical request returns the cached result with `idempotentReplay: true` and does not re-execute. Reusing the same key with a different request body returns **HTTP 409** (a fingerprint conflict).
-- **Async operations stream progress.** Long-running commands return `status: "pending"` with HTTP 202; monitor them via Server-Sent Events at `/v1/operations/{operationId}/stream` rather than expecting the result inline.
+Command writes and analytical view operations return the same `OperationEnvelope`, and accept the same `Idempotency-Key` header, as the graph lifecycle operations under `/v1/graphs/{graph_id}/operations/{op_name}`; long-running commands return `status: "pending"` and are followed over SSE. The field reference, idempotency rules, failure shapes, and progress events are in [Operations Contract](Operations-Contract).
 
 ## One Invariant: The Ops Layer Is the Single Source of Truth
 
@@ -222,6 +207,8 @@ For the exact request-body fields of any operation, consult the [API reference](
 
 **Wiki Guides:**
 - **[Architecture Overview](Architecture-Overview)** - Platform architecture; its "Extensions API" subsection is the parent context for this page
+- **[Operations Contract](Operations-Contract)** - The envelope, idempotency, and progress-streaming contract shared by every operation
+- **[Errors and Rate Limits](Errors-and-Rate-Limits)** - Error bodies, status codes, and rate-limit headers
 - **[GraphQL Reads](GraphQL-Reads)** - Deep dive on the typed read surface and field catalog
 - **[RoboLedger Operations](RoboLedger-Operations)** - The RoboLedger command operation catalog
 - **[RoboInvestor Operations](RoboInvestor-Operations)** - The RoboInvestor command operation catalog

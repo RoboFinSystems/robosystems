@@ -62,15 +62,15 @@ The user-facing way to run Cypher is `POST /v1/graphs/{graph_id}/query/cypher`. 
 
 ### Running Ad-Hoc Cypher
 
-Send your API key as `X-API-Key` and post a Cypher query with named parameters:
+Send your API key as `X-API-Key` and post a Cypher query with named parameters. This one returns a company's consolidated annual revenue, written to the [four SEC query rules](SEC-Data-Model-and-Query-Rules#the-four-rules):
 
 ```bash
 curl -X POST "https://api.robosystems.ai/v1/graphs/sec/query/cypher" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) WHERE e.name CONTAINS $name AND el.name = $element RETURN e.name, r.form, f.numeric_value LIMIT $limit",
-    "parameters": {"name": "NVIDIA", "element": "Revenues", "limit": 10},
+    "query": "MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: '\''annual'\''}) WHERE e.canonical_concept = $concept AND f.numeric_value IS NOT NULL RETURN DISTINCT ent.ticker AS ticker, e.qname AS qname, p.end_date AS end_date, f.numeric_value AS value ORDER BY end_date DESC LIMIT $limit",
+    "parameters": {"ticker": "NVDA", "concept": "revenue", "limit": 3},
     "timeout": 60
   }'
 ```
@@ -80,8 +80,8 @@ The response is a `CypherStatementResponse`, where each row is a dictionary keye
 ```json
 {
   "success": true,
-  "data": [{"e.name": "NVIDIA CORP", "r.form": "10-K", "f.numeric_value": 26974000000}],
-  "columns": ["e.name", "r.form", "f.numeric_value"],
+  "data": [{"ticker": "NVDA", "qname": "us-gaap:Revenues", "end_date": "2026-01-25", "value": 215938000000.0}],
+  "columns": ["ticker", "qname", "end_date", "value"],
   "row_count": 1,
   "execution_time_ms": 18.4,
   "graph_id": "sec",
@@ -217,27 +217,19 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/sec/mcp" \
 
 The older REST tool endpoints (`GET /mcp/tools`, `POST /mcp/call-tool`) no longer exist.
 
-Alongside these two, `get-graph-info` is available on every graph, and on graphs carrying the `roboledger` extension (including `sec`) the plane also exposes `get-example-queries` and `resolve-element`. There is a separate operational MCP plane (`query-graphql`, `get-graphql-schema`) that reads the OLTP database, and an unstructured plane (`search-documents`, `get-document-section`) over the document index. For the full agent surface, see [AI Operators and MCP](AI-Operators-and-MCP).
+Alongside these two, `get-graph-info` is available on every graph, and graphs carrying the `roboledger` extension (including `sec`) also expose `get-example-queries`. `resolve-element`, which maps a concept such as "revenue" to the element qnames filers use, is served only on `sec`: it is gated on the shared-repository manifest's semantic enrichment, so a tenant RoboLedger graph does not list it. There is a separate operational MCP plane (`query-graphql`, `get-graphql-schema`) that reads the OLTP database, and an unstructured plane (`search-documents`, `get-document-section`) over the document index. For the full agent surface, see [AI Operators and MCP](AI-Operators-and-MCP).
 
 **Note:** `read-graph-cypher` strips string literals before scanning for write keywords, but the scan matches on whole words. A variable or property named exactly like a blocked keyword — for example a property access `n.set` or a variable `delete` — trips the word-boundary match and is rejected. Names that merely contain a keyword as a substring (such as `created_at` or `deleted`) are fine; avoid naming a read-only variable exactly `set`, `create`, `delete`, `merge`, `remove`, or `drop`.
 
 ## Read Patterns and Example Cypher
 
-The examples below use the `sec` repository as an illustrative dataset. Its data model has node types including `Entity`, `Report`, `Fact`, `Element`, `Period`, `Unit`, `Dimension`, and `Structure`; see [SEC XBRL Pipeline](SEC-XBRL-Pipeline) for the complete model. Other graphs have their own schemas — always discover the schema before querying.
+The examples below use the `sec` repository as an illustrative dataset. Its data model has node types including `Entity`, `Report`, `Fact`, `Element`, `Period`, `Unit`, `Dimension`, `FactSet`, and `Structure`; [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules) covers the whole model and the four rules that decide whether a number read from it is right. Other graphs have their own schemas — always discover the schema before querying.
+
+Before writing Cypher against `sec`, check whether a ready-made view answers the question: `financial-statement-analysis`, `build-fact-grid`, `disclosures`, and `information-block` (MCP tools, and operations under `POST /extensions/roboledger/sec/operations/{name}`) already apply the rules.
 
 ### Discover the Schema First
 
-Property and label names are case-sensitive, so start by discovering what exists rather than guessing:
-
-```cypher
--- List the labels present in the graph
-MATCH (n) RETURN DISTINCT labels(n)
-
--- Count nodes by label
-MATCH (n) WITH labels(n) AS label, count(n) AS c RETURN label, c ORDER BY c DESC
-```
-
-From an agent, `get-graph-schema` returns the same information in one call (node types, properties with their data types — `STRING`, `INT64`, `DOUBLE`, `BOOLEAN`, `TIMESTAMP`, `JSON` — and relationships).
+Property and label names are case-sensitive, so start by discovering what exists rather than guessing. From an agent, `get-graph-schema` returns node types, properties with their data types — `STRING`, `INT64`, `DOUBLE`, `BOOLEAN`, `TIMESTAMP`, `JSON` — and relationships in one call.
 
 Over HTTP the same discovery is two plain `GET`s, and they answer different questions:
 
@@ -253,65 +245,106 @@ curl -s "https://api.robosystems.ai/v1/graphs/sec/schema/export" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
+On a small graph of your own, a label scan is a quick check too. Do not run it against `sec`: an unanchored `MATCH (n)` visits every node in the repository.
+
+```cypher
+-- Count nodes by label (small graphs only)
+MATCH (n) WITH labels(n) AS label, count(n) AS c RETURN label, c ORDER BY c DESC
+```
+
 ### Traversal Patterns
 
-Walk from an entity down to individual facts:
+Start from one company. `Entity` is the anchor: lead with it (by `ticker` or `cik`) or with one `Report`, and reach `Element`, `Period` and `Structure` last.
 
 ```cypher
--- Facts for a specific company by SEC CIK
-MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
-WHERE e.cik = $cik
-RETURN r.form, f.numeric_value
+-- A company's most recent annual filings
+MATCH (ent:Entity {ticker: $ticker})-[:ENTITY_HAS_REPORT]->(r:Report)
+WHERE r.form IN ['10-K', '20-F', '40-F']
+RETURN r.identifier, r.form, r.filing_date, r.fiscal_year_focus
+ORDER BY r.filing_date DESC
+LIMIT 5
+```
+
+Read a figure by its normalized concept, consolidated, with the period shape pinned:
+
+```cypher
+-- Consolidated annual net income for one company
+MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
+      -[:FACT_HAS_ELEMENT]->(e:Element),
+      (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
+WHERE e.canonical_concept = 'net_income' AND f.numeric_value IS NOT NULL
+RETURN DISTINCT e.qname AS qname, p.start_date AS start_date, p.end_date AS end_date,
+       f.numeric_value AS value
+ORDER BY end_date DESC
+LIMIT 5
+```
+
+Resolve a fact's full context — element, period, and unit — in a single `MATCH` of comma-separated patterns (separate `MATCH` clauses on the same node can time out):
+
+```cypher
+-- Balance-sheet facts at one date, with their units
+MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
+      -[:FACT_HAS_ELEMENT]->(e:Element),
+      (f)-[:FACT_HAS_PERIOD]->(p:Period {period_type: 'instant'}),
+      (f)-[:FACT_HAS_UNIT]->(u:Unit)
+WHERE p.end_date = $as_of
+  AND e.canonical_concept IN ['total_assets', 'total_liabilities', 'stockholders_equity']
+RETURN DISTINCT e.canonical_concept AS concept, e.qname AS qname,
+       f.numeric_value AS value, u.measure AS unit
 LIMIT 25
 ```
 
-Filter facts by the XBRL element they report:
+Pull a whole statement through the `Structure → FactSet → Fact` path. Anchor on one `Report` and reach `Structure` last — every filing has its own income-statement structure, so leading with `Structure {canonical_type: ...}` scans all of them:
 
 ```cypher
--- Revenue facts across all loaded companies
-MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
-WHERE el.name = $element
-RETURN el.name, f.numeric_value, f.value
-LIMIT 25
-```
-
-Resolve a fact's full context — element, period, and unit:
-
-```cypher
--- A fact with all of its aspects
-MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
-MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
-MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
-WHERE el.name = $element
-RETURN el.name, f.numeric_value, p.period_type, p.start_date, p.end_date, u
-LIMIT 25
-```
-
-Traverse the taxonomy structure to see how elements roll up:
-
-```cypher
--- Parent-child element relationships within a structure
-MATCH (s:Structure)-[:STRUCTURE_HAS_ASSOCIATION]->(a:Association)
-MATCH (a)-[:ASSOCIATION_HAS_FROM_ELEMENT]->(parent:Element)
-MATCH (a)-[:ASSOCIATION_HAS_TO_ELEMENT]->(child:Element)
-RETURN parent.name, child.name
-LIMIT 50
+-- The income statement of one filing
+MATCH (r:Report {identifier: $report_id})-[:REPORT_HAS_FACT]->(f:Fact {has_dimensions: false})
+      -[:FACT_HAS_ELEMENT]->(e:Element),
+      (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'}),
+      (fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f),
+      (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
+WHERE f.numeric_value IS NOT NULL
+RETURN DISTINCT e.canonical_concept AS concept, e.qname AS qname,
+       p.end_date AS end_date, f.numeric_value AS value
+ORDER BY end_date DESC, qname
+LIMIT 60
 ```
 
 ### Aggregate Across the Dataset
 
-The analytical plane shines on aggregation that spans the whole graph:
+The analytical plane is built for aggregation across filers. On `sec`, keep the cohort explicit — a list of tickers, a form, a date window — so the query anchors on `Entity` and never scans every fact:
 
 ```cypher
--- The most frequently reported elements
-MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
-RETURN el.name, count(f) AS fact_count
-ORDER BY fact_count DESC
+-- Consolidated annual revenue and gross profit across a peer group
+MATCH (ent:Entity)<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
+      -[:FACT_HAS_ELEMENT]->(e:Element),
+      (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
+WHERE ent.ticker IN $tickers
+  AND e.canonical_concept IN ['revenue', 'gross_profit']
+  AND p.end_date >= '2025-01-01'
+  AND f.numeric_value IS NOT NULL
+RETURN DISTINCT ent.ticker AS ticker, e.canonical_concept AS concept, e.qname AS qname,
+       p.end_date AS end_date, f.numeric_value AS value
+ORDER BY ticker, end_date DESC
+LIMIT 50
+```
+
+Filing metadata aggregates cheaply without touching facts:
+
+```cypher
+-- Annual and quarterly filings by fiscal year
+MATCH (r:Report)
+WHERE r.form IN ['10-K', '10-Q']
+RETURN r.fiscal_year_focus, r.form, count(r) AS filings
+ORDER BY r.fiscal_year_focus DESC, r.form
 LIMIT 20
 ```
 
+More worked queries — a statement for a ticker's latest 10-K, a metric across eight quarters, a balance sheet at a date — are on [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules#worked-queries).
+
 ## Gotchas and Limits
 
+- **SEC numbers have four rules.** Consolidated facts (`has_dimensions: false`), `Element.canonical_concept` over one qname, a pinned `Period` shape, and `RETURN DISTINCT` anchored on the `Entity`. A query that skips one returns a plausible wrong number rather than an error — see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules).
 - **Two parameter conventions.** Cypher uses named `$param` with a `parameters` object; staging SQL uses positional `?` (or `$1`, `$2`) with a `parameters` array. They are not interchangeable.
 - **Write attempts return 403 on main graphs.** Data enters via the staging pipeline. Only *user* subgraphs accept writes through the query path — and only for callers with the `member` or `admin` role. Shared repositories and their subgraphs never do.
 - **Shared-repo staging SQL is blocked on the public API.** `POST /v1/graphs/{shared}/query/sql` returns 403 for shared repositories and their subgraphs — query the graph with Cypher instead.
@@ -344,7 +377,8 @@ None of them exercise the public API's authentication, rate limiting, or shared-
 - **[GraphQL Reads](GraphQL-Reads)** - The operational/OLTP query plane (typed GraphQL over PostgreSQL)
 - **[AI Operators and MCP](AI-Operators-and-MCP)** - The full MCP tool surface for AI agents
 - **[Graph Operations](Graph-Operations)** - Graph lifecycle, subgraphs, and the staging/materialize write path
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - The example dataset, its data model, and staging-table reference
+- **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)** - The `sec` graph's model, the four query rules, and worked queries
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Loading the SEC dataset on a local stack, and its staging tables
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Define your own node and relationship types
 
 **Codebase Documentation:**

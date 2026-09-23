@@ -13,7 +13,9 @@ This guide shows you how to drive RoboLedger's command-write and analytical-view
 - [Quick Start](#quick-start)
 - [The Operation Envelope Contract](#the-operation-envelope-contract)
 - [Command Writes](#command-writes)
-- [Worked Example: close-period](#worked-example-close-period)
+- [Period Close](#period-close)
+- [QuickBooks Write-Back and Reconciling Items](#quickbooks-write-back-and-reconciling-items)
+- [Forecasting and Metrics](#forecasting-and-metrics)
 - [Analytical View Operations](#analytical-view-operations)
 - [Worked Example: build-fact-grid](#worked-example-build-fact-grid)
 - [Financial Statements](#financial-statements)
@@ -29,7 +31,7 @@ RoboLedger's extensions surface follows a CQRS split with three sub-surfaces, al
 | --- | --- | --- |
 | **Typed reads** | `POST /extensions/{graph_id}/graphql` | Strawberry GraphQL — entity, fiscal calendar, mappings, reports. See [GraphQL Reads](GraphQL-Reads). |
 | **Command writes** | `POST /extensions/roboledger/{graph_id}/operations/{op_name}` | Mutations — close a period, update the entity, generate a report. |
-| **Analytical views** | `POST /extensions/roboledger/{graph_id}/operations/{view_name}` | Read-only fact queries over the XBRL hypercube (`build-fact-grid`, `financial-statement-analysis`) and over the live OLTP ledger (`live-financial-statement`). |
+| **Analytical views** | `POST /extensions/roboledger/{graph_id}/operations/{view_name}` | Read-only queries over the XBRL hypercube (`build-fact-grid`, `financial-statement-analysis`), over a report read whole (`disclosures`, `information-block`), and over the live OLTP ledger (`live-financial-statement`). |
 
 This page covers the latter two. The `graph_id` always comes from the URL path — FastAPI dependencies validate authentication and per-graph access before the handler runs. The reads sibling is documented in [GraphQL Reads](GraphQL-Reads), and the surface as a whole in [Extensions Surface Overview](Extensions-Surface-Overview).
 
@@ -77,29 +79,39 @@ The envelope is defined in [`middleware/operations.py`](https://github.com/RoboF
 
 Command writes are the mutation half of the surface. The pattern is uniform: `POST` to `/extensions/roboledger/{graph_id}/operations/{op_name}` with a JSON body, get back an `OperationEnvelope`. The handlers are thin — they validate, delegate to the operations kernel, and wrap the result in the envelope.
 
-The registered command-write operations, grouped by workflow stage (from [`routers/extensions/roboledger/operations.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/operations.py)):
+The registered command-write operations, grouped by workflow stage. They live in the [`routers/extensions/roboledger/operations/`](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/routers/extensions/roboledger/operations) package, one module per API-reference tag (`setup`, `taxonomy`, `information_blocks`, `ledger`, `close`, `reports`, `distribution`):
 
 | Stage | Operations |
 | --- | --- |
-| **Setup** | `initialize`, `update-entity`, `change-reporting-style` |
+| **Setup** | `initialize`, `initialize-chart-of-accounts`, `update-entity`, `change-reporting-style` |
 | **Taxonomy Blocks** | `create-taxonomy-block`, `update-taxonomy-block`, `delete-taxonomy-block`, `link-entity-taxonomy` |
 | **Mapping** | `create-mapping-association`, `delete-mapping-association`, `auto-map-elements` |
 | **Information Blocks** | `create-information-block`, `update-information-block`, `delete-information-block`, `bind-text-block`, `evaluate-rules` |
 | **Forecasting and Metrics** | `compute-forecast`, `backfill-plan-history`, `compute-metrics`, `assert-metrics` |
 | **Agents** | `create-agent`, `update-agent` |
 | **Event Blocks** | `create-event-block`, `update-event-block`, `execute-event-block`, `preview-event-block` |
+| **Reconciling Items** | `preview-reconciling-item`, `resolve-reconciling-item` |
 | **Event Handlers** | `create-event-handler`, `update-event-handler` |
 | **Journal Entries** | `update-journal-entry`, `delete-journal-entry` |
-| **Schedules** | `promote-obligations`, `rebuild-schedule` |
+| **Schedules** | `promote-obligations`, `rebuild-schedule`, `terminate-schedule` |
 | **Close Workflow** | `set-close-target`, `close-period`, `reopen-period` |
 | **Reports** | `create-report`, `regenerate-report`, `delete-report`, `share-report`, `revoke-report-share`, `file-report`, `transition-filing-status` |
 | **Publish Lists and Distribution** | `create-publish-list`, `update-publish-list`, `delete-publish-list`, `add-publish-list-members`, `remove-publish-list-member`, `block-source-graph`, `unblock-source-graph` |
 
-`auto-map-elements` is the async one (returns `202 pending`); the rest complete synchronously. The exact request body for each is in the OpenAPI spec — the worked examples below show the two most common shapes.
+`auto-map-elements` is the async one (returns `202 pending`); the rest complete synchronously. The exact request body for each is in the API reference. The workflows with their own pages:
 
-**Forecasting and metrics** is the arc least self-evident from its operation names. A *forecast block* carries a driver cascade: `compute-forecast` walks it month-by-month forward from the block's base period — lever-driven `rs-driver` rules in dependency order, carry-forward for unmodeled income-statement lines, then calc-DAG subtotals — upserting one scenario income-statement FactSet (plus a working-capital balance-sheet set) per forward month, keyed by the block's `scenario_id` (`NULL` means actuals). `backfill-plan-history` fills the plan's *historical* columns behind the close boundary by running a real reopen → reclose cycle per month; it is chunked, so loop until `remaining_periods` comes back empty. `compute-metrics` derives a period's standing metric FactSet from the entity's most recent persisted report facts, and `assert-metrics` is its observation sibling — externally-observed values (usage counts, marketing numbers, hand-carried figures) written into the same standing-FactSet shape with asserted provenance. Structures carrying Derive rules are compute-owned and reject assertions, so derived and asserted series never share a structure. All four are deterministic and non-AI: they consume no credits.
+| Workflow | Operations | Page |
+| --- | --- | --- |
+| Month-end close | `set-close-target`, `promote-obligations`, `terminate-schedule`, `close-period`, `reopen-period` | [Period Close](Period-Close) |
+| QuickBooks write-back and drift | `execute-event-block`, `preview-reconciling-item`, `resolve-reconciling-item` | [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy) |
+| Mapping | `create-mapping-association`, `delete-mapping-association`, `auto-map-elements`, `initialize-chart-of-accounts` | [Chart of Accounts Mapping](Chart-of-Accounts-Mapping) |
+| Planning and KPIs | `compute-forecast`, `backfill-plan-history`, `compute-metrics`, `assert-metrics` | [Forecasting and Metrics](Forecasting-and-Metrics) |
+| Events and journal entries | `create-event-block`, `update-event-block`, `preview-event-block`, `update-journal-entry`, `delete-journal-entry` | [Event-Driven Ledger](Event-Driven-Ledger) |
+| Schedules and other blocks | `create-information-block`, `update-information-block`, `evaluate-rules` | [Information Blocks](Information-Blocks) |
 
-A second example, `update-entity`, illustrates the partial-update convention. Only the non-null fields in the body are applied; an empty body returns `400 "No fields provided for update."`
+**Forecasting and metrics.** A forecast is a scenario authored as a `forecast` Information Block. `compute-forecast` walks it forward month by month into scenario-stamped statement FactSets, halting at the first month that fails verification. `backfill-plan-history` stamps the historical months a scenario stands on. `compute-metrics` derives a metric block's ratios for a period, and `assert-metrics` records observed values into one. All four are deterministic and consume no credits. The block shape, the four drivers and a full scenario payload are on [Forecasting and Metrics](Forecasting-and-Metrics).
+
+One example, `update-entity`, illustrates the partial-update convention. Only the non-null fields in the body are applied; an empty body returns `400 "No fields provided for update."`
 
 ```bash
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/update-entity" \
@@ -116,78 +128,33 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 **Downloading a report bundle is a read, not an operation.** Generating, regenerating, and filing reports are command writes (`create-report`, `regenerate-report`, `file-report`, `transition-filing-status`), but fetching the produced artifact is not: the former `GET .../reports/{id}/download` REST resource has been retired. Use the GraphQL field `reportDownloadUrl(reportId:, format:, expiresIn:)` on `POST /extensions/{graph_id}/graphql`. Every flavor — `JSONLD` (the default), `HOLON_JSONLD`, `XBRL_2_1` — resolves to a short-lived presigned S3 URL the client follows directly; the API never streams the bytes. See [GraphQL Reads](GraphQL-Reads).
 
-## Worked Example: close-period
+## Period Close
 
-The close workflow is the most product-distinctive command path. The fiscal calendar tracks two cursors:
-
-- `closed_through` — the **system** boundary, the last period actually locked.
-- `close_target` — the **user-set** intent, the period you are working toward.
-
-Setting a target closes nothing. `close-period` does the locking, and it works **sequentially**: the `period` you pass must equal `closed_through + 1`. The `period` value matches the regex `^\d{4}-(0[1-9]|1[0-2])$` (e.g. `2026-03`).
+`close-period` locks one month: it checks the closeable gate, publishes eligible drafts to QuickBooks on a write-back graph, posts the rest, advances `closed_through`, stamps the month's canonical statement FactSets, and records a receipt, as one operation. Only the QuickBooks publish markers commit ahead of the rest, so a retried close never writes an entry to QuickBooks twice. Months close sequentially (`period` must be `closed_through + 1`) and only once they are over. A month that can't close returns `422` with a structured `detail.blockers` array (`sequence_violation`, `period_incomplete`, `sync_stale`, `pending_obligations`, `stranded_obligations`, `reconciling_items`, and others). `reopen-period` unlocks only the most recently closed month and needs a `reason`.
 
 ```bash
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/close-period" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: close-2026-03-$(date +%s)" \
   -H "Content-Type: application/json" \
-  -d '{"period": "2026-03", "allow_stale_sync": false}'
+  -d '{"period": "2026-03"}'
 ```
 
-On success, the envelope's `result` is a close summary:
+The fiscal calendar, every blocker and its remedy, the full result and receipt, the MCP async close, reopening, ending a schedule early and the closed-period write gate are on **[Period Close](Period-Close)**.
 
-```json
-{
-  "operation": "close-period",
-  "operationId": "op_01HVF8T0M2YTAY3BBNRH0V0",
-  "status": "completed",
-  "result": {
-    "fiscal_calendar": {
-      "graph_id": "...",
-      "closed_through": "2026-03",
-      "close_target": "2026-03",
-      "...": "..."
-    },
-    "period": "2026-03",
-    "entries_posted": 3,
-    "entries_published_to_qb": 2,
-    "entries_posted_locally": 1,
-    "target_auto_advanced": true,
-    "rule_summary": {"pass": 38, "fail": 0, "error": 0, "skipped": 0},
-    "evaluated_structure_ids": ["..."],
-    "statements_stamped": true,
-    "statement_stamp_note": null,
-    "stamped_statement_sets": {"struct_...": "fs_..."},
-    "statement_rule_summary": {"pass": 12, "fail": 0, "error": 0, "skipped": 0}
-  },
-  "at": "2026-06-11T00:00:00Z",
-  "createdBy": "user_...",
-  "idempotentReplay": false
-}
-```
+## QuickBooks Write-Back and Reconciling Items
 
-`entries_posted` is the total across both post paths, and `entries_published_to_qb` / `entries_posted_locally` are the split. On a graph whose QuickBooks connection is `qb_authoritative`, the close first publishes eligible RoboLedger-originated drafts back to QuickBooks (each is promoted to posted at publish time); everything else goes through the local bulk transition.
+On a graph whose QuickBooks connection is `qb_authoritative`, RoboLedger-originated drafts are written to QuickBooks at close (the `entries_published_to_qb` / `entries_posted_locally` split in the close result), or one at a time with `execute-event-block`. A transaction edited in QuickBooks after it posted is flagged as a reconciling item rather than overwritten. `preview-reconciling-item` shows the difference, and `resolve-reconciling-item` settles it by `restate`, `catch_up` or `acknowledge`. Sync windows, the write-back predicate, retry after a QuickBooks rejection, and disconnect vs. sever are on **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)**.
 
-The close also stamps the period's canonical statement FactSets. `stamped_statement_sets` maps `structure_id` → `fact_set_id` for each set minted, and `statement_rule_summary` reports statement-rule verification (distinct from `rule_summary`, which is the schedule-rule pass). When the tenant hasn't set up reporting yet, `statements_stamped` is `false` and `statement_stamp_note` carries the soft-skip reason (`no_coa_mapping`, `no_entity`, `no_statement_structures`, or `no_taxonomy`) — the close still succeeds.
+## Forecasting and Metrics
 
-**Blockers are structured.** When a period cannot close, `close-period` returns `422` with a structured `blockers` array — not a flat message. Clients must parse `detail.blockers`:
-
-```json
-{
-  "detail": {
-    "message": "Cannot close period '2026-03'.",
-    "blockers": ["sync_stale"],
-    "sync_stale_days": 5
-  }
-}
-```
-
-The verified blocker codes are `sequence_violation`, `period_incomplete`, `sync_stale`, `calendar_not_initialized`, `period_already_closed`, and `pending_obligations`. Some carry extra detail fields: `pending_obligation_count`, `pending_obligation_sample[]`, `earliest_pending_period`, and `sync_stale_days`. The `sync_stale` blocker is overridable with `allow_stale_sync: true` *after you have manually verified the source data is current*.
-
-The same `closed_through` / `close_target` cursors surface as a read on the GraphQL `fiscalCalendar` query, which also exposes `gap_periods`, `catch_up_sequence`, and `closeable_now`. See [GraphQL Reads](GraphQL-Reads) for the read side of the close workflow.
+Scenarios, the four drivers, line values and line growth, the verification halt, plan-history backfill, and the metric operations are on **[Forecasting and Metrics](Forecasting-and-Metrics)**.
 
 ## Analytical View Operations
 
-Analytical view operations are read-only queries over the **XBRL hypercube** — the `Fact` nodes materialized into the LadybugDB graph. They share the `OperationEnvelope` contract with command writes and live under the same `/operations/` prefix, but they mutate nothing.
+Analytical view operations are read-only. Most query the **XBRL hypercube** — the `Fact` nodes materialized into the LadybugDB graph. They share the `OperationEnvelope` contract with command writes and live under the same `/operations/` prefix, but they mutate nothing.
+
+Two view operations read a report *whole* instead of querying the hypercube. `disclosures` returns the map of a report's sections, one row per note or statement family with its block ids. `information-block` reads one section in full: rows with values per period, breakdowns by the section's own axes, calculation footing and text blocks. Both run xbrlkit's own tools over the report: the published filing on the SEC repository, or the ledger's own report on a tenant graph (pass `report_id`; on SEC, `ticker` or `report_id`). Call `disclosures` first, since it is cheap. `information-block` is the expensive call, one block at a time.
 
 `build-fact-grid` is the primary view operation. It takes a set of concept filters and period filters, walks the matching `Fact` nodes, deduplicates them, and returns them as a **flat list** alongside the aspects those facts span.
 
@@ -318,7 +285,7 @@ Two operations render a *complete* statement rather than a free-form slice. Whic
 
 `live-financial-statement` is the authoritative path for a RoboLedger entity graph. It builds the statement directly from the tenant's OLTP ledger through the active CoA→GAAP mapping, so **no materialization is required** — a ledger you synced a minute ago is already reportable. It is rejected on shared-repository graphs.
 
-It lives in a third router, [`reads.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/reads.py), sibling to `operations.py` (command writes) and `views.py` (graph-backed views). All three mount under the same `/operations/` prefix, but `reads.py` is gated by `ROBOLEDGER_ENABLED` — unlike `views.py`, which stays mounted for SEC-only deployments.
+It lives in a third router, [`reads.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/reads.py), sibling to the `operations/` package (command writes) and `views.py` (graph-backed views). All three mount under the same `/operations/` prefix, but `reads.py` is gated by `ROBOLEDGER_ENABLED` — unlike `views.py`, which stays mounted for SEC-only deployments.
 
 ```bash
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/live-financial-statement" \
@@ -351,7 +318,7 @@ How statements are rendered — the structures, the calc rollup, the footing —
 
 ### Sequential Close Only
 
-`close-period` requires `period == closed_through + 1`. Closing out of order returns `422` with `blockers: ["sequence_violation"]`. To advance multiple periods, close them one at a time in order.
+`close-period` requires `period == closed_through + 1`. Closing out of order returns `422` with `blockers: ["sequence_violation"]`. To advance multiple periods, close them one at a time in order. See [Period Close](Period-Close#blockers).
 
 ### "Ledger not initialized" 404
 
@@ -363,7 +330,7 @@ Any operation against a graph that has no extensions schema returns `404 "Ledger
 
 ### close-period Blockers Are Structured
 
-Do not parse a flat error string — read `detail.blockers`. `sync_stale` is overridable with `allow_stale_sync: true` only after you have manually verified the source data is current. A `WRITE_BACK_FAILED` failure carries a `failed_events[]` array for diagnosis.
+Do not parse a flat error string — read `detail.blockers`. `sync_stale` is overridable with `allow_stale_sync: true` only after you have manually verified the source data is current. A `WRITE_BACK_FAILED` failure carries a `failed_events[]` array for diagnosis, and retrying the close is safe. See [Period Close](Period-Close#refusals-and-errors).
 
 ### Fact Grid Needs Both a Concept and a Period Filter
 
@@ -387,7 +354,7 @@ Reusing an `Idempotency-Key` with a different request body returns `409`, not a 
 
 ## Self-hosted deployments
 
-On your own stack, `just demo-roboledger` provisions a tenant with 16 months of synthetic books in about 60 seconds and writes the API key and graph id into `.local/config.json` — see the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough). To layer real synced data under the same workflow, and for the write-policy model behind the `entries_published_to_qb` / `entries_posted_locally` split, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
+On your own stack, `just demo-roboledger` provisions a tenant with 16 months of synthetic books in about 60 seconds and writes the API key and graph id into `.local/config.json` — see the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough). To connect a real QuickBooks company to your own stack, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally). The write-policy model behind the `entries_published_to_qb` / `entries_posted_locally` split is on [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy).
 
 ## Related Documentation
 
@@ -397,6 +364,10 @@ On your own stack, `just demo-roboledger` provisions a tenant with 16 months of 
 - **[GraphQL Reads](GraphQL-Reads)** - The typed-read sibling surface (`POST /extensions/{graph_id}/graphql`)
 - **[Reporting and Rendering](Reporting-and-Rendering)** - How statements are rendered and footed from the hypercube
 - **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough)** - See the operations surface end-to-end against a populated tenant
+- **[Period Close](Period-Close)** - Fiscal calendar, blockers, the close and its receipt, reopening
+- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)** - Sync windows, write-back, reconciling items
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)** - Mapping model, auto-map, the closed-period mapping lock
+- **[Forecasting and Metrics](Forecasting-and-Metrics)** - Scenarios, drivers, plan history, metrics
 
 **API Reference:**
 
@@ -404,8 +375,8 @@ On your own stack, `just demo-roboledger` provisions a tenant with 16 months of 
 
 **Codebase Documentation:**
 
-- **[RoboLedger operations router](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/operations.py)** - The registered command-write operations
-- **[Analytical view router](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/views.py)** - `build-fact-grid` and `financial-statement-analysis`
+- **[RoboLedger operations package](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/routers/extensions/roboledger/operations)** - The registered command-write operations, one module per tag
+- **[Analytical view router](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/views.py)** - `build-fact-grid`, `financial-statement-analysis`, `disclosures`, `information-block`
 - **[OLTP reads router](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/reads.py)** - `live-financial-statement`
 - **[Operation envelope](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/operations.py)** - `OperationEnvelope`, idempotency, audit
 - **[Operations kernel](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business logic patterns behind every operation

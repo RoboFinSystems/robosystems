@@ -59,13 +59,15 @@ SEC access is a **subscription**, not a one-off grant — the shared repository 
 # Subscribe only; skip the download/process/ingest pipeline entirely
 just demo-sec --subscribe-only
 
-# Or use the dedicated recipe. sec-advanced raises rate limits and credits.
-just demo-sec-subscribe                 # sec-starter (default)
-just demo-sec-subscribe sec-advanced
+# Or use the dedicated recipe. advanced raises rate limits and credits.
+just demo-sec-subscribe                 # starter (default)
+just demo-sec-subscribe advanced
 
 # Pick the plan on a full run
-just demo-sec --plan sec-advanced
+just demo-sec --plan advanced
 ```
+
+The SEC plans are `starter` and `advanced`. The repository-prefixed spellings `sec-starter` and `sec-advanced` are accepted too, and stored as the bare plan name.
 
 **Note:** Setup and loading takes 1-5 minutes depending on the number of years of data.
 
@@ -197,7 +199,7 @@ You have multiple options for accessing and querying the loaded SEC data:
 
 ### Option 1: MCP Client (For AI Agents)
 
-Access data through any MCP-compatible AI tool (Claude Desktop, Claude Code, Cursor, Cline, etc.) using the MCP protocol.
+Access data through Claude, ChatGPT, Cursor or any other MCP client.
 
 **Setup MCP Client:**
 
@@ -236,7 +238,7 @@ Clients with no field for a custom header — claude.ai and Claude Desktop custo
    **Curated Tools** (no Cypher needed):
    - `financial-statement-analysis` - Structured financial statement by ticker and type (`income_statement`, `balance_sheet`, `cash_flow_statement`, `equity_statement`)
    - `build-fact-grid` - Pivot facts across entities, periods, and dimensions — the multidimensional view over the XBRL hypercube
-   - `resolve-element` - Look up XBRL element details by name or canonical concept (uses vector search when available)
+   - `resolve-element` - Map a concept in plain words ("revenue", "operating lease liability") to the element qnames filers use for it, with fact counts
    - `disclosures` - The map of a filing's sections, one row per note or statement
    - `information-block` - One section read whole: its rows, breakdowns, footing checks and text
 
@@ -267,37 +269,53 @@ The AI will use:
 
 ### Option 2: Direct Cypher Queries (For Development)
 
-Query the database directly using Cypher (no authentication required for local queries):
+Query the local database directly using Cypher (no authentication required for local queries). Queries that read numbers follow the [four SEC query rules](SEC-Data-Model-and-Query-Rules#the-four-rules): consolidated facts (`has_dimensions: false`), `canonical_concept` over one qname, a pinned period shape, and `RETURN DISTINCT` from an `Entity` anchor. `just graph-query` rewrites single quotes to double quotes, so string literals inside the query are fine.
 
 ```bash
-# List all companies in the database
-just graph-query sec "MATCH (e:Entity) RETURN e.name, e.identifier LIMIT 10"
+# List the companies in the database
+just graph-query sec "MATCH (e:Entity) RETURN e.ticker, e.name, e.cik LIMIT 10"
 
-# Get reports for a specific company
-just graph-query sec "MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report) WHERE e.name CONTAINS 'NVIDIA' RETURN r.form, r.filing_date LIMIT 10"
+# A company's filings
+just graph-query sec "MATCH (e:Entity {ticker: 'NVDA'})-[:ENTITY_HAS_REPORT]->(r:Report) RETURN r.form, r.filing_date, r.fiscal_year_focus ORDER BY r.filing_date DESC LIMIT 10"
 
-# Find revenue facts
-just graph-query sec "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) WHERE el.name = 'NetIncomeLoss' RETURN el.name, f.numeric_value, f.value LIMIT 10"
+# Consolidated annual net income
+just graph-query sec "MATCH (e:Entity {ticker: 'NVDA'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(el:Element), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'}) WHERE el.canonical_concept = 'net_income' RETURN DISTINCT el.qname AS qname, p.end_date AS end_date, f.numeric_value AS value ORDER BY end_date DESC LIMIT 5"
 ```
 
 **Common Cypher Patterns:**
 
 ```cypher
--- Find all facts for a NVDA SEC CIK
-MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
-WHERE e.cik = '0001045810'
-RETURN f
+-- Revenue across a company's quarters
+MATCH (e:Entity {cik: '0001045810'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
+      -[:FACT_HAS_ELEMENT]->(el:Element),
+      (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'quarterly'})
+WHERE el.canonical_concept = 'revenue'
+RETURN DISTINCT el.qname AS qname, p.start_date AS start_date, p.end_date AS end_date,
+       f.numeric_value AS value
+ORDER BY end_date DESC
+LIMIT 8
 
--- Get balance sheet items
-MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
-WHERE el.name STARTS WITH 'Assets'
-RETURN el.name, f.numeric_value
+-- Balance sheet items at a period end
+MATCH (e:Entity {ticker: 'NVDA'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
+      -[:FACT_HAS_ELEMENT]->(el:Element),
+      (f)-[:FACT_HAS_PERIOD]->(p:Period {period_type: 'instant'})
+WHERE p.end_date = '2025-01-26'
+  AND el.canonical_concept IN ['total_assets', 'total_liabilities', 'stockholders_equity']
+RETURN DISTINCT el.canonical_concept AS concept, el.qname AS qname, f.numeric_value AS value
 
--- Find facts by period
-MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
-WHERE p.instant_date = '2024-01-28'
-RETURN f
+-- The income statement of one filing, through its structure
+MATCH (r:Report {identifier: $report_id})-[:REPORT_HAS_FACT]->(f:Fact {has_dimensions: false})
+      -[:FACT_HAS_ELEMENT]->(el:Element),
+      (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'}),
+      (fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f),
+      (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
+RETURN DISTINCT el.canonical_concept AS concept, el.qname AS qname,
+       p.end_date AS end_date, f.numeric_value AS value
+ORDER BY end_date DESC
+LIMIT 60
 ```
+
+More worked queries, and why each rule matters, are on [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules).
 
 ### Option 3: Query Staging Tables (For Data Validation)
 
@@ -317,10 +335,10 @@ just tables-query sec "SELECT COUNT(*) as null_count FROM Entity WHERE name IS N
 just tables-query sec "SELECT r.* FROM Report r JOIN ENTITY_HAS_REPORT ehr ON r.identifier = ehr.dst JOIN Entity e ON ehr.src = e.identifier WHERE e.name LIKE '%NVIDIA%'"
 
 # Check available time periods
-just tables-query sec "SELECT DISTINCT instant_date FROM Period ORDER BY instant_date DESC LIMIT 10"
+just tables-query sec "SELECT DISTINCT end_date, period_type, duration_type FROM Period ORDER BY end_date DESC LIMIT 10"
 
-# Find revenue facts with full details
-just tables-query sec "SELECT f.value, f.numeric_value, p.instant_date, u.measure FROM Fact f JOIN FACT_HAS_ELEMENT fhe ON f.identifier = fhe.src JOIN Element el ON fhe.dst = el.identifier JOIN FACT_HAS_PERIOD fhp ON f.identifier = fhp.src JOIN Period p ON fhp.dst = p.identifier JOIN FACT_HAS_UNIT fhu ON f.identifier = fhu.src JOIN Unit u ON fhu.dst = u.identifier WHERE el.name = 'Revenues' LIMIT 10"
+# Consolidated annual revenue facts with full details
+just tables-query sec "SELECT el.qname, f.numeric_value, p.start_date, p.end_date, u.measure FROM Fact f JOIN FACT_HAS_ELEMENT fhe ON f.identifier = fhe.src JOIN Element el ON fhe.dst = el.identifier JOIN FACT_HAS_PERIOD fhp ON f.identifier = fhp.src JOIN Period p ON fhp.dst = p.identifier JOIN FACT_HAS_UNIT fhu ON f.identifier = fhu.src JOIN Unit u ON fhu.dst = u.identifier WHERE el.canonical_concept = 'revenue' AND NOT f.has_dimensions AND p.duration_type = 'annual' LIMIT 10"
 ```
 
 **Why Query Staging Tables?**
@@ -372,12 +390,15 @@ client = RoboSystemsClient(
 # Run Cypher query
 request = CypherStatementRequest(
     query="""
-    MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
-    WHERE e.name CONTAINS 'NVIDIA'
-    RETURN e.name, r.form, f.numeric_value
+    MATCH (e:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
+          -[:FACT_HAS_ELEMENT]->(el:Element),
+          (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
+    WHERE el.canonical_concept = $concept
+    RETURN DISTINCT el.qname AS qname, p.end_date AS end_date, f.numeric_value AS value
+    ORDER BY end_date DESC
     LIMIT 10
     """,
-    parameters={},
+    parameters={"ticker": "NVDA", "concept": "revenue"},
 )
 
 response = execute_query(graph_id="sec", client=client, body=request)
@@ -475,31 +496,32 @@ Any SQL IDE with DuckDB support can connect to the staging database for visual e
 -- See all companies loaded
 SELECT identifier, name, industry, ticker FROM Entity;
 
--- Check facts by year
+-- Check facts by calendar year
 SELECT
-  strftime(CAST(p.instant_date AS DATE), '%Y') as year,
-  COUNT(DISTINCT f.identifier) as fact_count
+  p.calendar_year AS year,
+  COUNT(DISTINCT f.identifier) AS fact_count
 FROM Fact f
 JOIN FACT_HAS_PERIOD fhp ON f.identifier = fhp.src
 JOIN Period p ON fhp.dst = p.identifier
-WHERE p.instant_date IS NOT NULL
 GROUP BY year
 ORDER BY year DESC;
 
--- Find largest revenue figures
-SELECT
-  e.name,
-  f.numeric_value,
-  p.instant_date
+-- Largest consolidated annual revenue figures
+SELECT DISTINCT
+  e.ticker,
+  el.qname,
+  p.end_date,
+  f.numeric_value
 FROM Fact f
 JOIN FACT_HAS_ELEMENT fhe ON f.identifier = fhe.src
 JOIN Element el ON fhe.dst = el.identifier
 JOIN FACT_HAS_PERIOD fhp ON f.identifier = fhp.src
 JOIN Period p ON fhp.dst = p.identifier
-JOIN REPORT_HAS_FACT rhf ON f.identifier = rhf.dst
-JOIN ENTITY_HAS_REPORT ehr ON rhf.src = ehr.dst
-JOIN Entity e ON ehr.src = e.identifier
-WHERE el.name = 'Revenues'
+JOIN FACT_HAS_ENTITY fhen ON f.identifier = fhen.src
+JOIN Entity e ON fhen.dst = e.identifier
+WHERE el.canonical_concept = 'revenue'
+  AND NOT f.has_dimensions
+  AND p.duration_type = 'annual'
 ORDER BY f.numeric_value DESC
 LIMIT 10;
 ```
@@ -513,72 +535,9 @@ LIMIT 10;
 
 ## Understanding the Data Model
 
-The SEC graph has 14 node types and 22 relationship types organized around two core traversal patterns.
+The graph you load is the same model the hosted `sec` repository serves. Each filing is a `Report` of an `Entity`; each reported number is a `Fact` linked to its `Element` (the concept, with a normalized `canonical_concept`), its `Period`, its `Unit`, and any `Dimension` qualifiers. A filing's statements and notes are `Structure` nodes (with `canonical_type` on the primary statements), each holding a `FactSet` of the facts it presents, and `Association` nodes carry the parent–child arcs within a structure.
 
-### Node Types
-
-**Reporting nodes** (the data):
-- **Entity** - Companies (e.g., NVIDIA, Apple) with ticker, CIK, industry
-- **Report** - SEC filings (10-K, 10-Q) with form type, filing date, fiscal period
-- **Fact** - Individual financial data points with `numeric_value` and `value`
-- **Element** - XBRL metric definitions (us-gaap tags) with `canonical_concept` (e.g., "revenue", "net_income")
-- **Period** - Time contexts (instant dates or duration start/end)
-- **Unit** - Measurement units (USD, shares)
-- **Dimension** - Dimensional qualifiers (segments, geographic breakdowns)
-
-**Structural nodes** (how data is organized):
-- **Structure** - XBRL presentation/calculation networks with `canonical_type` (e.g., "income_statement", "balance_sheet")
-- **Association** - Parent-child element relationships within structures (e.g., Revenue rolls up into GrossProfit)
-- **Classification** - Disclosure type labels on associations (e.g., AssetsRollUp, IncomeStatement, CashFlowStatement)
-- **FactSet** - Logical groupings of facts by structure and statement type
-
-**Reference nodes** (metadata):
-- **Label** - Human-readable labels for XBRL elements
-- **Reference** - Authoritative references (FASB codification)
-- **Taxonomy** - Global XBRL taxonomy definitions
-
-### Key Traversal Patterns
-
-**Pattern 1: Fact-level queries** (individual financial data points)
-
-```
-Entity (NVIDIA)
-  ─[:ENTITY_HAS_REPORT]─▶ Report (10-K 2024)
-    ─[:REPORT_HAS_FACT]─▶ Fact ($26.97B)
-      ─[:FACT_HAS_ELEMENT]─▶ Element (us-gaap:Revenues, canonical_concept: "revenue")
-      ─[:FACT_HAS_PERIOD]─▶ Period (2024-01-28)
-      ─[:FACT_HAS_UNIT]─▶ Unit (USD)
-      ─[:FACT_HAS_DIMENSION]─▶ Dimension (optional, for segment breakdowns)
-```
-
-**Pattern 2: Statement-level queries** (structured financial statements via FactSets)
-
-```
-Structure (canonical_type: "income_statement")
-  ─[:STRUCTURE_HAS_FACT_SET]─▶ FactSet
-    ─[:FACT_SET_CONTAINS_FACT]─▶ Fact ─[:FACT_HAS_ELEMENT]─▶ Element
-                                  └─[:FACT_HAS_ENTITY]─▶ Entity (filter by ticker)
-```
-
-This is what `financial-statement-analysis` uses — a single hop from Structure through FactSet to get all facts for a statement type, filtered by company.
-
-**Pattern 3: Taxonomy structure** (how elements relate to each other)
-
-```
-Structure
-  ─[:STRUCTURE_HAS_ASSOCIATION]─▶ Association
-    ─[:ASSOCIATION_HAS_FROM_ELEMENT]─▶ Element (parent, e.g., Assets)
-    ─[:ASSOCIATION_HAS_TO_ELEMENT]─▶ Element (child, e.g., CurrentAssets)
-    ─[:ASSOCIATION_HAS_CLASSIFICATION]─▶ Classification (type: "AssetsRollUp")
-```
-
-### Enriched Properties
-
-During processing, elements and structures are enriched with semantic metadata:
-
-- **`Element.canonical_concept`** — Standardized concept name (e.g., "revenue", "total_assets", "net_income"). Use this for cross-company comparisons instead of raw XBRL qnames.
-- **`Structure.canonical_type`** — Statement classification ("income_statement", "balance_sheet", "cash_flow_statement", "equity_statement", "comprehensive_income")
-- **`Classification.type`** — Disclosure mechanics label (e.g., "AssetsRollUp", "IncomeStatement", "LongTermDebtMaturities")
+The complete node and relationship reference, the traversal patterns, the enriched properties, and the four rules every number-reading query should follow are on **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)**.
 
 ## Common Tasks
 
@@ -610,11 +569,11 @@ just sec-health v
 
 ### Find Available Financial Metrics
 
-Use the `read-graph-cypher` MCP tool, or query directly:
+Use the `resolve-element` MCP tool to map a concept in plain words to the qnames filers use, or query directly:
 
 ```bash
-# Find most common us-gaap elements
-just graph-query sec "MATCH (el:Element) WHERE el.qname STARTS WITH 'us-gaap:' RETURN el.qname, el.name LIMIT 20"
+# Elements mapped to a canonical concept
+just graph-query sec "MATCH (el:Element) WHERE el.canonical_concept = 'revenue' RETURN el.qname, el.canonical_confidence LIMIT 20"
 ```
 
 Common financial metrics (XBRL qname → canonical concept):
@@ -630,12 +589,14 @@ Common financial metrics (XBRL qname → canonical concept):
 
 ### Query by Time Period
 
-```bash
-# Find all facts from a specific date
-just graph-query sec "MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period) WHERE p.instant_date = '2024-12-31' RETURN COUNT(f)"
+A `Period` is either an `instant` (a balance-sheet date, held in `end_date`) or a `duration` bucketed by `duration_type` (`quarterly`, `semi_annual`, `nine_months`, `annual`, `other`). Pin one or the other; see [rule 3](SEC-Data-Model-and-Query-Rules#the-four-rules).
 
-# Find facts for a fiscal year
-just graph-query sec "MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period) WHERE p.instant_date >= '2023-01-01' AND p.instant_date < '2025-01-01' RETURN COUNT(f)"
+```bash
+# Consolidated balance-sheet facts at one date
+just graph-query sec "MATCH (e:Entity {ticker: 'NVDA'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})-[:FACT_HAS_PERIOD]->(p:Period {period_type: 'instant'}) WHERE p.end_date = '2025-01-26' RETURN count(DISTINCT f) AS facts"
+
+# A company's annual filings for one fiscal year
+just graph-query sec "MATCH (e:Entity {ticker: 'NVDA'})-[:ENTITY_HAS_REPORT]->(r:Report) WHERE r.fiscal_year_focus = 2025 RETURN r.form, r.fiscal_period_focus, r.filing_date"
 ```
 
 ## Troubleshooting
@@ -704,6 +665,7 @@ just sec-load NVDA 2025
 - **Search SEC narratives**: [Search & AI Retrieval](Search-and-AI-Retrieval) - Full-text and semantic search over filing text
 - **XBRL taxonomy**: [Taxonomy & Frameworks](Taxonomy-and-Frameworks) - The rs-gaap and fac frameworks behind the facts
 - **Query the graph**: [Querying the Analytical Graph](Querying-the-Analytical-Graph) - Ad-hoc Cypher over the SEC graph
+- **Data model and rules**: [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules) - The node model, the four query rules, and worked queries
 - **MCP & operators**: [AI Operators & MCP](AI-Operators-and-MCP) - The MCP retrieval surface
 - **Shared repositories**: [Shared Repositories](Shared-Repositories) - SEC as the `ladybug-shared` tier: plans, subscription, and access
 
