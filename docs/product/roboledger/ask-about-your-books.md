@@ -70,3 +70,7 @@ Your graph holds documents as well as numbers. Ask your assistant to save your r
 - "What's our current ratio for each of the last twelve months?"
 - "What did we bill our five biggest customers this year, by month?"
 - "Save this as our capitalization policy."
+
+## Go deeper
+
+- [The two read planes](https://robosystems.ai/docs/technical/graphql-reads#the-two-read-planes): which questions are answered from the ledger database and which from the graph.

@@ -81,3 +81,7 @@ Something that runs on RoboLedger's own AI (AI mapping, a question in the Consol
 ## "Rate limit exceeded"
 
 Your plan allows a set number of MCP calls per minute. Ask your assistant to combine its questions into fewer calls, or wait a minute.
+
+## Go deeper
+
+- [Errors and rate limits](https://robosystems.ai/docs/technical/errors-and-rate-limits): the error codes behind these messages, and how rate limits are counted.

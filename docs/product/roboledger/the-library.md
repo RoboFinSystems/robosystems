@@ -30,3 +30,7 @@ Your AI assistant can list unmapped accounts and suggest a concept for each one.
 - "Look up the library concept for deferred revenue. Is it a balance or a flow, and where does it sit on the balance sheet?"
 - "Which concepts sit under operating expenses?"
 - "We added a contractor-costs account. Which library concept should it map to?"
+
+## Go deeper
+
+- [The three frameworks](https://robosystems.ai/docs/technical/taxonomy-and-frameworks#the-three-frameworks): what rs-gaap, fac and cm each hold, and how they relate.

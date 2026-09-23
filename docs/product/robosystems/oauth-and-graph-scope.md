@@ -54,3 +54,8 @@ Scripts, CI jobs and clients that can't open a browser connect with an API key r
 
 - "Which graph are you connected to?"
 - "What can you do on this graph?"
+
+## Go deeper
+
+- [Graph-scoped access](https://robosystems.ai/docs/technical/authentication-and-api-keys#graph-scoped-access): how every request is checked against the graph it names.
+- [Graph membership](https://robosystems.ai/docs/technical/authentication-and-api-keys#graph-membership): organization roles, graph roles, and how they combine.

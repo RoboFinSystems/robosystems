@@ -30,3 +30,7 @@ The app has no download button, but your graph holds a copy of the report files,
 - "Which reports have been shared with this graph?"
 - "Open the latest report from [company] and summarize the income statement."
 - "What changed between the last two reports we received from them?"
+
+## Go deeper
+
+- [What's inside each format](https://robosystems.ai/docs/technical/serialization-and-export#whats-inside-each-format): the contents of the report files a shared report carries.

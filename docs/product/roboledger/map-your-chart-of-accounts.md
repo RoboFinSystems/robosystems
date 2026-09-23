@@ -27,7 +27,7 @@ If the graph keeps native books instead of QuickBooks, an empty Chart of Account
 
 ![The chart of accounts with each account's reporting concept and a coverage bar reading 20 of 20](images/chart-of-accounts.png)
 
-**With your AI assistant.** It can list the accounts that aren't mapped, suggest a concept for each one, and apply the ones you agree with. Its suggestions come from matching on names and account types, not from AI inside RoboLedger, so they use no credits.
+**With your AI assistant.** It can list the accounts that aren't mapped, suggest a concept for each one, and apply the ones you agree with. RoboLedger narrows the candidates to concepts that fit where the account sits on the statements, and your assistant picks among them. No AI runs inside RoboLedger for this, so suggestions use no credits.
 
 Ask: "Which accounts aren't mapped yet? Suggest where each one belongs, and wait for me before applying anything."
 
@@ -50,3 +50,8 @@ So map first, close second. If you need to change a mapping after the fact, reop
 - "Show me every account mapped to an 'other' concept and suggest something more specific."
 - "We added three accounts in QuickBooks this month. Sync, then map them."
 - "Why is the balance sheet out of balance? Check for unmapped accounts with balances."
+
+## Go deeper
+
+- [Chart of accounts mapping](https://robosystems.ai/docs/technical/chart-of-accounts-mapping): how mappings are stored, suggested and guarded once a month is closed.
+- [The calc-DAG model](https://robosystems.ai/docs/technical/reporting-and-rendering#the-calc-dag-model): why accounts map only to detail lines, and how subtotals are derived.

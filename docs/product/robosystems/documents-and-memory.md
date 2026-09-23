@@ -1,7 +1,7 @@
 ---
 title: Documents and memory
 description: Keep policies and notes on a graph, search them, and store memories your AI assistant can recall later.
-order: 7
+order: 8
 section: In the app
 ---
 
@@ -33,3 +33,8 @@ Your assistant can also remember and recall through MCP. That uses no credits. T
 - "What close procedures do we have documented?"
 - "Remember that we treat [vendor] as a contractor, not an employee."
 - "What do you remember about how we map owner draws?"
+
+## Go deeper
+
+- [The document model](https://robosystems.ai/docs/technical/document-management#the-document-model): how documents are stored, sectioned and indexed for search.
+- [Semantic memory](https://robosystems.ai/docs/technical/search-and-ai-retrieval#semantic-memory-the-second-retrieval-plane): how memories are stored and recalled.

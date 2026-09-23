@@ -10,6 +10,7 @@ RoboSystems gives AI clients a financial knowledge graph to work on: your compan
 
 1. [Connect Claude, ChatGPT or any MCP client](connect-an-mcp-client.md): one address, a sign-in, and the setup for each client.
 2. [Sign-in and graph access](oauth-and-graph-scope.md): the consent screen, one connection per graph, switching graphs, and revoking access.
+3. [Skills and the RoboSystems plugin](skills-and-the-plugin.md): four skills that teach your assistant a close, a board pack, SEC analysis and finding its way around a graph.
 
 ## Working with graphs
 

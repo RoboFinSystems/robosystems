@@ -51,3 +51,7 @@ Someone without a RoboLedger or RoboInvestor graph can still read your report. D
 - "Create a report for September and tell me anything that looks off."
 - "What changed between the August and September reports?"
 - "We posted a late entry to September. Regenerate the September report."
+
+## Go deeper
+
+- [What's inside each format](https://robosystems.ai/docs/technical/serialization-and-export#whats-inside-each-format): the contents of the XBRL, JSON-LD, holon and Tavi downloads.

@@ -1,7 +1,7 @@
 ---
 title: Compare with public companies
 description: Put your margins, growth and ratios next to public companies. Add the SEC filings graph as a second connection beside your books and ask your AI to compare.
-order: 15
+order: 16
 section: Work with your books
 ---
 
@@ -45,3 +45,8 @@ The SEC graph covers annual and quarterly reports from more than 8,000 companies
 - "What share of revenue do they spend on sales and marketing? What do we spend?"
 - "Our days sales outstanding is 52. Where does that put us in this group?"
 - "How do those companies explain their margin changes this year?"
+
+## Go deeper
+
+- [SEC data model and query rules](https://robosystems.ai/docs/technical/sec-data-model-and-query-rules): how the SEC graph is shaped, and the rules that keep a comparison right.
+- [Worked example: build-fact-grid](https://robosystems.ai/docs/technical/roboledger-operations#worked-example-build-fact-grid): a pivot of facts across periods and companies, request and response.

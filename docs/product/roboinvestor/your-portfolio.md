@@ -35,9 +35,15 @@ You do not need the link to track a position. Use it when both sides are on Robo
 
 Connect the graph as in the [overview](index.md). Your assistant can list portfolios, positions and values, and read the reports companies have shared with you. It can also make the changes the Portfolio page doesn't: add a position to an existing security, update a position's quantity, cost or current value, dispose of a position, set a portfolio's inception date, and delete portfolios and securities. Deleting a security retires it but keeps its positions, so dispose of the position to take it off the page.
 
+Reading and updating the graph through your assistant uses no credits. The **Console** in the app runs on RoboSystems' own AI and does use credits. See [Graphs, tiers and credits](https://robosystems.ai/docs/guides/graphs-tiers-and-credits).
+
+## Try asking
+
 - "What are my largest positions by current value?"
 - "Which holdings aren't linked to a company yet?"
 - "Update the value of our [company] SAFE to $250,000 as of June 30."
 - "Show me every position in [portfolio], with cost and current value."
 
-Reading and updating the graph through your assistant uses no credits. The **Console** in the app runs on RoboSystems' own AI and does use credits. See [Graphs, tiers and credits](https://robosystems.ai/docs/guides/graphs-tiers-and-credits).
+## Go deeper
+
+- [Cross-graph issuer linking](https://robosystems.ai/docs/technical/roboinvestor-operations#cross-graph-issuer-linking): how a holding meets the reports its issuer shares.

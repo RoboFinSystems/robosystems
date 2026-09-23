@@ -1,7 +1,7 @@
 ---
 title: Explore statements and metrics over time
 description: Explorer opens any statement, disclosure, schedule, set of ratios or scenario as a series. Switch views, compute a metric, and export.
-order: 14
+order: 15
 section: Work with your books
 ---
 
@@ -37,3 +37,7 @@ Once a forecast exists, a scenario picker appears on statements and metrics. Pic
 - "Show me the income statement as a monthly series for the last year."
 - "Compute our standard ratios for each closed month and show me net profit margin."
 - "Why doesn't the balance sheet balance in June? Show me the checks."
+
+## Go deeper
+
+- [View projections](https://robosystems.ai/docs/technical/information-blocks#view-projections): the different ways one information block is laid out, and what each view is built from.
