@@ -812,6 +812,16 @@ class SubgraphService:
       logger.error(f"Failed to install base entity schema for {database_name}: {e}")
       raise
 
+  @staticmethod
+  async def _count(client: "GraphClient", database_name: str, cypher: str) -> int:
+    result = await client.query(cypher=cypher, graph_id=database_name)
+    rows = result.get("data") if isinstance(result, dict) else None
+    if not rows:
+      return 0
+    row = rows[0]
+    value = next(iter(row.values())) if isinstance(row, dict) else row[0]
+    return int(value or 0)
+
   async def _check_database_has_data(
     self,
     client: "GraphClient",
@@ -819,24 +829,21 @@ class SubgraphService:
   ) -> bool:
     """True when the database holds at least one node.
 
-    Returns False when the check itself fails, so a caller relying on this as a
-    delete guard should pair it with ``force`` semantics.
+    Fails closed: when the count can't be read, the delete is refused and the
+    caller can pass ``force``.
     """
     try:
-      result = await client.execute(
-        graph_id=database_name, query="MATCH (n) RETURN count(n) as node_count LIMIT 1"
+      node_count = await self._count(
+        client, database_name, "MATCH (n) RETURN count(n) AS node_count"
       )
-
-      if result and len(result) > 0:
-        node_count = result[0].get("node_count", 0)
-        has_data = node_count > 0
-        logger.info(f"Database {database_name} has {node_count} nodes")
-        return has_data
-
-      return False
     except Exception as e:
       logger.warning(f"Could not check data for {database_name}: {e}")
-      return False
+      raise GraphAllocationError(
+        f"Could not verify whether {database_name} contains data. "
+        "Use force=True to delete anyway."
+      ) from e
+    logger.info(f"Database {database_name} has {node_count} nodes")
+    return node_count > 0
 
   async def _get_database_stats(
     self,
@@ -845,15 +852,12 @@ class SubgraphService:
   ) -> dict[str, Any]:
     """Node/edge counts and size. Fields are None when unavailable."""
     try:
-      node_result = await client.execute(
-        graph_id=database_name, query="MATCH (n) RETURN count(n) as count"
+      node_count = await self._count(
+        client, database_name, "MATCH (n) RETURN count(n) AS count"
       )
-      node_count = node_result[0]["count"] if node_result else 0
-
-      edge_result = await client.execute(
-        graph_id=database_name, query="MATCH ()-[r]->() RETURN count(r) as count"
+      edge_count = await self._count(
+        client, database_name, "MATCH ()-[r]->() RETURN count(r) AS count"
       )
-      edge_count = edge_result[0]["count"] if edge_result else 0
 
       try:
         db_info = await client.get_database(database_name)

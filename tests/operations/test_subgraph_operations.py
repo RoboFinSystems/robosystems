@@ -25,7 +25,10 @@ class TestSubgraphOperations:
   @pytest.fixture
   async def mock_lbug_client(self):
     """Create a mock Graph API client."""
-    client = AsyncMock()
+    from robosystems.graph_api.client import GraphClient
+
+    # Spec'd, so a call to a method the real client lacks fails here too.
+    client = AsyncMock(spec=GraphClient)
 
     # Mock database operations
     client.create_database = AsyncMock(
@@ -35,9 +38,6 @@ class TestSubgraphOperations:
     client.install_schema = AsyncMock(
       return_value={"success": True, "message": "Schema installed"}
     )
-
-    # Don't set side_effect here - let individual tests set their own return values
-    client.execute = AsyncMock()
 
     client.get_database = AsyncMock(
       return_value={
@@ -92,15 +92,14 @@ class TestSubgraphOperations:
   async def test_check_database_has_data(self, subgraph_service, mock_lbug_client):
     """Test database data validation."""
     # Test empty database
-    mock_lbug_client.execute.return_value = [{"node_count": 0}]
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 0}]}
     has_data = await subgraph_service._check_database_has_data(
       mock_lbug_client, "test_db"
     )
     assert has_data is False
 
     # Reset mock and test database with data
-    mock_lbug_client.execute.reset_mock()
-    mock_lbug_client.execute.return_value = [{"node_count": 100}]
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 100}]}
     has_data = await subgraph_service._check_database_has_data(
       mock_lbug_client, "test_db"
     )
@@ -109,9 +108,9 @@ class TestSubgraphOperations:
   async def test_get_database_stats(self, subgraph_service, mock_lbug_client):
     """Test database statistics collection."""
     # Set up return values for the two queries
-    mock_lbug_client.execute.side_effect = [
-      [{"count": 100}],  # Node count query
-      [{"count": 50}],  # Edge count query
+    mock_lbug_client.query.side_effect = [
+      {"data": [{"count": 100}]},  # Node count query
+      {"data": [{"count": 50}]},  # Edge count query
     ]
 
     stats = await subgraph_service._get_database_stats(mock_lbug_client, "test_db")
@@ -147,7 +146,7 @@ class TestSubgraphOperations:
 
   async def test_stats_error_handling(self, subgraph_service, mock_lbug_client):
     """Test statistics collection error handling."""
-    mock_lbug_client.execute.side_effect = Exception("Query failed")
+    mock_lbug_client.query.side_effect = Exception("Query failed")
 
     stats = await subgraph_service._get_database_stats(mock_lbug_client, "test_db")
 

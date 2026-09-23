@@ -43,14 +43,12 @@ class TestSubgraphService:
   @pytest.fixture
   def mock_lbug_client(self):
     """Create a mock LadybugDB client."""
-    client = AsyncMock()
-    client.list_databases = AsyncMock(return_value={"databases": []})
-    client.create_database = AsyncMock()
-    client.delete_database = AsyncMock()
-    client.install_schema = AsyncMock()
-    client.execute = AsyncMock()
-    client.get_database = AsyncMock()
-    client.backup = AsyncMock()
+    from robosystems.graph_api.client import GraphClient
+
+    # Spec'd, so a call to a method the real client lacks fails here too.
+    client = AsyncMock(spec=GraphClient)
+    client.list_databases.return_value = {"databases": []}
+    client.query.return_value = {"data": [{"node_count": 0}]}
     return client
 
   @pytest.fixture
@@ -319,7 +317,7 @@ class TestSubgraphService:
     mock_lbug_client.list_databases.return_value = {
       "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
     }
-    mock_lbug_client.execute.return_value = [{"node_count": 0}]  # No data
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 0}]}  # No data
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
@@ -374,7 +372,7 @@ class TestSubgraphService:
     mock_lbug_client.list_databases.return_value = {
       "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
     }
-    mock_lbug_client.execute.return_value = [{"node_count": 100}]  # Has data
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 100}]}  # Has data
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
@@ -401,7 +399,7 @@ class TestSubgraphService:
     mock_lbug_client.list_databases.return_value = {
       "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
     }
-    mock_lbug_client.execute.return_value = [{"node_count": 100}]  # Has data
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 100}]}  # Has data
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
@@ -448,7 +446,7 @@ class TestSubgraphService:
     mock_lbug_client.list_databases.return_value = {
       "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
     }
-    mock_lbug_client.execute.return_value = [{"node_count": 100}]
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 100}]}
 
     calls: list[str] = []
     metadata = self._backup_metadata()
@@ -514,7 +512,7 @@ class TestSubgraphService:
     mock_lbug_client.list_databases.return_value = {
       "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
     }
-    mock_lbug_client.execute.return_value = [{"node_count": 100}]
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 100}]}
 
     manager = Mock()
     manager.create_backup = AsyncMock(side_effect=RuntimeError("s3 is down"))
@@ -550,7 +548,7 @@ class TestSubgraphService:
     mock_lbug_client.list_databases.return_value = {
       "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
     }
-    mock_lbug_client.execute.return_value = [{"node_count": 0}]
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 0}]}
 
     with (
       patch(
@@ -587,7 +585,7 @@ class TestSubgraphService:
     mock_lbug_client.list_databases.return_value = {
       "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
     }
-    mock_lbug_client.execute.return_value = [{"node_count": 0}]
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 0}]}
 
     mock_os_client = Mock()
     with (
@@ -626,7 +624,7 @@ class TestSubgraphService:
     mock_lbug_client.list_databases.return_value = {
       "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
     }
-    mock_lbug_client.execute.return_value = [{"node_count": 0}]
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 0}]}
 
     with (
       patch(
@@ -656,7 +654,7 @@ class TestSubgraphService:
     mock_lbug_client.list_databases.return_value = {
       "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
     }
-    mock_lbug_client.execute.return_value = [{"node_count": 0}]
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 0}]}
 
     with (
       patch(
@@ -752,9 +750,9 @@ class TestSubgraphService:
     mock_lbug_client.list_databases.return_value = {
       "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
     }
-    mock_lbug_client.execute.side_effect = [
-      [{"count": 100}],  # Node count
-      [{"count": 50}],  # Edge count
+    mock_lbug_client.query.side_effect = [
+      {"data": [{"count": 100}]},  # Node count
+      {"data": [{"count": 50}]},  # Edge count
     ]
     mock_lbug_client.get_database.return_value = {
       "size_mb": 10.5,
@@ -831,18 +829,28 @@ class TestSubgraphService:
   @pytest.mark.asyncio
   async def test_private_check_database_has_data(self, service, mock_lbug_client):
     """Test private method _check_database_has_data."""
-    mock_lbug_client.execute.return_value = [{"node_count": 50}]
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 50}]}
 
     result = await service._check_database_has_data(mock_lbug_client, "test_db")
 
     assert result is True
 
     # Test with no data
-    mock_lbug_client.execute.return_value = [{"node_count": 0}]
+    mock_lbug_client.query.return_value = {"data": [{"node_count": 0}]}
 
     result = await service._check_database_has_data(mock_lbug_client, "test_db")
 
     assert result is False
+
+  @pytest.mark.asyncio
+  async def test_private_check_database_has_data_fails_closed(
+    self, service, mock_lbug_client
+  ):
+    """A count that can't be read refuses the delete rather than allowing it."""
+    mock_lbug_client.query.side_effect = Exception("instance unreachable")
+
+    with pytest.raises(GraphAllocationError, match="force=True"):
+      await service._check_database_has_data(mock_lbug_client, "test_db")
 
   # NOTE: test_private_create_backup and test_private_create_backup_not_implemented
   # removed - _create_backup method was removed from subgraph_service.py as part
@@ -851,9 +859,9 @@ class TestSubgraphService:
   @pytest.mark.asyncio
   async def test_private_get_database_stats(self, service, mock_lbug_client):
     """Test private method _get_database_stats."""
-    mock_lbug_client.execute.side_effect = [
-      [{"count": 100}],  # Node count
-      [{"count": 50}],  # Edge count
+    mock_lbug_client.query.side_effect = [
+      {"data": [{"count": 100}]},  # Node count
+      {"data": [{"count": 50}]},  # Edge count
     ]
     mock_lbug_client.get_database.return_value = {
       "size_mb": 25.5,
@@ -870,7 +878,7 @@ class TestSubgraphService:
   @pytest.mark.asyncio
   async def test_private_get_database_stats_error(self, service, mock_lbug_client):
     """Test stats retrieval with errors."""
-    mock_lbug_client.execute.side_effect = Exception("Query failed")
+    mock_lbug_client.query.side_effect = Exception("Query failed")
 
     result = await service._get_database_stats(mock_lbug_client, "test_db")
 
@@ -911,13 +919,9 @@ class TestSubgraphServiceIntegration:
     mock_location.instance_id = "i-test123"
     mock_location.private_ip = "10.0.1.100"
 
-    mock_client = AsyncMock()
-    mock_client.list_databases = AsyncMock()
-    mock_client.create_database = AsyncMock()
-    mock_client.install_schema = AsyncMock()
-    mock_client.execute = AsyncMock()
-    mock_client.get_database = AsyncMock()
-    mock_client.delete_database = AsyncMock()
+    from robosystems.graph_api.client import GraphClient
+
+    mock_client = AsyncMock(spec=GraphClient)
 
     # Set up mock returns for lifecycle - need more calls now due to tier limit enforcement
     mock_client.list_databases.side_effect = [
@@ -931,7 +935,7 @@ class TestSubgraphServiceIntegration:
       },  # Get info check - exists
       {"databases": [{"graph_id": f"{parent_graph_id}_test"}]},  # Delete check - exists
     ]
-    mock_client.execute.return_value = [{"node_count": 0}]
+    mock_client.query.return_value = {"data": [{"node_count": 0}]}
 
     with patch.object(
       service.allocation_manager, "find_database_location"
