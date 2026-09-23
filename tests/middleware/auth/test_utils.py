@@ -32,6 +32,7 @@ class TestValidateAPIKey:
         "name": "Test User",
         "email": "test@example.com",
         "email_verified": True,
+        "key_expires_at": None,
         "is_active": True,
       },
     }
@@ -120,6 +121,7 @@ class TestValidateAPIKey:
         "name": "Test User",
         "email": "test@example.com",
         "email_verified": True,
+        "key_expires_at": None,
         "is_active": False,  # but the owning user is deactivated
       },
     }
@@ -442,6 +444,7 @@ class TestGraphScopedKeys:
         "name": "Test User",
         "email": "test@example.com",
         "email_verified": True,
+        "key_expires_at": None,
         "is_active": True,
         "key_graph_id": "kg123",
       },
@@ -540,6 +543,7 @@ class TestGraphScopedKeys:
         "name": "Test User",
         "email": "test@example.com",
         "email_verified": True,
+        "key_expires_at": None,
         "is_active": True,
         "key_graph_id": "kg123",
       },
@@ -564,6 +568,7 @@ class TestGraphScopedKeys:
         "name": "Test User",
         "email": "test@example.com",
         "email_verified": True,
+        "key_expires_at": None,
         "is_active": True,
         "key_graph_id": "kg123",
       },
@@ -571,4 +576,62 @@ class TestGraphScopedKeys:
     mock_cache.get_cached_graph_access.return_value = True
 
     assert validate_api_key_with_graph("rfsc" + "a" * 64, "kg999") is None
+    mock_api_key_class.get_by_key.assert_not_called()
+
+
+def _cached_payload(key_expires_at, key_graph_id=None):
+  return {
+    "is_active": True,
+    "user_data": {
+      "id": "user123",
+      "name": "Test User",
+      "email": "test@example.com",
+      "email_verified": True,
+      "is_active": True,
+      "key_graph_id": key_graph_id,
+      "key_expires_at": key_expires_at,
+    },
+  }
+
+
+class TestCacheHitExpiry:
+  """A cached key stops authenticating at its expiry, not at the cache TTL."""
+
+  @patch("robosystems.middleware.auth.utils.api_key_cache")
+  @patch("robosystems.middleware.auth.utils.UserAPIKey")
+  def test_expired_key_rejected_on_cache_hit(self, mock_api_key_class, mock_cache):
+    from datetime import UTC, datetime, timedelta
+
+    past = (datetime.now(UTC) - timedelta(seconds=5)).isoformat()
+    mock_cache.get_cached_api_key_validation.return_value = _cached_payload(past)
+
+    assert validate_api_key(_VALID_TEST_KEY) is None
+    mock_api_key_class.get_by_key.assert_not_called()
+
+  @patch("robosystems.middleware.auth.utils.api_key_cache")
+  @patch("robosystems.middleware.auth.utils.UserAPIKey")
+  def test_expired_scoped_key_rejected_on_cache_hit(
+    self, mock_api_key_class, mock_cache
+  ):
+    from datetime import UTC, datetime, timedelta
+
+    # A naive timestamp, as the column stores it, is read as UTC.
+    past = (datetime.now(UTC) - timedelta(seconds=5)).replace(tzinfo=None).isoformat()
+    mock_cache.get_cached_api_key_validation.return_value = _cached_payload(
+      past, key_graph_id="kg123"
+    )
+    mock_cache.get_cached_graph_access.return_value = True
+
+    assert validate_api_key_with_graph("rfsc" + "a" * 64, "kg123") is None
+    mock_api_key_class.get_by_key.assert_not_called()
+
+  @patch("robosystems.middleware.auth.utils.api_key_cache")
+  @patch("robosystems.middleware.auth.utils.UserAPIKey")
+  def test_unexpired_key_accepted_on_cache_hit(self, mock_api_key_class, mock_cache):
+    from datetime import UTC, datetime, timedelta
+
+    future = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    mock_cache.get_cached_api_key_validation.return_value = _cached_payload(future)
+
+    assert validate_api_key(_VALID_TEST_KEY) is not None
     mock_api_key_class.get_by_key.assert_not_called()
