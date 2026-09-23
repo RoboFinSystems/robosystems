@@ -37,17 +37,16 @@ def test_write_operation_detection():
 @pytest.mark.asyncio
 async def test_fork_parent_data():
   """Test the fork_parent_data method."""
-  from robosystems.config import env
   from robosystems.operations.graph.subgraph_service import SubgraphService
 
   service = SubgraphService()
 
-  # Patch the GraphClient where it's imported in the fork_parent_data function
   with (
     patch("robosystems.graph_api.client.GraphClient") as mock_client_class,
-    patch.object(type(env), "is_development", return_value=True),
+    patch("robosystems.operations.graph.subgraph_service.env") as mock_env,
   ):
-    # Setup the mock client instance
+    mock_env.is_development.return_value = True
+    mock_env.GRAPH_API_URL = "http://localhost:8001"
     mock_client = AsyncMock()
     mock_client_class.return_value = mock_client
     mock_client.fork_from_parent.return_value = {
@@ -56,33 +55,24 @@ async def test_fork_parent_data():
       "total_rows": 1000,
     }
 
-    # Save original env value and set to local mode for simpler testing
-    original_url = env.GRAPH_API_URL
-    env.GRAPH_API_URL = "http://localhost:8001"
+    result = await service.fork_parent_data(
+      parent_graph_id="kg1234567890abcdef",
+      subgraph_id="kg1234567890abcdef_dev",
+      options={"tables": ["Element", "Transaction"], "exclude_patterns": ["Report*"]},
+    )
 
-    try:
-      # Test fork
-      result = await service.fork_parent_data(
-        parent_graph_id="kg1234567890abcdef",
-        subgraph_id="kg1234567890abcdef_dev",
-        options={"tables": ["Element", "Transaction"], "exclude_patterns": ["Report*"]},
-      )
+    assert result["status"] == "success"
+    assert result["row_count"] == 1000
+    assert len(result["tables_copied"]) == 2
+    assert result["parent_graph_id"] == "kg1234567890abcdef"
+    assert result["subgraph_id"] == "kg1234567890abcdef_dev"
 
-      assert result["status"] == "success"
-      assert result["row_count"] == 1000
-      assert len(result["tables_copied"]) == 2
-      assert result["parent_graph_id"] == "kg1234567890abcdef"
-      assert result["subgraph_id"] == "kg1234567890abcdef_dev"
-
-      # Verify fork_from_parent was called with correct parameters
-      mock_client.fork_from_parent.assert_called_once()
-      call_args = mock_client.fork_from_parent.call_args
-      assert call_args[1]["parent_graph_id"] == "kg1234567890abcdef"
-      assert call_args[1]["subgraph_id"] == "kg1234567890abcdef_dev"
-      assert call_args[1]["tables"] == ["Element", "Transaction"]
-    finally:
-      # Restore original env
-      env.GRAPH_API_URL = original_url
+    mock_client_class.assert_called_once_with(base_url="http://localhost:8001")
+    mock_client.fork_from_parent.assert_called_once()
+    call_args = mock_client.fork_from_parent.call_args
+    assert call_args[1]["parent_graph_id"] == "kg1234567890abcdef"
+    assert call_args[1]["subgraph_id"] == "kg1234567890abcdef_dev"
+    assert call_args[1]["tables"] == ["Element", "Transaction"]
 
 
 @pytest.mark.asyncio

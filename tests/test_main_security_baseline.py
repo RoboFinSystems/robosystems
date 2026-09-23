@@ -98,7 +98,7 @@ class TestResponseHeaderBaseline:
     assert "strict-transport-security" not in response.headers
 
   def test_hsts_emitted_outside_development(self, client, monkeypatch):
-    monkeypatch.setattr(env, "ENVIRONMENT", "prod", raising=False)
+    monkeypatch.setattr(type(env), "ENVIRONMENT", "prod")
     response = client.get("/", follow_redirects=False)
     assert response.headers["strict-transport-security"] == (
       "max-age=31536000; includeSubDomains"
@@ -113,7 +113,7 @@ class TestResponseHeaderBaseline:
     the playground's policy carries exactly the directives the external
     assessment flagged and would read as an unremediated finding.
     """
-    monkeypatch.setattr(env, "is_development", lambda: False)
+    monkeypatch.setattr(type(env), "is_development", classmethod(lambda cls: False))
     response = client.get("/extensions/kg0123456789abcdef0000/graphql")
     csp = response.headers["content-security-policy"]
     assert "'unsafe-inline'" not in csp
@@ -123,7 +123,7 @@ class TestResponseHeaderBaseline:
 
   def test_graphql_path_relaxed_in_development(self, client, monkeypatch):
     """The playground keeps its CDN policy where it is actually served."""
-    monkeypatch.setattr(env, "is_development", lambda: True)
+    monkeypatch.setattr(type(env), "is_development", classmethod(lambda cls: True))
     response = client.get("/extensions/kg0123456789abcdef0000/graphql")
     csp = response.headers["content-security-policy"]
     assert "'unsafe-eval'" in csp
