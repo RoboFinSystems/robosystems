@@ -16,7 +16,7 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   FiscalPeriodSummary,
   PendingObligationDetailResponse,
 )
-from robosystems.models.core.connection.connection import Connection
+from robosystems.models.core.connection.connection import Connection, ConnectionStatus
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 
@@ -47,13 +47,21 @@ def qb_sync_state(platform_db: Session, graph_id: str) -> tuple[bool, datetime |
     timestamp against period_end
 
   A graph can have multiple QB connection rows (disconnected/old/new).
-  Prefer a currently-connected one; fall back to the most recently
+  Disconnected and severed rows no longer feed the ledger, so they don't
+  count. Prefer a currently-connected one; fall back to the most recently
   updated. `.first()` (not `.one_or_none()`) avoids a `MultipleResultsFound`
   crash.
   """
   connection = (
     platform_db.query(Connection)
-    .filter(Connection.graph_id == graph_id, Connection.provider == "quickbooks")
+    .filter(
+      Connection.graph_id == graph_id,
+      Connection.provider == "quickbooks",
+      Connection.deleted_at.is_(None),
+      Connection.status.notin_(
+        [ConnectionStatus.DISCONNECTED.value, ConnectionStatus.SEVERED.value]
+      ),
+    )
     .order_by(
       (Connection.status == "connected").desc(),
       Connection.updated_at.desc(),
