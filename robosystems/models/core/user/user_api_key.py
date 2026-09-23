@@ -173,7 +173,7 @@ class UserAPIKey(Model):
           if not api_key.key_fingerprint:
             api_key.key_fingerprint = cls._fingerprint_api_key(plain_key)
 
-          if api_key.expires_at and datetime.now(UTC) > api_key.expires_at:
+          if api_key.is_expired():
             logger.warning(f"API key {api_key.id} is expired")
             SecurityAuditLogger.log_security_event(
               event_type=SecurityEventType.AUTHORIZATION_DENIED,
@@ -225,6 +225,15 @@ class UserAPIKey(Model):
     )
 
     return None
+
+  def is_expired(self, now: datetime | None = None) -> bool:
+    """Whether the key is past its expiry. The column is naive UTC."""
+    if self.expires_at is None:
+      return False
+    expires_at = self.expires_at
+    if expires_at.tzinfo is None:
+      expires_at = expires_at.replace(tzinfo=UTC)
+    return (now or datetime.now(UTC)) > expires_at
 
   @classmethod
   def get_by_hash(cls, key_hash: str, session: Session) -> Optional["UserAPIKey"]:

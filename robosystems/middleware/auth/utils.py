@@ -2,6 +2,7 @@
 
 import hashlib
 import re
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -52,6 +53,9 @@ def _serialize_user_for_api_key_cache(user: User, key_record: UserAPIKey) -> dic
     "email_verified": bool(user.email_verified),
     "is_active": user.is_active,
     "key_graph_id": key_record.graph_id,
+    "key_expires_at": key_record.expires_at.isoformat()
+    if key_record.expires_at
+    else None,
   }
 
 
@@ -64,7 +68,23 @@ def _cached_user_payload_is_complete(user_data: dict) -> bool:
   False for a verified user, silently downgrading an authorization input rather
   than failing loudly. The fallback costs one DB read per stale entry, once.
   """
-  return bool(user_data.get("id")) and "email_verified" in user_data
+  return (
+    bool(user_data.get("id"))
+    and "email_verified" in user_data
+    and "key_expires_at" in user_data
+  )
+
+
+def _cached_key_expired(user_data: dict) -> bool:
+  """Whether a cached key has passed its expiry (the cache outlives it by up to
+  its TTL otherwise)."""
+  raw = user_data.get("key_expires_at")
+  if not raw:
+    return False
+  expires_at = datetime.fromisoformat(raw)
+  if expires_at.tzinfo is None:
+    expires_at = expires_at.replace(tzinfo=UTC)
+  return datetime.now(UTC) > expires_at
 
 
 def _hydrate_user_from_cache(user: User, user_data: dict) -> None:
@@ -117,6 +137,10 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
     user_data = cached_data.get("user_data", {})
     if user_data and _cached_user_payload_is_complete(user_data):
       logger.debug(f"API key validation cache hit: {cache_key[:8]}...")
+
+      if _cached_key_expired(user_data):
+        logger.debug(f"API key rejected: expired: {cache_key[:8]}...")
+        return None
 
       # Graph-scoped keys are never valid without a graph context (least
       # privilege: a connector credential cannot reach account-level surfaces).
@@ -250,6 +274,10 @@ def validate_api_key_with_graph(
       logger.debug(
         f"API key + graph validation cache hit: {api_key_hash[:8]}... -> {graph_id}"
       )
+
+      if _cached_key_expired(user_data):
+        logger.debug(f"API key rejected: expired: {api_key_hash[:8]}...")
+        return None
 
       # Key-level scope restrictions (checked on top of the cached user-level
       # graph access, which is shared across carriage paths).

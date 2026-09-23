@@ -1,5 +1,6 @@
 """Comprehensive tests for the UserAPIKey model."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import bcrypt
@@ -219,6 +220,33 @@ class TestUserAPIKeyModel:
     assert any(
       call[1]["details"]["action"] == "api_key_verification_success" for call in calls
     )
+
+  @pytest.mark.parametrize(
+    ("offset", "authenticates"),
+    [(timedelta(days=30), True), (timedelta(days=-1), False)],
+  )
+  @patch("robosystems.models.core.user.user_api_key.SecurityAuditLogger")
+  def test_get_by_key_honours_expiry(
+    self, mock_audit_logger, db_session, offset, authenticates
+  ):
+    """The column reads back naive; a key with an expiry must still compare
+    against it rather than fail on naive-vs-aware."""
+    user = User.create(
+      email=f"expiry{offset.days}@example.com",
+      name="Expiry User",
+      password_hash="hashed_password",
+      session=db_session,
+    )
+    _, plain_key = UserAPIKey.create(
+      user_id=user.id,
+      name="Expiring",
+      expires_at=datetime.now(UTC) + offset,
+      session=db_session,
+    )
+    db_session.expire_all()
+
+    found = UserAPIKey.get_by_key(plain_key, db_session)
+    assert (found is not None) is authenticates
 
   @patch("robosystems.models.core.user.user_api_key.SecurityAuditLogger")
   def test_get_by_key_wrong_key(self, mock_audit_logger, db_session):

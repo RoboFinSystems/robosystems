@@ -133,6 +133,8 @@ async def create_api_key(
     if request.expires_at:
       try:
         expires_at = datetime.fromisoformat(request.expires_at.replace("Z", "+00:00"))
+        if expires_at.tzinfo is None:
+          expires_at = expires_at.replace(tzinfo=UTC)
         if expires_at <= datetime.now(UTC):
           raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
