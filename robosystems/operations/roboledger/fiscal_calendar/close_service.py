@@ -289,6 +289,12 @@ class PeriodCloseService:
     if not gate.is_closeable:
       raise CloseGateFailed(gate)
 
+    # Only a QuickBooks sync seeds rows past the setup month, so a native or
+    # bank-feed ledger reaches its next closeable period with no row for it.
+    self._fcs.ensure_fiscal_periods(
+      session, graph_id, start_period=period, end_period=period
+    )
+
     period_start, period_end = period_date_range(period)
 
     # 2. Pre-flight BS balance check. Run against draft + posted together
