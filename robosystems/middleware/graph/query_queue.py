@@ -50,6 +50,7 @@ class QueuedQuery:
   status: QueryStatus = QueryStatus.PENDING
   result: Any | None = None
   error: str | None = None
+  operation_id: str | None = None
 
   @property
   def wait_time_seconds(self) -> float:
@@ -127,8 +128,13 @@ class QueryQueueManager:
     user_id: str,
     credits_required: float = 0,
     priority: int = 5,
+    operation_id: str | None = None,
   ) -> str:
-    """Submit a query to the queue."""
+    """Submit a query to the queue.
+
+    With ``operation_id``, the query's outcome is published to that SSE
+    operation when it finishes.
+    """
     await self._ensure_started()
 
     admission_controller = get_admission_controller()
@@ -203,6 +209,7 @@ class QueryQueueManager:
       user_id=user_id,
       credits_reserved=credits_required,
       priority=priority,
+      operation_id=operation_id,
     )
 
     self._queries[query_id] = query
@@ -322,6 +329,7 @@ class QueryQueueManager:
     self._user_query_counts[user_id] = max(0, self._user_query_counts[user_id] - 1)
 
     logger.info(f"Query {query_id} cancelled by user {user_id}")
+    await self._publish_outcome(query)
     return True
 
   def set_query_executor(self, executor: Callable):
@@ -385,6 +393,7 @@ class QueryQueueManager:
   async def _execute_query(self, query: QueuedQuery):
     """Execute a query with timeout and error handling."""
     try:
+      await self._publish_start(query)
       if not self._query_executor:
         raise Exception("Query executor not configured")
 
@@ -460,6 +469,38 @@ class QueryQueueManager:
 
       # Remove from main storage after a delay
       asyncio.create_task(self._cleanup_query(query.id))
+
+    await self._publish_outcome(query)
+
+  async def _publish_start(self, query: QueuedQuery):
+    if not query.operation_id:
+      return
+    from robosystems.middleware.sse.operation_manager import get_operation_manager
+
+    try:
+      await get_operation_manager().mark_running(
+        query.operation_id, "Query execution started"
+      )
+    except Exception as e:
+      logger.warning(f"Could not publish start of query {query.id}: {e}")
+
+  async def _publish_outcome(self, query: QueuedQuery):
+    if not query.operation_id:
+      return
+    from robosystems.middleware.sse.operation_manager import get_operation_manager
+
+    manager = get_operation_manager()
+    try:
+      if query.status == QueryStatus.COMPLETED:
+        await manager.complete_operation(
+          query.operation_id, result=query.result, message="Query completed"
+        )
+      elif query.status == QueryStatus.CANCELLED:
+        await manager.cancel_operation(query.operation_id)
+      else:
+        await manager.fail_operation(query.operation_id, query.error or "Query failed")
+    except Exception as e:
+      logger.warning(f"Could not publish outcome of query {query.id}: {e}")
 
   async def _cleanup_query(self, query_id: str, delay: int = 300):
     """Remove query from main storage after delay."""

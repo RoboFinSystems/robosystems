@@ -325,7 +325,6 @@ class TestStreamSseWithQueue:
   async def test_returns_event_source_response(self):
     """Test that stream_sse_with_queue returns EventSourceResponse."""
     request = _make_mock_request()
-    repo = AsyncMock()
 
     mock_queue = AsyncMock()
     mock_queue.submit_query = AsyncMock(return_value="query-001")
@@ -341,7 +340,6 @@ class TestStreamSseWithQueue:
       response = await stream_sse_with_queue(
         request,
         "kg01234567890abcdef",
-        repo,
         _make_mock_user(),
       )
 
@@ -352,7 +350,6 @@ class TestStreamSseWithQueue:
   async def test_queue_headers(self):
     """Test SSE queue response has correct headers."""
     request = _make_mock_request()
-    repo = AsyncMock()
 
     mock_queue = AsyncMock()
     mock_queue.submit_query = AsyncMock(return_value="query-001")
@@ -365,9 +362,79 @@ class TestStreamSseWithQueue:
       response = await stream_sse_with_queue(
         request,
         "kg01234567890abcdef",
-        repo,
         _make_mock_user(),
         priority=3,
       )
 
     assert response.headers.get("X-Graph-ID") == "kg01234567890abcdef"
+
+
+def _queue_manager(statuses, result=None):
+  from robosystems.middleware.graph.query_queue import QueryQueueManager
+
+  manager = Mock(spec=QueryQueueManager)
+  manager.submit_query = AsyncMock(return_value="q_abc")
+  manager.get_query_status = AsyncMock(side_effect=statuses)
+  manager.get_query_result = AsyncMock(return_value=result)
+  return manager
+
+
+async def _drain(response):
+  return [
+    (event["event"], json.loads(event["data"]))
+    async for event in response.body_iterator
+  ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestQueueStreamLifecycle:
+  async def test_streams_worker_result_without_rerunning(self):
+    from robosystems.middleware.graph.query_queue import QueryStatus
+
+    manager = _queue_manager(
+      [
+        {"status": QueryStatus.PENDING, "queue_position": 1},
+        {"status": QueryStatus.RUNNING},
+        {"status": QueryStatus.RUNNING},
+        {"status": QueryStatus.COMPLETED},
+      ],
+      result={"status": "completed", "data": {"data": [{"a": 1}, {"a": 2}, {"a": 3}]}},
+    )
+    with (
+      patch(
+        "robosystems.routers.graphs.query.streaming.get_query_queue",
+        return_value=manager,
+      ),
+      patch("robosystems.routers.graphs.query.streaming.asyncio.sleep", AsyncMock()),
+    ):
+      response = await stream_sse_with_queue(
+        _make_mock_request(), "kg01234567890abcdef", _make_mock_user(), chunk_size=2
+      )
+      events = await _drain(response)
+
+    names = [name for name, _ in events]
+    assert names == ["queued", "started", "chunk", "chunk", "complete"]
+    assert events[-1][1]["total_rows"] == 3
+    assert [row for _, data in events[2:4] for row in data["rows"]] == [
+      {"a": 1},
+      {"a": 2},
+      {"a": 3},
+    ]
+
+  async def test_lost_query_state_ends_stream_with_error(self):
+    manager = _queue_manager([{"status": "pending", "queue_position": 0}, None])
+    with (
+      patch(
+        "robosystems.routers.graphs.query.streaming.get_query_queue",
+        return_value=manager,
+      ),
+      patch("robosystems.routers.graphs.query.streaming.asyncio.sleep", AsyncMock()),
+    ):
+      response = await stream_sse_with_queue(
+        _make_mock_request(), "kg01234567890abcdef", _make_mock_user()
+      )
+      events = await _drain(response)
+
+    assert [name for name, _ in events] == ["queued", "error"]
+    assert "lost" in events[-1][1]["error"]

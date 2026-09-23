@@ -772,3 +772,85 @@ class TestGetQueryQueue:
     assert queue.max_concurrent_queries == 20
     assert queue.max_queries_per_user == 10
     assert queue.query_timeout == 120
+
+
+@pytest.mark.asyncio
+class TestOperationPublishing:
+  """A query submitted with an operation_id reports its outcome there."""
+
+  @pytest.fixture
+  def queue_manager(self):
+    return QueryQueueManager(query_timeout=60)
+
+  @pytest.fixture
+  def op_manager(self):
+    from unittest.mock import AsyncMock
+
+    manager = Mock()
+    manager.mark_running = AsyncMock()
+    manager.complete_operation = AsyncMock()
+    manager.fail_operation = AsyncMock()
+    manager.cancel_operation = AsyncMock()
+    with (
+      patch(
+        "robosystems.middleware.sse.operation_manager.get_operation_manager",
+        return_value=manager,
+      ),
+      patch("robosystems.middleware.graph.query_queue.record_query_queue_metrics"),
+    ):
+      yield manager
+
+  def _query(self, operation_id="op_01ABC"):
+    query = QueuedQuery(
+      id="q_1",
+      cypher="MATCH (n) RETURN n",
+      parameters=None,
+      graph_id="kg1",
+      user_id="user_123",
+      credits_reserved=0,
+      operation_id=operation_id,
+    )
+    query.started_at = datetime.now(UTC)
+    return query
+
+  async def test_completed_result_published(self, queue_manager, op_manager):
+    async def executor(cypher, params, graph_id):
+      return {"data": [{"n": 1}], "row_count": 1}
+
+    queue_manager._query_executor = executor
+    await queue_manager._execute_query(self._query())
+
+    op_manager.mark_running.assert_awaited_once()
+    op_manager.complete_operation.assert_awaited_once()
+    args, kwargs = op_manager.complete_operation.call_args
+    assert args[0] == "op_01ABC"
+    assert kwargs["result"] == {"data": [{"n": 1}], "row_count": 1}
+    op_manager.fail_operation.assert_not_awaited()
+
+  async def test_failure_published(self, queue_manager, op_manager):
+    async def executor(cypher, params, graph_id):
+      raise ValueError("Invalid query")
+
+    queue_manager._query_executor = executor
+    await queue_manager._execute_query(self._query())
+
+    op_manager.fail_operation.assert_awaited_once_with("op_01ABC", "Invalid query")
+    op_manager.complete_operation.assert_not_awaited()
+
+  async def test_cancel_published(self, queue_manager, op_manager):
+    query = self._query()
+    queue_manager._queries[query.id] = query
+    queue_manager._user_query_counts["user_123"] = 1
+
+    assert await queue_manager.cancel_query(query.id, "user_123")
+    op_manager.cancel_operation.assert_awaited_once_with("op_01ABC")
+
+  async def test_no_operation_publishes_nothing(self, queue_manager, op_manager):
+    async def executor(cypher, params, graph_id):
+      return {"data": []}
+
+    queue_manager._query_executor = executor
+    await queue_manager._execute_query(self._query(operation_id=None))
+
+    op_manager.mark_running.assert_not_awaited()
+    op_manager.complete_operation.assert_not_awaited()

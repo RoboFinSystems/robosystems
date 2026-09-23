@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import HTTPException
 
+from robosystems.middleware.graph.query_queue import QueryStatus
 from robosystems.routers.graphs.mcp import remote
 from robosystems.routers.graphs.mcp.handlers import tool_error_result
 from robosystems.routers.graphs.mcp.remote import (
@@ -624,9 +625,9 @@ class TestStreamQueuedCall:
   async def test_completed_query_streams_progress_then_result(self):
     manager = _make_queue_manager(
       [
-        {"status": "pending", "queue_position": 3},
-        {"status": "running"},
-        {"status": "completed"},
+        {"status": QueryStatus.PENDING, "queue_position": 3},
+        {"status": QueryStatus.RUNNING},
+        {"status": QueryStatus.COMPLETED},
       ]
     )
     with (
@@ -658,7 +659,9 @@ class TestStreamQueuedCall:
     manager.cancel_query.assert_not_awaited()
 
   async def test_failed_query_is_tool_error(self):
-    manager = _make_queue_manager([{"status": "failed", "error": "syntax error"}])
+    manager = _make_queue_manager(
+      [{"status": QueryStatus.FAILED, "error": "syntax error"}]
+    )
     with (
       patch.object(remote, "circuit_breaker", Mock()),
       patch.object(remote, "_get_user_priority", Mock(return_value=5)),
@@ -684,7 +687,7 @@ class TestStreamQueuedCall:
     runs the raw statement, so the same read-only guard the tool applies on
     the direct path must refuse a write here — before anything is enqueued,
     with the reason surfaced to the model and no breaker hit."""
-    manager = _make_queue_manager([{"status": "completed"}])
+    manager = _make_queue_manager([{"status": QueryStatus.COMPLETED}])
     tool_call = _make_tool_call()
     tool_call.arguments = {"query": "MATCH (n) DETACH DELETE n", "parameters": {}}
     breaker = Mock()
@@ -714,7 +717,11 @@ class TestStreamQueuedCall:
 
   async def test_disconnect_cancels_queued_query(self):
     manager = _make_queue_manager(
-      [{"status": "pending", "queue_position": 1}, {"status": "pending"}] * 50
+      [
+        {"status": QueryStatus.PENDING, "queue_position": 1},
+        {"status": QueryStatus.PENDING},
+      ]
+      * 50
     )
     with (
       patch.object(remote, "circuit_breaker", Mock()),
