@@ -57,7 +57,13 @@ class ScheduleMetadataRequest(BaseModel):
     ),
   )
   original_amount: int = Field(0, description="Cost basis in cents")
-  residual_value: int = Field(0, description="Salvage value in cents")
+  residual_value: int = Field(
+    0,
+    description=(
+      "Salvage value in cents. The schedule expenses `original_amount` less "
+      "this; net book value ends at it."
+    ),
+  )
   useful_life_months: int = Field(0, description="Useful life in months")
   asset_element_id: str | None = Field(
     None, description="BS asset element for net book value"
@@ -71,9 +77,9 @@ class ScheduleMetadataRequest(BaseModel):
       "amortization, day-count interest accrual, variable lease "
       "payments, pre-computed effective-yield curves, etc.). Length must "
       "match the number of monthly periods between `period_start` and "
-      "`period_end`; sum must equal `original_amount` exactly. The "
-      "auto-generated SumEquals rule proves Σ = original regardless of "
-      "the curve shape."
+      "`period_end`; sum must equal `original_amount` less "
+      "`residual_value` exactly. The auto-generated SumEquals rule proves "
+      "that total regardless of the curve shape."
     ),
   )
 

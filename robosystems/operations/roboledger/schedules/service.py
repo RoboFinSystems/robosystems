@@ -477,6 +477,19 @@ class ScheduleService:
     # accumulate rather than emit a garbage curve.
     credit_draws_down = credit_draws_down and original_dollars is not None
 
+    # The schedule expenses cost less residual (salvage) value; the carrying
+    # balances still run from cost, so they end at the residual.
+    residual_cents = schedule_metadata.residual_value if schedule_metadata else 0
+    if residual_cents and not (schedule_metadata and schedule_metadata.original_amount):
+      raise ValueError("residual_value requires original_amount (the cost basis).")
+    depreciable_dollars: float | None = None
+    if original_dollars is not None:
+      if residual_cents < 0 or residual_cents >= round(original_dollars * 100):
+        raise ValueError(
+          "residual_value must be at least 0 and less than original_amount."
+        )
+      depreciable_dollars = round(original_dollars - residual_cents / 100.0, 2)
+
     # Custom amortization curve: caller supplies one integer (cents) per
     # period, pre-balanced. The generator uses the explicit values
     # instead of the straight-line formula. Use cases: day-count
@@ -485,7 +498,7 @@ class ScheduleService:
     #
     # Invariants (enforced here so the downstream loop stays simple):
     #   - len(periodic_amounts) == len(periods)
-    #   - sum(periodic_amounts) == original_amount (cents, exact)
+    #   - sum(periodic_amounts) == original_amount - residual_value (cents, exact)
     #   - each entry >= 0 (the SumEquals rule assumes non-negative terms)
     custom_amounts_dollars: list[float] | None = None
     if schedule_metadata and schedule_metadata.periodic_amounts is not None:
@@ -498,14 +511,26 @@ class ScheduleService:
       if any(x < 0 for x in schedule_metadata.periodic_amounts):
         raise ValueError("periodic_amounts entries must be non-negative.")
       total_cents = sum(schedule_metadata.periodic_amounts)
-      if total_cents != schedule_metadata.original_amount:
+      depreciable_cents = (
+        schedule_metadata.original_amount - schedule_metadata.residual_value
+      )
+      if total_cents != depreciable_cents:
         raise ValueError(
           f"periodic_amounts sum ({total_cents} cents) does not equal "
-          f"original_amount ({schedule_metadata.original_amount} cents)."
+          f"original_amount less residual_value ({depreciable_cents} cents)."
         )
       custom_amounts_dollars = [
         round(c / 100.0, 2) for c in schedule_metadata.periodic_amounts
       ]
+    elif depreciable_dollars is not None and periods:
+      # Straight-line: the final month absorbs rounding, so the months before
+      # it must leave it something non-negative to book.
+      if round(amount_dollars * (len(periods) - 1), 2) > depreciable_dollars:
+        raise ValueError(
+          f"monthly_amount x {len(periods) - 1} months exceeds original_amount "
+          f"less residual_value ({depreciable_dollars}); the final month would "
+          f"be negative."
+        )
 
     # Roll-forward opening balances. A roll_forward block has a Beginning
     # Balance, so every rolled balance gets one instant fact at the schedule's
@@ -567,10 +592,10 @@ class ScheduleService:
         period_amount = custom_amounts_dollars[i]
       else:
         # Straight-line: final period absorbs rounding so
-        # Σ(debit facts) == original_amount exactly.
+        # Σ(debit facts) == original_amount - residual_value exactly.
         period_amount = (
-          round(original_dollars - accumulated_debit, 2)
-          if is_last and original_dollars is not None
+          round(depreciable_dollars - accumulated_debit, 2)
+          if is_last and depreciable_dollars is not None
           else amount_dollars
         )
       accumulated_debit = round(accumulated_debit + period_amount, 2)
@@ -644,12 +669,12 @@ class ScheduleService:
         )
 
     # Auto-generate a SumEquals rule so the engine can verify that
-    # the sum of period debit facts equals original_amount. The rule binds
+    # the sum of period debit facts equals original_amount - residual_value. The rule binds
     # the debit element by id (via variable_element_id) — tenant CoA accounts
     # carry a null qname, so qname-only binding would skip the rule entirely
     # for the normal case (a schedule debiting a CoA expense account). qname
     # is still recorded for display when present.
-    if original_dollars is not None:
+    if depreciable_dollars is not None:
       debit_qname: str | None = session.execute(
         select(Element.qname)
         .where(Element.id == entry_template.debit_element_id)
@@ -661,7 +686,7 @@ class ScheduleService:
           taxonomy_id=structure.taxonomy_id,
           rule_category="ReportingSystemSpecificRule",
           rule_pattern="SumEquals",
-          rule_expression=f"sum(${var_name}) = {original_dollars}",
+          rule_expression=f"sum(${var_name}) = {depreciable_dollars}",
           rule_severity="error",
           rule_origin="native",
           target_kind="structure",
@@ -673,7 +698,7 @@ class ScheduleService:
               "variable_element_id": entry_template.debit_element_id,
             }
           ],
-          metadata_={"expected_total": original_dollars},
+          metadata_={"expected_total": depreciable_dollars},
           created_by=created_by,
         )
       )

@@ -1037,6 +1037,37 @@ def test_rewrite_sum_equals_rule_reanchors_to_remaining_curve() -> None:
   assert VerificationResult in deleted_models
 
 
+def test_rewrite_sum_equals_rule_keeps_the_residual_in_the_basis() -> None:
+  """Generation expenses original_amount less residual_value, so the stored
+  basis must be the surviving total plus the residual for a rebuild to
+  reproduce the truncated curve."""
+  from decimal import Decimal
+  from unittest.mock import patch
+
+  from robosystems.operations.roboledger.commands.schedules import (
+    _rewrite_sum_equals_rule,
+  )
+
+  structure = _terminate_structure()
+  structure.metadata_["schedule_metadata"]["residual_value"] = 10_000
+
+  rule = MagicMock()
+  rule.metadata_ = {"expected_total": 1215.08}
+  rule_result = MagicMock()
+  rule_result.scalars.return_value.first.return_value = rule
+  sum_result = MagicMock()
+  sum_result.scalar.return_value = Decimal("182.65")
+  session = MagicMock()
+  session.execute.side_effect = [rule_result, sum_result]
+  session.query.side_effect = lambda model: _Query(model, [])
+
+  with patch("robosystems.operations.roboledger.commands.schedules.flag_modified"):
+    assert _rewrite_sum_equals_rule(session, structure) is True
+
+  assert rule.metadata_["expected_total"] == 182.65
+  assert structure.metadata_["schedule_metadata"]["original_amount"] == 28_265
+
+
 def test_rewrite_sum_equals_rule_noops_without_rule() -> None:
   from robosystems.operations.roboledger.commands.schedules import (
     _rewrite_sum_equals_rule,
