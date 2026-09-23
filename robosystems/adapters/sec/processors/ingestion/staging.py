@@ -281,6 +281,7 @@ class DuckDBStager:
       successful_tables: list[str] = []
       table_infos: dict[str, TableInfo] = {}
       failed_tables: list[tuple[str, str]] = []
+      quarter_has_files = False
 
       total_tables = len(tables_by_type)
       for i, (table_name, entity_type) in enumerate(tables_by_type.items(), 1):
@@ -330,6 +331,7 @@ class DuckDBStager:
           )
           continue
 
+        quarter_has_files = True
         s3_pattern: str | list[str] = (
           s3_patterns[0] if len(s3_patterns) == 1 else s3_patterns
         )
@@ -391,7 +393,7 @@ class DuckDBStager:
               # Insert all rows from temp (fresh data replaces deleted rows)
               await client.execute_write(
                 graph_id=self.graph_id,
-                sql=f'INSERT INTO "{table_name}" SELECT * FROM "{temp_name}"',
+                sql=f'INSERT INTO "{table_name}" BY NAME SELECT * FROM "{temp_name}"',
                 timeout=timeout,
               )
 
@@ -538,6 +540,12 @@ class DuckDBStager:
           table_infos[table_name] = table_info
         else:
           failed_tables.append((table_name, error or "Unknown error"))
+
+      if not quarter_has_files:
+        logger.warning(
+          f"Incremental staging for {self.graph_id} found no files for "
+          f"{quarters_str}; nothing was staged"
+        )
 
       status = "success" if len(successful_tables) == total_tables else "partial"
       total_rows = sum(info.row_count for info in table_infos.values())

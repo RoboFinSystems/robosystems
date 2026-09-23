@@ -150,13 +150,15 @@ uv run dagster asset materialize -m robosystems.dagster \
 ## Nightly chain
 
 ```
-9pm EST — sec_incremental_download_schedule
-  → download (current quarter, plus previous at a quarter boundary)
+9pm ET — sec_incremental_download_schedule
+  → download (the current Eastern-time quarter only)
 
 sec_incremental_pipeline_sensor
   → process (250-filing batches, looping; spot-safe via the S3 cache)
+  → shared master wake, once the partition has drained
+
+sec_wake_to_stage_sensor
   → stage (DuckDB INSERT with NOT EXISTS dedup)
-  [waits for all partitions to drain at quarter boundaries]
 
 sec_stage_to_materialize_sensor
   → materialize (full LadybugDB rebuild)
@@ -170,6 +172,10 @@ sec_post_materialize_publish_sensor
   → duckdb S3 publish (sequential, to avoid overloading the instance)
   → replica refresh (rolling, min_healthy=100%, ~15 min warmup)
 ```
+
+The download's quarter travels down the chain as the `quarter` run tag, so
+stage, index and catalog all work on the quarter that was downloaded, even when
+a run finishes after midnight on a quarter's last day.
 
 **All sensors start STOPPED.** Enable them in the Dagster UI when you want the
 automated chain; nothing runs on its own after a fresh deploy.

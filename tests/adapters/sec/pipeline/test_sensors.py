@@ -259,6 +259,8 @@ class TestSecIncrementalPipelineSensor:
     assert result[0].job_name == "shared_master_wake"
     assert result[0].tags["phase"] == "master_wake"
     assert result[0].tags["mode"] == "incremental"
+    # The downloaded quarter rides down the chain to stage and index.
+    assert result[0].tags["quarter"] == "2025-Q1"
 
   @patch("robosystems.database.session")
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
@@ -775,6 +777,46 @@ class TestSecPostStageIndexSensor:
       assert r.tags["mode"] == "incremental"
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_indexes_the_staged_quarter(self, mock_env):
+    """The index/catalog partition is the quarter staged, not today's in UTC."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_stage_index_sensor",
+        job_name="sec_incremental_stage",
+        run_id="run-stage-q4",
+        tags={"mode": "incremental", "quarter": "2025-Q4"},
+        instance=instance,
+        get_runs_return=[],
+      )
+      result = list(sec_post_stage_index_sensor(context))
+
+    assert {r.partition_key for r in result} == {"2025-Q4"}
+
+  @patch("robosystems.adapters.sec.get_current_quarter", return_value=(2024, 1))
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_untagged_run_falls_back_to_eastern_quarter(self, mock_env, _quarter):
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_stage_index_sensor",
+        job_name="sec_incremental_stage",
+        run_id="run-stage-manual",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[],
+      )
+      result = list(sec_post_stage_index_sensor(context))
+
+    assert {r.partition_key for r in result} == {"2024-Q1"}
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_passes_graph_id_in_config(self, mock_env):
     """Test sensor passes graph_id through run config."""
     mock_env.ENVIRONMENT = "prod"
@@ -880,6 +922,21 @@ class TestSecWakeToStageSensor:
     config = result[0].run_config["ops"]["sec_duckdb_incremental_staged"]["config"]
     assert config["graph_id"] == "sec"
     assert result[0].tags["mode"] == "incremental"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_stages_the_quarter_that_was_downloaded(self, mock_env):
+    """Staging after midnight on a quarter's last day must still stage that
+    quarter, not re-derive the new one from the clock."""
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_wake_to_stage_sensor",
+      job_name="shared_master_wake",
+      tags={"mode": "incremental", "batch_id": "20260930-21", "quarter": "2026-Q3"},
+    )
+    result = list(sec_wake_to_stage_sensor(context))
+    config = result[0].run_config["ops"]["sec_duckdb_incremental_staged"]["config"]
+    assert (config["year"], config["quarter"]) == (2026, 3)
+    assert result[0].tags["quarter"] == "2026-Q3"
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_non_incremental(self, mock_env):

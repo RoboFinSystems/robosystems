@@ -75,6 +75,12 @@ class TestSECConstants:
     assert f"{current_year}-Q1" in SEC_QUARTERS
     assert f"{current_year}-Q4" in SEC_QUARTERS
 
+  def test_quarters_survive_the_new_year(self):
+    """A deploy made this year must still accept next year's partitions."""
+    next_year = datetime.now(UTC).year + 1
+    assert f"{next_year}-Q1" in SEC_QUARTERS
+    assert f"{next_year}-Q4" in SEC_QUARTERS
+
   def test_quarters_format(self):
     """Test all quarters follow the YYYY-QN format."""
     for q in SEC_QUARTERS:
