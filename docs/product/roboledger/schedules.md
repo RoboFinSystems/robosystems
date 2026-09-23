@@ -56,3 +56,7 @@ Every scenario picks up your schedules. Depreciation and amortization continue a
 - "We prepaid 12,000 of insurance in July for twelve months. Set up the schedule."
 - "We sold the van on September 30. End its depreciation schedule and book the disposal."
 - "Which schedules end in the next six months?"
+
+## Go deeper
+
+- [Authoring an information block](https://robosystems.ai/docs/technical/information-blocks#authoring-an-information-block): a schedule created, read back and verified through the API.

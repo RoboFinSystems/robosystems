@@ -1,7 +1,7 @@
 ---
 title: Find your way around the app
 description: A tour of the RoboLedger app, page by page. Where to see your ledger, statements, the close, reports, plans and the concepts your accounts map to.
-order: 4
+order: 5
 section: Get started
 ---
 

@@ -26,4 +26,4 @@ Step-by-step setup is in the [RoboSystems guides](https://robosystems.ai/docs/gu
 
 ## Building on RoboInvestor
 
-RoboInvestor runs on the open-source RoboSystems platform. The technical documentation is at [robosystems.ai/docs](https://robosystems.ai/docs), and the command surface for portfolios and securities is in [RoboInvestor operations](https://robosystems.ai/docs/technical/roboinvestor-operations).
+RoboInvestor runs on the open-source RoboSystems platform. The technical documentation is at [robosystems.ai/docs/technical](https://robosystems.ai/docs/technical), and the command surface for portfolios and securities is in [RoboInvestor operations](https://robosystems.ai/docs/technical/roboinvestor-operations).

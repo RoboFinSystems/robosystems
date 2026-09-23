@@ -1,7 +1,7 @@
 ---
 title: Plan and forecast with your AI assistant
 description: Build budgets and what-if scenarios from your closed books. RoboLedger projects all three statements forward month by month, and every month has to balance.
-order: 13
+order: 14
 section: Work with your books
 ---
 
@@ -105,3 +105,7 @@ Deleting a scenario removes its assumptions and its forecast numbers. Your actua
 - "Last month had a one-time insurance payout. Set that line to zero in every scenario."
 - "How many months of cash do we have in the downside scenario?"
 - "We closed September. Run all our scenarios again and tell me what changed."
+
+## Go deeper
+
+- [Forecasting and metrics](https://robosystems.ai/docs/technical/forecasting-and-metrics): how a scenario is computed month by month, and how metrics and plan history are built.

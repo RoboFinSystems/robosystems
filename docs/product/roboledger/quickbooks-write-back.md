@@ -27,3 +27,12 @@ A connected QuickBooks company is the book of record. RoboLedger mirrors it on e
 ## Disconnecting QuickBooks
 
 Open the QuickBooks card, disconnect, and choose **Disconnect**. It revokes access and stops syncing, and your books stay in the graph. Connect the same QuickBooks company again later and it picks up where it left off.
+
+## Try asking
+
+- "Which of this month's draft entries will be written to QuickBooks at the close, and which stay in RoboLedger?"
+- "Post this accrual now instead of waiting for the close, and tell me whether it goes to QuickBooks."
+
+## Go deeper
+
+- [QuickBooks sync and write policy](https://robosystems.ai/docs/technical/quickbooks-sync-and-write-policy): the write policies a connection can carry, and exactly what reaches QuickBooks under each.

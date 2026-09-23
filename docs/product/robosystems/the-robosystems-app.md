@@ -1,7 +1,7 @@
 ---
 title: Find your way around the app
 description: "A tour of robosystems.ai: graphs, MCP, console, documents, memory, the data lake, subgraphs, backups and billing."
-order: 5
+order: 6
 section: In the app
 ---
 

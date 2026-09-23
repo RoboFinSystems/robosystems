@@ -57,3 +57,7 @@ A closed month can be reopened to fix a missed or wrong entry. Reopening works b
 - "Close September."
 - "September is closed. Run our forecasts again and create the September report."
 - "Reopen September. We missed an accrual for the October rent."
+
+## Go deeper
+
+- [Period close](https://robosystems.ai/docs/technical/period-close): the close operation step by step, its blockers, and the receipt it returns.

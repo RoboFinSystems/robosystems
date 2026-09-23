@@ -1,7 +1,7 @@
 ---
 title: Data lake, subgraphs and backups
 description: Stage and query tables, create subgraphs for experiments, and download backups. All of it lives on the graph's instance.
-order: 8
+order: 9
 section: In the app
 ---
 
@@ -37,3 +37,8 @@ There is no restore button in the app. A RoboLedger or RoboInvestor graph rebuil
 - "Which subgraphs does this graph have?"
 - "Create a subgraph so we can try a different model without touching the main graph."
 - "Create a backup of this graph."
+
+## Go deeper
+
+- [Subgraphs](https://robosystems.ai/docs/technical/graphs-and-multi-tenancy#subgraphs): what a subgraph shares with its parent and what it doesn't.
+- [The three-layer pipeline](https://robosystems.ai/docs/technical/file-uploads#the-three-layer-pipeline): how uploaded files are staged, queried and loaded into a graph.

@@ -419,6 +419,43 @@ class TestProductPages:
     ]
     assert _page(build, "plan").section == "Work with your books"
 
+  def test_technical_links_are_checked_against_the_wiki(self, tmp_path):
+    product = self._product(
+      tmp_path,
+      {
+        "a.md": "---\ntitle: A\norder: 1\n---\n\n"
+        "[ok](https://robosystems.ai/docs/technical/quick-start#first-query) "
+        "[page](https://robosystems.ai/docs/technical/core-concepts) "
+        "[home](https://robosystems.ai/docs/technical) "
+        "[gone](https://robosystems.ai/docs/technical/renamed-page) "
+        "[stale](https://robosystems.ai/docs/technical/quick-start#old-heading) "
+        "[guides](https://robosystems.ai/docs/guides/connect)\n\n"
+        "`[code](https://robosystems.ai/docs/technical/nowhere)`\n",
+      },
+    )
+    build = _build_wiki(_wiki(tmp_path, _pages()))
+    publish_docs.build_product(product, tmp_path, build)
+    assert build.errors == [
+      "roboledger/a.md: link to a technical page that does not exist: "
+      "https://robosystems.ai/docs/technical/renamed-page",
+      "roboledger/a.md: no heading in /docs/technical/quick-start for #old-heading: "
+      "https://robosystems.ai/docs/technical/quick-start#old-heading",
+    ]
+    body = build.files["product/roboledger/a.md"].decode()
+    assert "[ok](https://robosystems.ai/docs/technical/quick-start#first-query)" in body
+
+  def test_technical_links_are_not_checked_without_the_wiki(self, tmp_path):
+    product = self._product(
+      tmp_path,
+      {
+        "a.md": "---\ntitle: A\norder: 1\n---\n\n"
+        "[gone](https://robosystems.ai/docs/technical/renamed-page#x)\n",
+      },
+    )
+    build = publish_docs.Build()
+    publish_docs.build_product(product, tmp_path, build)
+    assert build.errors == []
+
   def test_an_unknown_site_is_an_error(self, tmp_path):
     root = tmp_path / "product" / "nowhere"
     root.mkdir(parents=True)

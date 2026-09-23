@@ -1,7 +1,7 @@
 ---
 title: Ask questions in the Console
 description: The Console is RoboSystems' own AI on a graph. Questions use credits from your plan. Claude and ChatGPT do not.
-order: 6
+order: 7
 section: In the app
 ---
 
@@ -43,3 +43,7 @@ The full setup for Claude, ChatGPT, Cursor and API keys is in [Connect Claude, C
 - "Show me the schema, then a few example queries."
 - On a ledger graph: "What's blocking the next close?"
 - On the SEC graph: "Income statement for NVDA for the last three fiscal years."
+
+## Go deeper
+
+- [The operator endpoint](https://robosystems.ai/docs/technical/ai-operators-and-mcp#the-operator-endpoint): the endpoint the Console's questions run through, with its modes and limits.

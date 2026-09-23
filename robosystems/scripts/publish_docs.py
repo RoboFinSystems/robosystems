@@ -24,7 +24,9 @@ the wiki's prose carries literal ``{`` and ``<`` that an MDX compiler rejects.
 
 Wiki-relative links become site paths, and a link to a page that does not
 exist fails the build, so a renamed page breaks the publish rather than the
-site. Anchors that match no heading are reported as warnings.
+site. Anchors that match no heading are reported as warnings. When both are
+built in one run, a product page's link into the technical docs must name a
+page and a heading that exist, or the build fails.
 
 ``digest`` hashes everything else in the output, so the workflow can skip the
 upload when nothing changed.
@@ -53,6 +55,7 @@ REPO_BLOB_URL = "https://github.com/RoboFinSystems/robosystems/blob/main"
 DEFAULT_ASSET_BASE = "https://assets.robosystems.ai/docs/"
 
 TECHNICAL_BASE_PATH = "/docs/technical"
+TECHNICAL_URL = f"https://robosystems.ai{TECHNICAL_BASE_PATH}"
 TECHNICAL_HOME_TITLE = "Technical documentation"
 PRODUCT_BASE_PATHS = {
   "robosystems": "/docs/guides",
@@ -107,6 +110,10 @@ class Build:
   files: dict[str, bytes] = field(default_factory=dict)
   errors: list[str] = field(default_factory=list)
   warnings: list[str] = field(default_factory=list)
+  # Heading anchors per technical page path, set when the wiki is built in the
+  # same run. Product pages link the technical docs by absolute URL, and those
+  # links are checked against it; without the wiki there is nothing to check.
+  technical_anchors: dict[str, set[str]] | None = None
 
 
 # ── Markdown helpers ────────────────────────────────────────────────────────
@@ -354,6 +361,9 @@ def build_wiki(wiki_dir: Path, asset_base: str, build: Build) -> None:
     return
   pages = set(sources)
   anchors = {name: heading_anchors(text) for name, text in sources.items()}
+  build.technical_anchors = {
+    technical_path(name): found for name, found in anchors.items()
+  }
 
   sidebar_path = wiki_dir / "_Sidebar.md"
   sidebar = (
@@ -550,6 +560,9 @@ def rewrite_product_links(
 ) -> str:
   def replace(match: re.Match[str]) -> str:
     bang, text_, target, title = match.groups()
+    if target.startswith(TECHNICAL_URL):
+      check_technical_link(label, target, build)
+      return match.group(0)
     if target.startswith(("http://", "https://", "mailto:", "#")):
       return match.group(0)
     # A site path is a fine link and a broken image: nothing serves it.
@@ -578,6 +591,27 @@ def rewrite_product_links(
     return f"[{text_}]({path}{'#' + anchor if anchor else ''}{title})"
 
   return map_prose(text, lambda chunk: _LINK.sub(replace, chunk))
+
+
+def check_technical_link(label: str, target: str, build: Build) -> None:
+  """A product page's jump into the technical docs must land on a real heading.
+
+  Product pages are public, so a dead jump-off is a defect, not a warning. The
+  check needs the wiki built in the same run and is skipped without it.
+  """
+  if build.technical_anchors is None:
+    return
+  url, _, anchor = target.partition("#")
+  path = url[len("https://robosystems.ai") :].rstrip("/")
+  if path != TECHNICAL_BASE_PATH and not path.startswith(f"{TECHNICAL_BASE_PATH}/"):
+    return
+  anchors = build.technical_anchors.get(path)
+  if anchors is None:
+    build.errors.append(
+      f"{label}: link to a technical page that does not exist: {target}"
+    )
+  elif anchor and anchor not in anchors:
+    build.errors.append(f"{label}: no heading in {path} for #{anchor}: {target}")
 
 
 # ── The catalog ─────────────────────────────────────────────────────────────

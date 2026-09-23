@@ -43,3 +43,7 @@ If you aren't sure, ask your assistant what each choice would do to the figures 
 - "For the changed invoice, show me what we posted, what QuickBooks says now, and the difference."
 - "Restate the first two. Catch up the March one in the current month."
 - "Someone edited transactions from last spring. Sync from April 1 and tell me what changed."
+
+## Go deeper
+
+- [QuickBooks sync and write policy](https://robosystems.ai/docs/technical/quickbooks-sync-and-write-policy): how a sync detects an edited transaction and what each way of settling it writes.

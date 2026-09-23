@@ -70,3 +70,7 @@ Nothing is written to QuickBooks by connecting, syncing or asking questions. See
 - "Which graph are you connected to, and when did QuickBooks last sync?"
 - "Sync QuickBooks, then tell me what changed since last week."
 - "Show me last month's income statement."
+
+## Go deeper
+
+- [Build a ledger integration](https://robosystems.ai/docs/technical/build-a-ledger-integration): bringing books from a source other than QuickBooks into a RoboLedger graph.

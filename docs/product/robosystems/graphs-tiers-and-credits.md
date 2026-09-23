@@ -1,7 +1,7 @@
 ---
 title: Graphs, tiers and credits
 description: What a RoboSystems graph is, how tiers differ, what uses credits and what doesn't, and what happens when a graph runs out.
-order: 4
+order: 5
 section: Working with graphs
 ---
 
@@ -64,3 +64,8 @@ Each graph gets its tier's credits every month, on the 1st (UTC). The balance re
 
 - "Which subgraphs does this graph have?"
 - "Create a subgraph so we can try a different model without touching the main graph."
+
+## Go deeper
+
+- [The credit model](https://robosystems.ai/docs/technical/credits-and-billing#the-credit-model): what consumes credits, what is free, and how balances are checked.
+- [Graph tiers](https://robosystems.ai/docs/technical/graphs-and-multi-tenancy#graph-tiers): what each tier provisions.

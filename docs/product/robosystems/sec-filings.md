@@ -1,7 +1,7 @@
 ---
 title: Analyze SEC filings with Claude or ChatGPT
 description: "Connect an AI client to the SEC filings graph: financial statements, cross-company comparisons, disclosures and filing text for 8,000+ companies."
-order: 3
+order: 4
 section: Working with graphs
 ---
 
@@ -59,3 +59,7 @@ These rules decide whether a number is right. The model is given them, and they'
 - "Which companies mention goodwill impairment in their latest 10-K?"
 - "Read the revenue recognition note from [ticker]'s latest annual report."
 - "What does [ticker] say about customer concentration in its risk factors?"
+
+## Go deeper
+
+- [SEC data model and query rules](https://robosystems.ai/docs/technical/sec-data-model-and-query-rules): how filings are modeled in the graph, and the rules behind a right number.

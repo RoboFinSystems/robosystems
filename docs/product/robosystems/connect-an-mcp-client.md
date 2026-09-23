@@ -25,7 +25,7 @@ You need a RoboSystems account and a graph to connect: your own, a RoboLedger gr
 claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
 ```
 
-Claude Code can also install the RoboSystems plugin, which adds the same server plus three skills that teach Claude how to explore a graph, analyze SEC filings and close the month:
+Claude Code can also install the RoboSystems plugin, which adds the same server plus four skills: finding its way around a graph, analyzing SEC filings, closing the month on RoboLedger, and building a board pack from a closed period. See [Skills and the RoboSystems plugin](skills-and-the-plugin.md).
 
 ```bash
 claude plugin marketplace add RoboFinSystems/robosystems-plugin
@@ -90,3 +90,8 @@ Once connected, start by letting the client orient itself:
 - "Which graph are you connected to, and what's in it?"
 - "What can you do on this graph?"
 - "Show me the schema, then a few example queries."
+
+## Go deeper
+
+- [Connecting from MCP clients](https://robosystems.ai/docs/technical/ai-operators-and-mcp#connecting-from-mcp-clients): the server's sign-in, transport and per-graph addresses in detail.
+- [API key lifecycle](https://robosystems.ai/docs/technical/authentication-and-api-keys#api-key-lifecycle): creating, scoping and revoking the keys scripts connect with.
