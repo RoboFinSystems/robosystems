@@ -974,6 +974,7 @@ class TestUserPasswordUpdate:
     from main import app
     from robosystems.middleware.auth.dependencies import (
       get_current_user,
+      get_optional_jwt_user,
     )
     from robosystems.middleware.rate_limits import (
       analytics_rate_limit_dependency,
@@ -989,8 +990,9 @@ class TestUserPasswordUpdate:
       user_management_rate_limit_dependency,
     )
 
-    # Mock the authentication dependency
+    # Password change takes a JWT session only (get_optional_jwt_user).
     app.dependency_overrides[get_current_user] = lambda: mock_user_with_password
+    app.dependency_overrides[get_optional_jwt_user] = lambda: mock_user_with_password
 
     # Disable rate limiting during tests
     app.dependency_overrides[auth_rate_limit_dependency] = lambda: None

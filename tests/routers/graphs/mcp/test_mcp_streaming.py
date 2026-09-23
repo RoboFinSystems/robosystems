@@ -608,3 +608,46 @@ class TestStreamingErrorChunks:
     result = aggregate_streamed_results(events)
     assert result["success"] is False
     assert result["error"] == "engine died mid-stream"
+
+
+@pytest.mark.unit
+class TestStreamingReadGuard:
+  """The streaming strategy runs the same read-only guard as the direct path."""
+
+  def _handler(self):
+    from types import SimpleNamespace
+
+    from robosystems.routers.graphs.mcp.handlers import MCPHandler
+
+    async def _noop():
+      return None
+
+    async def _stream(query, params, chunk_size=1000):
+      yield {"data": [], "columns": []}
+
+    repository = SimpleNamespace(execute_query_streaming=_stream)
+    graph_client = SimpleNamespace(prepare_read_query=lambda q: q + " LIMIT 1000")
+    fake = SimpleNamespace(
+      _ensure_not_closed=lambda: None,
+      _ensure_initialized=_noop,
+      graph_id="kg123_dev",
+      graph_client=graph_client,
+      repository=repository,
+    )
+    fake.execute_query_streaming = MCPHandler.execute_query_streaming.__get__(fake)
+    return fake
+
+  @pytest.mark.asyncio
+  async def test_write_statement_is_refused_as_constraint(self):
+    events = await _collect_events(
+      stream_cypher_query(self._handler(), {"query": "MATCH (n) SET n.x = 1 RETURN n"})
+    )
+    assert events[-1]["event"] == "error"
+    assert events[-1]["data"]["error_kind"] == "constraint"
+
+  @pytest.mark.asyncio
+  async def test_read_statement_streams(self):
+    events = await _collect_events(
+      stream_cypher_query(self._handler(), {"query": "MATCH (n) RETURN n"})
+    )
+    assert all(e["event"] != "error" for e in events)

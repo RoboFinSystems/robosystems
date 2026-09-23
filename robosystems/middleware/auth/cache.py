@@ -63,6 +63,7 @@ class APIKeyCache:
   KEY_ROTATION_INTERVAL = 86400  # 24 hours - rotate encryption keys daily
   KEY_ROTATION_PREFIX = "key_rotation:"
   KEY_GENERATION_PREFIX = "key_gen:"
+  KEY_GENERATION_RECHECK_SECONDS = 60
 
   # Signature optimization configuration
   SIGNATURE_CACHE_PREFIX = "sig_cache:"
@@ -77,6 +78,9 @@ class APIKeyCache:
 
     self._encryption_key = None
     self._cipher = None
+    self._cipher_key: bytes | None = None
+    self._key_component: str | None = None
+    self._key_checked_at = 0.0
 
     self._validation_failures = 0
 
@@ -101,16 +105,27 @@ class APIKeyCache:
 
   @property
   def encryption_key(self) -> bytes:
-    """Get encryption key, deriving if needed."""
-    if self._encryption_key is None:
+    """Get the encryption key for the shared key generation.
+
+    Re-reads the generation periodically so every process follows a rotation
+    made by any other, rather than keeping the key it derived at startup.
+    """
+    now = time.monotonic()
+    if (
+      self._encryption_key is None
+      or now - self._key_checked_at > self.KEY_GENERATION_RECHECK_SECONDS
+    ):
+      self._key_checked_at = now
       self._encryption_key = self._derive_encryption_key()
     return self._encryption_key
 
   @property
   def cipher(self) -> Fernet:
-    """Get Fernet cipher, creating if needed."""
-    if self._cipher is None:
-      self._cipher = Fernet(self.encryption_key)
+    """Get Fernet cipher for the current encryption key."""
+    key = self.encryption_key
+    if self._cipher is None or self._cipher_key != key:
+      self._cipher = Fernet(key)
+      self._cipher_key = key
     return self._cipher
 
   def _get_api_key_cache_key(self, api_key_hash: str) -> str:
@@ -175,6 +190,10 @@ class APIKeyCache:
     except Exception:
       # Redis unavailable: derive from the static secret alone.
       pass
+
+    if self._encryption_key is not None and key_component == self._key_component:
+      return self._encryption_key
+    self._key_component = key_component
 
     # Salt binds the key to the environment and the current rotation.
     key_component_safe = key_component[:8] if key_component else ""
@@ -280,9 +299,10 @@ class APIKeyCache:
         for key in keys:
           try:
             encrypted_data = self.redis.get(key)
-            if encrypted_data:
-              self._decrypt_cache_data(encrypted_data)
-          except (InvalidToken, Exception):
+            if encrypted_data and self._decrypt_cache_data(encrypted_data) is None:
+              self.redis.delete(key)
+              cleaned_count += 1
+          except Exception:
             self.redis.delete(key)
             cleaned_count += 1
 
@@ -1027,14 +1047,17 @@ class APIKeyCache:
             # was ever evicted. Decrypt through the same helper the read path
             # uses; it returns the inner payload, so user_data is at the top.
             data = self._decrypt_cache_data(cached_data)
+            api_key_hash = key[len(self.CACHE_KEY_PREFIX) :]
             if data is None:
+              # Unreadable here (another key generation): it may name this
+              # user, so drop it rather than let it outlive the revocation.
+              self.redis.delete(*self._api_key_cache_keys(api_key_hash))
               continue
             user_data = data.get("user_data", {})
             if user_data.get("id") == user_id:
               # Drop the key's per-graph access decisions along with the
               # validation entry: a revoked grant is what brought us here,
               # and a cached allow on that graph would outlive it.
-              api_key_hash = key[len(self.CACHE_KEY_PREFIX) :]
               self.redis.delete(*self._api_key_cache_keys(api_key_hash))
               invalidated_count += 1
         except Exception as e:
@@ -1051,6 +1074,7 @@ class APIKeyCache:
             # encrypted too, so json.loads never succeeded here either.
             data = self._decrypt_cache_data(cached_data)
             if data is None:
+              self.redis.delete(key)
               continue
             user_data = data.get("user_data", {})
             if user_data.get("id") == user_id:

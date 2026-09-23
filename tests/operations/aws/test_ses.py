@@ -166,6 +166,23 @@ class TestSESEmailService:
     assert "&lt;script&gt;" in html
 
   @pytest.mark.asyncio
+  async def test_org_invitation_escapes_org_name(self, ses_service, mock_ses_client):
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-inv"}
+
+    await ses_service.send_org_invitation_email(
+      user_email="invitee@example.com",
+      inviter_name="Pat",
+      org_name='<a href="https://evil.example">Verify</a>',
+      token="tok",
+    )
+
+    html = mock_ses_client.send_email.call_args.kwargs["Message"]["Body"]["Html"][
+      "Data"
+    ]
+    assert 'evil.example">' not in html
+    assert "&lt;a href=" in html
+
+  @pytest.mark.asyncio
   async def test_send_email_with_client_error(self, ses_service, mock_ses_client):
     """Test handling of AWS client errors."""
     mock_ses_client.send_email.side_effect = ClientError(

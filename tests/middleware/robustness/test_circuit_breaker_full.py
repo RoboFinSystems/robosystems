@@ -68,10 +68,16 @@ class TestRecordSuccess:
     status = breaker.get_circuit_status("kg123", "query")
     assert status["is_open"] is False
 
-  def test_sets_last_success_time(self, breaker):
+  def test_success_forgets_the_circuit(self, breaker):
+    breaker.record_failure("kg123", "query")
     breaker.record_success("kg123", "query")
-    status = breaker.get_circuit_status("kg123", "query")
-    assert status["last_success_time"] is not None
+    assert "kg123:query" not in breaker.circuits
+
+  def test_unfailed_operations_are_not_stored(self, breaker):
+    for i in range(100):
+      breaker.check_circuit("kg123", f"no-such-tool-{i}")
+      breaker.record_success("kg123", f"no-such-tool-{i}")
+    assert breaker.circuits == {}
 
 
 class TestRecordFailure:

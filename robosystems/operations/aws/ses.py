@@ -354,11 +354,14 @@ Visit your dashboard: {url}
     org_name = data.get("org_name", "an organization")
     expiry_days = data.get("expiry_days", ORG_INVITATION_EXPIRY_DAYS)
 
+    safe_inviter_name = html.escape(str(inviter_name))
+    safe_org_name = html.escape(str(org_name))
+
     content = (
       _paragraph("Hi there,")
       + _paragraph(
-        f"<strong>{inviter_name}</strong> has invited you to join "
-        f"<strong>{org_name}</strong> on {app_name}. "
+        f"<strong>{safe_inviter_name}</strong> has invited you to join "
+        f"<strong>{safe_org_name}</strong> on {app_name}. "
         "Accept the invitation to create your account and join the team."
       )
       + _button(url, "Accept Invitation")
