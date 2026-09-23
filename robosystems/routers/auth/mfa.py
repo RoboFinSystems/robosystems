@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...database import get_async_db_session
 from ...logger import logger
-from ...middleware.auth.dependencies import get_current_user
+from ...middleware.auth.dependencies import get_current_user, require_jwt_user
 from ...middleware.auth.jwt import (
   MFA_TOKEN_EXPIRY_SECONDS,
   create_jwt_token,
@@ -401,7 +401,7 @@ async def regenerate_recovery_codes(
   session: Session = Depends(get_async_db_session),
   _passkeys: None = Depends(require_passkeys_enabled),
   rate_limit: None = Depends(passkey_management_rate_limit_dependency),
-  user: User = Depends(get_current_user),
+  user: User = Depends(require_jwt_user),
 ) -> RecoveryCodesResponse:
   try:
     passkey_ops.verify_reauth(

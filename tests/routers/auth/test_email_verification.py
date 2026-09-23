@@ -391,3 +391,35 @@ class TestEmailVerificationEndpoints:
         # This would be 429 if rate limiting is enabled
         # For now, we'll just check it doesn't crash
         assert response.status_code in [200, 429]
+
+
+class TestVerifySessionIssuance:
+  @pytest.mark.asyncio
+  @patch(
+    "robosystems.routers.auth.email_verification.may_issue_session_without_login",
+    return_value=False,
+  )
+  @patch("robosystems.routers.auth.email_verification.run_and_monitor_dagster_job")
+  @patch("robosystems.routers.auth.email_verification.build_email_job_config")
+  @patch.object(UserToken, "verify_token")
+  @patch.object(User, "get_by_id")
+  async def test_verify_for_mfa_user_returns_no_session(
+    self, mock_get_user, mock_verify_token, mock_build_config, _job, _gate, client
+  ):
+    mock_verify_token.return_value = ("user_mfa", 0)
+    mock_user = Mock(spec=User)
+    mock_user.id = "user_mfa"
+    mock_user.email = "mfa@example.com"
+    mock_user.name = "MFA User"
+    mock_user.email_verified = False
+    mock_user.is_active = True
+    mock_user.verify_email = Mock()
+    mock_get_user.return_value = mock_user
+    mock_build_config.return_value = {"ops": {}}
+
+    response = client.post("/v1/auth/email/verify", json={"token": "tok"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("token") is None
+    assert data["message"] == "Email verified successfully. Sign in to continue."

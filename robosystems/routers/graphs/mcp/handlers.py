@@ -128,6 +128,9 @@ async def validate_mcp_access(
 # Core tools whose authored description gets the graph scope prepended.
 SCOPED_TOOL_NAMES = ("read-graph-cypher", "get-graph-schema")
 
+_MIN_USER_TIMEOUT_S = 10
+_MAX_USER_TIMEOUT_S = 300
+
 
 def _graph_scope_line(graph_id: str, is_shared_repo: bool) -> str:
   if is_shared_repo:
@@ -314,9 +317,12 @@ class MCPHandler:
 
     tool_timeout = timeout_coordinator.get_tool_timeout(name)
 
-    if name == "read-graph-cypher" and "timeout" in arguments:
-      user_timeout = min(arguments.get("timeout", tool_timeout), 300)  # Cap at 5 min
-      tool_timeout = user_timeout
+    if name == "read-graph-cypher":
+      requested = arguments.get("timeout")
+      # A caller's timeout must not be able to fail the call on its own: that
+      # failure counts against the shared per-graph breaker.
+      if isinstance(requested, int | float) and not isinstance(requested, bool):
+        tool_timeout = min(max(requested, _MIN_USER_TIMEOUT_S), _MAX_USER_TIMEOUT_S)
 
     try:
       if name == "get-graph-info":
@@ -366,8 +372,16 @@ class MCPHandler:
   async def execute_query_streaming(
     self, query: str, parameters: dict[str, Any] | None = None, chunk_size: int = 1000
   ):
-    """Execute a query with streaming support."""
+    """Execute a read query with streaming support, under the same guards as
+    the direct ``read-graph-cypher`` path."""
     self._ensure_not_closed()
+    await self._ensure_initialized()
+
+    from robosystems.middleware.mcp.tools.cypher_tool import assert_read_only_cypher
+
+    assert_read_only_cypher(query, self.graph_id)
+    if self.graph_client is not None:
+      query = self.graph_client.prepare_read_query(query)
 
     if hasattr(self.repository, "execute_query_streaming"):
       async for chunk in self.repository.execute_query_streaming(

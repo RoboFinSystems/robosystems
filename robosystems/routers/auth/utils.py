@@ -78,6 +78,24 @@ def require_passkeys_enabled() -> None:
     )
 
 
+def may_issue_session_without_login(session, user) -> bool:
+  """Whether a token-redemption flow (reset, verify) may mint a session itself.
+
+  Not when login would demand a passkey step: those users sign in normally.
+  """
+  if not user.is_active:
+    return False
+  if not env.PASSKEYS_ENABLED:
+    return True
+
+  from ...models.core import UserPasskey
+  from ...operations.passkeys import user_requires_mfa_enrollment
+
+  if UserPasskey.count_for_user(str(user.id), session) > 0:
+    return False
+  return not user_requires_mfa_enrollment(session, user)
+
+
 # Redis clients are now imported from middleware.auth.jwt
 
 

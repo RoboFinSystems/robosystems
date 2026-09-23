@@ -978,3 +978,57 @@ class TestInvalidateUserData:
     assert graph_target_2 in deleted, "per-graph decision survived the sweep"
     assert api_key_other not in deleted
     assert graph_other not in deleted
+
+
+class _FakeRedis:
+  def __init__(self):
+    self.store: dict[str, str] = {}
+
+  def get(self, key):
+    return self.store.get(key)
+
+  def setex(self, key, _ttl, value):
+    self.store[key] = value
+
+  def set(self, key, value, **_kwargs):
+    self.store[key] = value
+
+  def delete(self, *keys):
+    for key in keys:
+      self.store.pop(key, None)
+
+  def keys(self, pattern):
+    prefix = pattern.rstrip("*")
+    return [k for k in self.store if k.startswith(prefix)]
+
+
+class TestKeyGenerationTracking:
+  """Processes follow a key rotation made by any other process."""
+
+  def _cache(self, shared):
+    cache = APIKeyCache()
+    cache._redis = shared
+    return cache
+
+  def test_process_follows_rotation_after_recheck(self):
+    shared = _FakeRedis()
+    first, second = self._cache(shared), self._cache(shared)
+    assert first.encryption_key == second.encryption_key
+
+    shared.setex(f"{APIKeyCache.KEY_GENERATION_PREFIX}current", 0, "rotated")
+    second._key_checked_at = 0.0
+    entry = second._encrypt_cache_data({"user_data": {"id": "u1"}})
+
+    first._key_checked_at = 0.0
+    assert first._decrypt_cache_data(entry) == {"user_data": {"id": "u1"}}
+
+  def test_invalidation_drops_entries_it_cannot_read(self):
+    shared = _FakeRedis()
+    cache = self._cache(shared)
+    shared.store[f"{APIKeyCache.CACHE_KEY_PREFIX}abc"] = "not-decryptable"
+    shared.store[f"{APIKeyCache.GRAPH_CACHE_KEY_PREFIX}abc:kg1"] = "{}"
+
+    cache.invalidate_user_data("u1")
+
+    assert f"{APIKeyCache.CACHE_KEY_PREFIX}abc" not in shared.store
+    assert f"{APIKeyCache.GRAPH_CACHE_KEY_PREFIX}abc:kg1" not in shared.store

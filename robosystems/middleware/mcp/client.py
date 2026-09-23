@@ -170,6 +170,25 @@ class GraphMCPClient:
       f"Query complexity validation passed for {len(cypher)} character query"
     )
 
+  def prepare_read_query(self, cypher: str) -> str:
+    """Apply the complexity check and the MCP auto-LIMIT to a read statement."""
+    self._validate_query_complexity(cypher)
+
+    cypher_upper = cypher.strip().upper()
+    has_limit = "LIMIT" in cypher_upper
+    has_return = "RETURN" in cypher_upper
+    has_aggregation = self._has_aggregation_function(cypher_upper)
+
+    if self.auto_limit_enabled and has_return and not has_limit and not has_aggregation:
+      cypher = self._inject_limit_intelligently(cypher, self.max_result_rows)
+      logger.info(
+        f"MCP safety: Auto-injected LIMIT {self.max_result_rows} to prevent "
+        "context exhaustion"
+      )
+    elif has_aggregation:
+      logger.debug("MCP: Skipping auto-LIMIT for aggregation query")
+    return cypher
+
   async def execute_query(
     self, cypher: str, parameters: dict[str, Any] | None = None
   ) -> list[dict[str, Any]]:
@@ -189,26 +208,10 @@ class GraphMCPClient:
         GraphQueryComplexityError: If query is too complex
     """
     logger.info(f"MCP execute_query called with: {cypher[:100]}...")
-    self._validate_query_complexity(cypher)
-
-    # Auto-append LIMIT for MCP context safety.
     original_query = cypher
-    cypher_upper = cypher.strip().upper()
-
+    cypher = self.prepare_read_query(cypher)
     max_rows = self.max_result_rows
     auto_limit_enabled = self.auto_limit_enabled
-
-    has_limit = "LIMIT" in cypher_upper
-    has_return = "RETURN" in cypher_upper
-    has_aggregation = self._has_aggregation_function(cypher_upper)
-
-    if auto_limit_enabled and has_return and not has_limit and not has_aggregation:
-      cypher = self._inject_limit_intelligently(cypher, max_rows)
-      logger.info(
-        f"MCP safety: Auto-injected LIMIT {max_rows} to prevent context exhaustion"
-      )
-    elif has_aggregation:
-      logger.debug("MCP: Skipping auto-LIMIT for aggregation query")
 
     try:
       logger.info(

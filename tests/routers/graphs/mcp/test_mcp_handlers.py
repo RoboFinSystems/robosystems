@@ -647,3 +647,34 @@ class TestExecuteMcpQueryWithTimeout:
       await execute_mcp_query_with_timeout(
         mock_tools, "get-graph-schema", {}, timeout=30.0
       )
+
+
+@pytest.mark.unit
+class TestCallerTimeoutClamp:
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("requested", "expected"), [(0, 10), (1000, 300), (60, 60), ("x", None)]
+  )
+  async def test_caller_timeout_is_clamped(self, requested, expected):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from robosystems.routers.graphs.mcp import handlers
+
+    async def _noop():
+      return None
+
+    fake = SimpleNamespace(
+      _ensure_not_closed=lambda: None, _ensure_initialized=_noop, mcp_tools=None
+    )
+    call_tool = handlers.MCPHandler.call_tool.__get__(fake)
+    default = handlers.timeout_coordinator.get_tool_timeout("read-graph-cypher")
+
+    with patch.object(
+      handlers, "execute_mcp_query_with_timeout", return_value=[]
+    ) as execute:
+      await call_tool(
+        "read-graph-cypher", {"query": "MATCH (n) RETURN n", "timeout": requested}
+      )
+
+    assert execute.call_args.kwargs["timeout"] == (expected or default)

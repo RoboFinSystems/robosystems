@@ -12,7 +12,7 @@ URL, or the credential leaks.
 
 from typing import Any
 
-from fastapi import Header, HTTPException, Query, Request, Security, status
+from fastapi import Depends, Header, HTTPException, Query, Request, Security, status
 from fastapi.security import APIKeyHeader
 
 from ...logger import logger
@@ -296,6 +296,18 @@ async def get_optional_jwt_user(request: Request) -> User | None:
     return None
   user_id, token_session_version = verify_result
   return _get_user_for_verified_jwt(user_id, token_session_version)
+
+
+async def require_jwt_user(
+  user: User | None = Depends(get_optional_jwt_user),
+) -> User:
+  """The JWT-session user, or 401. For routes that change sign-in credentials."""
+  if user is None:
+    raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      detail="An interactive session is required for this action",
+    )
+  return user
 
 
 async def get_current_user(

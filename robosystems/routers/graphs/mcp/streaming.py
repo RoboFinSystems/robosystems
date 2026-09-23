@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from robosystems.logger import logger
+from robosystems.middleware.mcp import GraphQueryComplexityError
 
 from .handlers import is_tool_error_result, tool_error_kind
 
@@ -136,9 +137,27 @@ async def stream_cypher_query(
     chunk_count = 0
     all_columns = None
 
-    async for chunk in handler.execute_query_streaming(
-      query, parameters, chunk_size=chunk_size
-    ):
+    stream = handler.execute_query_streaming(query, parameters, chunk_size=chunk_size)
+    try:
+      first = await anext(stream, None)
+    except (ValueError, GraphQueryComplexityError) as e:
+      yield {
+        "event": "error",
+        "data": {
+          "tool": "read-graph-cypher",
+          "error": str(e),
+          "error_kind": "constraint",
+        },
+      }
+      return
+
+    async def _chunks():
+      if first is not None:
+        yield first
+      async for rest in stream:
+        yield rest
+
+    async for chunk in _chunks():
       # A failed backend query arrives as an error chunk (see
       # StreamingRepositoryWrapper): surface it as an error event, or the
       # stream completes normally and aggregates to a successful empty result.

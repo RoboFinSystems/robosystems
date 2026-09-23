@@ -273,15 +273,13 @@ class TestAuthenticationWorkflow:
     register_response = client.post("/v1/auth/register", json=registration_data)
     assert register_response.status_code == 201
 
-    user_data = register_response.json()["user"]
-    user_id = user_data["id"]
-
-    # Step 2: Create API key for authentication
-    api_key, plain_key = UserAPIKey.create(
-      user_id=user_id, name="Password Change API Key", session=test_db
+    # Step 2: Sign in — password change takes an interactive session, not a key
+    login_response = client.post(
+      "/v1/auth/login",
+      json={"email": "passwordchange@example.com", "password": "0r1g1n@lP@ssw0rd!"},
     )
-
-    headers = {"X-API-Key": plain_key}
+    assert login_response.status_code == 200
+    headers = {"Authorization": f"Bearer {login_response.json()['token']}"}
 
     # Step 3: Change password
     password_change_data = {

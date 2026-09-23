@@ -23,7 +23,7 @@ from ...models.api.common import COMMON_ERROR_RESPONSES, ErrorResponse
 from ...models.core import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.device_fingerprinting import extract_device_fingerprint
-from .utils import detect_app_source
+from .utils import detect_app_source, may_issue_session_without_login
 
 # Create router for email verification endpoints
 router = APIRouter()
@@ -231,6 +231,20 @@ async def verify_email(
     risk_level="low",
   )
 
+  user_info = {
+    "id": user.id,
+    "name": user.name,
+    "email": user.email,
+    "email_verified": user.email_verified,
+  }
+
+  if not may_issue_session_without_login(session, user):
+    logger.info(f"Email verified for user {user.email}; sign-in required")
+    return AuthResponse(
+      user=user_info,
+      message="Email verified successfully. Sign in to continue.",
+    )
+
   # Generate JWT token for auto-login with device binding
   device_fingerprint = extract_device_fingerprint(fastapi_request)
   jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
@@ -241,12 +255,7 @@ async def verify_email(
   refresh_threshold = int(TOKEN_GRACE_PERIOD_MINUTES * 60)
 
   return AuthResponse(
-    user={
-      "id": user.id,
-      "name": user.name,
-      "email": user.email,
-      "email_verified": user.email_verified,
-    },
+    user=user_info,
     message="Email verified successfully. Welcome to RoboSystems!",
     token=jwt_token,
     expires_in=expires_in,

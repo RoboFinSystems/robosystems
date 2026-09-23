@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db_session
 from ...logger import logger
-from ...middleware.auth.dependencies import get_current_user
+from ...middleware.auth.dependencies import require_jwt_user
 from ...middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
@@ -38,7 +38,7 @@ router = APIRouter(tags=["User"])
 )
 async def update_user_password(
   request: UpdatePasswordRequest,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(require_jwt_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
   _password_auth: None = Depends(require_password_auth),

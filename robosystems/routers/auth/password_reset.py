@@ -40,7 +40,12 @@ from ...security.input_validation import (
   validate_email,
 )
 from ...security.password import PasswordSecurity
-from .utils import detect_app_source, hash_password_async, require_password_auth
+from .utils import (
+  detect_app_source,
+  hash_password_async,
+  may_issue_session_without_login,
+  require_password_auth,
+)
 
 # Create router for password reset endpoints
 router = APIRouter()
@@ -278,6 +283,20 @@ async def reset_password(
     risk_level="high",
   )
 
+  user_info = {
+    "id": user.id,
+    "name": user.name,
+    "email": user.email,
+    "email_verified": user.email_verified,
+  }
+
+  if not may_issue_session_without_login(session, user):
+    logger.info(f"Password reset completed for user {user.email}; sign-in required")
+    return AuthResponse(
+      user=user_info,
+      message="Password reset successfully. Sign in to continue.",
+    )
+
   # Generate new JWT token for auto-login with device binding.
   # This picks up the just-bumped session_version.
   device_fingerprint = extract_device_fingerprint(fastapi_request)
@@ -289,12 +308,7 @@ async def reset_password(
   refresh_threshold = int(TOKEN_GRACE_PERIOD_MINUTES * 60)
 
   return AuthResponse(
-    user={
-      "id": user.id,
-      "name": user.name,
-      "email": user.email,
-      "email_verified": user.email_verified,
-    },
+    user=user_info,
     message="Password reset successfully. You are now logged in.",
     token=jwt_token,
     expires_in=expires_in,

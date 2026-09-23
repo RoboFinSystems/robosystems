@@ -495,3 +495,101 @@ class TestPasswordlessAccountGuard:
     assert response.json()["detail"] == "Invalid or expired reset token"
     mock_user.update.assert_not_called()
     mock_user.invalidate_sessions.assert_not_called()
+
+
+class TestResetSessionIssuance:
+  """A reset mints a session only where login would not demand a passkey step."""
+
+  @pytest.mark.asyncio
+  @patch(
+    "robosystems.routers.auth.password_reset.may_issue_session_without_login",
+    return_value=False,
+  )
+  @patch.object(UserToken, "verify_token")
+  @patch.object(User, "get_by_id")
+  @patch(
+    "robosystems.routers.auth.password_reset.hash_password_async",
+    new_callable=AsyncMock,
+  )
+  async def test_reset_for_mfa_user_returns_no_session(
+    self, mock_hash_password, mock_get_user, mock_verify_token, _gate, client
+  ):
+    mock_verify_token.return_value = ("user_mfa", 0)
+    mock_user = Mock(spec=User)
+    mock_user.id = "user_mfa"
+    mock_user.email = "mfa@example.com"
+    mock_user.name = "MFA User"
+    mock_user.is_active = True
+    mock_user.email_verified = True
+    mock_user.update = Mock()
+    mock_get_user.return_value = mock_user
+    mock_hash_password.return_value = "hashed"
+
+    response = client.post(
+      "/v1/auth/password/reset",
+      json={"token": "valid_reset_token", "new_password": "NewS3cur3P@ssw0rd!"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("token") is None
+    assert data["message"] == "Password reset successfully. Sign in to continue."
+    mock_user.update.assert_called_once()
+
+
+class TestMayIssueSessionWithoutLogin:
+  def _user(self, active=True):
+    user = Mock(spec=User)
+    user.id = "user_x"
+    user.is_active = active
+    return user
+
+  def test_inactive_user_never_gets_a_session(self):
+    from robosystems.routers.auth.utils import may_issue_session_without_login
+
+    assert may_issue_session_without_login(Mock(), self._user(active=False)) is False
+
+  def test_passkeys_disabled_allows_session(self):
+    from robosystems.routers.auth.utils import may_issue_session_without_login
+
+    with patch("robosystems.routers.auth.utils.env") as env:
+      env.PASSKEYS_ENABLED = False
+      assert may_issue_session_without_login(Mock(), self._user()) is True
+
+  def test_enrolled_passkey_blocks_session(self):
+    from robosystems.routers.auth.utils import may_issue_session_without_login
+
+    with (
+      patch("robosystems.routers.auth.utils.env") as env,
+      patch("robosystems.models.core.UserPasskey.count_for_user", return_value=1),
+    ):
+      env.PASSKEYS_ENABLED = True
+      assert may_issue_session_without_login(Mock(), self._user()) is False
+
+  def test_forced_enrollment_blocks_session(self):
+    from robosystems.routers.auth.utils import may_issue_session_without_login
+
+    with (
+      patch("robosystems.routers.auth.utils.env") as env,
+      patch("robosystems.models.core.UserPasskey.count_for_user", return_value=0),
+      patch(
+        "robosystems.operations.passkeys.user_requires_mfa_enrollment",
+        return_value=True,
+      ),
+    ):
+      env.PASSKEYS_ENABLED = True
+      assert may_issue_session_without_login(Mock(), self._user()) is False
+
+  def test_no_second_factor_allows_session(self):
+    from robosystems.routers.auth.utils import may_issue_session_without_login
+
+    with (
+      patch("robosystems.routers.auth.utils.env") as env,
+      patch("robosystems.models.core.UserPasskey.count_for_user", return_value=0),
+      patch(
+        "robosystems.operations.passkeys.user_requires_mfa_enrollment",
+        return_value=False,
+      ),
+    ):
+      env.PASSKEYS_ENABLED = True
+      assert may_issue_session_without_login(Mock(), self._user()) is True

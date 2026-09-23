@@ -6,7 +6,6 @@ recovery timeout it half-opens to test whether the dependency is back.
 """
 
 import time
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
@@ -50,8 +49,10 @@ class CircuitBreakerManager:
     )
     self.half_open_max_calls = half_open_max_calls
 
-    # Track circuit state per graph_id + operation key
-    self.circuits: dict[str, CircuitState] = defaultdict(CircuitState)
+    # Only circuits that have recorded a failure are stored: a closed circuit
+    # with no failures is the default, so caller-supplied operation names
+    # cannot grow this map.
+    self.circuits: dict[str, CircuitState] = {}
 
     logger.debug(
       f"Initialized CircuitBreakerManager with threshold={self.failure_threshold}, "
@@ -64,11 +65,11 @@ class CircuitBreakerManager:
 
   def _should_allow_request(self, circuit_key: str) -> bool:
     """Check if request should be allowed through circuit."""
-    circuit = self.circuits[circuit_key]
+    circuit = self.circuits.get(circuit_key)
     current_time = time.time()
 
     # If circuit is closed, allow request
-    if not circuit.is_open:
+    if circuit is None or not circuit.is_open:
       return True
 
     # If circuit is open, check if we should attempt recovery
@@ -89,7 +90,7 @@ class CircuitBreakerManager:
     circuit_key = self._get_circuit_key(graph_id, operation)
 
     if not self._should_allow_request(circuit_key):
-      circuit = self.circuits[circuit_key]
+      circuit = self.circuits.get(circuit_key, CircuitState())
       time_since_failure = time.time() - (circuit.last_failure_time or 0)
 
       raise HTTPException(
@@ -105,9 +106,10 @@ class CircuitBreakerManager:
   def record_success(self, graph_id: str, operation: str) -> None:
     """Record successful operation."""
     circuit_key = self._get_circuit_key(graph_id, operation)
-    circuit = self.circuits[circuit_key]
+    circuit = self.circuits.pop(circuit_key, None)
+    if circuit is None:
+      return
 
-    # Reset failure count on success
     circuit.failure_count = 0
     circuit.last_success_time = time.time()
 
@@ -134,7 +136,7 @@ class CircuitBreakerManager:
       return
 
     circuit_key = self._get_circuit_key(graph_id, operation)
-    circuit = self.circuits[circuit_key]
+    circuit = self.circuits.setdefault(circuit_key, CircuitState())
 
     circuit.failure_count += 1
     circuit.last_failure_time = time.time()
@@ -151,7 +153,7 @@ class CircuitBreakerManager:
   def get_circuit_status(self, graph_id: str, operation: str) -> dict[str, Any]:
     """Get current circuit status for monitoring."""
     circuit_key = self._get_circuit_key(graph_id, operation)
-    circuit = self.circuits[circuit_key]
+    circuit = self.circuits.get(circuit_key, CircuitState())
 
     return {
       "circuit_key": circuit_key,
