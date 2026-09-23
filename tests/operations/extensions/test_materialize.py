@@ -1185,7 +1185,8 @@ class TestPruneDanglingEdges:
     db.execute('CREATE TABLE "Element"(identifier VARCHAR)')
     db.execute('CREATE TABLE "LINE_ITEM_RELATES_TO_ELEMENT"(src VARCHAR, dst VARCHAR)')
     db.execute("INSERT INTO \"LineItem\" VALUES ('li_1'), ('li_2')")
-    db.execute("INSERT INTO \"Element\" VALUES ('el_active')")
+    # A NULL identifier must not stop the prune (it would under NOT IN).
+    db.execute("INSERT INTO \"Element\" VALUES ('el_active'), (NULL)")
     db.execute(
       'INSERT INTO "LINE_ITEM_RELATES_TO_ELEMENT" VALUES '
       "('li_1', 'el_active'), ('li_2', 'el_missing')"

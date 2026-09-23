@@ -1320,9 +1320,13 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'securities') sec
     LEFT JOIN postgres_scan('{c}', '{s}', 'entities') e
       ON sec.entity_id = e.id
-    -- A position keeps its security in the graph; is_active marks it retired.
+    -- An active position keeps its security in the graph; is_active marks it
+    -- retired. Same position set as POSITION_IN_SECURITY.
     WHERE sec.is_active = true
-      OR sec.id IN (SELECT security_id FROM postgres_scan('{c}', '{s}', 'positions'))
+      OR sec.id IN (
+        SELECT security_id FROM postgres_scan('{c}', '{s}', 'positions')
+        WHERE status = 'active'
+      )
   """
 
   tables["Position"] = f"""
@@ -1816,11 +1820,13 @@ class ExtensionsMaterializer:
       from_node, to_node = endpoints[table_name]
       if from_node not in staged or to_node not in staged:
         continue
+      # NOT EXISTS, not NOT IN: one NULL identifier would make NOT IN
+      # unknown for every row and prune nothing.
       sql = (
-        f'DELETE FROM "{table_name}" '
-        f"WHERE src IS NULL OR dst IS NULL "
-        f'OR src NOT IN (SELECT identifier FROM "{from_node}") '
-        f'OR dst NOT IN (SELECT identifier FROM "{to_node}")'
+        f'DELETE FROM "{table_name}" AS r '
+        f"WHERE r.src IS NULL OR r.dst IS NULL "
+        f'OR NOT EXISTS (SELECT 1 FROM "{from_node}" n WHERE n.identifier = r.src) '
+        f'OR NOT EXISTS (SELECT 1 FROM "{to_node}" n WHERE n.identifier = r.dst)'
       )
       try:
         response = await client.execute_write(graph_id, sql, timeout=120.0)
