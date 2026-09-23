@@ -82,6 +82,36 @@ class TestDispatch:
     assert session.execute.called
     assert result.entry_ids == ["je_new"]
 
+  def test_dispatch_links_the_auto_reversal_too(self) -> None:
+    """Write-back publishes an event's linked entries; an unlinked reversal
+    would never reach QuickBooks."""
+    session = MagicMock()
+    service_mock = MagicMock()
+    service_mock.create_closing_entry.return_value = ClosingEntryResult(
+      outcome="created",
+      entry_id="je_accrual",
+      status="draft",
+      posting_date=date(2026, 3, 31),
+      reversal=ClosingEntryResult(
+        outcome="created",
+        entry_id="je_reversal",
+        status="draft",
+        posting_date=date(2026, 4, 1),
+      ),
+    )
+
+    with patch(
+      "robosystems.operations.event_block.python_handlers.schedule_entry_due.ScheduleService",
+      return_value=service_mock,
+    ):
+      result = dispatch(session, _make_event(), _make_metadata(), created_by="usr_test")
+
+    assert result.entry_ids == ["je_accrual", "je_reversal"]
+    sql = str(
+      session.execute.call_args.args[0].compile(compile_kwargs={"literal_binds": True})
+    )
+    assert "je_accrual" in sql and "je_reversal" in sql and "evt_test" in sql
+
   def test_dispatch_skipped_does_not_link(self) -> None:
     """When outcome is 'skipped' (no fact), no entry to link."""
     session = MagicMock()

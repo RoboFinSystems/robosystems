@@ -648,8 +648,9 @@ class PeriodCloseService:
             created_by=actor_id,
             graph_id=graph_id,
             acquire_period_fence=False,
+            entry_ids=[str(entry.id)],
           )
-        if result.status == "pending":
+        if result.qb_error is not None:
           # QB rejected — collect for the batch error.
           failed_events.append(
             {

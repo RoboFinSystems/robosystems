@@ -418,6 +418,21 @@ async def oauth_callback(
       )
       returned_realm_id = provider_data.get("realm_id")
 
+      # Re-authorizing a connection must not move it to another company: its
+      # ledger already holds the first company's books, and the next
+      # incremental sync would write the second one's on top.
+      stored_realm_id = (connection.get("metadata") or {}).get("realm_id")
+      if stored_realm_id and returned_realm_id and stored_realm_id != returned_realm_id:
+        raise create_error_response(
+          status_code=status.HTTP_409_CONFLICT,
+          detail=(
+            "This connection belongs to a different QuickBooks company. "
+            "Reconnect the same company, or add the other one as a new connection."
+          ),
+          code=ErrorCode.INVALID_INPUT,
+        )
+      is_pending = connection.get("status") == "pending_oauth"
+
       # Reuse-on-re-OAuth: if a soft-deleted connection exists
       # for this graph+provider+realm, revive it in place rather than
       # leaving the pending connection as a brand-new row. Preserves
@@ -434,7 +449,7 @@ async def oauth_callback(
           realm_id=returned_realm_id,
           session=db,
         )
-        if prior is not None and prior.id != connection_id:
+        if prior is not None and prior.id != connection_id and is_pending:
           logger.info(
             "Re-OAuth reuse: reviving soft-deleted connection %s for "
             "realm %s; discarding freshly-created pending %s",

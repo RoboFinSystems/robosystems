@@ -69,14 +69,22 @@ def dispatch(
     memo=metadata.memo,
   )
 
-  entry_ids: list[str] = []
-  if result.entry_id:
+  # The auto-reversal is linked too: write-back publishes an event's linked
+  # entries, and an unlinked reversal never reaches QuickBooks.
+  entry_ids = [
+    entry_id
+    for entry_id in (
+      result.entry_id,
+      result.reversal.entry_id if result.reversal else None,
+    )
+    if entry_id
+  ]
+  if entry_ids:
     session.execute(
       update(Entry)
-      .where(Entry.id == result.entry_id)
+      .where(Entry.id.in_(entry_ids))
       .values(triggered_by_event_id=event.id)
     )
-    entry_ids.append(result.entry_id)
 
   logger.info(
     "schedule_entry_due event %s fired: schedule=%s outcome=%s entry=%s",

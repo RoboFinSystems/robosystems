@@ -3,10 +3,10 @@
 Covers the four observable behaviors of the write-back path:
 
 1. Native-policy events fast-path through (no QB write, status unchanged).
-2. QB-authoritative + QB accepts → `qb_external_id` stamped, status =
-   'fulfilled', drafts promoted to posted.
+2. QB-authoritative + QB accepts → per-entry ids and `qb_external_id`
+   stamped, entries promoted, status = 'fulfilled' once no draft remains.
 3. QB-authoritative + QB rejects → `last_outbound_error` stamped,
-   status = 'pending', drafts STAY draft.
+   status = 'pending', unpublished drafts STAY draft.
 4. Missing connection_id on event metadata → fast-path with status
    unchanged (event is RL-native; nothing to publish).
 """
@@ -25,11 +25,13 @@ def _make_event(
   event_id: str = "evt_test_abc",
   status: str = "classified",
   metadata: dict | None = None,
+  source: str = "manual",
 ) -> MagicMock:
   """A MagicMock Event row matching the shape the command reads."""
   evt = MagicMock()
   evt.id = event_id
   evt.status = status
+  evt.source = source
   evt.metadata_ = metadata or {
     "connection_id": "conn_qb_1",
     "posting_date": "2026-05-19",
@@ -43,20 +45,32 @@ def _make_event(
   return evt
 
 
-def _make_session(event: MagicMock) -> MagicMock:
+def _make_session(
+  event: MagicMock, *, drafts_left_after: bool | None = None
+) -> MagicMock:
   """Extensions session that returns `event` for any Event.query.
 
   The read is locked and refreshed — `.populate_existing().with_for_update()`
   — so the chain is stubbed self-returning rather than pinned to a position.
   ``session.get`` is the unlocked peek used to take the period fence
   before that lock.
+
+  With ``drafts_left_after`` set, the two later ``.first()`` reads answer
+  "the event has ledger rows" and then whether a draft is still unpublished.
   """
   session = MagicMock()
   session.get.return_value = event
   filtered = session.query.return_value.filter.return_value
   filtered.populate_existing.return_value = filtered
   filtered.with_for_update.return_value = filtered
-  filtered.first.return_value = event
+  if drafts_left_after is None:
+    filtered.first.return_value = event
+  else:
+    filtered.first.side_effect = [
+      event,
+      ("je_row",),
+      ("je_left",) if drafts_left_after else None,
+    ]
   return session
 
 
@@ -260,7 +274,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
     from robosystems.operations.event_block.commands import execute_event_block
 
     evt = _make_event()
-    session = _make_session(evt)
+    session = _make_session(evt, drafts_left_after=False)
 
     mock_connection = MagicMock()
     mock_connection.graph_id = GRAPH_ID
@@ -298,7 +312,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
         # Prefixed format matching QB importer's external_id convention
         # (qb_writeback returns these prefixed so the cross-source
         # matcher sees the same `JournalEntry_<id>` shape).
-        return_value=["JournalEntry_99001"],
+        return_value={"je_1": "JournalEntry_99001"},
       ),
     ):
       result = execute_event_block(
@@ -314,8 +328,8 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
     # Metadata stamped with the prefixed form so the cross-source
     # matcher recognises round-tripped entries on the next sync.
     assert evt.metadata_["qb_external_id"] == "JournalEntry_99001"
+    assert evt.metadata_["qb_entry_ids"] == {"je_1": "JournalEntry_99001"}
     assert evt.metadata_["routed_via"]["connection_id"] == "conn_qb_1"
-    assert evt.metadata_["routed_via"]["qb_request_id"] == "evt_test_abc"
     # Status on the event row.
     assert evt.status == "fulfilled"
     # Entry + Transaction promote-to-posted queries fired.
@@ -351,7 +365,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
         ],
       }
     )
-    session = _make_session(evt)
+    session = _make_session(evt, drafts_left_after=False)
 
     mock_connection = MagicMock(
       graph_id=GRAPH_ID,
@@ -378,7 +392,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
       patch("robosystems.adapters.quickbooks.client.api.QBClient"),
       patch(
         "robosystems.operations.event_block.qb_writeback.post_event_to_qb",
-        return_value=["JournalEntry_AA", "JournalEntry_BB"],
+        return_value={"je_1": "JournalEntry_AA", "je_2": "JournalEntry_BB"},
       ),
     ):
       result = execute_event_block(
@@ -429,7 +443,7 @@ class TestExecuteEventBlockQBReject:
     from robosystems.operations.event_block.qb_writeback import QBWritebackError
 
     evt = _make_event()
-    session = _make_session(evt)
+    session = _make_session(evt, drafts_left_after=True)
 
     mock_connection = MagicMock(
       graph_id=GRAPH_ID,
@@ -650,3 +664,116 @@ class TestSaveWithRetry:
     assert exc_info.value.payload["code"] == "qb_validation_error"
     # Non-retryable — exactly one attempt.
     assert call_count["n"] == 1
+
+
+def _run_against_qb(evt, session, *, post_result=None, post_error=None):
+  """Execute with a qb_authoritative connection and the QB boundary faked."""
+  from robosystems.models.api.event_block import ExecuteEventBlockRequest
+  from robosystems.operations.event_block.commands import execute_event_block
+
+  connection = MagicMock(
+    graph_id=GRAPH_ID,
+    write_policy="qb_authoritative",
+    provider="quickbooks",
+    realm_id="9341",
+  )
+  cred = MagicMock()
+  cred.get_credentials.return_value = {"refresh_token": "r"}
+  platform = MagicMock()
+  platform.__enter__ = MagicMock(return_value=platform)
+  platform.__exit__ = MagicMock(return_value=False)
+
+  with (
+    patch("robosystems.database.SessionFactory", return_value=platform),
+    patch(
+      "robosystems.models.core.connection.connection.Connection.get_by_id",
+      return_value=connection,
+    ),
+    patch(
+      "robosystems.models.core.connection.connection_credentials.ConnectionCredentials.get_by_connection_id",
+      return_value=cred,
+    ),
+    patch("robosystems.adapters.quickbooks.client.api.QBClient"),
+    patch(
+      "robosystems.operations.event_block.qb_writeback.post_event_to_qb",
+      return_value=post_result,
+      side_effect=post_error,
+    ) as post,
+  ):
+    result = execute_event_block(
+      session,
+      ExecuteEventBlockRequest(event_id=str(evt.id)),
+      created_by="user_1",
+      graph_id=GRAPH_ID,
+    )
+  return result, post
+
+
+@pytest.mark.unit
+class TestExecutePublishesLedgerEntries:
+  def test_a_synced_in_quickbooks_event_is_not_sent_back(self):
+    from robosystems.models.api.event_block import ExecuteEventBlockRequest
+    from robosystems.operations.event_block.commands import execute_event_block
+
+    evt = _make_event(source="quickbooks")
+    session = _make_session(evt)
+
+    with patch("robosystems.database.SessionFactory") as platform_factory:
+      result = execute_event_block(
+        session,
+        ExecuteEventBlockRequest(event_id="evt_test_abc", connection_id="conn_qb_1"),
+        created_by="user_1",
+        graph_id=GRAPH_ID,
+      )
+
+    platform_factory.assert_not_called()
+    assert result.qb_external_id is None
+    assert evt.status == "classified"
+
+  def test_an_event_without_ledger_rows_is_refused(self):
+    from robosystems.operations.event_block.commands import EventNotPublishableError
+
+    evt = _make_event()
+    session = _make_session(evt)
+    session.query.return_value.filter.return_value.first.side_effect = [evt, None]
+
+    with pytest.raises(EventNotPublishableError, match="commit it first"):
+      _run_against_qb(evt, session, post_result={})
+
+  def test_a_partial_publish_records_what_landed(self):
+    from robosystems.operations.event_block.qb_writeback import QBWritebackError
+
+    evt = _make_event()
+    session = _make_session(evt, drafts_left_after=True)
+    error = QBWritebackError({"code": "qb_validation_error"})
+    error.published = {"je_1": "JournalEntry_AA"}
+
+    result, _ = _run_against_qb(evt, session, post_error=error)
+
+    assert result.qb_error == {"code": "qb_validation_error"}
+    assert evt.metadata_["qb_entry_ids"] == {"je_1": "JournalEntry_AA"}
+    assert evt.metadata_["qb_external_id"] == "JournalEntry_AA"
+    assert evt.status == "pending"
+
+  def test_a_draft_left_for_a_later_period_keeps_the_event_open(self):
+    evt = _make_event()
+    session = _make_session(evt, drafts_left_after=True)
+
+    result, _ = _run_against_qb(evt, session, post_result={"je_1": "JournalEntry_AA"})
+
+    assert result.qb_error is None
+    assert evt.status == "classified"
+    assert evt.metadata_["qb_entry_ids"] == {"je_1": "JournalEntry_AA"}
+
+  def test_a_failure_from_captured_leaves_the_status_alone(self):
+    from robosystems.operations.event_block.qb_writeback import QBWritebackError
+
+    evt = _make_event(status="captured")
+    session = _make_session(evt, drafts_left_after=True)
+
+    result, _ = _run_against_qb(
+      evt, session, post_error=QBWritebackError({"code": "qb_transport_error"})
+    )
+
+    assert result.qb_error is not None
+    assert evt.status == "captured"

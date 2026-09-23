@@ -14,8 +14,8 @@ The predicate has two halves:
   ``Connection`` whose ``write_policy`` is qb_authoritative / hybrid.
 - **eligible drafts** (extensions DB): in-period ``draft`` entries whose
   triggering ``Event`` publishes (see below), is not retracted (``status``
-  not ``voided`` / ``superseded``), and is not already in QB (no
-  ``qb_external_id``).
+  not ``voided`` / ``superseded``), and that are not already in QB (no id
+  recorded for the entry in ``qb_entry_ids``).
 
 A draft publishes on close iff both hold.
 
@@ -40,7 +40,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import ColumnElement, Row, and_, or_
+from sqlalchemy import ColumnElement, Row, and_, not_, or_
 from sqlalchemy.orm import Session
 
 from robosystems.models.extensions.roboledger.entry import Entry
@@ -121,6 +121,20 @@ def resolve_writeback_connection(
   )
 
 
+def _entry_not_yet_in_qb() -> ColumnElement[bool]:
+  """The entry has no recorded QuickBooks id.
+
+  Published entries are recorded per entry in ``metadata.qb_entry_ids``. An
+  event published before that map existed carries only ``qb_external_id``,
+  and all of its entries went together.
+  """
+  recorded = Event.metadata_["qb_entry_ids"]
+  return or_(
+    and_(recorded.is_(None), Event.metadata_["qb_external_id"].astext.is_(None)),
+    and_(recorded.isnot(None), not_(recorded.has_key(Entry.id))),
+  )
+
+
 def select_writeback_eligible_entries(
   session: Session, period_start: date, period_end: date
 ) -> list[Row[tuple[Entry, Event]]]:
@@ -140,7 +154,7 @@ def select_writeback_eligible_entries(
       Entry.status == "draft",
       writeback_source_clause(),
       Event.status.notin_(WRITEBACK_EXCLUDED_EVENT_STATUSES),
-      Event.metadata_["qb_external_id"].astext.is_(None),
+      _entry_not_yet_in_qb(),
     )
     .all()
   )

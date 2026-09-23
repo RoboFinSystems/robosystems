@@ -20,10 +20,11 @@ handler's `JournalEntryRecordedMetadata` Pydantic):
   `posting_date`, `memo`, `line_items` (multi-entry path used by QB
   ingest; one event → multiple journal entries on the QB side).
 
-For the nested case we post **one QB JournalEntry per entry**. QB's
-JournalEntry endpoint doesn't natively support multi-entry-per-call,
-so a multi-entry RL event becomes N round-trips. The returned
-`qb_txn_id` is a list when N > 1.
+Each draft Entry linked to the event posts as its own QB JournalEntry,
+keyed by the entry id, and the QB id it receives is recorded per entry in
+``metadata.qb_entry_ids``. An event whose entries span periods therefore
+publishes one period at a time, and a partial failure keeps the ids of the
+entries that did land.
 """
 
 from __future__ import annotations
@@ -61,6 +62,17 @@ class QBWritebackError(Exception):
   def __init__(self, payload: dict[str, Any]) -> None:
     super().__init__(payload.get("message", "QB JE write rejected"))
     self.payload = payload
+    # Entries that reached QuickBooks before the failure, entry_id → QB id.
+    self.published: dict[str, str] = {}
+
+
+QB_ENTRY_IDS_KEY = "qb_entry_ids"
+
+
+def published_entry_ids(metadata: dict[str, Any] | None) -> dict[str, str]:
+  """Entry id → QB JournalEntry id for the event's entries already in QB."""
+  recorded = (metadata or {}).get(QB_ENTRY_IDS_KEY)
+  return dict(recorded) if isinstance(recorded, dict) else {}
 
 
 def _validated_cents(value: Any, field: str) -> int:
@@ -190,24 +202,23 @@ def _build_qb_journal_entry(
   return je
 
 
-def _entries_from_draft_rows(session: Session, event_id: str) -> list[dict[str, Any]]:
-  """Build nested-shape entry dicts from the GL rows linked to an event.
+def _draft_entries(
+  session: Session, event_id: str, entry_ids: list[str] | None
+) -> list[tuple[str, dict[str, Any]]]:
+  """(entry_id, entry dict) for the event's draft GL rows, in creation order.
 
   These rows are the ledger's version of the event — the drafts close will
-  post — and so the thing to publish. Every handler materializes them
-  (``journal_entry_recorded`` via `create_journal_entry`,
-  ``schedule_entry_due`` / ``asset_disposed`` via the schedule service);
-  ``event.metadata`` is the capture, which a draft correction leaves behind.
-  Returns one entry dict per linked Entry, in creation order.
+  post — and so the thing to publish; ``event.metadata`` is the capture,
+  which a draft correction leaves behind. ``entry_ids`` narrows the set to
+  the entries a caller is publishing (close passes the ones in its period).
   """
-  entries = (
-    session.query(Entry)
-    .filter(Entry.triggered_by_event_id == event_id)
-    .order_by(Entry.created_at, Entry.id)
-    .all()
+  query = session.query(Entry).filter(
+    Entry.triggered_by_event_id == event_id, Entry.status == "draft"
   )
-  result: list[dict[str, Any]] = []
-  for entry in entries:
+  if entry_ids is not None:
+    query = query.filter(Entry.id.in_(entry_ids))
+  result: list[tuple[str, dict[str, Any]]] = []
+  for entry in query.order_by(Entry.created_at, Entry.id).all():
     lines = (
       session.query(LineItem)
       .filter(LineItem.entry_id == entry.id)
@@ -215,19 +226,22 @@ def _entries_from_draft_rows(session: Session, event_id: str) -> list[dict[str, 
       .all()
     )
     result.append(
-      {
-        "posting_date": entry.posting_date,
-        "memo": entry.memo,
-        "line_items": [
-          {
-            "element_id": li.element_id,
-            "debit_amount": int(li.debit_amount or 0),
-            "credit_amount": int(li.credit_amount or 0),
-            "description": li.description,
-          }
-          for li in lines
-        ],
-      }
+      (
+        str(entry.id),
+        {
+          "posting_date": entry.posting_date,
+          "memo": entry.memo,
+          "line_items": [
+            {
+              "element_id": li.element_id,
+              "debit_amount": int(li.debit_amount or 0),
+              "credit_amount": int(li.credit_amount or 0),
+              "description": li.description,
+            }
+            for li in lines
+          ],
+        },
+      )
     )
   return result
 
@@ -236,82 +250,52 @@ def post_event_to_qb(
   session: Session,
   event: Event,
   qb_client,
-) -> list[str]:
-  """Post the event's journal-entry plan to QB.
+  *,
+  entry_ids: list[str] | None = None,
+) -> dict[str, str]:
+  """Post the event's unpublished draft entries to QB, one JournalEntry each.
 
-  Returns the list of QB-side transaction IDs (one per nested entry,
-  or a single-element list for flat-shape events). Raises
-  `QBWritebackError` on QB rejection — caller stamps the payload on
-  the event's metadata and transitions to status='pending' for retry.
+  Returns entry_id → QB id (prefixed ``JournalEntry_``, the external_id
+  format the QB importer builds, so the cross-source matcher can compare
+  the two) for the entries posted by this call.
 
-  Idempotency: each QB POST carries `request_id=event.id`. Multi-entry
-  nested-shape events suffix the request_id with the entry index so
-  each call has a distinct key but the per-entry write is still
-  retry-safe within QB's ~5-minute dedup window.
+  Every entry is built — accounts resolved, amounts validated — before the
+  first POST, so a mapping error publishes nothing. A QB rejection mid-batch
+  raises `QBWritebackError` with ``published`` holding the entries that
+  landed first; the caller must record them. Each POST carries the entry id
+  as its RequestId, so a retry inside QB's ~5-minute window is deduplicated.
   """
-  metadata = dict(event.metadata_ or {})
-  qb_txn_ids: list[str] = []
+  already = published_entry_ids(event.metadata_)
+  pending = [
+    (entry_id, entry)
+    for entry_id, entry in _draft_entries(session, str(event.id), entry_ids)
+    if entry_id not in already
+  ]
+  if not pending:
+    return {}
 
-  # Resolve the entries to post. The ledger rows come first: what publishes
-  # to QuickBooks must be what the ledger posts, and the rows are what
-  # `execute` promotes to `posted` a few lines later. `event.metadata` is
-  # the *capture* — a draft corrected through `update-journal-entry` before
-  # close has moved on from it, and publishing the capture would put the
-  # original in QuickBooks and the correction in the ledger.
-  #   1. Entry/LineItem rows linked by ``triggered_by_event_id`` — every
-  #      handler materializes these (journal_entry_recorded via
-  #      `create_journal_entry`; schedule_entry_due / asset_disposed via the
-  #      schedule service).
-  #   2. metadata["entries"]      — nested shape, for an event that never
-  #      materialized rows
-  #   3. metadata["line_items"]   — flat shape, same case
-  nested_entries = _entries_from_draft_rows(session, str(event.id))
-  if not nested_entries:
-    captured = metadata.get("entries")
-    if isinstance(captured, list) and captured:
-      nested_entries = captured
-    elif metadata.get("line_items"):
-      nested_entries = [
-        {
-          "posting_date": metadata.get("posting_date"),
-          "memo": metadata.get("memo"),
-          "line_items": metadata.get("line_items"),
-        }
-      ]
-
-  if not nested_entries:
-    raise QBWritebackError(
-      {
-        "code": "no_line_items",
-        "message": (
-          f"Event {event.id} has no line items in metadata and no linked "
-          f"draft entries — nothing to publish to QuickBooks."
-        ),
-      }
+  built = [
+    (
+      entry_id,
+      _build_qb_journal_entry(
+        session,
+        posting_date=entry.get("posting_date"),
+        memo=entry.get("memo"),
+        line_items=entry.get("line_items") or [],
+      ),
     )
+    for entry_id, entry in pending
+  ]
 
-  # One QB JournalEntry per entry. Single-entry events keep request_id =
-  # event.id (original idempotency key); multi-entry events suffix per
-  # entry so each call has a distinct key but stays retry-safe in QB's
-  # ~5-minute dedup window.
-  single = len(nested_entries) == 1
-  for idx, entry in enumerate(nested_entries):
-    je = _build_qb_journal_entry(
-      session,
-      posting_date=entry.get("posting_date"),
-      memo=entry.get("memo"),
-      line_items=entry.get("line_items") or [],
-    )
-    request_id = str(event.id) if single else f"{event.id}-e{idx}"
-    qb_id = _save_with_retry(je, qb_client, request_id, event.id)
-    qb_txn_ids.append(f"JournalEntry_{qb_id}")
-
-  # The bare QB Id is prefixed with the entity type ("JournalEntry_") above so
-  # the stamped value matches the external_id format the QB importer builds
-  # for incoming rows (`f"{qb_class}_{tx_id}"`). The cross-source matcher in
-  # the extensions loader compares incoming external_ids against
-  # `metadata.qb_external_id`, so the two must use the same convention.
-  return qb_txn_ids
+  published: dict[str, str] = {}
+  for entry_id, je in built:
+    try:
+      qb_id = _save_with_retry(je, qb_client, entry_id, event.id)
+    except QBWritebackError as e:
+      e.published = published
+      raise
+    published[entry_id] = f"JournalEntry_{qb_id}"
+  return published
 
 
 @_QB_RETRY
