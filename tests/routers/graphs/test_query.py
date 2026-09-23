@@ -616,3 +616,41 @@ async def test_timed_out_write_is_not_resubmitted(
 
   assert response.status_code == 408, response.text
   queue.submit_query.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch("robosystems.routers.graphs.query.execute.get_query_queue")
+@patch("robosystems.routers.graphs.query.execute.get_universal_repository")
+async def test_rejected_queue_submission_fails_its_operation(
+  mock_get_repo,
+  mock_get_queue,
+  async_client: AsyncClient,
+  test_user: User,
+  test_graph_with_credits: dict,
+):
+  mock_get_repo.return_value = AsyncMock()
+  queue = _queue_mock()
+  queue.submit_query = AsyncMock(side_effect=Exception("Query queue is full (5)"))
+  mock_get_queue.return_value = queue
+  op_manager = Mock(fail_operation=AsyncMock())
+  graph_id = test_graph_with_credits["user_graph"].graph_id
+
+  with (
+    patch(
+      "robosystems.routers.graphs.query.execute.create_operation_response",
+      AsyncMock(return_value={"operation_id": "op_01J0000000000000000000000A"}),
+    ),
+    patch(
+      "robosystems.routers.graphs.query.execute.get_operation_manager",
+      return_value=op_manager,
+    ),
+  ):
+    response = await async_client.post(
+      f"/v1/graphs/{graph_id}/query/cypher?mode=async",
+      json={"query": "MATCH (n) RETURN n"},
+      headers={"Authorization": f"Bearer {create_jwt_token(test_user.id)}"},
+    )
+
+  assert response.status_code == 503, response.text
+  op_manager.fail_operation.assert_awaited_once()
+  assert op_manager.fail_operation.call_args.args[0] == "op_01J0000000000000000000000A"

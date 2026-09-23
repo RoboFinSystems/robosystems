@@ -52,7 +52,10 @@ from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
 from robosystems.middleware.robustness import CircuitBreakerManager
-from robosystems.middleware.sse.operation_manager import create_operation_response
+from robosystems.middleware.sse.operation_manager import (
+  create_operation_response,
+  get_operation_manager,
+)
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.query import (
   DEFAULT_QUERY_TIMEOUT,
@@ -574,6 +577,7 @@ async def execute_cypher_query(
           logger.info("Direct execution timed out, falling back to queue")
 
     # TRADITIONAL_QUEUE or fallback
+    sse_response = None
     try:
       sse_response = await create_operation_response(
         operation_type="cypher_query",
@@ -591,7 +595,8 @@ async def execute_cypher_query(
       )
       status = await queue_manager.get_query_status(query_id)
     except Exception as queue_error:
-      # Handle queue submission errors
+      if sse_response:
+        await _fail_unqueued_operation(sse_response["operation_id"], queue_error)
       metrics_instance = get_endpoint_metrics()
 
       if "queue is full" in str(queue_error):
@@ -903,6 +908,15 @@ async def execute_cypher_query(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="An unexpected error occurred while processing your query",
     )
+
+
+async def _fail_unqueued_operation(operation_id: str, error: Exception) -> None:
+  try:
+    await get_operation_manager().fail_operation(
+      operation_id, safe_error_message(error) or "Query was not queued"
+    )
+  except Exception as e:
+    logger.warning(f"Could not fail operation {operation_id}: {e}")
 
 
 async def _check_shared_repository_limits(
