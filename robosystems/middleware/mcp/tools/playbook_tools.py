@@ -197,7 +197,7 @@ _SCHEDULE_AUTHORING: list[str] = [
   "curve (effective-interest amortization, variable leases) set "
   "schedule_metadata.periodic_amounts to explicit per-period cents — its "
   "length must match the number of months and its sum must equal "
-  "original_amount.",
+  "original_amount less residual_value.",
   "MATCH THE CALENDAR WATERMARK — set the schedule's closed_through to the "
   "last day of the calendar's closed_through month (calendar '2026-05' → "
   "schedule closed_through '2026-05-31'). This flags every period at/before "

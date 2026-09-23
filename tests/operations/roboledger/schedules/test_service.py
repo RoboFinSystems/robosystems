@@ -2303,3 +2303,74 @@ class TestDeleteDraftEntryRefusesLandedRows:
       s for s in statements if s.strip().upper().startswith("DELETE FROM ENTRIES")
     ]
     assert deletes and all("status = 'draft'" in s for s in deletes)
+
+
+class TestCreateScheduleResidualValue:
+  """A schedule expenses cost less residual value: the final month books the
+  regular amount, accumulated depreciation ends at the depreciable base, and
+  net book value ends at the residual."""
+
+  def _run(self, *, monthly_amount=40_000, periodic_amounts=None):
+    session = _mock_session()
+    svc = ScheduleService()
+    cm_roles_row = MagicMock()
+    cm_roles_row.scalars.return_value = []
+    balance_row = MagicMock()
+    balance_row.scalar.return_value = "credit"  # contra accumulates
+    qname_row = MagicMock()
+    qname_row.scalar.return_value = "fac:DeprExpense"
+    session.execute.side_effect = [cm_roles_row, balance_row, qname_row]
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Residual Test",
+        taxonomy_id="tax_01",
+        element_ids=["elem_dr", "elem_cr"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),  # 3 monthly periods
+        monthly_amount=monthly_amount,
+        entry_template=EntryTemplate(
+          debit_element_id="elem_dr", credit_element_id="elem_cr"
+        ),
+        schedule_metadata=ScheduleMetadata(
+          method="straight_line",
+          original_amount=130_000,  # $1,300 cost
+          residual_value=10_000,  # $100 salvage
+          useful_life_months=3,
+          asset_element_id="elem_ppe",
+          periodic_amounts=periodic_amounts,
+        ),
+        created_by="usr_test",
+      )
+    return [c[0][0] for c in session.add.call_args_list]
+
+  @staticmethod
+  def _values(added, element_id, period_type):
+    return [
+      f.value
+      for f in added
+      if type(f).__name__ == "Fact"
+      and f.element_id == element_id
+      and f.period_type == period_type
+    ]
+
+  def test_straight_line_depreciates_to_the_residual(self):
+    added = self._run()
+    assert self._values(added, "elem_dr", "duration") == [400.0, 400.0, 400.0]
+    assert self._values(added, "elem_cr", "instant") == [0.0, 400.0, 800.0, 1200.0]
+    assert self._values(added, "elem_ppe", "instant") == [1300.0, 900.0, 500.0, 100.0]
+    rule = next(o for o in added if type(o).__name__ == "Rule")
+    assert rule.metadata_["expected_total"] == 1200.0
+
+  def test_custom_curve_sums_to_the_depreciable_base(self):
+    added = self._run(periodic_amounts=[60_000, 40_000, 20_000])
+    assert self._values(added, "elem_dr", "duration") == [600.0, 400.0, 200.0]
+    with pytest.raises(ValueError, match="less residual_value"):
+      self._run(periodic_amounts=[60_000, 40_000, 30_000])  # sums to cost
+
+  def test_monthly_amount_that_overruns_the_base_is_refused(self):
+    # $700 x 2 months already exceeds the $1,200 base: the final month
+    # would be negative and fail drafting at close.
+    with pytest.raises(ValueError, match="final month would be negative"):
+      self._run(monthly_amount=70_000)

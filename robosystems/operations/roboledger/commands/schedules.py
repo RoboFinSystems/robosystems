@@ -611,7 +611,10 @@ def _rewrite_sum_equals_rule(session: Session, structure: Structure) -> bool:
   mechanics_metadata = dict(structure.metadata_ or {})
   schedule_meta = dict(mechanics_metadata.get("schedule_metadata") or {})
   if schedule_meta.get("original_amount"):
-    schedule_meta["original_amount"] = round(new_total * 100)
+    # Generation expenses original_amount less residual_value.
+    schedule_meta["original_amount"] = round(new_total * 100) + int(
+      schedule_meta.get("residual_value") or 0
+    )
     mechanics_metadata["schedule_metadata"] = schedule_meta
     structure.metadata_ = mechanics_metadata
     structure.artifact_mechanics = {
