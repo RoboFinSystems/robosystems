@@ -9,6 +9,8 @@ The SEC filings graph holds the XBRL financial filings of more than 8,000 public
 
 The graph is read-only and shared: everyone who subscribes reads the same filings.
 
+![RoboSystems SEC filing analysis in ChatGPT](https://youtu.be/Qb4b29Za8LA)
+
 ## Get access
 
 Access is a subscription. In the app, open **Repositories**, browse to **SEC EDGAR Filings** and choose a plan. There are two plans, **Starter** and **Advanced**; Advanced has higher usage limits. Current plans and prices are on the [pricing page](https://robosystems.ai/pricing).

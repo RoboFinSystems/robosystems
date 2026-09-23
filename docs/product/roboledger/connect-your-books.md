@@ -41,7 +41,7 @@ https://api.robosystems.ai/v1/mcp
 
 The first time a tool runs, you sign in to RoboSystems and choose which graph to connect. **One connection is one graph.** To work on another graph, such as the SEC filings for comparing against public companies, add a second connection and choose that graph.
 
-**Claude (claude.ai and Claude Desktop):** Settings → Connectors → Add custom connector, and paste the address.
+**Claude (claude.ai and Claude Desktop):** Customize → Connectors → Add → Add custom connector, and paste the address.
 
 **Claude Code:** run this, then `/mcp` to sign in.
 

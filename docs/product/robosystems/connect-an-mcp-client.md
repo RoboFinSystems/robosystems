@@ -17,7 +17,7 @@ You need a RoboSystems account and a graph to connect: your own, a RoboLedger gr
 
 ## Claude
 
-**claude.ai and Claude Desktop:** Settings → Connectors → Add custom connector, and paste the address. Claude detects the sign-in on its own, so leave the OAuth client fields blank.
+**claude.ai and Claude Desktop:** Customize → Connectors → Add → Add custom connector, and paste the address. Claude detects the sign-in on its own, so leave the OAuth client fields blank.
 
 **Claude Code:** add the server, then run `/mcp`, pick `robosystems` and sign in.
 
