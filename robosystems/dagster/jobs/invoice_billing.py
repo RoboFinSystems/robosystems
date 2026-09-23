@@ -5,6 +5,7 @@ that use invoice billing (no Stripe subscription).
 """
 
 import logging
+from datetime import UTC, datetime
 
 from dagster import Config, OpExecutionContext, job, op
 from sqlalchemy.orm import Session
@@ -51,9 +52,12 @@ def _renew_subscriptions(
 
   for sub_id in subscription_ids:
     try:
+      # Locked, so a duplicate run queued behind this one waits here and then
+      # sees the rotated period below instead of renewing it again.
       subscription = (
         session.query(BillingSubscription)
         .filter(BillingSubscription.id == sub_id)
+        .with_for_update()
         .first()
       )
 
@@ -90,6 +94,14 @@ def _renew_subscriptions(
 
       if not subscription.current_period_end:
         log.warning(f"Subscription {sub_id} has no period end, skipping")
+        skipped_count += 1
+        continue
+
+      period_end = subscription.current_period_end
+      if period_end.tzinfo is None:
+        period_end = period_end.replace(tzinfo=UTC)
+      if period_end > datetime.now(UTC):
+        log.info(f"Subscription {sub_id} period has not ended, skipping")
         skipped_count += 1
         continue
 

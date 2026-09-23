@@ -124,7 +124,7 @@ class TestRenewSubscriptions:
     mock_invoice = MagicMock()
     mock_invoice.id = "binv_test1"
 
-    mock_session.query.return_value.filter.return_value.first.return_value = mock_sub
+    mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_sub
     log = logging.getLogger("test")
 
     with (
@@ -150,10 +150,40 @@ class TestRenewSubscriptions:
     mock_audit_log.assert_called_once()
     assert mock_audit_log.call_args.kwargs["event_type"].value == "subscription_renewed"
 
+  def test_skips_subscription_whose_period_has_not_ended(self):
+    """A duplicate run that reaches a subscription after it was renewed finds
+    the period rotated into the future and must not renew or invoice again."""
+    from datetime import timedelta
+
+    mock_session = MagicMock()
+    mock_sub = self._make_mock_subscription()
+    mock_sub.current_period_end = datetime.now(UTC) + timedelta(days=29)
+    query = mock_session.query.return_value.filter.return_value
+    query.with_for_update.return_value.first.return_value = mock_sub
+
+    with (
+      patch(
+        "robosystems.models.core.billing.customer.BillingCustomer.get_by_org_id",
+        return_value=self._make_mock_customer(),
+      ),
+      patch(
+        "robosystems.operations.graph.subscription_service.generate_subscription_invoice",
+      ) as invoice,
+    ):
+      result = _renew_subscriptions(
+        ["bsub_test1"], mock_session, logging.getLogger("t")
+      )
+
+    assert result["renewed_count"] == 0
+    assert result["skipped_count"] == 1
+    query.with_for_update.assert_called_once()
+    mock_sub.renew_period.assert_not_called()
+    invoice.assert_not_called()
+
   def test_skips_not_found_subscription(self):
     """Skips subscription that no longer exists."""
     mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.first.return_value = None
+    mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = None
     log = logging.getLogger("test")
 
     result = _renew_subscriptions(["bsub_gone"], mock_session, log)
@@ -167,7 +197,7 @@ class TestRenewSubscriptions:
     mock_sub = self._make_mock_subscription(active=False)
     mock_customer = self._make_mock_customer()
 
-    mock_session.query.return_value.filter.return_value.first.return_value = mock_sub
+    mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_sub
     log = logging.getLogger("test")
 
     with patch(
@@ -185,7 +215,7 @@ class TestRenewSubscriptions:
     mock_sub = self._make_mock_subscription(stripe_sub_id="sub_stripe123")
     mock_customer = self._make_mock_customer()
 
-    mock_session.query.return_value.filter.return_value.first.return_value = mock_sub
+    mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_sub
     log = logging.getLogger("test")
 
     with patch(
@@ -203,7 +233,7 @@ class TestRenewSubscriptions:
     mock_sub = self._make_mock_subscription()
     mock_customer = self._make_mock_customer(invoice_billing=False)
 
-    mock_session.query.return_value.filter.return_value.first.return_value = mock_sub
+    mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_sub
     log = logging.getLogger("test")
 
     with patch(
@@ -220,7 +250,7 @@ class TestRenewSubscriptions:
     mock_session = MagicMock()
     mock_sub = self._make_mock_subscription()
 
-    mock_session.query.return_value.filter.return_value.first.return_value = mock_sub
+    mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_sub
     log = logging.getLogger("test")
 
     with patch(
@@ -239,7 +269,7 @@ class TestRenewSubscriptions:
     mock_sub.current_period_end = None
     mock_customer = self._make_mock_customer()
 
-    mock_session.query.return_value.filter.return_value.first.return_value = mock_sub
+    mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_sub
     log = logging.getLogger("test")
 
     with patch(
@@ -258,7 +288,7 @@ class TestRenewSubscriptions:
     mock_sub = self._make_mock_subscription()
     mock_customer = self._make_mock_customer()
 
-    mock_session.query.return_value.filter.return_value.first.return_value = mock_sub
+    mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_sub
     mock_sub.renew_period.side_effect = RuntimeError("DB connection lost")
     log = logging.getLogger("test")
 
