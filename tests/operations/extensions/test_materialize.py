@@ -1168,3 +1168,66 @@ class TestRebuildDeleteCarriesTheLock:
       )
 
     ensure.assert_awaited_once_with(client, GRAPH_ID, True, lock_token="tok-direct")
+
+
+class TestPruneDanglingEdges:
+  """An edge naming a node the node table left out is dropped before COPY,
+  which would otherwise fail the edge table and discard the rebuild."""
+
+  @pytest.mark.asyncio
+  async def test_dangling_edges_are_pruned_and_valid_ones_kept(self):
+    import duckdb
+
+    from robosystems.operations.extensions.materialize import ExtensionsMaterializer
+
+    db = duckdb.connect()
+    db.execute('CREATE TABLE "LineItem"(identifier VARCHAR)')
+    db.execute('CREATE TABLE "Element"(identifier VARCHAR)')
+    db.execute('CREATE TABLE "LINE_ITEM_RELATES_TO_ELEMENT"(src VARCHAR, dst VARCHAR)')
+    db.execute("INSERT INTO \"LineItem\" VALUES ('li_1'), ('li_2')")
+    db.execute("INSERT INTO \"Element\" VALUES ('el_active')")
+    db.execute(
+      'INSERT INTO "LINE_ITEM_RELATES_TO_ELEMENT" VALUES '
+      "('li_1', 'el_active'), ('li_2', 'el_missing')"
+    )
+
+    async def execute_write(graph_id, sql, timeout=None):
+      return {"rows": [list(r) for r in db.execute(sql).fetchall()]}
+
+    client = MagicMock()
+    client.execute_write = AsyncMock(side_effect=execute_write)
+    result = MaterializeResult(
+      graph_id=GRAPH_ID,
+      tables_staged=["Element", "LineItem", "LINE_ITEM_RELATES_TO_ELEMENT"],
+    )
+
+    await ExtensionsMaterializer()._prune_dangling_edges(client, GRAPH_ID, result)
+
+    remaining = db.execute(
+      'SELECT src, dst FROM "LINE_ITEM_RELATES_TO_ELEMENT"'
+    ).fetchall()
+    assert remaining == [("li_1", "el_active")]
+
+  @pytest.mark.asyncio
+  async def test_an_edge_whose_node_table_was_not_staged_is_left_alone(self):
+    from robosystems.operations.extensions.materialize import ExtensionsMaterializer
+
+    client = MagicMock()
+    client.execute_write = AsyncMock()
+    result = MaterializeResult(
+      graph_id=GRAPH_ID, tables_staged=["LineItem", "LINE_ITEM_RELATES_TO_ELEMENT"]
+    )
+
+    await ExtensionsMaterializer()._prune_dangling_edges(client, GRAPH_ID, result)
+
+    client.execute_write.assert_not_called()
+
+
+class TestInactiveNodesWithHistory:
+  def test_element_keeps_inactive_accounts_that_carry_history(self):
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Element"]
+    assert "'line_items'" in sql and "'facts'" in sql
+
+  def test_security_keeps_retired_securities_held_by_a_position(self):
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Security"]
+    assert "'positions'" in sql
