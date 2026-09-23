@@ -480,6 +480,8 @@ class ScheduleService:
     # The schedule expenses cost less residual (salvage) value; the carrying
     # balances still run from cost, so they end at the residual.
     residual_cents = schedule_metadata.residual_value if schedule_metadata else 0
+    if residual_cents and not (schedule_metadata and schedule_metadata.original_amount):
+      raise ValueError("residual_value requires original_amount (the cost basis).")
     depreciable_dollars: float | None = None
     if original_dollars is not None:
       if residual_cents < 0 or residual_cents >= round(original_dollars * 100):

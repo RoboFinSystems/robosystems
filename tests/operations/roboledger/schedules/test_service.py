@@ -2310,7 +2310,9 @@ class TestCreateScheduleResidualValue:
   regular amount, accumulated depreciation ends at the depreciable base, and
   net book value ends at the residual."""
 
-  def _run(self, *, monthly_amount=40_000, periodic_amounts=None):
+  def _run(
+    self, *, monthly_amount=40_000, periodic_amounts=None, original_amount=130_000
+  ):
     session = _mock_session()
     svc = ScheduleService()
     cm_roles_row = MagicMock()
@@ -2335,7 +2337,7 @@ class TestCreateScheduleResidualValue:
         ),
         schedule_metadata=ScheduleMetadata(
           method="straight_line",
-          original_amount=130_000,  # $1,300 cost
+          original_amount=original_amount,  # $1,300 cost
           residual_value=10_000,  # $100 salvage
           useful_life_months=3,
           asset_element_id="elem_ppe",
@@ -2374,3 +2376,9 @@ class TestCreateScheduleResidualValue:
     # would be negative and fail drafting at close.
     with pytest.raises(ValueError, match="final month would be negative"):
       self._run(monthly_amount=70_000)
+
+  def test_residual_without_a_cost_basis_is_refused(self):
+    with pytest.raises(ValueError, match="requires original_amount"):
+      self._run(original_amount=0)
+    with pytest.raises(ValueError, match="requires original_amount"):
+      self._run(original_amount=0, periodic_amounts=[40_000, 40_000, 40_000])
