@@ -150,13 +150,15 @@ uv run dagster asset materialize -m robosystems.dagster \
 ## Nightly chain
 
 ```
-9pm EST — sec_incremental_download_schedule
-  → download (current quarter, plus previous at a quarter boundary)
+9pm ET — sec_incremental_download_schedule
+  → download (the current Eastern-time quarter only)
 
 sec_incremental_pipeline_sensor
   → process (250-filing batches, looping; spot-safe via the S3 cache)
+  → shared master wake, once the partition has drained
+
+sec_wake_to_stage_sensor
   → stage (DuckDB INSERT with NOT EXISTS dedup)
-  [waits for all partitions to drain at quarter boundaries]
 
 sec_stage_to_materialize_sensor
   → materialize (full LadybugDB rebuild)
@@ -171,14 +173,18 @@ sec_post_materialize_publish_sensor
   → replica refresh (rolling, min_healthy=100%, ~15 min warmup)
 ```
 
+The download's quarter travels down the chain as the `quarter` run tag, so
+stage, index and catalog all work on the quarter that was downloaded, even when
+a run finishes after midnight on a quarter's last day.
+
 **All sensors start STOPPED.** Enable them in the Dagster UI when you want the
 automated chain; nothing runs on its own after a fresh deploy.
 
 | Sensor / schedule | Triggers | Role |
 |-------------------|----------|------|
 | `sec_incremental_download_schedule` | `sec_download_job` | 9pm EST weekdays |
-| `sec_incremental_pipeline_sensor` | `sec_process_job`, `sec_incremental_stage_job` | download → process (batched loop) → stage |
-| `sec_wake_to_stage_sensor` | staging jobs | resumes the chain after a sleep window |
+| `sec_incremental_pipeline_sensor` | `sec_process_job`, `shared_master_wake_job` | download → process (batched loop) → wake the shared master once drained |
+| `sec_wake_to_stage_sensor` | `sec_incremental_stage_job` | master awake → stage the tagged quarter |
 | `sec_stage_to_materialize_sensor` | `sec_materialize_job` | stage → full graph rebuild |
 | `sec_post_stage_index_sensor` | `sec_narratives_index_job`, `sec_ixbrl_index_job` | stage → OpenSearch indexing |
 | `sec_index_retry_sensor` | index jobs | retries failed index runs |

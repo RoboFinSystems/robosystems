@@ -36,13 +36,14 @@ SEC_FORM_TYPE_BATCHES = [
   ["DEF 14A", "S-1"],  # Supplementary (~3k in Q2)
 ]
 
-# Quarter partitions for SEC data (SEC_START_YEAR-Q1 through current year Q4)
-# EFTS has a 10k result limit per query; quarterly partitions typically return 5-7k filings
-# Dynamically includes current year so no manual updates needed on Jan 1
+# Quarter partitions for SEC data (SEC_START_YEAR-Q1 through next year's Q4).
+# EFTS has a 10k result limit per query; quarterly partitions typically return 5-7k filings.
+# Computed at import, so next year is included: a deploy from this year keeps
+# working past Jan 1 instead of rejecting the new quarter's partition key.
 _current_year = datetime.now(UTC).year
 SEC_QUARTERS = [
   f"{year}-Q{q}"
-  for year in range(SEC_START_YEAR, _current_year + 1)
+  for year in range(SEC_START_YEAR, _current_year + 2)
   for q in range(1, 5)
 ]
 sec_quarter_partitions = StaticPartitionsDefinition(SEC_QUARTERS)

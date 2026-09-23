@@ -443,6 +443,9 @@ class TestStageIncrementalToDuckDB:
     mock_client.insert_into_table.assert_not_called()
     assert mock_client.execute_write.call_count == 2  # DELETE, INSERT
     assert mock_client.query_table.call_count == 1  # COUNT
+    # Columns are matched by name: the temp table takes the upload's order.
+    insert_sql = mock_client.execute_write.call_args_list[1].kwargs["sql"]
+    assert 'INSERT INTO "Entity" BY NAME SELECT' in insert_sql
 
   @pytest.mark.asyncio
   @patch("robosystems.adapters.sec.processors.ingestion.staging.asyncio.sleep")
@@ -478,11 +481,17 @@ class TestStageIncrementalToDuckDB:
     from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
 
     stager = DuckDBStager()
-    result = await stager.stage_incremental_to_duckdb(year=2024, quarter=1)
+    with patch(
+      "robosystems.adapters.sec.processors.ingestion.staging.logger"
+    ) as mock_logger:
+      result = await stager.stage_incremental_to_duckdb(year=2024, quarter=1)
 
     assert result.status == "success"
     assert "Entity" in result.table_names
     assert result.tables["Entity"].skipped is True
+    # An empty quarter is not silent.
+    warning = mock_logger.warning.call_args.args[0]
+    assert "no files for 2024-Q1" in warning
 
   @pytest.mark.asyncio
   @patch("robosystems.adapters.sec.processors.ingestion.staging.asyncio.sleep")

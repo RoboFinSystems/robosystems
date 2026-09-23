@@ -23,7 +23,8 @@ truth). The whole chain wakes the master at the start and sleeps it after
 publish.
 """
 
-from datetime import UTC, datetime
+import re
+from datetime import datetime
 
 from dagster import (
   DagsterRunStatus,
@@ -99,7 +100,6 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   - Active run check prevents concurrent runs for same quarter
   - After batch completes, sensor re-triggers if pending files remain
   """
-  import re
 
   from sqlalchemy import func
 
@@ -321,7 +321,6 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
 
   The stage_to_materialize_sensor handles the next step (stage → materialize).
   """
-  import re
 
   from robosystems.database import session as SessionLocal
   from robosystems.models.core import SourceFile
@@ -420,6 +419,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
           "phase": "master_wake",
           "mode": "incremental",
           "batch_id": batch_id or "",
+          "quarter": partition_key,
         },
       )
       return
@@ -480,6 +480,11 @@ def sec_wake_to_stage_sensor(context: RunStatusSensorContext):
     return
 
   batch_id = run_tags.get("batch_id")
+  stage_config: dict[str, object] = {"graph_id": "sec"}
+  quarter_tag = run_tags.get("quarter", "")
+  if match := re.fullmatch(r"(\d{4})-Q([1-4])", quarter_tag):
+    stage_config["year"] = int(match.group(1))
+    stage_config["quarter"] = int(match.group(2))
 
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
@@ -502,11 +507,7 @@ def sec_wake_to_stage_sensor(context: RunStatusSensorContext):
     run_key=f"sec-stage-chain-{batch_id or dagster_run.run_id[:8]}",
     run_config={
       "ops": {
-        "sec_duckdb_incremental_staged": {
-          "config": {
-            "graph_id": "sec",
-          }
-        },
+        "sec_duckdb_incremental_staged": {"config": stage_config},
       }
     },
     tags={
@@ -514,6 +515,7 @@ def sec_wake_to_stage_sensor(context: RunStatusSensorContext):
       "phase": "incremental_stage",
       "mode": "incremental",
       "batch_id": batch_id or "",
+      "quarter": quarter_tag,
     },
   )
 
@@ -847,13 +849,14 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
 
   graph_id = run_tags.get("graph_id", "sec")
 
-  # Derive the current quarter partition key
-  # Try to get from upstream run tags, otherwise compute from current date
-  partition_key = run_tags.get("dagster/partition")
+  # The quarter the download ran for, carried down the chain; the Eastern
+  # filing calendar only when a run was started by hand without one.
+  partition_key = run_tags.get("dagster/partition") or run_tags.get("quarter")
   if not partition_key:
-    now = datetime.now(UTC)
-    quarter = (now.month - 1) // 3 + 1
-    partition_key = f"{now.year}-Q{quarter}"
+    from robosystems.adapters.sec import get_current_quarter
+
+    year, quarter = get_current_quarter()
+    partition_key = f"{year}-Q{quarter}"
 
   context.log.info(f"Will index partition {partition_key}")
 
