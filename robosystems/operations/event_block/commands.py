@@ -1307,6 +1307,7 @@ def execute_event_block(
       event_id=str(event.id),
       status=str(event.status),
       qb_external_id=None,
+      qb_entry_ids=published or None,
       qb_error=error_payload,
     )
 
@@ -1338,7 +1339,7 @@ def execute_event_block(
   return ExecuteEventBlockResponse(
     event_id=str(event.id),
     status=str(event.status),
-    qb_external_id=next(iter(newly_published.values()), None)
-    or next(iter(published.values()), None),
+    qb_external_id=next(iter(newly_published.values()), None),
+    qb_entry_ids=published or None,
     qb_error=None,
   )

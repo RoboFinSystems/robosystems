@@ -174,6 +174,8 @@ def test_each_period_publishes_its_own_entry(session):
 
   assert result.qb_error is None
   assert save.call_count == 1
+  assert result.qb_entry_ids is not None
+  assert set(result.qb_entry_ids) == {august, september}
   reloaded = session.get(Event, event.id)
   assert reloaded.status == "fulfilled"
   assert set(reloaded.metadata_["qb_entry_ids"]) == {august, september}
