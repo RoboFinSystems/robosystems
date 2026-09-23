@@ -411,7 +411,6 @@ async def stream_sse_response(
 async def stream_sse_with_queue(
   request: CypherStatementRequest,
   graph_id: str,
-  repository: Any,
   current_user: User,
   priority: int = 5,
   chunk_size: int = 100,
@@ -462,13 +461,14 @@ async def stream_sse_with_queue(
 
       # Monitor queue position
       last_position = initial_status.get("queue_position", 0)
+      announced_start = False
 
       while True:
         await asyncio.sleep(1)
         status = await queue_manager.get_query_status(query_id)
+        state = status["status"] if status else None
 
-        if status and status["status"] == QueryStatus.PENDING:
-          # Update position if changed
+        if state == QueryStatus.PENDING:
           current_position = status.get("queue_position", 0)
           if current_position != last_position:
             yield {
@@ -483,118 +483,73 @@ async def stream_sse_with_queue(
             }
             last_position = current_position
 
-        elif status and status["status"] == QueryStatus.RUNNING:
-          # Query started executing
+        elif state == QueryStatus.RUNNING:
+          if announced_start:
+            continue
+          announced_start = True
           start_event_data = {
             "query_id": query_id,
             "message": "Query execution started",
           }
-
-          # Emit to unified SSE if operation_id provided
           if operation_id:
             await emit_event_to_operation(
               operation_id,
               EventType.OPERATION_STARTED,
               {**start_event_data, "progress_percent": 10, "status": "running"},
             )
+          yield {"event": "started", "data": json.dumps(start_event_data)}
 
-          yield {
-            "event": "started",
-            "data": json.dumps(start_event_data),
-          }
+        elif state == QueryStatus.COMPLETED:
+          # The queue worker already ran the query; stream its stored result.
+          result = await queue_manager.get_query_result(query_id)
+          payload = (result or {}).get("data") or {}
+          rows = payload.get("data", []) if isinstance(payload, dict) else payload
 
-          # Now stream the results
           total_rows = 0
           chunk_count = 0
-
-          # Check for native streaming support
-          if hasattr(repository, "execute_query_streaming"):
-            async for chunk in repository.execute_query_streaming(
-              request.query, request.parameters, chunk_size=chunk_size
-            ):
-              chunk_count += 1
-              rows = chunk.get("rows", chunk) if isinstance(chunk, dict) else chunk
-              total_rows += len(rows)
-
-              # Send chunk
-              yield {
-                "event": "chunk",
-                "data": json.dumps(
-                  {
-                    "chunk_number": chunk_count,
-                    "rows": rows,
-                    "rows_in_chunk": len(rows),
-                    "total_rows": total_rows,
-                  }
-                ),
-              }
-
-              # Progress updates
-              if chunk_count % 10 == 0:
-                yield {
-                  "event": "progress",
-                  "data": json.dumps(
-                    {
-                      "chunks": chunk_count,
-                      "rows": total_rows,
-                    }
-                  ),
+          for i in range(0, len(rows), chunk_size):
+            chunk = rows[i : i + chunk_size]
+            chunk_count += 1
+            total_rows += len(chunk)
+            yield {
+              "event": "chunk",
+              "data": json.dumps(
+                {
+                  "chunk_number": chunk_count,
+                  "rows": chunk,
+                  "total_rows": total_rows,
                 }
-          else:
-            # Execute and stream complete result
-            result = await execute_query_with_timeout(
-              repository,
-              request.query,
-              request.parameters,
-              request.timeout or DEFAULT_QUERY_TIMEOUT,
-            )
+              ),
+            }
 
-            # Stream in chunks
-            for i in range(0, len(result), chunk_size):
-              chunk = result[i : i + chunk_size]
-              chunk_count += 1
-              total_rows += len(chunk)
-
-              yield {
-                "event": "chunk",
-                "data": json.dumps(
-                  {
-                    "chunk_number": chunk_count,
-                    "rows": chunk,
-                    "total_rows": total_rows,
-                  }
-                ),
-              }
-
-          await queue_manager.mark_completed(query_id, {"rows": total_rows})
-
-          # Send completion
           complete_event_data = {
             "query_id": query_id,
             "total_rows": total_rows,
             "message": "Query completed successfully",
           }
-
-          # Emit to unified SSE if operation_id provided
           if operation_id:
             await emit_event_to_operation(
               operation_id,
               EventType.OPERATION_COMPLETED,
               {**complete_event_data, "progress_percent": 100, "status": "completed"},
             )
-
-          yield {
-            "event": "complete",
-            "data": json.dumps(complete_event_data),
-          }
+          yield {"event": "complete", "data": json.dumps(complete_event_data)}
           break
 
-        elif status and status["status"] in [QueryStatus.COMPLETED, QueryStatus.FAILED]:
-          # Handle completion or failure
-          event_type = (
-            "complete" if status["status"] == QueryStatus.COMPLETED else "error"
-          )
-          yield {"event": event_type, "data": json.dumps(status)}
+        else:
+          # FAILED, CANCELLED, or the query aged out of the queue.
+          error_event_data = {
+            "query_id": query_id,
+            "error": (status or {}).get("error")
+            or ("Query cancelled" if state else "Queued query state was lost"),
+          }
+          if operation_id:
+            await emit_event_to_operation(
+              operation_id,
+              EventType.OPERATION_ERROR,
+              {**error_event_data, "status": "failed"},
+            )
+          yield {"event": "error", "data": json.dumps(error_event_data)}
           break
 
     except Exception as e:

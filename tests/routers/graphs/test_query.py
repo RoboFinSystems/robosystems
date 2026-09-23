@@ -2,6 +2,7 @@
 Tests for the graph query endpoint.
 """
 
+import re
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -525,3 +526,93 @@ async def test_get_graph_schema(
   assert "node_labels" in data["schema"]
   assert "relationship_types" in data["schema"]
   assert "node_properties" in data["schema"]
+
+
+def _queue_mock():
+  queue = Mock()
+  queue.get_stats.return_value = {"queue_size": 0, "running_queries": 0}
+  queue.submit_query = AsyncMock(return_value="q_abc123")
+  queue.get_query_status = AsyncMock(
+    return_value={"status": "pending", "queue_position": 1, "estimated_wait": 2}
+  )
+  return queue
+
+
+@pytest.mark.asyncio
+@patch("robosystems.routers.graphs.query.execute.get_query_queue")
+@patch("robosystems.routers.graphs.query.execute.get_universal_repository")
+async def test_queued_query_links_to_a_valid_operation(
+  mock_get_repo,
+  mock_get_queue,
+  async_client: AsyncClient,
+  test_user: User,
+  test_graph_with_credits: dict,
+):
+  from robosystems.routers.operations import OPERATION_ID_PATTERN
+
+  mock_get_repo.return_value = AsyncMock()
+  queue = _queue_mock()
+  mock_get_queue.return_value = queue
+  operation = AsyncMock(return_value={"operation_id": "op_01J0000000000000000000000A"})
+  graph_id = test_graph_with_credits["user_graph"].graph_id
+
+  with patch(
+    "robosystems.routers.graphs.query.execute.create_operation_response", operation
+  ):
+    response = await async_client.post(
+      f"/v1/graphs/{graph_id}/query/cypher?mode=async",
+      json={"query": "MATCH (n) RETURN n"},
+      headers={"Authorization": f"Bearer {create_jwt_token(test_user.id)}"},
+    )
+
+  assert response.status_code == 202, response.text
+  assert "operation_id" not in operation.call_args.kwargs
+  operation_id = response.json()["operation_id"]
+  assert re.match(OPERATION_ID_PATTERN, operation_id)
+  assert queue.submit_query.call_args.kwargs["operation_id"] == operation_id
+
+
+@pytest.mark.asyncio
+@patch("robosystems.routers.graphs.query.execute.get_query_queue")
+@patch("robosystems.routers.graphs.query.execute.get_universal_repository")
+async def test_timed_out_write_is_not_resubmitted(
+  mock_get_repo,
+  mock_get_queue,
+  async_client: AsyncClient,
+  test_user: User,
+  test_graph_with_credits: dict,
+  db_session: Session,
+):
+  repo = AsyncMock()
+  repo.execute_query = AsyncMock(side_effect=TimeoutError("Query timeout"))
+  repo.execute_query_streaming = None
+  mock_get_repo.return_value = repo
+  queue = _queue_mock()
+  mock_get_queue.return_value = queue
+  parent = Graph.get_by_id(test_graph_with_credits["user_graph"].graph_id, db_session)
+  subgraph_id = f"{parent.graph_id}_dev"
+  db_session.add(
+    Graph(
+      graph_id=subgraph_id,
+      org_id=parent.org_id,
+      graph_name="dev",
+      graph_type=parent.graph_type,
+      base_schema=parent.base_schema,
+      graph_tier=parent.graph_tier,
+      graph_instance_id=parent.graph_instance_id,
+      parent_graph_id=parent.graph_id,
+      subgraph_index=1,
+      subgraph_name="dev",
+      is_subgraph=True,
+    )
+  )
+  db_session.commit()
+
+  response = await async_client.post(
+    f"/v1/graphs/{subgraph_id}/query/cypher",
+    json={"query": "CREATE (n:Widget {id: 1})", "timeout": 1},
+    headers={"Authorization": f"Bearer {create_jwt_token(test_user.id)}"},
+  )
+
+  assert response.status_code == 408, response.text
+  queue.submit_query.assert_not_awaited()

@@ -329,7 +329,6 @@ async def execute_cypher_query(
       return await stream_sse_with_queue(
         request=request,
         graph_id=graph_id,
-        repository=repository,
         current_user=current_user,
         priority=_get_user_priority(current_user),
         chunk_size=chunk_size,
@@ -527,7 +526,9 @@ async def execute_cypher_query(
         # (ALB + ASG) — queuing just delays the inevitable, so return a
         # timeout error. User graphs benefit from the queue since they have
         # limited connections (max 3) and no read replicas.
-        if client_info["is_interactive"] or is_shared:
+        # A write never falls back: it is still running on the Graph API, so
+        # resubmitting it would execute it twice.
+        if client_info["is_interactive"] or is_shared or is_write:
           elapsed = (datetime.now(UTC) - start_time).total_seconds()
 
           record_shared_query_outcome(
@@ -574,6 +575,11 @@ async def execute_cypher_query(
 
     # TRADITIONAL_QUEUE or fallback
     try:
+      sse_response = await create_operation_response(
+        operation_type="cypher_query",
+        user_id=current_user.id,
+        graph_id=graph_id,
+      )
       query_id = await queue_manager.submit_query(
         cypher=request.query,
         parameters=request.parameters,
@@ -581,18 +587,9 @@ async def execute_cypher_query(
         user_id=current_user.id,
         credits_required=0.0,  # Queries are included
         priority=_get_user_priority(current_user),
+        operation_id=sse_response["operation_id"],
       )
-
-      # Get initial status
       status = await queue_manager.get_query_status(query_id)
-
-      # Create unified SSE operation for monitoring
-      sse_response = await create_operation_response(
-        operation_type="cypher_query",
-        user_id=current_user.id,
-        graph_id=graph_id,
-        operation_id=query_id,  # Use query_id as operation_id
-      )
     except Exception as queue_error:
       # Handle queue submission errors
       metrics_instance = get_endpoint_metrics()

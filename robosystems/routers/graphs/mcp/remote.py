@@ -607,7 +607,7 @@ async def _stream_queued_call(
   completion. A client disconnect cancels the queued query so abandoned work
   stops consuming queue capacity.
   """
-  from robosystems.middleware.graph.query_queue import get_query_queue
+  from robosystems.middleware.graph.query_queue import QueryStatus, get_query_queue
   from robosystems.middleware.mcp.tools.cypher_tool import assert_read_only_cypher
 
   queue_manager = get_query_queue()
@@ -647,7 +647,8 @@ async def _stream_queued_call(
             )
             break
 
-          state = str(status.get("status", ""))
+          raw_state = status.get("status", "")
+          state = raw_state.value if isinstance(raw_state, QueryStatus) else raw_state
           if progress_token is not None:
             position = status.get("queue_position")
             message = (
