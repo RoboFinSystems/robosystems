@@ -7,7 +7,9 @@ R2 URL onto its local disk and uploads to the dataset repo. Dagster only
 presigns, launches, polls, verifies, and prunes.
 """
 
+import json
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
@@ -16,10 +18,14 @@ from dagster import AssetExecutionContext, MaterializeResult, MetadataValue
 from huggingface_hub import HfApi
 
 from robosystems.config import env
+from robosystems.config.storage.graph import get_r2_download_key
 from robosystems.dagster.assets.shared_repositories.publish import (
+  SNAPSHOT_STATS_EXTENSION,
   _build_r2_destination,
   _validate_shared_graph_id,
 )
+
+HF_CARD_PATH = "README.md"
 
 HF_JOB_IMAGE = "python:3.12"
 HF_JOB_POLL_SECONDS = 30
@@ -51,6 +57,7 @@ def publish_to_huggingface(
   job_flavor: str = "cpu-basic",
   job_timeout: str = "6h",
   prune_previous: bool = True,
+  render_card: Callable[[dict[str, Any]], str] | None = None,
 ) -> MaterializeResult:
   """Copy a shared repository's R2 snapshot to a public Hugging Face dataset.
 
@@ -59,6 +66,11 @@ def publish_to_huggingface(
   snapshot so the download URL stays stable), waits for the job, verifies the
   published size against R2, and optionally deletes the LFS objects of earlier
   snapshots at the same path so storage stays one snapshot deep.
+
+  With ``render_card``, the dataset's README is rewritten for this snapshot
+  from the stats file beside the archive. The card is rendered before the job
+  launches, so a missing or mismatched stats file stops the run before hours
+  of copying rather than after.
   """
   context.log.info(f"Publishing {graph_id} R2 snapshot to Hugging Face {repo_id}")
 
@@ -105,6 +117,20 @@ def publish_to_huggingface(
   commit_message = (
     f"{path_in_repo}: snapshot {snapshot_at:%Y-%m-%d} (ladybug {engine_version})"
   )
+
+  card = None
+  if render_card is not None:
+    snapshot = _load_snapshot_stats(r2_client, bucket, graph_id, source_size)
+    card = render_card(
+      {
+        "snapshot_at": snapshot_at,
+        "compressed_size_bytes": source_size,
+        "original_size_bytes": snapshot["original_size_bytes"],
+        "engine_version": engine_version,
+        "storage_version": _engine_storage_version(),
+        "stats": snapshot["stats"],
+      }
+    )
 
   api = HfApi(token=token)
   namespace = repo_id.split("/", 1)[0]
@@ -154,6 +180,16 @@ def publish_to_huggingface(
     f"sha256 {published['sha256']}); pruned {pruned} previous snapshot(s)"
   )
 
+  if card is not None:
+    api.upload_file(
+      path_or_fileobj=card.encode(),
+      path_in_repo=HF_CARD_PATH,
+      repo_id=repo_id,
+      repo_type="dataset",
+      commit_message=f"card: snapshot {snapshot_at:%Y-%m-%d}",
+    )
+    context.log.info(f"Dataset card updated for the {snapshot_at:%Y-%m-%d} snapshot")
+
   return MaterializeResult(
     metadata={
       "hf_repo": repo_id,
@@ -169,6 +205,7 @@ def publish_to_huggingface(
       "engine_version": engine_version,
       "commit_message": commit_message,
       "pruned_previous": pruned,
+      "card_updated": card is not None,
       "graph_id": graph_id,
       "published_at": datetime.now(UTC).isoformat(),
     }
@@ -181,6 +218,42 @@ def _engine_version() -> str:
     return version("ladybug")
   except PackageNotFoundError:
     return "unknown"
+
+
+def _engine_storage_version() -> int | None:
+  """The storage format that engine writes; None if the package does not say."""
+  try:
+    import ladybug
+
+    return ladybug._get_version_info()[1]
+  except Exception:
+    return None
+
+
+def _load_snapshot_stats(
+  r2_client: Any, bucket: str, graph_id: str, archive_size: int
+) -> dict[str, Any]:
+  """Read the stats file beside the archive, refusing one from another snapshot.
+
+  The archive key is fixed and overwritten each snapshot, so the stats file is
+  paired to its archive by compressed size: a snapshot whose stats were never
+  written finds the previous snapshot's file here, with a different size.
+  """
+  key = get_r2_download_key(graph_id, SNAPSHOT_STATS_EXTENSION)
+  try:
+    body = r2_client.get_object(Bucket=bucket, Key=key)["Body"].read()
+  except r2_client.exceptions.NoSuchKey as e:
+    raise RuntimeError(
+      f"No snapshot stats at r2://{bucket}/{key}; re-run the R2 publish"
+    ) from e
+  snapshot = json.loads(body)
+  if snapshot.get("compressed_size_bytes") != archive_size:
+    raise RuntimeError(
+      f"Snapshot stats at r2://{bucket}/{key} describe a "
+      f"{snapshot.get('compressed_size_bytes')}-byte archive, not the current "
+      f"{archive_size}-byte one; re-run the R2 publish"
+    )
+  return snapshot
 
 
 def _wait_for_job(

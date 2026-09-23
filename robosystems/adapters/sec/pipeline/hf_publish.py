@@ -14,6 +14,7 @@ This is a thin wrapper around the shared publish_to_huggingface() helper.
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from robosystems.adapters.sec.pipeline.configs import SECHFPublishConfig
+from robosystems.adapters.sec.pipeline.dataset_card import render_dataset_card
 from robosystems.config import env
 from robosystems.dagster.assets.shared_repositories.huggingface import (
   publish_to_huggingface,
@@ -45,6 +46,7 @@ def sec_lbug_hf_published(
   - Launching and polling the Hugging Face Job
   - Verifying the published size against R2
   - Pruning superseded snapshots' LFS objects
+  - Rewriting the dataset card from the snapshot's stats file
   """
   return publish_to_huggingface(
     context,
@@ -54,4 +56,5 @@ def sec_lbug_hf_published(
     job_flavor=config.job_flavor,
     job_timeout=config.job_timeout,
     prune_previous=config.prune_previous,
+    render_card=render_dataset_card,
   )
