@@ -451,6 +451,21 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'entities')
   """
 
+  # Scenario guard: fact sets stamped with a scenario_id are forecast
+  # months (NULL means actuals — see FactSet.scenario_id). The graph
+  # schema carries no scenario discriminator, so materializing them would
+  # blend plan into history for every graph reader (fact grids, Cypher,
+  # analytical views). Until an OLAP scenario leg exists, scenario facts
+  # and fact sets stay OLTP-only: every projection below that reads
+  # `facts` goes through this derived table, and every `fact_sets`
+  # projection filters `scenario_id IS NULL` directly.
+  actual_facts = (
+    f"(SELECT f.* FROM postgres_scan('{c}', '{s}', 'facts') f "
+    f"LEFT JOIN postgres_scan('{c}', '{s}', 'fact_sets') sfs "
+    f"ON sfs.id = f.fact_set_id "
+    f"WHERE sfs.scenario_id IS NULL)"
+  )
+
   tables["Element"] = f"""
     CREATE OR REPLACE TABLE Element AS
     SELECT
@@ -497,7 +512,11 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::DOUBLE                    AS canonical_confidence,
       NULL::FLOAT[384]                AS embedding
     FROM postgres_scan('{c}', '{s}', 'elements') e
+    -- An inactive account (a QuickBooks account marked inactive, a retired
+    -- element) still carries the history posted to it.
     WHERE e.is_active = true
+      OR e.id IN (SELECT element_id FROM postgres_scan('{c}', '{s}', 'line_items'))
+      OR e.id IN (SELECT element_id FROM {actual_facts})
   """
 
   tables["Trait"] = f"""
@@ -942,21 +961,6 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   # have been generated yet — that's fine, they'll be populated on next
   # materialization after report creation.
 
-  # Scenario guard: fact sets stamped with a scenario_id are forecast
-  # months (NULL means actuals — see FactSet.scenario_id). The graph
-  # schema carries no scenario discriminator, so materializing them would
-  # blend plan into history for every graph reader (fact grids, Cypher,
-  # analytical views). Until an OLAP scenario leg exists, scenario facts
-  # and fact sets stay OLTP-only: every projection below that reads
-  # `facts` goes through this derived table, and every `fact_sets`
-  # projection filters `scenario_id IS NULL` directly.
-  actual_facts = (
-    f"(SELECT f.* FROM postgres_scan('{c}', '{s}', 'facts') f "
-    f"LEFT JOIN postgres_scan('{c}', '{s}', 'fact_sets') sfs "
-    f"ON sfs.id = f.fact_set_id "
-    f"WHERE sfs.scenario_id IS NULL)"
-  )
-
   tables["Taxonomy"] = f"""
     CREATE OR REPLACE TABLE Taxonomy AS
     SELECT
@@ -1316,7 +1320,13 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'securities') sec
     LEFT JOIN postgres_scan('{c}', '{s}', 'entities') e
       ON sec.entity_id = e.id
+    -- An active position keeps its security in the graph; is_active marks it
+    -- retired. Same position set as POSITION_IN_SECURITY.
     WHERE sec.is_active = true
+      OR sec.id IN (
+        SELECT security_id FROM postgres_scan('{c}', '{s}', 'positions')
+        WHERE status = 'active'
+      )
   """
 
   tables["Position"] = f"""
@@ -1781,6 +1791,57 @@ class ExtensionsMaterializer:
         else:
           result.status = "error"
           result.errors.append(error_msg)
+
+    await self._prune_dangling_edges(client, graph_id, result)
+
+  async def _prune_dangling_edges(
+    self, client: "GraphClient", graph_id: str, result: MaterializeResult
+  ) -> None:
+    """Drop staged edges whose endpoint is not a staged node.
+
+    COPY into LadybugDB fails the whole edge table on one missing endpoint
+    (deliberately — no ignore_errors), and a failed table discards the
+    rebuild. Node tables filter some rows out (inactive securities, unused
+    inactive elements), so an edge can still name one. Pruned counts are
+    logged: a nonzero count is a data question, not a load failure.
+    """
+    from robosystems.schemas.loader import get_contextual_schema_loader
+
+    endpoints: dict[str, tuple[str, str]] = {}
+    for ext_name in ("roboledger", "roboinvestor"):
+      loader = get_contextual_schema_loader("application", ext_name)
+      for name, rel in loader.relationships.items():
+        endpoints[name] = (rel.from_node, rel.to_node)
+
+    staged = set(result.tables_staged)
+    for table_name in result.tables_staged:
+      if table_name not in RELATIONSHIP_TABLES or table_name not in endpoints:
+        continue
+      from_node, to_node = endpoints[table_name]
+      if from_node not in staged or to_node not in staged:
+        continue
+      # NOT EXISTS, not NOT IN: one NULL identifier would make NOT IN
+      # unknown for every row and prune nothing.
+      sql = (
+        f'DELETE FROM "{table_name}" AS r '
+        f"WHERE r.src IS NULL OR r.dst IS NULL "
+        f'OR NOT EXISTS (SELECT 1 FROM "{from_node}" n WHERE n.identifier = r.src) '
+        f'OR NOT EXISTS (SELECT 1 FROM "{to_node}" n WHERE n.identifier = r.dst)'
+      )
+      try:
+        response = await client.execute_write(graph_id, sql, timeout=120.0)
+      except Exception as e:
+        logger.warning(
+          redact_connection_secrets(f"Could not prune {table_name}: {e!s}")
+        )
+        continue
+      rows = response.get("rows") or [[0]]
+      pruned = int(rows[0][0] or 0) if rows and rows[0] else 0
+      if pruned:
+        logger.warning(
+          f"Pruned {pruned} {table_name} edge(s) with no {from_node}/{to_node} "
+          f"endpoint in {graph_id}"
+        )
 
   async def _materialize_tables(
     self,
