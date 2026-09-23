@@ -298,7 +298,7 @@ class DuckDBTableManager:
     column_names: list[str] | None = None,
     null_columns: set[str] | None = None,
   ) -> str:
-    """Build CREATE TABLE SQL that UNION ALLs the files, stamping each row with
+    """Build CREATE TABLE SQL that unions the files by column name, stamping each row with
     its source ``file_id`` so ``delete_file_data`` can remove one file's rows
     without a full rebuild.
 
@@ -339,7 +339,7 @@ class DuckDBTableManager:
 
       selects.append(select)
 
-    union_query = "\n UNION ALL\n".join(selects)
+    union_query = "\n UNION ALL BY NAME\n".join(selects)
 
     if has_identifier and column_names:
       # Node table: dedupe on identifier, keep first file_id.
@@ -746,11 +746,9 @@ class DuckDBTableManager:
               else quote_identifier(c)
               for c in append_columns
             )
-            sql = f"INSERT INTO {quoted_table} SELECT {append_expr}{file_id_suffix} FROM {parquet_read}"
+            sql = f"INSERT INTO {quoted_table} BY NAME SELECT {append_expr}{file_id_suffix} FROM {parquet_read}"
           else:
-            sql = (
-              f"INSERT INTO {quoted_table} SELECT *{file_id_suffix} FROM {parquet_read}"
-            )
+            sql = f"INSERT INTO {quoted_table} BY NAME SELECT *{file_id_suffix} FROM {parquet_read}"
 
         conn.execute(sql)
 

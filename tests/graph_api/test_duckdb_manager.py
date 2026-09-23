@@ -857,3 +857,38 @@ class TestTableRequestModels:
     assert response.rows == [[1, "Alice"], [2, "Bob"]]
     assert response.row_count == 2
     assert response.execution_time_ms == 50.0
+
+
+@pytest.mark.unit
+@patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+def test_plain_append_aligns_columns_by_name(mock_get_pool, tmp_path):
+  import duckdb
+
+  conn = duckdb.connect()
+  conn.execute(
+    'CREATE TABLE "Entity" (identifier VARCHAR, name VARCHAR, country VARCHAR)'
+  )
+  conn.execute("INSERT INTO \"Entity\" VALUES ('e1', 'Acme', 'US')")
+  upload = tmp_path / "second.parquet"
+  conn.execute(
+    f"COPY (SELECT 'e2' AS identifier, 'CA' AS country, 'Birch' AS name) "
+    f"TO '{upload}' (FORMAT PARQUET)"
+  )
+  mock_pool = MagicMock()
+  mock_pool.get_connection.return_value.__enter__.return_value = conn
+  mock_get_pool.return_value = mock_pool
+
+  response = DuckDBTableManager().insert_into_table(
+    # model_construct: the validator only admits s3:// paths.
+    TableCreateRequest.model_construct(
+      graph_id="test_graph",
+      table_name="Entity",
+      s3_pattern=str(upload),
+      deduplicate=False,
+    )
+  )
+
+  assert response.status == "success", response
+  assert conn.execute(
+    "SELECT name, country FROM \"Entity\" WHERE identifier = 'e2'"
+  ).fetchall() == [("Birch", "CA")]

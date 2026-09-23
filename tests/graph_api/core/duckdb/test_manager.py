@@ -622,3 +622,38 @@ class TestStreamingLockSafety:
       assert acquired == [True]
 
       list(gen)  # drain the rest
+
+
+@pytest.mark.unit
+class TestFileTrackedUnionByName:
+  """Uploads with the same columns in a different order must not swap values."""
+
+  def test_node_table_aligns_columns_by_name(self, tmp_path):
+    import duckdb
+
+    conn = duckdb.connect()
+    first = tmp_path / "first.parquet"
+    second = tmp_path / "second.parquet"
+    conn.execute(
+      f"COPY (SELECT 'e1' AS identifier, 'Acme' AS name, 'US' AS country) "
+      f"TO '{first}' (FORMAT PARQUET)"
+    )
+    conn.execute(
+      f"COPY (SELECT 'e2' AS identifier, 'CA' AS country, 'Birch' AS name) "
+      f"TO '{second}' (FORMAT PARQUET)"
+    )
+
+    sql = DuckDBTableManager()._build_table_sql_with_file_id(
+      '"Entity"',
+      has_identifier=True,
+      has_from_to=False,
+      s3_files=[str(first), str(second)],
+      file_id_map={str(first): "f1", str(second): "f2"},
+      column_names=["identifier", "name", "country"],
+    )
+    conn.execute(sql)
+
+    rows = conn.execute(
+      'SELECT identifier, name, country, file_id FROM "Entity" ORDER BY identifier'
+    ).fetchall()
+    assert rows == [("e1", "Acme", "US", "f1"), ("e2", "Birch", "CA", "f2")]

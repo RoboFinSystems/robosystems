@@ -609,3 +609,51 @@ class TestReadOnlySandbox:
     with pytest.raises(FileNotFoundError):
       with pool.get_readonly_connection("kgnostaging"):
         pass
+
+
+@pytest.mark.unit
+class TestLockOrder:
+  """Maintenance never waits on a per-graph lock while holding the global
+  lock, so it cannot deadlock against a caller that holds a per-graph lock."""
+
+  def setup_method(self):
+    self.temp_dir = tempfile.mkdtemp()
+
+  def teardown_method(self):
+    shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+  def test_cleanup_waiting_on_a_graph_does_not_block_other_lock_lookups(self):
+    import threading
+
+    pool = _make_pool(self.temp_dir)
+    stale = datetime.now(UTC) - timedelta(hours=2)
+    pool._pools["kg1"] = {
+      "kg1_0": DuckDBConnectionInfo(
+        connection=MagicMock(),
+        database_path=Path(self.temp_dir) / "kg1.duckdb",
+        created_at=stale,
+        last_used=stale,
+        use_count=1,
+        is_healthy=True,
+      )
+    }
+
+    graph_lock = pool._get_database_lock("kg1")
+    graph_lock.acquire()
+    try:
+      cleanup = threading.Thread(target=pool._cleanup_expired_connections)
+      cleanup.start()
+      cleanup.join(timeout=0.2)  # now blocked on kg1's lock
+      assert cleanup.is_alive()
+
+      # What the holder of kg1's lock does next in get_readonly_connection.
+      lookup = threading.Thread(target=pool._get_database_lock, args=("kg2",))
+      lookup.start()
+      lookup.join(timeout=2)
+      assert not lookup.is_alive()
+    finally:
+      graph_lock.release()
+
+    cleanup.join(timeout=2)
+    assert not cleanup.is_alive()
+    assert pool._pools["kg1"] == {}
