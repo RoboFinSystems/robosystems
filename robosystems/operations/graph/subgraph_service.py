@@ -450,15 +450,13 @@ class SubgraphService:
     logger.info(f"Deleting subgraph database {subgraph_id}")
 
     try:
-      from ...config import env
       from ...graph_api.client import GraphClient
-      from ...graph_api.client.factory import get_graph_client_for_instance
 
       # Locally there is one Graph API; in production the parent's instance
       # has to be resolved from DynamoDB first.
-      is_local = env.GRAPH_API_URL and any(
-        host in env.GRAPH_API_URL for host in ["localhost", "graph-api", "127.0.0.1"]
-      )
+      # GRAPH_API_URL is unset in production and falls back to a localhost
+      # default, so the environment decides, never the URL.
+      is_local = env.is_development() and bool(env.GRAPH_API_URL)
 
       parent_location = None
       if is_local:
@@ -908,18 +906,16 @@ class SubgraphService:
       if progress_callback:
         progress_callback("Initiating fork from parent DuckDB", 10)
 
-      from ...config import env
       from ...graph_api.client import GraphClient
-      from ...graph_api.client.factory import get_graph_client_for_instance
 
       if progress_callback:
         progress_callback("Connecting to Graph API", 20)
 
       # Locally there is one Graph API; in production the parent's instance
       # has to be resolved from DynamoDB first.
-      is_local = env.GRAPH_API_URL and any(
-        host in env.GRAPH_API_URL for host in ["localhost", "graph-api", "127.0.0.1"]
-      )
+      # GRAPH_API_URL is unset in production and falls back to a localhost
+      # default, so the environment decides, never the URL.
+      is_local = env.is_development() and bool(env.GRAPH_API_URL)
 
       if is_local:
         logger.info(f"Using local Graph API URL: {env.GRAPH_API_URL}")

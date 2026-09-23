@@ -647,6 +647,38 @@ class TestSubgraphService:
     assert result["search_purged"] is False
 
   @pytest.mark.asyncio
+  async def test_delete_outside_dev_routes_to_parent_instance(
+    self, service, mock_allocation_manager, mock_lbug_client, mock_parent_location
+  ):
+    """Production leaves GRAPH_API_URL at its localhost default; delete must still
+    resolve the parent's instance rather than call that default."""
+    mock_allocation_manager.find_database_location.return_value = mock_parent_location
+    mock_lbug_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
+    mock_lbug_client.execute.return_value = [{"node_count": 0}]
+
+    with (
+      patch(
+        "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance",
+        return_value=mock_lbug_client,
+      ) as instance_client,
+      patch("robosystems.graph_api.client.GraphClient") as local_client,
+      patch("robosystems.operations.graph.subgraph_service.env") as mock_env,
+    ):
+      mock_env.SEMANTIC_SEARCH_ENABLED = False
+      mock_env.GRAPH_API_URL = "http://localhost:8001"
+      mock_env.is_development.return_value = False
+
+      result = await service.delete_subgraph_database(
+        "kg5f2e5e0da65d45d69645_analysis", force=True
+      )
+
+    assert result["status"] == "deleted"
+    local_client.assert_not_called()
+    instance_client.assert_called_once_with(mock_parent_location.private_ip)
+
+  @pytest.mark.asyncio
   async def test_delete_invalid_subgraph_id(self, service):
     """Test deletion with invalid subgraph ID."""
     with pytest.raises(ValueError) as exc_info:
