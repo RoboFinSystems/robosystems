@@ -27,7 +27,12 @@ def _connection(test_db, graph_id, user_id, status, *, deleted=False):
 
 @pytest.mark.parametrize(
   ("status", "deleted"),
-  [(ConnectionStatus.SEVERED.value, True), (ConnectionStatus.DISCONNECTED.value, True)],
+  [
+    # Severed but not yet soft-deleted: sever and delete are separate steps.
+    (ConnectionStatus.SEVERED.value, False),
+    (ConnectionStatus.SEVERED.value, True),
+    (ConnectionStatus.DISCONNECTED.value, True),
+  ],
 )
 def test_ended_connection_does_not_gate_close(
   test_db, test_user, sample_graph, status, deleted
