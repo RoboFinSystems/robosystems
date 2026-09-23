@@ -43,7 +43,10 @@ async def test_fork_parent_data():
   service = SubgraphService()
 
   # Patch the GraphClient where it's imported in the fork_parent_data function
-  with patch("robosystems.graph_api.client.GraphClient") as mock_client_class:
+  with (
+    patch("robosystems.graph_api.client.GraphClient") as mock_client_class,
+    patch.object(type(env), "is_development", return_value=True),
+  ):
     # Setup the mock client instance
     mock_client = AsyncMock()
     mock_client_class.return_value = mock_client
