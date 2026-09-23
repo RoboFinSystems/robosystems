@@ -29,6 +29,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _infer_classification,
   _infer_period_type,
   _is_equity_flow_reducer,
+  _load_opening_facts,
   _natural_sign,
   _reconcile_operating_to_cash,
   _roll_up_facts_to_structure,
@@ -2872,3 +2873,105 @@ class TestCloseSourceDedupe:
     assert revenue == 10_000.0, "fan-out source counted once (trait target wins)"
     assert expense == 6_000.0
     assert reductions == 0.0
+
+
+class TestNonContiguousPeriods:
+  """A period's cash-flow change runs from the day before it starts, not from
+  whichever column precedes it (year-over-year, YTD, rolling layouts)."""
+
+  PRIOR_YEAR_Q3 = PeriodSpec(date(2024, 7, 1), date(2024, 9, 30), "Q3 2024")
+  Q3 = PeriodSpec(date(2025, 7, 1), date(2025, 9, 30), "Q3 2025")
+  Q3_OPENING = date(2025, 6, 30)
+
+  def _instant(self, element_id, value, end, qname=None):
+    return ReportFact(
+      element_id=element_id,
+      element_qname=qname or "x:" + element_id,
+      element_name=element_id,
+      classification="asset",
+      balance_type="debit",
+      value=value,
+      period_start=end,
+      period_end=end,
+      period_type="instant",
+    )
+
+  def test_derivation_measures_from_the_period_opening(self):
+    facts = [
+      self._instant("ar_src", 0.0, self.PRIOR_YEAR_Q3.end),
+      self._instant("ar_src", 1000.0, self.Q3.end),
+    ]
+    opening = [self._instant("ar_src", 900.0, self.Q3_OPENING)]
+    session = MagicMock()
+    derivations, meta = MagicMock(), MagicMock()
+    derivations.fetchall.return_value = [("cf_ar_leaf", "ar_src", -1.0)]
+    meta.fetchall.return_value = [
+      ("cf_ar_leaf", "rs-gaap:IncreaseDecreaseInAR", "AR", "credit")
+    ]
+    session.execute.side_effect = [derivations, meta]
+
+    _derive_cash_flow_facts(session, facts, [self.Q3, self.PRIOR_YEAR_Q3], opening)
+
+    cf = [f for f in facts if f.element_id == "cf_ar_leaf"]
+    assert [f.value for f in cf] == [-100.0]  # 1000 - 900, not 1000 - 0
+
+  def test_tie_out_measures_cash_from_the_period_opening(self):
+    cash = "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+    facts = [
+      self._instant("cash", 5000.0, self.PRIOR_YEAR_Q3.end, qname=cash),
+      self._instant("cash", 1850.0, self.Q3.end, qname=cash),
+      ReportFact(
+        element_id="cfnc",
+        element_qname="rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease",
+        element_name="Net change in cash",
+        classification=None,
+        balance_type="debit",
+        value=850.0,
+        period_start=self.Q3.start,
+        period_end=self.Q3.end,
+        period_type="duration",
+      ),
+    ]
+    opening = [self._instant("cash", 1000.0, self.Q3_OPENING, qname=cash)]
+    with patch("robosystems.operations.roboledger.reports.fact_grid.logger") as log:
+      _check_cash_flow_tie_out(facts, [self.PRIOR_YEAR_Q3, self.Q3], opening)
+    assert not log.warning.called
+
+  def test_openings_load_only_where_no_column_ends(self):
+    contiguous = [
+      PeriodSpec(date(2025, 4, 1), date(2025, 6, 30), "Q2"),
+      self.Q3,
+    ]
+    with patch(
+      "robosystems.operations.roboledger.reports.fact_grid._read_mapped_balances",
+      return_value={},
+    ) as read:
+      _load_opening_facts(MagicMock(), "map", contiguous, "mapping")
+      read.assert_not_called()
+
+      _load_opening_facts(MagicMock(), "map", [self.PRIOR_YEAR_Q3, self.Q3], "mapping")
+      assert read.call_args.args[2:4] == (self.Q3_OPENING, self.Q3_OPENING)
+
+  def test_openings_keep_contra_balances(self):
+    """A contra account is a stock balance whatever its classification; its
+    opening must be kept or the whole balance reads as one period's change."""
+    contra = _Balance(
+      element_id="accum_dep",
+      qname="rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+      name="Accumulated depreciation",
+      classification="contra-asset",
+      balance_type="credit",
+      total_debits=0.0,
+      total_credits=500.0,
+      net_balance=-500.0,
+    )
+    with patch(
+      "robosystems.operations.roboledger.reports.fact_grid._read_mapped_balances",
+      return_value={"accum_dep": contra},
+    ):
+      openings = _load_opening_facts(
+        MagicMock(), "map", [self.PRIOR_YEAR_Q3, self.Q3], "mapping"
+      )
+    assert [(f.element_id, f.period_end) for f in openings] == [
+      ("accum_dep", self.Q3_OPENING)
+    ]

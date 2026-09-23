@@ -247,6 +247,12 @@ def generate_report_facts(
   # whose ΔGross derivation is defeated by an all-in-Net PP&E mapping).
   _emit_flow_facts(session, facts, periods, mapping_id, arc_type)
 
+  # Balances the day before each period starts, where that is not the previous
+  # column's end (year-over-year, YTD, rolling). The cash flow measures change
+  # from a period's opening, not from whichever column precedes it. Kept out of
+  # ``facts`` so they are never rendered.
+  opening_facts = _load_opening_facts(session, mapping_id, periods, arc_type)
+
   # Derive Cash Flow facts from period-over-period BS deltas (indirect
   # method). Each derivation arc encodes "this CF leaf is the change in
   # this BS source element" with a sign weight for the
@@ -254,7 +260,7 @@ def generate_report_facts(
   # the per-period loop because each derivation reads both the current
   # and prior period's BS values. Operating flows land here; investing/
   # financing were already emitted from flow concepts above.
-  _derive_cash_flow_facts(session, facts, periods)
+  _derive_cash_flow_facts(session, facts, periods, opening_facts)
 
   # Foot the CF to the actual cash movement. Investing/financing come from
   # actual cash-paired postings and ΔCash is known from the cash-anchor instant
@@ -262,7 +268,7 @@ def generate_report_facts(
   # operating cash is exactly ΔCash - Investing - Financing - (NI + DDA + ΔWC).
   # Book it on an operating leaf so the statement foots to actual cash. Runs
   # before the subtotal roll-up so the subtotals foot.
-  _reconcile_operating_to_cash(session, facts, periods)
+  _reconcile_operating_to_cash(session, facts, periods, opening_facts)
 
   # Persist the calc-DAG subtotals (Assets, Revenues, GrossProfit,
   # StockholdersEquity, …) as facts. Runs last so every leaf + derived
@@ -274,7 +280,7 @@ def generate_report_facts(
   # movement (the acceptance criterion for flow attribution). Warning-only —
   # the bundle is already generated; a mismatch flags incomplete investing/
   # financing attribution (dead-branch flow concept or coarse CoA mapping).
-  _check_cash_flow_tie_out(facts, periods)
+  _check_cash_flow_tie_out(facts, periods, opening_facts)
 
   unmapped_count = _count_unmapped(session, mapping_id, arc_type=arc_type)
 
@@ -1484,10 +1490,54 @@ def _emit_flow_facts(
       )
 
 
+def _opening_date(period: PeriodSpec) -> date:
+  """The balance-sheet date a period's change is measured from."""
+  return period.start - timedelta(days=1)
+
+
+def _load_opening_facts(
+  session: Session,
+  mapping_id: str,
+  periods: list[PeriodSpec],
+  arc_type: str,
+) -> list[ReportFact]:
+  """Instant balances at each later period's opening date, for the periods
+  whose opening is not already another column's end."""
+  ordered = sorted(periods, key=lambda p: p.end)
+  loaded = {p.end for p in ordered}
+  opening_facts: list[ReportFact] = []
+  for current in ordered[1:]:
+    opening = _opening_date(current)
+    if opening in loaded:
+      continue
+    loaded.add(opening)
+    balances = _read_mapped_balances(
+      session, mapping_id, opening, opening, arc_type=arc_type
+    )
+    # Every row, tagged as the main loop tags it: a contra account such as
+    # accumulated depreciation is a stock balance whatever its classification.
+    for balance in balances.values():
+      opening_facts.append(
+        ReportFact(
+          element_id=balance.element_id,
+          element_qname=balance.qname,
+          element_name=balance.name,
+          classification=balance.classification,
+          balance_type=balance.balance_type,
+          value=_natural_sign(balance.net_balance, balance.balance_type),
+          period_start=opening,
+          period_end=opening,
+          period_type=_infer_period_type(balance.classification),
+        )
+      )
+  return opening_facts
+
+
 def _derive_cash_flow_facts(
   session: Session,
   facts: list[ReportFact],
   periods: list[PeriodSpec],
+  opening_facts: list[ReportFact] | None = None,
 ) -> None:
   """Synthesize CF facts from period-over-period BS deltas (indirect method).
 
@@ -1501,7 +1551,9 @@ def _derive_cash_flow_facts(
     (liability up = cash source)
 
   For each period after the first, compute
-  ``cf_value = sum(weight * (BS_current - BS_prior))`` across all arcs
+  ``cf_value = sum(weight * (BS_end - BS_opening))`` across all arcs, where
+  the opening is the balance the day before the period starts (the previous
+  column's end when the columns are contiguous; ``opening_facts`` otherwise)
   that target each CF leaf, and append a synthetic
   ``ReportFact(period_type='duration')`` covering that period.
 
@@ -1588,10 +1640,13 @@ def _derive_cash_flow_facts(
   for f in facts:
     key = (f.element_id, f.period_end)
     fact_index[key] = fact_index.get(key, 0.0) + f.value
+  opening_index: dict[tuple[str, date], float] = dict(fact_index)
+  for f in opening_facts or ():
+    key = (f.element_id, f.period_end)
+    opening_index[key] = opening_index.get(key, 0.0) + f.value
 
-  for i in range(1, len(ordered)):
-    current = ordered[i]
-    prior = ordered[i - 1]
+  for current in ordered[1:]:
+    opening = _opening_date(current)
     for cf_leaf_id, sources in derivations.items():
       # Skip if a direct fact already exists for this CF leaf at the
       # current period — direct fact wins, derivation is the fallback.
@@ -1603,8 +1658,8 @@ def _derive_cash_flow_facts(
       cf_value = 0.0
       for source_id, weight in sources:
         current_v = fact_index.get((source_id, current.end), 0.0)
-        prior_v = fact_index.get((source_id, prior.end), 0.0)
-        cf_value += weight * (current_v - prior_v)
+        opening_v = opening_index.get((source_id, opening), 0.0)
+        cf_value += weight * (current_v - opening_v)
       if cf_value == 0.0:
         continue
       meta = cf_meta.get(cf_leaf_id)
@@ -1630,6 +1685,7 @@ def _reconcile_operating_to_cash(
   session: Session,
   facts: list[ReportFact],
   periods: list[PeriodSpec],
+  opening_facts: list[ReportFact] | None = None,
 ) -> None:
   """Foot the indirect CF to the actual cash-balance movement.
 
@@ -1698,20 +1754,16 @@ def _reconcile_operating_to_cash(
     return
   order = topo_sort_calculations(calculations)
 
-  # Cash-balance (instant) anchors by period boundary — a period's end is the
-  # next period's opening, same prior-period-end delta basis as the tie-out.
-  cash_by_date: dict[date, float] = {}
-  for f in facts:
-    if f.period_type == "instant" and f.element_qname in _CASH_ANCHOR_QNAMES:
-      cash_by_date[f.period_end] = cash_by_date.get(f.period_end, 0.0) + f.value
+  # Cash-balance (instant) anchors by date, the same opening basis as the
+  # tie-out: a period's change runs from the day before it starts.
+  cash_by_date = _cash_by_date(facts, opening_facts)
 
   ordered = sorted(periods, key=lambda p: p.end)
-  for i in range(1, len(ordered)):
-    current, prior = ordered[i], ordered[i - 1]
+  for current in ordered[1:]:
     cash_end = cash_by_date.get(current.end)
     if cash_end is None:
       continue
-    cash_delta = cash_end - cash_by_date.get(prior.end, 0.0)
+    cash_delta = cash_end - cash_by_date.get(_opening_date(current), 0.0)
 
     # Resolve the CF net-change the renderer would show: direct fact wins,
     # else Σ child·weight (identical to _emit_subtotal_facts / _build_rows).
@@ -1769,8 +1821,20 @@ def _reconcile_operating_to_cash(
     )
 
 
+def _cash_by_date(
+  facts: list[ReportFact], opening_facts: list[ReportFact] | None
+) -> dict[date, float]:
+  cash_by_date: dict[date, float] = {}
+  for f in [*facts, *(opening_facts or ())]:
+    if f.period_type == "instant" and f.element_qname in _CASH_ANCHOR_QNAMES:
+      cash_by_date[f.period_end] = cash_by_date.get(f.period_end, 0.0) + f.value
+  return cash_by_date
+
+
 def _check_cash_flow_tie_out(
-  facts: list[ReportFact], periods: list[PeriodSpec]
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+  opening_facts: list[ReportFact] | None = None,
 ) -> None:
   """Reconcile the CF net change in cash against the BS cash movement.
 
@@ -1789,22 +1853,18 @@ def _check_cash_flow_tie_out(
   """
   if len(periods) < 2:
     return
-  cash_by_date: dict[date, float] = {}
+  cash_by_date = _cash_by_date(facts, opening_facts)
   net_change_by_end: dict[date, float] = {}
   for f in facts:
-    if f.period_type == "instant" and f.element_qname in _CASH_ANCHOR_QNAMES:
-      cash_by_date[f.period_end] = cash_by_date.get(f.period_end, 0.0) + f.value
-    elif f.element_qname == "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease":
+    if f.element_qname == "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease":
       net_change_by_end[f.period_end] = (
         net_change_by_end.get(f.period_end, 0.0) + f.value
       )
 
-  # Cash balances are instant facts at period boundaries (a period's end is the
-  # next period's opening), so ΔCash for period i is cash(end_i) - cash(end_{i-1})
-  # — the same prior-period-end delta basis as _derive_cash_flow_facts.
+  # ΔCash for a period runs from the day before it starts to its end — the
+  # same opening basis as _derive_cash_flow_facts.
   ordered = sorted(periods, key=lambda p: p.end)
-  for i in range(1, len(ordered)):
-    current, prior = ordered[i], ordered[i - 1]
+  for current in ordered[1:]:
     net_change = net_change_by_end.get(current.end)
     if net_change is None:
       continue
@@ -1827,7 +1887,7 @@ def _check_cash_flow_tie_out(
     # A missing opening balance means $0 cash at that boundary (inception) —
     # default to 0 rather than skip, so a first-period discrepancy (e.g. a
     # financing leaf that renders but isn't summed) is flagged, not masked.
-    cash_start = cash_by_date.get(prior.end, 0.0)
+    cash_start = cash_by_date.get(_opening_date(current), 0.0)
     delta_cash = cash_end - cash_start
     residual = net_change - delta_cash
     if abs(residual) > 0.01:
