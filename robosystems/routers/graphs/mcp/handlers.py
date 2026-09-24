@@ -305,7 +305,13 @@ class MCPHandler:
           timeout=tool_timeout,
           tool_timeout=instance_timeout,  # Pass instance timeout to the tool
         )
-        return {"type": "text", "text": json.dumps(results, indent=2)}
+        text = json.dumps(results, indent=2)
+        # Tools report a refusal (closed period, not found, bad arguments)
+        # as a dict with an `error` code. It is a failed call for the client,
+        # but the caller's, not the backend's, so the breaker ignores it.
+        if isinstance(results, dict) and results.get("error"):
+          return tool_error_result(text, "constraint")
+        return {"type": "text", "text": text}
 
     except TimeoutError:
       error_msg = f"Tool '{name}' timed out after {tool_timeout} seconds"
