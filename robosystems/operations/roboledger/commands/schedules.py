@@ -744,10 +744,13 @@ def rebuild_schedule(
     "This schedule's pending obligations are being written by another "
     "process. Retry in a moment.",
   ):
+    # Classified too: the guard above leaves them only draft entries, which
+    # are deleted below, and the new chain re-issues every period.
     service.void_pending_obligations(
       session,
       structure=structure,
       void_reason="schedule_rebuilt",
+      include_classified=True,
     )
 
   # delete_schedule's cascade, minus the Structure and Associations.
