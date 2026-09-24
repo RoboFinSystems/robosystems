@@ -141,3 +141,46 @@ def test_query_tables_error(client):
 
   assert response.status_code == 400
   assert "failed" in response.json()["detail"].lower()
+
+
+def _sse_events(text: str) -> list[tuple[str, dict]]:
+  events = []
+  for block in text.replace("\r\n", "\n").strip().split("\n\n"):
+    fields = dict(line.split(": ", 1) for line in block.split("\n") if ": " in line)
+    if "event" in fields:
+      events.append((fields["event"], json.loads(fields["data"])))
+  return events
+
+
+def test_query_tables_sse_progress_without_known_total(client):
+  chunks = [
+    {
+      "chunk_index": 0,
+      "rows": [[1]] * 10,
+      "row_count": 10,
+      "total_rows_sent": 10,
+      "is_last_chunk": False,
+      "execution_time_ms": 5,
+    },
+    {
+      "chunk_index": 1,
+      "rows": [[2]] * 5,
+      "row_count": 5,
+      "total_rows_sent": 15,
+      "is_last_chunk": True,
+      "execution_time_ms": 9,
+    },
+  ]
+  client.fake_manager.query_table_streaming = lambda req, chunk_size: iter(chunks)
+
+  response = client.post(
+    "/databases/graph-123/tables/query",
+    json={"graph_id": "graph-ignored", "sql": "SELECT id FROM Entity"},
+    headers={"accept": "text/event-stream"},
+  )
+
+  events = _sse_events(response.text)
+  progress = [data for name, data in events if name == "progress"]
+  assert [p["progress_percent"] for p in progress] == [None, 100]
+  [completed] = [data for name, data in events if name == "completed"]
+  assert completed["total_rows"] == 15

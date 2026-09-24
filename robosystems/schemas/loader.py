@@ -340,17 +340,15 @@ def get_contextual_schema_loader(
     return loader
   else:
     extensions = []
+    base_only = context_type == "application" and context_name == "robosystems"
 
-    if context_type == "application":
-      if context_name == "roboinvestor":
-        extensions = ["roboinvestor"]
-      elif context_name == "robosystems":
-        extensions = []  # Base schema only for admin
+    if context_type == "application" and context_name == "roboinvestor":
+      extensions = ["roboinvestor"]
 
     if additional_extensions:
       extensions.extend(additional_extensions)
 
-    return get_schema_loader(extensions=extensions if extensions else None)
+    return get_schema_loader(extensions=extensions if extensions or base_only else None)
 
 
 def compile_repository_schema(repository_name: str) -> Schema:

@@ -177,13 +177,16 @@ def _gate(
   current_user: User,
   db: Session,
   mode: BaseOperatorMode,
+  operator_type: str | None = None,
 ) -> None:
   """Refuse now what the worker would refuse later: the worker re-checks with
   its own session, but the caller should get the 403/402 on the request."""
   enforce_operator_write_role(operator, graph_id, str(current_user.id))
   enforce_operator_graph_scope(operator, graph_id)
   try:
-    enforce_operator_credits(operator, graph_id, str(current_user.id), db, mode)
+    enforce_operator_credits(
+      operator, graph_id, str(current_user.id), db, mode, operator_type
+    )
   except InsufficientOperatorCreditsError as e:
     raise HTTPException(
       status_code=402,
@@ -269,7 +272,7 @@ async def _dispatch(
     if request.force_extended_analysis
     else _convert_operator_mode(request.mode)
   )
-  _gate(operator, graph_id, current_user, db, base_mode)
+  _gate(operator, graph_id, current_user, db, base_mode, operator_type)
 
   params = {
     "operator_type": operator_type,

@@ -511,6 +511,35 @@ class TestDeallocateDatabase:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
+  async def test_deallocation_audits_as_deallocated_not_denied(self):
+    from robosystems.security.audit_logger import SecurityEventType
+
+    manager = _make_manager()
+    manager.graph_table.get_item.return_value = {
+      "Item": {
+        "graph_id": "kgaabbccdd11223344",
+        "instance_id": "i-0123456789abcdef0",
+        "status": "active",
+        "entity_id": "user123",
+      }
+    }
+    with patch(
+      "robosystems.middleware.graph.allocation_manager.SecurityAuditLogger"
+    ) as mock_audit:
+      assert await manager.deallocate_database("kgaabbccdd11223344") is True
+
+    event_types = [
+      c.kwargs["event_type"] for c in mock_audit.log_security_event.call_args_list
+    ]
+    assert SecurityEventType.DATABASE_DEALLOCATED in event_types
+    assert SecurityEventType.AUTHORIZATION_DENIED not in event_types
+    call = mock_audit.log_security_event.call_args_list[
+      event_types.index(SecurityEventType.DATABASE_DEALLOCATED)
+    ]
+    assert call.kwargs["risk_level"] == "low"
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
   async def test_deallocation_returns_false_when_not_found(self):
     """If graph_table has no entry, returns False."""
     manager = _make_manager()

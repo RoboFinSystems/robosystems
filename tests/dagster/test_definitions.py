@@ -65,6 +65,20 @@ class TestDefinitionsLoad:
     assert defs.sensors is not None
 
   @pytest.mark.unit
+  def test_sec_index_retry_is_left_to_run_retries(self):
+    """The index/catalog jobs retry via dagster/max_retries, not a sensor."""
+    from robosystems.adapters.sec.pipeline.jobs import (
+      sec_filing_catalog_job,
+      sec_ixbrl_index_job,
+      sec_narratives_index_job,
+    )
+    from robosystems.dagster.definitions import all_sensors
+
+    assert "sec_index_retry_sensor" not in [s.name for s in all_sensors]
+    for job in (sec_narratives_index_job, sec_ixbrl_index_job, sec_filing_catalog_job):
+      assert "dagster/max_retries" in (job.tags or {}), job.name
+
+  @pytest.mark.unit
   def test_all_assets_registered(self):
     """Test that all expected assets are registered."""
     from robosystems.dagster.definitions import all_assets, defs

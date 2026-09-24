@@ -1,7 +1,7 @@
 """Tests for SEC parquet consolidation.
 
 Tests get_quarter_end_date, consolidate_parquet_tables_by_date,
-consolidate_parquet_from_disk, merge_with_existing_s3, and atomic_s3_upload.
+consolidate_parquet_from_disk, and atomic_s3_upload.
 """
 
 import tempfile
@@ -19,7 +19,6 @@ from robosystems.adapters.sec.processors.consolidation import (
   consolidate_parquet_from_disk,
   consolidate_parquet_tables_by_date,
   get_quarter_end_date,
-  merge_with_existing_s3,
 )
 
 
@@ -356,89 +355,6 @@ class TestConsolidateParquetFromDisk:
       read_back = pq.read_table(BytesIO(result))
       # All duplicates deduped: a, b, c, d, e = 5 unique rows
       assert read_back.num_rows == 5
-
-
-@pytest.mark.unit
-class TestMergeWithExistingS3:
-  """Tests for merge_with_existing_s3."""
-
-  def test_no_existing_file_returns_new_data(self):
-    """Returns new data when S3 file doesn't exist (NoSuchKey)."""
-    mock_s3 = MagicMock()
-    mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-    mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey("Not found")
-
-    new_data = _make_parquet_bytes({"identifier": ["e1"]})
-    result = merge_with_existing_s3(
-      mock_s3, "bucket", "key.parquet", new_data, "nodes/Entity"
-    )
-    assert result == new_data
-
-  def test_s3_error_returns_new_data(self):
-    """Returns new data when S3 read fails with generic error."""
-    mock_s3 = MagicMock()
-    mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-    mock_s3.get_object.side_effect = RuntimeError("Connection error")
-
-    new_data = _make_parquet_bytes({"identifier": ["e1"]})
-    result = merge_with_existing_s3(
-      mock_s3, "bucket", "key.parquet", new_data, "nodes/Entity"
-    )
-    assert result == new_data
-
-  def test_merge_non_shared_table(self):
-    """Non-shared tables concatenate without dedup."""
-    existing_data = _make_parquet_bytes({"identifier": ["f1"], "value": ["old"]})
-    new_data = _make_parquet_bytes({"identifier": ["f1"], "value": ["new"]})
-
-    mock_s3 = MagicMock()
-    mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-    mock_s3.get_object.return_value = {
-      "Body": MagicMock(read=MagicMock(return_value=existing_data))
-    }
-
-    result = merge_with_existing_s3(
-      mock_s3, "bucket", "key.parquet", new_data, "nodes/Fact"
-    )
-    table = pq.read_table(BytesIO(result))
-    # f1 appears twice (no dedup for non-shared tables)
-    assert table.num_rows == 2
-
-  def test_merge_shared_table_deduplicates(self):
-    """Shared tables are deduplicated on identifier during merge."""
-    existing_data = _make_parquet_bytes(
-      {"identifier": ["elem1", "elem2"], "name": ["E1", "E2"]}
-    )
-    new_data = _make_parquet_bytes(
-      {"identifier": ["elem2", "elem3"], "name": ["E2new", "E3"]}
-    )
-
-    mock_s3 = MagicMock()
-    mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-    mock_s3.get_object.return_value = {
-      "Body": MagicMock(read=MagicMock(return_value=existing_data))
-    }
-
-    result = merge_with_existing_s3(
-      mock_s3, "bucket", "key.parquet", new_data, "nodes/Element"
-    )
-    table = pq.read_table(BytesIO(result))
-    assert table.num_rows == 3
-
-  def test_merge_corrupted_new_data_keeps_existing(self):
-    """When new data can't be parsed, returns existing data."""
-    existing_data = _make_parquet_bytes({"identifier": ["e1"]})
-
-    mock_s3 = MagicMock()
-    mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-    mock_s3.get_object.return_value = {
-      "Body": MagicMock(read=MagicMock(return_value=existing_data))
-    }
-
-    result = merge_with_existing_s3(
-      mock_s3, "bucket", "key.parquet", b"not parquet", "nodes/Entity"
-    )
-    assert result == existing_data
 
 
 @pytest.mark.unit

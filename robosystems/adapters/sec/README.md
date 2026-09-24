@@ -58,9 +58,8 @@ which run on top of the projected tables.
 
 Supporting modules: `constants.py` (`SHARED_NODE_TABLES`, `QUARTER_END_DAYS`),
 `processing.py` (`process_single_filing_to_memory()`), `consolidation.py`
-(`consolidate_parquet_from_disk()`, `merge_with_existing_s3()`,
-`atomic_s3_upload()`), `ids.py` (naming helpers — graph ids are minted by the
-xbrlkit projection),
+(`consolidate_parquet_from_disk()`, `atomic_s3_upload()`), `ids.py` (naming
+helpers — graph ids are minted by the xbrlkit projection),
 `schema.py`, `dataframe.py`, `parquet.py`, `textblock.py` (S3 externalization
 for oversized text), `classify.py`.
 

@@ -141,62 +141,6 @@ def consolidate_parquet_from_disk(
   return buffer.getvalue()
 
 
-def merge_with_existing_s3(
-  s3_client,
-  bucket: str,
-  s3_key: str,
-  new_data: bytes,
-  table_key: str,
-) -> bytes:
-  """Merge ``new_data`` into the parquet at ``s3_key`` (if any), deduplicating shared tables."""
-  existing_data: bytes | None = None
-  try:
-    response = s3_client.get_object(Bucket=bucket, Key=s3_key)
-    existing_data = response["Body"].read()
-    logger.info(
-      "Downloaded existing S3 file for merge: %s (%s bytes)",
-      s3_key,
-      f"{len(existing_data):,}",
-    )
-  except s3_client.exceptions.NoSuchKey:
-    logger.info("No existing S3 file at %s, creating new file", s3_key)
-    return new_data
-  except Exception as e:
-    # Unreadable existing file: the new data overwrites it.
-    logger.warning("Failed to read existing S3 file %s, will overwrite: %s", s3_key, e)
-    return new_data
-
-  try:
-    existing_table = pq.read_table(BytesIO(existing_data))
-    new_table = pq.read_table(BytesIO(new_data))
-  except Exception as e:
-    logger.warning(
-      "Failed to parse parquet for merge at %s, keeping existing: %s", s3_key, e
-    )
-    return existing_data
-
-  combined = pa.concat_tables([existing_table, new_table], promote_options="permissive")
-  pre_dedup_rows = combined.num_rows
-
-  if table_key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
-    combined = _dedup_arrow_table(combined, "identifier", table_key)
-
-  buffer = BytesIO()
-  pq.write_table(combined, buffer)
-  merged_bytes = buffer.getvalue()
-
-  logger.info(
-    "Merged %s: %s existing + %s new = %s rows (%s after dedup), %s bytes",
-    table_key,
-    f"{existing_table.num_rows:,}",
-    f"{new_table.num_rows:,}",
-    f"{pre_dedup_rows:,}",
-    f"{combined.num_rows:,}",
-    f"{len(merged_bytes):,}",
-  )
-  return merged_bytes
-
-
 def atomic_s3_upload(
   s3_client,
   bucket: str,

@@ -54,6 +54,10 @@ class SecurityEventType(Enum):
   GRAPH_MEMBER_ROLE_CHANGED = "graph_member_role_changed"
   GRAPH_MEMBER_REMOVED = "graph_member_removed"
 
+  # Graph database placement lifecycle (operational evidence, no metric).
+  DATABASE_ALLOCATED = "database_allocated"
+  DATABASE_DEALLOCATED = "database_deallocated"
+
   CONNECTION_SEVERED = "connection_severed"
   # Bank-feed consent on connect and purge on disconnect. Evidence, not alerts.
   BANK_FEED_CONSENT_GRANTED = "bank_feed_consent_granted"
