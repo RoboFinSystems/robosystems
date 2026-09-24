@@ -127,16 +127,9 @@ on:
 permissions: {}
 
 jobs:
-  # This job exists only to do arithmetic. GitHub Actions expressions have no
-  # arithmetic operators, and `timeout-minutes` can read `needs` but not compute,
-  # so the one place a derived timeout can come from is another job's output.
-  #
-  # It is not optional. The refresh job's internal poll budget is
-  # max_wait_minutes + 15, so a job timeout of max_wait_minutes alone gets the
-  # runner killed *before* the poll's own graceful give-up branch can fire — a
-  # healthy-but-slow refresh would read as a hard workflow failure. A previous
-  # incarnation of this arithmetic was lost when the collector job it lived in was
-  # deleted, which is exactly how that bug came back.
+  # Computes the refresh job's timeout (Actions expressions have no arithmetic).
+  # It must exceed the poll budget (max_wait_minutes + 15), or the runner is
+  # killed before the poll's graceful give-up branch can fire.
   graph-refresh-budget:
     if: ${{ inputs.graph_refresh_enabled == true || inputs.graph_refresh_enabled == 'true' }}
     runs-on: ubuntu-latest
@@ -159,11 +152,9 @@ jobs:
   # ============================================
   # Graph Container Refresh (fleet-wide, via SSM)
   # ============================================
-  # One job, one Lambda invocation, one tag-targeted SSM command per node-type
-  # group. Do not fan the fleet into a job matrix: a matrix caps at 256 jobs,
-  # the fleet runs one database per instance, and per-instance jobs pay runner
-  # minutes to sit through the busy-wait. Runner time here is bounded and
-  # independent of fleet size.
+  # One Lambda invocation, one tag-targeted SSM command per node-type group.
+  # Not a job matrix: it caps at 256 jobs and would pay runner minutes per
+  # instance through the busy-wait.
   refresh-graph:
     needs: [graph-refresh-budget]
     if: ${{ inputs.graph_refresh_enabled == true || inputs.graph_refresh_enabled == 'true' }}
@@ -189,10 +180,8 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
 
-      # Neither the stack name nor the function name is reconstructed here.
-      # stack-config.sh is the single source of truth for stack names, and the
-      # function name is a CloudFormation output of that stack — string-building
-      # either one would put the same fact in two files that then drift.
+      # Stack name from stack-config.sh, function name from the stack's outputs;
+      # never string-built here.
       - name: Resolve the refresh function
         id: fn
         env:
@@ -270,11 +259,8 @@ jobs:
                && [ "$(jq -r '.statusCode // empty' /tmp/status.json)" = "200" ]; then
               POLL_ERRORS=0
             else
-              # A transient failure is fine to ride out, but a poller that can
-              # never reach the Lambda — or only ever gets a function-error
-              # payload back (no statusCode) — must not look like "still in
-              # progress" until the deadline; the fleet may be mid-rollout and
-              # unwatched.
+              # Ride out transient failures, but a poller that never reaches the
+              # Lambda must not read as "still in progress" until the deadline.
               POLL_ERRORS=$((POLL_ERRORS + 1))
               echo "::warning::status poll failed (${POLL_ERRORS} consecutive)"
               if [ "$POLL_ERRORS" -ge 5 ]; then
@@ -293,10 +279,8 @@ jobs:
 
           jq . /tmp/status.json
 
-          # The per-instance outcome breakdown is the point of this summary. A run
-          # that no-ops on nearly every instance must be distinguishable from one
-          # that pulled nothing and quietly did nothing, and a fleet stuck on
-          # skipped-* has to be visible rather than hiding behind a green job.
+          # Per-instance outcomes, so a fleet stuck on skipped-* stays visible
+          # behind a green job.
           {
             echo "### Graph container refresh (${ENV_NAME}, ${NODE_TYPES})"
             echo
@@ -309,14 +293,9 @@ jobs:
             jq -r '.counts // {} | to_entries[] | "| \(.key) | \(.value) |"' /tmp/status.json
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # `failed` already excludes the skips (script not installed yet, or
-          # stale /etc/environment). The refresh document normalizes those to
-          # exit 0 — a non-zero exit would consume the SSM MaxErrors budget and
-          # terminate the rest of the fleet's invocations — and the Lambda
-          # classifies them off the REFRESH_RESULT marker. A skip means the
-          # instance has not cycled onto the new scripts and its container was
-          # deliberately left alone — a transitional state that must not fail a
-          # deploy, but must stay visible, which the summary above does.
+          # `failed` excludes skips (script not installed yet, or stale
+          # /etc/environment): they exit 0 so they don't spend the SSM MaxErrors
+          # budget, and are surfaced here as warnings rather than failing the deploy.
           SKIPPED=$(jq -r '.skipped // 0' /tmp/status.json)
           if [ "${SKIPPED:-0}" -gt 0 ]; then
             echo "::warning::${SKIPPED} instance(s) skipped — not yet cycled onto the new refresh scripts. Cycle them (graph-asg-refresh.yml) to pick them up."

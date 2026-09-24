@@ -159,10 +159,8 @@ jobs:
 
   # ============================================================================
   # DEPLOYMENTS
-  # Each deployment is dispatched as an independent workflow run for better
-  # monitoring. workflow_dispatch is exempt from GitHub's "GITHUB_TOKEN events
-  # don't trigger workflows" rule, so this works with the default token too;
-  # ACTIONS_TOKEN is preferred when available.
+  # Dispatched as independent runs. workflow_dispatch works with the default
+  # GITHUB_TOKEN; ACTIONS_TOKEN is preferred when available.
   # ============================================================================
 
   deploy-staging:

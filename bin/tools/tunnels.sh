@@ -29,12 +29,8 @@ API_ENDPOINT=""
 API_INTERNAL_ENDPOINT=""  # Service Discovery endpoint (bypasses ALB)
 API_ACCESS_MODE=""        # internal or public
 
-# Dagster webserver scale-on-demand tracking. The webserver is UI-only and
-# reachable solely through this tunnel, so when its configured desired count
-# (DAGSTER_WEBSERVER_DESIRED_COUNT_<ENV>) is 0 an idle UI costs no Fargate task.
-# We scale it to 1 while a dagster tunnel is open, then restore the configured
-# desired count on exit — so prod deployments that keep it up (for API-triggered
-# Dagster jobs) are NOT scaled back to 0.
+# The Dagster webserver may be configured at desired count 0; a dagster tunnel
+# scales it to 1 while open and restores the configured count on exit.
 ENVIRONMENT=""
 WEBSERVER_SCALED_UP="false"
 WEBSERVER_WAIT_PID=""  # background `ecs wait services-stable` PID (overlaps with bastion boot)
@@ -370,11 +366,9 @@ check_bastion_status() {
     fi
 }
 
-# Fire the webserver scale-up (fast: describe + update-service) and kick off the
-# readiness wait in the background, so the ~1-2 min cold start overlaps with the
-# bastion boot instead of running after it. The describe/update run synchronously
-# in the parent shell so WEBSERVER_SCALED_UP propagates to the cleanup trap;
-# only the slow `wait services-stable` is backgrounded. Join with wait_webserver_ready.
+# Scale up synchronously (so WEBSERVER_SCALED_UP reaches the cleanup trap) and
+# background only the readiness wait, overlapping it with the bastion boot.
+# Join with wait_webserver_ready.
 start_webserver_scale_up() {
     local environment=$1
     local cluster="robosystems-dagster-${environment}-cluster"
@@ -425,10 +419,8 @@ wait_webserver_ready() {
 
 scale_webserver_down() {
     local environment=$1
-    # Restore the configured baseline desired count instead of forcing 0. When
-    # prod keeps the webserver up so API-triggered Dagster jobs (qb_sync,
-    # extensions materialize, etc.) can submit through it,
-    # DAGSTER_WEBSERVER_DESIRED_COUNT_<ENV> is >0 and the tunnel must not drop it.
+    # Restore the configured baseline, not 0: an environment may keep the
+    # webserver up for API-triggered Dagster jobs.
     local env_upper baseline
     env_upper=$(echo "$environment" | tr '[:lower:]' '[:upper:]')
     baseline=$(gh variable get "DAGSTER_WEBSERVER_DESIRED_COUNT_${env_upper}" 2>/dev/null || echo "0")

@@ -231,15 +231,9 @@ export DOCKER_PROFILE="ladybug-shared-writer"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES}"
 
-# Persist variables to /etc/environment for health checks and restarts.
-#
-# This must stay a superset of everything run-graph-container.sh reads, because
-# a container refresh sources only this file. Anything exported above but not
-# written here silently falls back to that script's defaults, and the refreshed
-# container then differs from the one this boot started — which is exactly how
-# the mount paths and DOCKER_PROFILE below went missing: a refreshed replica
-# came back with no Lance mount (while LANCE_INDEX_PATH still pointed into it)
-# and no staging mount.
+# Persist variables to /etc/environment for health checks and restarts. Must be
+# a superset of everything run-graph-container.sh reads: a refresh sources only
+# this file, and anything missing silently falls back to that script's defaults.
 echo "DATABASE_TYPE=ladybug" >> /etc/environment
 echo "NODE_TYPE=${LBUG_NODE_TYPE}" >> /etc/environment
 echo "CONTAINER_PORT=${LBUG_PORT}" >> /etc/environment
@@ -289,10 +283,7 @@ aws dynamodb update-item \
 # ==================================================================================
 # DUCKDB STAGING DOWNLOAD (Skipped)
 # ==================================================================================
-# DuckDB staging files are not needed on replicas — the MCP resolve-element tool
-# resolves concepts via canonical-concept matching + text search on the graph
-# (the LanceDB element-vector index was retired). Skipping this download saves
-# ~10 minutes of boot time and avoids downloading a 100GB+ file.
+# DuckDB staging files (100GB+) are not used on replicas.
 echo "Skipping DuckDB staging download (not used on replicas)"
 
 # ==================================================================================

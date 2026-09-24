@@ -1,16 +1,8 @@
-"""Background task worker for executing long-running operations.
-
-Consumes tasks from a Valkey queue and executes them with progress
-reporting via the SSE system and observability via Dagster.
-
-Task registration happens via side-effect imports at module load time:
-- Platform tasks: worker infrastructure (dagster_monitoring) and
-  operations (graph creation/materialization/subgraph, operators)
-- Adapter tasks: loaded via load_adapter_tasks() for future adapter extensions
+"""Background task worker: consumes a Valkey queue, reporting progress over
+SSE. Task handlers register via the side-effect imports below.
 """
 
-# Import task modules to trigger @register_task decorators.
-# These are imported for side effects only (registration).
+# Side-effect imports: @register_task.
 import robosystems.operations.graph.tasks as graph_tasks  # noqa: F401
 import robosystems.operations.operators.adapters.worker_task as worker_task  # noqa: F401
 import robosystems.operations.roboledger.tasks as roboledger_tasks  # noqa: F401

@@ -212,14 +212,9 @@ function create_ssm_feature_flags() {
         "DIRECT_GRAPH_MATERIALIZATION_ENABLED=true"
         "EMAIL_VERIFICATION_ENABLED=false"
         "FACT_GRID_ENABLED=false"
-        # Extensions surfaces are gated per product domain. There is no
-        # settable EXTENSIONS_ENABLED: it is a *derived* property in
-        # config/env.py (ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED), so
-        # seeding that name — or the retired LEDGER_ENABLED / INVESTOR_ENABLED
-        # — produces a parameter nothing reads, and an operator who sets it to
-        # false gets no effect while extensions stay on. Seed the three names
-        # the code actually reads. Code defaults are true; these start false so
-        # a fresh environment opts in per domain.
+        # Extensions are gated per domain; EXTENSIONS_ENABLED is derived in
+        # config/env.py and must not be seeded. Code defaults are true; these
+        # start false so a fresh environment opts in per domain.
         "ROBOLEDGER_ENABLED=false"
         "ROBOINVESTOR_ENABLED=false"
         "EXTENSIONS_GRAPHQL_ENABLED=false"
@@ -227,11 +222,8 @@ function create_ssm_feature_flags() {
         # Seeded at its code default purely so it is discoverable in
         # `just ssm-list <env> features` — a kill switch you cannot find is not one.
         "GRAPH_USAGE_ALERTS_ENABLED=true"
-        # Identity and access controls. Seeded at their code defaults so an
-        # operator can find them — these are the switches you reach for during
-        # an incident, and one you cannot see in `just ssm-list` is not a
-        # switch. Changing a value here changes nothing until an environment
-        # is bootstrapped; the code default already governs today.
+        # Identity and access controls, seeded at their code defaults so they
+        # are visible in `just ssm-list` when needed during an incident.
         "PASSWORD_AUTH_ENABLED=true"
         "PASSKEYS_ENABLED=false"
         "MFA_ENFORCEMENT_ENABLED=false"

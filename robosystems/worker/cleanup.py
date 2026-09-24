@@ -27,9 +27,7 @@ def cleanup_connections() -> None:
   except Exception as e:
     logger.warning(f"Failed to dispose platform engine: {e}")
 
-  # Extensions engine (lazy global, may be None if extensions not used this task).
-  # Accesses _engine directly because _get_engine() would create one if it doesn't
-  # exist, which is the opposite of what we want.
+  # Read _engine directly: _get_engine() would create one.
   try:
     from robosystems.db import extensions
 

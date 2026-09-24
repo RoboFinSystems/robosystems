@@ -443,9 +443,7 @@ Resources:
           Value: CloudFormation
 
   # Composite alarm for overall PostgreSQL health including rotation.
-  # Logical ID retains the historical "-RDS" suffix to avoid triggering a CFN
-  # rename, which would collide on the shared AlarmName and fail the stack
-  # update. Previously gated on a now-removed IsRDS condition.
+  # Keep the "RDS" logical-ID suffix: a rename would collide on the AlarmName.
   PostgresHealthCompositeAlarmRDS:
     Type: AWS::CloudWatch::CompositeAlarm
     DeletionPolicy: Delete
@@ -651,12 +649,8 @@ Resources:
       EngineFamily: POSTGRESQL
       RoleArn: !GetAtt RDSProxyRole.Arn
       Auth:
-        # IAMAuth: DISABLED is intentional. Flipping to REQUIRED would force app-side
-        # IAM token generation (short-lived tokens via rds-db:connect), which this app
-        # does not implement — the app reads POSTGRES_PASSWORD from Secrets Manager
-        # and builds a standard postgres:// URL. REQUIRED would add a valid IAM
-        # identity as a second factor alongside the secret — revisit if the threat
-        # model calls for that.
+        # IAMAuth DISABLED: REQUIRED needs app-side rds-db:connect token
+        # generation, which the app (password from Secrets Manager) doesn't do.
         - AuthScheme: SECRETS
           SecretArn: !Ref DBPasswordSecret
           IAMAuth: DISABLED

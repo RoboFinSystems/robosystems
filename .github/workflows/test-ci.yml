@@ -27,12 +27,8 @@ jobs:
           ref: ${{ github.ref }}
           token: ${{ github.token }}
 
-      # Pull requests from forks carry untrusted code, so they are pinned to
-      # ephemeral GitHub-hosted runners regardless of RUNNER_LABELS. Self-hosted
-      # runners persist between jobs; running a fork's code on one would let an
-      # external contributor reach the runner host and anything it can access.
-      # RUNNER_LABELS is a GitHub variable that can be flipped to self-hosted at
-      # any time, so the guard lives here rather than relying on its value.
+      # Fork PRs carry untrusted code, so they always get ephemeral GitHub-hosted
+      # runners, whatever RUNNER_LABELS says: self-hosted runners persist between jobs.
       - name: Select runner
         id: select
         uses: ./.github/actions/select-runner
@@ -48,11 +44,9 @@ jobs:
       runner_config: ${{ needs.runner.outputs.runner_config }}
     secrets: inherit
 
-  # Records the change class on every pull request, whoever opened it, and for
-  # code changes requests the automated review and waits for it. Standard
-  # changes (dependency bumps, manifests, docs) ride the test gate alone. This
-  # is the documented second reader that stands in for a human approver in a
-  # single-maintainer repository (change-management compensating control).
+  # Records the change class on every PR; code changes also require the
+  # automated review (the change-management compensating control that stands in
+  # for a second human approver). Standard changes ride the test gate alone.
   change-classification:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

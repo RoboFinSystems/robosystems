@@ -1,27 +1,12 @@
 Description: RoboSystems Security Baseline - Account-Global Detective Controls (SOC 2)
 
-# Account/region-global detective services for SOC 2 (CC4/CC6/CC7). Every
-# resource here is a per-account singleton, so this is ONE shared stack
-# (RoboSystemsSecurity) like cloudtrail.yaml — never per-environment, or the
-# second environment's deploy would collide. Deployed by the `security` job in
-# deploy-api's VPC workflow, gated on the SECURITY_ENABLED variable (mirrors
-# CloudTrail). Off by default.
-#
-# Covers: GuardDuty (threat detection), Security Hub (+ FSBP standard),
-# AWS Config (config recorder — the cost outlier, gated separately), and
-# IAM Access Analyzer. Amazon Inspector v2 has no native single-account
-# CloudFormation resource (enablement is the inspector2:Enable API), so it is
-# turned on by a small idempotent CLI step in the deploy job, not here.
-#
-# Workflow scope: the deploy job wires only Environment + EnableConfig
-# (SECURITY_CONFIG_ENABLED). GuardDuty / Security Hub / Access Analyzer use their
-# template defaults (on) — SECURITY_ENABLED is intentionally all-or-nothing for
-# those three; granular per-service toggling would need additional GH variables.
-#
-# Precondition: these are account-global singletons. If GuardDuty, Security Hub,
-# or Access Analyzer is already enabled out-of-band in the target account, first
-# stack creation fails with an "already exists" error — an account-state
-# precondition, not a permissions gap, so there is no CFN-level guard for it.
+# Account/region-global detective services for SOC 2 (CC4/CC6/CC7): GuardDuty,
+# Security Hub (+ FSBP), AWS Config (gated separately by SECURITY_CONFIG_ENABLED)
+# and IAM Access Analyzer. Per-account singletons, so ONE shared stack
+# (RoboSystemsSecurity), never per-environment; gated on SECURITY_ENABLED.
+# Inspector v2 has no CloudFormation resource and is enabled by a CLI step in
+# the deploy job. First creation fails if any of these was already enabled
+# out-of-band in the account.
 
 Parameters:
   Environment:
@@ -295,20 +280,9 @@ Resources:
       ConfigSnapshotDeliveryProperties:
         DeliveryFrequency: TwentyFour_Hours
 
-  # --- Security alerting: route detective-control signals to the existing
-  # per-env security-alerts SNS topics (owned by api.yaml as
-  # robosystems-<env>-security-alerts, email-subscribed). Account-global
-  # signals (GuardDuty findings, root-credential use) notify the prod topic —
-  # ${Environment} normalizes to prod in the deploy job.
-  #
-  # What belongs in this stack is the account-global detective baseline only.
-  # Alarms on API-stack resources (ALB health, the security metric namespace,
-  # the rotation Lambda) belong beside the resources they watch, in api.yaml,
-  # which deploys from S3 and has the room. Do not add per-env application
-  # alarms here.
-  #
-  # Precondition: the topic must already exist (api stack deployed with
-  # SNSAlertEmail set), or the topic-policy attachment fails this stack.
+  # --- Security alerting: route detective-control signals to the prod
+  # security-alerts SNS topic owned by api.yaml, which must already exist.
+  # Account-global signals only; per-env application alarms belong in api.yaml.
   SecurityAlertsTopicPolicy:
     Type: AWS::SNS::TopicPolicy
     Properties:
@@ -453,16 +427,10 @@ Resources:
               is accessible from outside the account (public: <isPublic>).
               Review, then remediate or archive."
 
-  # The alert chain above depends on CloudTrail (feeds the root rule),
-  # GuardDuty, and the rest of the detective baseline staying on — but
-  # disabling any of them is otherwise silent, and StopLogging is the
-  # canonical first move before doing something worth hiding. Event names are
-  # unique per service, so the flat eventSource x eventName lists cannot
-  # cross-match. Unlike the CIS metric-filter suite (skipped: needs CloudWatch
-  # Logs ingest), EventBridge management events cost nothing; same
-  # CloudTrail-logging precondition as the root rule. UpdateTrail and
-  # UpdateDetector are matched wholesale (CIS 3.5-style) — a legitimate
-  # settings change emails once, acceptable on a tamper surface.
+  # Alerts when any detective control is disabled or altered (StopLogging is the
+  # canonical first move before something worth hiding). Event names are unique
+  # per service, so the flat eventSource x eventName lists cannot cross-match.
+  # UpdateTrail/UpdateDetector match wholesale, so a legitimate change emails once.
   DetectiveControlTamperRule:
     Type: AWS::Events::Rule
     Properties:
@@ -505,52 +473,17 @@ Resources:
               from <sourceIP> at <eventTime>. If this was not a deliberate
               deploy or teardown, investigate immediately."
 
-  # Delivery assurance for the alert channel itself: every alarm in this account
-  # reaches a human through SNS email.
+  # Delivery assurance for the SNS email alert channel, across every topic in
+  # the account (one alarm, not per environment; new topics are picked up).
   #
-  # **Be precise about what this catches, because the obvious reading is wrong.**
-  # It fires when SNS *attempts* a delivery and the attempt fails — the bounce
-  # window that precedes AWS disabling a confirmed subscriber. It does NOT
-  # detect a subscription sitting in `PendingConfirmation`, nor one AWS has
-  # already dropped: neither receives delivery attempts, so neither produces a
-  # failed-notification datapoint, and the alarm is silent straight through the
-  # scenario people assume it covers. **The check for that state is the
-  # subscription list itself** — `aws sns list-subscriptions-by-topic` for a
-  # `PendingConfirmation` ARN or a missing subscriber. Verify it
-  # periodically.
+  # It fires only on failed delivery ATTEMPTS. A subscription stuck in
+  # PendingConfirmation or already dropped gets no attempts and stays silent;
+  # check that with `aws sns list-subscriptions-by-topic`.
   #
-  # **This alarm cannot report its own brokenness.** SNS publishes
-  # `NumberOfNotificationsFailed` only on failure — healthy is *no data*, which
-  # `notBreaching` renders as OK. A query that matches nothing (typo, changed
-  # schema) produces the same no-data and the same OK. `notBreaching` is still
-  # the right setting — the alternative is an alarm that lives permanently in
-  # INSUFFICIENT_DATA — but it means a real deploy is the *only* validation this
-  # alarm will ever get. **Re-validate whenever this expression changes**, with
-  # `aws cloudwatch get-metric-data` on the expression before deploying it.
-  #
-  # Aggregated across every topic rather than one alarm per topic: sixteen alert
-  # topics across ten stacks, and the query also picks up topics added later
-  # without anyone remembering.
-  #
-  # **This is a Metrics Insights query, and it must not be rewritten as SEARCH.**
-  # `SUM(SEARCH(...))` is the obvious way to express this and it is rejected at
-  # deploy time — `PutMetricAlarm` answers "SEARCH is not supported on Metric
-  # Alarms". SEARCH works in dashboards and GetMetricData but never in an alarm.
-  # Metrics Insights is the supported route to the same fleet-wide aggregate, and
-  # it keeps the property this alarm exists for: the query picks up new topics on
-  # its own. No GROUP BY — that would make it a multi-time-series alarm, which
-  # additionally requires ORDER BY; a bare aggregate returns the single series an
-  # alarm wants. Period is required here, exactly as it was for the metric-math
-  # form: with no MetricStat there is nothing to inherit a period from.
-  #
-  # **One alarm, not one per environment.** The query matches every topic in the
-  # account and region, so prod and staging copies would watch identical data and
-  # both fire on the same failure. It routes to the prod alert topic because that
-  # is the destination that gets read, not because it is prod-scoped.
-  #
-  # Circular by design — a delivery-failure alarm delivered by the channel that
-  # is failing. Accepted: the realistic failure is one subscriber bouncing, not
-  # SNS itself being down.
+  # Healthy is no data (notBreaching), so a query that matches nothing also
+  # reads OK: validate any change with `aws cloudwatch get-metric-data` first.
+  # Metrics Insights, not SEARCH (alarms reject SEARCH); no GROUP BY, which would
+  # make it multi-series.
   SnsDeliveryFailureAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:

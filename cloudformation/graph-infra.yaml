@@ -457,11 +457,9 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Rotation schedule associates the Lambda with the secret so Secrets Manager
-  # knows which Lambda to invoke. Actual rotation cadence is managed by the
-  # GitHub Actions workflow (secrets-rotation.yml) which orchestrates rotation +
-  # service refresh atomically. The high AutomaticallyAfterDays prevents SM from
-  # auto-triggering outside of the GHA workflow.
+  # Associates the rotation Lambda with the secret. Cadence is driven by
+  # secrets-rotation.yml (rotation + service refresh together); the high
+  # AutomaticallyAfterDays keeps Secrets Manager from rotating on its own.
   SecretRotationSchedule:
     Type: AWS::SecretsManager::RotationSchedule
     DeletionPolicy: Delete
@@ -510,51 +508,15 @@ Resources:
         - Endpoint: !Ref SNSAlertEmail
           Protocol: email
 
-  # Database capacity alarms
+  # Database capacity alarm. Dimensions must match the emitter exactly
+  # (allocation_manager.py publishes under NodeType=writer); CloudWatch matches
+  # on the full dimension set and cfn-lint cannot see a mismatch, so validate
+  # changes with `aws cloudwatch get-metric-data`.
   #
-  # This alarm was unmatched from its creation on 2025-12-23 until 2026-09-14:
-  # it carried no Dimensions at all, while the emitter
-  # (allocation_manager.py `_publish_allocation_metrics`) publishes
-  # DatabaseUtilizationPercent under [NodeType=writer]. CloudWatch matches an
-  # alarm to a metric on the exact dimension set, so it watched a stream nothing
-  # writes to and TreatMissingData rendered nine months of silence as OK. It
-  # read 100.0 on 2026-08-31 — the prod Standard fleet full, a real signup
-  # refused — and did not move. Same defect class as graph-ladybug.yaml's
-  # AllocationFailureAlarm. Validate any change with `aws cloudwatch
-  # get-metric-data` against the live namespace before deploying; cfn-lint
-  # cannot see a dimension mismatch.
-  #
-  # Period/evaluation are tuned to the emitter, not to habit:
-  # DatabaseUtilizationPercent is published ONLY on allocate/deallocate
-  # (allocation_manager.py:518, :798) — not by the 5-minute
-  # instance_metrics_collection_job, which publishes the Cluster* family
-  # instead. It is therefore a sparse, event-driven gauge:
-  #   * EvaluationPeriods 1, because two ADJACENT 5-minute windows that each
-  #     contain an allocation event is a condition that essentially never
-  #     occurs at this volume. The old value of 2 made the alarm unfireable
-  #     even had the dimensions matched.
-  #   * TreatMissingData stays notBreaching, and the reason is the operating
-  #     model rather than the metric. `missing` would latch the alarm ALARM
-  #     between events, which looks more correct in the console — but the
-  #     destination here is a monitored INBOX, not a console, and an alarm
-  #     that is already ALARM sends no further mail. Latching would notify
-  #     once and then go quiet for as long as the fleet stayed full. Under
-  #     notBreaching every fresh allocation against a full fleet re-crosses
-  #     the threshold and sends another email, which is the behaviour that
-  #     actually reaches a human. It also keeps the staging copy of this alarm
-  #     out of permanent INSUFFICIENT_DATA — the staging instance registry is
-  #     empty, so this metric has never published there at all.
-  #     The real fix for the silent case — full fleet, nobody attempting an
-  #     allocation, therefore no datapoints and no alarm either way — is a
-  #     periodic per-tier TenantSlotsFree gauge, noted below.
-  #
-  # Known limit, deliberately accepted: overall_utilization_percent is summed
-  # across every instance in the registry with no tier filter, so this is a
-  # fleet-wide average, not per-tier. It tracks Standard closely while
-  # ladybug-large / ladybug-xlarge sit at desired 0 (request-only tiers), but a
-  # single idle Large instance would dilute it below the threshold while
-  # Standard is full. A per-tier TenantSlotsFree signal is the real answer and
-  # is specced in the vault's data-plane domain.
+  # The metric is published only on allocate/deallocate, so it is sparse:
+  # EvaluationPeriods 1, and notBreaching so every allocation against a full
+  # fleet re-crosses the threshold and mails again (a latched ALARM mails once).
+  # It is a fleet-wide average across tiers; TenantSlotsFree below is per tier.
   DatabaseCapacityAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete
@@ -576,25 +538,10 @@ Resources:
       AlarmActions:
         - !Ref InfraAlertTopic
 
-  # A graph-registry row pointing at an instance the instance registry no
-  # longer knows. Published (zero included) by the daily registry sweep, which
-  # marks such rows rather than deleting them; any non-zero value is a live
-  # graph whose routing is stale and needs reconciling from on-disk truth.
-  # Free tenant slots on the Standard tier. This is the alarm that is supposed to
-  # fire BEFORE a signup is refused, and it is deliberately a count per tier
-  # rather than a fleet-wide percentage.
-  #
-  # Only ladybug-standard is alarmed. ladybug-large and ladybug-xlarge are
-  # request-only and sit at desired 0, so they legitimately publish 0 free slots
-  # and an alarm on them would be permanently breaching. The metric is still
-  # published for all three, so the reading exists when one is turned on.
-  #
-  # TreatMissingData is breaching, and that is the point of the alarm rather than
-  # an aside: the emitter is the 5-minute instance_metrics_collection_job, so
-  # missing data means the fleet's capacity is UNKNOWN, not that it is fine.
-  # Every other capacity signal here has failed by rendering silence as health —
-  # DatabaseCapacityAlarm sat OK for nine months on a dimension mismatch. This
-  # one goes off instead.
+  # Free Standard tenant slots: fires BEFORE a signup is refused. Large and
+  # XLarge sit at desired 0 and would always breach, so only Standard is alarmed.
+  # Missing data is breaching: the 5-minute emitter going quiet means capacity
+  # is UNKNOWN, not fine.
   TenantSlotsFreeStandardAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete
@@ -618,6 +565,9 @@ Resources:
       OKActions:
         - !Ref InfraAlertTopic
 
+  # A graph-registry row pointing at an instance the instance registry no
+  # longer knows, marked (not deleted) by the daily registry sweep. Non-zero
+  # means stale routing that needs reconciling from on-disk truth.
   OrphanedGraphRegistrationsAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete
@@ -952,42 +902,20 @@ Resources:
   # GRAPH CONTAINER REFRESH
   # ========================================
   # Fans a container refresh out across the graph fleet with one tag-targeted SSM
-  # command per node-type group. The per-instance logic lives on the instance in
-  # refresh-graph-container.sh; this is the trigger and the aggregator.
-  #
-  # Its value over calling `aws ssm send-command` from a workflow is that the
-  # platform gets a refresh path that is not GitHub Actions — an ops CLI command,
-  # a post-image-push hook, or an Operator tool — with the rate-control defaults
-  # applied in one place rather than at each caller.
+  # command per node-type group; per-instance logic lives in
+  # refresh-graph-container.sh. Gives non-GitHub callers the same path, with
+  # rate-control defaults in one place.
 
-  # The refresh dispatches this stack-owned document rather than the generic
-  # AWS-RunShellScript, for three reasons that are one fact — the document name
-  # is the only environment- or purpose-specific field an SSM invocation event
-  # carries:
-  #   1. The failure rule below filters on it. Bare Failed/TimedOut invocation
-  #      events carry no such field, so every failed SSM command in the account
-  #      would page both environments' topics.
-  #   2. The Lambda role's SendCommand collapses to this one document: the role
-  #      can trigger a refresh on this environment's fleet, not run arbitrary
-  #      shell on it.
-  #   3. A hand-run refresh gets the same wrapper semantics instead of
-  #      re-typing them.
+  # A stack-owned document rather than AWS-RunShellScript: its name is the only
+  # environment-specific field in an SSM invocation event, so the failure rule
+  # filters on it and the Lambda role's SendCommand is scoped to it.
   #
-  # Skip normalization: "script not installed" and the script's own exit 3
-  # ("/etc/environment predates the completeness contract") exit 0 here, with
-  # the REFRESH_RESULT stdout marker as the signal the Lambda classifies on.
-  # SSM counts every non-zero exit toward MaxErrors, so a skip that exits
-  # non-zero burns the error budget and terminates the rest of the fleet's
-  # queued invocations — a uniformly not-yet-cycled fleet could never even
-  # report itself. Real failures keep their non-zero exits, so MaxErrors still
-  # halts a bad rollout and the rule below still pages.
+  # Skips ("script not installed", the script's exit 3) exit 0 with a
+  # REFRESH_RESULT marker, since every non-zero exit counts toward MaxErrors and
+  # would halt the rest of the fleet. Real failures keep their non-zero exits.
   #
-  # Output forwarding: the script's output is captured to an on-instance log
-  # and only the REFRESH_RESULT line plus a bounded tail are echoed back. SSM
-  # truncates a plugin's inline Output after 2500 characters keeping the head,
-  # so a marker printed last — after docker-pull progress — falls outside the
-  # window and the Lambda classifies nothing. Marker first + 2000-byte tail
-  # fits by construction.
+  # SSM keeps only the first 2500 chars of inline output, so the marker is
+  # echoed first, followed by a 2000-byte tail of the on-instance log.
   GraphRefreshDocument:
     Type: AWS::SSM::Document
     Properties:
@@ -1138,14 +1066,8 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Failure notification is push, not poll: it fires regardless of whether
-  # anyone is watching the run.
-  #
-  # Filtered to this stack's own document — the only environment- or
-  # purpose-specific field an SSM invocation event carries. Unfiltered, the
-  # pattern matches every failed SSM command in the account, so one failure
-  # pages both environments' topics and unrelated commands (secrets rotation,
-  # maintenance sweeps) page as "graph container refresh".
+  # Push notification of per-instance refresh failures. Filtered to this stack's
+  # document; unfiltered, every failed SSM command in the account would page.
   GraphRefreshFailureRule:
     Type: AWS::Events::Rule
     Properties:
@@ -1176,12 +1098,8 @@ Resources:
               in ${Environment}. The container was left as-is; check the command output for
               REFRESH_RESULT and the instance's docker state."
 
-  # The EventBridge rule above pages when the refresh fails on an instance; this
-  # pages when the dispatcher itself dies — a timeout, an OOM, an image that no
-  # longer imports, or a raised dispatch error. The handler deliberately lets
-  # operational failures propagate (bin/lambda/graph_container_refresh.py) so
-  # they land on this metric instead of hiding inside a 500-shaped payload that
-  # only a watched workflow run would ever surface.
+  # Pages when the dispatcher Lambda itself fails (timeout, OOM, import or
+  # dispatch error); the handler lets these propagate so they land here.
   GraphContainerRefreshErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete

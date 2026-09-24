@@ -1,32 +1,14 @@
-"""
-AI Billing Configuration - Token-based credit system for AI operations.
+"""Token-based credit pricing for AI operations (the only thing that costs
+credits).
 
-Credits are ONLY consumed for operations that incur external AI API costs.
-All database, MCP, and infrastructure operations are included with the
-subscription — credits are reserved exclusively for AI agent calls.
+Rates are credits per 1K tokens at exact cost passthrough (1 credit ~ $0.001),
+indexed on what Bedrock bills for the ``us.*`` regional profiles (10% over
+list). Cache rates pass Bedrock's multipliers through (read 0.1x, write
+1.25x input).
 
-TOKEN PRICING:
-==============
-Credits per 1K tokens, indexed on what Bedrock actually bills us: the
-``us.*`` regional inference profiles carry a 10% premium over the vendor's
-list price (Sonnet 4.x: $3.30/$16.50 per MTok, not $3.00/$15.00; GPT-5.6
-Luna: $0.22/$1.32, not $0.20/$1.20). 1 credit ~ $0.001, so the rates below
-are an exact cost passthrough. Rates were read from the Bedrock agreement
-rate cards (Claude) and the model card (GPT-5.6) on 2026-09-15.
-
-Cache rates mirror Bedrock's own multipliers (read 0.1x, 5-minute write
-1.25x the input rate; GPT-5.6's 30-minute write is also 1.25x) — the
-discount is passed through to the customer rather than kept as margin.
-
-Rates are per (provider, model family); an entry carries all four
-dimensions. Which model bills under which key is the model registry's
-business (``config/operators.py`` ``MODEL_REGISTRY``, field ``pricing_key``);
-an unregistered model raises at billing time rather than underbilling.
-Never add a silent default entry here (see
-specs/ai-operators/llm-provider-abstraction).
-
-The ``openai_compat`` key exists only in a deployment that turns on its
-self-hosted model (``OPENAI_COMPAT_ENABLED``), at the rates it configures.
+A model bills under its registry ``pricing_key`` (config/operators.py); an
+unregistered model raises at billing time. Never add a silent default entry.
+``openai_compat`` exists only when the self-hosted model is enabled.
 """
 
 from decimal import Decimal, InvalidOperation
@@ -63,7 +45,6 @@ def self_hosted_rates(input_per_1k: str, output_per_1k: str) -> dict[str, Decima
 class AIBillingConfig:
   """Configuration for AI-specific billing."""
 
-  # Minimum credit charge per operation (rounds up to this minimum)
   MINIMUM_CHARGE = Decimal("1")
 
   # Token-based pricing: credits per 1K tokens, us.* regional profiles.
@@ -101,15 +82,7 @@ class AIBillingConfig:
 
   @classmethod
   def apply_minimum_charge(cls, cost: Decimal) -> Decimal:
-    """
-    Apply minimum charge, rounding up to at least MINIMUM_CHARGE.
-
-    Args:
-        cost: Calculated cost in credits
-
-    Returns:
-        Cost rounded up to minimum charge
-    """
+    """Round a positive cost up to MINIMUM_CHARGE; non-positive is 0."""
     if cost <= 0:
       return Decimal("0")
     return max(cost, cls.MINIMUM_CHARGE)

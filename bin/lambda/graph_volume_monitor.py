@@ -49,10 +49,8 @@ INSTANCE_REGISTRY_GRACE_SECONDS = int(
 )
 EXPANSION_THRESHOLD = float(os.environ.get("EXPANSION_THRESHOLD", "0.8"))  # 80%
 EXPANSION_FACTOR = float(os.environ.get("EXPANSION_FACTOR", "1.5"))  # 50% increase
-# Floor on each expansion step. Kept meaningfully large because EBS enforces
-# a ~6 hour cooldown between volume modifications - too small a step risks
-# needing another expansion before the next one is allowed. At the 20GB
-# Standard starting size this yields 20 -> 40GB, a doubling.
+# Floor on each expansion step, large because EBS enforces a ~6 hour cooldown
+# between volume modifications.
 MIN_EXPANSION_GB = int(os.environ.get("MIN_EXPANSION_GB", "20"))
 MAX_VOLUME_SIZE_GB = int(os.environ.get("MAX_VOLUME_SIZE_GB", "16384"))  # EBS limit
 
@@ -66,10 +64,7 @@ TIER_STORAGE_LIMITS_GB = {
   "ladybug-xlarge": 100,
 }
 # Volume ceiling = product cap x this multiplier. Above 1.0 because DuckDB
-# staging, temp files, and vector indexes legitimately live on the volume
-# beyond the graph data the product cap governs. Without any ceiling this
-# Lambda kept expanding a 20 GB-cap tenant's volume toward the EBS maximum —
-# unbounded EBS spend for data the app-side cap should have stopped.
+# staging, temp files, and vector indexes also live on the volume.
 TIER_CEILING_MULTIPLIER = float(os.environ.get("TIER_CEILING_MULTIPLIER", "2.0"))
 GRAPH_API_PORT = os.environ.get("GRAPH_API_PORT", "8001")
 GRAPH_API_SECRET_ARN = os.environ.get("GRAPH_API_SECRET_ARN", "")
@@ -229,18 +224,9 @@ def monitor_all_instances(expand_immediately: bool = False) -> dict[str, Any]:
 def discover_lbug_instances() -> list[dict]:
   """Discover all running Graph writer instances.
 
-  `writer` is the only value the writer launch template ever puts on
-  `LadybugRole`, across every tier — the tier is carried separately on
-  `WriterTier`. Do not add `shared_master` / `shared_replica` here: those are
-  `NODE_TYPE` values and never appear on `LadybugRole`, so they would match
-  nothing.
-
-  Do not widen this to match any `LadybugRole` value. Replicas carry no
-  `LadybugRole` today and are slated to get `replica` (deliberately not
-  `shared_replica`) so that a tag expression can select the whole graph fleet.
-  Either way they must stay out of this function: its callers drive volume
-  expansion and replicas carry no data volume to manage. See
-  `discover_replica_instance_ids`, which enumerates them separately.
+  Every writer tier is tagged `LadybugRole=writer` (tier in `WriterTier`). Do not
+  widen the filter: replicas carry `LadybugRole=replica` and no data volume, and
+  the callers drive volume expansion.
   """
 
   instances = []
@@ -284,10 +270,9 @@ def discover_lbug_instances() -> list[dict]:
 def discover_replica_instance_ids() -> set[str]:
   """Enumerate running shared replicas for registry reconciliation.
 
-  Replica launch templates tag instances with `NodeType: shared_replica` and no
-  `LadybugRole` tag, so `discover_lbug_instances` cannot see them. They are
-  enumerated separately (rather than folded into that filter) so they stay out
-  of the volume-expansion loop — replicas carry no data volume to manage.
+  Matched on `NodeType: shared_replica`, which every replica carries. Kept
+  separate from `discover_lbug_instances` so replicas stay out of the
+  volume-expansion loop.
   """
   try:
     response = ec2.describe_instances(
@@ -638,10 +623,8 @@ def get_data_volume_info(instance_id: str) -> tuple[str | None, int | None]:
 def get_volume_metrics_from_instance(instance: dict) -> dict | None:
   """Query Graph API for volume metrics.
 
-  Uses a short timeout with minimal retries so we fail fast and fall through
-  to the CloudWatch fallback. Under heavy ingestion I/O, the Graph API can
-  become unresponsive for minutes - we don't want to waste 30s on retries
-  when CloudWatch has the same data.
+  Short timeout and minimal retries: under heavy ingestion the Graph API can
+  stall for minutes, and the CloudWatch fallback has the same data.
   """
 
   try:
@@ -780,15 +763,9 @@ def get_volume_metrics_from_cloudwatch(instance: dict) -> dict | None:
 def mark_volume_attached(volume_id: str) -> None:
   """Reset a volume's registry status from ``expanding`` back to ``attached``.
 
-  ``perform_volume_expansion`` stamps ``expanding`` while the online EBS resize
-  runs, but nothing else clears it until the next detach/reattach cycle. Callers
-  invoke this once a filesystem grow has succeeded so ``expanding`` stays a
-  transient state — otherwise a master kept awake across an auto-expansion is
-  left with a stale ``expanding`` row, which stalls the wake health-gate and
-  can misfire status-filtered volume lookups.
-
-  The conditional write only flips ``expanding`` → ``attached``; if a detach has
-  already moved the row to ``available`` the condition fails and we leave it be.
+  Called once a filesystem grow succeeds; nothing else clears ``expanding``
+  before the next detach, and a stale row stalls the wake health-gate. The
+  conditional write leaves a row a detach already moved to ``available``.
   """
   if not VOLUME_REGISTRY_TABLE:
     return
@@ -1482,21 +1459,10 @@ def send_stuck_volume_alert(fixed_volumes: list[dict]):
 def sync_instance_registry() -> dict[str, int]:
   """Remove instance-registry rows whose EC2 instance no longer exists.
 
-  Writers deregister themselves twice over: the on-instance lifecycle script
-  marks `terminating` then `terminated`, and the termination lifecycle hook's
-  detachment Lambda deletes the row outright. Both of those hang off EBS volume
-  management, so an instance with no volume gets neither — shared replicas
-  register on boot (`ladybug-replica.sh`) and nothing ever removes them. They
-  also run on spot, so the rows accumulate at the reclaim rate rather than the
-  deploy rate.
-
-  Reconciling here rather than giving replicas their own lifecycle hook covers
-  every way an instance can vanish — graceful shutdown, spot reclaim, or host
-  failure — instead of only the ones that grant a shutdown window.
-
-  Rows younger than INSTANCE_REGISTRY_GRACE_SECONDS are left alone: an instance
-  registers itself before it is `running` and fully tagged, so it is briefly
-  invisible to discovery and must not be reaped during its own boot.
+  Writers deregister through their volume lifecycle; shared replicas have no
+  volume, so nothing else removes theirs, and reconciling here also covers spot
+  reclaim and host failure. Rows younger than INSTANCE_REGISTRY_GRACE_SECONDS
+  are skipped: an instance registers before it is discoverable.
   """
   results = {"scanned": 0, "removed": 0, "skipped_recent": 0}
 

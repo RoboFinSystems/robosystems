@@ -1,11 +1,5 @@
-"""JSON-LD → Pydantic TaxonomyPackage loader.
-
-Reads a seed artifact produced by `robosystems.arelle.serialize_jsonld()`
-and returns a validated `TaxonomyPackage` ready for the library writer.
-
-The loader uses rdflib to parse the JSON-LD into triples, then walks
-the graph by subject IRI to reconstruct ElementSpec, AssociationSpec,
-and StructureSpec instances.
+"""JSON-LD seed (from `robosystems.arelle.serialize_jsonld()`) → validated
+`TaxonomyPackage`, parsed with rdflib and walked by subject IRI.
 """
 
 from __future__ import annotations
@@ -36,18 +30,13 @@ from robosystems.taxonomy.model import (
   TraitSpec,
 )
 
-RS_NS = RS_VOCAB  # alias for readability
-# XBRL vocabulary namespaces — concept attributes (xbrli:balance/periodType)
-# and reified-arc endpoints/metadata (xlink:from/to/arcrole/role, link:weight/order).
+RS_NS = RS_VOCAB
 XBRLI_NS = "http://www.xbrl.org/2003/instance#"
 XLINK_NS = "http://www.w3.org/1999/xlink#"
 LINK_NS = "http://www.xbrl.org/2003/linkbase#"
 
-# Enum closures for rule axes. Kept here so both the loader (for
-# cheap sanity-checking during parse) and the migration CHECK
-# constraints can import one canonical source. Update RULE_CATEGORY_VALUES
-# and RULE_PATTERN_VALUES when new categories or patterns are added to the
-# seed.
+# Rule-axis enums, shared with the migration CHECK constraints. Extend when a
+# seed adds a category or pattern.
 RULE_CATEGORY_VALUES: frozenset[str] = frozenset(
   {
     "AutomatedAccountingAndReportingChecks",
@@ -77,10 +66,8 @@ RULE_PATTERN_VALUES: frozenset[str] = frozenset(
     "Variance",
   }
 )
-# Model-structure check kinds — walked over the association graph rather
-# than evaluated over fact values. Disjoint from RULE_PATTERN_VALUES; the
-# Rule.rule_pattern / Rule.rule_check_kind XOR CHECK enforces exactly one
-# is populated per row.
+# Structural checks over the association graph, not fact values. A rule has
+# exactly one of rule_pattern / rule_check_kind (XOR CHECK).
 RULE_CHECK_KIND_VALUES: frozenset[str] = frozenset(
   {
     "LeafHasClassification",
@@ -93,7 +80,7 @@ RULE_CHECK_KIND_VALUES: frozenset[str] = frozenset(
 )
 
 
-# Inverse label role mapping — predicate → role name + language preserved via literal.lang
+# Label predicate → role; language comes from the literal.
 LABEL_ROLE_FROM_PREDICATE: dict[URIRef, str] = {
   RDFS.label: "standard",
   RDFS.comment: "documentation",
@@ -101,26 +88,15 @@ LABEL_ROLE_FROM_PREDICATE: dict[URIRef, str] = {
   SKOS.prefLabel: "standard",
 }
 
-# Direct-predicate arcs keyed by RDF predicate → (association_type, arcrole).
-#
-# This map holds ONLY pure binary relations — equivalence + the Seattle-Method
-# "drules" vocabulary (disclosure / checklist / style requirements). They carry
-# no weight/order/role, so a direct predicate is their natural RDF form and
-# they have never drifted. The STRUCTURAL taxonomy arcs (presentation /
-# calculation / definition) are NOT here: they reify into rs:Association nodes
-# (xlink:from/to + xlink:arcrole + link:weight/order) — read below in the
-# reified-arc pass. The retired direct terms (summationOf/parent/generalOf/
-# dimensionOf/hypercubeOf) are banned by shapes.ttl.
+# Direct-predicate arcs: only pure binary relations (equivalence and the
+# Seattle Method "drules" vocabulary), which carry no weight/order/role.
+# Structural arcs are reified rs:Association nodes, read separately.
 ARC_PREDICATE_TO_ASSOC_TYPE: dict[str, tuple[str, str]] = {
-  # predicate_iri: (association_type, arcrole)
   str(OWL.equivalentClass): (
     "equivalence",
     "http://xbrlsite.azurewebsites.net/2016/conceptual-model/arcrole/class-equivalentClass",
   ),
-  # Disclosure Mechanics predicates (rs-gaap-disclosure-mechanics package).
-  # Mirror Charlie Hoffman's Seattle Method arcrole vocabulary so a future
-  # Arelle harvest of his theory file can land into the same association
-  # rows. Composition-style: each Disclosure declares what it requires.
+  # Disclosure Mechanics (Seattle Method arcroles)
   f"{RS_NS}reportedDisclosureRequiresDisclosure": (
     "definition",
     "https://robosystems.ai/seattle/cm/drules-arcroles/reportedDisclosure-requiresDisclosure",
@@ -141,9 +117,7 @@ ARC_PREDICATE_TO_ASSOC_TYPE: dict[str, tuple[str, str]] = {
     "equivalence",
     "https://robosystems.ai/seattle/cm/drules-arcroles/disclosure-equivalentTextblock",
   ),
-  # Reporting Checklist predicates (rs-gaap-reporting-checklist package).
-  # A FinancialReport requires/may-have/has-alternatives-for specific
-  # Disclosures.
+  # Reporting Checklist
   f"{RS_NS}financialReportRequiresDisclosure": (
     "definition",
     "https://robosystems.ai/seattle/cm/drules-arcroles/financialReport-requiresDisclosure",
@@ -156,8 +130,7 @@ ARC_PREDICATE_TO_ASSOC_TYPE: dict[str, tuple[str, str]] = {
     "definition",
     "https://robosystems.ai/seattle/cm/drules-arcroles/disclosure-allowedAlternativeDisclosure",
   ),
-  # Reporting Style predicates (rs-gaap-reporting-styles package).
-  # A Style composes specific Disclosures for a vertical / filer profile.
+  # Reporting Styles
   f"{RS_NS}reportingStyleComposesDisclosure": (
     "definition",
     "https://robosystems.ai/seattle/cm/drules-arcroles/reportingStyle-composesDisclosure",
@@ -166,9 +139,8 @@ ARC_PREDICATE_TO_ASSOC_TYPE: dict[str, tuple[str, str]] = {
 
 
 def _iri_to_qname(iri: str, context: dict) -> str | None:
-  """Compact a full IRI back to prefix:local using the @context.
-
-  Returns None if no matching prefix is found (e.g., blank nodes).
+  """Compact an IRI to prefix:local via the @context (longest match); None if
+  no prefix matches.
   """
   pairs: list[tuple[str, str]] = []
   for key, val in context.items():
@@ -185,15 +157,11 @@ def _iri_to_qname(iri: str, context: dict) -> str | None:
 
 
 def _infer_namespace(iri: str) -> tuple[str, str, str]:
-  """Split an IRI into (namespace_uri, prefix, local_name).
-
-  Falls back to splitting at # then /.
-  """
+  """Split an IRI at # (else /) into (namespace_uri, prefix, local_name)."""
   for sep in ("#", "/"):
     if sep in iri:
       ns, local = iri.rsplit(sep, 1)
       ns_with_sep = ns + sep
-      # Look up prefix in context
       prefix = ""
       for key, val in CANONICAL_CONTEXT.items():
         if isinstance(val, str) and val == ns_with_sep:
@@ -207,14 +175,13 @@ def _extract_labels(graph: Graph, subject: URIRef) -> list[LabelSpec]:
   """Collect all labels for a concept."""
   labels: list[LabelSpec] = []
 
-  # Standard label predicates
   for pred, role in LABEL_ROLE_FROM_PREDICATE.items():
     for obj in graph.objects(subject, pred):
       if isinstance(obj, Literal):
         lang = obj.language or "en"
         labels.append(LabelSpec(role=role, language=lang, text=str(obj)))
 
-  # Custom role labels stored under rs:labelRole blank nodes
+  # Custom-role labels live under rs:labelRole blank nodes.
   for label_node in graph.objects(subject, URIRef(f"{RS_NS}labelRole")):
     role_vals = list(graph.objects(label_node, URIRef(f"{RS_NS}role")))
     lang_vals = list(graph.objects(label_node, URIRef(f"{RS_NS}labelLanguage")))
@@ -291,16 +258,12 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
   is_abstract = _bool(URIRef(f"{RS_NS}abstract"), False)
   is_monetary = _bool(URIRef(f"{RS_NS}monetary"), True)
 
-  # Substitution group (optional — XBRL intrinsic)
   sub_group: str | None = None
   sg_vals = list(graph.objects(subject, URIRef(f"{RS_NS}substitutionGroup")))
   if sg_vals and isinstance(sg_vals[0], URIRef):
     sub_group = _iri_to_qname(str(sg_vals[0]), CANONICAL_CONTEXT)
 
-  # Parent (optional). Element-level tree-parent declaration via ``rs:childOf``
-  # ("subject is a child of X"). No active seeds use this today. The retired
-  # ``rs:parent`` direct predicate is no longer read here — presentation arcs
-  # are reified rs:Association nodes (and rs:parent is banned by shapes.ttl).
+  # ``rs:childOf``: "subject is a child of X" (no active seed uses it).
   parent_qname: str | None = None
   parent_vals = list(graph.objects(subject, URIRef(f"{RS_NS}childOf")))
   if parent_vals and isinstance(parent_vals[0], URIRef):
@@ -309,7 +272,6 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
   labels = _extract_labels(graph, subject)
   references = _extract_references(graph, subject)
 
-  # Default name is the local part with spaces (or a standard label if found)
   name = local
   for label in labels:
     if label.role == "standard":
@@ -369,12 +331,8 @@ def _extract_trait_assignments(
 ) -> list[TraitAssignmentSpec]:
   """Walk ``hasTrait`` arcs and emit trait assignment specs.
 
-  Each arc connects an element (subject) to a Trait IRI of the
-  shape ``{namespace_uri}/{standard}/{version}/{category}/{identifier}``
-  — e.g. ``https://robosystems.ai/taxonomy/fac-traits/v1/
-  elementsOfFinancialStatements/asset``. We decode the last 4 IRI
-  segments into (standard-as-source, version, category, identifier) so
-  the assignment carries its vocabulary's provenance.
+  Trait IRIs end ``.../{standard}/{version}/{category}/{identifier}``; the
+  standard becomes the assignment's source.
   """
   assignments: list[TraitAssignmentSpec] = []
   predicate = URIRef(f"{RS_NS}hasTrait")
@@ -386,9 +344,7 @@ def _extract_trait_assignments(
       continue
     iri = str(obj)
     parts = iri.rsplit("/", 4)
-    # Need at least 4 trailing segments — anything shorter cannot carry
-    # the {standard}/{version}/{category}/{identifier} structure and
-    # would silently round-trip with a bogus category.
+    # Shorter IRIs would round-trip with a bogus category.
     if len(parts) < 5:
       continue
     source, _version, category, identifier = (
@@ -419,29 +375,17 @@ _DEFAULT_ARCROLE_BY_ASSOC_TYPE = {
 
 
 def _extract_associations(graph: Graph) -> list[AssociationSpec]:
-  """Walk all arc predicates + reified arcs, emit AssociationSpec entries.
+  """Emit AssociationSpecs from both encodings.
 
-  Two encodings are supported:
-
-  1. Flat arc predicates (``rs:generalOf``, ``rs:summationOf``, ``rs:parent``,
-     ``owl:equivalentClass``) — a single triple per arc; metadata like
-     weight / order / structure role is not carried.
-
-  2. Reified arcs — an ``rs:Association`` node carrying the canonical XBRL
-     linkbase vocabulary: ``xlink:from`` / ``xlink:to`` / ``rs:associationType``
-     / ``xlink:role`` (ELR / structure binding) / ``xlink:arcrole`` /
-     ``link:weight`` (calc) / ``link:order``. This is the single canonical form
-     for presentation / calculation / definition arcs.
+  1. Direct predicates (``ARC_PREDICATE_TO_ASSOC_TYPE``): one triple per arc,
+     subject = from, object = to; no weight/order/role.
+  2. Reified ``rs:Association`` nodes (xlink:from/to/role/arcrole,
+     link:weight/order, rs:associationType): the canonical form for
+     presentation / calculation / definition arcs.
   """
   associations: list[AssociationSpec] = []
 
-  # All flat arc predicates declare arcs in XBRL parent-child / general-
-  # special / summation-item direction (subject is the parent / general
-  # / summation, object is the child / special / operand). The loader
-  # extracts ``from=subject, to=object`` directly — same direction the
-  # renderer expects. No per-predicate swapping needed.
-
-  # 1. Flat arc predicates
+  # 1. Direct predicates
   for pred_iri, (assoc_type, arcrole) in ARC_PREDICATE_TO_ASSOC_TYPE.items():
     predicate = URIRef(pred_iri)
     for s, o in graph.subject_objects(predicate):
@@ -460,8 +404,7 @@ def _extract_associations(graph: Graph) -> list[AssociationSpec]:
         )
       )
 
-  # 2. Reified arcs (rs:Association: xlink:from/to + xlink:arcrole/role +
-  #    link:weight/order + rs:associationType)
+  # 2. Reified arcs
   arc_from_pred = URIRef(f"{XLINK_NS}from")
   arc_to_pred = URIRef(f"{XLINK_NS}to")
   arc_type_pred = URIRef(f"{RS_NS}associationType")
@@ -550,10 +493,7 @@ def _extract_rules(graph: Graph) -> list[RuleSpec]:
     if not category_vals or not pattern_vals or not expression_vals:
       continue
 
-    # Unknown categories / patterns are not silently round-tripped — a
-    # typo in a seed would otherwise land in the DB and fail the CHECK
-    # constraint only at write time. Skip with a warning here so the
-    # failure surfaces during load.
+    # Skip with a warning at load rather than fail the CHECK at write time.
     category = str(category_vals[0])
     pattern = str(pattern_vals[0])
     if category not in RULE_CATEGORY_VALUES:
@@ -624,17 +564,11 @@ def _extract_structures(
 
   Resolution order for ``block_type``:
 
-  1. Explicit ``blockType`` on the role node — authoritative;
-     used by presentation packages that carry per-structure types.
-  2. ``default_block_type`` from the package — set by mapping /
-     rules / disclosure packages to override the role-uri name
-     heuristic that would otherwise mistake (e.g.) a fac-to-rs-gaap
-     crosswalk role for a balance_sheet just because the role URI
-     mentions BS.
-  3. Role-uri name heuristic — only fires for packages without a
-     default; matches abbreviations like ``BS-classified`` /
-     ``IS-multistep`` in real-world presentation taxonomies.
-  4. ``custom`` fallback.
+  1. Explicit ``blockType`` on the role node.
+  2. The package's ``default_block_type`` (keeps e.g. a crosswalk role that
+     mentions BS from being typed a balance_sheet).
+  3. A role-URI name heuristic (``BS-classified``, ``IS-multistep``, ...).
+  4. ``custom``.
   """
   structures: list[StructureSpec] = []
   role_pred = URIRef(f"{RS_NS}roleUri")
@@ -667,8 +601,6 @@ def _extract_structures(
       else:
         stype = "custom"
 
-    # Concept Arrangement Pattern: explicit field wins; otherwise default
-    # by block_type.
     explicit_caps = list(graph.objects(subject, cap_pred))
     if explicit_caps:
       cap: str | None = str(explicit_caps[0])
@@ -687,8 +619,7 @@ def _extract_structures(
 
 
 def _default_concept_arrangement(block_type: str) -> str | None:
-  """Default Concept Arrangement Pattern per block_type when seed
-  doesn't declare one explicitly. Charlie's vocabulary."""
+  """Default Concept Arrangement Pattern per block_type."""
   return {
     "income_statement": "arithmetic",
     "balance_sheet": "arithmetic",
@@ -699,19 +630,11 @@ def _default_concept_arrangement(block_type: str) -> str | None:
 
 
 def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
-  """Parse a JSON-LD seed file and return a TaxonomyPackage.
-
-  Args:
-      path: Path to the JSON-LD seed file.
-
-  Returns:
-      TaxonomyPackage with elements, associations, and structures.
-  """
+  """Parse a JSON-LD seed file into a TaxonomyPackage."""
   path = Path(path)
   raw = path.read_text(encoding="utf-8")
   doc = json.loads(raw)
 
-  # Extract top-level metadata
   standard = doc.get("standard", "unknown")
   version = doc.get("version", "v1")
   namespace_uri = doc.get("namespace_uri", "")
@@ -720,19 +643,13 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
   default_block_type = doc.get("default_block_type")
   name = f"{standard} {version}"
 
-  # Parse with rdflib — it handles the @context expansion
   graph = Graph()
   graph.parse(data=raw, format="json-ld")
 
-  # Find concepts + trait nodes. A subject is one or the other,
-  # not both (traits have category+identifier, concepts have
-  # balance/period/elementType). A third case — an IRI node that is
-  # neither (no concept attrs, not a trait) but carries labels /
-  # references — is a label-/reference-linkbase entry: it attaches to a
-  # concept defined in another package by qname (the label / reference
-  # linkbase pattern). Emit those as by-qname assignments resolved in the
-  # arcs pass, never as elements (so they don't clobber the owning
-  # package's balance/periodType via the element upsert).
+  # A subject is a trait, a concept, or neither. "Neither" with labels or
+  # references is a linkbase entry for a concept owned by another package:
+  # emit by-qname assignments, never elements, so the owning package's
+  # balance/periodType is not clobbered by the element upsert.
   elements: list[ElementSpec] = []
   traits: list[TraitSpec] = []
   label_assignments: list[LabelAssignmentSpec] = []
@@ -792,9 +709,8 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
     f"{len(rules)} rules"
   )
 
-  # Derive primary namespace_uri if not in metadata
+  # Absent from metadata: the most common namespace among this standard's elements.
   if not namespace_uri and elements:
-    # Use most common namespace_uri among elements with matching standard
     ns_counts: dict[str, int] = {}
     for el in elements:
       if el.source == standard and el.namespace_uri:

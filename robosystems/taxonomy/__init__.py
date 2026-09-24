@@ -1,51 +1,11 @@
-"""Taxonomy subsystem — the Python runtime around the library content.
+"""Taxonomy subsystem: the Python runtime around the repo-root ``frameworks/``
+library.
 
-The taxonomy library (JSON-LD content + framework manifests) lives at
-the repo-root `/frameworks/` directory, peer to `/robosystems/`. This
-package is the Python code that walks it, parses it, and writes its
-contents into per-tenant schemas at provision time.
-
-## Lifecycle
-
-```
-disk (/frameworks/)
-    │
-    │  discovery.py        walks frameworks/{name}/v*.json + packages/* + bridges/*
-    ▼
-filesystem paths
-    │
-    │  loader.py           parses each taxonomy.jsonld → TaxonomyPackage
-    ▼
-TaxonomyPackage (Pydantic, see model.py)
-    │
-    │  migration 0002      INSERTs into public.* tables (frameworks-wide library)
-    ▼
-public schema (extensions DB)
-    │
-    │  pins.py             resolves Graph.taxonomy_pin → flat {standard: version}
-    │  writer.py           copies the pinned subset into per-tenant schema
-    ▼
-tenant schema (per-graph subset)
-```
-
-## Modules
-
-- `model.py` — Pydantic `TaxonomyPackage` and component specs (the
-  in-memory shape of taxonomy content)
-- `discovery.py` — filesystem walking, manifest reading, dependency
-  expansion (`load_framework_manifest`, `expand_framework_to_pin`,
-  `list_framework_seed_paths`, `framework_root`)
-- `loader.py` — JSON-LD parser via rdflib → `TaxonomyPackage`
-  (`load_taxonomy_package`)
-- `pins.py` — polymorphic `resolve_pin()` that turns a Graph's
-  `taxonomy_pin` JSONB into the flat `{standard: version}` dict the
-  writer consumes
-- `writer.py` — copies the pinned library subset into a per-graph
-  schema at provision time (`copy_library_into_tenant`)
-- `seed.py` — legacy Python-dict seeder (retained for migration 0001
-  backward compatibility)
-
-The library content itself is documented in `/frameworks/README.md`.
+discovery.py walks the manifests and packages, loader.py parses each
+taxonomy.jsonld into a TaxonomyPackage (model.py), a migration inserts them
+into ``public``, and pins.py + writer.py copy each graph's pinned subset into
+its tenant schema. seed.py is the legacy dict seeder for migration 0001.
+Library content is documented in ``frameworks/README.md``.
 """
 
 from __future__ import annotations

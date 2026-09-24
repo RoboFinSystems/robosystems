@@ -88,15 +88,9 @@ jobs:
 
   # =============================================================================
   # Task: update-ami
-  # Pins the latest Amazon Linux 2023 ARM64 AMI in SSM (/robosystems/{env}/graph/ami-id).
-  # By default that is all it does: the fleet picks the AMI up on the next
-  # deploy, which reads the pin (get-graph-ami) into the launch template and
-  # lets the ASG UpdatePolicy roll the instances. If trigger_deploy is true
-  # (or GRAPH_AMI_AUTO_DEPLOY=true for scheduled runs), that deploy is
-  # dispatched immediately — staging.yml on main, prod.yml on the latest
-  # release tag. An ASG instance refresh is deliberately NOT used here: it
-  # reboots instances from the launch template's existing (old) AMI, so it
-  # patches userspace via boot-time dnf but can never deliver a kernel fix.
+  # Pins the latest Amazon Linux 2023 ARM64 AMI in SSM (/robosystems/{env}/graph/ami-id);
+  # the next deploy reads it into the launch template. With trigger_deploy (or
+  # GRAPH_AMI_AUTO_DEPLOY=true on schedule) that deploy is dispatched now.
   # =============================================================================
   ami-get-latest:
     # always() needed because schedule-gate is skipped for workflow_dispatch
@@ -215,11 +209,8 @@ jobs:
 
           echo "✅ SSM parameter updated successfully"
 
-  # Dispatch a deploy so the fleet actually rolls onto the new AMI. An ASG
-  # instance refresh cannot do this: the launch template's ImageId is baked in
-  # by the CloudFormation deploy, so a refresh boots instances from the old
-  # AMI. Only a deploy reads the SSM pin into the launch template, after which
-  # the ASG UpdatePolicy (AutoScalingRollingUpdate) cycles the instances.
+  # A deploy, not an ASG instance refresh: only a deploy writes the new ImageId
+  # into the launch template; a refresh would boot the old AMI again.
   ami-dispatch-deploy:
     if: |
       always() &&
@@ -287,14 +278,8 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
-      # One tag-targeted command per environment instead of a serial loop that
-      # issued an SSM command per instance and waited on each in turn. Same
-      # defect the graph container refresh had: O(n) API calls and wall-clock
-      # linear in fleet size.
-      #
-      # `aws ssm wait command-executed` is deliberately not used here either —
-      # its botocore waiter is delay:5 x maxAttempts:20, so it gives up after 100
-      # seconds and reports failure for a prune that is still running.
+      # One tag-targeted SSM command per environment. Not `aws ssm wait
+      # command-executed`: its waiter gives up after 100s while a prune may still run.
       - name: Run Docker Cleanup
         id: cleanup
         run: |

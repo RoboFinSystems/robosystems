@@ -70,9 +70,7 @@ class CustomSchemaParser:
     "REL",
   }
 
-  # Reserved node names that cannot be used in custom schemas
-  # NOTE: Platform metadata (GraphMetadata, User, Connection) are stored in PostgreSQL,
-  # not in the LadybugDB graph database. These reserved names are for future system nodes.
+  # Reserved for future system nodes.
   RESERVED_NODE_NAMES = {
     "SystemConfig",  # System configuration node
     "SchemaVersion",  # Schema versioning node
@@ -108,9 +106,7 @@ class CustomSchemaParser:
         ValueError: If the input does not match ``format``, or the schema is
             structurally invalid.
     """
-    # Parse input based on format
     if format == SchemaFormat.DICT:
-      # For DICT format, ensure we have a dictionary
       if isinstance(schema_input, dict):
         schema_dict: dict[str, Any] = schema_input
       else:
@@ -135,10 +131,8 @@ class CustomSchemaParser:
       else:
         raise ValueError("YAML format requires string or dict input")
 
-    # Validate required fields
     self._validate_schema_structure(schema_dict)
 
-    # Create schema definition
     definition = CustomSchemaDefinition(
       name=schema_dict["name"],
       version=schema_dict.get("version", "1.0.0"),
@@ -191,7 +185,6 @@ class CustomSchemaParser:
 
   def _build_node(self, node_def: dict[str, Any]) -> Node:
     """Build a Node from definition."""
-    # Validate required fields
     if "name" not in node_def:
       raise ValueError("Node must have a 'name' field")
 
@@ -228,7 +221,6 @@ class CustomSchemaParser:
 
   def _build_property(self, prop_def: dict[str, Any]) -> Property:
     """Build a Property from definition."""
-    # Validate required fields
     if "name" not in prop_def:
       raise ValueError("Property must have a 'name' field")
 
@@ -254,7 +246,6 @@ class CustomSchemaParser:
     self, rel_def: dict[str, Any], schema: Schema
   ) -> Relationship:
     """Build a Relationship from definition."""
-    # Validate required fields
     if "name" not in rel_def:
       raise ValueError("Relationship must have a 'name' field")
 

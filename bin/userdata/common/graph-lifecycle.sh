@@ -20,8 +20,7 @@ INSTANCE_REGISTRY_TABLE="${INSTANCE_REGISTRY_TABLE:-robosystems-graph-${ENVIRONM
 # ==================================================================================
 # DATABASE-SPECIFIC CONFIGURATION
 # ==================================================================================
-# Ask run-graph-container.sh for the container name rather than re-deriving the
-# NODE_TYPE mapping. It owns that mapping; every other copy of it drifted.
+# run-graph-container.sh owns the NODE_TYPE -> container name mapping.
 CONTAINER_NAME=$(/usr/local/bin/run-graph-container.sh --print-container-name) || {
     echo "ERROR: could not determine container name from run-graph-container.sh" >&2
     exit 1

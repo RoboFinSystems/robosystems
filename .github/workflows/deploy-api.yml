@@ -277,21 +277,10 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.aws_region }}
 
-      # api.yaml is deployed from S3 rather than inline. The inline --template-body
-      # ceiling is 51,200 bytes and api.yaml had grown to ~98% of it, which is what
-      # pushed the API's own alarms out into the security stack. From S3 the limit
-      # is 1 MB, so the template can hold the resources that belong to it.
-      #
-      # Keyed by commit SHA, not a fixed path: concurrent deploys cannot overwrite
-      # each other's object, re-running an old workflow run deploys that run's
-      # template rather than whatever is at HEAD, and the object is a durable
-      # record of what each build actually deployed. (Stack rollback is unaffected
-      # either way — CloudFormation rolls back to the template stored in the
-      # stack, not to this object.)
-      #
-      # Uploaded here rather than in package-scripts.sh because deploy-api does
-      # not depend on that job — only on deploy-s3, which is what creates the
-      # bucket.
+      # Deployed from S3: api.yaml exceeds the inline --template-body limit
+      # (51,200 bytes). Keyed by commit SHA so concurrent deploys can't overwrite
+      # each other and a re-run deploys its own template. Uploaded here, not in
+      # package-scripts.sh, because deploy-api depends only on deploy-s3.
       - name: Upload API template to S3
         id: upload-template
         run: |

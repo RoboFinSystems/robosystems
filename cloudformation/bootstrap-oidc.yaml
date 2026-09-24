@@ -121,14 +121,9 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
                 # Allow main, release branches, and version tags for backend repo only.
-                # Each ref appears twice: GitHub's classic subject
-                # (repo:ORG/REPO:ref:…) and its immutable one
-                # (repo:ORG@ID/REPO@ID:ref:…), which GitHub issues for a
-                # repository after it is renamed and for repositories created
-                # after July 2026. Only GitHub can mint the ID-qualified form
-                # for this org and repo name, so accepting both narrows nothing
-                # — and a rename no longer locks the deploy out (2026-09-09,
-                # the viewer's rename did exactly that).
+                # Each ref appears twice: the classic subject (repo:ORG/REPO:ref:…)
+                # and the immutable one (repo:ORG@ID/REPO@ID:ref:…) GitHub issues
+                # after a rename. Only GitHub can mint either, so both are safe.
                 token.actions.githubusercontent.com:sub:
                   - !Sub repo:${GitHubOrg}/${GitHubRepoName}:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}/${GitHubRepoName}:ref:refs/heads/release/*
@@ -202,12 +197,9 @@ Resources:
                   - iam:UntagPolicy
                 Resource: "*"
 
-              # IAM PassRole — restricted to the AWS services this deployment
-              # actually creates roles for, so the deploy role cannot pass an
-              # arbitrary role to an arbitrary principal. This closes the main
-              # privilege-escalation path that unconditional iam:PassRole opened.
-              # The service list is derived from every Service principal the
-              # cloudformation/ templates create roles for.
+              # IAM PassRole — restricted to the Service principals the
+              # cloudformation/ templates create roles for, closing the
+              # privilege-escalation path of an unconditional iam:PassRole.
               - Sid: IAMPassRole
                 Effect: Allow
                 Action:
@@ -604,10 +596,8 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                # Explicitly allow only these frontend repos
-                # If a repo isn't used, it simply won't assume this role.
-                # Classic and immutable subject forms for each ref — see the
-                # backend role above for why both.
+                # Only these frontend repos; classic and immutable subject forms
+                # for each ref (see the backend role above).
                 token.actions.githubusercontent.com:sub:
                   # Primary dashboard frontend
                   - !Sub repo:${GitHubOrg}/${GitHubAppRepoName}:ref:refs/heads/main
@@ -630,8 +620,7 @@ Resources:
                   - !Sub repo:${GitHubOrg}@*/${GitHubInvestorAppRepoName}@*:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}@*/${GitHubInvestorAppRepoName}@*:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}@*/${GitHubInvestorAppRepoName}@*:ref:refs/tags/v*
-                  # xbrlkit viewer (static SPA → S3 + CloudFront) — renamed
-                  # 2026-09-09, so GitHub issues its immutable subject
+                  # xbrlkit viewer (static SPA → S3 + CloudFront)
                   - !Sub repo:${GitHubOrg}/${GitHubViewerRepoName}:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}/${GitHubViewerRepoName}:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}/${GitHubViewerRepoName}:ref:refs/tags/v*
@@ -776,17 +765,12 @@ Resources:
                   - sns:ListTagsForResource
                 Resource: "*"
 
-              # IAM role management — mutations are pinned to the App Runner
-              # access/instance roles the frontend stacks actually create
-              # (robosystems-app-*, roboledger-*, roboinvestor-*), so a
-              # compromised frontend workflow cannot attach policies to, or pass,
-              # backend/deploy/SSO roles. Reads stay broad. Role-name
-              # prefixing alone does not stop creating a NEW privileged role
-              # within the prefix — that is what FrontendRoleBoundary is for.
-              # Once every app template sets PermissionsBoundary on its roles,
-              # add the iam:PermissionsBoundary condition to this statement so
-              # CreateRole/AttachRolePolicy/PutRolePolicy only succeed inside
-              # the boundary.
+              # IAM role management — mutations pinned to the App Runner roles the
+              # frontend stacks create, so a compromised frontend workflow cannot
+              # touch backend/deploy/SSO roles. Reads stay broad. A NEW privileged
+              # role inside the prefix is what FrontendRoleBoundary prevents.
+              # TODO: once every app template sets PermissionsBoundary, add the
+              # iam:PermissionsBoundary condition here.
               - Sid: IAMRoleManagement
                 Effect: Allow
                 Action:
@@ -825,10 +809,8 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
                 # No iam:PassedToService condition: App Runner does not populate
-                # that key, so any value denies the pass (a staging deploy under
-                # the conditioned statement failed at the service update). The
-                # role-name patterns above are the bound; the roles' own trust
-                # policies already limit them to the App Runner principals.
+                # that key, so any value denies the pass. The role-name patterns
+                # and the roles' trust policies are the bound.
               # Setting the boundary is allowed only to this one policy, so the
               # frontend role can install the ceiling but never swap it for a
               # looser one. Removing it (DeleteRolePermissionsBoundary) is not

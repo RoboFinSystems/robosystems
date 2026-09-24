@@ -491,25 +491,17 @@ jobs:
       ami_id: ${{ needs.stack-config.outputs.graph_ami_id }}
       # Container Configuration - use prod tag for EC2/ASG (container refresh handles updates)
       ecr_image_tag: prod
-      # SEC shared replicas track the moving prod tag by default (no per-deploy
-      # ECRImageTag change → CloudFormation doesn't cycle the fleet; the daily
-      # shared_replicas_refresh is the only routine boot). Leave
-      # shared_replica_image_tag unset for that. Pin it ONLY during a
-      # storage-format-breaking engine upgrade, so a boot can't pull a new engine
-      # before the new-format sec.lbug is published — set a
-      # SHARED_REPLICA_IMAGE_TAG_PROD var for the migration window, then clear it.
+      # SEC replicas track the moving prod tag. Set SHARED_REPLICA_IMAGE_TAG_PROD
+      # only during a storage-format-breaking engine upgrade (so a boot can't pull
+      # the new engine before the new-format sec.lbug is published), then clear it.
       shared_replica_image_tag: ${{ vars.SHARED_REPLICA_IMAGE_TAG_PROD || '' }}
       # Infrastructure inputs from graph infrastructure jobs
       secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}
       volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
       volume_manager_function_arn: ${{ needs.deploy-graph-volumes.outputs.volume_manager_function_arn }}
       volume_detachment_topic_arn: ${{ needs.deploy-graph-volumes.outputs.volume_detachment_topic_arn }}
-      # Writer placement. Every writer tier sits in ONE AZ (EBS volume affinity).
-      # The graph_writer_az dispatch input MOVES the tiers — a deliberate, per-run
-      # act. The GRAPH_WRITER_AZ_PROD var SUSTAINS the AZ across the input-less
-      # dispatches from create-release / graph-maintenance and may only name the
-      # AZ the tiers already occupy (a mismatch fails the deploy). Both unset →
-      # <region>c, unchanged behaviour.
+      # Writer AZ (EBS volume affinity): the graph_writer_az input MOVES the tiers;
+      # GRAPH_WRITER_AZ_PROD only SUSTAINS their current AZ. Both unset → <region>c.
       writer_az: ${{ inputs.graph_writer_az || vars.GRAPH_WRITER_AZ_PROD || '' }}
       writer_az_change_allowed: ${{ (inputs.graph_writer_az != '' && 'true') || 'false' }}
       # Graph Tier Configuration

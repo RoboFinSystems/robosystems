@@ -1,30 +1,14 @@
 #!/usr/bin/env python3
 # type: ignore
 """
-SEC Pipeline - XBRL Data Processing via Dagster.
+SEC Pipeline - drives the local SEC Dagster jobs.
 
-This script manages SEC XBRL data processing through 3 independent phases:
-
-  Phase 1 - Download: sec_download job
-    Downloads raw XBRL ZIPs to S3 (quarterly partitions).
-    Years are automatically converted to quarters (e.g., 2024 -> 2024-Q1..Q4).
-    Creates SourceFile records in PostgreSQL for processing tracking.
-
-  Phase 2 - Process: sec_process job (quarterly batch, sensor-driven)
-    The sec_processing_sensor discovers quarters with pending SourceFile records
-    and triggers one Dagster run per quarter. Each quarter's filings are processed
-    together, with output consolidated by filing date (filed=YYYY-MM-DD).
-    Dagster's QueuedRunCoordinator controls concurrency via DAGSTER_MAX_CONCURRENT_RUNS.
-
-    In production: Enable sec_processing_sensor in Dagster UI (auto-disabled in dev).
-    In development: Use Dagster UI to manually launch sec_process runs, or use
-    'just sec-process' to trigger runs via this script.
-
-  Phase 3 - Materialize (decoupled for retry safety):
-    sec_stage job: Stage to persistent DuckDB (2+ hours for full SEC)
-    sec_materialize job: Materialize from DuckDB to LadybugDB (retry-safe)
-
-    If materialization fails, just re-run sec_materialize - DuckDB is preserved.
+  Phase 1 - sec_download: raw XBRL ZIPs to S3 per quarterly partition, plus
+    SourceFile tracking rows.
+  Phase 2 - sec_process: one run per quarter with pending SourceFiles (the
+    sec_processing_sensor does this in production; it is off in dev).
+  Phase 3 - sec_stage to persistent DuckDB, then sec_materialize to LadybugDB.
+    A failed materialize can be re-run; the staging is preserved.
 
 Usage:
     # All-in-one (chains all 3 phases):
@@ -69,14 +53,11 @@ from robosystems.config.storage.shared import (
 )
 from robosystems.logger import logger
 
-# Primary graph starts at 2024 (source of truth: adapters/sec/pipeline/configs.py)
+# Mirrors adapters/sec/pipeline/configs.py
 SEC_PRIMARY_START_YEAR = 2024
 
-# Top companies by market cap (as of 2024)
-# Used when --count is specified without --tickers
-# Note: Only US companies with SEC filings (no foreign ADRs like TSM)
-# Note: Excludes mega-financials (JPM, BRK-B) whose filings exceed local memory limits
-# LocalStack limits S3 listings to ~1000 files, so capped at 15 companies for local dev
+# Default set for --count. US filers only; JPM and BRK-B excluded (their filings
+# exceed local memory); capped at 15 because LocalStack lists ~1000 S3 files.
 TOP_COMPANIES_BY_MARKET_CAP = [
   "AAPL",  # Apple - Tech
   "MSFT",  # Microsoft - Tech
@@ -101,14 +82,7 @@ ALL_YEARS = list(range(SEC_PRIMARY_START_YEAR, _current_year + 1))
 
 
 def year_to_quarters(year: int | str) -> list[str]:
-  """Convert a year to quarterly partition keys.
-
-  Args:
-      year: Year as int or string (e.g., 2024 or "2024")
-
-  Returns:
-      List of quarterly partition keys (e.g., ["2024-Q1", "2024-Q2", "2024-Q3", "2024-Q4"])
-  """
+  """2024 -> ["2024-Q1", ..., "2024-Q4"]."""
   y = int(year)
   return [f"{y}-Q{q}" for q in range(1, 5)]
 
@@ -121,7 +95,7 @@ def years_to_quarters(years: list[str]) -> list[str]:
   return quarters
 
 
-# Default timeouts in seconds (generous for large batch processing)
+# Seconds
 DEFAULT_DOWNLOAD_TIMEOUT = 7200  # 2 hours per quarter partition
 DEFAULT_MATERIALIZE_TIMEOUT = 14400  # 4 hours for full materialization
 
@@ -210,18 +184,13 @@ class SECPipeline:
     rebuild_graph: bool = False,
     skip_taxonomy: bool = False,
   ) -> str:
-    """Create YAML config for Dagster job.
+    """Write a Dagster run config into the webserver container; returns its path.
 
-    Args:
-        job_type: "download_only", "stage", or "materialize_duckdb"
-        graph_id: Graph ID for staging/materialization jobs
-        reset_staging: Whether to delete DuckDB file before staging (fresh start)
-        rebuild_graph: Whether to rebuild LadybugDB (materialize jobs)
+    ``job_type``: download_only | stage | materialize_duckdb | narratives_index
+    | ixbrl_index.
     """
 
     if job_type == "stage":
-      # sec_stage job - stages to persistent DuckDB only (Stage 1)
-      # Note: staging doesn't touch LadybugDB - rebuild is handled by materialize
       stage_config: dict[str, Any] = {
         "graph_id": graph_id,
         "reset_staging": reset_staging,
@@ -236,15 +205,13 @@ class SECPipeline:
         }
       }
     elif job_type == "materialize_duckdb":
-      # sec_materialize job - materializes from DuckDB to LadybugDB
-      # batch_materialization=False for local dev (small data, no memory pressure)
       config = {
         "ops": {
           "sec_graph_materialized": {
             "config": {
               "graph_id": graph_id,
               "rebuild_graph": rebuild_graph,
-              "batch_materialization": False,  # Disable hash-based batching for local dev
+              "batch_materialization": False,  # local data is small
             }
           },
         }
@@ -270,8 +237,7 @@ class SECPipeline:
         }
       }
     else:
-      # sec_download job: download raw ZIPs only (no processing)
-      # EFTS-based discovery - resolves tickers to CIKs in the asset
+      # The asset resolves tickers to CIKs via EFTS.
       config = {
         "ops": {
           "sec_raw_filings": {
@@ -340,7 +306,6 @@ class SECPipeline:
     error = None
     if not success:
       if stderr:
-        # Include first 250 + last 250 chars to preserve context from both ends
         if len(stderr) <= 500:
           error = stderr
         else:
@@ -358,7 +323,6 @@ class SECPipeline:
 
   def run(self) -> dict[str, Any]:
     """Run the full pipeline."""
-    # Convert years to quarterly partitions
     quarters = years_to_quarters(self.years)
 
     logger.info("=" * 60)
@@ -416,7 +380,6 @@ class SECPipeline:
       logger.info(f"\n{'=' * 60}")
       logger.info("PROCESSING (Quarterly Batch)")
       logger.info(f"{'=' * 60}")
-      # Run quarterly batch processing for all quarters with pending files
       process_result = self._run_quarterly_batch_processing()
       if process_result:
         all_results.append(process_result)
@@ -557,7 +520,6 @@ class SECPipeline:
     graph_api_url = "http://localhost:8001"
 
     try:
-      # Delete existing database
       logger.info("  Deleting existing SEC database...")
       try:
         resp = requests.delete(f"{graph_api_url}/databases/sec", timeout=30)
@@ -568,7 +530,6 @@ class SECPipeline:
       except Exception as e:
         logger.warning(f"  Delete failed: {e}")
 
-      # Create database via Graph API REST endpoint
       logger.info("  Creating SEC database...")
       try:
         resp = requests.post(
@@ -591,8 +552,7 @@ class SECPipeline:
         logger.error(f"  Create request failed: {e}")
         return False
 
-      # Ensure PostgreSQL repository metadata exists (Graph + GraphSchema records)
-      # This is required for user subscriptions to work
+      # Graph + GraphSchema rows; subscriptions require them.
       logger.info("  Ensuring repository metadata exists...")
       try:
         from robosystems.operations.graph.shared_repository_service import (
@@ -611,7 +571,6 @@ class SECPipeline:
         logger.error(f"  Repository metadata creation failed: {e}")
         return False
 
-      # Clear S3 if requested
       if clear_s3:
         self._clear_s3_buckets()
         self._clear_source_files()
@@ -628,7 +587,6 @@ class SECPipeline:
 
     sec_prefix = get_raw_key(DataSourceType.SEC)  # "sec"
 
-    # Clear SEC prefix in shared buckets
     bucket_prefixes = [
       (app_env.SHARED_RAW_BUCKET, sec_prefix),
       (app_env.SHARED_PROCESSED_BUCKET, sec_prefix),
@@ -656,11 +614,7 @@ class SECPipeline:
         logger.warning(f"    Error clearing {bucket}/{prefix}/: {e}")
 
   def _clear_source_files(self):
-    """Clear SourceFile records for SEC graph.
-
-    This keeps PostgreSQL tracking in sync with S3 when buckets are cleared.
-    Without this, stale SourceFile records would prevent reprocessing.
-    """
+    """Clear SEC SourceFile rows; stale ones would block reprocessing."""
     from robosystems.database import SessionFactory
     from robosystems.models.core import SourceFile
 
@@ -679,20 +633,11 @@ class SECPipeline:
       logger.warning(f"    Error clearing SourceFile records: {e}")
 
   def _run_quarterly_batch_processing(self) -> StageResult | None:
-    """Trigger quarterly batch processing for all quarters with pending SourceFiles.
-
-    In production, the sec_processing_sensor handles this automatically.
-    This method is for local development where the sensor is disabled.
-
-    Each quarter's filings are processed together with output consolidated
-    by filing date (filed=YYYY-MM-DD/nodes/Table.parquet).
-
-    Returns:
-        StageResult with processing outcome
+    """Run sec_process for each quarter with pending SourceFiles (what the
+    production sensor does; it is disabled locally).
     """
     start_time = time.time()
 
-    # Get quarters with pending files and counts
     quarters_with_pending = self._get_quarters_with_pending_files()
     pending_count, error_count = self._get_source_file_counts()
 
@@ -717,7 +662,6 @@ class SECPipeline:
     if error_count > 0:
       logger.info(f"  ({error_count} files in error state)")
 
-    # Process each quarter
     success_count = 0
     failure_count = 0
     last_error = None
@@ -725,7 +669,6 @@ class SECPipeline:
     for quarter in sorted(quarters_with_pending):
       logger.info(f"\n  Processing quarter {quarter}...")
 
-      # Execute the job with partition key
       cmd = [
         "docker",
         "compose",
@@ -743,7 +686,6 @@ class SECPipeline:
         json.dumps({"dagster/partition": quarter}),
       ]
 
-      # Use longer timeout for batch processing (30 min per quarter)
       success, stdout, stderr = self._exec_docker(cmd, timeout=1800)
 
       if success:

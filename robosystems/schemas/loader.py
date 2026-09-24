@@ -29,46 +29,33 @@ class LadybugSchemaLoader:
   """Loads and manages LadybugDB schema definitions with selective extension loading."""
 
   def __init__(self, extensions: list[str] | None = None):
-    """
-    Initialize schema loader with optional extension filtering.
-
-    ``extensions`` names the extensions to load — ``None`` discovers and loads
-    every available one, ``[]`` yields the base schema alone.
-    """
-    # Start with base schemas
+    """``None`` loads every discoverable extension; ``[]`` is base schema only."""
     all_nodes = list(BASE_NODES)
     all_relationships = list(BASE_RELATIONSHIPS)
 
-    # Determine which extensions to load
     if extensions is None:
       target_extensions = self._discover_all_extensions()
       logger.info("Loading all available extensions (no filter specified)")
     else:
-      # Load only specified extensions
       target_extensions = extensions
       logger.info(f"Loading selective extensions: {target_extensions}")
 
-    # Load the specified extensions
     loaded_extensions = []
 
     for extension_name in target_extensions:
-      # Resolve legacy aliases (e.g. "memory" -> "knowledge") to the canonical
-      # module name before importing or recording it.
+      # Legacy aliases, e.g. "memory" -> "knowledge".
       extension_name = resolve_extension_alias(extension_name)
       try:
-        # Import the extension module
         extension_module = importlib.import_module(
           f"robosystems.schemas.extensions.{extension_name}"
         )
 
-        # Check if module has EXTENSION_NODES and EXTENSION_RELATIONSHIPS
         if hasattr(extension_module, "EXTENSION_NODES") and hasattr(
           extension_module, "EXTENSION_RELATIONSHIPS"
         ):
           extension_nodes = extension_module.EXTENSION_NODES
           extension_relationships = extension_module.EXTENSION_RELATIONSHIPS
 
-          # Add to our collections
           all_nodes.extend(extension_nodes)
           all_relationships.extend(extension_relationships)
           loaded_extensions.append(extension_name)
@@ -88,16 +75,13 @@ class LadybugSchemaLoader:
         logger.warning(f"Failed to load extension '{extension_name}': {e}")
         continue
 
-    # Fallback if no extensions loaded successfully
     if not loaded_extensions and extensions is not None:
-      # No fallback here: an explicit selection is always honored, even when it
-      # resolves to nothing. Substituting a default extension set produces a
-      # schema that disagrees with the one the database was created under.
+      # Deliberately no fallback: a substituted default set would disagree
+      # with the schema the database was created under.
       logger.info(
         f"No extensions loaded (intentional). Using base schema only: {len(all_nodes)} nodes, {len(all_relationships)} relationships"
       )
 
-    # Create lookup dictionaries
     self.nodes = {node.name: node for node in all_nodes}
     self.relationships = {rel.name: rel for rel in all_relationships}
     self.loaded_extensions = loaded_extensions
@@ -116,16 +100,13 @@ class LadybugSchemaLoader:
     available_extensions = []
 
     try:
-      # Get the extensions package path
       extensions_path = extensions_pkg.__path__
 
-      # Iterate through all modules in the extensions package
       for importer, modname, ispkg in pkgutil.iter_modules(extensions_path):
         if modname.startswith("__"):
-          continue  # Skip __init__ and other special modules
+          continue
 
         try:
-          # Check if module has the required attributes without importing
           extension_module = importlib.import_module(
             f"robosystems.schemas.extensions.{modname}"
           )
@@ -312,20 +293,16 @@ def get_schema_loader(extensions: list[str] | None = None) -> LadybugSchemaLoade
   """
   global _default_schema_loader, _schema_loader_cache
 
-  # If no extensions specified, use the default global instance
   if extensions is None:
     if _default_schema_loader is None:
       _default_schema_loader = LadybugSchemaLoader()
     return _default_schema_loader
 
-  # Create cache key from sorted extensions
   cache_key = "+".join(sorted(extensions))
 
-  # Return cached instance if available
   if cache_key in _schema_loader_cache:
     return _schema_loader_cache[cache_key]
 
-  # Create new instance with specified extensions
   loader = LadybugSchemaLoader(extensions=extensions)
   _schema_loader_cache[cache_key] = loader
 
@@ -355,27 +332,21 @@ def get_contextual_schema_loader(
   without a dedicated context fall back to plain extension loading, plus any
   ``additional_extensions``.
   """
-  # Special handling for RoboLedger unified schema contexts
   if context_type == "repository" and context_name == "sec":
-    # SEC repository needs reporting-only view of RoboLedger
     loader = ContextAwareSchemaLoader(extension="roboledger", context="sec_repository")
     return loader
   elif context_type == "application" and context_name == "roboledger":
-    # RoboLedger app needs full accounting capabilities
     loader = ContextAwareSchemaLoader(extension="roboledger", context="full_accounting")
     return loader
   else:
-    # For other contexts, use standard extension loading
     extensions = []
 
-    # Map context to extensions
     if context_type == "application":
       if context_name == "roboinvestor":
         extensions = ["roboinvestor"]
       elif context_name == "robosystems":
         extensions = []  # Base schema only for admin
 
-    # Add any additional requested extensions
     if additional_extensions:
       extensions.extend(additional_extensions)
 
@@ -385,16 +356,9 @@ def get_contextual_schema_loader(
 def compile_repository_schema(repository_name: str) -> Schema:
   """Compile the full Schema object for a shared repository's graph DDL.
 
-  Single source of truth for shared-repository schema compilation — used by
-  both the initial creation path (SharedRepositoryService) and the
-  rebuild-on-materialize path (SEC ingestion), so a repository always gets
-  the same contextual schema no matter which path created its database.
-
-  For SEC this applies the reporting-only context: REA/trait tables and
-  tenant-OLTP-only edges are excluded (see base.py exclusion sets).
-
-  Raises:
-      ValueError: If no schema nodes resolve for the repository.
+  Used by both creation and rebuild-on-materialize, so a repository gets the
+  same schema either way (for SEC, the reporting-only context). Raises
+  ValueError when nothing resolves.
   """
   loader = get_contextual_schema_loader("repository", repository_name)
   if not loader.nodes:
@@ -482,7 +446,6 @@ class ContextAwareSchemaLoader(LadybugSchemaLoader):
       logger.error(f"Error loading context-aware extension '{extension}': {e}")
       # Fall back to base schema only
 
-    # Create lookup dictionaries
     self.nodes = {node.name: node for node in all_nodes}
     self.relationships = {rel.name: rel for rel in all_relationships}
     self.loaded_extensions = [f"{extension}[{context}]"]

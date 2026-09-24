@@ -43,10 +43,8 @@ class DagsterJobMonitorTask(BaseTask):
       run_id = await asyncio.to_thread(monitor.submit_job, job_name, run_config, tags)
       await self.report_progress(f"Submitted {job_name}", percent=5)
 
-      # Poll with cancellation checks between iterations.
-      # DagsterRunMonitor.monitor_run handles SSE progress internally,
-      # but doesn't know about worker cancellation. We wrap the poll
-      # loop so the user can cancel long-running monitors (backup/restore).
+      # Our own poll loop (not DagsterRunMonitor.monitor_run) so a user can
+      # cancel a long monitor between iterations.
       while True:
         if await self.is_cancelled():
           logger.info(f"Dagster job monitor cancelled: {job_name} (run_id={run_id})")

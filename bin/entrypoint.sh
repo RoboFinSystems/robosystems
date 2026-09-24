@@ -180,12 +180,9 @@ configure_dagster() {
 case $DOCKER_PROFILE in
   "api")
     echo "Starting API service..."
-    # FORWARDED_ALLOW_IPS must name the trusted proxy range, so uvicorn will
-    # read X-Forwarded-For from it and per-IP limits see the real client rather
-    # than the load balancer. The deployment sets it to the VPC CIDR; the
-    # 127.0.0.1 default here is for running without a proxy in front.
-    # It must never be "*" — the allow-list is what makes the header
-    # trustworthy, and a wildcard accepts it from anyone.
+    # FORWARDED_ALLOW_IPS names the trusted proxy range (the VPC CIDR in
+    # deployment) so per-IP limits see the real client. Never "*": a wildcard
+    # trusts X-Forwarded-For from anyone.
     exec uv run uvicorn main:app \
       --host 0.0.0.0 \
       --port 8000 \

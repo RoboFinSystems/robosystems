@@ -21,11 +21,7 @@ Select a context explicitly:
 from ..models import Node, Property, Relationship
 from ..xbrl import xbrl_node_properties, xbrl_relationship_properties
 
-# NOTE: Before adding nodes or edges here, review schemas/base.py invariants.
-# Universally-applicable concepts (Entity, Taxonomy, Element, Dimension,
-# Structure, Association, Classification) belong in base.py, not here.
-# Aspects (Period, Unit, Dimension) never attach to declarative nodes like
-# Entity, Report, Taxonomy, Portfolio — that's a category error.
+# Review the invariants in schemas/base.py before adding nodes or edges here.
 
 # ============================================================================
 # REPORTING SECTION (XBRL/Financial Statements)
@@ -50,10 +46,6 @@ REPORTING_NODES = [
     "value holds the CDN URL with content_type its MIME type.",
     properties=xbrl_node_properties("Fact"),
   ),
-  # NOTE: Structure, Association, Classification are now in schemas/base.py
-  # because they're base ontology concepts (XBRL taxonomy link networks and
-  # pattern metadata), not reporting-specific. Any extension that works with
-  # a formal taxonomy traverses these nodes. See INVARIANT 1 in base.py.
   Node(
     name="FactSet",
     description="Period-specific instantiation of a Structure — the facts a "
@@ -133,10 +125,8 @@ REPORTING_RELATIONSHIPS = [
     description="Structure has a pre-computed set of facts for rendering",
     properties=xbrl_relationship_properties("STRUCTURE_HAS_FACT_SET"),
   ),
-  # Report → FactSet (the package-mode container edge). A Report groups
-  # N FactSets — one per statement Structure produced for the period.
-  # Lets the graph traverse "give me the FactSets of this Report" in one
-  # hop, instead of the two-hop ``Report → Fact ← FactSet`` path.
+  # Report → FactSet: one per statement Structure, one hop instead of
+  # Report → Fact ← FactSet.
   Relationship(
     name="REPORT_HAS_FACT_SET",
     from_node="Report",
@@ -151,10 +141,6 @@ REPORTING_RELATIONSHIPS = [
     description="Report uses XBRL taxonomy",
     properties=xbrl_relationship_properties("REPORT_USES_TAXONOMY"),
   ),
-  # NOTE: STRUCTURE_HAS_ASSOCIATION, ASSOCIATION_HAS_FROM_ELEMENT,
-  # ASSOCIATION_HAS_TO_ELEMENT, ASSOCIATION_HAS_CLASSIFICATION, and
-  # STRUCTURE_HAS_TAXONOMY are now in schemas/base.py alongside the
-  # Structure / Association / Classification nodes they connect.
 ]
 
 # ============================================================================
@@ -309,9 +295,8 @@ TRANSACTION_RELATIONSHIPS = [
     properties=[],
   ),
   # ── McCarthy bridge ──────────────────────────────────────────────────
-  # Event → Transaction is the realization at the graph layer of
-  # McCarthy 1982's vision: "accounting should be derived from underlying
-  # economic events." OLTP source: transactions.triggered_by_event_id.
+  # Event → Transaction (REA: accounting derived from economic events).
+  # OLTP source: transactions.triggered_by_event_id.
   Relationship(
     name="EVENT_TRIGGERS_TRANSACTION",
     from_node="Event",
@@ -340,16 +325,13 @@ class RoboLedgerContext:
   def get_nodes_for_context(cls, context: str) -> list[Node]:
     """Get appropriate nodes based on context"""
     if context == cls.SEC_REPOSITORY or context == cls.REPORTING_ONLY:
-      # SEC only has aggregated reports, no transaction data
       return REPORTING_NODES
     elif context == cls.FULL_ACCOUNTING:
-      # Complete accounting system needs everything
       return REPORTING_NODES + TRANSACTION_NODES
     elif context == cls.TRANSACTION_ONLY:
       # Some use cases might only need GL
       return TRANSACTION_NODES
     else:
-      # Default to full system
       return REPORTING_NODES + TRANSACTION_NODES
 
   @classmethod
@@ -392,14 +374,10 @@ class RoboLedgerContext:
 
     tables: dict[str, str] = {}
 
-    # Get context-specific tables
     ext_nodes = cls.get_nodes_for_context(context)
     ext_relationships = cls.get_relationships_for_context(context)
 
-    # Reporting-only contexts (SEC) skip the REA/trait base tables and the
-    # tenant-OLTP-only taxonomy link edges so this materialization list
-    # matches the schema ContextAwareSchemaLoader builds — tables with no SEC
-    # writer are neither created nor materialized.
+    # Must match what ContextAwareSchemaLoader builds (see base.py exclusions).
     reporting_only = context in (cls.SEC_REPOSITORY, cls.REPORTING_ONLY)
     excluded_nodes = REPORTING_ONLY_EXCLUDED_NODES if reporting_only else frozenset()
     excluded_rels = (
@@ -435,7 +413,6 @@ class RoboLedgerContext:
 EXTENSION_NODES = REPORTING_NODES + TRANSACTION_NODES
 EXTENSION_RELATIONSHIPS = REPORTING_RELATIONSHIPS + TRANSACTION_RELATIONSHIPS
 
-# Export all components for flexibility
 __all__ = [
   # Full schema (default)
   "EXTENSION_NODES",

@@ -92,16 +92,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # This job exists only to do arithmetic, because GitHub Actions expressions have
-  # no arithmetic operators and `timeout-minutes` can read `needs` but not compute.
-  #
-  # It is not cosmetic. The action's busy-counter wait runs **per tier,
-  # sequentially**, each up to max_wait_minutes, and a run with no `tier` input
-  # iterates every writer tier. A fixed 45-minute job cap was therefore roughly
-  # 2.4x smaller than the worst-case internal budget (3 tiers x 30m, plus a 20m
-  # refresh-completion wait), so both the "timed out waiting for idle" error and
-  # the completion-wait branch were unreachable: a legitimately slow refresh was
-  # killed by the runner and reported as a bare cancellation with no diagnostic.
+  # Computes the job timeout (Actions expressions have no arithmetic). The
+  # busy-wait runs per tier, sequentially, plus the completion wait; a fixed cap
+  # would kill a slow refresh before the action's own timeout errors can fire.
   budget:
     runs-on: ubuntu-latest
     timeout-minutes: 5

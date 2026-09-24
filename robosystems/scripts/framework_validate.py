@@ -1,38 +1,19 @@
 """Validate the curated rs-gaap framework — Mode A (structural correctness).
 
-A host-run script (outside Docker, against the dockerized services via the
-localhost env) that provisions a throwaway reference tenant, seeds the
-default-pin library, and asserts the framework is internally sound across the
-full set of renderable concepts and the three equity forms (CORP / PART / LLC)
-— not just the slice a single demo chart of accounts exercises. It's the
-front-end of the framework-completeness instrument that the rs-gaap
-alignment tooling consumes.
+Host-run: provisions a throwaway tenant seeded with the default-pin library
+and checks every renderable concept across the three equity forms
+(CORP / PART / LLC). Fact-free, deterministic checks:
 
-Checks (all fact-free, deterministic; they name the offending element):
+1. **reachability** (the load-bearing one): every concrete leaf on a roll-up
+   statement reaches a canonical root up the calc DAG; one that doesn't
+   renders but never foots.
+2. **consistency** (warning): calc-reachable leaves never presented.
+3. **no calc cycles**.
 
-1. **reachability** — every concrete presentation leaf on a roll-up statement
-   traces up the calc DAG to a canonical rs-gaap root. A leaf that doesn't
-   reach a root renders but can never foot: it's mapped onto a dead branch, so
-   its value never lands in any subtotal and the statement is wrong. This is
-   the load-bearing check.
-2. **consistency** — calc-reachable leaves that never appear in any
-   presentation network (foots but doesn't render) are reported as warnings.
-3. **no calc cycles** — the calculation DAG is acyclic.
-
-These implement the ``rule_check_kind`` structural checks that ``auto_rules``
-declares but the rule engine does not yet evaluate.
-
-**Why there is no per-subtotal footing check.** It was investigated and
-dropped: the renderer computes a *nesting* subtotal (e.g. Assets) as the plain
-sum of its presentation children, so those foot by construction; *flat*
-multi-step subtotals (GrossProfit, NetIncomeLoss) carry no presentation
-children and are verified by the seeded RollUp rules, not by containment; and
-the calc DAG is intentionally a superset for form-aware equity
-(StockholdersEquity calc includes PartnersCapital/MembersEquity, zero on a
-corp). A presentation-vs-calc child comparison therefore yields only benign
-divergences, not render failures. The real-pipeline footing/identity proof is
-the demo oracles (Harbinger, World Online — they foot and balance) plus the
-RollUp rules.
+No per-subtotal footing check: nesting subtotals foot by construction, flat
+ones are covered by the RollUp rules, and the calc DAG is deliberately a
+superset for form-aware equity, so a presentation-vs-calc comparison only
+finds benign divergences.
 
 Run it:
     just framework-validate                 # everything: A (structure) + C (package) + B (coverage)
@@ -57,14 +38,8 @@ from sqlalchemy.orm import Session
 
 from robosystems.config.constants import ReportingStyleConstants
 
-# NOTE — accepted coupling: this validator deliberately reuses several
-# underscore-prefixed internals from the operations/reporting layer
-# (_load_calc_parents, _resolve_root_ids, _load_reporting_structure,
-# _HierarchyNode, _get_engine, _sanitize_schema). It has to, to see the framework
-# *exactly* as the renderer does. The cost is that a refactor of those modules can
-# break this script with no import-time signal — so the pure-logic helpers are
-# covered by tests/taxonomy/test_framework_validate.py, which fails in CI if a
-# reused internal moves.
+# Deliberately reuses private renderer internals to see the framework exactly
+# as the renderer does; tests/taxonomy/test_framework_validate.py catches moves.
 from robosystems.db.extensions import (
   _get_engine,
   _sanitize_schema,
@@ -89,18 +64,14 @@ from robosystems.operations.roboledger.reports.network_picker import (
   load_close_target_concept,
 )
 
-# The per-section "Other" catch-all leaves the MappingOperator falls back to
-# when no specific rs-gaap leaf fits. An account landing here is a framework
-# *breadth* signal — the curated set lacked a precise home. (Note: APIC is the
-# equity fallback and also a legitimate leaf, so catch-all hits are flagged for
-# review, not treated as failures.)
+# The MappingOperator's per-section fallback leaves. An account landing on one
+# is a breadth signal, flagged for review rather than failed (APIC is also a
+# legitimate leaf).
 _CATCHALL_LEAVES: frozenset[str] = frozenset(FAC_TO_RS_GAAP_FALLBACK.values())
 
 # ── Reference tenant ─────────────────────────────────────────────────────────
 
-# Equity form → library-seeded Reporting Style id. This is the axis Mode A
-# sweeps: the default family is form-pure (BSC / multi-step IS / indirect CF),
-# and the equity form is the one place the framework varies per entity type.
+# Equity form → seeded Reporting Style id: the one axis the framework varies by.
 REFERENCE_STYLES: dict[str, str] = {
   "CORP": ReportingStyleConstants.DEFAULT_STYLE_ID,
   "PART": ReportingStyleConstants.PARTNERSHIP_STYLE_ID,
@@ -120,13 +91,8 @@ class ReferenceTenant:
 def reference_tenant(keep: bool = False) -> Generator[ReferenceTenant]:
   """Provision a disposable tenant seeded with the default-pin library.
 
-  No platform ``Graph`` row is created: ``provision_tenant_schema`` falls back
-  to the default framework pin when the graph is unknown, and the renderer
-  takes a ``reporting_style_id`` directly — so the seeded style ids are all we
-  need.
-
-  Args:
-      keep: leave the schema in place on exit (debugging). Default drops it.
+  No platform ``Graph`` row is needed: an unknown graph gets the default pin.
+  ``keep`` leaves the schema in place for debugging.
   """
   graph_id = f"kg{uuid.uuid4().hex}"
   _sanitize_schema(graph_id)  # fail fast if the id pattern ever changes
@@ -362,10 +328,8 @@ def run_structural(session: Session, styles: dict[str, str]) -> GapReport:
         bs_leaf_qnames = {node.qname for node in leaves}
         bs_leaf_ids |= {node.element_id for node in leaves}
 
-      # Roll-forward statements (Statement of Changes in Equity) foot by an
-      # opening+movements=closing identity, not by calc-DAG roll-up — their
-      # movement leaves (dividends, OCI, contributions) legitimately don't
-      # reach a calc root, so the reachability check doesn't apply.
+      # Roll-forward statements foot by opening + movements = closing, so
+      # their movement leaves legitimately don't reach a calc root.
       if arrangement != "roll_forward":
         summary.n_reachable = _check_reachability(
           session,
@@ -446,12 +410,9 @@ def _check_equity_home(
 ) -> None:
   """Cross-statement: the form's earnings-home concept renders on the BS.
 
-  Net Income closes into a form-specific equity concept (``close target``:
-  CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity). For the
-  balance sheet to foot, that concept must be a presented leaf in the BS equity
-  section — otherwise NI lands on a concept the BS never shows and equity
-  silently under-reports. This is the one check that exercises the form axis
-  (the whole reason the three forms are swept).
+  Net income closes into the form's close target (RetainedEarnings,
+  PartnersCapital, MembersEquity); if the BS doesn't present it, equity
+  silently under-reports.
   """
   close_target = load_close_target_concept(session, style_id)
   present = close_target in bs_leaf_qnames
@@ -473,8 +434,7 @@ def _check_equity_home(
 def _concrete_leaves(hierarchy: list[_HierarchyNode]) -> list[_HierarchyNode]:
   """Concrete (non-abstract) leaf nodes of a presentation hierarchy.
 
-  Abstract nodes are presentation scaffolding (headers/groupings) — they carry
-  no value and are not expected to reach a calc root, so they're excluded.
+  Abstract nodes are headers and carry no value.
   """
   leaves: list[_HierarchyNode] = []
 
@@ -567,9 +527,7 @@ def _check_consistency(
 ) -> None:
   """Report calc-reachable leaves that never appear in any presentation network.
 
-  ``presentation - calc`` (renders-but-doesn't-foot) is covered by the
-  reachability check. This is the opposite direction: a calc-reachable leaf
-  that foots but never renders — a lower-severity authoring gap.
+  The reverse of reachability: foots but never renders (lower severity).
   """
   parent_ids = {
     row[0]
@@ -612,11 +570,8 @@ def _scalar(session: Session, sql: str) -> int:
 
 
 # ── Mode C: package + bridge integrity (cross-package, against the tenant) ────
-#
-# These span packages, so the per-package seed tests in tests/taxonomy/ don't
-# cover them. They run against the same loaded reference tenant as the
-# structural checks (the packages are seeded into it), so they validate the
-# library *as loaded* — catching seed→load drift, not just authored-file shape.
+# Validates the library as loaded, catching seed→load drift that the
+# per-package seed tests cannot see.
 
 
 def run_package_integrity(session: Session, report: GapReport) -> None:
@@ -845,15 +800,8 @@ def render_trees(session: Session, styles: dict[str, str]) -> str:
 
 
 # ── Mode B: CoA coverage on real graphs ──────────────────────────────────────
-#
-# Mode A validates the framework in isolation. Mode B asks the *breadth*
-# question — does a real chart of accounts map cleanly onto the curated leaves,
-# or fall into catch-alls / go unmapped? It measures the mappings that ALREADY
-# exist on provisioned graphs (the demos render statements through them), so it
-# is deterministic — no MappingOperator re-run, no credits, no LLM variance.
-# The number it produces is "framework + operator coverage achieved on real
-# data"; the catch-all and unmapped lists are the actionable framework-gap
-# signal (review each: is it a missing leaf, or an account that needs none?).
+# Breadth: how the existing mappings on provisioned graphs land (real leaf,
+# catch-all, unmapped). Deterministic: no MappingOperator re-run.
 
 
 @dataclass
@@ -890,11 +838,8 @@ def measure_coverage(session: Session, label: str, graph_id: str) -> CoverageRes
     or 0
   )
 
-  # A real chart of accounts has accounts (null/code-based qnames), not
-  # taxonomy concepts. If the "CoA" is dominated by taxonomy-namespaced qnames
-  # (mini:/us-gaap:/…), this graph is a taxonomy→taxonomy projection (the
-  # Seattle/World Online demos), not a CoA — its coverage % is meaningless as a
-  # breadth signal, so we flag it rather than report a misleading number.
+  # A "CoA" dominated by taxonomy-namespaced qnames is a taxonomy projection,
+  # whose coverage % would be meaningless.
   taxonomy_coa = int(
     session.execute(
       text(
@@ -1092,8 +1037,7 @@ def main(argv: list[str] | None = None) -> int:
         print()
       print(report.format_text())
 
-  # Mode B coverage is informational (doesn't gate the A+C verdict) and reads
-  # real graphs, so it prints as its own section after the framework report.
+  # Mode B is informational; it does not gate the exit code.
   print()
   _print_coverage()
   return 0 if report.ok() else 1

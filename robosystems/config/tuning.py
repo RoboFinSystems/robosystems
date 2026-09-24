@@ -1,50 +1,7 @@
-"""
-Runtime tuning configuration via SSM Parameter Store.
+"""Runtime tuning parameters from SSM, adjustable without a redeploy.
 
-Operational parameters adjustable at runtime, without a redeploy.
-
-## Three-Tier Model
-
-```
-CONSTANTS (constants.py)    | TUNABLES (this module)      | SECRETS (secrets_manager.py)
-----------------------------|-----------------------------|--------------------------
-Never change                | Runtime adjustable          | Sensitive data
-- XBRL URIs                 | - Cache TTLs                | - DATABASE_URL
-- SEC_RATE_LIMIT            | - Queue sizes               | - JWT_SECRET_KEY
-- Memory limits             | - Thresholds                | - API keys
-- Credit day/hour           | - Timeouts                  | - Passwords
-```
-
-## Override Priority
-
-Environment Variable > SSM Parameter Store > Default Value
-
-## Usage
-
-```python
-from robosystems.config.tuning import TuningConfig
-
-# Get a tuning value (uses SSM override if set, otherwise default)
-balance_ttl = TuningConfig.get_cache_balance_ttl()
-memory_threshold = TuningConfig.get_admission_memory_threshold()
-
-# Or use the helper for any path
-custom_value = TuningConfig.get_int("cache/CUSTOM_TTL", 300)
-```
-
-## SSM Parameter Hierarchy
-
-Parameters are stored at: /robosystems/{env}/tuning/{category}/{key}
-
-Categories:
-- cache/       - Cache TTL values
-- admission/   - Admission control thresholds
-- database/    - Connection pool sizing
-- queues/      - Queue configuration
-- circuits/    - Circuit breaker settings
-- load_shedding/ - Load shedding thresholds
-- mcp/         - MCP operation limits
-- workers/     - Worker pool settings
+Override priority: env var ``TUNING_{CATEGORY}_{KEY}`` > SSM
+``/robosystems/{env}/tuning/{category}/{key}`` > defaults.py.
 """
 
 import logging
@@ -65,17 +22,16 @@ from .defaults import (
   WorkerDefaults,
 )
 
-# Use standard logging to avoid circular import with robosystems.logger
+# Not robosystems.logger: that would be a circular import.
 logger = logging.getLogger(__name__)
 
 
 def _get_env_override(env_key: str) -> str | None:
-  """Check for environment variable override."""
   return os.getenv(env_key)
 
 
 def _get_parameter_manager():
-  """Get the parameter manager with lazy import to avoid circular dependency."""
+  """Lazy import avoids a circular dependency."""
   try:
     from .parameter_store import get_parameter_manager
 
@@ -86,14 +42,7 @@ def _get_parameter_manager():
 
 
 class TuningConfig:
-  """
-  Runtime tunable configuration with SSM backend.
-
-  This class provides typed access to tuning parameters with the
-  override priority: env var > SSM > default.
-
-  All methods are class methods for easy access without instantiation.
-  """
+  """Typed access to tuning parameters (env var > SSM > default)."""
 
   # =========================================================================
   # GENERIC ACCESSORS
@@ -101,19 +50,12 @@ class TuningConfig:
 
   @classmethod
   def get(cls, path: str, default: str) -> str:
-    """
-    Get a tuning parameter as a string.
-
-    ``path`` is relative to /tuning/, e.g. "cache/BALANCE_TTL". The env var
-    ``TUNING_CACHE_BALANCE_TTL`` overrides it.
-    """
-    # Convert path to env var name (e.g., "cache/BALANCE_TTL" -> "TUNING_CACHE_BALANCE_TTL")
+    """``path`` is relative to /tuning/, e.g. "cache/BALANCE_TTL"."""
     env_key = "TUNING_" + path.upper().replace("/", "_")
     env_value = _get_env_override(env_key)
     if env_value is not None:
       return env_value
 
-    # Try SSM
     manager = _get_parameter_manager()
     if manager:
       return manager.get_tuning_parameter(path, default)
@@ -122,10 +64,7 @@ class TuningConfig:
 
   @classmethod
   def get_int(cls, path: str, default: int) -> int:
-    """
-    Get a tuning parameter as an int, falling back if unset or unparseable.
-    """
-    # Convert path to env var name
+    """Int parameter; an unparseable env value falls through to SSM."""
     env_key = "TUNING_" + path.upper().replace("/", "_")
     env_value = _get_env_override(env_key)
     if env_value is not None:
@@ -134,7 +73,6 @@ class TuningConfig:
       except (ValueError, TypeError):
         logger.warning(f"Invalid int env var {env_key}: {env_value}")
 
-    # Try SSM
     manager = _get_parameter_manager()
     if manager:
       return manager.get_tuning_int(path, default)
@@ -143,10 +81,7 @@ class TuningConfig:
 
   @classmethod
   def get_float(cls, path: str, default: float) -> float:
-    """
-    Get a tuning parameter as a float, falling back if unset or unparseable.
-    """
-    # Convert path to env var name
+    """Float parameter; an unparseable env value falls through to SSM."""
     env_key = "TUNING_" + path.upper().replace("/", "_")
     env_value = _get_env_override(env_key)
     if env_value is not None:
@@ -155,7 +90,6 @@ class TuningConfig:
       except (ValueError, TypeError):
         logger.warning(f"Invalid float env var {env_key}: {env_value}")
 
-    # Try SSM
     manager = _get_parameter_manager()
     if manager:
       return manager.get_tuning_float(path, default)
@@ -400,10 +334,7 @@ class TuningConfig:
   @classmethod
   @lru_cache(maxsize=1)
   def preload_all(cls) -> dict[str, str]:
-    """
-    Warm the cache at startup with a single batched SSM call, rather than
-    one call per parameter.
-    """
+    """Warm the cache with one batched SSM call."""
     manager = _get_parameter_manager()
     if manager:
       return manager.get_all_tuning_parameters()
@@ -411,15 +342,9 @@ class TuningConfig:
 
   @classmethod
   def refresh(cls):
-    """
-    Refresh cached tuning parameters.
-
-    Call this to force re-fetching from SSM on next access.
-    """
-    # Clear the preload cache
+    """Force re-fetching from SSM on next access."""
     cls.preload_all.cache_clear()
 
-    # Refresh the parameter manager cache
     manager = _get_parameter_manager()
     if manager:
       manager.refresh()

@@ -1,14 +1,8 @@
-"""Copy library content from the ``public`` schema into a tenant schema.
+"""Copy library content from ``public`` into a tenant schema.
 
-Called at entity-graph provisioning time (via ``provision_tenant_schema``)
-and by the backfill migration that seeds library rows into existing tenant
-schemas. The pattern is bulk ``INSERT ... SELECT`` in FK order, preserving
-the library rows' deterministic UUID5 ids so re-running is idempotent.
-
-Library-origin rows are distinguished by ``created_by = 'library-seeder'``
-(applied by ``operations/taxonomy_block/library_creator.py``). After the copy,
-tenant-schema immutability triggers (installed separately) key on that same
-audit field to raise on any UPDATE/DELETE against a library-seeded row.
+Bulk ``INSERT ... SELECT`` in FK order, keeping the deterministic UUID5 ids
+so re-running is idempotent. Library rows carry ``created_by =
+'library-seeder'``, which the tenant immutability triggers key on.
 """
 
 from __future__ import annotations
@@ -28,14 +22,9 @@ _TENANT_EXCLUDE_PATH = FRAMEWORKS_DIR / "rs-gaap" / "tenant-exclude" / "v1.json"
 
 @lru_cache(maxsize=1)
 def _tenant_exclude_qnames() -> tuple[str, ...]:
-  """rs-gaap qnames kept in the public library but NOT copied into tenant
-  schemas (industry verticals + dimension members/domains +
-  general-special-disconnected concepts the renderer never reaches). Generated
-  by ``scripts/generate_tenant_exclude.py``; the full catalog still lives in
-  ``public`` for the future SEC us-gaap bridge.
-
-  Returns an empty tuple when the artifact is absent so the copy degrades to a
-  no-op filter (tests / environments without the data file copy everything).
+  """rs-gaap qnames kept in ``public`` but not copied to tenants (industry
+  verticals, dimension members, concepts the renderer never reaches); from
+  ``scripts/generate_tenant_exclude.py``. Empty when the artifact is absent.
   """
   try:
     data = json.loads(_TENANT_EXCLUDE_PATH.read_text())
@@ -145,22 +134,14 @@ class CopyStats:
     )
 
 
-# The transaction-scoped GUC that opts a transaction into a library re-sync.
-# resync_library_into_tenant requires it (the immutability triggers consult it),
-# and callers run SET_LIBRARY_RESYNC in the same transaction first. Defined at
-# this layer so the writer's guard and every caller share one source of truth.
+# Transaction-scoped GUC the immutability triggers consult; a re-sync caller
+# runs SET_LIBRARY_RESYNC in the same transaction first.
 LIBRARY_RESYNC_GUC = "robosystems.library_resync"
 SET_LIBRARY_RESYNC = f"SET LOCAL {LIBRARY_RESYNC_GUC} = 'on'"
 
 
 def _build_pin_clause(resolved_pin: dict[str, str]) -> tuple[str, dict[str, str]]:
-  """Flatten a resolved pin into a parameterized ``VALUES`` clause + params.
-
-  E.g. ``{"fac":"v1","rs-gaap":"v1"}`` → ``"(:s0, :v0), (:s1, :v1)"`` plus the
-  bound params. Shared by :func:`copy_library_into_tenant` and
-  :func:`resync_library_into_tenant` so the two paths cannot drift in how they
-  bind the pinned ``(standard, version)`` pairs.
-  """
+  """``{"fac":"v1","rs-gaap":"v1"}`` → ``"(:s0, :v0), (:s1, :v1)"`` + params."""
   pin_values_sql = ", ".join(f"(:s{i}, :v{i})" for i in range(len(resolved_pin)))
   pin_params: dict[str, str] = {}
   for i, (std, ver) in enumerate(resolved_pin.items()):
@@ -170,20 +151,10 @@ def _build_pin_clause(resolved_pin: dict[str, str]) -> tuple[str, dict[str, str]
 
 
 def _assoc_endpoints_present(schema: str) -> str:
-  """SQL fragment gating an association copy on BOTH element endpoints
-  already existing in the tenant.
-
-  ``associations.from_element_id`` / ``to_element_id`` are NOT NULL FKs to
-  ``elements.id``. A ``tenant_copy: false`` package (or any partial pin)
-  leaves its elements out of the tenant, so an arc *owned by a copied
-  package but pointing at an excluded one* (e.g. the kept rs-gaap-reporting-
-  styles ``reportingStyleComposesDisclosure`` arcs into a public-only
-  disclosures package) would violate the FK. This gate skips such an arc
-  instead — the same defensive posture the ``reporting_style_networks``
-  copy already takes on its structure endpoints. Safe because elements are
-  inserted before associations in both the copy and the re-sync fan-out,
-  and a no-op for a full pin (every endpoint is present). Assumes the
-  source ``public.associations`` row is aliased ``a``.
+  """SQL fragment skipping an arc unless both endpoint elements are already in
+  the tenant: a copied package's arc may point into a package that is not
+  copied, which would violate the NOT NULL FKs. Relies on elements being
+  inserted first; the source row must be aliased ``a``.
   """
   return (
     f" AND EXISTS (SELECT 1 FROM {schema}.elements e WHERE e.id = a.from_element_id)"
@@ -198,22 +169,9 @@ def copy_library_into_tenant(
 ) -> CopyStats:
   """Bulk-copy pinned library taxonomies from ``public.*`` into ``{schema}.*``.
 
-  Copies six tables in FK order (taxonomies → elements → element_labels /
-  element_references → structures → associations). Every statement uses
-  ``ON CONFLICT (id) DO NOTHING`` so the call is idempotent: library rows
-  keep their deterministic UUID5 ids, and re-running never produces
-  duplicates or updates.
-
-  Args:
-      connection: A SQLAlchemy connection bound to the extensions database.
-          Caller owns transaction management (this function only issues
-          statements; it does not commit).
-      schema: The tenant schema name (validated upstream).
-      pin: ``{standard: version}`` naming which library taxonomies to
-          copy. Defaults to :data:`DEFAULT_TAXONOMY_PIN` when None.
-
-  Returns:
-      :class:`CopyStats` with per-table insert counts (from ``result.rowcount``).
+  Copies every library table in FK order with ``ON CONFLICT DO NOTHING``,
+  so re-running never duplicates or updates. Does not commit. ``pin`` is
+  ``{standard: version}``, defaulting to :data:`DEFAULT_TAXONOMY_PIN`.
   """
   resolved_pin = pin if pin is not None else DEFAULT_TAXONOMY_PIN
   if not resolved_pin:
@@ -221,7 +179,6 @@ def copy_library_into_tenant(
 
   pin_values_sql, pin_params = _build_pin_clause(resolved_pin)
 
-  # Taxonomies — only the pinned (standard, version) pairs.
   tax_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.taxonomies ({_TAXONOMY_COLS})
@@ -232,12 +189,8 @@ def copy_library_into_tenant(
     pin_params,
   )
 
-  # Elements — by taxonomy_id, minus the per-tenant exclusion set (industry
-  # verticals + dimension members + disconnected concepts kept in public but
-  # not copied per-tenant). Dependent rows (labels /
-  # references / element_traits / associations) below key off what actually
-  # landed in {schema}.elements, so excluding an element here transparently
-  # excludes its dependents — no dangling FKs.
+  # Dependent rows below key off what landed in {schema}.elements, so the
+  # exclusion set drops their dependents too.
   exclude_qnames = _tenant_exclude_qnames()
   exclude_clause = "AND e.qname != ALL(:exclude_qnames)" if exclude_qnames else ""
   elem_params = (
@@ -259,9 +212,6 @@ def copy_library_into_tenant(
     elem_params,
   )
 
-  # Labels + references — keyed on the elements that actually landed in
-  # {schema}.elements (so the per-tenant exclusion set above transparently
-  # drops their labels/references too, with no dangling element_id FK).
   label_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.element_labels ({_ELEMENT_LABEL_COLS})
@@ -280,8 +230,6 @@ def copy_library_into_tenant(
     """),
   )
 
-  # Structures + associations — by taxonomy_id (structures), then by
-  # structure_id (associations).
   struct_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.structures ({_STRUCTURE_COLS})
@@ -312,9 +260,7 @@ def copy_library_into_tenant(
     pin_params,
   )
 
-  # Traits — copy the full fac-traits vocabulary (all rows with
-  # created_by='library-seeder'). Pin-independent: every tenant gets the
-  # same trait catalog.
+  # Traits and classifications are pin-independent: every tenant gets all.
   trait_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.traits ({_TRAIT_COLS})
@@ -324,9 +270,6 @@ def copy_library_into_tenant(
     """),
   )
 
-  # Element traits — junction rows linking the elements that landed in
-  # {schema}.elements to the trait catalog (keyed on tenant membership so the
-  # exclusion set drops their trait bindings too).
   et_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.element_traits ({_ELEMENT_TRAIT_COLS})
@@ -336,8 +279,6 @@ def copy_library_into_tenant(
     """),
   )
 
-  # Classifications — copy association-side structural pattern vocabulary
-  # (all rows with created_by='library-seeder'). Pin-independent.
   cls_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.classifications ({_CLASSIFICATION_COLS})
@@ -347,8 +288,6 @@ def copy_library_into_tenant(
     """),
   )
 
-  # Association classifications — junction rows linking
-  # associations copied above to the classification catalog.
   ac_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.association_classifications ({_ASSOC_CLASSIFICATION_COLS})
@@ -358,8 +297,7 @@ def copy_library_into_tenant(
     """),
   )
 
-  # Rules — by taxonomy_id. Depends on the copied structures / elements /
-  # associations above since rule rows FK them polymorphically.
+  # Rules reference structures / elements / associations polymorphically.
   rule_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.rules ({_RULE_COLS})
@@ -373,10 +311,7 @@ def copy_library_into_tenant(
     pin_params,
   )
 
-  # Reporting Style composition. Each row points at a Style Structure + a
-  # Network Structure that have both been copied into this tenant — gate on
-  # both structure_ids existing locally so an unpinned package doesn't leave
-  # dangling composition references.
+  # Only rows whose Style and Network structures both landed in the tenant.
   rsn_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.reporting_style_networks ({_REPORTING_STYLE_NETWORK_COLS})
@@ -403,14 +338,10 @@ def copy_library_into_tenant(
   )
 
 
-# Per-table ON CONFLICT clauses for the re-sync path. The updatable column sets
-# mirror ``operations/taxonomy_block/library_creator.py`` EXACTLY — public and
-# tenant must agree on what is mutable. Frozen tables stay DO NOTHING (additive:
-# new rows insert, existing rows are left alone).
-#
-# IMPORTANT: keep these statements in lockstep with ``copy_library_into_tenant``
-# above (same tables, same FK order, same WHERE clauses) — only the trailing
-# conflict action differs.
+# Re-sync ON CONFLICT clauses. The updatable columns must match
+# operations/taxonomy_block/library_creator.py exactly; frozen tables stay DO
+# NOTHING. The statements must stay in lockstep with copy_library_into_tenant
+# (same tables, FK order and WHERE clauses); only the conflict action differs.
 _RESYNC_TAXONOMY_CONFLICT = (
   "ON CONFLICT (id) DO UPDATE SET "
   "taxonomy_type = EXCLUDED.taxonomy_type, description = EXCLUDED.description"
@@ -438,10 +369,8 @@ _RESYNC_RULE_CONFLICT = (
   "rule_severity = EXCLUDED.rule_severity, "
   "rule_variables = EXCLUDED.rule_variables"
 )
-# The association id (uuid5(structure:from:to:type)) is preserved when only
-# these value columns change, so calc-weight / presentation-order / arcrole
-# fixes update cleanly. Changing from/to/type mints a new arc (additive; the
-# stale arc lingers until a deletion pass exists). Mirrors library_creator.
+# The id is uuid5(structure:from:to:type), so value fixes update in place;
+# changing from/to/type mints a new arc and the stale one lingers.
 _RESYNC_ASSOCIATION_CONFLICT = (
   "ON CONFLICT (id) DO UPDATE SET "
   "weight = EXCLUDED.weight, order_value = EXCLUDED.order_value, "
@@ -457,38 +386,20 @@ def resync_library_into_tenant(
 ) -> CopyStats:
   """Re-sync pinned library taxonomies from ``public.*`` into ``{schema}.*``.
 
-  The ``DO UPDATE`` sibling of :func:`copy_library_into_tenant`: same 12
-  statements in the same FK order, but in-place library fixes (rule logic,
-  calc-irrelevant element attributes, trait names/bindings) flow into an
-  already-provisioned tenant instead of being skipped. New rows still insert;
-  existing rows update for the mutable columns only; **nothing is ever
-  deleted** (retirement propagation is intentionally out of scope).
+  The ``DO UPDATE`` sibling of :func:`copy_library_into_tenant`: library
+  fixes reach provisioned tenants. Mutable columns update in place; labels,
+  references, structures, classifications and style networks are additive
+  only; **nothing is ever deleted**.
 
-  The updatable column sets mirror ``library_creator`` exactly: taxonomies,
-  elements, traits, element_traits, rules, and **associations** (calc/
-  presentation value columns) update in place. Frozen (additive only):
-  labels, references, structures, classifications, association_classifications,
-  reporting_style_networks.
-
-  Caller contract (identical to :func:`copy_library_into_tenant`): this function
-  only issues statements and does not commit. **The caller MUST run inside a
-  transaction that has executed** :data:`SET_LIBRARY_RESYNC`
-  (``SET LOCAL robosystems.library_resync = 'on'``) — otherwise the immutability
-  triggers (migration 0016) reject the ``DO UPDATE``. This is asserted up front:
-  a missing GUC raises a clear ``RuntimeError`` rather than an opaque trigger
-  exception mid-fan-out.
-
-  Returns:
-      :class:`CopyStats`. For ``DO UPDATE`` tables ``rowcount`` counts inserts
-      **and** updates (the per-table delta touched by this re-sync); for frozen
-      tables it counts inserts only.
+  Does not commit. **Must run in a transaction that has executed**
+  :data:`SET_LIBRARY_RESYNC`, or the immutability triggers reject the update
+  (asserted up front). CopyStats counts inserts plus updates for DO UPDATE
+  tables, inserts only for the rest.
   """
   resolved_pin = pin if pin is not None else DEFAULT_TAXONOMY_PIN
   if not resolved_pin:
     return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-  # Fail loudly and early if the caller forgot the bypass GUC — otherwise the
-  # first DO UPDATE raises an opaque PL/pgSQL trigger exception mid-fan-out.
   if (
     connection.execute(
       text("SELECT current_setting(:guc, true)"), {"guc": LIBRARY_RESYNC_GUC}
@@ -513,10 +424,7 @@ def resync_library_into_tenant(
     pin_params,
   )
 
-  # Same per-tenant exclusion set as copy_library_into_tenant, so a re-sync
-  # never re-introduces a curated-out concept (and promotion = drop it from
-  # the artifact, then re-sync). Dependent tables below key on tenant
-  # membership.
+  # Same exclusion set, so a re-sync never re-introduces a curated-out concept.
   exclude_qnames = _tenant_exclude_qnames()
   exclude_clause = "AND e.qname != ALL(:exclude_qnames)" if exclude_qnames else ""
   elem_params = (
@@ -538,7 +446,6 @@ def resync_library_into_tenant(
     elem_params,
   )
 
-  # Labels + references — frozen (additive only); keyed on tenant membership.
   label_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.element_labels ({_ELEMENT_LABEL_COLS})
@@ -557,7 +464,6 @@ def resync_library_into_tenant(
     """),
   )
 
-  # Structures — frozen (additive only).
   struct_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.structures ({_STRUCTURE_COLS})
@@ -571,8 +477,6 @@ def resync_library_into_tenant(
     pin_params,
   )
 
-  # Associations — DO UPDATE on value columns: calc weights and presentation
-  # order propagate in place; from/to/type changes mint new arcs.
   assoc_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.associations ({_ASSOCIATION_COLS})
@@ -608,7 +512,6 @@ def resync_library_into_tenant(
     """),
   )
 
-  # Classifications — frozen (additive only).
   cls_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.classifications ({_CLASSIFICATION_COLS})
@@ -640,7 +543,6 @@ def resync_library_into_tenant(
     pin_params,
   )
 
-  # Reporting Style composition — frozen (additive only).
   rsn_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.reporting_style_networks ({_REPORTING_STYLE_NETWORK_COLS})

@@ -43,11 +43,8 @@ async def enqueue_task(
   """
   queue = create_async_redis_client(ValkeyDatabase.WORKER_QUEUE, decode_responses=True)
   try:
-    # Check deduplication — if an identical task was recently enqueued,
-    # return the existing operation instead of creating a duplicate.
-    # The key includes a params hash so that different params (e.g. two
-    # different subgraph names or mapping IDs) get separate dedup slots.
-    # Skip dedup entirely when graph_id is None (new graph creation).
+    # An identical recent task (same params hash) returns the existing
+    # operation. No dedup without a graph_id (new graph creation).
     params_hash = hashlib.md5(
       json.dumps(params or {}, sort_keys=True).encode()
     ).hexdigest()[:8]
@@ -69,7 +66,6 @@ async def enqueue_task(
 
     task_id = generate_prefixed_ulid("op")
 
-    # Create SSE operation (PENDING state, generates _links)
     response = await create_operation_response(
       operation_type=task_type,
       user_id=user_id,
@@ -88,8 +84,7 @@ async def enqueue_task(
       }
     )
 
-    # Atomic: set dedup key + enqueue in a single round trip.
-    # Prevents ghost dedup keys if the process crashes between the two ops.
+    # One round trip, so a crash cannot leave a dedup key without its task.
     pipe = queue.pipeline(transaction=True)
     if graph_id:
       pipe.set(dedup_key, task_id, ex=DEDUP_TTL)

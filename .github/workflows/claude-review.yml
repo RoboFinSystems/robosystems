@@ -1,14 +1,9 @@
 name: Claude Review (shared)
 
-# Shared implementation behind each repo's claude.yml. Callers keep only their
-# event triggers and the permissions grant; the author gate, runner selection,
-# and the claude-code-action / checkout pins live here so a version bump is one
-# PR instead of one per repo.
-#
-# Runner selection needs no input: select-runner treats an unset RUNNER_LABELS
-# as "github-hosted" and returns ["ubuntu-latest"] without an API call, so repos
-# with no self-hosted fleet get GitHub-hosted runners for free. vars.* resolve
-# from the CALLER's repository, so each repo keeps its own RUNNER_LABELS.
+# Shared implementation behind each repo's claude.yml: callers keep only their
+# triggers and permissions; the author gate, runner selection and action pins
+# live here. vars.* resolve from the CALLER's repo, so each keeps its own
+# RUNNER_LABELS (unset means GitHub-hosted).
 
 on:
   workflow_call:
@@ -43,11 +38,8 @@ jobs:
 
   claude:
     needs: [check-runner-availability]
-    # Defense-in-depth author gate: on top of the action's own permission check,
-    # only run when the triggering actor is a repo OWNER/MEMBER/COLLABORATOR, so a
-    # drive-by comment/issue from an outside account cannot invoke Claude with
-    # repo secrets in scope. These repos are public, so the gate is load-bearing,
-    # not decorative.
+    # Defense-in-depth author gate: these repos are public, so an outside
+    # account's comment or issue must not invoke Claude with secrets in scope.
     if: |
       (
         github.event_name == 'issue_comment' &&
@@ -76,12 +68,8 @@ jobs:
       pull-requests: read
       issues: read
       actions: read # Required for Claude to read CI results on PRs
-      id-token: write # Required: claude-code-action mints a GitHub OIDC token to
-        # authenticate to GitHub (setupGitHubToken → getOidcToken), independent of
-        # any cloud role. Without it the action fails: "Could not fetch an OIDC
-        # token." (This is GitHub auth, not AWS — do not drop it as "unused".)
-        # The caller must also grant id-token: write on its calling job; a called
-        # workflow cannot exceed the caller's token permissions.
+      id-token: write # Required: claude-code-action authenticates to GitHub (not AWS)
+        # with an OIDC token. The caller's job must grant id-token: write too.
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

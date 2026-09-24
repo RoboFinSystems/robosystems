@@ -47,31 +47,18 @@ def serialize_jsonld(
   description: str | None = None,
   taxonomy_type: str = "reporting_standard",
 ) -> str:
-  """Serialize an rdflib.Graph to canonical JSON-LD string.
+  """Serialize an rdflib.Graph (from `extract_taxonomy()`) to seed-file JSON-LD.
 
-  Args:
-      graph: rdflib.Graph from `extract_taxonomy()`.
-      standard: Taxonomy standard identifier (fac, rs-gaap, us-gaap, …).
-      version: Version identifier (v1, 2020, …).
-      namespace_uri: Primary namespace URI (for metadata).
-      description: Optional human-readable description.
-      taxonomy_type: chart_of_accounts | reporting_standard | reporting_extension
-        | custom_ontology | mapping | schedule.
-
-  Returns:
-      JSON-LD string ready to write to a seed file.
+  ``taxonomy_type``: chart_of_accounts | reporting_standard |
+  reporting_extension | custom_ontology | mapping | schedule.
   """
-  # Serialize WITH the canonical context so rdflib compacts predicate IRIs
-  # to their readable terms (`balance`, `summationOf`, `from`, …) and @id/@type
-  # to prefixed qnames. Keeping keys compact keeps committed seeds readable and
-  # keeps diffs surgical (a concept's `balance` key is stable even though the
-  # context now maps it to xbrli:balance).
+  # Compacting against the canonical context keeps committed seeds readable
+  # and their diffs surgical.
   raw = graph.serialize(format="json-ld", auto_compact=True, context=CANONICAL_CONTEXT)
 
   parsed = json.loads(raw)
 
-  # rdflib returns a list of resources or a {"@context", "@graph"|node} object;
-  # normalize to a flat node list (we re-attach the full context below).
+  # rdflib returns a list or a {"@context", "@graph"|node} object; flatten.
   if isinstance(parsed, list):
     nodes: list[Any] = parsed
   elif isinstance(parsed, dict):

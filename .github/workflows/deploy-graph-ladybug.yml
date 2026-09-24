@@ -189,20 +189,11 @@ jobs:
           echo "🌐 Selecting availability zone for deployment..."
           echo "⚠️  IMPORTANT: LadybugDB writers use persistent EBS volumes that are AZ-specific"
 
-          # Every writer tier lives in ONE AZ: an EBS volume cannot cross an AZ and
-          # a writer reattaches to its existing volume on launch. The AZ is a deploy
-          # parameter for recovery (AZ loss) and capacity (no instance capacity in
-          # the default zone) — never for tuning.
-          #
-          # Two levers, one rule:
-          #   - the environment workflow's dispatch input (arriving here as
-          #     writer_az + writer_az_change_allowed=true) MOVES a tier;
-          #   - the GRAPH_WRITER_AZ_<ENV> variable SUSTAINS it across the input-less
-          #     release dispatches and may only name the AZ the tier already occupies.
-          # Changing VPCZoneIdentifier replaces every instance in the ASG, and a
-          # writer relaunched in another AZ boots healthy on an EMPTY volume (the
-          # volume registry is AZ-scoped), so a mismatch between the requested AZ
-          # and the stack's current AZ is refused below unless the run allows it.
+          # Every writer tier lives in ONE AZ: an EBS volume cannot cross AZs. The
+          # dispatch input (writer_az + writer_az_change_allowed=true) MOVES a tier;
+          # GRAPH_WRITER_AZ_<ENV> only SUSTAINS the AZ it already occupies. A writer
+          # relaunched in another AZ boots on an EMPTY volume, so a mismatch with
+          # the stack's current AZ is refused unless the run allows it.
 
           WRITER_AZ_INPUT="${{ inputs.writer_az }}"
           if [ -n "$WRITER_AZ_INPUT" ]; then

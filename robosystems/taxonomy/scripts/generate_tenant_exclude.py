@@ -1,34 +1,14 @@
-"""Generate the per-tenant rs-gaap exclusion list (copy-filter curation).
+"""Generate the per-tenant rs-gaap exclusion list,
+``frameworks/rs-gaap/tenant-exclude/v1.json``.
 
-The rs-gaap catalog is a us-gaap *mapping-target mirror* (~2155 concepts) of
-which only ~90 render under the seeded Reporting Styles. The full mirror stays
-in the **public** library (it backs the future SEC us-gaap bridge + MappingAgent
-training corpus), but a tenant graph only needs the curated subset — industry
-verticals (oil & gas, insurance, banking, utilities, …) belong in *peer*
-frameworks (rs-call-report, rs-statutory, rs-ferc), and XBRL dimension
-members/domains are never CoA line-item targets.
-
-This script computes the **keep-critical, zero-rollup-risk** exclusion
-set and writes it to ``frameworks/rs-gaap/tenant-exclude/v1.json``. The copy path
-(``writer.copy_library_into_tenant`` / ``resync_library_into_tenant``) reads that
-artifact and omits the listed concepts from each tenant schema; the public
-library is untouched. Promotion is reversible: drop a qname from the list and
-re-sync.
-
-Exclusion = library **minus** KEEP-CRITICAL — i.e. a tenant keeps EXACTLY the
-working set (concepts that render under the active Reporting Style's Networks)
-plus its structural scaffolding: the upward rollup ancestors, the calc DAG,
-every concept a library rule references (target/operand), and the synthesized
-PP&E grains. Everything else is inert — mapping candidates are capped at the
-renderable working set and the renderer only walks anchored concepts, so an
-un-anchored concept renders nowhere and cannot be mapped. "Kept ⟺ used": it is
-dropped, and re-added via resync the moment a future Reporting Style or deeper
-breakdown wires it (add is cheap; delete after a tenant maps to a concept is
-not). The drop is partitioned for audit (members/domains, disconnected,
-industry/specialist verticals, general-special leaves, unanchored intermediate
-aggregates) but the gate is simply non-membership in keep-critical, so the
-subtraction can never drop a concept the render ancestor-rollup
-(``_resolve_renderable_ancestor``) or a rule could need.
+The full rs-gaap mirror stays in ``public``; tenants get only KEEP-CRITICAL:
+the concepts that render under the active Reporting Style plus their
+scaffolding (rollup ancestors, calc DAG, rule operands, synthesized PP&E
+grains). Everything else is inert (unmappable and unrendered), so it is
+dropped: adding a concept back via resync is cheap, deleting one a tenant has
+mapped is not. The drop is partitioned by reason for audit only; the gate is
+non-membership in keep-critical, so nothing the renderer's ancestor rollup or
+a rule needs can be dropped.
 
 Run against a seeded library DB:
 
@@ -53,22 +33,9 @@ from robosystems.taxonomy.discovery import FRAMEWORKS_DIR
 
 _ARTIFACT = FRAMEWORKS_DIR / "rs-gaap" / "tenant-exclude" / "v1.json"
 
-# Industry-vertical / specialist-domain keyword matcher. These are concepts that
-# belong in peer frameworks (rs-call-report, rs-statutory, rs-ferc, …) or
-# specialist modules, NOT a general-purpose GL framework. Leases (ASC 842) and
-# income tax are intentionally NOT here: they apply to every entity.
-#
-# The base block catches the obvious verticals; the financial-institution /
-# insurance / derivative / pension domains are matched here too. Their
-# INTERMEDIATE aggregates (non-leaf, so they slipped the disaggregation-leaf
-# filter; not vertical-keyword'd, so they slipped this matcher) were being copied
-# into every tenant despite rendering in no Reporting Style — e.g. servicing-
-# financial-asset fees, leveraged leases, deposit interest, loan-loss provisions,
-# derivative/hedge positions, defined-benefit pension liabilities. General
-# private-company lines (notes & loans payable/receivable, related-party
-# balances, share-based comp, FX gains) are deliberately NOT matched — they stay
-# in the tenant as wire-in stock for a future granular/vertical Style. Conservative
-# bias: when a concept is plausibly general, leave it unmatched (kept).
+# Industry and specialist domains that belong in peer frameworks. Used only to
+# label the drop reason. Leases, income tax and general private-company lines
+# are deliberately unmatched; when a concept is plausibly general, leave it out.
 _VERTICAL = re.compile(
   r"(OilAndGas|NaturalGas|Aircraft|Airline|Regulated"
   r"|AllowanceForFundsUsedDuringConstruction|PublicUtilit|Mineral|Mining"
@@ -148,8 +115,7 @@ def compute_exclude() -> dict:
       & rg
     )
 
-    # Concepts referenced by library rules (target + operands) — never drop
-    # one, or the rules copy dangles its polymorphic FK / rule eval can't bind.
+    # Rule targets and operands: dropping one would dangle the rule's FK.
     rule_target_ids = (
       fetch_ids(
         "SELECT target_element_id FROM public.rules WHERE target_element_id IS NOT NULL"
@@ -176,10 +142,9 @@ def compute_exclude() -> dict:
       )
     ).fetchall()
 
-  # Upward rollup closure: ancestors the renderer may walk to from the working
-  # set. general-special: parent=from, child=to. equivalence/mapping: child=from,
-  # parent=to. (Mirrors operations/roboledger/reports/fact_grid.py
-  # ::_resolve_renderable_ancestor.)
+  # Ancestors the renderer may roll up to (mirrors fact_grid's
+  # _resolve_renderable_ancestor). general-special runs parent→child;
+  # equivalence/mapping run child→parent.
   up: dict[str, set[str]] = {}
   for f, t in gs:
     up.setdefault(t, set()).add(f)
@@ -202,13 +167,9 @@ def compute_exclude() -> dict:
     qname_to_id[q] for q in rule_var_qnames if q in qname_to_id
   }
 
-  # Synthesized-detail mapping grains (PP&E Gross + its accumulated-depreciation
-  # contra). The renderer synthesizes PropertyPlantAndEquipmentNet = Gross - AD
-  # and the CF Investing derivation reads ΔGross as capex, so a CoA fixed-asset
-  # account maps to these even though Net is what the BS presents — they are NOT
-  # in the working set's presentation networks (AD is a general-special leaf, so
-  # it would otherwise be excluded) but MUST be in every tenant. Mirrors
-  # ``mapping/constants.py::RS_GAAP_SYNTHESIZED_DETAIL_ALLOW``.
+  # PP&E Gross and accumulated depreciation: not presented (the BS shows Net =
+  # Gross - AD, and CF reads ΔGross as capex), but fixed-asset accounts map to
+  # them, so every tenant needs them.
   synthesized_detail = {
     qname_to_id[q] for q in RS_GAAP_SYNTHESIZED_DETAIL_ALLOW if q in qname_to_id
   }
@@ -235,35 +196,15 @@ def compute_exclude() -> dict:
   members = {i for i, q in qname.items() if q.endswith(("Member", "Domain"))}
   verticals = {i for i, q in qname.items() if _VERTICAL.search(q)}
 
-  # Disaggregation leaves. The general-special tree is the aggregation lattice:
-  # a preparer picks report granularity by mapping a CoA account to a higher
-  # (aggregate) or lower (disaggregated) node. The leaf level is the finest
-  # detail. Today it is INERT — mapping candidates are capped at the renderable
-  # working set and the renderer only walks the aggregate level (see
-  # operations/roboledger/reads/taxonomies.py), so a tenant cannot map to or
-  # render a leaf. Shipping the leaves buys no capability now but makes them
-  # un-deletable once a granularity-selection feature lands and customers map to
-  # them. So defer the leaf detail: keep the high-level aggregates (intermediates
-  # with children), and add disaggregation levels back later via resync ("we
-  # added a deeper level so your reports can be denser"). Add is cheap; delete
-  # after use isn't.
+  # Leaves of the general-special aggregation lattice: unmappable and
+  # unrendered today, so deferred until a granularity feature wires them.
   gs_parents = {f for f, _ in gs}
   gs_children = {t for _, t in gs}
   disaggregation_leaves = (gs_children - gs_parents) & rg  # child-only in the lattice
 
-  # A tenant keeps EXACTLY keep-critical — the working set that renders under
-  # the active Reporting Style plus its structural scaffolding (calc DAG, rollup
-  # ancestors, rule operands, synthesized PP&E grains). Everything else is inert
-  # today — mapping candidates are capped at
-  # the renderable working set and the renderer only walks anchored concepts, so
-  # an un-anchored concept renders nowhere and can't be mapped. "Kept ⟺ used":
-  # drop it, and re-add via resync the moment a future Reporting Style / deeper
-  # breakdown wires it (add is cheap; delete after a tenant maps to a concept is
-  # not). The members / disconnected / verticals / leaves sets are retained only
-  # to LABEL the drop reason for the audit metadata; the residual — connected
-  # non-leaf aggregates outside the active Style (unwired BS/IS disaggregations,
-  # finer CF detail, replaced combined leaves) — is ``unanchored_intermediate``.
-  final_drop = rg - keep_critical  # keep only what renders + its scaffolding
+  # The category sets above only label the drop reason; anything else dropped
+  # is ``unanchored_intermediate``.
+  final_drop = rg - keep_critical
 
   def cat(i: str) -> str:
     if i in members:

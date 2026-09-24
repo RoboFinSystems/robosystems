@@ -1,9 +1,4 @@
-"""
-Environment variable validation for startup checks.
-
-This module provides validation functions to ensure all required
-environment variables are properly configured at application startup.
-"""
+"""Startup validation of environment configuration."""
 
 import logging
 import os
@@ -21,9 +16,8 @@ class ConfigValidationError(Exception):
 class EnvValidator:
   """Validates environment configuration at startup."""
 
-  # Flags whose code default is the permissive value, so an individual absence
-  # from SSM in a deployed environment is a silent control failure. Presence
-  # is asserted, not value: `false` is a legitimate setting for any of them.
+  # Flags whose code default is permissive; their presence in SSM is asserted
+  # when deployed (the value may legitimately be false).
   SAFETY_CRITICAL_FEATURE_FLAGS: tuple[str, ...] = (
     "RATE_LIMIT_ENABLED",
     "BILLING_ENABLED",
@@ -34,19 +28,10 @@ class EnvValidator:
 
   @staticmethod
   def validate_required_vars(env_config) -> None:
-    """
-    Validate that all required environment variables are set.
-
-    Args:
-        env_config: The EnvConfig instance to validate
-
-    Raises:
-        ConfigValidationError: If validation fails
-    """
+    """Raise ConfigValidationError on any error; log warnings."""
     errors = []
     warnings = []
 
-    # Fail fast on unsupported graph backend
     backend_type = getattr(env_config, "GRAPH_BACKEND_TYPE", "ladybug")
     if backend_type != "ladybug":
       errors.append(
@@ -54,7 +39,6 @@ class EnvValidator:
         f"Only 'ladybug' is supported."
       )
 
-    # Critical variables that must be set in production and staging
     if env_config.ENVIRONMENT in ("prod", "staging"):
       required_prod_vars = {
         "DATABASE_URL": "PostgreSQL connection string",
@@ -64,14 +48,10 @@ class EnvValidator:
         "CONNECTION_CREDENTIALS_KEY": "Encryption key for credentials",
       }
 
-      # Check for S3 credentials - IAM roles preferred, access keys for development only
       has_s3_credentials = getattr(
         env_config, "AWS_S3_ACCESS_KEY_ID", None
       ) and getattr(env_config, "AWS_S3_SECRET_ACCESS_KEY", None)
 
-      # In production/staging, IAM roles are used automatically
-      # In development, credentials are optional - can use AWS CLI profile or default chain
-      # Only warn if no credentials are found and we're not in test/CI environment
       if (
         env_config.ENVIRONMENT not in ["prod", "staging", "test", "dev"]
         and not has_s3_credentials
@@ -97,7 +77,6 @@ class EnvValidator:
           elif len(str(value)) < 32:
             errors.append(f"{var_name}: Must be at least 32 characters for security")
 
-    # Billing/Stripe validation - required when billing is enabled
     if getattr(env_config, "BILLING_ENABLED", False):
       stripe_vars = {
         "STRIPE_SECRET_KEY": "Stripe payment processing",
@@ -120,7 +99,6 @@ class EnvValidator:
           if not value.startswith("whsec_"):
             errors.append(f"{var_name}: Must be a valid Stripe webhook secret")
 
-    # Variables that should be set for specific features
     feature_vars = {
       # QuickBooks integration
       "INTUIT_CLIENT_ID": "QuickBooks OAuth",
@@ -128,7 +106,6 @@ class EnvValidator:
       # LadybugDB database
       "LBUG_DATABASE_PATH": "LadybugDB database storage",
     }
-    # The bank feeds are off by default; their clients only matter when on
     if getattr(env_config, "CONNECTION_MERCURY_ENABLED", False):
       feature_vars["MERCURY_CLIENT_ID"] = "Mercury OAuth"
       feature_vars["MERCURY_CLIENT_SECRET"] = "Mercury OAuth"
@@ -136,7 +113,6 @@ class EnvValidator:
       feature_vars["PLAID_CLIENT_ID"] = "Plaid bank feed"
       feature_vars["PLAID_SECRET"] = "Plaid bank feed"
 
-    # Only check GRAPH_API_URL in dev/local environments
     if env_config.ENVIRONMENT in ["dev", "local"]:
       feature_vars["GRAPH_API_URL"] = "Graph API endpoint (local development)"
 
@@ -145,7 +121,6 @@ class EnvValidator:
       if not value:
         warnings.append(f"{var_name}: Not configured - {feature} will not be available")
 
-    # Special validation for Graph API key
     if (
       not getattr(env_config, "GRAPH_API_KEY", None)
       and env_config.ENVIRONMENT != "dev"
@@ -156,10 +131,7 @@ class EnvValidator:
         "Graph database operations will fail without proper authentication."
       )
 
-    # OIDC login: an enabled surface with a missing connection fails at the
-    # first login attempt, which presents as a confusing auth error — fail at
-    # boot instead. And a deployment with password auth off and no OIDC is one
-    # nobody can log in to.
+    # Fail at boot rather than as a confusing error at first login.
     deployed = env_config.ENVIRONMENT not in ("dev", "local", "test")
     if getattr(env_config, "SSO_OIDC_ENABLED", False):
       for var_name in (
@@ -212,9 +184,7 @@ class EnvValidator:
           "SSO_DEFAULT_ROLE: Must be 'member' or 'admin' — IdP-provisioned "
           "users must not default to a privileged role"
         )
-      # Warning, not error: the org id only exists after the first bootstrap
-      # run, so the enablement sequence is flags on → bootstrap → pin the id
-      # → restart. Unpinned, any org's bearer token is accepted.
+      # Warning, not error: the id exists only after the first bootstrap.
       if deployed and not getattr(env_config, "ENTERPRISE_ORG_ID", ""):
         warnings.append(
           "ENTERPRISE_ORG_ID: Unset while SCIM_ENABLED=true — SCIM/OIDC are "
@@ -234,11 +204,8 @@ class EnvValidator:
         "PASSKEYS_ENABLED — their auth rate buckets are no-ops without it"
       )
 
-    # Parameter Store reachability. In a deployed environment, a boot that
-    # could not read SSM serves its entire life on code defaults — flags are
-    # resolved once at import — so security-relevant toggles would run at
-    # their permissive defaults. Refuse to boot instead of silently serving
-    # inert controls.
+    # Flags resolve once at import, so a deployed boot that could not read SSM
+    # would serve its whole life on permissive code defaults. Refuse to boot.
     if deployed:
       if not getattr(env_config, "PARAMETER_STORE_AVAILABLE", False):
         errors.append(
@@ -252,20 +219,13 @@ class EnvValidator:
           "— the batched read returned nothing, so controls would run on code "
           "defaults. Refusing to boot on inert controls."
         )
-      # Belt and braces: rate limiting must be on in any deployed environment.
-      # The checks above catch the cause (SSM unreachable); this catches the
-      # symptom regardless of cause — RATE_LIMIT_ENABLED false here is the tell
-      # of a read that fell back to the (false) code default.
+      # Catches the symptom whatever the cause.
       if not getattr(env_config, "RATE_LIMIT_ENABLED", False):
         errors.append(
           "RATE_LIMIT_ENABLED is false in a deployed environment — this is the "
           "signature of an SSM read that fell back to defaults. Refusing to boot."
         )
-      # Per-flag, not just per-store: the batched read returns only the
-      # parameters that exist, so a single safety-critical flag missing from
-      # SSM passes both checks above and resolves silently to its permissive
-      # code default (BILLING_ENABLED off is the expensive one). Presence is
-      # what is asserted — the value may legitimately be false.
+      # Per flag: one missing parameter passes the store-level checks above.
       preloaded = getattr(env_config, "PRELOADED_FEATURE_FLAG_NAMES", frozenset())
       missing = [
         name
@@ -279,11 +239,9 @@ class EnvValidator:
           "default. Set the parameter(s) under /features/ and redeploy."
         )
 
-    # Validate value ranges and formats
     EnvValidator._validate_urls(env_config, errors)
     EnvValidator._validate_paths(env_config, warnings)
 
-    # Report results
     if warnings:
       for warning in warnings:
         logger.warning(f"Config validation warning: {warning}")
@@ -324,14 +282,11 @@ class EnvValidator:
       ):
         errors.append(f"{var_name}: Invalid URL format - {value}")
 
-      # Special validation for GRAPH_API_URL
-      # In production, this should NOT be explicitly set via environment variable
-      # The factory handles dynamic endpoint selection based on the database
-      # The default value in env.py is fine and will be ignored by the factory
+      # In prod the client factory selects endpoints; an explicit value is a
+      # misconfiguration (the env.py default is ignored).
       if var_name == "GRAPH_API_URL" and env_config.ENVIRONMENT == "prod":
         import os
 
-        # Only error if explicitly set via environment variable, not if using default
         if os.getenv("GRAPH_API_URL"):
           errors.append(
             f"{var_name}: Should not be explicitly set in production environment. "
@@ -351,7 +306,6 @@ class EnvValidator:
     for var_name, description in path_vars:
       value = getattr(env_config, var_name, None)
       if value and value not in ["stdout", "stderr"]:
-        # Check if path exists or parent directory exists
         if not os.path.exists(value):
           parent_dir = os.path.dirname(value)
           if parent_dir and not os.path.exists(parent_dir):
@@ -362,15 +316,7 @@ class EnvValidator:
 
   @staticmethod
   def validate_startup(env_config) -> bool:
-    """
-    Perform startup validation and return success status.
-
-    Args:
-        env_config: The EnvConfig instance to validate
-
-    Returns:
-        bool: True if validation passed, False otherwise
-    """
+    """:meth:`validate_required_vars` as a bool."""
     try:
       EnvValidator.validate_required_vars(env_config)
       return True
@@ -380,22 +326,12 @@ class EnvValidator:
 
   @staticmethod
   def get_config_summary(env_config) -> dict[str, Any]:
-    """
-    Get a summary of the current configuration for logging.
-
-    Args:
-        env_config: The EnvConfig instance
-
-    Returns:
-        Dict with configuration summary
-    """
+    """Configuration summary for logging."""
     from robosystems.config import OperatorConfig
     from robosystems.config.billing import BillingConfig
 
     operator_validation = OperatorConfig.validate_configuration()
-    # Checks every plan in DEFAULT_GRAPH_BILLING_PLANS carries the fields the
-    # checkout and allocation paths read. Returns a report and logs its own
-    # warnings; it never raises, so it cannot block startup.
+    # Never raises, so it cannot block startup.
     billing_validation = BillingConfig.validate_configuration()
 
     return {

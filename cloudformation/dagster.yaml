@@ -1028,13 +1028,8 @@ Resources:
   # ========================================
   # BACKUP COVERAGE ALERTING
   # ========================================
-  # The nightly backup schedule can stop without failing: a daemon problem, a
-  # disabled schedule, or an exception before any RunRequest is returned all
-  # produce NO run at all, and an absent run is exactly what a run list cannot
-  # surface. `assert_backup_coverage` answers the outcome question instead —
-  # does every graph that should have a backup have one — and logs CRITICAL on
-  # a gap. This turns that log into a notification; without it the check
-  # detects the condition and tells nobody.
+  # The backup schedule can stop without a failed run. `assert_backup_coverage`
+  # logs CRITICAL when a graph lacks a backup; this turns that log into a page.
 
   DagsterAlertTopic:
     Type: AWS::SNS::Topic

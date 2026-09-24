@@ -1,20 +1,8 @@
-"""ModelXbrl → rdflib.Graph extractor.
+"""Arelle ModelXbrl → rdflib.Graph (concepts, labels, references, arcs,
+extended link roles), for `serialize_jsonld()`.
 
-Walks an Arelle-loaded XBRL taxonomy and produces an RDF graph that
-captures:
-- Concepts (as classes / instances with classification, balance, periodType)
-- Labels (via rdfs:label, skos:altLabel, rdfs:comment per XBRL role)
-- References (via dcterms:references with structured citation)
-- Arcs (parent-child, summation-item, general-special, equivalence, etc)
-- Extended link roles (as structure metadata)
-
-The output rdflib.Graph is fed to `serialize_jsonld()` for on-disk
-persistence.
-
-Namespace / formula concept filtering: XBRL Formula / Variable /
-Validation linkbase concepts are skipped at extraction time to keep
-seed artifacts focused on reporting taxonomy. Full formula ingest is
-deferred to the validation rules engine.
+Formula / variable / validation linkbase concepts are skipped; seeds carry
+reporting taxonomy only.
 """
 
 from __future__ import annotations
@@ -30,42 +18,31 @@ from rdflib.namespace import DCTERMS, OWL, RDF, RDFS, SKOS, XSD
 from robosystems.arelle.context import RS_VOCAB
 from robosystems.logger import logger
 
-# RoboSystems vocabulary namespace
 RS = Namespace(RS_VOCAB)
-# XBRL vocabulary — inherited where XBRL defines the term (concept
-# attributes, arc endpoints/roles, weight/order). Structural taxonomy
-# arcs are reified as rs:Association nodes carrying these predicates.
+# XBRL terms are reused where XBRL defines them; structural arcs reify into
+# rs:Association nodes carrying them.
 XBRLI = Namespace("http://www.xbrl.org/2003/instance#")
 XLINK = Namespace("http://www.w3.org/1999/xlink#")
 LINK = Namespace("http://www.xbrl.org/2003/linkbase#")
 
 
-# Arcrole → association_type mapping.
-#
-# The association_type is the DB-side enum value (for library_writer) and is
-# stamped on each reified rs:Association via rs:associationType. The arcrole
-# URI itself is preserved on the Association as xlink:arcrole.
+# Arcrole → DB association_type, stamped as rs:associationType (the arcrole
+# itself is kept as xlink:arcrole).
 ARCROLE_MAPPING: dict[str, str] = {
   "http://www.xbrl.org/2003/arcrole/parent-child": "presentation",
   "http://www.xbrl.org/2003/arcrole/summation-item": "calculation",
   "http://xbrlsite.azurewebsites.net/2016/conceptual-model/arcrole/class-equivalentClass": "equivalence",
-  # General-special appears under multiple arcrole URIs in practice; check
-  # both the XBRL-standard and any custom variants.
   "http://www.xbrl.org/2003/arcrole/general-special": "general-special",
   "http://xbrl.org/int/dim/arcrole/domain-member": "general-special",
   "http://xbrl.org/int/dim/arcrole/all": "calculation",
   "http://xbrl.org/int/dim/arcrole/hypercube-dimension": "calculation",
 }
 
-# Equivalence is the one relationship that stays a DIRECT predicate
-# (owl:equivalentClass): a genuine symmetric OWL relation with no
-# weight/order/role to carry. Every other arcrole reifies into an
-# rs:Association node (see _add_relationship_triples).
+# The one arc kept as a direct owl:equivalentClass triple (symmetric, no
+# weight/order/role); every other arcrole reifies.
 EQUIVALENCE_ASSOCIATION_TYPE = "equivalence"
 
-# Namespace prefixes to skip. XBRL Formula / Variable / Validation
-# linkbase infrastructure + XBRL core meta-concepts (xbrli:item,
-# xbrldt:dimensionItem, etc) aren't reporting taxonomy content.
+# Namespace prefixes that are infrastructure, not reporting taxonomy content.
 SKIP_NAMESPACE_PREFIXES = {
   # Formula / validation linkbase infrastructure
   "formula",
@@ -95,10 +72,7 @@ SKIP_NAMESPACE_PREFIXES = {
   "other",
   # XBRL dimensions infrastructure
   "xbrldi",
-  # SEC infrastructure namespaces that Arelle pulls in as transitive
-  # dependencies of the us-gaap taxonomy (geographies, currencies,
-  # exchange listings, etc). They're member concepts for dimensional
-  # reporting, not reporting concepts themselves.
+  # SEC dimensional-member namespaces pulled in transitively by us-gaap
   "country",
   "currency",
   "stpr",
@@ -123,12 +97,7 @@ LABEL_ROLE_MAPPING: dict[str, str] = {
 
 
 def _concept_iri(concept: Any) -> URIRef | None:
-  """Return the RDF IRI for an Arelle ModelConcept.
-
-  Uses {namespace_uri}{local_name} — the XBRL-standard way to identify
-  concepts by their qname. Returns None for concepts whose namespace
-  prefix is in SKIP_NAMESPACE_PREFIXES (Formula/Variable infrastructure).
-  """
+  """``{namespace_uri}{local_name}``, or None for skipped namespaces."""
   if concept is None or concept.qname is None:
     return None
 
@@ -141,7 +110,6 @@ def _concept_iri(concept: Any) -> URIRef | None:
   if not ns_uri or not local:
     return None
 
-  # Ensure namespace URI ends with # or / for proper concatenation
   if not ns_uri.endswith(("#", "/")):
     ns_uri = ns_uri + "#"
 
@@ -149,17 +117,13 @@ def _concept_iri(concept: Any) -> URIRef | None:
 
 
 def _classify_concept(concept: Any) -> str:
-  """Derive the classification (asset/liability/equity/revenue/expense).
-
-  Heuristic: use balance + periodType as signals, fall back to
-  name-based inference. Authoritative classification will eventually
-  come from the rs-gaap-type-subtype linkbase.
+  """Heuristic classification from balance + periodType (with a name check to
+  tell equity from liability); defaults to asset.
   """
   balance = getattr(concept, "balance", None)
   period_type = getattr(concept, "periodType", None)
   name = (concept.name or "").lower()
 
-  # Instant + credit → liability or equity
   if period_type == "instant":
     if balance == "credit":
       if any(k in name for k in ("equity", "capital", "earnings", "stock")):
@@ -168,14 +132,12 @@ def _classify_concept(concept: Any) -> str:
     if balance == "debit":
       return "asset"
 
-  # Duration + credit → revenue
   if period_type == "duration":
     if balance == "credit":
       return "revenue"
     if balance == "debit":
       return "expense"
 
-  # Default
   return "asset"
 
 
@@ -185,8 +147,7 @@ def _classify_element_type(concept: Any) -> str:
     return "hypercube"
   if getattr(concept, "isDimensionItem", False):
     return "axis"
-  # Members are typed-domain items or domain members; Arelle doesn't
-  # expose this uniformly, infer from substitution group
+  # Arelle doesn't expose this uniformly; fall back to the substitution group.
   sub_group = getattr(concept, "substitutionGroupQname", None)
   if sub_group is not None:
     sub_local = getattr(sub_group, "localName", "")
@@ -230,16 +191,12 @@ def _add_concept_triples(graph: Graph, concept: Any) -> None:
         sg_ns = sg_ns + "#"
       graph.add((iri, RS.substitutionGroup, URIRef(f"{sg_ns}{sg_local}")))
 
-  # Source inferred from namespace prefix
   prefix = getattr(concept.qname, "prefix", None) or ""
   graph.add((iri, RS.source, Literal(prefix)))
 
 
 def _add_label_triples(graph: Graph, model_xbrl: Any) -> int:
-  """Walk the label linkbase and attach labels to concepts.
-
-  Returns count of labels added.
-  """
+  """Attach label-linkbase labels to concepts; returns the count."""
   label_rel_set = model_xbrl.relationshipSet(XbrlConst.conceptLabel)
   if not label_rel_set or not label_rel_set.modelRelationships:
     return 0
@@ -261,7 +218,6 @@ def _add_label_triples(graph: Graph, model_xbrl: Any) -> int:
     role_name = LABEL_ROLE_MAPPING.get(role_uri, "other")
     language = getattr(label_obj, "xmlLang", "en") or "en"
 
-    # Route based on role
     literal = Literal(text, lang=language)
     if role_name == "standard":
       graph.add((concept_iri, RDFS.label, literal))
@@ -270,7 +226,7 @@ def _add_label_triples(graph: Graph, model_xbrl: Any) -> int:
     elif role_name in ("verbose", "terse"):
       graph.add((concept_iri, SKOS.altLabel, literal))
     else:
-      # Custom role — use rs:labelRole to preserve the role info
+      # Custom roles are preserved under rs:labelRole.
       label_node = BNode()
       graph.add((concept_iri, RS.labelRole, label_node))
       graph.add((label_node, RS.role, Literal(role_name)))
@@ -283,10 +239,7 @@ def _add_label_triples(graph: Graph, model_xbrl: Any) -> int:
 
 
 def _add_reference_triples(graph: Graph, model_xbrl: Any) -> int:
-  """Walk the reference linkbase and attach references to concepts.
-
-  Returns count of references added.
-  """
+  """Attach reference-linkbase citations to concepts; returns the count."""
   ref_rel_set = model_xbrl.relationshipSet(XbrlConst.conceptReference)
   if not ref_rel_set or not ref_rel_set.modelRelationships:
     return 0
@@ -298,11 +251,8 @@ def _add_reference_triples(graph: Graph, model_xbrl: Any) -> int:
     if concept_iri is None or ref_obj is None:
       continue
 
-    # Reference linkbase resources have nested <Publisher>, <Name>, <Number>, etc.
-    # Build a citation string from those parts. Upstream reference resources
-    # occasionally have malformed XML or unexpected child structures; we
-    # tolerate them non-fatally but log at debug so extraction drift during
-    # seed curation is observable rather than silent.
+    # Citation from the nested <Publisher>/<Name>/<Number> parts. Malformed
+    # upstream resources are tolerated but logged at debug.
     parts: list[str] = []
     ref_type: str | None = None
     try:
@@ -339,17 +289,10 @@ def _add_reference_triples(graph: Graph, model_xbrl: Any) -> int:
 
 
 def _add_relationship_triples(graph: Graph, model_xbrl: Any) -> dict[str, int]:
-  """Walk all relationship base sets and add canonical arc triples.
+  """Add arc triples: structural arcs reified as ``rs:Association`` (so weight,
+  order and the ELR binding survive), equivalence as a direct triple.
 
-  Structural taxonomy arcs (presentation / calculation / definition) are
-  REIFIED as ``rs:Association`` nodes carrying ``xlink:from`` / ``xlink:to``
-  / ``xlink:arcrole`` / ``xlink:role`` (the ELR binding) / ``link:weight`` /
-  ``link:order`` / ``rs:associationType`` — so weight + order + the role
-  binding survive, which the old flat-predicate form dropped. Equivalence
-  stays a DIRECT ``owl:equivalentClass`` triple (symmetric OWL relation,
-  no arc metadata to carry).
-
-  Returns a dict of arcrole → count for diagnostics.
+  Returns arcrole → count.
   """
   counts: dict[str, int] = {}
 
@@ -375,7 +318,6 @@ def _add_relationship_triples(graph: Graph, model_xbrl: Any) -> dict[str, int]:
         continue
 
       if assoc_type == EQUIVALENCE_ASSOCIATION_TYPE:
-        # Direct symmetric OWL relation — no reification.
         graph.add((from_iri, OWL.equivalentClass, to_iri))
         counts[arcrole] = counts.get(arcrole, 0) + 1
         continue
@@ -383,9 +325,7 @@ def _add_relationship_triples(graph: Graph, model_xbrl: Any) -> dict[str, int]:
       order = getattr(rel, "order", None)
       weight = getattr(rel, "weight", None) if assoc_type == "calculation" else None
       preferred = getattr(rel, "preferredLabel", None)
-      # Deterministic content-hashed IRI so regenerated seeds are
-      # byte-stable across runs (a BNode would get a fresh label each run
-      # and churn the committed seed diff).
+      # Content-hashed IRI, not a BNode, so regenerated seeds are byte-stable.
       digest = hashlib.sha1(
         f"{role}|{arcrole}|{from_iri}|{to_iri}|{order}|{weight}".encode()
       ).hexdigest()[:16]
@@ -414,16 +354,11 @@ def _add_relationship_triples(graph: Graph, model_xbrl: Any) -> dict[str, int]:
 
 
 def _add_structure_metadata(graph: Graph, model_xbrl: Any) -> int:
-  """Record extended link roles as structures.
-
-  Each role URI becomes a resource with rs:structureName and rs:roleUri.
-  Returns count of structures added.
-  """
+  """Record each extended link role as a structure; returns the count."""
   count = 0
   for role_uri, role_obj in (getattr(model_xbrl, "roleTypes", {}) or {}).items():
     if role_uri in ("http://www.xbrl.org/2003/role/link", ""):
       continue
-    # role_obj can be a list of ModelRoleType
     role_entries = role_obj if isinstance(role_obj, list) else [role_obj]
     for rt in role_entries:
       definition = getattr(rt, "definition", None) or role_uri.rsplit("/", 1)[-1]
@@ -431,24 +366,13 @@ def _add_structure_metadata(graph: Graph, model_xbrl: Any) -> int:
       graph.add((iri, RS.roleUri, Literal(role_uri)))
       graph.add((iri, RS.structureName, Literal(definition)))
       count += 1
-      break  # one entry per role URI is enough for metadata
+      break  # one entry per role URI
 
   return count
 
 
 def extract_taxonomy(model_xbrl: Any) -> Graph:
-  """Produce an rdflib.Graph from an Arelle-loaded ModelXbrl.
-
-  Walks concepts, labels, references, arcs, and role metadata into a
-  semantic graph that downstream code (serializer, loader, library writer)
-  consumes.
-
-  Args:
-      model_xbrl: Arelle ModelXbrl returned from `load_filing(path)`
-
-  Returns:
-      rdflib.Graph populated with the taxonomy content.
-  """
+  """Produce an rdflib.Graph from an Arelle-loaded ModelXbrl."""
   graph = Graph()
 
   # Concepts

@@ -26,19 +26,12 @@ class TaskPaused(Exception):
 
 
 class BaseTask(ABC):
-  """Base class for all worker tasks.
+  """Base class for worker tasks: implement execute() returning a result dict.
 
-  Subclasses must implement execute() and return a result dict.
-  Use report_progress() for SSE updates and is_cancelled() to
-  check for user-initiated cancellation between steps. Sync work that
-  blocks — database and network calls — goes through ``run_blocking``,
-  which is what keeps the consumer's budget honest for a thread.
+  Blocking sync work (database, network) must go through ``run_blocking``.
   """
 
-  # Stamped by ``@register_task``: the key the consumer sizes this task's
-  # budget by, so a handler can derive the waits it makes from that budget
-  # rather than from a constant that knows nothing about it. None on a
-  # subclass that was never registered.
+  # Stamped by ``@register_task``; None when unregistered.
   task_type: ClassVar[str | None] = None
 
   def __init__(
@@ -72,22 +65,13 @@ class BaseTask(ABC):
     return [work for work in self._abandoned if not work.done()]
 
   async def run_blocking(self, func: Callable[..., Any], *args: Any) -> Any:
-    """Run sync work — database and network calls — in a thread.
+    """Run sync work in a thread, shielded from the budget's cancellation.
 
-    The consumer enforces the task budget with ``asyncio.wait_for``, which
-    cancels this coroutine and cannot cancel the thread. Left alone, that
-    reports the operation FAILED while the thread runs on and can still
-    commit: a close that landed, described to the operator as one that did
-    not. So the thread is shielded, and an expired budget becomes a bounded
-    wait for it — one more budget of grace. If the thread lands inside
-    that, its outcome is the task's outcome and the overrun is logged; only
-    past it is the work abandoned (tracked in ``abandoned_work``, so the
-    consumer can say so) and the timeout let through.
-
-    While this waits, the consumer's ``finally`` has not run: scale-in
-    protection stays on and the engines are not disposed, so a slow close is
-    not exposed to scale-in mid-publish and is not handed a second tenant's
-    task while its thread is still on the first.
+    ``wait_for`` cannot cancel a thread, which could commit after the
+    operation was reported FAILED. So an expired budget waits one more budget
+    for the thread; if it lands, its outcome stands. Past that grace the work
+    is abandoned (``abandoned_work``) and the timeout propagates. Meanwhile
+    scale-in protection stays on and the engines are not disposed.
     """
     work = asyncio.ensure_future(asyncio.to_thread(func, *args))
     try:
@@ -124,8 +108,7 @@ class BaseTask(ABC):
     )
 
   def _log_abandoned_outcome(self, work: asyncio.Future[Any]) -> None:
-    # Nothing awaits an abandoned future, so its outcome would otherwise be
-    # dropped (or surface as "exception was never retrieved" on stderr).
+    # Nothing awaits an abandoned future; log its outcome here.
     if work.cancelled():
       return
     exc = work.exception()

@@ -31,10 +31,9 @@ ARG TARGETARCH=arm64
 # This version is used for both the repo source path and the runtime install path.
 ARG LADYBUG_EXT_VERSION=0.18.1
 
-# Create extension directories using internal version (where LadybugDB looks)
-# The duckdb extension is deliberately absent: materialization moved from
-# DuckDB ATTACH to a parquet handoff (LadybugDB 0.14+ creates persistent
-# shadow catalog entries on ATTACH that collide with installed schema).
+# Create extension directories using internal version (where LadybugDB looks).
+# No duckdb extension: materialization uses a parquet handoff, since ATTACH
+# creates persistent shadow catalog entries that collide with the schema.
 RUN mkdir -p /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs \
              /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector
 
@@ -124,11 +123,8 @@ ENV PYTHONUNBUFFERED=1 \
     FASTEMBED_CACHE_PATH="/app/fastembed_cache"
 
 # Install runtime dependencies, apply security patches, and install uv.
-# CACHE_DATE (set per-build in build.yml) busts this layer so the upgrade
-# re-runs despite GHA layer caching — a cached layer keeps stale OS packages.
-# No curl or git here: nothing in the build fetches from a repository, and
-# health probes use bin/healthcheck.py — curl would drag libcurl and libssh2
-# into the image, which the container-image scanners then flag.
+# CACHE_DATE (set per-build in build.yml) busts the layer cache so patches apply.
+# No curl or git (scanner surface; health probes use bin/healthcheck.py).
 # postgresql-client stays: entrypoint.sh waits on the database with psql.
 ARG CACHE_DATE
 RUN echo "os-refresh ${CACHE_DATE}" && apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
@@ -181,7 +177,6 @@ RUN chown appuser:appuser /usr/local/bin/uv
 RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 # Create extension directory in appuser's home (where LadybugDB looks for extensions)
 # Extensions are stored at ~/.lbdb/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
-# (the directory moved from ~/.lbug to ~/.lbdb in LadybugDB 0.15+)
 # This is in the container filesystem, NOT persistent volume, so extensions refresh with each deploy
 RUN mkdir -p /home/appuser/.lbdb/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH} && chown -R appuser:appuser /home/appuser/.lbdb
 # Give appuser write access to /app for log files

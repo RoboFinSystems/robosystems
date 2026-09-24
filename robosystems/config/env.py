@@ -1,22 +1,8 @@
 """Single source of truth for environment variables.
 
-Read configuration through ``env`` rather than calling ``os.getenv`` directly —
-the accessors here apply the type conversion, default, and validation each
-variable is supposed to have, and tuning parameters additionally layer in SSM.
-
-Organization (mirrors .env file section order):
-- Helper functions for type-safe env var access
-- Core application configuration (env, encryption, service URLs, JWT, email, CAPTCHA)
-- Feature flags (security, graph ops, connections, shared repos, org, platform)
-- Graph databases (API config, resiliency, tiers, LadybugDB)
-- PostgreSQL
-- Valkey/Redis
-- Dagster configuration
-- AWS configuration
-- External service API keys
-- Performance and scaling
-- XBRL and Arelle
-- Observability
+Read configuration through ``env`` rather than ``os.getenv``: the accessors
+apply each variable's type, default, and validation, and tuning parameters
+layer in SSM. Sections mirror the .env file order.
 """
 
 import os
@@ -27,15 +13,12 @@ from urllib.parse import urlparse
 if TYPE_CHECKING:
   from .valkey_registry import ValkeyDatabase
 
-# Import secrets manager with graceful fallback
-# This handles cases where boto3 isn't installed or circular imports occur
+# Falls back to plain env vars when boto3 is missing or the import is circular.
 try:
   from .secrets_manager import get_secret_list_value, get_secret_value
 
   SECRETS_MANAGER_AVAILABLE = True
 except ImportError:
-  # If secrets_manager can't be imported (missing boto3, circular import, etc),
-  # provide a fallback that uses environment variables
   SECRETS_MANAGER_AVAILABLE = False
 
   def get_secret_value(key: str, default: str = "") -> str:
@@ -52,35 +35,28 @@ except ImportError:
     return [item.strip() for item in value.split(separator) if item.strip()]
 
 
-# Import parameter store for feature flags (SSM Parameter Store)
-# Feature flags use SSM instead of Secrets Manager for cost efficiency
+# Feature flags live in SSM Parameter Store (cheaper than Secrets Manager).
 try:
   from .parameter_store import get_parameter_value, preload_feature_flags
 
   PARAMETER_STORE_AVAILABLE = True
 
-  # Preload all feature flags in a single batch API call before EnvConfig
-  # class definition. This populates the cache so individual get_parameter_value
-  # calls don't each make a separate SSM API call (which can fail under load).
+  # One batched SSM read before EnvConfig is defined, so each flag lookup hits
+  # the cache instead of making its own call (which can fail under load).
   _preloaded_flags = preload_feature_flags()
-  # Whether the batched SSM read actually returned flags. Read by
-  # EnvValidator in deployed environments: a boot that could not reach SSM
-  # serves its whole life on code defaults, so it must refuse to start rather
-  # than silently run with permissive fallbacks. Always {} (→ False) outside
-  # prod/staging by design; the validator only asserts on it when deployed.
+  # EnvValidator refuses a deployed boot where this is False: a boot that could
+  # not reach SSM would serve its whole life on code defaults. Always False
+  # outside prod/staging.
   FEATURE_FLAGS_PRELOADED = bool(_preloaded_flags)
-  # The names that were actually present in SSM. `FEATURE_FLAGS_PRELOADED`
-  # is per-store (any flag came back); the validator also needs per-flag,
-  # because a flag individually absent from SSM resolves silently to its code
-  # default and the resolved bool cannot say which of "absent" or "false" it is.
+  # Per-flag presence: a resolved bool cannot distinguish "absent from SSM"
+  # from "false".
   PRELOADED_FEATURE_FLAG_NAMES = frozenset(_preloaded_flags or ())
   if _preloaded_flags:
     print(f"Preloaded {len(_preloaded_flags)} feature flags from SSM")
   elif os.getenv("ENVIRONMENT", "dev") in ("prod", "staging"):
     print("WARNING: No feature flags loaded from SSM. All flags will use defaults.")
 except Exception as _e:
-  # If parameter_store can't be imported, fall back to default values
-  # Catch all exceptions (not just ImportError) to handle transitive failures
+  # Broad except: transitive import failures must also fall back to defaults.
   PARAMETER_STORE_AVAILABLE = False
   FEATURE_FLAGS_PRELOADED = False
   PRELOADED_FEATURE_FLAG_NAMES = frozenset()
@@ -90,14 +66,10 @@ except Exception as _e:
   )
 
   def get_parameter_value(key: str, default: str = "") -> str:
-    """
-    Fallback implementation when parameter_store isn't available.
-    Simply returns environment variable or default value.
-    """
+    """Fallback when parameter_store is unavailable: read the env var."""
     return os.getenv(key, default)
 
 
-# Import tunable defaults (runtime-adjustable via SSM)
 from .defaults import (
   AdmissionDefaults,
   CacheDefaults,
@@ -120,7 +92,7 @@ def get_int_env(key: str, default: int) -> int:
   try:
     return int(os.getenv(key, str(default)))
   except (ValueError, TypeError):
-    # Use print instead of logger to avoid circular import
+    # print, not logger: the logger imports this module.
     print(f"Warning: Invalid {key} value, using default: {default}")
     return default
 
@@ -130,7 +102,6 @@ def get_float_env(key: str, default: float) -> float:
   try:
     return float(os.getenv(key, str(default)))
   except (ValueError, TypeError):
-    # Use print instead of logger to avoid circular import
     print(f"Warning: Invalid {key} value, using default: {default}")
     return default
 
@@ -155,29 +126,15 @@ def _url_origin(url: str) -> str | None:
 
 
 def _tuning_env_key(ssm_path: str) -> str:
-  """Env-var name for a tuning param following the documented convention.
-
-  ``TUNING_{CATEGORY}_{KEY}`` derived from the SSM path — e.g.
-  ``"graphql/MAX_DEPTH"`` -> ``"TUNING_GRAPHQL_MAX_DEPTH"``. Mirrors the naming
-  in ``config/tuning.py`` and ``.env.example`` so the documented override
-  convention is actually honored (the raw ``env_key`` still works too).
-  """
+  """``"graphql/MAX_DEPTH"`` -> ``"TUNING_GRAPHQL_MAX_DEPTH"``."""
   return "TUNING_" + ssm_path.upper().replace("/", "_")
 
 
 def get_tuning_float(env_key: str, ssm_path: str, default: float) -> float:
+  """Float tuning parameter: env var (``env_key`` or ``TUNING_{CATEGORY}_{KEY}``),
+  then SSM ``tuning/`` in prod/staging (applies without a redeploy), then
+  ``default``.
   """
-  Get a float tuning parameter with layered fallback.
-
-  Priority order:
-  1. Environment variable (local dev, CI, testing) — either the raw ``env_key``
-     or the ``TUNING_{CATEGORY}_{KEY}`` form derived from ``ssm_path``
-  2. SSM Parameter Store under ``tuning/`` (prod/staging only, applies without
-     a redeploy)
-  3. ``default``
-  """
-  # Priority 1: Environment variable — accept both the raw env_key (backward
-  # compat) and the documented TUNING_{CATEGORY}_{KEY} convention.
   for candidate in (env_key, _tuning_env_key(ssm_path)):
     env_value = os.getenv(candidate)
     if env_value is not None:
@@ -187,7 +144,6 @@ def get_tuning_float(env_key: str, ssm_path: str, default: float) -> float:
         print(f"Warning: Invalid {env_key} value, using default: {default}")
         return default
 
-  # Priority 2: SSM Parameter Store (prod/staging only)
   environment = os.getenv("ENVIRONMENT", "dev")
   if environment in ["prod", "staging"]:
     try:
@@ -199,23 +155,11 @@ def get_tuning_float(env_key: str, ssm_path: str, default: float) -> float:
     except Exception:
       pass  # Fall through to default
 
-  # Priority 3: Default value
   return default
 
 
 def get_tuning_int(env_key: str, ssm_path: str, default: int) -> int:
-  """
-  Get an integer tuning parameter with layered fallback.
-
-  Priority order:
-  1. Environment variable (local dev, CI, testing) — either the raw ``env_key``
-     or the ``TUNING_{CATEGORY}_{KEY}`` form derived from ``ssm_path``
-  2. SSM Parameter Store under ``tuning/`` (prod/staging only, applies without
-     a redeploy)
-  3. ``default``
-  """
-  # Priority 1: Environment variable — accept both the raw env_key (backward
-  # compat) and the documented TUNING_{CATEGORY}_{KEY} convention.
+  """Int counterpart of ``get_tuning_float``, same precedence."""
   for candidate in (env_key, _tuning_env_key(ssm_path)):
     env_value = os.getenv(candidate)
     if env_value is not None:
@@ -225,7 +169,6 @@ def get_tuning_int(env_key: str, ssm_path: str, default: int) -> int:
         print(f"Warning: Invalid {env_key} value, using default: {default}")
         return default
 
-  # Priority 2: SSM Parameter Store (prod/staging only)
   environment = os.getenv("ENVIRONMENT", "dev")
   if environment in ["prod", "staging"]:
     try:
@@ -237,7 +180,6 @@ def get_tuning_int(env_key: str, ssm_path: str, default: int) -> int:
     except Exception:
       pass  # Fall through to default
 
-  # Priority 3: Default value
   return default
 
 
@@ -249,20 +191,11 @@ def get_list_env(key: str, default: str = "", separator: str = ",") -> list[str]
   return [item.strip() for item in value.split(separator) if item.strip()]
 
 
-# Cache for CloudFormation lookups (avoid repeated API calls)
 _cloudformation_cache: dict[str, str | None] = {}
 
 
 def _get_cf_stack_output(stack_name: str, output_key: str) -> str:
-  """Look up a CloudFormation stack output by key, with caching.
-
-  Args:
-      stack_name: Full CloudFormation stack name
-      output_key: The OutputKey to find
-
-  Returns:
-      Output value or empty string if not found
-  """
+  """Cached CloudFormation stack output lookup; "" if not found."""
   cache_key = f"{stack_name}:{output_key}"
   if cache_key in _cloudformation_cache:
     return _cloudformation_cache[cache_key] or ""
@@ -328,7 +261,6 @@ def _get_shared_replica_alb_url_from_cloudformation() -> str:
       _cloudformation_cache[cache_key] = None
       return ""
 
-    # Stack name follows pattern: RoboSystemsGraphSharedReplicas{Prod|Staging}
     env_suffix = "Prod" if environment == "prod" else "Staging"
     stack_name = f"RoboSystemsGraphSharedReplicas{env_suffix}"
 
@@ -375,9 +307,7 @@ class EnvConfig:
   # 1. CORE APPLICATION CONFIGURATION
   # ==========================================================================
 
-  # SSM Parameter Store reachability, captured at import. EnvValidator asserts
-  # on these in deployed environments (see validation.py): a boot that could
-  # not read SSM would serve its whole life on code defaults.
+  # SSM reachability captured at import; EnvValidator asserts on it when deployed.
   PARAMETER_STORE_AVAILABLE = PARAMETER_STORE_AVAILABLE
   FEATURE_FLAGS_PRELOADED = FEATURE_FLAGS_PRELOADED
   PRELOADED_FEATURE_FLAG_NAMES = PRELOADED_FEATURE_FLAG_NAMES
@@ -387,7 +317,6 @@ class EnvConfig:
   DEBUG = get_bool_env("DEBUG", False)
   LOG_LEVEL = get_str_env("LOG_LEVEL", "INFO")
 
-  # Secrets Manager availability (set at module level during import)
   SECRETS_MANAGER_AVAILABLE = SECRETS_MANAGER_AVAILABLE
 
   # Server configuration
@@ -398,46 +327,34 @@ class EnvConfig:
   CONNECTION_CREDENTIALS_KEY = get_secret_value("CONNECTION_CREDENTIALS_KEY", "")
 
   # Service URLs
-  # ROBOSYSTEMS_API_URL is set by CloudFormation based on access mode (domain or ALB DNS)
+  # Set by CloudFormation per access mode (custom domain or ALB DNS).
   ROBOSYSTEMS_API_URL = get_str_env("ROBOSYSTEMS_API_URL", "https://api.robosystems.ai")
-  # Frontend URLs - set via CloudFormation environment variables
   ROBOLEDGER_URL = get_str_env("ROBOLEDGER_URL", "https://roboledger.ai")
   ROBOINVESTOR_URL = get_str_env("ROBOINVESTOR_URL", "https://roboinvestor.ai")
   ROBOSYSTEMS_URL = get_str_env("ROBOSYSTEMS_URL", "https://robosystems.ai")
-  # xbrlkit viewer origin — a static SPA with no app backend of its own; it
-  # participates in the CORS allowlist only (Graph mode calls this API from
-  # the browser). No CloudFormation plumbing: the env-aware default matches
-  # the managed deployment, and forks can override or leave it (an RFS-owned
-  # origin in a fork's allowlist is inert).
+  # xbrlkit viewer origin (a static SPA); CORS allowlist only.
   VIEWER_URL = get_str_env(
     "VIEWER_URL",
     "https://staging.xbrlkit.com"
     if ENVIRONMENT == "staging"
     else "https://xbrlkit.com",
   )
-  # The viewer's original host, served as an alias of the same deployment.
-  # Every `xbrlkit view` published before 0.10 opens it and names it as the
-  # only origin allowed to read the report it serves, so the alias — and this
-  # allowlist entry — stay for as long as those installs might.
+  # The viewer's original host, kept as an alias: `xbrlkit view` before 0.10
+  # names it as the only origin allowed to read the report it serves.
   HOLON_URL = get_str_env(
     "HOLON_URL",
     "https://staging.holon.robosystems.ai"
     if ENVIRONMENT == "staging"
     else "https://holon.robosystems.ai",
   )
-  # Which app hosts the interactive auth surface ("login home"). Single-app
-  # deployments designate their own app key here.
+  # App key of the app hosting the interactive auth surface ("login home").
   LOGIN_HOME_APP = get_str_env("LOGIN_HOME_APP", "robosystems")
 
   # JWT configuration
   JWT_SECRET_KEY = get_secret_value("JWT_SECRET_KEY", "")
 
-  # JWT Issuer and Audience - configurable for different deployments
-  # Default JWT_ISSUER is derived from ROBOSYSTEMS_API_URL (strips protocol)
-  # Override via Secrets Manager for custom deployments:
-  # - internal mode: set JWT_ISSUER=localhost (access via SSM tunnel)
-  # - public mode: uses custom domain automatically, or set custom value
-  # Derive default JWT issuer/audience from ROBOSYSTEMS_API_URL, stripping protocol
+  # Issuer/audience default to the API host; internal-mode deployments (SSM
+  # tunnel access) override JWT_ISSUER=localhost in Secrets Manager.
   _jwt_default_domain = (
     os.getenv("ROBOSYSTEMS_API_URL", "https://api.robosystems.ai")
     .replace("https://", "")
@@ -467,10 +384,8 @@ class EnvConfig:
   R2_BUCKET_NAME = get_secret_value("R2_BUCKET_NAME", "")
   R2_PUBLIC_BUCKET_NAME = get_secret_value(
     "R2_PUBLIC_BUCKET_NAME", ""
-  )  # Public bucket for artifacts
-  R2_PUBLIC_URL = get_secret_value(
-    "R2_PUBLIC_URL", ""
-  )  # Public bucket URL (no auth needed)
+  )  # public artifacts bucket
+  R2_PUBLIC_URL = get_secret_value("R2_PUBLIC_URL", "")
 
   # Hugging Face (public SEC dataset publish — a manual Dagster job)
   HF_TOKEN = get_secret_value("HF_TOKEN", "")  # write token; also runs HF Jobs
@@ -481,19 +396,14 @@ class EnvConfig:
   # ==========================================================================
   # 2. FEATURE FLAGS
   # ==========================================================================
-  # Feature flags use SSM Parameter Store instead of Secrets Manager.
-  # This provides cost savings (SSM Standard tier is FREE) and better
-  # separation between secrets (credentials) and configuration (flags).
-  #
-  # Override priority: env var > SSM Parameter Store > default value
+  # Override priority: env var > SSM Parameter Store > default.
 
   # --- Platform Operations ---
   USER_REGISTRATION_ENABLED = get_bool_env(
     "USER_REGISTRATION_ENABLED",
     get_parameter_value("USER_REGISTRATION_ENABLED", "true").lower() == "true",
   )
-  # For forked/self-hosted deployments: Set BILLING_ENABLED=false in SSM Parameter Store
-  # This disables payment requirements since you're paying for your own infrastructure
+  # Self-hosted deployments leave this false: no payment requirements.
   BILLING_ENABLED = get_bool_env(
     "BILLING_ENABLED",
     get_parameter_value("BILLING_ENABLED", "false").lower() == "true",
@@ -510,9 +420,7 @@ class EnvConfig:
     "OTEL_ENABLED",
     get_parameter_value("OTEL_ENABLED", "false").lower() == "true",
   )
-  # Span export is a separate switch under OTEL_ENABLED: metrics have flowed
-  # to AMP for a long time, but no traces backend or collector pipeline exists
-  # yet, so this stays off until one does.
+  # Span export, separate from OTEL_ENABLED (metrics); no traces backend exists yet.
   OTEL_TRACES_ENABLED = get_bool_env(
     "OTEL_TRACES_ENABLED",
     get_parameter_value("OTEL_TRACES_ENABLED", "false").lower() == "true",
@@ -540,29 +448,23 @@ class EnvConfig:
     "SSO_OIDC_ENABLED",
     get_parameter_value("SSO_OIDC_ENABLED", "false").lower() == "true",
   )
-  # The SSO connection block lives in the base robosystems/{env} secret on
-  # deployed environments (JWT_ISSUER precedent — not secrets per se, but
-  # they ride with SSO_OIDC_CLIENT_SECRET so the whole connection is one
-  # operator surface). Env vars win everywhere, which is the local-dev path.
+  # The SSO connection block rides in the base robosystems/{env} secret with
+  # SSO_OIDC_CLIENT_SECRET; env vars win (the local-dev path).
   SSO_OIDC_PROVIDER_LABEL = get_secret_value("SSO_OIDC_PROVIDER_LABEL", "SSO")
-  # The issuer is the IdP's org authorization server (e.g.
-  # https://<org>.okta.com — NOT /oauth2/default, which mints API access
-  # tokens rather than sign-in ID tokens).
+  # The IdP's org authorization server (https://<org>.okta.com), NOT
+  # /oauth2/default, which mints API access tokens rather than ID tokens.
   SSO_OIDC_ISSUER = get_secret_value("SSO_OIDC_ISSUER", "")
   SSO_OIDC_CLIENT_ID = get_secret_value("SSO_OIDC_CLIENT_ID", "")
-  # SCIM 2.0 provisioning surface (IdP pushes users into the enterprise org).
-  # Gated independently of OIDC — a deployment may run one without the other.
+  # SCIM 2.0 provisioning, gated independently of OIDC.
   SCIM_ENABLED = get_bool_env(
     "SCIM_ENABLED",
     get_parameter_value("SCIM_ENABLED", "false").lower() == "true",
   )
   # Org role SCIM-provisioned users join the enterprise org with.
   SSO_DEFAULT_ROLE = get_secret_value("SSO_DEFAULT_ROLE", "member")
-  # Pins the single org this deployment's SCIM/OIDC surface operates against.
-  # Set after the first `scim bootstrap` mints the enterprise org (the id only
-  # exists then); once set, bearer tokens for other orgs are refused, bootstrap
-  # can only target this org, and OIDC first-login linking requires membership.
-  # Rides in the base secret with the SSO connection block.
+  # Pins the one org the SCIM/OIDC surface operates against; set after the
+  # first `scim bootstrap`. Once set, other orgs' bearer tokens are refused and
+  # OIDC first-login linking requires membership.
   ENTERPRISE_ORG_ID = get_secret_value("ENTERPRISE_ORG_ID", "")
   # ID-token claim compared against the SCIM-provisioned external_id at
   # first-login linking. Okta: externalId ≡ sub. Entra pairs SCIM externalId
@@ -572,25 +474,20 @@ class EnvConfig:
     "PASSKEYS_ENABLED",
     get_parameter_value("PASSKEYS_ENABLED", "false").lower() == "true",
   )
-  # MCP OAuth 2.1: the authorization server under /v1/oauth + /.well-known,
-  # the OAuth Bearer carriage on /v1/graphs/{g}/mcp, and the graph-agnostic
-  # OAuth-only /v1/mcp and /v1/mcp/roboledger routes. Off = those routes answer 404 and the MCP 401
-  # challenge carries no resource_metadata (clients treat the server as
-  # header-auth only). SSM: features/MCP_OAUTH_ENABLED.
+  # MCP OAuth 2.1 (authorization server, Bearer on /v1/graphs/{g}/mcp, and the
+  # OAuth-only /v1/mcp routes). Off: those routes 404 and the MCP 401 carries no
+  # resource_metadata, so clients treat the server as header-auth only.
   MCP_OAUTH_ENABLED = get_bool_env(
     "MCP_OAUTH_ENABLED",
     get_parameter_value("MCP_OAUTH_ENABLED", "false").lower() == "true",
   )
-  # Hard MFA gate for org owner/admin password logins: without a passkey the
-  # login returns mfa_enrollment_required instead of a session. Flipped after
-  # an adoption window; requires PASSKEYS_ENABLED (boot-validated).
+  # Org owner/admin password logins without a passkey get
+  # mfa_enrollment_required instead of a session. Requires PASSKEYS_ENABLED.
   MFA_ENFORCEMENT_ENABLED = get_bool_env(
     "MFA_ENFORCEMENT_ENABLED",
     get_parameter_value("MFA_ENFORCEMENT_ENABLED", "false").lower() == "true",
   )
-  # WebAuthn Relying Party overrides. Normally derived from ROBOSYSTEMS_URL
-  # (the login home hosts every ceremony — one RP ID per deployment, the
-  # deployment's root domain); see get_passkey_rp_id/get_passkey_origin.
+  # WebAuthn RP overrides; normally derived from ROBOSYSTEMS_URL.
   PASSKEY_RP_ID = get_str_env("PASSKEY_RP_ID", "")
   PASSKEY_ORIGIN = get_str_env("PASSKEY_ORIGIN", "")
 
@@ -599,13 +496,9 @@ class EnvConfig:
     "ORG_MEMBER_INVITATIONS_ENABLED",
     get_parameter_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true",
   )
-  # Test-support only. When enabled in an explicit non-prod env (see
-  # `expose_invite_token_in_response()`), the org-invitation create response
-  # includes the raw invite token, so automated authorization tests can complete
-  # the invite -> register -> role-grant flow without email interception.
-  # Deliberately a plain env var (not SSM/get_parameter_value like its
-  # neighbors): a credential-exposing flag must not be flippable live in a
-  # running deployment — turning it on requires an env change + redeploy.
+  # Test support: returns the raw invite token in the invitation response
+  # (non-prod only, see expose_invite_token_in_response). Deliberately not SSM:
+  # a credential-exposing flag must not be flippable live.
   AUTH_INVITE_TOKEN_IN_RESPONSE = get_bool_env("AUTH_INVITE_TOKEN_IN_RESPONSE", False)
   # Organization limits (SSM: /tuning/limits/)
   ORG_GRAPHS_DEFAULT_LIMIT = get_tuning_int(
@@ -644,9 +537,8 @@ class EnvConfig:
     "MCP_WORKSPACE_ENABLED",
     get_parameter_value("MCP_WORKSPACE_ENABLED", "true").lower() == "true",
   )
-  # Gates the subgraph write/DDL MCP tools (write-graph-cypher, add-node-table,
-  # add-relationship-table). These operate on subgraphs only — the main graph is
-  # read-only to raw statements (see StatementKernel / _validate_subgraph_context).
+  # Gates the subgraph write/DDL MCP tools; the main graph stays read-only to
+  # raw statements regardless.
   MCP_SUBGRAPH_OPS_ENABLED = get_bool_env(
     "MCP_SUBGRAPH_OPS_ENABLED",
     get_parameter_value("MCP_SUBGRAPH_OPS_ENABLED", "true").lower() == "true",
@@ -669,13 +561,9 @@ class EnvConfig:
     "SEMANTIC_MEMORY_ENABLED",
     get_parameter_value("SEMANTIC_MEMORY_ENABLED", "false").lower() == "true",
   )
-  # Gates tenant authoring of framework-shaped taxonomy blocks
-  # (reporting_extension / custom_ontology) on create + update; delete stays
-  # open so gated content can always be removed. chart_of_accounts is never
-  # gated — it is the core product path. Fail-closed in prod/staging: the
-  # default is "false" there, so a missing SSM parameter cannot open the
-  # surface. Dev/test default on (the scenario demos author
-  # reporting_extension disclosure notes).
+  # Gates create/update of reporting_extension / custom_ontology taxonomy
+  # blocks (delete stays open; chart_of_accounts is never gated). Fail-closed
+  # in prod/staging so a missing SSM parameter cannot open the surface.
   TAXONOMY_AUTHORING_ENABLED = get_bool_env(
     "TAXONOMY_AUTHORING_ENABLED",
     get_parameter_value(
@@ -694,90 +582,61 @@ class EnvConfig:
     "SHARED_MASTER_READS_ENABLED",
     get_parameter_value("SHARED_MASTER_READS_ENABLED", "true").lower() == "true",
   )
-  # Shared Replica ALB URL (for read scaling)
-  # When set, reads to shared repositories will route to the replica ALB
-  # instead of the shared master. This allows horizontal scaling of reads.
-  # Auto-discovered from CloudFormation if not explicitly set via env var
-  # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
+  # When set, shared-repository reads route to the replica ALB instead of the
+  # shared master. Auto-discovered from CloudFormation if unset.
   SHARED_REPLICA_ALB_URL = (
     get_str_env("SHARED_REPLICA_ALB_URL", "")
     or _get_shared_replica_alb_url_from_cloudformation()
   )
-  # Shared repositories list for infrastructure/deployment (used by userdata scripts)
-  # This configures which repositories should be deployed on shared writer instances
-  # For application logic (checking if a graph is a shared repo), use config.shared_repositories
+  # Repositories deployed on shared writer instances (infrastructure only; for
+  # "is this a shared repo" use config.shared_repositories).
   SHARED_REPOSITORIES = get_list_env("SHARED_REPOSITORIES", "")
 
   # --- Connection Providers ---
-  # CONNECTIONS_ENABLED controls whether the /connections router is included.
-  # Code defaults to TRUE — the fully-featured platform exposes connection
-  # providers. Deployed environments may override it via SSM; the live value
-  # is whatever the parameter says (`just ssm-get <env> features/CONNECTIONS_ENABLED`),
-  # not this comment. Individual provider flags below require
-  # CONNECTIONS_ENABLED=true to function.
+  # Mounts the /connections router; the provider flags below require it.
   CONNECTIONS_ENABLED = get_bool_env(
     "CONNECTIONS_ENABLED",
     get_parameter_value("CONNECTIONS_ENABLED", "true").lower() == "true",
   )
-  # Individual provider flags (require CONNECTIONS_ENABLED=true)
   CONNECTION_QUICKBOOKS_ENABLED = get_bool_env(
     "CONNECTION_QUICKBOOKS_ENABLED",
     get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "true").lower() == "true",
   )
-  # External provider: registers a source namespace for integrations that
-  # run outside the platform and write through the public API (the
-  # event-source registry). No credentials, no sync — registration only.
+  # Source-namespace registration for integrations that write through the
+  # public API; no credentials, no sync.
   CONNECTION_EXTERNAL_ENABLED = get_bool_env(
     "CONNECTION_EXTERNAL_ENABLED",
     get_parameter_value("CONNECTION_EXTERNAL_ENABLED", "true").lower() == "true",
   )
-  # Mercury bank feed — the first bank-feed provider. A bank feed is native
-  # accounting (it needs a chart of accounts and no live QuickBooks). Off by
-  # default: it needs Mercury's partner OAuth client, and the production
-  # client sits behind Mercury's compliance review.
+  # Mercury bank feed; needs Mercury's partner OAuth client.
   CONNECTION_MERCURY_ENABLED = get_bool_env(
     "CONNECTION_MERCURY_ENABLED",
     get_parameter_value("CONNECTION_MERCURY_ENABLED", "false").lower() == "true",
   )
-  # The Mercury provider's `api_key` credential mode: a personal read-only
-  # token pasted at connect time instead of the partner OAuth client. For
-  # self-hosted and local deployments only (your token, your graph). Hosted
-  # production never turns this on — Mercury's terms bar third-party
-  # automated access without written permission, and the OAuth approval is
-  # that permission.
+  # Mercury personal read-only token mode, for self-hosted/local only: Mercury's
+  # terms bar third-party automated access without the OAuth approval.
   MERCURY_API_KEY_CONNECTIONS_ENABLED = get_bool_env(
     "MERCURY_API_KEY_CONNECTIONS_ENABLED",
     get_parameter_value("MERCURY_API_KEY_CONNECTIONS_ENABLED", "false").lower()
     == "true",
   )
-  # Plaid bank feed — the aggregator feed on the same bank-feed contract, one
-  # connection per Item (one institution login for one customer). Off by
-  # default: hosted production needs Plaid's production access.
+  # Plaid bank feed, one connection per Item (one institution login).
   CONNECTION_PLAID_ENABLED = get_bool_env(
     "CONNECTION_PLAID_ENABLED",
     get_parameter_value("CONNECTION_PLAID_ENABLED", "false").lower() == "true",
   )
 
-  # Routes QB Reports API calls (JournalReport — our live GL posting source)
-  # through Intuit's modernized "v2" reporting service via the
-  # `testing_migration` query param. Defaults TRUE: we cut over to v2 ahead of
-  # Intuit's 2026-08-31 hard cutover (validated to parse identically to v1).
-  # Set FALSE via SSM (features/INTUIT_REPORTS_TESTING_MIGRATION) to fall back
-  # to v1 at runtime with no redeploy — but ONLY until 2026-08-31, after which
-  # Intuit serves v2 unconditionally and the param becomes a no-op. Retire this
-  # flag (and the get_transactions param) once that cutover lands.
+  # Sends `testing_migration` on QB Reports API calls to select Intuit's v2
+  # reporting service. TODO: retire with the get_transactions param; Intuit
+  # serves v2 unconditionally since 2026-08-31, so the param is a no-op.
   # https://medium.com/intuitdev/upcoming-changes-to-reports-apis-5083ec9aadce
   INTUIT_REPORTS_TESTING_MIGRATION = get_bool_env(
     "INTUIT_REPORTS_TESTING_MIGRATION",
     get_parameter_value("INTUIT_REPORTS_TESTING_MIGRATION", "true").lower() == "true",
   )
 
-  # SEC shared-master parking on/off (ASG name/timeout live in section 3).
-  # When False, the nightly SEC pipeline still wakes and health-gates the master
-  # (staging depends on the wake job succeeding) but never sleeps it back to 0 —
-  # so a reserved-instance-backed master stays pinned awake and utilized. Flip to
-  # True via SSM (features/SHARED_MASTER_PARKING_ENABLED) once the master is 100%
-  # on-demand to reclaim the ~85% of idle hours it otherwise sits unused.
+  # When False the nightly SEC pipeline still wakes and health-gates the shared
+  # master but never parks it back to 0 (keeps a reserved-instance master busy).
   SHARED_MASTER_PARKING_ENABLED = get_bool_env(
     "SHARED_MASTER_PARKING_ENABLED",
     get_parameter_value("SHARED_MASTER_PARKING_ENABLED", "true").lower() == "true",
@@ -786,23 +645,7 @@ class EnvConfig:
   # ==========================================================================
   # EXTENSIONS — RoboLedger & RoboInvestor product surfaces
   # ==========================================================================
-  #
-  # Two per-domain flags gate the extension surfaces:
-  #
-  #   - ROBOLEDGER_ENABLED → mounts the roboledger ops router and exposes
-  #     ledger resolvers on the GraphQL endpoint
-  #   - ROBOINVESTOR_ENABLED → mounts the roboinvestor ops router and
-  #     exposes investor resolvers on the GraphQL endpoint
-  #
-  # `EXTENSIONS_ENABLED` is **derived** (see property below) — it's true
-  # whenever either domain is on. There's no scenario where you'd want
-  # the extensions PostgreSQL connection without at least one domain
-  # enabled, so it's not a separate user-facing flag.
-  #
-  # Code defaults to TRUE — the fully-featured platform exposes both
-  # product surfaces. Prod and staging currently override to `false` via
-  # SSM during the staged extensions rollout; flip the SSM values to `true`
-  # when each domain is ready to ship to that environment.
+  # Each flag mounts its domain's ops router and GraphQL resolvers.
   ROBOLEDGER_ENABLED = get_bool_env(
     "ROBOLEDGER_ENABLED",
     get_parameter_value("ROBOLEDGER_ENABLED", "true").lower() == "true",
@@ -813,27 +656,16 @@ class EnvConfig:
     get_parameter_value("ROBOINVESTOR_ENABLED", "true").lower() == "true",
   )
 
-  # --- Extensions GraphQL Endpoint ---
-  # Controls the /extensions/{graph_id}/graphql endpoint (Strawberry).
-  #
-  # Defaults to TRUE alongside the per-domain ROBOLEDGER/ROBOINVESTOR flags
-  # so a fresh deployment with extensions on automatically gets the read
-  # surface — this GraphQL endpoint is the only way to read extensions data.
-  # Kept as an independent kill switch for incident response (e.g. lock down
-  # introspection without disabling write operations).
+  # Kill switch for /extensions/{graph_id}/graphql, the only extensions read
+  # surface; independent of the domain flags so reads can be cut in an incident.
   EXTENSIONS_GRAPHQL_ENABLED = get_bool_env(
     "EXTENSIONS_GRAPHQL_ENABLED",
     get_parameter_value("EXTENSIONS_GRAPHQL_ENABLED", "true").lower() == "true",
   )
 
-  # Query-bounding limits for the extensions GraphQL endpoint. The OLTP pool
-  # is small and each resolved field can open a session, so an unbounded
-  # nested / alias-heavy / oversized document is a DoS vector. Defaults are
-  # generous for legitimate nested reads; introspection is unaffected (the
-  # depth limiter does not count introspection fields). SSM-tunable at runtime
-  # (like the other query/pool limits) so a limit can be tightened on abuse or
-  # loosened for a false-positive block without a redeploy —
-  # `just ssm-set <env> tuning/graphql/MAX_DEPTH <n>`.
+  # Query-bounding limits: the OLTP pool is small and each resolved field can
+  # open a session, so unbounded documents are a DoS vector. The depth limiter
+  # ignores introspection fields.
   EXTENSIONS_GRAPHQL_MAX_DEPTH = get_tuning_int(
     "EXTENSIONS_GRAPHQL_MAX_DEPTH", "graphql/MAX_DEPTH", 15
   )
@@ -844,20 +676,12 @@ class EnvConfig:
     "EXTENSIONS_GRAPHQL_MAX_TOKENS", "graphql/MAX_TOKENS", 2000
   )
 
-  # --- Derived: EXTENSIONS_ENABLED ---
-  # Whether the extensions PostgreSQL database should open at all.
-  # Computed at class-body evaluation time from the per-domain flags
-  # above (Python evaluates class bodies sequentially, so the names are
-  # in scope here). Replaces the standalone `EXTENSIONS_ENABLED` env var.
+  # Derived, not an env var: whether the extensions database opens at all.
   EXTENSIONS_ENABLED = ROBOLEDGER_ENABLED or ROBOINVESTOR_ENABLED
 
-  # Period-boundary obligation promoter. When True, the Dagster sensor
-  # not only flips matured `pending` schedule_entry_due events to
-  # `classified` but also dispatches the registered handler so the
-  # closing-entry draft lands in the GL on the same tick. Defaults to
-  # False (co-pilot mode): status flips, drafts wait for an explicit
-  # operator action. The per-graph autopilot column on the Graph row
-  # overrides this default when set.
+  # When True the obligation-promoter sensor also dispatches the handler, so
+  # the closing-entry draft lands on the same tick; False only flips status.
+  # The per-graph autopilot column overrides this default.
   EXTENSIONS_PROMOTION_AUTO_DISPATCH = get_bool_env(
     "EXTENSIONS_PROMOTION_AUTO_DISPATCH",
     get_parameter_value("EXTENSIONS_PROMOTION_AUTO_DISPATCH", "false").lower()
@@ -865,8 +689,6 @@ class EnvConfig:
   )
 
   # --- Adapter Pipelines (Dagster) ---
-  # Controls whether adapter-specific Dagster assets, jobs, sensors, and schedules
-  # are loaded into the Dagster definitions. Disabling gives a clean Dagster slate.
   SEC_PIPELINE_ENABLED = get_bool_env(
     "SEC_PIPELINE_ENABLED",
     get_parameter_value("SEC_PIPELINE_ENABLED", "true").lower() == "true",
@@ -878,30 +700,22 @@ class EnvConfig:
 
   GRAPH_BACKEND_TYPE = get_str_env("GRAPH_BACKEND_TYPE", "ladybug")
 
-  # SHACL validation of the JSON-LD report bundle at publish time, against
-  # frameworks/ontology/v1/shapes.ttl. Opt-in (default off) so the publish
-  # path stays fast — the standalone validator + the SHACL regression test
-  # cover the demos/CI. When enabled, the structured result is logged onto
-  # Report.metadata['bundle_validation'].
-  #   off    — skip (default)
-  #   warn   — validate, record the result, never block the publish
-  #   strict — validate, record, and raise on non-conformance (block publish)
+  # SHACL validation of the report bundle at publish, recorded on
+  # Report.metadata['bundle_validation']: off | warn (never blocks) | strict
+  # (raises on non-conformance).
   REPORT_BUNDLE_SHACL_VALIDATION = get_str_env("REPORT_BUNDLE_SHACL_VALIDATION", "off")
 
   # ===========================================================================
   # GRAPH API CONFIGURATION
   # ===========================================================================
 
-  # Graph API Endpoint
   GRAPH_API_URL = get_str_env("GRAPH_API_URL", "http://localhost:8001")
   GRAPH_API_KEY = get_secret_value("GRAPH_API_KEY", "")
 
-  # Shared repository backend selection (dev/local only)
-  # In AWS environments, backend is determined by graph.yml tier configuration
+  # Dev/local only; in AWS the graph.yml tier decides the backend.
   GRAPH_SHARED_REPOSITORY_BACKEND = get_str_env("GRAPH_SHARED_REPOSITORY_BACKEND", "")
 
-  # Graph Registry Tables (DynamoDB)
-  # These tables track graph allocations, instance health, and volume management
+  # DynamoDB registries
   GRAPH_REGISTRY_TABLE = get_str_env(
     "GRAPH_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-graph-registry"
   )
@@ -912,8 +726,7 @@ class EnvConfig:
     "VOLUME_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-volume-registry"
   )
 
-  # Shared-master ASG (off-hours parking / wake). The single writer that hosts
-  # the platform's shared repositories (SEC today). Adapter pipelines scale this
+  # The single writer hosting shared repositories; adapter pipelines scale it
   # to 1 before staging and back to 0 after publish.
   SHARED_MASTER_ASG_NAME = get_str_env(
     "SHARED_MASTER_ASG_NAME",
@@ -959,9 +772,8 @@ class EnvConfig:
 
   # DuckDB Staging Configuration (for data ingestion/materialization)
   DUCKDB_STAGING_PATH = get_str_env("DUCKDB_STAGING_PATH", "./data/staging")
-  # Fallbacks for the staging connection's resource caps. The tier config in
-  # .github/configs/graph.yml wins when CLUSTER_TIER is set; these apply on
-  # hosts that carry no tier. Defaults match GraphTierConfig's own fallbacks.
+  # Staging-connection caps for hosts with no CLUSTER_TIER (the tier config
+  # wins otherwise).
   DUCKDB_MEMORY_LIMIT = get_str_env("DUCKDB_MEMORY_LIMIT", "2GB")
   DUCKDB_MAX_THREADS = get_int_env("DUCKDB_MAX_THREADS", 4)
 
@@ -971,9 +783,7 @@ class EnvConfig:
   # LanceDB Vector Search Index (for MCP element resolution)
   LANCE_INDEX_PATH = get_str_env("LANCE_INDEX_PATH", "./data/lance")
 
-  # LadybugDB Admission Control
-  # These use SSM tuning parameters in prod/staging for runtime adjustability
-  # Override priority: env var > SSM /tuning/lbug_admission/ > default
+  # LadybugDB Admission Control (SSM: /tuning/lbug_admission/)
   LBUG_ADMISSION_MEMORY_THRESHOLD = get_tuning_float(
     "LBUG_ADMISSION_MEMORY_THRESHOLD",
     "lbug_admission/MEMORY_THRESHOLD",
@@ -997,10 +807,8 @@ class EnvConfig:
   DATABASE_ENDPOINT = get_str_env("DATABASE_ENDPOINT", "")
   DATABASE_PORT = get_str_env("DATABASE_PORT", "5432")
 
-  # DATABASE_URL resolution order:
-  # 1. DATABASE_URL env var (local dev, ECS with CF resolve)
-  # 2. Constructed from DATABASE_ENDPOINT + POSTGRES_PASSWORD from Secrets Manager (EC2 graph instances)
-  # 3. Local dev default
+  # DATABASE_URL env var, else built from DATABASE_ENDPOINT + the Secrets
+  # Manager password (EC2 graph instances), else the local default.
   DATABASE_URL = get_str_env("DATABASE_URL", "") or (
     f"postgresql://postgres:{get_secret_value('POSTGRES_PASSWORD', 'postgres')}@{get_str_env('DATABASE_ENDPOINT', '')}:{get_str_env('DATABASE_PORT', '5432')}/robosystems?sslmode=require"
     if get_str_env("DATABASE_ENDPOINT", "")
@@ -1019,13 +827,10 @@ class EnvConfig:
   # 5. CACHE AND QUEUE CONFIGURATION (VALKEY/REDIS)
   # ==========================================================================
 
-  # Valkey/Redis URLs
-  # Base URL without database number (database numbers are managed in valkey_registry.py)
+  # Base URL without a database number (see valkey_registry.py).
   VALKEY_URL = get_str_env("VALKEY_URL", "redis://localhost:6379")
 
-  # Valkey authentication (for encrypted/production environments)
-  # This is fetched from AWS Secrets Manager in prod/staging environments
-  # Secret path: robosystems/{env}/valkey (defined in secrets_manager.py SECRET_MAPPINGS)
+  # From Secrets Manager robosystems/{env}/valkey in prod/staging.
   VALKEY_AUTH_TOKEN = get_str_env("VALKEY_AUTH_TOKEN", "")
 
   # Cache TTLs (SSM: /tuning/cache/)
@@ -1058,40 +863,25 @@ class EnvConfig:
   # 7. AWS CONFIGURATION
   # ==========================================================================
 
-  # AWS Region configuration (credentials come from IAM roles in ECS/EC2)
+  # Credentials come from IAM roles in ECS/EC2.
   AWS_DEFAULT_REGION = get_str_env("AWS_DEFAULT_REGION", "us-east-1")
   AWS_REGION = get_str_env("AWS_REGION", AWS_DEFAULT_REGION)
   AWS_ENDPOINT_URL = get_str_env("AWS_ENDPOINT_URL", "")  # For LocalStack
-  # Optional override for the *S3 endpoint embedded in presigned URLs*.
-  # AWS_ENDPOINT_URL is used for internal API↔S3 traffic (docker DNS hostname
-  # like ``http://localstack:4566`` in dev) but those URLs aren't reachable
-  # from the host browser. Setting this to ``http://localhost:4566`` makes
-  # ``S3Client.generate_presigned_url`` sign URLs against a separate boto3
-  # client whose endpoint is browser-reachable. Unset in staging/prod —
-  # boto3's default real-AWS endpoints are already browser-reachable.
+  # Browser-reachable S3 endpoint for presigned URLs in dev (AWS_ENDPOINT_URL
+  # is a docker hostname). Unset in staging/prod.
   AWS_S3_PRESIGN_ENDPOINT_URL = get_str_env("AWS_S3_PRESIGN_ENDPOINT_URL", "")
 
-  # AWS Bedrock configuration (for AI agent features)
-  # DEV ONLY: Explicit credentials for local development
-  # PROD/STAGING: Uses IAM role credentials (ECS task role / EC2 instance profile)
-  # NOT stored in Secrets Manager - these are dev-only overrides in .env
+  # Bedrock keys are dev-only .env overrides; prod/staging use IAM roles.
   AWS_BEDROCK_REGION = get_str_env("AWS_BEDROCK_REGION", "us-east-1")
   AWS_BEDROCK_ACCESS_KEY_ID = get_str_env("AWS_BEDROCK_ACCESS_KEY_ID", "")
   AWS_BEDROCK_SECRET_ACCESS_KEY = get_str_env("AWS_BEDROCK_SECRET_ACCESS_KEY", "")
 
-  # Self-hosted inference: an OpenAI-compatible Chat Completions endpoint
-  # (vLLM, Ollama, LM Studio, NVIDIA NIM), so the open-source stack can run on
-  # open weights with no proprietary model service. Off by default and off in
-  # hosted prod; a dedicated tenant turns it on when it asks for it. Off means
-  # the model row does not exist, so nothing can route to it, and nothing
-  # below is read. SSM: features/OPENAI_COMPAT_ENABLED.
+  # Self-hosted OpenAI-compatible inference (vLLM, Ollama, NIM). Off means the
+  # model row does not exist and nothing below is read.
   OPENAI_COMPAT_ENABLED = get_bool_env(
     "OPENAI_COMPAT_ENABLED",
     get_parameter_value("OPENAI_COMPAT_ENABLED", "false").lower() == "true",
   )
-  # Read through the secret lookup (env var first, then the deployment's
-  # secret in prod/staging) so a deployment can point at an endpoint without
-  # a template change.
   OPENAI_COMPAT_BASE_URL = (
     get_secret_value("OPENAI_COMPAT_BASE_URL", "") if OPENAI_COMPAT_ENABLED else ""
   )
@@ -1102,14 +892,11 @@ class EnvConfig:
   OPENAI_COMPAT_API_KEY = (
     get_secret_value("OPENAI_COMPAT_API_KEY", "") if OPENAI_COMPAT_ENABLED else ""
   )
-  # The model's own output cap, when it is below what the execution profiles
-  # ask for (EXTENDED asks 8,000). 0 = no cap that binds.
+  # The model's own output cap when below the profiles' ask; 0 = none.
   OPENAI_COMPAT_MAX_OUTPUT_TOKENS = get_int_env("OPENAI_COMPAT_MAX_OUTPUT_TOKENS", 0)
   # A local model on modest hardware can take minutes per call.
   OPENAI_COMPAT_TIMEOUT_SECONDS = get_int_env("OPENAI_COMPAT_TIMEOUT_SECONDS", 300)
-  # Credits per 1K tokens. The rate card is a cost passthrough and a
-  # self-hosted GPU has no per-token vendor cost, so 0 is the honest default;
-  # a deployment pointed at a paid endpoint sets its own rates.
+  # Credits per 1K tokens; 0 because a self-hosted GPU has no per-token cost.
   OPENAI_COMPAT_CREDITS_PER_1K_INPUT = get_str_env(
     "OPENAI_COMPAT_CREDITS_PER_1K_INPUT", "0"
   )
@@ -1117,22 +904,16 @@ class EnvConfig:
     "OPENAI_COMPAT_CREDITS_PER_1K_OUTPUT", "0"
   )
 
-  # Which registered model backs each operator tier in this deployment
-  # (a short name from config/operators.py, e.g. "openai-compat" or
-  # "claude-sonnet-5"). Unset keeps the platform's mapping. Deployment-scoped,
-  # never customer-set; an unknown name fails the boot.
+  # Model short name (config/operators.py) backing each operator tier; unset
+  # keeps the platform mapping, an unknown name fails the boot.
   OPERATOR_PROFILE_ECONOMY = get_str_env("OPERATOR_PROFILE_ECONOMY", "")
   OPERATOR_PROFILE_BALANCED = get_str_env("OPERATOR_PROFILE_BALANCED", "")
   OPERATOR_PROFILE_QUALITY = get_str_env("OPERATOR_PROFILE_QUALITY", "")
 
-  # S3-specific credentials
-  # Use secrets manager for prod/staging, environment variables for local dev
   AWS_S3_ACCESS_KEY_ID = get_secret_value("AWS_S3_ACCESS_KEY_ID", "")
   AWS_S3_SECRET_ACCESS_KEY = get_secret_value("AWS_S3_SECRET_ACCESS_KEY", "")
 
-  # S3 Bucket Configuration
-  # Bucket names are passed as env vars from CloudFormation (api.yaml, dagster.yaml)
-  # Defaults are for local development only
+  # Set by CloudFormation; defaults are local-dev only.
   SHARED_RAW_BUCKET = get_str_env("SHARED_RAW_BUCKET", "robosystems-shared-raw")
   SHARED_PROCESSED_BUCKET = get_str_env(
     "SHARED_PROCESSED_BUCKET", "robosystems-shared-processed"
@@ -1142,15 +923,13 @@ class EnvConfig:
   DEPLOYMENT_BUCKET = get_str_env("DEPLOYMENT_BUCKET", "robosystems-deployment")
   LOGS_BUCKET = get_str_env("LOGS_BUCKET", "robosystems-logs")
 
-  # CDN URL passed via ECS task definition (depends on CloudFront distribution)
   PUBLIC_DATA_CDN_URL = get_str_env("PUBLIC_DATA_CDN_URL", "")
 
   # ==========================================================================
   # 8. EXTERNAL SERVICE API KEYS
   # ==========================================================================
 
-  # Enterprise SSO (OIDC) — IdP client secret; issuer/client_id are plain
-  # config in the auth-posture block above
+  # Enterprise SSO (OIDC) IdP client secret
   SSO_OIDC_CLIENT_SECRET = get_secret_value("SSO_OIDC_CLIENT_SECRET", "")
 
   # QuickBooks/Intuit
@@ -1161,35 +940,26 @@ class EnvConfig:
   )
   INTUIT_ENVIRONMENT = get_secret_value("INTUIT_ENVIRONMENT", "sandbox")
 
-  # Mercury (bank feed) — the partner OAuth client. Sandbox and production
-  # are separate clients on separate hosts; MERCURY_ENVIRONMENT picks the host.
+  # Mercury partner OAuth client; MERCURY_ENVIRONMENT picks the host.
   MERCURY_CLIENT_ID = get_secret_value("MERCURY_CLIENT_ID", "")
   MERCURY_CLIENT_SECRET = get_secret_value("MERCURY_CLIENT_SECRET", "")
   MERCURY_ENVIRONMENT = get_secret_value("MERCURY_ENVIRONMENT", "sandbox")
 
-  # Plaid (bank feed) — one client id, a secret per environment;
-  # PLAID_ENVIRONMENT picks the host (sandbox or production).
+  # Plaid: one client id, a secret per environment.
   PLAID_CLIENT_ID = get_secret_value("PLAID_CLIENT_ID", "")
   PLAID_SECRET = get_secret_value("PLAID_SECRET", "")
   PLAID_ENVIRONMENT = get_secret_value("PLAID_ENVIRONMENT", "sandbox")
 
   # SEC
-  # SEC_GOV_USER_AGENT is a secret identity for API access
   SEC_GOV_USER_AGENT = get_secret_value(
     "SEC_GOV_USER_AGENT", "YourCompany your-email@example.com"
   )
-  # Keep externalized text-block values in the graph as well as on S3/CDN. Off in
-  # every real environment: text blocks are most of a filing's bytes, and moving
-  # them out of the graph into the document index is what keeps the shared SEC
-  # graph its size. On only for a local control experiment where raw Cypher must
-  # be able to reach the note text. Filings processed this way carry
-  # value_type=inline, so the search index resolves no content_url for them.
+  # Also keep text-block values in the graph (local experiments only: they are
+  # most of a filing's bytes). Such filings carry value_type=inline, so search
+  # resolves no content_url for them.
   XBRL_KEEP_TEXTBLOCKS_INLINE = get_bool_env("XBRL_KEEP_TEXTBLOCKS_INLINE", False)
-  # Publish each processed filing's portable representations — the holon, the
-  # Tavi compiled model, the primary document and a manifest — to the public
-  # data bucket beside its externalized text blocks, and keep the per-filer
-  # catalog there (adapters/sec/processors/artifacts.py, pipeline/catalog.py).
-  # Off only where there is no public bucket to write to.
+  # Publish each filing's holon, Tavi model, primary document and manifest,
+  # plus the per-filer catalog, to the public data bucket.
   SEC_FILING_ARTIFACTS_ENABLED = get_bool_env("SEC_FILING_ARTIFACTS_ENABLED", True)
 
   # OpenFIGI (financial identifiers)
@@ -1295,12 +1065,8 @@ class EnvConfig:
 
   @classmethod
   def expose_invite_token_in_response(cls) -> bool:
-    """Whether to return the raw org-invite token in the create response.
-
-    Test-support only, and fail-closed by design: it requires an *explicit*
-    non-prod environment (dev or staging), not merely "not prod". An
-    unrecognized or misconfigured ENVIRONMENT therefore denies rather than
-    leaks — a credential must never surface from a prod-or-unknown response.
+    """Fail-closed: requires an explicit dev or staging ENVIRONMENT, so an
+    unrecognized value denies rather than leaks the invite token.
     """
     return cls.AUTH_INVITE_TOKEN_IN_RESPONSE and (
       cls.is_development() or cls.is_staging()
@@ -1350,27 +1116,19 @@ class EnvConfig:
   @classmethod
   @lru_cache(maxsize=1)
   def validate(cls) -> list[str]:
-    """Check required variables and numeric ranges.
-
-    Returns one message per problem; an empty list means the configuration is
-    usable. Production additionally requires DATABASE_URL and JWT_SECRET_KEY to
-    be set to non-default values.
-    """
+    """One message per problem; empty means usable."""
     errors = []
 
-    # Check required variables in production
     if cls.is_production():
       required_vars = [
         ("DATABASE_URL", cls.DATABASE_URL, None),
         ("JWT_SECRET_KEY", cls.JWT_SECRET_KEY, ""),
-        # Note: AWS credentials come from IAM roles, not environment variables
       ]
 
       for var_name, var_value, default_value in required_vars:
         if not var_value or var_value == default_value:
           errors.append(f"{var_name} must be set in production")
 
-    # Validate numeric ranges
     if cls.PORT < 1 or cls.PORT > 65535:
       errors.append("PORT must be between 1 and 65535")
 
@@ -1378,39 +1136,24 @@ class EnvConfig:
 
   @classmethod
   def get_lbug_tier_config(cls) -> dict[str, Any]:
-    """Get LadybugDB tier configuration, with graph.yml overriding env vars.
-
-    Lets a container inherit its tier's memory settings (max_memory_mb,
-    memory_per_db_mb), performance settings (chunk_size, query_timeout,
-    max_query_length), and connection settings (connection_pool_size,
-    databases_per_instance) from ``.github/configs/graph.yml``.
-    """
-    # Import constants at function level to avoid circular imports
+    """LadybugDB tier settings from graph.yml for CLUSTER_TIER, else env vars."""
     from robosystems.config.constants import MAX_QUERY_LENGTH
 
-    # Try to load tier-specific config if available
     try:
       from robosystems.config.graph_tier import GraphTierConfig
 
-      # Determine tier from environment
-      # CLUSTER_TIER is set by CloudFormation to the actual tier (e.g., "ladybug-standard")
       tier = cls.CLUSTER_TIER
 
       if tier:
-        # Get instance config from graph.yml
         instance_config = GraphTierConfig.get_instance_config(tier)
 
         if instance_config:
-          # Get full tier config for additional settings
           full_tier_config = GraphTierConfig.get_tier_config(tier)
 
-          # Override with values from config file if present
           return {
-            # Memory settings (from graph.yml tier config)
             "max_memory_mb": instance_config.get("max_memory_mb", 2048),
             "memory_per_db_mb": instance_config.get("memory_per_db_mb", 0),
             "memory_per_subgraph_mb": instance_config.get("memory_per_subgraph_mb", 0),
-            # Performance settings
             "chunk_size": instance_config.get("chunk_size", 1000),
             "query_timeout": instance_config.get(
               "query_timeout", cls.GRAPH_QUERY_TIMEOUT
@@ -1419,7 +1162,7 @@ class EnvConfig:
               "max_query_length", MAX_QUERY_LENGTH
             ),
             "connection_pool_size": instance_config.get("connection_pool_size", 10),
-            # Database settings - prioritize environment variable in dev
+            # Dev may override via LBUG_DATABASES_PER_INSTANCE.
             "databases_per_instance": (
               get_int_env("LBUG_DATABASES_PER_INSTANCE", 0)
               if cls.ENVIRONMENT == "dev"
@@ -1432,42 +1175,33 @@ class EnvConfig:
               and get_int_env("LBUG_DATABASES_PER_INSTANCE", 0) > 0
               else instance_config.get("databases_per_instance", 10)
             ),
-            # Tier-level settings from full config. Storage, credits, and
-            # rate multipliers deliberately do not appear here: those keys
-            # never existed in graph.yml, so this dict only fabricated
-            # defaults (500 GB / 10000 / 1.0) that nothing should read.
-            # Their sources of truth are GraphTierConfig, BillingConfig,
-            # and RateLimitConfig respectively.
+            # Storage, credits and rate multipliers live in GraphTierConfig,
+            # BillingConfig and RateLimitConfig, not here.
             "tier": tier,
             "max_subgraphs": full_tier_config.get("max_subgraphs", 0),
           }
     except ImportError:
-      pass  # GraphTierConfig not available
+      pass
     except Exception:
-      pass  # Any other error loading config
+      pass
 
-    # Fall back to sensible defaults (used when CLUSTER_TIER is not set)
     return {
-      # Memory settings (defaults for local dev)
       "max_memory_mb": get_int_env("LBUG_MAX_MEMORY_MB", 2048),
       "memory_per_db_mb": get_int_env("LBUG_MAX_MEMORY_PER_DB_MB", 0),
       "memory_per_subgraph_mb": 0,
-      # Performance settings
       "chunk_size": get_int_env("LBUG_CHUNK_SIZE", 1000),
       "query_timeout": cls.GRAPH_QUERY_TIMEOUT,
       "max_query_length": MAX_QUERY_LENGTH,
       "connection_pool_size": get_int_env("LBUG_CONNECTION_POOL_SIZE", 10),
-      # Database settings
       "databases_per_instance": get_int_env("LBUG_DATABASES_PER_INSTANCE", 10),
       "max_databases": get_int_env("LBUG_DATABASES_PER_INSTANCE", 10),
-      # Default tier settings
       "tier": "ladybug-standard",
       "max_subgraphs": 0,
     }
 
   @classmethod
   def get_lbug_memory_config(cls) -> dict[str, Any]:
-    """Alias for backward compatibility with existing code."""
+    """Alias of get_lbug_tier_config."""
     return cls.get_lbug_tier_config()
 
   @classmethod
@@ -1476,16 +1210,12 @@ class EnvConfig:
     if not database_name:
       return cls.DATABASE_URL
 
-    # Parse and replace database name
     base_url = cls.DATABASE_URL.rsplit("/", 1)[0]
     return f"{base_url}/{database_name}"
 
   @classmethod
   def get_aws_config(cls) -> dict:
-    """Get boto3 kwargs for AWS: region, plus endpoint when one is set.
-
-    Deliberately sets no credentials — production authenticates via IAM roles.
-    """
+    """boto3 kwargs; deliberately no credentials (IAM roles)."""
     config = {
       "region_name": cls.AWS_DEFAULT_REGION,
     }
@@ -1497,16 +1227,11 @@ class EnvConfig:
 
   @classmethod
   def get_s3_config(cls) -> dict:
-    """Get boto3 kwargs for S3.
-
-    Uses the S3-specific credentials when set (cross-account access, local dev)
-    and otherwise relies on IAM roles.
-    """
+    """boto3 kwargs for S3; S3-specific credentials when set, else IAM roles."""
     config = {
       "region_name": cls.AWS_DEFAULT_REGION,
     }
 
-    # Use S3-specific credentials if available (for cross-account access or local dev)
     if cls.AWS_S3_ACCESS_KEY_ID:
       config["aws_access_key_id"] = cls.AWS_S3_ACCESS_KEY_ID
 
@@ -1520,10 +1245,7 @@ class EnvConfig:
 
   @classmethod
   def get_r2_config(cls) -> dict:
-    """Get boto3 kwargs for Cloudflare R2, or {} when R2 is not configured.
-
-    R2 speaks the S3 API against a custom endpoint, with region "auto".
-    """
+    """boto3 kwargs for Cloudflare R2, or {} when R2 is not configured."""
     if not cls.R2_ENDPOINT_URL:
       return {}
 
@@ -1536,18 +1258,16 @@ class EnvConfig:
 
   @classmethod
   def get_cors_origins(cls) -> list[str]:
-    """Get CORS origins for Main API (backward compatibility)."""
+    """Alias of get_main_cors_origins."""
     return cls.get_main_cors_origins()
 
   @classmethod
   def get_main_cors_origins(cls) -> list[str]:
-    """Get CORS origins for Main API (public-facing).
+    """CORS origins for the main API.
 
-    Deployed environments derive the allowlist from the deployment's own app
-    URLs (CloudFormation-fed; the env-var defaults reproduce the managed
-    platform's lists exactly), so a fork serving its own domain allows its
-    own frontends without code changes. Note this list also backs OAuth
-    redirect_uri validation and the MCP remote origin check.
+    Deployed environments derive them from the app URLs, so a fork on its own
+    domain needs no code change. Also backs OAuth redirect_uri validation and
+    the MCP remote origin check.
     """
     if cls.is_production() or cls.is_staging():
       origins = []
@@ -1563,7 +1283,6 @@ class EnvConfig:
           origins.append(origin)
       return origins
     else:
-      # Development
       origins = [
         "http://localhost:3000",
         "http://localhost:3001",
@@ -1573,21 +1292,16 @@ class EnvConfig:
         "https://roboinvestor.ai",
         "https://robosystems.ai",
       ]
-      # Allow extra origins via env (e.g., ngrok tunnels for OAuth callbacks).
-      # Dev-only — production/staging lists are hardcoded above on purpose.
+      # Dev-only extras (e.g. ngrok tunnels for OAuth callbacks).
       extra = get_secret_list_value("EXTRA_CORS_ORIGINS", "")
       origins.extend(o for o in extra if o not in origins)
       return origins
 
   @classmethod
   def get_passkey_rp_id(cls) -> str:
-    """WebAuthn RP ID: one per deployment, the deployment's root domain.
-
-    Derived from ROBOSYSTEMS_URL (the login home hosts every ceremony) so a
-    fork serving its own domain scopes passkeys to itself with no fork-local
-    code — the get_main_cors_origins pattern. Explicit PASSKEY_RP_ID wins.
-    Dev uses ``localhost`` (a WebAuthn secure-context exception) because the
-    dev default of ROBOSYSTEMS_URL is the managed domain, not localhost.
+    """WebAuthn RP ID: the host of ROBOSYSTEMS_URL (the login home hosts every
+    ceremony). Dev uses ``localhost`` because its ROBOSYSTEMS_URL default is
+    the managed domain.
     """
     if cls.PASSKEY_RP_ID:
       return cls.PASSKEY_RP_ID
@@ -1608,42 +1322,24 @@ class EnvConfig:
   def get_lbug_cors_origins(cls) -> list[str]:
     """Get CORS origins for Graph API (VPC-internal)."""
     if cls.is_production() or cls.is_staging():
-      # VPC-internal APIs don't need CORS for browsers
       return []
     else:
-      # Development only
       return ["*"]
 
   @classmethod
   def get_valkey_url(cls, database: Union[int, "ValkeyDatabase"] | None = None) -> str:
-    """Get the Valkey/Redis URL, optionally for a specific database.
-
-    Pass a :class:`~robosystems.config.valkey_registry.ValkeyDatabase` member
-    rather than a bare int — see that module for why numbers are never
-    hardcoded. A None ``database`` returns the base URL.
-
-    Example:
-        >>> from robosystems.config.valkey_registry import ValkeyDatabase
-        >>> env.get_valkey_url(ValkeyDatabase.AUTH)
-        'redis://localhost:6379/0'
+    """Valkey URL for ``database`` (prefer a ValkeyDatabase member over an
+    int); None returns the base URL.
     """
     if database is None:
       return cls.VALKEY_URL
 
-    # Import here to avoid circular dependency
     from .valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 
-    # Handle both int and enum
     if isinstance(database, ValkeyDatabase):
       return ValkeyURLBuilder.build_url(cls.VALKEY_URL, database)
     else:
-      # Create a temporary enum value for the integer
       return f"{cls.VALKEY_URL.rstrip('/')}/{database}"
 
 
-# ==========================================================================
-# SINGLETON INSTANCE
-# ==========================================================================
-
-# Create a singleton instance for easy import
 env = EnvConfig()

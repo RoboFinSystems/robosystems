@@ -28,9 +28,6 @@ class ValkeyDatabase(IntEnum):
   Redis exposes databases 0-15; the unused tail is free for new subsystems.
   """
 
-  # =========================================================================
-  # APPLICATION DATABASES (0-4, ordered by system criticality)
-  # =========================================================================
   AUTH = 0  # JWT tokens, API key cache, sessions
   RATE_LIMITS = 1  # Burst protection, download limits
   GRAPH_ROUTING = 2  # Graph client factory (URLs, health)
@@ -44,7 +41,6 @@ class ValkeyDatabase(IntEnum):
   def get_next_available(cls) -> int:
     """Get the lowest unallocated database number, or raise if 0-15 are full."""
     used_numbers = {db.value for db in cls}
-    # Redis supports databases 0-15
     for i in range(16):
       if i not in used_numbers:
         return i
@@ -57,9 +53,8 @@ class ValkeyDatabase(IntEnum):
 
 
 class ValkeyURLBuilder:
-  """Helper class to build Valkey/Redis URLs with proper database numbers."""
+  """Builds Valkey/Redis URLs with database numbers, auth and TLS."""
 
-  # Cache for the base Valkey URL and auth token
   _cached_base_url: str | None = None
   _cache_environment: str | None = None
   _cached_auth_token: str | None = None
@@ -92,7 +87,6 @@ class ValkeyURLBuilder:
       if not stack_name:
         return None
 
-      # Fetch from CloudFormation
       region = os.getenv("AWS_REGION", "us-east-1")
       cf_client = boto3.client("cloudformation", region_name=region)
       response = cf_client.describe_stacks(StackName=stack_name)
@@ -112,14 +106,8 @@ class ValkeyURLBuilder:
 
   @staticmethod
   def get_base_url() -> str:
-    """
-    Get the base Valkey URL for the current environment.
-
-    Resolution order, cached per environment:
-
-    1. prod/staging: CloudFormation stack outputs
-    2. the ``VALKEY_URL`` environment variable
-    3. ``redis://localhost:6379``
+    """Base URL, cached per environment: CloudFormation output (prod/staging),
+    then ``VALKEY_URL``, then localhost.
     """
     current_env = os.getenv("ENVIRONMENT", "dev").lower()
 
@@ -136,7 +124,6 @@ class ValkeyURLBuilder:
         ValkeyURLBuilder._cache_environment = current_env
         return url
 
-    # Fall back to environment variable
     url = os.getenv("VALKEY_URL", "redis://localhost:6379")
     ValkeyURLBuilder._cached_base_url = url
     ValkeyURLBuilder._cache_environment = current_env
@@ -144,14 +131,8 @@ class ValkeyURLBuilder:
 
   @staticmethod
   def get_auth_token() -> str | None:
-    """
-    Get the Valkey auth token for the current environment.
-
-    Resolution order, cached per environment:
-
-    1. prod/staging: AWS Secrets Manager
-    2. the ``VALKEY_AUTH_TOKEN`` environment variable
-    3. None, meaning unauthenticated
+    """Auth token, cached per environment: Secrets Manager (prod/staging), then
+    ``VALKEY_AUTH_TOKEN``, else None (unauthenticated).
     """
     current_env = os.getenv("ENVIRONMENT", "dev").lower()
 
@@ -171,10 +152,8 @@ class ValkeyURLBuilder:
           ValkeyURLBuilder._auth_token_environment = current_env
           return token
       except (ImportError, Exception):
-        # Secrets Manager not available or error occurred, fall back to env var
         pass
 
-    # Fall back to environment variable
     token = os.getenv("VALKEY_AUTH_TOKEN", "")
     if token:
       ValkeyURLBuilder._cached_auth_token = token
@@ -194,55 +173,30 @@ class ValkeyURLBuilder:
     use_tls: bool | None = None,
     include_ssl_params: bool = True,
   ) -> str:
-    """
-    Build a complete Valkey/Redis URL with the specified database.
+    """Build a Valkey/Redis URL for ``database``.
 
     A None ``base_url`` auto-discovers via :meth:`get_base_url`. A None
-    ``use_tls`` turns TLS on only when an auth token is present in
-    prod/staging. Any database number or credentials already on ``base_url``
-    are stripped and replaced.
-
-    Examples:
-        >>> # Auto-discover base URL (recommended for prod/staging)
-        >>> ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH)
-        'redis://valkey.us-east-1.cache.amazonaws.com:6379/0'
-
-        >>> # With authentication (production)
-        >>> ValkeyURLBuilder.build_url(
-        ...     database=ValkeyDatabase.AUTH,
-        ...     auth_token="secret_token_here"
-        ... )
-        'rediss://default:secret_token_here@valkey.us-east-1.cache.amazonaws.com:6379/0?ssl_cert_reqs=CERT_NONE'
-
-        >>> # Explicit base URL (for testing or dev)
-        >>> ValkeyURLBuilder.build_url("redis://localhost:6379", ValkeyDatabase.AUTH)
-        'redis://localhost:6379/0'
+    ``use_tls`` enables TLS only with an auth token in prod/staging. Any
+    database number or credentials already on ``base_url`` are replaced.
     """
     if base_url is None:
       base_url = ValkeyURLBuilder.get_base_url()
 
-    # Auto-detect TLS if not specified - only use TLS in prod/staging with auth
     if use_tls is None:
       environment = os.getenv("ENVIRONMENT", "dev").lower()
       use_tls = auth_token is not None and environment in ["prod", "staging"]
 
     base_url = base_url.rstrip("/")
 
-    # Remove any existing database number
     if "/" in base_url.split("://")[-1]:
-      # Has a database number already, remove it
       base_url = base_url.rsplit("/", 1)[0]
 
-    # Parse the URL to handle authentication injection
     if "://" in base_url:
       protocol, host_part = base_url.split("://", 1)
 
-      # Handle existing authentication in URL
       if "@" in host_part:
-        # URL already has auth, strip it to avoid conflicts
         host_part = host_part.split("@")[-1]
 
-      # Determine protocol
       if use_tls:
         protocol = "rediss"
       elif use_valkey_prefix:
@@ -250,10 +204,7 @@ class ValkeyURLBuilder:
       else:
         protocol = "redis"
 
-      # Build the URL with optional authentication
       if auth_token:
-        # Use 'default' as username for Redis/Valkey AUTH
-        # URL-encode the auth token to handle special characters
         encoded_token = quote(auth_token, safe="")
         base_url = f"{protocol}://default:{encoded_token}@{host_part}"
       else:
@@ -267,7 +218,6 @@ class ValkeyURLBuilder:
         prefix = "redis://"
 
       if auth_token:
-        # URL-encode the auth token to handle special characters
         encoded_token = quote(auth_token, safe="")
         base_url = f"{prefix}default:{encoded_token}@{base_url}"
       else:
@@ -286,21 +236,7 @@ class ValkeyURLBuilder:
     base_url: str | None = None,
     include_ssl_params: bool = True,
   ) -> str:
-    """
-    Build a Valkey URL with auto-detected authentication.
-
-    Looks up the environment's auth token, then picks ``rediss://`` when one
-    exists and ``redis://`` when it does not.
-
-    Examples:
-        >>> # Production (with auth)
-        >>> ValkeyURLBuilder.build_authenticated_url(ValkeyDatabase.AUTH)
-        'rediss://default:secret_token@valkey.us-east-1.cache.amazonaws.com:6379/0?ssl_cert_reqs=CERT_NONE'
-
-        >>> # Development (no auth)
-        >>> ValkeyURLBuilder.build_authenticated_url(ValkeyDatabase.AUTH)
-        'redis://localhost:6379/0'
-    """
+    """:meth:`build_url` with the environment's auth token."""
     auth_token = ValkeyURLBuilder.get_auth_token()
     return ValkeyURLBuilder.build_url(
       base_url=base_url,
@@ -311,32 +247,19 @@ class ValkeyURLBuilder:
 
   @staticmethod
   def parse_url(url: str) -> tuple[str, int | None]:
-    """
-    Split a Valkey/Redis URL into ``(base_url, database_number)``.
-
-    The database number is None when the URL carries none.
-
-    Example:
-        >>> ValkeyURLBuilder.parse_url("redis://localhost:6379/2")
-        ('redis://localhost:6379', 2)
-    """
+    """Split a URL into ``(base_url, database_number or None)``."""
     if "/" in url.split("://")[-1]:
       base_url, db_part = url.rsplit("/", 1)
       try:
-        db_num = int(db_part.split("?")[0])  # Handle query params
+        db_num = int(db_part.split("?")[0])
         return base_url, db_num
       except ValueError:
         return url, None
     return url, None
 
 
-# =============================================================================
-# USAGE DOCUMENTATION
-# =============================================================================
-
-
 def get_database_purpose(database: ValkeyDatabase) -> str:
-  """Get a human-readable description of what a database is used for."""
+  """Human-readable purpose of a database."""
   descriptions = {
     ValkeyDatabase.AUTH: "JWT tokens, API key cache, and sessions",
     ValkeyDatabase.RATE_LIMITS: "Burst protection and download rate limits",
@@ -411,28 +334,20 @@ def get_redis_connection_params(environment: str | None = None) -> dict[str, Any
 
   params: dict[str, Any] = {
     "decode_responses": True,
-    "socket_connect_timeout": 5,  # 5 second connection timeout
-    "socket_timeout": 5,  # 5 second operation timeout
+    "socket_connect_timeout": 5,
+    "socket_timeout": 5,
     "retry_on_timeout": True,
     "retry_on_error": [
       redis_exceptions.ConnectionError,
       redis_exceptions.TimeoutError,
     ],
-    "health_check_interval": 30,  # Health check every 30 seconds
+    "health_check_interval": 30,
   }
 
-  # In production/staging with ElastiCache TLS
   if environment in ["prod", "staging"]:
-    # SECURITY NOTE: ElastiCache uses self-signed certificates that cannot be validated
-    # against a CA. This is AWS's design for ElastiCache. The connection is still
-    # encrypted with TLS, but we cannot verify the certificate authenticity.
-    # This is acceptable because:
-    # 1. Connection is within AWS VPC (not over public internet)
-    # 2. ElastiCache endpoint DNS is managed by AWS
-    # 3. Network security groups restrict access
-
-    # Use individual SSL parameters (redis-py async doesn't support ssl_context)
-    # Note: ssl_cert_reqs must be lowercase 'none' for redis-py (not ssl.CERT_NONE)
+    # ElastiCache TLS certificates cannot be validated against a CA; accepted
+    # because traffic stays in the VPC behind security groups. redis-py async
+    # takes no ssl_context, and wants lowercase 'none'.
     params["ssl_cert_reqs"] = "none"
     params["ssl_check_hostname"] = False
 
@@ -442,20 +357,10 @@ def get_redis_connection_params(environment: str | None = None) -> dict[str, Any
 def create_redis_client(
   database: ValkeyDatabase, decode_responses: bool = True, **kwargs
 ) -> Any:  # Returns redis.Redis but avoid import here
-  """Create a Redis client, wiring up auth and TLS for the environment.
-
-  Prefer this over building a client by hand — it is what keeps database
-  numbers, credentials, and ElastiCache TLS consistent.
-
-  Example:
-      >>> from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
-      >>> client = create_redis_client(ValkeyDatabase.AUTH)
-      >>> client.set("key", "value")
-  """
+  """Create a Redis client with the environment's auth and TLS."""
   import redis
 
-  # Build authenticated URL WITHOUT SSL params in query string
-  # (SSL params will be passed as connection parameters instead)
+  # SSL goes in connection params, not the query string.
   url = ValkeyURLBuilder.build_authenticated_url(database, include_ssl_params=False)
 
   params = get_redis_connection_params()
@@ -469,17 +374,9 @@ def create_redis_client(
 def create_async_redis_client(
   database: ValkeyDatabase, decode_responses: bool = True, **kwargs
 ) -> Any:  # Returns redis.asyncio.Redis but avoid import here
-  """Create an async Redis client, wiring up auth and TLS for the environment.
-
-  Example:
-      >>> from robosystems.config.valkey_registry import ValkeyDatabase, create_async_redis_client
-      >>> client = create_async_redis_client(ValkeyDatabase.AUTH)
-      >>> await client.set("key", "value")
-  """
+  """Async counterpart of :func:`create_redis_client`."""
   import redis.asyncio as redis_async
 
-  # Build authenticated URL WITHOUT SSL params in query string
-  # (SSL params will be passed as connection parameters instead)
   url = ValkeyURLBuilder.build_authenticated_url(database, include_ssl_params=False)
 
   params = get_redis_connection_params()
