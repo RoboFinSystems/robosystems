@@ -201,3 +201,22 @@ class TestSlowReports:
   def test_a_week_too_slow_to_generate_raises(self):
     with pytest.raises(requests.exceptions.ReadTimeout):
       fetch_journal_report(_SlowIntuit(slow_over=0), "2023-01-01", "2023-01-31")
+
+
+@pytest.mark.unit
+class TestTruncationSignalReReview:
+  def test_a_memo_quoting_the_notice_is_not_truncation(self):
+    rows = _transaction(date(2024, 1, 2))
+    rows[0]["ColData"][4]["value"] = "note: unable to display more data in QBO"
+    assert journal_report_truncated({"Rows": {"Row": rows}}) is False
+
+  def test_the_gate_counts_rows_at_full_width(self):
+    """Narrow Summary rows must not hide a cut at Intuit's 400k-cell cap."""
+    rows: list[dict] = []
+    day = date(2020, 1, 1)
+    while len(rows) * 8 < 400_000:
+      rows.extend(_transaction(day)[:2])
+      rows.append({"Summary": {"ColData": [{"value": ""}]}})
+      day += timedelta(days=1)
+    rows.append(_line(day.isoformat(), "cut", "10", dr="1"))
+    assert journal_report_truncated({"Rows": {"Row": rows}}) is True

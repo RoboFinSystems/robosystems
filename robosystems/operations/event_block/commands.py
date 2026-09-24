@@ -1093,7 +1093,8 @@ def execute_event_block(
   if isinstance(qb_client, QBAuthFailedError):
     # This run already failed to authenticate; asking Intuit again per entry
     # would repeat the same refresh (and, for invalid_grant, a dead token).
-    raise qb_client
+    # Fresh traceback: re-raising one object keeps growing its frames.
+    raise qb_client.with_traceback(None)
   if qb_client is None:
     try:
       qb_client = QBClient(

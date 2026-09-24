@@ -68,27 +68,30 @@ _NEAR_CAP_CELLS = 300_000
 def journal_report_truncated(report: dict[str, Any] | None) -> bool:
   """True when the report shows a sign of Intuit's cell cap.
 
-  The notice text anywhere in the report is truncation. So is a final
+  The notice text anywhere outside a transaction line is truncation (a
+  line's memo is user text, and could contain it). So is a final
   transaction group that never reaches its ``Summary`` row, but only in a
   report near the cap: every group of a complete report closes with one,
   and a false positive here would fail every sync.
   """
   if not report:
     return False
-  if _TRUNCATION_NOTICE in json.dumps(report).lower():
-    return True
   rows = (report.get("Rows") or {}).get("Row") or []
-  cells = 0
+  outside_rows = {k: v for k, v in report.items() if k != "Rows"}
+  if _TRUNCATION_NOTICE in json.dumps(outside_rows).lower():
+    return True
+  # Intuit's cap counts every row at the report's full width.
+  width = max(8, len((report.get("Columns") or {}).get("Column") or []))
   open_group = False
   for row in rows:
-    col_data = row.get("ColData") or []
-    cells += len(col_data)
+    is_line = "Summary" not in row and len(row.get("ColData") or []) >= 8
+    if not is_line and _TRUNCATION_NOTICE in json.dumps(row).lower():
+      return True
     if "Summary" in row:
-      cells += len((row.get("Summary") or {}).get("ColData") or [])
       open_group = False
-    elif len(col_data) >= 8:
+    elif is_line:
       open_group = True
-  return open_group and cells >= _NEAR_CAP_CELLS
+  return open_group and len(rows) * width >= _NEAR_CAP_CELLS
 
 
 def parse_journal_report(
