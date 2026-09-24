@@ -20,8 +20,6 @@ from robosystems.middleware.mcp import (
 )
 from robosystems.middleware.robustness.timeout_coordinator import TimeoutCoordinator
 
-MCP_AVAILABLE = False
-
 timeout_coordinator = TimeoutCoordinator()
 
 
@@ -157,7 +155,6 @@ class MCPHandler:
 
     self.graph_client = None
     self.mcp_tools: AdapterGraphMCPTools | None = None
-    self.database = None
     self._init_lock = asyncio.Lock()
     self._init_task = asyncio.create_task(self._init_async(repository_url))
 
@@ -432,7 +429,7 @@ class MCPHandler:
       )
 
   async def close(self):
-    """Close the MCP tools and database connections."""
+    """Close the MCP client."""
     if self._closed:
       return
 
@@ -444,15 +441,6 @@ class MCPHandler:
           logger.debug(f"Closed Graph client for graph {self.graph_id}")
         except Exception as e:
           error_msg = f"Failed to close Graph client for graph {self.graph_id}: {e}"
-          logger.error(error_msg, exc_info=True)
-          errors.append(error_msg)
-
-      if self.database:
-        try:
-          await self.database.close()
-          logger.debug(f"Closed direct database connection for graph {self.graph_id}")
-        except Exception as e:
-          error_msg = f"Failed to close database for graph {self.graph_id}: {e}"
           logger.error(error_msg, exc_info=True)
           errors.append(error_msg)
     finally:

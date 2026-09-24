@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from robosystems.operations.operators.base import GraphScope, matches_graph_scope
 
 # ── matches_graph_scope ──────────────────────────────────────────────────────
@@ -159,55 +157,6 @@ class TestOrchestratorScopeFiltering:
       agents = orch._get_all_operators()
       assert "platform" in agents
       assert "ledger" in agents
-
-  @pytest.mark.asyncio
-  async def test_specific_agent_raises_for_out_of_scope(self):
-    from unittest.mock import MagicMock
-
-    from robosystems.operations.operators.base import (
-      Operator,
-      OperatorCapability,
-      OperatorResult,
-      OperatorSpec,
-    )
-    from robosystems.operations.operators.orchestrator import OperatorOrchestrator
-
-    class ScopedAgent(Operator):
-      spec = OperatorSpec(
-        name="Scoped",
-        description="Scoped",
-        capabilities=[OperatorCapability.CUSTOM],
-        graph_scope=GraphScope(schema_extension="roboledger"),
-      )
-
-      async def run(self, ctx):
-        return OperatorResult(content="ok")
-
-    user = MagicMock()
-    user.id = "user1"
-
-    with (
-      patch(
-        "robosystems.operations.operators.orchestrator.get_operator",
-        return_value=ScopedAgent(),
-      ),
-      patch(
-        "robosystems.middleware.mcp.tools.manager.resolve_schema_extensions",
-        return_value=[],
-      ),
-    ):
-      orch = OperatorOrchestrator("kg_no_ledger", user)
-      with pytest.raises(ValueError, match="not available for graph"):
-        await orch._route_to_specific_operator(
-          query="test",
-          operator_type="scoped",
-          mode=OperatorSpec.__dataclass_fields__["supported_modes"].default_factory()[
-            0
-          ],
-          history=None,
-          context={},
-          stream_callback=None,
-        )
 
 
 # ── list_operators scope metadata ───────────────────────────────────────────────

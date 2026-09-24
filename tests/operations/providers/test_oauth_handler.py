@@ -416,22 +416,3 @@ class TestOAuthHandlerStoreTokens:
 
     mock_existing.update_credentials.assert_called_once()
     mock_existing.update_expiry.assert_not_called()
-
-
-@pytest.mark.unit
-class TestOAuthHandlerValidateConnection:
-  @pytest.mark.asyncio
-  async def test_returns_true_with_token(self):
-    handler = OAuthHandler(MockProvider())
-
-    result = await handler.validate_connection("some_access_token")
-
-    assert result is True
-
-  @pytest.mark.asyncio
-  async def test_returns_false_without_token(self):
-    handler = OAuthHandler(MockProvider())
-
-    result = await handler.validate_connection("")
-
-    assert result is False

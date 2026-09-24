@@ -355,49 +355,6 @@ class TestCallMcpToolStrategySelection:
 
 
 @pytest.mark.unit
-class TestMCPClientDetection:
-  """Test MCP client detection logic."""
-
-  def test_detects_mcp_client_from_user_agent(self):
-    """Test MCP client detection from user-agent header."""
-    from robosystems.routers.graphs.mcp.strategies import MCPClientDetector
-
-    headers = {"user-agent": "robosystems-mcp/1.0.0"}
-    info = MCPClientDetector.detect_client_type(headers)
-
-    assert info["is_mcp_client"] is True
-    assert info["supports_sse"] is True
-    assert info["supports_ndjson"] is True
-
-  def test_detects_mcp_client_from_x_mcp_client_header(self):
-    """Test MCP client detection from X-MCP-Client header."""
-    from robosystems.routers.graphs.mcp.strategies import MCPClientDetector
-
-    headers = {"x-mcp-client": "robosystems-mcp/2.0"}
-    info = MCPClientDetector.detect_client_type(headers)
-
-    assert info["is_mcp_client"] is True
-
-  def test_non_mcp_client_detected(self):
-    """Test non-MCP client detection."""
-    from robosystems.routers.graphs.mcp.strategies import MCPClientDetector
-
-    headers = {"user-agent": "Mozilla/5.0"}
-    info = MCPClientDetector.detect_client_type(headers)
-
-    assert info["is_mcp_client"] is False
-
-  def test_empty_headers_non_mcp(self):
-    """Test empty headers result in non-MCP client."""
-    from robosystems.routers.graphs.mcp.strategies import MCPClientDetector
-
-    headers = {}
-    info = MCPClientDetector.detect_client_type(headers)
-
-    assert info["is_mcp_client"] is False
-
-
-@pytest.mark.unit
 class TestMCPToolAnalyzer:
   """Test the MCPToolAnalyzer analysis logic."""
 

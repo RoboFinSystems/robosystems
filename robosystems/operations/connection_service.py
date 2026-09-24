@@ -200,62 +200,6 @@ class ConnectionService:
         session.close()
 
   @staticmethod
-  def update_connection_credentials(
-    connection_id: str,
-    user_id: str,
-    credentials: dict[str, Any],
-    db_session: Session | None = None,
-  ) -> bool:
-    """Replace a connection's credentials, creating the row if absent."""
-    session = db_session or SessionFactory()
-    session_created = db_session is None
-
-    try:
-      cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
-      if cred:
-        cred.update_credentials(credentials, session)
-      else:
-        ConnectionCredentials.create(
-          connection_id=connection_id,
-          provider="",
-          user_id=user_id,
-          credentials=credentials,
-          session=session,
-        )
-      return True
-    except Exception:
-      logger.error("Failed to update credentials for %s", connection_id, exc_info=True)
-      return False
-    finally:
-      if session_created:
-        session.close()
-
-  @staticmethod
-  async def update_last_sync(
-    connection_id: str,
-    graph_id: str | None = None,
-    db_session: Session | None = None,
-  ) -> bool:
-    """Stamp `last_sync` on the connection. `graph_id` is accepted but unused."""
-    session = db_session or SessionFactory()
-    session_created = db_session is None
-
-    try:
-      conn = Connection.get_by_id(connection_id, session)
-      if conn:
-        conn.update_last_sync(session)
-        logger.info(f"Updated last_sync for connection {connection_id}")
-        return True
-      logger.warning(f"Connection {connection_id} not found for last_sync update")
-      return False
-    except Exception:
-      logger.error("Failed to update last_sync for %s", connection_id, exc_info=True)
-      return False
-    finally:
-      if session_created:
-        session.close()
-
-  @staticmethod
   async def delete_connection(
     connection_id: str,
     user_id: str,
@@ -358,31 +302,6 @@ class ConnectionService:
         session.close()
 
   @staticmethod
-  async def mark_connection_error(
-    connection_id: str,
-    graph_id: str | None = None,
-    db_session: Session | None = None,
-  ) -> bool:
-    session = db_session or SessionFactory()
-    session_created = db_session is None
-
-    try:
-      conn = Connection.get_by_id(connection_id, session)
-      if conn:
-        conn.update_status("error", session)
-        logger.warning(f"Marked connection {connection_id} with error status")
-        return True
-      return False
-    except Exception:
-      logger.error(
-        "Failed to mark connection error for %s", connection_id, exc_info=True
-      )
-      return False
-    finally:
-      if session_created:
-        session.close()
-
-  @staticmethod
   def mark_connection_needs_reauth_sync(
     connection_id: str,
     db_session: Session | None = None,
@@ -409,31 +328,6 @@ class ConnectionService:
         "Failed to mark connection needs_reauth for %s",
         connection_id,
         exc_info=True,
-      )
-      return False
-    finally:
-      if session_created:
-        session.close()
-
-  @staticmethod
-  async def mark_connection_connected(
-    connection_id: str,
-    graph_id: str | None = None,
-    db_session: Session | None = None,
-  ) -> bool:
-    session = db_session or SessionFactory()
-    session_created = db_session is None
-
-    try:
-      conn = Connection.get_by_id(connection_id, session)
-      if conn:
-        conn.update_status("connected", session)
-        logger.info(f"Marked connection {connection_id} as connected")
-        return True
-      return False
-    except Exception:
-      logger.error(
-        "Failed to mark connection connected for %s", connection_id, exc_info=True
       )
       return False
     finally:

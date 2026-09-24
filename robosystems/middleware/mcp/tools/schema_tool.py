@@ -24,25 +24,22 @@ class SchemaTool(BaseTool):
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "get-graph-schema",
-      "description": """Get the complete database schema showing all node types, properties, and relationships.
+      "description": """Get the graph schema: each node table with its property names, and each relationship table with its source and target node.
 
 **WHEN TO USE:**
-- Always start with this tool to understand the data structure
-- Before writing queries to verify property names and relationships
+- Start here to understand the data structure
+- Before writing queries, to check property names and relationship directions
 - When exploring what data is available in the graph
-- To understand custom schema definitions
 
-**RETURNS:** Comprehensive schema information including:
-- **Node Types**: Label, properties with data types, primary keys
-- **Relationships**: Label, properties, source/target nodes
-- **Property Details**: Name, data type (STRING, INT64, DOUBLE, etc.), nullable flags
-- **Metadata**: Descriptions and additional context when available
+**RETURNS:** A list of tables, nodes first, then relationships:
+- **Node**: `label`, `properties` (names only; the core node types list their key properties), and a `description` / `comment` when one exists
+- **Relationship**: `label`, `from_node`, `to_node`, and a `description` / `comment` when one exists
+
+Property data types, keys and row counts are not included.
 
 **NOTES:**
-- Look for node labels ending in specific patterns (Entity, Fact, etc.)
 - Check relationship direction: ->() vs <-()
-- Property names are case-sensitive
-- Use count properties to understand data volume""",
+- Property names are case-sensitive""",
       "inputSchema": {
         "type": "object",
         "properties": {},

@@ -9,10 +9,8 @@ import pytest
 from robosystems.config.graph_tier import GraphTier
 from robosystems.models.core import (
   GraphCredits,
-  GraphCreditTransaction,
   User,
 )
-from robosystems.models.core.graph.graph_credits import CreditTransactionType
 from robosystems.operations.graph.credit_service import CreditService
 
 
@@ -130,16 +128,12 @@ class TestCreditSystemIntegration:
           "robosystems.operations.graph.credit_service.get_operation_cost",
           return_value=Decimal("10.0"),
         ):
-          # Mock _get_consumed_this_month to return consumed credits
-          with patch.object(
-            credit_service, "_get_consumed_this_month", return_value=Decimal("100.0")
-          ):
-            # Consume AI credits
-            result = credit_service.consume_credits(
-              graph_id=graph_id,
-              operation_type="agent_call",
-              base_cost=Decimal("100.0"),
-            )
+          # Consume AI credits
+          result = credit_service.consume_credits(
+            graph_id=graph_id,
+            operation_type="agent_call",
+            base_cost=Decimal("100.0"),
+          )
 
         # Verify credits consumed (no multipliers in simplified model)
         assert result["success"] is True
@@ -205,53 +199,6 @@ class TestCreditSystemIntegration:
       assert result["has_sufficient_credits"] is True
       assert result["available_credits"] == 100.0
       assert result["required_credits"] == 50.0  # No multiplier in simplified model
-
-  def test_credit_transaction_history(self, credit_service, mock_session):
-    """Test retrieving credit transaction history."""
-    graph_id = "kg1a2b3c"
-
-    # Create mock transactions
-    mock_transactions = []
-    for i, (type_val, amount, desc) in enumerate(
-      [
-        (CreditTransactionType.ALLOCATION, 1000.0, "Monthly allocation"),
-        (CreditTransactionType.CONSUMPTION, -10.0, "API call"),
-        (CreditTransactionType.BONUS, 100.0, "Support credit"),
-      ]
-    ):
-      transaction = Mock(spec=GraphCreditTransaction)
-      transaction.id = f"tx_{i}"
-      transaction.transaction_type = type_val.value
-      transaction.amount = Decimal(str(amount))
-      transaction.description = desc
-      transaction.metadata = {}
-      transaction.get_metadata = Mock(return_value={})
-      transaction.created_at = datetime.now(UTC)
-      mock_transactions.append(transaction)
-
-    # Mock GraphCredits
-    mock_credits = Mock(spec=GraphCredits)
-    mock_credits.id = "gc_123"
-
-    # Mock GraphCredits.get_by_graph_id
-    with patch.object(GraphCredits, "get_by_graph_id", return_value=mock_credits):
-      # Mock GraphCreditTransaction.get_transactions_for_graph
-      with patch.object(
-        GraphCreditTransaction,
-        "get_transactions_for_graph",
-        return_value=mock_transactions,
-      ):
-        # Get transactions
-        transactions = credit_service.get_credit_transactions(
-          graph_id=graph_id, limit=10
-        )
-
-    # Verify transaction format
-    assert len(transactions) == 3
-    assert transactions[0]["type"] == CreditTransactionType.ALLOCATION.value
-    assert transactions[0]["amount"] == 1000.0
-    assert transactions[1]["type"] == CreditTransactionType.CONSUMPTION.value
-    assert transactions[1]["amount"] == -10.0
 
   def test_credit_summary_with_caching(self, credit_service, mock_session):
     """Test credit summary retrieval with caching."""

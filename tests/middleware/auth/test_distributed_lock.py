@@ -422,55 +422,6 @@ class TestSSOTokenLockManager:
     # Verify security event logged
     mock_audit_logger.log_security_event.assert_called()
 
-  @patch("robosystems.middleware.auth.distributed_lock.SecurityAuditLogger")
-  def test_cleanup_expired_locks(self, mock_audit_logger, sso_lock_manager, mock_redis):
-    """Test cleanup of expired locks."""
-    # Setup mock data
-    mock_redis.keys.side_effect = [
-      [b"lock:sso_token:abc", b"lock:sso_token:def"],  # Token locks
-      [b"lock:sso_session:123", b"lock:sso_session:456"],  # Session locks
-    ]
-    # TTL returns: -1 means no expiry, -2 means doesn't exist, >0 means valid
-    mock_redis.ttl.side_effect = [-1, 30, -1, -2]  # First and third have no expiry
-    mock_redis.delete.return_value = 1
-
-    stats = sso_lock_manager.cleanup_expired_locks()
-
-    assert stats["sso_token_locks_cleaned"] == 1
-    assert stats["sso_session_locks_cleaned"] == 1
-    assert stats["total_locks_cleaned"] == 2
-
-    # Verify delete was called for expired locks
-    assert mock_redis.delete.call_count == 2
-
-    # Verify security logging
-    mock_audit_logger.log_security_event.assert_called_once()
-
-  @patch("robosystems.middleware.auth.distributed_lock.SecurityAuditLogger")
-  def test_cleanup_redis_error(self, mock_audit_logger, sso_lock_manager, mock_redis):
-    """Test cleanup with Redis error."""
-    mock_redis.keys.side_effect = RedisError("Connection lost")
-
-    stats = sso_lock_manager.cleanup_expired_locks()
-
-    assert "error" in stats
-    assert stats["total_locks_cleaned"] == 0
-
-    # Verify error logging
-    mock_audit_logger.log_security_event.assert_called_once()
-    call_args = mock_audit_logger.log_security_event.call_args
-    assert call_args[1]["details"]["action"] == "sso_lock_cleanup_failed"
-
-  def test_cleanup_no_expired_locks(self, sso_lock_manager, mock_redis):
-    """Test cleanup when no locks are expired."""
-    mock_redis.keys.side_effect = [[], []]  # No locks found
-
-    stats = sso_lock_manager.cleanup_expired_locks()
-
-    assert stats["total_locks_cleaned"] == 0
-    assert stats["sso_token_locks_cleaned"] == 0
-    assert stats["sso_session_locks_cleaned"] == 0
-
 
 class TestGetSSOLockManager:
   """Tests for get_sso_lock_manager function."""

@@ -8,7 +8,6 @@ from DynamoDB); and the shared replica ALB (shared reads).
 import asyncio
 import json
 import random
-import threading
 import time
 from enum import Enum
 from typing import Any
@@ -177,12 +176,6 @@ class GraphClientFactory:
 
   _connect_timeout = GRAPH_CONNECT_TIMEOUT
   _read_timeout = GRAPH_READ_TIMEOUT
-
-  _connection_pools: dict[str, httpx.AsyncClient] = {}
-  _pool_stats: dict[str, dict[str, Any]] = {}
-
-  _redis_pool: redis.ConnectionPool | None = None
-  _redis_client_lock = threading.Lock()
 
   _master_circuit_breaker = CircuitBreaker(
     failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
@@ -598,107 +591,6 @@ class GraphClientFactory:
 
     return client
 
-  @classmethod
-  def create_client_sync(
-    cls,
-    graph_id: str,
-    operation_type: str = "read",
-    environment: str | None = None,
-    tier: GraphTier | None = None,
-  ) -> GraphClient:
-    """Synchronous wrapper for :meth:`create_client`.
-
-    Only valid outside a running event loop; called from async code it raises
-    rather than deadlocking on a nested ``asyncio.run``.
-    """
-    try:
-      asyncio.get_running_loop()
-      raise RuntimeError(
-        "create_client_sync() cannot be called from an async context. "
-        "Use 'await get_graph_client(graph_id)' or "
-        "'await GraphClientFactory.create_client(graph_id)' instead. "
-        "For sync contexts, wrap with asyncio.run()."
-      )
-    except RuntimeError as e:
-      if "no running event loop" in str(e).lower():
-        return asyncio.run(
-          cls.create_client(graph_id, operation_type, environment, tier)
-        )
-      else:
-        raise
-
-  @classmethod
-  def get_pool_statistics(cls) -> dict[str, Any]:
-    """Get per-pool request counts and failure rates plus circuit-breaker state."""
-    stats = {
-      "pools": {},
-      "circuit_breakers": {
-        "master": {
-          "is_open": cls._master_circuit_breaker.is_open,
-          "failure_count": cls._master_circuit_breaker.failure_count,
-          "last_failure": cls._master_circuit_breaker.last_failure_time,
-        },
-      },
-      "total_pools": len(cls._connection_pools),
-    }
-
-    for url, pool_stat in cls._pool_stats.items():
-      failure_rate = 0
-      if pool_stat.get("requests", 0) > 0:
-        failure_rate = pool_stat.get("failures", 0) / pool_stat["requests"]
-
-      stats["pools"][url] = {
-        "created_at": pool_stat.get("created_at"),
-        "requests": pool_stat.get("requests", 0),
-        "failures": pool_stat.get("failures", 0),
-        "failure_rate": round(failure_rate, 3),
-        "is_active": url in cls._connection_pools,
-      }
-
-    return stats
-
-  @classmethod
-  async def cleanup(cls):
-    """Close all pools and reset the circuit breakers.
-
-    Every step swallows its own errors so one bad pool cannot abort shutdown.
-    """
-    try:
-      stats = cls.get_pool_statistics()
-      logger.info(
-        f"Cleaning up GraphClientFactory: {stats['total_pools']} pools active",
-        extra={"pool_stats": stats},
-      )
-    except Exception as e:
-      logger.warning(f"Error getting pool statistics during cleanup: {e}")
-
-    for url, client in cls._connection_pools.items():
-      try:
-        await client.aclose()
-        logger.debug(f"Closed connection pool for {url}")
-      except Exception as e:
-        logger.warning(f"Error closing connection pool for {url}: {e}")
-
-    cls._connection_pools.clear()
-    cls._pool_stats.clear()
-
-    with cls._redis_client_lock:
-      if cls._redis_pool:
-        try:
-          await cls._redis_pool.disconnect()
-          logger.debug("Closed Redis connection pool")
-        except Exception as e:
-          logger.warning(f"Error closing Redis connection pool: {e}")
-        finally:
-          cls._redis_pool = None
-
-    cls._master_circuit_breaker = CircuitBreaker(
-      failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
-      timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
-    )
-
-    logger.info("GraphClientFactory cleanup completed")
-
 
 async def get_graph_client(
   graph_id: str,
@@ -708,18 +600,6 @@ async def get_graph_client(
 ) -> GraphClient:
   """Get a routed graph client. Preferred entry point in async contexts."""
   return await GraphClientFactory.create_client(
-    graph_id, operation_type, environment, tier
-  )
-
-
-def get_graph_client_sync(
-  graph_id: str,
-  operation_type: str = "read",
-  environment: str | None = None,
-  tier: GraphTier | None = None,
-) -> GraphClient:
-  """Get a routed graph client from sync code (no event loop running)."""
-  return GraphClientFactory.create_client_sync(
     graph_id, operation_type, environment, tier
   )
 

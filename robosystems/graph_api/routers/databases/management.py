@@ -37,10 +37,8 @@ async def create_database(
   """
   Create a new database with schema.
 
-  Creates a new LadybugDB database with the specified schema type.
-  Different node types support different schema types:
-  - Writer nodes: entity, custom
-  - Shared master nodes: shared (requires repository_name)
+  Creates a new LadybugDB database with the specified schema type. The
+  `shared` schema type requires `repository_name`. Refused on read-only nodes.
   """
   if ladybug_service.read_only:
     raise HTTPException(

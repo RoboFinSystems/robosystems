@@ -106,10 +106,7 @@ class BaseAnalyzer(ABC):
 
     if "COUNT(" in query_upper and "GROUP BY" not in query_upper:
       return "small"
-    elif "LIMIT" not in query_upper:
-      return "large"
-    else:
-      return "medium"
+    return "large"
 
 
 class BaseClientDetector:

@@ -265,18 +265,6 @@ def create_universal_repository(
   return UniversalRepository(repository)
 
 
-async def create_universal_repository_with_auth(
-  graph_id: str, current_user, operation_type: str = "write"
-) -> UniversalRepository:
-  """Build a `UniversalRepository`, checking the user's graph access first."""
-  from .dependencies import get_graph_repository_with_auth
-
-  repository = await get_graph_repository_with_auth(
-    graph_id, current_user, operation_type
-  )
-  return UniversalRepository(repository)
-
-
 def is_api_repository(
   repository: Repository | GraphClient | UniversalRepository,
 ) -> bool:

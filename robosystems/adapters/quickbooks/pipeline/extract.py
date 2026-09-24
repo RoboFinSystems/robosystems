@@ -41,10 +41,9 @@ def _assert_usd_only(
     codes = ", ".join(sorted(offending))
     raise MultiCurrencyNotSupportedError(
       f"QuickBooks realm {realm_id} contains transactions in non-USD "
-      f"currencies ({codes}). Multi-currency is not yet supported by the "
-      f"dbt mart pipeline; the data would silently coerce to USD and "
-      f"corrupt your reports. Contact RoboSystems to enable multi-currency "
-      f"support before re-syncing this realm."
+      f"currencies ({codes}). Multi-currency QuickBooks companies are not "
+      f"supported: the data would silently coerce to USD and corrupt your "
+      f"reports."
     )
 
 

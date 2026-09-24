@@ -82,30 +82,7 @@ def require_graph_extension_mcp(
   return meta
 
 
-def require_not_repository_mcp(
-  graph_id: str,
-  meta: GraphExtensionContext | None = None,
-) -> GraphExtensionContext:
-  """`require_graph_extension_mcp` without the extension check."""
-  if meta is None:
-    try:
-      meta = _load_with_short_lived_session(graph_id)
-    except Exception as exc:
-      raise MCPExtensionGateError(
-        code="access_denied",
-        message=f"Access denied to graph: {graph_id}",
-      ) from exc
-
-  if meta.is_repository or meta.graph_type == "repository":
-    raise MCPExtensionGateError(
-      code="repository_write_forbidden",
-      message="This operation is not available on repository graphs",
-    )
-  return meta
-
-
 __all__ = [
   "MCPExtensionGateError",
   "require_graph_extension_mcp",
-  "require_not_repository_mcp",
 ]

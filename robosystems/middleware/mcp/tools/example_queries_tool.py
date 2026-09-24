@@ -103,7 +103,7 @@ List of example queries with explanations, tailored to the actual schema present
           {
             "category": "exploration",
             "description": "Get sample nodes to understand structure",
-            "query": "MATCH (n) RETURN n LIMIT 5",
+            "query": f"MATCH (n:{node_types[0] if node_types else 'Node'}) RETURN n LIMIT 5",
             "explanation": "Returns full node objects to see all properties",
           }
         )
@@ -254,7 +254,7 @@ ORDER BY t.date DESC LIMIT 25""",
             {
               "category": "entity",
               "description": "Find entities by name pattern",
-              "query": "MATCH (e:Entity) WHERE e.name CONTAINS 'TECH' RETURN e.name, e.identifier",
+              "query": "MATCH (e:Entity) WHERE e.name CONTAINS 'TECH' RETURN e.name, e.identifier LIMIT 25",
               "explanation": "Use CONTAINS for substring matching",
             },
             {
@@ -267,21 +267,13 @@ ORDER BY t.date DESC LIMIT 25""",
         )
 
       if rel_types and (not category or category == "relationships"):
-        examples.extend(
-          [
-            {
-              "category": "relationships",
-              "description": "Find all relationships from a node",
-              "query": "MATCH (n)-[r]->(m) WHERE id(n) = 0 RETURN type(r) as rel_type, labels(m)[0] as target_type",
-              "explanation": "Discover what a node is connected to",
-            },
-            {
-              "category": "relationships",
-              "description": "Count relationships by type",
-              "query": "MATCH ()-[r]->() RETURN type(r) as rel_type, count(r) as count",
-              "explanation": "Understand the relationship distribution",
-            },
-          ]
+        examples.append(
+          {
+            "category": "relationships",
+            "description": "Find relationships from a node type",
+            "query": f"MATCH (n:{node_types[0] if node_types else 'Node'})-[r]->(m) RETURN type(r) as rel_type, labels(m)[0] as target_type LIMIT 25",
+            "explanation": "Discover what a node type is connected to",
+          }
         )
 
       # Anchored on one labelled set, never a `MATCH (n)` global scan, which
@@ -318,12 +310,6 @@ ORDER BY t.date DESC LIMIT 25""",
     except Exception as e:
       logger.warning(f"Error generating examples: {e}")
       examples = [
-        {
-          "category": "basic",
-          "description": "Count all nodes",
-          "query": "MATCH (n) RETURN COUNT(*) as total_nodes",
-          "explanation": "Basic query that should always work",
-        },
         {
           "category": "basic",
           "description": "Get sample data",

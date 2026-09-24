@@ -200,28 +200,6 @@ class TestSubgraphCreditSharing:
     assert result["new_balance"] == 10000.0
     assert parent_credits.current_balance == Decimal("10000")
 
-  def test_get_credit_transactions_with_subgraph_id(
-    self,
-    credit_service: CreditService,
-    parent_credits: GraphCredits,
-    parent_graph: Graph,
-  ):
-    subgraph_id = f"{parent_graph.graph_id}_dev"
-
-    credit_service.consume_credits(
-      graph_id=subgraph_id,
-      operation_type="ai_agent",
-      base_cost=Decimal("50"),
-      metadata={"description": "Subgraph transaction"},
-    )
-
-    transactions = credit_service.get_credit_transactions(
-      graph_id=subgraph_id,
-      limit=10,
-    )
-
-    assert len(transactions) > 0
-
   def test_insufficient_credits_error_with_subgraph(
     self,
     credit_service: CreditService,

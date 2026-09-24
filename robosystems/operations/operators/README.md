@@ -74,13 +74,12 @@ Import the module in `implementations/__init__.py` so the decorator runs.
 | `operator_context.py` | `OperatorContext` dataclass; `ToolAccess` / `ProgressReporter` protocols |
 | `operator_registry.py` | `@register_operator`, `get_operator()`, `list_operators()`, adapter loading |
 | `ai_client.py` / `tracked_ai.py` | Bedrock Converse client (one request shape for every model in the registry), and the tracking wrapper around it |
-| `credit_consumer.py` | `SessionCreditConsumer` (API), `FactoryCreditConsumer` (worker) |
+| `credit_consumer.py` | `FactoryCreditConsumer` (worker) |
 | `credit_preflight.py` | Pre-flight balance check before any Bedrock spend |
 | `tool_access.py` | `HttpToolAccess` (MCP over HTTP), `DirectToolAccess` (in-process) |
 | `tool_loop.py` | Bounded, model-driven tool-use loop shared by read/analysis operators |
-| `progress.py` | `CallbackProgress` (API), `OperationManagerProgress` (worker SSE) |
-| `orchestrator.py` | Operator routing and coordination |
-| `adapters/api.py` | `run_operator_api()` — builds an in-process context (the orchestrator's `route_query` and tests; no endpoint runs an operator in the API process) |
+| `progress.py` | `OperationManagerProgress` (worker SSE) |
+| `orchestrator.py` | Operator selection by confidence ranking |
 | `adapters/worker.py` | `run_operator_worker()` — builds the context for worker tasks and returns the response envelope |
 | `adapters/worker_task.py` | `@register_task("operator")` bridge into the worker consumer |
 | `implementations/` | `analyst.py`, `mapping/` (operator, prompt, constants) |
@@ -99,8 +98,6 @@ POST /v1/graphs/{g}/operator[/{type}]   (or auto-map-elements, or the QB first s
 ```
 
 The envelope (`content`, `operator_used`, `mode_used`, `metadata`, `tokens_used`, `confidence_score`, `execution_time`) is what `/status` returns under `result` and what the SSE `operation_completed` event carries; the operator's own metadata keys are also merged flat for the mapping operation's consumers. The worker re-runs the three gates with its own session before the first model call — a task can sit in the queue past a role change or a spent balance.
-
-`run_operator_api()` still builds an in-process context (`HttpToolAccess` + `SessionCreditConsumer` + `CallbackProgress`) for the orchestrator's `route_query` and for tests; no endpoint reaches it.
 
 **Pausing.** A worker task can stop at a checkpoint for a human decision (`BaseTask.pause_for_input` → status `awaiting_input` → `POST /v1/operations/{id}/resume`); see the worker README. No operator pauses yet — the primitive is there for the ones that will.
 

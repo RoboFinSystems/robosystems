@@ -7,7 +7,6 @@ from .base import GraphEngineInterface, GraphOperation
 from .repository import (
   UniversalRepository,
   create_universal_repository,
-  create_universal_repository_with_auth,
   get_repository_type,
   is_api_repository,
   is_direct_repository,
@@ -40,7 +39,6 @@ __all__ = [
   "RepositoryType",
   "UniversalRepository",
   "create_universal_repository",
-  "create_universal_repository_with_auth",
   "get_graph_repository",
   "get_graph_router",
   "get_repository_type",

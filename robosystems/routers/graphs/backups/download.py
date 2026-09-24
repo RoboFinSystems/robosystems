@@ -45,9 +45,7 @@ router = APIRouter()
     "The filename carries the extension listed as `download_extension` on the "
     "backup: `.lbug.zip` is a ZIP holding the LadybugDB database file "
     "`{graph_id}.lbug`; `.lbug.zst` (shared repository snapshots) is a single "
-    "zstd-compressed database file. Decompress the latter with "
-    "`zstd -d <file>.lbug.zst` (install zstd first: `brew install zstd`, "
-    "`apt-get install zstd`, or `dnf install zstd`) — no `--long` flag is needed."
+    "zstd-compressed database file; decompress it with `zstd -d`."
   ),
   status_code=status.HTTP_200_OK,
   responses={
@@ -95,11 +93,7 @@ async def get_backup_download_url(
   - `{graph_id}_{timestamp}.lbug.zip` (backups of a graph you own) — a standard
     ZIP archive holding the LadybugDB database file `{graph_id}.lbug`; `unzip` it.
   - `{graph_id}_{timestamp}.lbug.zst` (shared repository snapshots) — a single
-    zstd-compressed LadybugDB file. Install zstd (`brew install zstd` on macOS,
-    `apt-get install zstd` on Debian/Ubuntu, `dnf install zstd` on
-    Amazon Linux/Fedora), then run `zstd -d <file>.lbug.zst`. Compression uses a
-    128MB long window, so plain `zstd -d` suffices — no `--long` flag required.
-    Allow disk for roughly 2x the download size.
+    zstd-compressed LadybugDB file; `zstd -d` it. Allow disk for roughly 2x the download size.
 
   Returns the download URL and its expiration. `expires_in` ranges from 5
   minutes to 24 hours.

@@ -111,7 +111,7 @@ class OperationEnvelope(BaseModel, Generic[TResult]):
   created_by: str | None = Field(
     default=None,
     alias="createdBy",
-    description="User ID that initiated the operation (null for legacy callers)",
+    description="User ID that initiated the operation",
   )
   idempotent_replay: bool = Field(
     default=False,

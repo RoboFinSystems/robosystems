@@ -48,20 +48,6 @@ class EnvValidator:
         "CONNECTION_CREDENTIALS_KEY": "Encryption key for credentials",
       }
 
-      has_s3_credentials = getattr(
-        env_config, "AWS_S3_ACCESS_KEY_ID", None
-      ) and getattr(env_config, "AWS_S3_SECRET_ACCESS_KEY", None)
-
-      if (
-        env_config.ENVIRONMENT not in ["prod", "staging", "test", "dev"]
-        and not has_s3_credentials
-        and not os.getenv("CI")
-      ):
-        warnings.append(
-          "S3 credentials not found: Consider setting AWS_S3_ACCESS_KEY_ID/AWS_S3_SECRET_ACCESS_KEY "
-          "or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, or use AWS CLI profile"
-        )
-
       for var_name, description in required_prod_vars.items():
         value = getattr(env_config, var_name, None)
         if not value:
@@ -296,8 +282,6 @@ class EnvValidator:
   @staticmethod
   def _validate_paths(env_config, warnings: list[str]) -> None:
     """Validate file paths exist or can be created."""
-    import os
-
     path_vars = [
       ("LBUG_DATABASE_PATH", "LadybugDB database directory"),
       ("LOG_FILE_PATH", "Log file directory"),

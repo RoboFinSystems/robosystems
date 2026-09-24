@@ -197,58 +197,6 @@ class TestCreateRepositorySubscription:
     assert result == mock_existing
 
 
-class TestUpgradeRepositorySubscription:
-  @pytest.mark.unit
-  def test_happy_path(self, service):
-    mock_access = MagicMock()
-
-    with (
-      patch(f"{MODULE}._is_repository_enabled", return_value=True),
-      patch(
-        f"{MODULE}.get_available_plans_for_repository",
-        return_value=["starter", "advanced"],
-      ),
-      patch(
-        f"{MODULE}._get_plan_details",
-        return_value={"price_monthly": 29.99, "monthly_credits": 5000},
-      ),
-      patch(f"{MODULE}.UserRepository") as MockUR,
-    ):
-      MockUR.get_by_user_and_repository.return_value = mock_access
-
-      result = service.upgrade_repository_subscription(
-        MOCK_USER_ID, RepositoryType("sec"), "advanced"
-      )
-
-    assert result == mock_access
-    mock_access.upgrade_tier.assert_called_once()
-
-  @pytest.mark.unit
-  def test_no_existing_raises(self, service):
-    with patch(f"{MODULE}.UserRepository") as MockUR:
-      MockUR.get_by_user_and_repository.return_value = None
-
-      with pytest.raises(ValueError, match="No subscription found"):
-        service.upgrade_repository_subscription(
-          MOCK_USER_ID, RepositoryType("sec"), "advanced"
-        )
-
-  @pytest.mark.unit
-  def test_disabled_repo_raises(self, service):
-    mock_access = MagicMock()
-
-    with (
-      patch(f"{MODULE}._is_repository_enabled", return_value=False),
-      patch(f"{MODULE}.UserRepository") as MockUR,
-    ):
-      MockUR.get_by_user_and_repository.return_value = mock_access
-
-      with pytest.raises(ValueError, match="no longer available"):
-        service.upgrade_repository_subscription(
-          MOCK_USER_ID, RepositoryType("sec"), "advanced"
-        )
-
-
 class TestCancelRepositorySubscription:
   @pytest.mark.unit
   def test_happy_path(self, service):
@@ -271,68 +219,6 @@ class TestCancelRepositorySubscription:
 
       with pytest.raises(ValueError, match="No subscription found"):
         service.cancel_repository_subscription(MOCK_USER_ID, RepositoryType("sec"))
-
-
-class TestGetUserRepositorySubscriptions:
-  @pytest.mark.unit
-  def test_returns_list(self, service):
-    mock_records = [MagicMock(), MagicMock()]
-
-    with patch(f"{MODULE}.UserRepository") as MockUR:
-      MockUR.get_user_repositories.return_value = mock_records
-
-      result = service.get_user_repository_subscriptions(MOCK_USER_ID)
-
-    assert len(result) == 2
-
-
-class TestGetRepositoryCreditsSummary:
-  @pytest.mark.unit
-  def test_specific_repository(self, service):
-    mock_credits = MagicMock()
-    mock_credits.get_summary.return_value = {
-      "current_balance": 800,
-      "monthly_allocation": 1000,
-    }
-
-    with patch(f"{MODULE}.UserRepositoryCredits") as MockURC:
-      MockURC.get_user_repository_credits.return_value = mock_credits
-
-      result = service.get_repository_credits_summary(
-        MOCK_USER_ID, RepositoryType("sec")
-      )
-
-    assert result["current_balance"] == 800
-
-  @pytest.mark.unit
-  def test_specific_repository_no_credits(self, service):
-    with patch(f"{MODULE}.UserRepositoryCredits") as MockURC:
-      MockURC.get_user_repository_credits.return_value = None
-
-      result = service.get_repository_credits_summary(
-        MOCK_USER_ID, RepositoryType("sec")
-      )
-
-    assert result == {}
-
-  @pytest.mark.unit
-  def test_all_repositories(self, service):
-    mock_access = MagicMock()
-    mock_access.repository_type = "sec"
-    mock_access.repository_plan = "starter"
-    mock_access.user_credits = MagicMock()
-    mock_access.user_credits.get_summary.return_value = {
-      "current_balance": 800,
-    }
-
-    with patch.object(
-      service, "get_user_repository_subscriptions", return_value=[mock_access]
-    ):
-      result = service.get_repository_credits_summary(MOCK_USER_ID)
-
-    assert result["total_subscriptions"] == 1
-    assert result["total_credits"] == 800
-    assert len(result["repositories"]) == 1
 
 
 class TestAllocateCredits:

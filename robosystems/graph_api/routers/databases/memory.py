@@ -2,7 +2,6 @@
 materialization runs. /restore only lowers limits; /release frees memory.
 """
 
-from enum import Enum
 from typing import Literal
 
 from fastapi import APIRouter, Body, Path
@@ -21,14 +20,6 @@ from robosystems.graph_api.core.memory_manager import (
 from robosystems.logger import logger
 
 router = APIRouter(prefix="/databases/{graph_id}/memory", tags=["Memory"])
-
-
-class MemoryTarget(str, Enum):
-  """Target system for memory boost."""
-
-  DUCKDB = "duckdb"
-  LADYBUG = "ladybug"
-  BOTH = "both"
 
 
 class MemoryBoostRequest(BaseModel):

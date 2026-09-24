@@ -29,7 +29,6 @@ Every block has a `block_type` that determines how it is constructed and read. `
 | `metric.py` | Derivative metric handler — renders the standing metric time series |
 | `metrics.py` | `compute-metrics` / `assert-metrics` — the metric write paths |
 | `chart.py` | Chart View projection (panels and series over a rendering) |
-| `classify.py` | Reserved import path for the association classifier (not implemented) |
 | `rules/` | Rule evaluation engine — `engine.py`, `evaluators.py`, `expressions.py`, `commands.py` |
 
 ## Construction modes
@@ -98,5 +97,4 @@ The engine loads rules via `envelope.load_rules_for_structure` (so element- and 
 
 ## Not implemented
 
-- **Association classifier (`classify.py`)** — the module reserves the import path so handlers have a stable hook, and exports nothing. The working SEC-side classifier lives in `adapters/sec/processors/classify.py` and writes graph-side Classification nodes; a PostgreSQL-backed equivalent that runs over OLTP `associations` and `elements` to produce `association_classifications` rows has not been ported.
 - **Custom metric authoring** — `metric.py`'s create/update/delete handlers raise `NotImplementedError` (HTTP 501). The metric write surface is the seeded catalog plus `compute-metrics` / `assert-metrics`.

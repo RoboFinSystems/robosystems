@@ -28,7 +28,6 @@ class GenericTaskManager:
   def __init__(self, task_prefix: str = "task"):
     self.task_prefix = task_prefix
     self._redis_client = None
-    self._redis_url = None
 
   async def get_redis(self) -> redis_async.Redis:
     """Get the Valkey client, creating it on first use."""

@@ -8,7 +8,6 @@ from robosystems.security.input_validation import (
   sanitize_url,
   sanitize_user_input,
   strip_html_tags,
-  validate_api_key,
   validate_email,
   validate_username,
   validate_uuid,
@@ -248,26 +247,3 @@ class TestStripHtmlTags:
 
   def test_self_closing_tags(self):
     assert strip_html_tags("line1<br/>line2") == "line1line2"
-
-
-class TestValidateApiKey:
-  """Tests for validate_api_key."""
-
-  def test_valid_api_key(self):
-    key = "rsk_" + "a" * 60
-    assert validate_api_key(key) is True
-
-  def test_wrong_prefix(self):
-    key = "sk_" + "a" * 60
-    assert validate_api_key(key) is False
-
-  def test_too_short(self):
-    key = "rsk_" + "a" * 10
-    assert validate_api_key(key) is False
-
-  def test_empty_string(self):
-    assert validate_api_key("") is False
-
-  def test_long_key(self):
-    key = "rsk_" + "a" * 100
-    assert validate_api_key(key) is True

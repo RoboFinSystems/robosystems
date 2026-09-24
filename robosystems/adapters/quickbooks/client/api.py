@@ -1,8 +1,6 @@
 from datetime import UTC, datetime
 from typing import Any
 
-import numpy as np
-import pandas as pd
 import requests
 from intuitlib.client import AuthClient
 from intuitlib.exceptions import AuthClientError
@@ -235,78 +233,6 @@ class QBClient:
         break
       start += page_size
     return all_accounts
-
-  def get_accounts_df(self):
-    accounts = self.get_accounts()
-    accounts_df = pd.DataFrame(accounts)
-    accounts_df["AccountType"] = accounts_df.apply(
-      lambda x: (
-        f"Other {x.Classification}" if x.AccountType == "NaN" else x.AccountType
-      ),
-      axis=1,
-    )
-    for i, r in accounts_df.iterrows():
-      if r.AccountType in ["Other Income", "Other Expense"]:
-        accounts_df.loc[i, "Classification"] = r.AccountType
-
-    accounts_df["Classification"] = pd.Categorical(
-      accounts_df["Classification"],
-      [
-        "Asset",
-        "Liability",
-        "Equity",
-        "Revenue",
-        "Expense",
-        "Other Income",
-        "Other Expense",
-      ],
-    )
-
-    accounts_df["AccountType"] = pd.Categorical(
-      accounts_df["AccountType"],
-      [
-        "Bank",
-        "Accounts Receivable",
-        "Other Current Asset",
-        "Fixed Asset",
-        "Other Asset",
-        "Accounts Payable",
-        "Credit Card",
-        "Other Current Liability",
-        "Long Term Liability",
-        "Equity",
-        "Income",
-        "Cost of Goods Sold",
-        "Expense",
-        "Other Income",
-        "Other Expense",
-      ],
-    )
-    accounts_df.sort_values(
-      by=["Classification", "AccountType", "FullyQualifiedName"], inplace=True
-    )
-    accounts_df["Order"] = np.nan
-    accounts_df["Sequence"] = np.nan
-    accounts_df.reset_index(inplace=True, drop=True)
-
-    def traverse(parentRef):
-      children_df = accounts_df[accounts_df.ParentRef == parentRef]
-      torder = 1
-      for ci, cr in children_df.iterrows():
-        accounts_df.loc[ci, "Order"] = torder
-        torder += 1
-
-    seq_cnt = 1
-    order_cnt = 1
-    for i, r in accounts_df.iterrows():
-      accounts_df.loc[i, "Sequence"] = seq_cnt
-      if not r.ParentRef:
-        accounts_df.loc[i, "Order"] = order_cnt
-        order_cnt += 1
-      else:
-        traverse(r.ParentRef)
-      seq_cnt += 1
-    return accounts_df
 
   @_QB_RETRY
   def get_account_by_id(self, account_id):

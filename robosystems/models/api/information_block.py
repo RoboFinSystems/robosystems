@@ -1020,22 +1020,20 @@ class ChartLite(BaseModel):
 
 
 class ViewProjections(BaseModel):
-  """Charlie's six `type-of View` arms, surfaced at the envelope boundary.
+  """The six `type-of` View projections of an Information Block (Rendering,
+  FactTable, ModelStructure, VerificationResults, ReportElements,
+  BusinessRules), surfaced at the envelope boundary.
 
   Each projection is computed server-side at envelope-build time when
   its source data is available. The frontend's `BlockView` dispatcher
   routes to the projection component matching the user's selected view
-  mode; missing projections (those still in backlog) render as empty
-  states without breaking the dispatcher.
+  mode; missing projections render as empty states without breaking the
+  dispatcher.
 
   Today: `rendering` is computed for the statement family, and
-  `chart` (the 7th arm — panel/series config over the rendering's
-  rows and periods) for metric blocks.
-  Other arms (`fact_table`, `model_structure`, `verification_results`,
-  `report_elements`, `business_rules`) come online as their backend
-  support lands; `fact_table` is trivially derivable from
-  `InformationBlockEnvelope.facts` and may stay as a frontend-only
-  projection.
+  `chart` (panel/series config over the rendering's rows and periods)
+  for metric blocks. Projections without backend support yet are empty;
+  `fact_table` is derivable from `InformationBlockEnvelope.facts`.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -1125,11 +1123,11 @@ class InformationBlockEnvelope(BaseModel):
   view: ViewProjections = Field(
     default_factory=ViewProjections,
     description=(
-      "Server-computed view projections (Charlie's six type-of View "
-      "arms). `view.rendering` carries pre-computed rows + periods + "
+      "Server-computed view projections (the six `type-of` View "
+      "projections). `view.rendering` carries pre-computed rows + periods + "
       "validation for blocks where rendering is deterministic (the "
-      "statement family today). Other projections come online as "
-      "their backend support lands — see :class:`ViewProjections`."
+      "statement family today). Projections without backend support yet "
+      "are empty — see :class:`ViewProjections`."
     ),
   )
 

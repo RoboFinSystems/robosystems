@@ -872,34 +872,10 @@ class TestGraphClientApiMethods:
       result = await client.execute_single("MATCH (n:Missing) RETURN n")
       assert result is None
 
-  @pytest.mark.asyncio
-  async def test_export_database_returns_bytes(self, client):
-    """export_database returns raw bytes."""
-    mock_response = Mock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.content = b"binary_export_data"
-    mock_response.headers = {"content-type": "application/octet-stream"}
-
-    with patch.object(client.client, "request", return_value=mock_response):
-      result = await client.export_database("test_db")
-      assert result == b"binary_export_data"
-
 
 @pytest.mark.unit
 class TestGraphClientBaseHelpers:
   """Tests for base class helper methods."""
-
-  def test_build_url(self, mock_env):
-    """_build_url constructs proper URL from base and path."""
-    client = GraphClient(base_url="http://localhost:8001")
-    url = client._build_url("/databases/test/query")
-    assert url == "http://localhost:8001/databases/test/query"
-
-  def test_build_url_without_leading_slash(self, mock_env):
-    """_build_url handles paths without leading slash."""
-    client = GraphClient(base_url="http://localhost:8001")
-    url = client._build_url("health")
-    assert url == "http://localhost:8001/health"
 
   def test_should_retry_transient_error(self, mock_env):
     """Transient errors are retriable."""

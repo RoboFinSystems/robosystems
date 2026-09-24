@@ -474,8 +474,6 @@ class OLTPLoader:
       # Structural reset on full_rebuild. Adapter-derived traits are re-derived
       # on upsert. Associations are deliberately kept: user-curated mappings
       # survive, and the element UPSERT preserves the elem_* ids they point at.
-      from robosystems.models.extensions.association import Association  # noqa: F401
-
       if full_rebuild:
         element_subq = session.query(Element.id).filter(
           Element.external_source == source,

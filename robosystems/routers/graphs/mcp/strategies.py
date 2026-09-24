@@ -7,7 +7,6 @@ from typing import Any
 
 from robosystems.middleware.graph.execution_strategies import (
   BaseAnalyzer,
-  BaseClientDetector,
   BaseStrategySelector,
 )
 
@@ -121,28 +120,6 @@ class MCPToolAnalyzer(BaseAnalyzer):
       return "large"  # Schemas can be extensive
     else:
       return "small"  # Info is typically compact
-
-  @classmethod
-  def _analyze_cypher_query(cls, query: str) -> dict[str, Any]:
-    """Analyze a Cypher query for MCP-specific optimizations."""
-    query_upper = query.upper()
-
-    has_match = "MATCH" in query_upper
-    has_aggregation = any(
-      agg in query_upper for agg in ["COUNT(", "SUM(", "AVG(", "COLLECT("]
-    )
-    has_order_by = "ORDER BY" in query_upper
-
-    requires_streaming = (
-      has_match and "LIMIT" not in query_upper and not has_aggregation
-    )
-
-    return {
-      "requires_streaming": requires_streaming,
-      "supports_progress": has_match and not has_aggregation,
-      "has_aggregation": has_aggregation,
-      "has_ordering": has_order_by,
-    }
 
 
 class MCPStrategySelector(BaseStrategySelector):
@@ -261,43 +238,3 @@ class MCPStrategySelector(BaseStrategySelector):
     }
 
     return mcp_timeouts.get(strategy, 60)
-
-
-class MCPClientDetector(BaseClientDetector):
-  """Detect MCP client capabilities and optimize responses."""
-
-  @classmethod
-  def detect_client_type(cls, headers: dict[str, str]) -> dict[str, Any]:
-    """The stdio bridge identifies itself with a `robosystems-mcp` User-Agent or
-    an `X-MCP-Client` header; otherwise capabilities come from `Accept`."""
-    base_info = cls.detect_client_capabilities(headers)
-
-    user_agent = headers.get("user-agent", "").lower()
-    mcp_client = headers.get("x-mcp-client", "")
-
-    is_mcp_client = (
-      "robosystems-mcp" in user_agent or mcp_client != "" or "mcp" in user_agent
-    )
-
-    if is_mcp_client:
-      return {
-        "is_mcp_client": True,
-        "supports_sse": True,  # Node.js package will handle SSE
-        "supports_ndjson": True,  # And NDJSON
-        "prefers_streaming": False,  # But aggregate for AI agent
-        "client_version": mcp_client or "unknown",
-        "is_testing_tool": base_info["is_testing_tool"],
-        "is_browser": base_info["is_browser"],
-        "is_interactive": base_info["is_interactive"],
-      }
-
-    return {
-      "is_mcp_client": False,
-      "supports_sse": base_info["supports_sse"],
-      "supports_ndjson": base_info["supports_ndjson"],
-      "prefers_streaming": base_info["supports_streaming"],
-      "client_version": None,
-      "is_testing_tool": base_info["is_testing_tool"],
-      "is_browser": base_info["is_browser"],
-      "is_interactive": base_info["is_interactive"],
-    }

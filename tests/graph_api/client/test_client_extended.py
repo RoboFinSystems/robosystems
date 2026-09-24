@@ -227,52 +227,6 @@ class TestLadybugClientExtended:
       result = await client.delete_database("old_db")
       assert result["message"] == "Database deleted"
 
-  # Test ingest method (sync mode)
-  @pytest.mark.asyncio
-  async def test_ingest_sync_mode(self, client):
-    """Test sync mode ingestion."""
-    mock_response = Mock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-      "task_id": "task-123",
-      "status": "completed",
-      "rows_imported": 100,
-    }
-
-    with patch.object(client.client, "request", return_value=mock_response):
-      result = await client.ingest(
-        graph_id="test_db",
-        file_path="/tmp/data.csv",
-        table_name="TestTable",
-        mode="sync",
-        ignore_errors=True,
-      )
-      assert result["task_id"] == "task-123"
-      assert result["rows_imported"] == 100
-
-  # Test ingest method (async mode)
-  @pytest.mark.asyncio
-  async def test_ingest_async_mode(self, client):
-    """Test async mode ingestion."""
-    mock_response = Mock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-      "task_id": "task-456",
-      "status": "queued",
-    }
-
-    with patch.object(client.client, "request", return_value=mock_response):
-      result = await client.ingest(
-        graph_id="test_db",
-        pipeline_run_id="pipeline-123",
-        bucket="my-bucket",
-        files=["file1.csv", "file2.csv"],
-        mode="async",
-        priority=7,
-      )
-      assert result["task_id"] == "task-456"
-      assert result["status"] == "queued"
-
   # Test get_task_status method
   @pytest.mark.asyncio
   async def test_get_task_status(self, client):
@@ -306,30 +260,6 @@ class TestLadybugClientExtended:
     with patch.object(client.client, "request", return_value=mock_response):
       result = await client.list_tasks(status="all")
       assert len(result["tasks"]) == 2
-
-  # Test cancel_task method
-  @pytest.mark.asyncio
-  async def test_cancel_task(self, client):
-    """Test cancel_task endpoint."""
-    mock_response = Mock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"message": "Task cancelled"}
-
-    with patch.object(client.client, "request", return_value=mock_response):
-      result = await client.cancel_task("task-123")
-      assert result["message"] == "Task cancelled"
-
-  # Test get_queue_info method
-  @pytest.mark.asyncio
-  async def test_get_queue_info(self, client):
-    """Test get_queue_info endpoint."""
-    mock_response = Mock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"pending": 5, "running": 2}
-
-    with patch.object(client.client, "request", return_value=mock_response):
-      result = await client.get_queue_info()
-      assert result["pending"] == 5
 
   # Test execute_query method
   @pytest.mark.asyncio
@@ -401,19 +331,6 @@ class TestLadybugClientExtended:
       )
       assert result["nodes_created"] == 5
       assert result["relationships_created"] == 3
-
-  # Test export_database method
-  @pytest.mark.asyncio
-  async def test_export_database(self, client):
-    """Test export_database endpoint."""
-    mock_response = Mock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.content = b"database export data"
-    mock_response.headers = {"content-type": "application/octet-stream"}
-
-    with patch.object(client.client, "request", return_value=mock_response):
-      result = await client.export_database("test_db")
-      assert result == b"database export data"
 
   # Test get_database_info method
   @pytest.mark.asyncio

@@ -11,18 +11,6 @@ from robosystems.middleware.robustness import (
 
 SCHEMA_QUERIES = {
   "tables": "CALL SHOW_TABLES() RETURN *",
-  "node_labels": """CALL SHOW_TABLES()
-    WHERE type = 'NODE'
-    RETURN name as label""",
-  "relationship_types": """CALL SHOW_TABLES()
-    WHERE type = 'REL'
-    RETURN name as rel_type""",
-  "node_properties": """MATCH (n)
-WITH labels(n) as labels, keys(n) as props
-UNWIND labels as label
-UNWIND props as prop
-RETURN DISTINCT label, collect(DISTINCT prop) as properties
-LIMIT 100""",
 }
 
 circuit_breaker = CircuitBreakerManager()

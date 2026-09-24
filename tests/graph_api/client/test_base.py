@@ -92,26 +92,6 @@ class TestBaseGraphClient:
 
       assert client.config.base_url == "http://localhost:8001"
 
-  def test_build_url(self):
-    """Test URL building."""
-    with patch("robosystems.config.env") as mock_env:
-      mock_env.GRAPH_API_KEY = None
-      mock_env.ENVIRONMENT = "dev"
-
-      client = BaseGraphClient(base_url="http://localhost:8001")
-
-      # Test with leading slash
-      assert client._build_url("/databases") == "http://localhost:8001/databases"
-
-      # Test without leading slash
-      assert client._build_url("databases") == "http://localhost:8001/databases"
-
-      # Test with nested path
-      assert (
-        client._build_url("/databases/test/query")
-        == "http://localhost:8001/databases/test/query"
-      )
-
   def test_should_retry_transient_errors(self):
     """Test retry logic for transient errors."""
     with patch("robosystems.config.env") as mock_env:

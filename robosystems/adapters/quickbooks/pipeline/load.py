@@ -127,15 +127,17 @@ def _release_sync_lock(context: AssetExecutionContext, config: QBSyncConfig) -> 
       lock_id=config.sync_lock_id,
     )
     if released:
-      context.log.info(f"Released B7 sync lock for connection {config.connection_id}")
+      context.log.info(
+        f"Released the per-connection sync lock for connection {config.connection_id}"
+      )
     else:
       context.log.info(
-        f"B7 sync lock release no-op for connection {config.connection_id} "
+        f"Sync lock release no-op for connection {config.connection_id} "
         f"(lock already expired or held by someone else)"
       )
   except Exception as e:
     context.log.warning(
-      f"Failed to release B7 sync lock for connection {config.connection_id} "
+      f"Failed to release the sync lock for connection {config.connection_id} "
       f"(non-fatal — TTL is the fallback): {e}"
     )
 

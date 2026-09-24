@@ -125,22 +125,16 @@ def _make_statement_entry(block_type: str, icon: str) -> BlockTypeRegistryEntry:
     construction_mode="compositional",
     dispatch_create=make_not_implemented_handler(
       f"create-{block_type}-block",
-      f"Direct construction of {display_name} blocks is not yet "
-      "available — they are produced today by `create-report`, which "
-      "generates the facts and the envelope becomes queryable via "
-      "`informationBlocks(blockType=...)` after the report publishes. "
-      "Standalone construction is a planned follow-up: the same "
-      "primitive that builds a Schedule block today will extend to "
-      "the statement family. Until then, call `create-report` against "
-      "the appropriate taxonomy.",
+      f"Create is not supported for {display_name} blocks. They are "
+      "produced by `create-report` against the appropriate taxonomy; the "
+      "envelope is queryable via `informationBlocks(blockType=...)` once "
+      "the report publishes.",
     ),
     dispatch_update=make_not_implemented_handler(
       f"update-{block_type}-block",
-      f"Direct in-place updates of {display_name} blocks are not yet "
-      "available. The envelope re-surfaces the most recent Report's "
-      "facts automatically — call `create-report` (or "
-      "`regenerate-report`) to produce new facts. Standalone update "
-      "lands when standalone construction does.",
+      f"Update is not supported for {display_name} blocks. The envelope "
+      "re-surfaces the most recent Report's facts — call `create-report` "
+      "(or `regenerate-report`) to produce new facts.",
     ),
     dispatch_delete=make_not_implemented_handler(
       f"delete-{block_type}-block",

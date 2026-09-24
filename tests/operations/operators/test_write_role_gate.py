@@ -78,43 +78,12 @@ class TestEnforceOperatorWriteRole:
 
 
 class TestAdaptersEnforceBeforeToolAccess:
-  """Both adapters check the role *before* constructing tool access.
+  """The worker adapter checks the role *before* constructing tool access.
 
   Asserted through the adapter rather than by reading it, and by proving tool
   access was never constructed — an ordering regression that left the gate in
   place but moved it after initialization would still leak graph reads.
   """
-
-  @pytest.mark.asyncio
-  async def test_api_adapter_denies_a_viewer(self) -> None:
-    from robosystems.operations.operators.adapters import api
-
-    user = MagicMock()
-    user.id = USER_ID
-
-    # AIClient is patched so that removing the gate fails this test with a
-    # clean "DID NOT RAISE HTTPException" rather than an unrelated credentials
-    # error from further down the adapter.
-    with (
-      patch.object(
-        api,
-        "enforce_operator_write_role",
-        side_effect=HTTPException(status_code=403, detail="read-only"),
-      ),
-      patch.object(api, "HttpToolAccess") as tool_access,
-      patch.object(api, "get_ai_client"),
-      patch.object(api, "TrackedAIClient"),
-    ):
-      with pytest.raises(HTTPException) as exc:
-        await api.run_operator_api(
-          operator=_operator(read_only=False),
-          graph_id=GRAPH_ID,
-          user=user,
-          query="anything",
-        )
-
-    assert exc.value.status_code == 403
-    tool_access.assert_not_called()
 
   @pytest.mark.asyncio
   async def test_worker_adapter_denies_a_viewer(self) -> None:
@@ -174,54 +143,6 @@ class TestToolSurfaceMatchesSpec:
   tool access must be built read-only — otherwise the flag that skips the
   gate is also the flag that unlocks the write tools.
   """
-
-  @pytest.mark.asyncio
-  async def test_api_adapter_builds_tool_access_from_the_spec(self) -> None:
-    from robosystems.operations.operators.adapters import api
-
-    user = MagicMock()
-    user.id = USER_ID
-
-    with (
-      patch.object(api, "enforce_operator_write_role"),
-      patch.object(api, "enforce_operator_credits"),
-      patch.object(api, "HttpToolAccess") as tool_access,
-      patch.object(api, "get_ai_client"),
-      patch.object(api, "TrackedAIClient"),
-    ):
-      tool_access.return_value = MagicMock(close=AsyncMock())
-      await api.run_operator_api(
-        operator=_operator(read_only=True),
-        graph_id=GRAPH_ID,
-        user=user,
-        query="anything",
-      )
-
-    tool_access.assert_called_once_with(GRAPH_ID, read_only=True, user_id=str(USER_ID))
-
-  @pytest.mark.asyncio
-  async def test_api_adapter_grants_writes_only_to_write_capable_specs(self) -> None:
-    from robosystems.operations.operators.adapters import api
-
-    user = MagicMock()
-    user.id = USER_ID
-
-    with (
-      patch.object(api, "enforce_operator_write_role"),
-      patch.object(api, "enforce_operator_credits"),
-      patch.object(api, "HttpToolAccess") as tool_access,
-      patch.object(api, "get_ai_client"),
-      patch.object(api, "TrackedAIClient"),
-    ):
-      tool_access.return_value = MagicMock(close=AsyncMock())
-      await api.run_operator_api(
-        operator=_operator(read_only=False),
-        graph_id=GRAPH_ID,
-        user=user,
-        query="anything",
-      )
-
-    tool_access.assert_called_once_with(GRAPH_ID, read_only=False, user_id=str(USER_ID))
 
   @pytest.mark.asyncio
   async def test_http_tool_access_wires_read_only_into_the_tool_manager(self) -> None:
@@ -316,28 +237,3 @@ class TestGraphScopeGate:
       resolve.reset_mock()
       enforce_operator_graph_scope(_operator(read_only=False), GRAPH_ID)
       resolve.assert_not_called()
-
-  @pytest.mark.asyncio
-  async def test_api_adapter_applies_the_scope_gate(self) -> None:
-    from fastapi import HTTPException
-
-    from robosystems.operations.operators.adapters import api
-
-    user = MagicMock()
-    user.id = USER_ID
-    with (
-      patch.object(api, "enforce_operator_write_role"),
-      patch.object(api, "enforce_operator_credits"),
-      patch(
-        "robosystems.middleware.mcp.tools.manager.resolve_schema_extensions",
-        return_value=[],
-      ),
-    ):
-      with pytest.raises(HTTPException) as exc_info:
-        await api.run_operator_api(
-          operator=self._scoped_operator(),
-          graph_id=GRAPH_ID,
-          user=user,
-          query="anything",
-        )
-    assert exc_info.value.status_code == 403

@@ -466,10 +466,3 @@ class TestMemoryModels:
     req = memory_module.MemoryReleaseRequest()
     assert req.target == "both"
     assert req.aggressive is True
-
-  @pytest.mark.unit
-  def test_memory_target_enum_values(self):
-    """Test MemoryTarget enum has expected values."""
-    assert memory_module.MemoryTarget.DUCKDB == "duckdb"
-    assert memory_module.MemoryTarget.LADYBUG == "ladybug"
-    assert memory_module.MemoryTarget.BOTH == "both"
