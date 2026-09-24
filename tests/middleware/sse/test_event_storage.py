@@ -728,6 +728,36 @@ class TestSSEEventStorage:
         "processed_items": 100,
       }
 
+  def test_update_operation_metadata_sync_completed_without_result(self):
+    """A completion with no ``result`` keeps the recorded result data rather
+    than merging the event envelope into it (matches the async path)."""
+    mock_redis = Mock()
+    mock_redis.get.return_value = json.dumps(
+      {
+        "operation_id": "op123",
+        "operation_type": "test_op",
+        "user_id": "user456",
+        "graph_id": "kg789",
+        "status": "running",
+        "created_at": "2023-01-01T12:00:00Z",
+        "updated_at": "2023-01-01T12:30:00Z",
+        "error_message": None,
+        "result_data": {"graph_id": "kg789"},
+      }
+    )
+    mock_pipe = Mock()
+    mock_redis.pipeline.return_value.__enter__ = Mock(return_value=mock_pipe)
+    mock_redis.pipeline.return_value.__exit__ = Mock(return_value=False)
+    storage = SSEEventStorage()
+    storage._sync_redis = mock_redis
+
+    storage._update_operation_metadata_sync(
+      "op123", EventType.OPERATION_COMPLETED, {"message": "done"}
+    )
+
+    stored_metadata = json.loads(mock_pipe.setex.call_args[0][2])
+    assert stored_metadata["result_data"] == {"graph_id": "kg789"}
+
   def test_update_operation_metadata_sync_no_existing_metadata(self):
     """Test sync metadata update when no metadata exists - returns early."""
     mock_redis = Mock()

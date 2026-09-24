@@ -127,6 +127,13 @@ def get_rate_limit_config(identifier: str) -> tuple[int, int]:
   return limit, window
 
 
+def _user_id_from_identifier(identifier: str) -> str | None:
+  for prefix in ("jwt:", "apikey:user:"):
+    if identifier.startswith(prefix):
+      return identifier[len(prefix) :] or None
+  return None
+
+
 def rate_limit_dependency(request: Request):
   identifier = get_user_identifier(request)
   limit, window = get_rate_limit_config(identifier)
@@ -138,9 +145,7 @@ def rate_limit_dependency(request: Request):
     user_agent = request.headers.get("user-agent")
     endpoint = str(request.url.path)
 
-    user_id = None
-    if ":" in identifier and identifier.startswith("user:"):
-      user_id = identifier.split(":")[1]
+    user_id = _user_id_from_identifier(identifier)
 
     identifier_type = identifier.split(":")[0] if ":" in identifier else "anonymous"
     limit_type_str = f"general_api_{identifier_type}"

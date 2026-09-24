@@ -1286,10 +1286,12 @@ class TestCreateScheduleMaterializesObligations:
     session.get.assert_not_called()
 
   def test_supersede_no_op_when_schedule_predates_stream_2a(self):
-    """Schedules with no schedule_created_event_id stamped return 0 cleanly."""
+    """No stamp and no recoverable obligations → 0 cleanly."""
     structure = MagicMock()
     structure.metadata_ = {}  # legacy row with no event linkage
+    structure.id = "struct_legacy"
     session = MagicMock()
+    session.execute.return_value.scalar.return_value = None
 
     svc = ScheduleService()
     count = svc.supersede_pending_obligations(
@@ -1297,7 +1299,37 @@ class TestCreateScheduleMaterializesObligations:
     )
 
     assert count == 0
-    session.execute.assert_not_called()
+    # Only the recovery select ran.
+    assert session.execute.call_count == 1
+    session.add.assert_not_called()
+
+  def test_supersede_recovers_link_when_stamp_missing(self):
+    from types import SimpleNamespace
+
+    structure = MagicMock()
+    structure.metadata_ = {}
+    structure.id = "struct_orphan"
+    pending = SimpleNamespace(
+      id="evt_old",
+      status="pending",
+      replaced_by_event_id=None,
+      metadata_={"period_start": "2026-01-01", "period_end": "2026-01-31"},
+    )
+    recovery = MagicMock()
+    recovery.scalar.return_value = "evt_origin_recovered"
+    locked = MagicMock()
+    locked.scalars.return_value = iter([pending])
+    session = MagicMock()
+    session.execute.side_effect = [recovery, locked, MagicMock()]
+
+    count = ScheduleService().supersede_pending_obligations(
+      session, structure=structure, created_by="usr_test"
+    )
+
+    assert count == 1
+    assert pending.status == "voided"
+    replacement = session.add.call_args.args[0]
+    assert replacement.obligated_by_event_id == "evt_origin_recovered"
 
   def test_supersede_no_op_when_no_pending_events(self):
     """All obligations already classified/fulfilled — nothing to supersede."""
@@ -1963,6 +1995,38 @@ class TestTruncateSchedule:
     assert result["reason"] == "Sold the computer"
     structure = session.get.return_value
     assert structure.artifact_mechanics["schedule_metadata"]["end_date"] == "2026-03-31"
+
+  def test_preserves_unrelated_mechanics_keys(self):
+    session = _mock_session()
+    structure = self._mock_schedule_structure()
+    structure.artifact_mechanics["source_transaction_id"] = "txn_1"
+    session.get.return_value = structure
+    stale_dates = MagicMock()
+    stale_dates.scalars.return_value.all.return_value = []
+    session.execute.side_effect = [
+      MagicMock(
+        fetchone=MagicMock(
+          return_value=MagicMock(
+            first_start=date(2025, 1, 1), last_end=date(2027, 12, 31)
+          )
+        )
+      ),
+      MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
+      stale_dates,
+      MagicMock(),
+      MagicMock(),
+      MagicMock(rowcount=15),
+    ]
+
+    ScheduleService().truncate_schedule(
+      session,
+      structure_id="struct_01",
+      new_end_date=date(2026, 3, 31),
+      reason="Sold the computer",
+      updated_by="usr_test",
+    )
+
+    assert structure.artifact_mechanics["source_transaction_id"] == "txn_1"
 
   def test_rejects_empty_reason(self):
     session = _mock_session()

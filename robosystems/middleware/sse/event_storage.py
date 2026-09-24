@@ -423,7 +423,7 @@ class SSEEventStorage:
 
           if event_type == EventType.OPERATION_COMPLETED:
             # Merge, so a graph_id recorded by the Dagster job survives.
-            new_result = data.get("result") or data
+            new_result = data.get("result") or {}
             if metadata.result_data:
               metadata.result_data.update(new_result)
             else:

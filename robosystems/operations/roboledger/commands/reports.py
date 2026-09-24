@@ -423,7 +423,7 @@ def create_report(
   report_def.last_generated = datetime.now(UTC)
   session.commit()
 
-  structures = load_structures(session, body.taxonomy_id)
+  structures = load_structures(session, resolved_taxonomy_id)
   entity_name = resolve_entity_name(session, report_def)
   resp = report_to_response(report_def, structures, entity_name)
   resp.rule_summary = summary

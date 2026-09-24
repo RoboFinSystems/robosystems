@@ -53,10 +53,8 @@ def create(
 
 
 _ADMIN_ONLY_MESSAGE = (
-  "schedule-container update/delete are intentionally not exposed on the "
-  "public envelope; admin-only via library_creator. The schedule artifacts "
-  "themselves live as Schedule Information Blocks and are mutated through "
-  "that surface."
+  "Schedule-container update/delete are not exposed. Change the Schedule "
+  "Information Blocks it groups through that surface instead."
 )
 
 

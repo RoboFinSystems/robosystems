@@ -263,7 +263,16 @@ async def create_sse_stream_starlette(
       ),
     }
 
-    if from_sequence > 0:
+    settled = metadata.status in [
+      OperationStatus.COMPLETED,
+      OperationStatus.FAILED,
+      OperationStatus.CANCELLED,
+      # Nothing more arrives until a resume; the client reconnects then.
+      OperationStatus.AWAITING_INPUT,
+    ]
+
+    # A settled operation replays once, below, after the connection is taken.
+    if from_sequence > 0 and not settled:
       historical_events = await event_storage.get_events(operation_id, from_sequence)
       for event in historical_events:
         if request and await request.is_disconnected():
@@ -299,15 +308,11 @@ async def create_sse_stream_starlette(
         f"Failed to subscribe to Redis channel for operation {operation_id}: {e}"
       )
 
-    if metadata.status in [
-      OperationStatus.COMPLETED,
-      OperationStatus.FAILED,
-      OperationStatus.CANCELLED,
-      # Nothing more arrives until a resume; the client reconnects then.
-      OperationStatus.AWAITING_INPUT,
-    ]:
-      # Nothing live will arrive: replay the whole history and close.
-      all_events = await event_storage.get_events(operation_id, from_sequence=0)
+    if settled:
+      # Nothing live will arrive: replay the history and close.
+      all_events = await event_storage.get_events(
+        operation_id, from_sequence=from_sequence
+      )
       for event in all_events:
         if request and await request.is_disconnected():
           return

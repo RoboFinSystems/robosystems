@@ -568,6 +568,63 @@ class TestCreateSSEStreamStarlette:
         assert len(progress_events) >= 1
 
   @pytest.mark.asyncio
+  async def test_settled_stream_resumed_mid_history_replays_each_event_once(self):
+    metadata = self._make_metadata(status=OperationStatus.COMPLETED)
+    stored = [
+      SSEEvent(
+        event_type=EventType.OPERATION_PROGRESS,
+        operation_id="op1",
+        timestamp="2025-01-01T00:00:01Z",
+        data={"progress": seq * 25},
+        sequence_number=seq,
+      )
+      for seq in range(4)
+    ]
+
+    async def get_events(operation_id, from_sequence=0, *args, **kwargs):
+      return [e for e in stored if e.sequence_number >= from_sequence]
+
+    with (
+      patch(
+        "robosystems.middleware.sse.streaming.get_event_storage"
+      ) as mock_storage_fn,
+      patch(
+        "robosystems.middleware.sse.streaming.TuningConfig.get_sse_max_connections_per_user",
+        return_value=10,
+      ),
+      patch(
+        "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
+        return_value=100,
+      ),
+      patch(
+        "robosystems.middleware.sse.streaming.asyncio.sleep", new_callable=AsyncMock
+      ),
+      patch(
+        "robosystems.middleware.sse.streaming.get_connection_manager"
+      ) as mock_mgr_fn,
+    ):
+      mock_storage = AsyncMock()
+      mock_storage.get_operation_metadata.return_value = metadata
+      mock_storage.get_events.side_effect = get_events
+      mock_storage_fn.return_value = mock_storage
+      mock_mgr = MagicMock()
+      mock_mgr.add_connection = AsyncMock(return_value=asyncio.Queue())
+      mock_mgr.remove_connection = AsyncMock()
+      mock_mgr_fn.return_value = mock_mgr
+
+      events = [
+        e async for e in create_sse_stream_starlette("op1", "user1", from_sequence=2)
+      ]
+
+    sequences = [
+      json.loads(e["data"])["sequence_number"]
+      for e in events
+      if e["event"] == str(EventType.OPERATION_PROGRESS)
+    ]
+    assert sequences == [2, 3]
+    assert events[-1]["event"] == "stream_end"
+
+  @pytest.mark.asyncio
   async def test_stream_completed_operation_sends_stream_end(self):
     """Test that a completed operation sends stream_end event."""
     metadata = self._make_metadata(status=OperationStatus.COMPLETED)

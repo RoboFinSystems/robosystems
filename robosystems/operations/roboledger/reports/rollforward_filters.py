@@ -139,9 +139,9 @@ def evaluate_attribution_filters(
         AttributedFact(
           target_element_id=mechanics.default_change_tag_element_id,
           target_qname=(
-            mechanics.default_change_tag_element_id
-            if mechanics.default_change_tag_element_id is not None
-            else f"{mechanics.bs_source_qname}#residual"
+            mechanics.default_change_tag_qname
+            or mechanics.default_change_tag_element_id
+            or f"{mechanics.bs_source_qname}#residual"
           ),
           value_cents=residual,
           period_start=period_start,

@@ -70,8 +70,6 @@ class OrchestratorConfig:
 
     if self.fallback_operator is None:
       self.fallback_operator = OperatorConfig.ORCHESTRATOR_CONFIG["fallback_operator"]
-    if self.enable_rag is None:
-      self.enable_rag = OperatorConfig.ORCHESTRATOR_CONFIG["enable_rag"]
 
 
 from robosystems.operations.operators.base import OperatorResponse  # noqa: E402

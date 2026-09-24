@@ -174,6 +174,34 @@ def test_update_schedule_keeps_omitted_metadata_null_in_typed_mechanics() -> Non
   assert structure.artifact_mechanics["schedule_metadata"] is None
 
 
+def test_update_schedule_preserves_unrelated_mechanics_keys() -> None:
+  structure = MagicMock()
+  structure.id = "struct_sched"
+  structure.block_type = "schedule"
+  structure.name = "Old Name"
+  structure.taxonomy_id = "tax_1"
+  structure.metadata_ = {"entry_template": {"debit_element_id": "elem_dr"}}
+  structure.artifact_mechanics = {
+    "kind": "closing_entry_generator",
+    "source_transaction_id": "txn_1",
+  }
+
+  session = MagicMock()
+  session.get.return_value = structure
+  session.execute.side_effect = [
+    _exec_result(),
+    _exec_result(fetchone_row=MagicMock(cnt=2)),
+    _exec_result(fetchone_row=MagicMock(cnt=1)),
+  ]
+
+  update_schedule(
+    session,
+    UpdateScheduleRequest(structure_id="struct_sched", name="New Name"),
+  )
+
+  assert structure.artifact_mechanics["source_transaction_id"] == "txn_1"
+
+
 def test_update_schedule_template_change_triggers_supersession() -> None:
   """Changing entry_template voids + re-materializes pending events."""
   from unittest.mock import patch
@@ -1066,6 +1094,36 @@ def test_rewrite_sum_equals_rule_keeps_the_residual_in_the_basis() -> None:
 
   assert rule.metadata_["expected_total"] == 182.65
   assert structure.metadata_["schedule_metadata"]["original_amount"] == 28_265
+
+
+def test_rewrite_sum_equals_rule_preserves_unrelated_mechanics_keys() -> None:
+  from decimal import Decimal
+  from unittest.mock import patch
+
+  from robosystems.operations.roboledger.commands.schedules import (
+    _rewrite_sum_equals_rule,
+  )
+
+  structure = _terminate_structure()
+  structure.artifact_mechanics["source_transaction_id"] = "txn_1"
+
+  rule = MagicMock()
+  rule.metadata_ = {"expected_total": 1315.08}
+  rule_result = MagicMock()
+  rule_result.scalars.return_value.first.return_value = rule
+  sum_result = MagicMock()
+  sum_result.scalar.return_value = Decimal("182.65")
+  session = MagicMock()
+  session.execute.side_effect = [rule_result, sum_result]
+  session.query.side_effect = lambda model: _Query(model, [])
+
+  with patch("robosystems.operations.roboledger.commands.schedules.flag_modified"):
+    assert _rewrite_sum_equals_rule(session, structure) is True
+
+  assert structure.artifact_mechanics["source_transaction_id"] == "txn_1"
+  assert structure.artifact_mechanics["schedule_metadata"]["original_amount"] == (
+    18_265
+  )
 
 
 def test_rewrite_sum_equals_rule_noops_without_rule() -> None:

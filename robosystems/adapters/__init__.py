@@ -6,7 +6,6 @@ _LAZY_IMPORTS = {
   "XBRLGraphProcessor": "robosystems.adapters.sec",
   # QuickBooks
   "QBClient": "robosystems.adapters.quickbooks",
-  "QBTransactionsProcessor": "robosystems.adapters.quickbooks",
 }
 
 

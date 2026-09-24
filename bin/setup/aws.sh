@@ -241,7 +241,6 @@ function create_ssm_feature_flags() {
         "MCP_GRAPHQL_ENABLED=true"
         "OPERATOR_POST_ENABLED=true"
         "EXTENSIONS_PROMOTION_AUTO_DISPATCH=false"
-        "INTUIT_REPORTS_TESTING_MIGRATION=true"
         "LOAD_SHEDDING_ENABLED=true"
         "MCP_AUTO_LIMIT_ENABLED=true"
         "MCP_SEMANTIC_MEMORY_ENABLED=false"

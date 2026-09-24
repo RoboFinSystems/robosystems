@@ -326,6 +326,7 @@ def update_schedule(
   structure.metadata_ = metadata
   # Both columns are written; see ScheduleService._build_schedule_definition_blobs.
   structure.artifact_mechanics = {
+    **(structure.artifact_mechanics or {}),
     "kind": "closing_entry_generator",
     "entry_template": metadata.get("entry_template", {}),
     "schedule_metadata": metadata.get("schedule_metadata"),
@@ -501,6 +502,7 @@ def _rewrite_sum_equals_rule(session: Session, structure: Structure) -> bool:
     mechanics_metadata["schedule_metadata"] = schedule_meta
     structure.metadata_ = mechanics_metadata
     structure.artifact_mechanics = {
+      **(structure.artifact_mechanics or {}),
       "kind": "closing_entry_generator",
       "entry_template": mechanics_metadata.get("entry_template", {}),
       "schedule_metadata": schedule_meta,

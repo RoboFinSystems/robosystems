@@ -102,7 +102,8 @@ class DagsterRunMonitor:
     run_id: str,
   ):
     try:
-      self.event_storage.store_event_sync(
+      await asyncio.to_thread(
+        self.event_storage.store_event_sync,
         operation_id,
         EventType.OPERATION_STARTED,
         {
@@ -130,7 +131,8 @@ class DagsterRunMonitor:
       event_data.update(details)
 
     try:
-      self.event_storage.store_event_sync(
+      await asyncio.to_thread(
+        self.event_storage.store_event_sync,
         operation_id,
         EventType.OPERATION_PROGRESS,
         event_data,
@@ -146,11 +148,17 @@ class DagsterRunMonitor:
     """Emit completion, merging the result the job recorded on the operation
     metadata with the monitoring result."""
     try:
-      stored_result = self.event_storage.get_operation_result_sync(operation_id) or {}
+      stored_result = (
+        await asyncio.to_thread(
+          self.event_storage.get_operation_result_sync, operation_id
+        )
+        or {}
+      )
 
       merged_result = {**stored_result, **result}
 
-      self.event_storage.store_event_sync(
+      await asyncio.to_thread(
+        self.event_storage.store_event_sync,
         operation_id,
         EventType.OPERATION_COMPLETED,
         {
@@ -168,7 +176,8 @@ class DagsterRunMonitor:
     error_details: dict[str, Any] | None = None,
   ):
     try:
-      self.event_storage.store_event_sync(
+      await asyncio.to_thread(
+        self.event_storage.store_event_sync,
         operation_id,
         EventType.OPERATION_ERROR,
         {
