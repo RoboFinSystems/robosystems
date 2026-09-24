@@ -104,7 +104,7 @@ class StreamingRepositoryWrapper:
 
     total_rows = len(data)
 
-    for i in range(0, total_rows, chunk_size):
+    for i in range(0, total_rows or 1, chunk_size):
       chunk_data = data[i : i + chunk_size]
       is_last = i + chunk_size >= total_rows
 

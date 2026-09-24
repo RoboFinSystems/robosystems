@@ -444,7 +444,8 @@ async def vector_search(
   manager = _get_lance_manager()
 
   try:
-    result = manager.search(
+    result = await asyncio.to_thread(
+      manager.search,
       graph_id=graph_id,
       table_name=table_name,
       embedding=request.embedding,

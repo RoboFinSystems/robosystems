@@ -498,6 +498,7 @@ class DuckDBStager:
         total_rows=total_rows,
         duration_ms=duration * 1000,
         duckdb_path=get_staging_duckdb_path(self.graph_id),
+        error=f"failed tables: {failed_tables}" if failed_tables else None,
       )
 
     except Exception as e:

@@ -263,6 +263,10 @@ all_schedules = [
   full_instance_maintenance_schedule,
   # Adapter: SEC pipeline
   *sec["schedules"],
+  # Adapter: QuickBooks, Mercury and Plaid pipelines
+  *qb["schedules"],
+  *mercury["schedules"],
+  *plaid["schedules"],
 ]
 
 all_sensors = [
@@ -284,6 +288,10 @@ all_sensors = [
   *_extensions_sensors,
   # Adapter: SEC pipeline
   *sec["sensors"],
+  # Adapter: QuickBooks, Mercury and Plaid pipelines
+  *qb["sensors"],
+  *mercury["sensors"],
+  *plaid["sensors"],
 ]
 
 defs = Definitions(

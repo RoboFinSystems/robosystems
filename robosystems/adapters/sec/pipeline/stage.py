@@ -8,6 +8,19 @@ from robosystems.config import env
 from .configs import SECHistoricalStageConfig, SECIncrementalStageConfig, SECStageConfig
 
 
+def _release_duckdb_memory(context: AssetExecutionContext, graph_id: str) -> None:
+  """Hand the staging memory boost back. Never raises."""
+  import asyncio
+
+  try:
+    from robosystems.graph_api.client.factory import release_graph_memory
+
+    release_result = asyncio.run(release_graph_memory(graph_id, target="duckdb"))
+    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
+  except Exception as release_err:
+    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
+
+
 @asset(
   group_name="sec_pipeline",
   description="Stage SEC parquet files to DuckDB (full rebuild)",
@@ -90,7 +103,10 @@ def sec_duckdb_staged(
     finally:
       await end_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
 
-  result = asyncio.run(run_staging())
+  try:
+    result = asyncio.run(run_staging())
+  finally:
+    _release_duckdb_memory(context, config.graph_id)
 
   if result.status == "error":
     context.log.error(f"Staging failed: {result.error}")
@@ -108,14 +124,6 @@ def sec_duckdb_staged(
     f"Staging complete: {len(result.table_names)} tables, "
     f"{result.total_files} files, {result.duration_ms / 1000:.2f}s"
   )
-
-  try:
-    from robosystems.graph_api.client.factory import release_graph_memory
-
-    release_result = asyncio.run(release_graph_memory(config.graph_id, target="duckdb"))
-    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
-  except Exception as release_err:
-    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
 
   return MaterializeResult(
     metadata={
@@ -213,15 +221,10 @@ def sec_historical_duckdb_staged(
     finally:
       await end_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
 
-  result = asyncio.run(run_staging())
-
   try:
-    from robosystems.graph_api.client.factory import release_graph_memory
-
-    release_result = asyncio.run(release_graph_memory(graph_id, target="duckdb"))
-    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
-  except Exception as release_err:
-    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
+    result = asyncio.run(run_staging())
+  finally:
+    _release_duckdb_memory(context, graph_id)
 
   if result.status == "error":
     context.log.error(f"Staging failed: {result.error}")
@@ -312,15 +315,10 @@ def sec_duckdb_incremental_staged(
     finally:
       await end_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
 
-  result = asyncio.run(run_incremental())
-
   try:
-    from robosystems.graph_api.client.factory import release_graph_memory
-
-    release_result = asyncio.run(release_graph_memory(config.graph_id, target="duckdb"))
-    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
-  except Exception as release_err:
-    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
+    result = asyncio.run(run_incremental())
+  finally:
+    _release_duckdb_memory(context, config.graph_id)
 
   if result.status == "error":
     context.log.error(f"Incremental staging failed: {result.error}")
@@ -346,6 +344,7 @@ def sec_duckdb_incremental_staged(
         "graph_id": config.graph_id,
         "status": "partial",
         "tables_staged": len(result.table_names),
+        "error": result.error or "",
         "duration_ms": result.duration_ms,
       },
     )

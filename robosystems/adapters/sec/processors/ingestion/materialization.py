@@ -130,11 +130,18 @@ class LadybugMaterializer:
         f"Materialization complete in {duration:.2f}s: "
         f"{ingestion_results.get('total_rows_ingested', 0):,} rows ingested"
       )
+      table_results = ingestion_results.get("tables", [])
+      total_rows = ingestion_results.get("total_rows_ingested", 0)
       return MaterializeResult(
         status=status,
-        total_rows_ingested=ingestion_results.get("total_rows_ingested", 0),
+        table_names=[
+          r["table_name"] for r in table_results if r.get("status") != "error"
+        ],
+        failed_tables=[r for r in table_results if r.get("status") == "error"],
+        total_rows_ingested=total_rows,
+        total_rows=total_rows,
         duration_ms=ingestion_results.get("duration_ms", 0),
-        tables=ingestion_results.get("tables", []),
+        tables=table_results,
       )
 
     except Exception as e:

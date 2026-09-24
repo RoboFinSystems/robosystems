@@ -7,6 +7,7 @@ from robosystems.middleware.graph.types import (
   AccessPattern,
   GraphCategory,
   GraphTypeRegistry,
+  is_subgraph_id,
 )
 from robosystems.models.core import Graph, Org
 from robosystems.models.core.org import OrgType
@@ -155,3 +156,12 @@ class TestGraphTypeRegistry:
 
     assert identity.graph_id == "kg_test"
     assert identity.category == GraphCategory.USER
+
+
+@pytest.mark.unit
+class TestIsSubgraphId:
+  def test_ascii_subgraph_name_accepted(self):
+    assert is_subgraph_id("kg" + "a" * 16 + "_dev") is True
+
+  def test_non_ascii_subgraph_name_rejected(self):
+    assert is_subgraph_id("kg" + "a" * 16 + "_d\u00e9v") is False

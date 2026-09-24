@@ -269,6 +269,19 @@ class TestUniversalRepositoryStreaming:
     assert collected[2]["is_last_chunk"] is True
     assert collected[2]["row_count"] == 1
 
+  @pytest.mark.asyncio
+  async def test_streaming_fallback_empty_result_sends_last_chunk(self):
+    mock_repo = MagicMock(spec=["execute_query"])
+    mock_repo.execute_query = MagicMock(return_value=[])
+    ur = UniversalRepository(mock_repo)
+
+    collected = [chunk async for chunk in ur.execute_query_streaming("MATCH (n)")]
+
+    assert len(collected) == 1
+    assert collected[0]["is_last_chunk"] is True
+    assert collected[0]["row_count"] == 0
+    assert collected[0]["data"] == []
+
 
 @pytest.mark.unit
 class TestUniversalRepositorySyncMethods:

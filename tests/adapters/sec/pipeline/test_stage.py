@@ -80,8 +80,12 @@ class TestSecDuckdbStaged:
     "robosystems.operations.graph.shared_repository_service.ensure_shared_repository_exists"
   )
   @patch("robosystems.graph_api.client.factory.boost_graph_memory")
+  @patch(
+    "robosystems.graph_api.client.factory.release_graph_memory",
+    new_callable=AsyncMock,
+  )
   def test_staging_error(
-    self, mock_boost, mock_ensure_repo, mock_processor_cls, mock_env
+    self, mock_release, mock_boost, mock_ensure_repo, mock_processor_cls, mock_env
   ):
     """Test staging raises Failure to block downstream materialization."""
     mock_env.ENVIRONMENT = "dev"
@@ -99,6 +103,8 @@ class TestSecDuckdbStaged:
 
     with pytest.raises(Failure, match="DuckDB out of memory"):
       sec_duckdb_staged(context, config)
+
+    mock_release.assert_awaited_once_with(config.graph_id, target="duckdb")
 
   @patch("robosystems.config.env")
   @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
@@ -336,7 +342,9 @@ class TestSecDuckdbIncrementalStaged:
   @patch("robosystems.graph_api.client.factory.boost_graph_memory")
   def test_incremental_staging_partial_failure(self, mock_boost, mock_processor_cls):
     """Test incremental staging with partial failure raises Failure."""
-    staging_result = _make_staging_result(status="partial")
+    staging_result = _make_staging_result(
+      status="partial", error="failed tables: [('Fact', 'boom')]"
+    )
     mock_processor = MagicMock()
     mock_processor.stage_incremental_to_duckdb = AsyncMock(return_value=staging_result)
     mock_processor_cls.return_value = mock_processor
@@ -346,8 +354,9 @@ class TestSecDuckdbIncrementalStaged:
     config = SECIncrementalStageConfig(year=2025, quarter=1)
     context = build_asset_context()
 
-    with pytest.raises(Failure, match="Partial staging failure"):
+    with pytest.raises(Failure, match="Partial staging failure") as exc_info:
       sec_duckdb_incremental_staged(context, config)
+    assert "Fact" in exc_info.value.metadata["error"].value
 
   @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
   @patch("robosystems.graph_api.client.factory.boost_graph_memory")

@@ -887,6 +887,23 @@ class TestLadybugServiceStreamingQuery:
         list(service.execute_query_streaming(request))
       assert exc_info.value.status_code == 404
 
+  def test_streaming_rejects_invalid_parameters(self, service):
+    """Parameters are validated before the query reaches the engine."""
+    from robosystems.graph_api.models.database import QueryRequest
+
+    service.db_manager.list_databases.return_value = ["test_db"]
+    service.db_manager.get_connection.side_effect = AssertionError("reached engine")
+    request = QueryRequest(
+      database="test_db",
+      cypher="MATCH (n) WHERE n.x = $x RETURN n",
+      parameters={"bad-name": 1},
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+      list(service.execute_query_streaming(request))
+    assert exc_info.value.status_code == 400
+    service.db_manager.get_connection.assert_not_called()
+
   def _wire_streaming_result(self, service, mock_query_result):
     """Attach a mock query result to the service's connection for streaming."""
     mock_conn = MagicMock()

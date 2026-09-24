@@ -269,15 +269,15 @@ class IngestionLimitChecker:
     """Itemized disk usage from the Graph API, or None when unavailable."""
     from robosystems.graph_api.client.factory import GraphClientFactory
 
+    client = None
     try:
       client = await GraphClientFactory.create_client(
         graph_id=graph_id, operation_type="read"
       )
-      breakdown = await asyncio.wait_for(
-        client.get_storage_breakdown(graph_id), timeout=10
-      )
-      await client.close()
-      return breakdown
+      return await asyncio.wait_for(client.get_storage_breakdown(graph_id), timeout=10)
     except Exception as e:
       logger.debug(f"Could not get database size for {graph_id}: {e}")
       return None
+    finally:
+      if client is not None:
+        await client.close()

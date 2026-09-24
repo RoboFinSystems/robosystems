@@ -17,6 +17,7 @@ Database files persist for the life of the graph; ``force_database_cleanup``
 deletes one when a graph is dropped.
 """
 
+import itertools
 import os
 import threading
 import weakref
@@ -83,6 +84,7 @@ class DuckDBConnectionPool:
     # registry guard is a leaf: nothing else is acquired under it.
     self._locks_guard = threading.Lock()
     self._global_lock = threading.RLock()
+    self._conn_ids = itertools.count()
 
     self._stats = {
       "connections_created": 0,
@@ -276,7 +278,7 @@ class DuckDBConnectionPool:
       if graph_id not in self._pools:
         self._pools[graph_id] = {}
 
-      conn_id = f"{graph_id}_{len(self._pools[graph_id])}"
+      conn_id = f"{graph_id}_{next(self._conn_ids)}"
       self._pools[graph_id][conn_id] = connection_info
 
       self._stats["connections_created"] += 1

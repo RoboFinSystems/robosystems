@@ -1320,3 +1320,29 @@ class TestRouteTarget:
 
   def test_shared_replica_value(self):
     assert RouteTarget.SHARED_REPLICA.value == "shared_replica"
+
+
+@pytest.mark.unit
+class TestMemoryHelpersCloseClient:
+  """The boost/release helpers must close the client they open."""
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("helper", "method"),
+    [
+      ("boost_graph_memory", "boost_memory"),
+      ("release_graph_memory", "release_memory"),
+    ],
+  )
+  async def test_client_closed_when_call_raises(self, helper, method):
+    import robosystems.graph_api.client.factory as factory_module
+
+    client = MagicMock()
+    setattr(client, method, AsyncMock(side_effect=RuntimeError("down")))
+    client.close = AsyncMock()
+
+    with patch(f"{FACTORY_MODULE}.get_graph_client", AsyncMock(return_value=client)):
+      result = await getattr(factory_module, helper)("kg_test")
+
+    assert "failed" in result["message"].lower()
+    client.close.assert_awaited_once()

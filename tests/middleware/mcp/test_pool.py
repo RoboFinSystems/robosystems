@@ -369,6 +369,21 @@ class TestMCPConnectionPoolStats:
     assert "will_expire_in" in conn_stat
 
   @pytest.mark.asyncio
+  async def test_will_expire_in_is_the_nearer_limit(self, pool):
+    """Idle 100s of 300 and alive 3500s of 3600: expires in ~100s, not ~200s."""
+    now = datetime.now()
+    pool._pools["graph1"] = [
+      (MagicMock(), now - timedelta(seconds=100), now - timedelta(seconds=3500)),
+      (MagicMock(), now - timedelta(seconds=400), now - timedelta(seconds=400)),
+    ]
+
+    stats = await pool.get_stats()
+
+    fresh, stale = stats["graph1"]["connections"]
+    assert 99 <= fresh["will_expire_in"] <= 100
+    assert stale["will_expire_in"] == 0
+
+  @pytest.mark.asyncio
   async def test_get_stats_multiple_graphs(self, pool):
     """Test stats with multiple graphs in pool."""
     now = datetime.now()

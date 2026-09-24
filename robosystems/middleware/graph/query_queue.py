@@ -300,6 +300,7 @@ class QueryQueueManager:
     )
 
     self._completed_queries[query_id] = query
+    self._queries.pop(query_id, None)
     self._cleanup_completed_queries()
 
     self._user_query_counts[user_id] = max(0, self._user_query_counts[user_id] - 1)

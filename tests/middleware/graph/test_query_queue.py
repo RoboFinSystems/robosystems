@@ -478,6 +478,10 @@ class TestQueryQueueManager:
       queue_manager._completed_queries["test_query"].status == QueryStatus.CANCELLED
     )
     assert queue_manager._user_query_counts.get("user_123", 0) == 0
+    assert "test_query" not in queue_manager._queries
+    status = await queue_manager.get_query_status("test_query")
+    assert status is not None
+    assert status["status"] == QueryStatus.CANCELLED
 
     # Check metrics were recorded
     mock_metrics.assert_called_with(

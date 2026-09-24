@@ -793,6 +793,8 @@ async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, A
       "ladybug_boosted": False,
       "message": f"Boost failed: {e}",
     }
+  finally:
+    await client.close()
 
 
 async def release_graph_memory(
@@ -820,3 +822,5 @@ async def release_graph_memory(
       "ladybug_released": False,
       "message": f"Release failed: {e}",
     }
+  finally:
+    await client.close()
