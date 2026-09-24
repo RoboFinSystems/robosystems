@@ -132,19 +132,17 @@ class RateLimitCache:
       logger.error(f"Failed to clear rate limit for {identifier}: {e}")
       return False
 
+  # get/set ignore RATE_LIMIT_ENABLED: auth protection keeps its state here and
+  # must keep working with rate limiting switched off.
   def get(self, key: str) -> Any:
-    """Plain key read; None when rate limiting is disabled."""
-    if not self.enabled:
-      return None
+    """Plain key read; None on a backend failure."""
     try:
       return self.redis.get(key)
     except Exception:
       return None
 
   def set(self, key: str, value: Any, expire: int | None = None) -> bool:
-    """Plain key write; a no-op when rate limiting is disabled."""
-    if not self.enabled:
-      return False
+    """Plain key write; False on a backend failure."""
     try:
       return bool(self.redis.set(key, value, ex=expire))
     except Exception:
