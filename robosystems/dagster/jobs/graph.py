@@ -932,6 +932,8 @@ def materialize_graph_tables(
 
       if not tables_with_staged_data:
         context.log.info(f"No tables with staged data found for graph {graph_id}")
+        if config.rebuild:
+          graph_record.settle_rebuild(session, "available")
         result = {
           "status": "success",
           "graph_id": graph_id,
@@ -1060,6 +1062,16 @@ def materialize_graph_tables(
       return result
 
     finally:
+      if config.rebuild and graph_record.is_rebuilding:
+        try:
+          session.rollback()
+          graph_record.settle_rebuild(
+            session, "rebuild_failed", error="materialization did not complete"
+          )
+        except Exception as settle_err:
+          context.log.error(
+            f"Could not clear rebuilding status on {graph_id}: {settle_err}"
+          )
       try:
         loop.run_until_complete(
           end_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)

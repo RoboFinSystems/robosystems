@@ -23,9 +23,12 @@ class DagsterJobMonitorTask(BaseTask):
   """Submit a Dagster job and monitor its progress, relaying to SSE.
 
   Params: ``job_name`` (required), plus optional ``run_config``, ``tags``,
-  and ``lock_key`` — the lock is released when the monitor exits, however it
-  exits.
+  and ``lock_key``. The lock is released when the monitor exits, except when a
+  cancelled run will not confirm it has stopped: releasing then would let a
+  second run write alongside it, so the lock is left to its TTL.
   """
+
+  CANCEL_SETTLE_SECONDS = 120
 
   async def execute(self) -> dict[str, Any]:
     import asyncio
@@ -38,6 +41,7 @@ class DagsterJobMonitorTask(BaseTask):
     lock_key = self.params.get("lock_key")
 
     monitor = DagsterRunMonitor()
+    release = True
 
     try:
       run_id = await asyncio.to_thread(monitor.submit_job, job_name, run_config, tags)
@@ -48,6 +52,7 @@ class DagsterJobMonitorTask(BaseTask):
       while True:
         if await self.is_cancelled():
           logger.info(f"Dagster job monitor cancelled: {job_name} (run_id={run_id})")
+          release = await self._stop_run(monitor, run_id)
           return {"status": "cancelled", "run_id": run_id, "job_name": job_name}
 
         status_info = await asyncio.to_thread(monitor.get_run_status, run_id)
@@ -79,4 +84,29 @@ class DagsterJobMonitorTask(BaseTask):
         await asyncio.sleep(monitor.poll_interval)
 
     finally:
-      self.release_lock(lock_key)
+      if release:
+        self.release_lock(lock_key)
+
+  async def _stop_run(self, monitor: Any, run_id: str) -> bool:
+    """Terminate the run and wait for Dagster to report it stopped.
+
+    True once it has; False if it is still running after the settle window.
+    """
+    import asyncio
+
+    try:
+      await asyncio.to_thread(monitor.terminate_run, run_id)
+    except Exception as e:
+      logger.warning(f"Terminating Dagster run {run_id} failed: {e}")
+    waited = 0.0
+    while waited < self.CANCEL_SETTLE_SECONDS:
+      status = (await asyncio.to_thread(monitor.get_run_status, run_id))["status"]
+      if status in ("completed", "failed", "cancelled"):
+        return True
+      await asyncio.sleep(monitor.poll_interval)
+      waited += monitor.poll_interval
+    logger.error(
+      f"Dagster run {run_id} still running {self.CANCEL_SETTLE_SECONDS}s after "
+      "cancel; leaving its lock to expire rather than release it under a writer"
+    )
+    return False

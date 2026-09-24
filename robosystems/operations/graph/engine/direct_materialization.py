@@ -193,6 +193,8 @@ async def materialize_graph_directly(
 
       if not tables_with_staged_data:
         logger.info(f"No tables with staged data found for graph {graph_id}")
+        if rebuild:
+          graph_record.settle_rebuild(db, "available")
         result = {
           "status": "success",
           "graph_id": graph_id,
@@ -334,6 +336,14 @@ async def materialize_graph_directly(
       return result
 
     finally:
+      if rebuild and graph_record.is_rebuilding:
+        try:
+          db.rollback()
+          graph_record.settle_rebuild(
+            db, "rebuild_failed", error="materialization did not complete"
+          )
+        except Exception as settle_err:
+          logger.error(f"Could not clear rebuilding status on {graph_id}: {settle_err}")
       await end_destructive_op(busy_instance_id, OP_KIND_MATERIALIZATION)
       await client.close()
 

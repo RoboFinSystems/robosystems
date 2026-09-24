@@ -13,7 +13,7 @@ from sqlalchemy import (
   Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Session, relationship
+from sqlalchemy.orm import Session, backref, relationship
 
 from robosystems.database import Base
 from robosystems.utils.ulid import generate_prefixed_ulid
@@ -51,7 +51,9 @@ class GraphSchema(Base):
   )
   is_active = Column(Boolean, default=True, nullable=False)
 
-  graph = relationship("Graph", backref="schemas")
+  # The FK cascades in the database; without passive_deletes the ORM would
+  # null graph_id (NOT NULL) on a Graph delete before the cascade ran.
+  graph = relationship("Graph", backref=backref("schemas", passive_deletes="all"))
 
   def __repr__(self) -> str:
     return f"<GraphSchema {self.id} graph_id={self.graph_id} type={self.schema_type} version={self.schema_version}>"
