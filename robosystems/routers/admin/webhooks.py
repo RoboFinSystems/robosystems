@@ -1,6 +1,7 @@
 """Admin webhook handlers for payment providers."""
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ...database import SessionFactory, get_db_session
@@ -206,6 +207,19 @@ async def handle_stripe_webhook(
     event_type = event.get("type")
     event_data = event.get("data", {}).get("object", {})
     event_id = event.get("id")
+
+    # Held for this request's transaction. A concurrent redelivery of the same
+    # event gets a non-2xx and Stripe retries it later, when the processed
+    # check below turns it away. Non-blocking: the DB call is sync and a wait
+    # here would stall the event loop the first delivery is running on.
+    acquired = db.execute(
+      text("SELECT pg_try_advisory_xact_lock(hashtext(:key))"),
+      {"key": f"stripe-webhook:{event_id}"},
+    ).scalar()
+    if not acquired:
+      raise HTTPException(
+        status_code=409, detail="Event is already being processed; retry"
+      )
 
     if BillingAuditLog.is_webhook_processed(event_id, "stripe", db):
       logger.info(

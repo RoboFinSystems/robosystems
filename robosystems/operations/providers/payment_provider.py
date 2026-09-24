@@ -109,6 +109,11 @@ class PaymentProvider(ABC):
     """Return a self-serve portal URL for managing payment methods."""
     pass
 
+  @abstractmethod
+  def invoice_for_payment_intent(self, payment_intent_id: str) -> str | None:
+    """The provider invoice id a payment paid, or None."""
+    pass
+
 
 class StripePaymentProvider(PaymentProvider):
   """Stripe implementation of payment provider."""
@@ -686,6 +691,24 @@ class StripePaymentProvider(PaymentProvider):
         exc_info=True,
       )
       raise
+
+  def invoice_for_payment_intent(self, payment_intent_id: str) -> str | None:
+    """The invoice a PaymentIntent paid, or None.
+
+    Charges and PaymentIntents stopped carrying ``invoice`` in API version
+    2025-03-31; the link is now an InvoicePayment.
+    """
+    client = self.stripe.StripeClient(
+      env.STRIPE_SECRET_KEY, stripe_version=STRIPE_API_VERSION
+    )
+    response = client.raw_request(
+      "get",
+      "/v1/invoice_payments",
+      payment={"type": "payment_intent", "payment_intent": payment_intent_id},
+      limit=1,
+    )
+    payments = client.deserialize(response, api_mode="V1").get("data") or []
+    return payments[0].get("invoice") if payments else None
 
   def _subscription_already_terminal(self, subscription_id: str) -> bool:
     """True when Stripe has no live subscription left to cancel.

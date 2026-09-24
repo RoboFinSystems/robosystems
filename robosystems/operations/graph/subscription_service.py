@@ -41,6 +41,7 @@ def generate_subscription_invoice(
   customer: BillingCustomer,
   description: str,
   session: Session,
+  commit: bool = True,
 ) -> BillingInvoice:
   """Create and finalize an OPEN invoice for a new subscription.
 
@@ -61,6 +62,7 @@ def generate_subscription_invoice(
     period_end=subscription.current_period_end,
     payment_terms=customer.payment_terms,
     session=session,
+    commit=commit,
   )
 
   invoice.add_line_item(
@@ -70,9 +72,10 @@ def generate_subscription_invoice(
     description=description,
     amount_cents=amount_cents,
     session=session,
+    commit=commit,
   )
 
-  invoice.finalize(session)
+  invoice.finalize(session, commit=commit)
 
   BillingAuditLog.log_event(
     session=session,
@@ -91,6 +94,7 @@ def generate_subscription_invoice(
       "resource_id": subscription.resource_id,
       "plan_name": subscription.plan_name,
     },
+    commit=commit,
   )
 
   logger.info(

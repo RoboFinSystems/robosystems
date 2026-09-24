@@ -531,11 +531,21 @@ class TestBillingSubscriptionStatusChecks:
     assert subscription.is_active() is False
 
 
+def _add_months(value, months):
+  import calendar
+
+  index = value.month - 1 + months
+  year, month = value.year + index // 12, index % 12 + 1
+  return value.replace(
+    year=year, month=month, day=min(value.day, calendar.monthrange(year, month)[1])
+  )
+
+
 class TestBillingSubscriptionRenewal:
   """Tests for subscription period renewal."""
 
   def test_renew_period_advances_dates(self, db_session: Session, test_user, test_org):
-    """Test that renew_period shifts period start/end forward by 30 days."""
+    """Test that renew_period shifts period start/end forward one calendar month."""
     subscription = BillingSubscription.create_subscription(
       org_id=test_org.id,
       resource_type="graph",
@@ -552,7 +562,7 @@ class TestBillingSubscriptionRenewal:
     subscription.renew_period(db_session)
 
     assert subscription.current_period_start == old_period_end
-    assert subscription.current_period_end == old_period_end + timedelta(days=30)
+    assert subscription.current_period_end == _add_months(old_period_end, 1)
     assert subscription.current_period_start != old_period_start
 
   def test_renew_period_preserves_status(
@@ -593,7 +603,7 @@ class TestBillingSubscriptionRenewal:
     assert subscription.updated_at is not None
 
   def test_renew_period_annual_interval(self, db_session: Session, test_user, test_org):
-    """Test that renew_period uses 365 days for annual subscriptions."""
+    """Test that renew_period advances one calendar year for annual subscriptions."""
     subscription = BillingSubscription.create_subscription(
       org_id=test_org.id,
       resource_type="graph",
@@ -610,12 +620,12 @@ class TestBillingSubscriptionRenewal:
     subscription.renew_period(db_session)
 
     assert subscription.current_period_start == old_period_end
-    assert subscription.current_period_end == old_period_end + timedelta(days=365)
+    assert subscription.current_period_end == _add_months(old_period_end, 12)
 
   def test_renew_period_monthly_interval(
     self, db_session: Session, test_user, test_org
   ):
-    """Test that renew_period uses 30 days for monthly subscriptions."""
+    """Test that renew_period advances one calendar month for monthly subscriptions."""
     subscription = BillingSubscription.create_subscription(
       org_id=test_org.id,
       resource_type="graph",
@@ -632,7 +642,7 @@ class TestBillingSubscriptionRenewal:
     subscription.renew_period(db_session)
 
     assert subscription.current_period_start == old_period_end
-    assert subscription.current_period_end == old_period_end + timedelta(days=30)
+    assert subscription.current_period_end == _add_months(old_period_end, 1)
 
 
 class TestBillingSubscriptionRepr:

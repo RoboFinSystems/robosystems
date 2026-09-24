@@ -1,5 +1,6 @@
 """Billing subscription model - polymorphic subscriptions for any resource type."""
 
+import calendar
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Optional
@@ -437,13 +438,28 @@ class BillingSubscription(Base):
 
     return bool(wrote_off)
 
+  def restore_suspended_graph(self, session: Session) -> bool:
+    """Lift the suspension a lapsed subscription put on its graph.
+
+    Commits through `transition_status`. True when a graph was restored.
+    """
+    if self.resource_type != "graph" or not self.resource_id:
+      return False
+    from robosystems.models.core.graph import Graph, GraphStatus
+
+    graph = Graph.get_by_id(self.resource_id, session, include_deprovisioned=True)
+    if graph is None or graph.status != GraphStatus.SUSPENDED.value:
+      return False
+    graph.transition_status(GraphStatus.ACTIVE, session)
+    return True
+
   def activate(self, session: Session) -> None:
     """Activate the subscription."""
     now = datetime.now(UTC)
     self.status = SubscriptionStatus.ACTIVE.value
     self.started_at = now
     self.current_period_start = now
-    self.current_period_end = now + timedelta(days=30)
+    self.current_period_end = self._period_end_after(now)
     self.updated_at = now
 
     session.commit()
@@ -532,19 +548,26 @@ class BillingSubscription(Base):
 
     logger.info(f"Updated Stripe subscription for {self.id}")
 
-  def _get_period_delta(self) -> timedelta:
-    """Get the timedelta for one billing period based on billing_interval."""
-    if self.billing_interval == BillingInterval.ANNUAL.value:
-      return timedelta(days=365)
+  def _period_end_after(self, start: datetime) -> datetime:
+    """One billing period after ``start``: a calendar month (or year).
+
+    Anchored to the day the subscription started, clamped to the month's
+    last day, so a period begun on the 31st renews on the 30th, 28th/29th and
+    31st as the months allow instead of drifting earlier each month.
+    """
+    anchor = (self.started_at or start).day
+    months = 12 if self.billing_interval == BillingInterval.ANNUAL.value else 1
     # Both "monthly" and "usage_based" bill on a monthly cadence.
-    return timedelta(days=30)
+    month_index = start.month - 1 + months
+    year, month = start.year + month_index // 12, month_index % 12 + 1
+    day = min(anchor, calendar.monthrange(year, month)[1])
+    return start.replace(year=year, month=month, day=day)
 
   def renew_period(self, session: Session) -> None:
     """Advance to the next billing period. Flushes, does not commit."""
     now = datetime.now(UTC)
-    delta = self._get_period_delta()
     self.current_period_start = self.current_period_end
-    self.current_period_end = self.current_period_end + delta
+    self.current_period_end = self._period_end_after(self.current_period_end)
     self.updated_at = now
 
     session.flush()
