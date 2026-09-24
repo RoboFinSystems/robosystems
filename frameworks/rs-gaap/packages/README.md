@@ -6,8 +6,8 @@ that lives on top of them, the Reporting Styles surface for
 vertical/filer-profile flavoring, and the metric / forecast-lever
 catalogs that derive from the same anchors.
 
-Packages owned by the upstream **`fac@v1`** framework (Charlie Hoffman's
-universal accounting-concept substrate) live next door at
+Packages owned by the upstream **`fac@v1`** framework (the universal
+accounting-concept substrate) live next door at
 `../../../fac/packages/`, and the **`cm@v1`** conceptual-model substrate
 (the `cm:Debit` / `cm:Credit` posting roles) at `../../../cm/packages/`.
 Both are inherited via this framework's
@@ -25,8 +25,8 @@ For framework composition rules and manifest schema see
 ## Fork model
 
 These packages are **RoboSystems canonical forks**. A handful were
-originally bootstrapped from upstream XBRL (Charlie Hoffman's Seattle
-Method publications + FASB us-gaap 2017); the rest were authored
+originally bootstrapped from upstream XBRL (published reference
+taxonomies + FASB us-gaap 2017); the rest were authored
 natively as part of the taxonomy library build-out.
 
 Whichever origin they had, all packages are now maintained **directly
