@@ -557,6 +557,35 @@ class TestLadybugDatabaseManager:
     assert response.node_capacity["utilization_percent"] == 2.0
 
   @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
+  def test_capacity_counts_only_primaries(self, mock_init_pool):
+    """Subgraphs and blue-green copies are listed but take no capacity slot."""
+    mock_init_pool.return_value = MagicMock()
+    manager = LadybugDatabaseManager(str(self.base_path), max_databases=10)
+    names = ["kg1", "kg1_dev", "kg1-wip", "kg1-prev", "sec"]
+    manager.list_databases = MagicMock(return_value=names)
+    manager.get_database_info = MagicMock(
+      side_effect=[
+        DatabaseInfo(
+          graph_id=name,
+          database_path=f"/tmp/{name}.lbug",
+          created_at="2023-01-01T00:00:00",
+          size_bytes=1,
+          read_only=False,
+          is_healthy=True,
+          last_accessed=None,
+        )
+        for name in names
+      ]
+    )
+
+    response = manager.get_all_databases_info()
+
+    assert response.total_databases == 5
+    assert response.node_capacity["current_databases"] == 2
+    assert response.node_capacity["capacity_remaining"] == 8
+    assert response.node_capacity["utilization_percent"] == 20.0
+
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_health_check_all(self, mock_init_pool):
     """Test health check for all databases."""
     mock_init_pool.return_value = MagicMock()

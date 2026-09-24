@@ -613,6 +613,29 @@ class TestRequireGraphAccessGracePeriod:
 
     assert graph is mock_graph_class.get_by_id.return_value
 
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_grace_cache_expires_by_ends_at(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    """The cached grace verdict must not outlive the subscription's end."""
+    import time
+
+    from robosystems.middleware.billing import enforcement
+
+    mock_env.BILLING_ENABLED = True
+    mock_graph_class.get_by_id.return_value = self._active_graph()
+    mock_subscription_class.get_by_resource.return_value = self._canceled_subscription(
+      datetime.now(UTC) + timedelta(seconds=10)
+    )
+
+    require_graph_access("kg_gracetest5", mock_session)
+
+    [(result, expires_at)] = enforcement._subscription_cache.values()
+    assert result == "canceled_grace"
+    assert expires_at <= time.time() + 10
+
 
 class TestRequireGraphAccessLifecycle:
   """Lifecycle layer of require_graph_access: gone graphs and subgraphs.

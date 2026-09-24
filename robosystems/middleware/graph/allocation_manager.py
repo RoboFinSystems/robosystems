@@ -467,7 +467,7 @@ class LadybugAllocationManager:
             raise e
 
       SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.AUTH_SUCCESS,
+        event_type=SecurityEventType.DATABASE_ALLOCATED,
         details={
           "action": "database_allocated",
           "entity_id": entity_id,
@@ -479,7 +479,7 @@ class LadybugAllocationManager:
           "availability_zone": instance.availability_zone,
           "allocated_at": now.isoformat(),
         },
-        risk_level="medium",
+        risk_level="low",
       )
 
       logger.info(
@@ -741,7 +741,7 @@ class LadybugAllocationManager:
           return False
 
       SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.AUTHORIZATION_DENIED,
+        event_type=SecurityEventType.DATABASE_DEALLOCATED,
         details={
           "action": "database_deallocated",
           "graph_id": graph_id,
@@ -749,7 +749,7 @@ class LadybugAllocationManager:
           "entity_id": item.get("entity_id"),
           "deallocated_at": datetime.now(UTC).isoformat(),
         },
-        risk_level="high",
+        risk_level="low",
       )
 
       logger.info(f"Deallocated database {graph_id} from instance {instance_id}")

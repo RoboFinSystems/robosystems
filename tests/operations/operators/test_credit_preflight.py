@@ -131,6 +131,40 @@ class TestEstimation:
     )
     assert financial > plain
 
+  def test_priced_at_the_default_profile_model(self) -> None:
+    from robosystems.config.billing.ai import AIBillingConfig
+    from robosystems.config.operators import OperatorConfig
+    from robosystems.operations.operators.credit_preflight import (
+      estimate_operator_tokens,
+    )
+
+    operator = _operator()
+    tokens = estimate_operator_tokens(operator, OperatorMode.STANDARD)
+    rates = AIBillingConfig.TOKEN_PRICING[OperatorConfig.resolve_model().pricing_key]
+    expected = (Decimal(tokens["input"]) / 1000) * rates["input"] + (
+      Decimal(tokens["output"]) / 1000
+    ) * rates["output"]
+
+    assert estimate_operator_credits(operator, OperatorMode.STANDARD) == expected
+
+  def test_operator_type_override_sets_the_price(self) -> None:
+    from robosystems.config.billing.ai import AIBillingConfig
+    from robosystems.config.operators import OperatorConfig, OperatorModel
+
+    operator = _operator()
+    with patch.dict(
+      OperatorConfig.OPERATOR_MODEL_OVERRIDES, {"analyst": OperatorModel.OPUS_5}
+    ):
+      opus = estimate_operator_credits(
+        operator, OperatorMode.STANDARD, operator_type="analyst"
+      )
+    rates = AIBillingConfig.TOKEN_PRICING[
+      OperatorConfig.MODEL_REGISTRY[OperatorModel.OPUS_5].pricing_key
+    ]
+    assert opus == Decimal(5000) / 1000 * rates["input"] + (
+      Decimal(1500) / 1000 * rates["output"]
+    )
+
 
 class TestAdaptersRunThePreflight:
   """Asserted through the adapters, and by proving tool access is never

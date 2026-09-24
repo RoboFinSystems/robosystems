@@ -83,6 +83,16 @@ class TestSecurityMetricMapping:
       mock_publish.assert_called_once_with([])
 
   @patch("robosystems.security.audit_logger._publish_security_metrics")
+  def test_database_lifecycle_events_emit_no_metric(self, mock_publish):
+    for event_type in (
+      SecurityEventType.DATABASE_ALLOCATED,
+      SecurityEventType.DATABASE_DEALLOCATED,
+    ):
+      mock_publish.reset_mock()
+      SecurityAuditLogger.log_security_event(event_type=event_type)
+      mock_publish.assert_called_once_with([])
+
+  @patch("robosystems.security.audit_logger._publish_security_metrics")
   def test_admin_flag_adds_failed_admin_metric(self, mock_publish):
     SecurityAuditLogger.log_admin_auth_failure(
       reason="invalid_admin_key",

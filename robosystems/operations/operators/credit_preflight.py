@@ -56,14 +56,19 @@ def estimate_operator_tokens(operator: Operator, mode: OperatorMode) -> dict[str
   return estimate
 
 
-def estimate_operator_credits(operator: Operator, mode: OperatorMode) -> Decimal:
+_FALLBACK_PRICING = {"input": Decimal("3.3"), "output": Decimal("16.5")}
+
+
+def estimate_operator_credits(
+  operator: Operator, mode: OperatorMode, operator_type: str | None = None
+) -> Decimal:
+  """Priced at the model the run resolves to, as `AIClient.create_message` does."""
   from robosystems.config.billing.ai import AIBillingConfig
+  from robosystems.config.operators import OperatorConfig
 
   tokens = estimate_operator_tokens(operator, mode)
-  pricing = AIBillingConfig.TOKEN_PRICING.get(
-    "anthropic_claude_4_sonnet",
-    {"input": Decimal("3"), "output": Decimal("15")},
-  )
+  pricing_key = OperatorConfig.resolve_model(operator_type=operator_type).pricing_key
+  pricing = AIBillingConfig.TOKEN_PRICING.get(pricing_key, _FALLBACK_PRICING)
 
   input_cost = (Decimal(tokens["input"]) / 1000) * pricing["input"]
   output_cost = (Decimal(tokens["output"]) / 1000) * pricing["output"]
@@ -76,12 +81,13 @@ def check_operator_credits(
   user_id: str,
   session: Any,
   mode: OperatorMode,
+  operator_type: str | None = None,
 ) -> dict[str, Any]:
   """`CreditService.check_credit_balance` plus `estimated_credits`; denies on
   an unexpected failure."""
   from robosystems.operations.graph.credit_service import CreditService
 
-  estimated_cost = estimate_operator_credits(operator, mode)
+  estimated_cost = estimate_operator_credits(operator, mode, operator_type)
 
   try:
     result = CreditService(session).check_credit_balance(
@@ -113,6 +119,7 @@ def enforce_operator_credits(
   user_id: str,
   session: Any,
   mode: OperatorMode,
+  operator_type: str | None = None,
 ) -> None:
   """Raise `InsufficientOperatorCreditsError` if the graph cannot fund the run.
 
@@ -121,7 +128,9 @@ def enforce_operator_credits(
   if not operator.spec.requires_credits or session is None:
     return
 
-  result = check_operator_credits(operator, graph_id, user_id, session, mode)
+  result = check_operator_credits(
+    operator, graph_id, user_id, session, mode, operator_type
+  )
   if result.get("has_sufficient_credits"):
     return
 

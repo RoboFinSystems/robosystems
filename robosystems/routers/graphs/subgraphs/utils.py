@@ -35,7 +35,9 @@ def verify_parent_graph_access(
   ('read' or 'admin') on it. Raises 403 on denial, 404 when it is missing."""
   from robosystems.middleware.billing.enforcement import require_graph_access
 
-  parent_graph = require_graph_access(graph_id, session, require_write=True)
+  parent_graph = require_graph_access(
+    graph_id, session, require_write=(required_role != "read")
+  )
 
   if is_shared_repository_or_subgraph(graph_id.lower()):
     raise HTTPException(

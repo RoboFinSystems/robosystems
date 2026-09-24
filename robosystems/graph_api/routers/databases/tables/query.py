@@ -125,20 +125,19 @@ async def query_tables(
 
               # Progress is emitted on the first and last chunk only.
               if chunk_index == 0 or chunk["is_last_chunk"]:
-                progress_percent = (
-                  100
-                  if chunk["is_last_chunk"]
-                  else int(
-                    (chunk["total_rows_sent"] / chunk.get("total_rows", 1)) * 100
-                  )
-                )
+                total_rows = chunk.get("total_rows")
+                progress_percent = None
+                if chunk["is_last_chunk"]:
+                  progress_percent = 100
+                elif total_rows:
+                  progress_percent = int(chunk["total_rows_sent"] / total_rows * 100)
                 yield {
                   "event": "progress",
                   "data": json.dumps(
                     {
                       "progress_percent": progress_percent,
                       "rows_processed": chunk["total_rows_sent"],
-                      "total_rows": chunk.get("total_rows"),
+                      "total_rows": total_rows,
                       "execution_time_ms": chunk["execution_time_ms"],
                     }
                   ),
@@ -152,7 +151,9 @@ async def query_tables(
               "data": json.dumps(
                 {
                   "message": "Query execution completed",
-                  "total_rows": last_chunk.get("total_rows", 0) if last_chunk else 0,
+                  "total_rows": last_chunk.get("total_rows_sent", 0)
+                  if last_chunk
+                  else 0,
                   "execution_time_ms": execution_time_ms,
                 }
               ),

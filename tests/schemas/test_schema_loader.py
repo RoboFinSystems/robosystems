@@ -261,12 +261,14 @@ class TestContextAwareSchemaLoader:
   def test_get_contextual_schema_loader_admin(self):
     loader = get_contextual_schema_loader("application", "robosystems")
     assert isinstance(loader, LadybugSchemaLoader)
+    assert loader.loaded_extensions == []
 
   def test_get_contextual_with_additional_extensions(self):
     loader = get_contextual_schema_loader(
       "application", "robosystems", additional_extensions=["knowledge"]
     )
     assert isinstance(loader, LadybugSchemaLoader)
+    assert loader.loaded_extensions == ["knowledge"]
 
 
 class TestREAPrimitives:

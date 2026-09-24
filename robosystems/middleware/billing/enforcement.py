@@ -36,9 +36,12 @@ def _get_cached_subscription(graph_id: str) -> str | None:
     return None
 
 
-def _cache_subscription(graph_id: str, result: str) -> None:
+def _cache_subscription(graph_id: str, result: str, ttl: float | None = None) -> None:
+  seconds = (
+    CacheDefaults.SHORT if ttl is None else min(max(ttl, 0), CacheDefaults.SHORT)
+  )
   with _subscription_lock:
-    _subscription_cache[graph_id] = (result, time.time() + CacheDefaults.SHORT)
+    _subscription_cache[graph_id] = (result, time.time() + seconds)
 
 
 def invalidate_subscription_cache(graph_id: str) -> None:
@@ -233,7 +236,9 @@ def require_graph_access(
       ends_at = ends_at.replace(tzinfo=UTC)
 
     if ends_at and ends_at > now:
-      _cache_subscription(billing_graph_id, "canceled_grace")
+      _cache_subscription(
+        billing_graph_id, "canceled_grace", (ends_at - now).total_seconds()
+      )
       if require_write:
         raise HTTPException(
           status_code=status.HTTP_403_FORBIDDEN,

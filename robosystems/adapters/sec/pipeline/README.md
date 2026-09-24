@@ -187,7 +187,6 @@ automated chain; nothing runs on its own after a fresh deploy.
 | `sec_wake_to_stage_sensor` | `sec_incremental_stage_job` | master awake → stage the tagged quarter |
 | `sec_stage_to_materialize_sensor` | `sec_materialize_job` | stage → full graph rebuild |
 | `sec_post_stage_index_sensor` | `sec_narratives_index_job`, `sec_ixbrl_index_job` | stage → OpenSearch indexing |
-| `sec_index_retry_sensor` | index jobs | retries failed index runs |
 | `sec_post_materialize_publish_sensor` | `sec_lbug_s3_publish_job`, `sec_duckdb_s3_publish_job`, `shared_replicas_refresh_job` | materialize → publish → replica refresh |
 | `sec_master_sleep_on_failure_sensor` | — | halts the chain on failure instead of looping |
 | `sec_processing_sensor` | `sec_process_job` | backfill: discovers pending SourceFiles across all quarters, polls every 5 min |

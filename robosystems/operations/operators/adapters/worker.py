@@ -56,7 +56,14 @@ async def run_operator_worker(
 
   preflight_session = SessionFactory()
   try:
-    enforce_operator_credits(operator, graph_id, user_id, preflight_session, mode)
+    enforce_operator_credits(
+      operator,
+      graph_id,
+      user_id,
+      preflight_session,
+      mode,
+      params.get("operator_type"),
+    )
   finally:
     preflight_session.close()
 

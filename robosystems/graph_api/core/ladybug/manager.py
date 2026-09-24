@@ -543,11 +543,12 @@ class LadybugDatabaseManager:
       except Exception as e:
         logger.error(f"Failed to get info for database {db_name}: {e}")
 
+    occupied = sum(1 for db in databases if counts_toward_capacity(db.graph_id))
     node_capacity = {
       "max_databases": self.max_databases,
-      "current_databases": len(databases),
-      "capacity_remaining": self.max_databases - len(databases),
-      "utilization_percent": (len(databases) / self.max_databases) * 100,
+      "current_databases": occupied,
+      "capacity_remaining": self.max_databases - occupied,
+      "utilization_percent": (occupied / self.max_databases) * 100,
     }
 
     return DatabaseListResponse(
@@ -1032,7 +1033,11 @@ class LadybugDatabaseManager:
         region_name="us-east-1",
       )
 
-      db_count = len([f for f in self.base_path.glob("*.lbug") if f.is_file()])
+      db_count = sum(
+        1
+        for f in self.base_path.glob("*.lbug")
+        if f.is_file() and counts_toward_capacity(f.stem)
+      )
       capacity_pct = int((db_count / self.max_databases) * 100)
 
       dynamodb.update_item(
