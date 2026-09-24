@@ -11,6 +11,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from robosystems.config.operators import ModelProfile, OperatorConfig, OperatorModel
+from robosystems.operations.operators.ai_client import _BEDROCK_CONFIG
 
 # Module paths for patching
 AI_CLIENT_MODULE = "robosystems.operations.operators.ai_client"
@@ -171,6 +172,7 @@ class TestAIClientInitialization:
         service_name="bedrock-runtime",
         region_name="us-east-1",
         endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com",
+        config=_BEDROCK_CONFIG,
         aws_access_key_id="test-access-key",
         aws_secret_access_key="test-secret-key",
       )
@@ -199,6 +201,7 @@ class TestAIClientInitialization:
         service_name="bedrock-runtime",
         region_name="us-west-2",
         endpoint_url="https://bedrock-runtime.us-west-2.amazonaws.com",
+        config=_BEDROCK_CONFIG,
       )
 
   @pytest.mark.unit

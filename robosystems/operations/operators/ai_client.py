@@ -11,7 +11,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
 
 from robosystems.config import (
   ModelProfile,
@@ -32,6 +33,20 @@ class AIProviderError(Exception):
   request shape). Callers must fail the operation, never treat it as an empty
   result."""
 
+
+# A generation is billed once it starts, so botocore must never re-send one:
+# its default 60s read timeout plus retries re-bought every long answer. The
+# read timeout covers the longest generation; only refusals that happen before
+# a generation starts are retried, by `create_message`.
+_BEDROCK_CONFIG = Config(
+  connect_timeout=10,
+  read_timeout=900,
+  retries={"total_max_attempts": 1},
+)
+_UNSTARTED_ERROR_CODES = frozenset(
+  {"ThrottlingException", "ServiceUnavailableException", "ModelNotReadyException"}
+)
+_UNSTARTED_MAX_ATTEMPTS = 3
 
 _PROVIDER_ERROR_CODES = frozenset(
   {
@@ -126,6 +141,7 @@ class AIClient:
       "service_name": "bedrock-runtime",
       "region_name": env.AWS_BEDROCK_REGION,
       "endpoint_url": bedrock_endpoint,
+      "config": _BEDROCK_CONFIG,
     }
 
     if env.ENVIRONMENT == "dev" and env.AWS_BEDROCK_ACCESS_KEY_ID:
@@ -216,7 +232,13 @@ class AIClient:
     # Minutes-long sync call: off the event loop, on the default executor
     # rather than `run_off_loop`, whose limiter is sized for short OLTP work.
     try:
-      response = await asyncio.to_thread(self._converse_sync, request)
+      response = await self._converse_with_retry(request)
+    except ReadTimeoutError as e:
+      raise AIProviderError(
+        f"Bedrock call to {spec.model_id} produced no response within "
+        f"{_BEDROCK_CONFIG.read_timeout}s. The model may have run (and been "
+        "billed); it was not re-sent."
+      ) from e
     except ClientError as e:
       code = e.response.get("Error", {}).get("Code", "")
       if code in _PROVIDER_ERROR_CODES:
@@ -233,6 +255,18 @@ class AIClient:
       ) from e
 
     return self._parse_response(response, spec)
+
+  async def _converse_with_retry(self, request: dict[str, Any]) -> dict[str, Any]:
+    """Retry only refusals that precede generation (nothing was billed)."""
+    for attempt in range(1, _UNSTARTED_MAX_ATTEMPTS + 1):
+      try:
+        return await asyncio.to_thread(self._converse_sync, request)
+      except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        if code not in _UNSTARTED_ERROR_CODES or attempt == _UNSTARTED_MAX_ATTEMPTS:
+          raise
+        await asyncio.sleep(2**attempt)
+    raise AssertionError("unreachable")
 
   def _converse_sync(self, request: dict[str, Any]) -> dict[str, Any]:
     return self.client.converse(**request)
