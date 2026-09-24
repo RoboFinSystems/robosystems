@@ -675,6 +675,17 @@ class APIKeyCache:
         pass
       return None
 
+  def _read_graph_access_entry(self, cached: str | None) -> dict[str, Any] | None:
+    if not cached:
+      return None
+    if cached.startswith("{"):
+      # Written before entries were sealed; a miss re-checks the database.
+      return None
+    data = self._decrypt_cache_data(cached)
+    if not isinstance(data, dict) or "has_access" not in data:
+      return None
+    return data
+
   def cache_graph_access(
     self, api_key_hash: str, graph_id: str, has_access: bool
   ) -> None:
@@ -686,7 +697,7 @@ class APIKeyCache:
         "cached_at": datetime.now(UTC).isoformat(),
       }
 
-      self.redis.setex(cache_key, self.ttl, json.dumps(cache_data))
+      self.redis.setex(cache_key, self.ttl, self._encrypt_cache_data(cache_data))
       logger.debug(f"Cached graph access: {api_key_hash[:8]}... -> {graph_id}")
 
     except Exception as e:
@@ -698,8 +709,8 @@ class APIKeyCache:
       cache_key = self._get_graph_cache_key(api_key_hash, graph_id)
       cached_data = cast(str | None, self.redis.get(cache_key))
 
-      if cached_data:
-        data = json.loads(cached_data)
+      data = self._read_graph_access_entry(cached_data)
+      if data is not None:
         logger.debug(f"Graph access cache hit: {api_key_hash[:8]}... -> {graph_id}")
         return data["has_access"]
 
@@ -907,7 +918,7 @@ class APIKeyCache:
       }
 
       graph_ttl = min(self.jwt_ttl, 600)
-      self.redis.setex(cache_key, graph_ttl, json.dumps(cache_data))
+      self.redis.setex(cache_key, graph_ttl, self._encrypt_cache_data(cache_data))
       logger.debug(f"Cached JWT graph access: {user_id} -> {graph_id}")
 
     except Exception as e:
@@ -919,8 +930,8 @@ class APIKeyCache:
       cache_key = self._get_jwt_graph_cache_key(user_id, graph_id)
       cached_data = cast(str | None, self.redis.get(cache_key))
 
-      if cached_data:
-        data = json.loads(cached_data)
+      data = self._read_graph_access_entry(cached_data)
+      if data is not None:
         logger.debug(f"JWT graph access cache hit: {user_id} -> {graph_id}")
         return data["has_access"]
 

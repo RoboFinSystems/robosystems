@@ -9,7 +9,7 @@ import base64
 import json
 import secrets
 from datetime import UTC, datetime, timedelta
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from cryptography.fernet import InvalidToken
@@ -1032,3 +1032,32 @@ class TestKeyGenerationTracking:
 
     assert f"{APIKeyCache.CACHE_KEY_PREFIX}abc" not in shared.store
     assert f"{APIKeyCache.GRAPH_CACHE_KEY_PREFIX}abc:kg1" not in shared.store
+
+
+class TestGraphAccessEntryIntegrity:
+  """Graph-access decisions are only honoured when this service wrote them."""
+
+  @pytest.fixture
+  def cache(self):
+    with patch("robosystems.middleware.auth.cache.redis.Redis"):
+      cache = APIKeyCache()
+    store: dict = {}
+    fake = MagicMock()
+    fake.setex.side_effect = lambda key, ttl, value: store.__setitem__(key, value)
+    fake.get.side_effect = lambda key: store.get(key)
+    cache._redis = fake
+    cache.store = store
+    return cache
+
+  def test_round_trip(self, cache):
+    cache.cache_graph_access("hash123", "kg1", True)
+    cache.cache_jwt_graph_access("user1", "kg1", False)
+    assert cache.get_cached_graph_access("hash123", "kg1") is True
+    assert cache.get_cached_jwt_graph_access("user1", "kg1") is False
+
+  def test_plain_entries_are_a_cache_miss(self, cache):
+    plain = json.dumps({"has_access": True})
+    cache.store[cache._get_graph_cache_key("hash123", "kg1")] = plain
+    cache.store[cache._get_jwt_graph_cache_key("user1", "kg1")] = plain
+    assert cache.get_cached_graph_access("hash123", "kg1") is None
+    assert cache.get_cached_jwt_graph_access("user1", "kg1") is None
