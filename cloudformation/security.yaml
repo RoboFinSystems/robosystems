@@ -484,6 +484,9 @@ Resources:
   # reads OK: validate any change with `aws cloudwatch get-metric-data` first.
   # Metrics Insights, not SEARCH (alarms reject SEARCH); no GROUP BY, which would
   # make it multi-series.
+  #
+  # It notifies through the same SNS topic it watches, so it can't report SNS
+  # itself being down; the realistic failure is one subscriber bouncing.
   SnsDeliveryFailureAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
