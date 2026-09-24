@@ -194,17 +194,17 @@ class EndpointMetrics:
         description="Business logic events by endpoint, method, and event type",
       )
 
-      self._graph_node_count = self.meter.create_up_down_counter(
+      self._graph_node_count = self.meter.create_gauge(
         "robosystems_graph_nodes_total",
         description="Total number of nodes in graph databases by graph_id",
       )
 
-      self._graph_relationship_count = self.meter.create_up_down_counter(
+      self._graph_relationship_count = self.meter.create_gauge(
         "robosystems_graph_relationships_total",
         description="Total number of relationships in graph databases by graph_id",
       )
 
-      self._graph_size_estimate = self.meter.create_up_down_counter(
+      self._graph_size_estimate = self.meter.create_gauge(
         "robosystems_graph_size_bytes",
         description="Estimated size of graph databases in bytes by graph_id",
         unit="By",
@@ -492,11 +492,11 @@ class EndpointMetrics:
       base_attributes.update(additional_attributes)
 
     if self._graph_node_count is not None:
-      self._graph_node_count.add(node_count, base_attributes)
+      self._graph_node_count.set(node_count, base_attributes)
     if self._graph_relationship_count is not None:
-      self._graph_relationship_count.add(relationship_count, base_attributes)
+      self._graph_relationship_count.set(relationship_count, base_attributes)
     if self._graph_size_estimate is not None:
-      self._graph_size_estimate.add(estimated_size_bytes, base_attributes)
+      self._graph_size_estimate.set(estimated_size_bytes, base_attributes)
 
   def record_query_submission(
     self,
@@ -628,7 +628,7 @@ class EndpointMetrics:
   ):
     self._ensure_instruments()
     attributes = {
-      "endpoint": endpoint,
+      "endpoint": _sanitize_endpoint(endpoint),
       "limit_type": limit_type,
       "identifier_type": identifier_type,
     }
@@ -885,7 +885,7 @@ def endpoint_metrics_decorator(
           endpoint=endpoint,
           method=resolved_method,
           error_type=type(e).__name__,
-          error_code=str(getattr(e, "detail", "Unknown error")),
+          error_code=str(status_code),
           user_id=user_id,
         )
 
@@ -926,7 +926,7 @@ def endpoint_metrics_decorator(
           endpoint=endpoint,
           method=resolved_method,
           error_type=type(e).__name__,
-          error_code=str(getattr(e, "detail", "Unknown error")),
+          error_code=str(status_code),
           user_id=user_id,
         )
 
@@ -1008,7 +1008,7 @@ def endpoint_metrics_context(
       endpoint=endpoint,
       method=method,
       error_type=type(e).__name__,
-      error_code=str(getattr(e, "detail", "Unknown error")),
+      error_code=str(status_code),
       user_id=user_id,
     )
 
