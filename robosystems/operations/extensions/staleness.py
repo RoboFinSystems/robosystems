@@ -1,14 +1,5 @@
-"""Staleness tracking for graph materialization.
-
-Marks a graph as stale after OLTP writes so the AI (and UI) can see
-whether the graph database is current with the extensions PostgreSQL data.
-
-Usage:
-    from robosystems.operations.extensions.staleness import mark_graph_stale
-
-    # After any OLTP write that changes data:
-    mark_graph_stale(graph_id, "schedule_created")
-"""
+"""Mark a graph stale after an OLTP write, so readers can tell whether the
+graph is current with the extensions database."""
 
 from robosystems.database import SessionFactory
 from robosystems.logger import logger

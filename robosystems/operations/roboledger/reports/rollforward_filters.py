@@ -1,24 +1,14 @@
 """Filter evaluation engine for ``rollforward`` Information Blocks.
 
 Decomposes a BS account's period change across declared flow concepts by
-matching ledger LineItems on their first-class ``flow_element_id`` FK. Each
-filter authors flow concepts by qname; the engine resolves those to
-element_ids and matches the FK.
+matching LineItems on ``flow_element_id`` (filters name flow concepts by
+qname). Untagged data goes through ``fact_grid._derive_cash_flow_facts``
+instead.
 
-The complementary path is ``fact_grid._derive_cash_flow_facts``, which
-derives flow facts from period-over-period BS deltas using ``derivation``
-arcs. That one handles untagged data; this one handles data carrying
-explicit per-LineItem flow tags.
+All amounts are **debit-positive cents** (``debit_amount - credit_amount``);
+the renderer flips signs for presentation.
 
-**Sign convention**: all internal aggregations are in **debit-positive
-cents** (``debit_amount - credit_amount``). This matches the LineItem
-model's natural form and avoids per-account balance-type sign
-gymnastics inside the engine. The renderer can flip signs at
-presentation time per the target statement's conventions (e.g. CF
-inflows reported as positive even for a credit-balance source).
-
-**Residual handling**: ``residual = Δ_debit_positive(BS source over
-period) - Σ filter matches``. When non-zero:
+**Residual** = ΔBS source over the period - Σ filter matches. When non-zero:
  - ``residual_as_default`` (default): emit a default-tag fact for the
    residual when ``default_change_tag_element_id`` is set; otherwise
    emit it as an unattributed residual fact.
@@ -42,12 +32,7 @@ from robosystems.operations.roboledger.entry_status import (
 
 
 class RollforwardResidualError(ValueError):
-  """Σ filter matches != Δ BS and ``validation_mode='strict'``.
-
-  Carries the BS source qname, period, expected delta, sum of matched
-  amounts, and computed residual so the caller can surface a precise
-  reconciliation message to the operator.
-  """
+  """Σ filter matches != Δ BS and ``validation_mode='strict'``."""
 
   def __init__(
     self,
@@ -74,18 +59,11 @@ class RollforwardResidualError(ValueError):
 
 @dataclass(frozen=True)
 class AttributedFact:
-  """One filter-matched fact for a single period on a rollforward IB.
+  """One filter-matched (or residual) fact for a single period.
 
-  Emitted by :func:`evaluate_attribution_filters` — one per declared
-  filter that matched at least one LineItem, plus optionally one
-  residual fact for the unattributed delta.
-
-  ``value_cents`` is debit-positive (see module docstring).
-  ``event_ids`` is the deduplicated set of ``entries.triggered_by_event_id``
-  values for the matched lines — empty if the matched entries weren't
-  created by event handlers (manual entries, legacy data).
-  ``is_residual`` flags the default-tag residual fact; matched-filter
-  facts have ``is_residual=False``.
+  ``value_cents`` is debit-positive. ``event_ids`` are the distinct
+  ``triggered_by_event_id`` values of the matched entries; empty for manual
+  entries.
   """
 
   target_element_id: str | None
@@ -104,35 +82,17 @@ def evaluate_attribution_filters(
   period_start: date,
   period_end: date,
 ) -> list[AttributedFact]:
-  """Evaluate a rollforward's filters over one period; return facts.
+  """Evaluate a rollforward's filters over one period.
 
-  For each declared filter in ``mechanics.attribution_filters``: match
-  LineItems on the BS source element whose metadata field is in the
-  filter's values; aggregate signed amounts (debit-positive cents);
-  emit one :class:`AttributedFact` carrying the value and the matched
-  ``event_ids``.
+  Returns one fact per filter that matched lines, in declaration order, with
+  any residual fact last (per ``mechanics.validation_mode``).
 
-  Compute residual = Δ_debit_positive(BS source over period) - Σ
-  filter matches. Arbitrate per ``mechanics.validation_mode``:
-  ``residual_as_default`` (default) emits a default-tag fact for any
-  non-zero residual; ``strict`` raises; ``warn_only`` logs and omits.
-
-  Returns the full fact list in declaration order, with the residual
-  (if any) appended last.
-
-  **N+1 note**: this implementation emits 1 (BS delta) + N (one per
-  filter) SQL queries per period evaluation. Fine at current scope —
-  manually-authored filters typically run 5-15 per block, and the
-  reconciliation harness calls this once per (BS leaf, period) pair.
-  When wiring into the multi-period ``fact_grid`` rendering pipeline,
-  batch across periods with a single windowed
-  ``GROUP BY (target_qname, period)`` pass — eliminates the per-period
-  round trips that would otherwise dominate render time.
+  Runs 1 + N queries per period; batch across periods before wiring this
+  into multi-period rendering.
   """
   facts: list[AttributedFact] = []
   bs_element_id = mechanics.bs_source_element_id
 
-  # Δ BS over the period — debit-positive cents.
   bs_delta = _bs_period_delta_cents(session, bs_element_id, period_start, period_end)
 
   sum_matched = 0
@@ -147,14 +107,8 @@ def evaluate_attribution_filters(
       period_end=period_end,
     )
     if matched is None:
-      # Filter matched zero LineItems — no activity in this period to
-      # attribute. We deliberately do NOT suppress facts where lines
-      # matched but the signed amount sums to zero (e.g. 3 DR + 2 CR
-      # cancelling): activity-happened-but-netted-to-zero is a real
-      # audit signal that downstream renderers may want to surface
-      # (think: a covenant test that watches gross volume, not net).
-      # Suppression here only kicks in for "no rows touched" → the
-      # cleanest skip condition.
+      # No lines matched. Lines that net to zero still emit a fact: activity
+      # that cancelled out is an audit signal.
       continue
     sum_matched += matched.value_cents
     facts.append(matched)
@@ -181,8 +135,6 @@ def evaluate_attribution_filters(
         residual,
       )
     else:
-      # residual_as_default — emit a default-tag fact (or unattributed
-      # when no default is declared).
       facts.append(
         AttributedFact(
           target_element_id=mechanics.default_change_tag_element_id,
@@ -209,14 +161,9 @@ def _bs_period_delta_cents(
   period_start: date,
   period_end: date,
 ) -> int:
-  """Sum ``debit_amount - credit_amount`` on the BS source element
-  across every posted LineItem whose Entry.posting_date falls in the
-  period. Debit-positive cents.
+  """The BS source element's flow over the period (not its ending balance).
 
-  Note: this is the **flow** over the period, not the ending balance.
-  For asset accounts (debit-balance), positive return = balance
-  increased over the period. For liability/equity (credit-balance),
-  positive return = balance decreased.
+  Debit-positive: positive means an asset rose, or a liability/equity fell.
   """
   row = session.execute(
     text(
@@ -250,20 +197,10 @@ def _evaluate_one_filter(
   period_start: date,
   period_end: date,
 ) -> AttributedFact | None:
-  """Aggregate matched LineItems for one filter, return the fact (or
-  ``None`` if no lines matched).
+  """Aggregate one filter's landed LineItems on the BS source in the period.
 
-  Match criteria:
-   - LineItem.element_id = BS source (only lines touching the BS account)
-   - Entry.posting_date in period AND Entry has landed (posted or reversed —
-     see `roboledger.entry_status`; a reversed original keeps its lines so its
-     reversing entry nets the pair to zero)
-   - LineItem.flow_element_id ∈ the elements named by ``flow_qnames``
-
-  The filter authors flow concepts by qname (the predicate's ``values``);
-  these resolve to element_ids once and match the first-class
-  ``flow_element_id`` FK. Returns ``None`` when no qname resolves to an
-  element.
+  Matches ``flow_element_id`` against the elements named by ``flow_qnames``.
+  Returns ``None`` when no qname resolves or no line matched.
   """
   value_ids = [
     r[0]

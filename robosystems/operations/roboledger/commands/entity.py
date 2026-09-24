@@ -35,9 +35,8 @@ def update_parent_entity(
 ) -> LedgerEntityResponse | None:
   """Apply `updates` to the parent entity and commit.
 
-  Returns the refreshed response, or `None` if no parent entity exists
-  for the ledger. The caller is expected to have already validated that
-  `updates` is non-empty — this function commits whatever it is given.
+  Returns `None` if there is no parent entity. Commits whatever it is given;
+  the caller validates that `updates` is non-empty.
   """
   entity = resolve_parent_entity(session)
   if entity is None:
@@ -47,11 +46,8 @@ def update_parent_entity(
     setattr(entity, field_name, value)
 
   entity.updated_at = datetime.now(UTC)
-  # Build the response off the flush, before committing: `commit()` expires
-  # every instance, so reading the entity afterwards would issue a refresh
-  # SELECT on whichever pooled connection comes back — one whose search_path
-  # `extensions_session` has already reset. See
-  # tests/operations/information_block/test_no_post_commit_reads.py.
+  # Build the response before committing: commit expires the instance, and a
+  # refresh would run on a pooled connection whose search_path was reset.
   session.flush()
   response = entity_to_response(entity)
   session.commit()
@@ -66,12 +62,8 @@ def update_entity(
 ) -> LedgerEntityResponse:
   """Update the graph's primary entity from a validated request body.
 
-  Only provided (non-null) fields are applied. Raises :class:`ValueError`
-  when the body carries no updates and :class:`ParentEntityNotFoundError`
-  when the graph has no primary entity; the registrar maps both.
-
-  ``created_by`` is accepted for registrar uniformity — the entity row
-  tracks `updated_at` rather than a per-edit author.
+  Only non-null fields are applied. Raises `ValueError` for an empty body and
+  `ParentEntityNotFoundError`. ``created_by`` is unused (registrar signature).
   """
   del created_by
 

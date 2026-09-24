@@ -1,13 +1,7 @@
-"""Shared apply-delta helpers for update-taxonomy-block handlers.
+"""Shared apply-delta helpers for the update-taxonomy-block handlers.
 
-Each handler (CoA, reporting_extension, custom_ontology) gets a tiny
-wrapper that calls these helpers in order. They're grouped here to
-keep the three handlers free of duplicated delta-application code.
-
-Library parent resolution for ``reporting_extension`` uses a
-caller-supplied ``parent_taxonomy_id`` and the scoped library qname
-lookup from ``reporting_extension._library_qname_lookup`` — passed in
-as a callback to keep this module free of type-specific logic.
+Type-specific behavior (element construction, library parent lookup) is
+passed in as callbacks.
 """
 
 from __future__ import annotations
@@ -63,16 +57,10 @@ def apply_elements_to_add(
   element_factory: Callable[..., Element],
   library_parent_lookup: Callable[[set[str]], dict[str, str]] | None = None,
 ) -> dict[str, Element]:
-  """Insert new elements using the handler-supplied factory.
+  """Insert new elements built by the handler-supplied factory.
 
-  ``element_factory`` receives the request + derived qname + updated_by
-  and returns an un-added Element row (so type-specific period/balance/
-  classification rules stay in the handler).
-
-  ``library_parent_lookup`` is called after pass 1 flush for any
-  ``parent_ref`` that doesn't resolve locally. Returns a qname→id map.
-  When None, unresolved parent_refs raise ValueError (custom_ontology
-  + CoA have no library fallback).
+  ``library_parent_lookup`` resolves ``parent_ref``s not found locally
+  (qname→id); when None, an unresolved parent_ref raises ValueError.
   """
   if not payload.elements_to_add:
     return {}
@@ -245,12 +233,9 @@ def apply_elements_to_update(
 ) -> None:
   """Mutate existing elements in place per each ``ElementUpdatePatch``.
 
-  Non-None patch fields overwrite; ``metadata`` when provided replaces
-  ``metadata_`` wholesale. ``parent_ref`` is re-resolved against the
-  current in-taxonomy qname→id map, with optional library fallback.
-  ``update_classification`` (handler-supplied) is invoked per element
-  when ``trait`` is non-None — CoA uses this to re-assign
-  the FASB elementsOfFinancialStatements junction row.
+  Non-None fields overwrite (``metadata`` replaces wholesale); an empty
+  ``parent_ref`` clears the parent. ``update_classification`` runs when
+  ``trait`` is set.
   """
   if not payload.elements_to_update:
     return
@@ -339,10 +324,10 @@ def apply_elements_to_remove(
 ) -> None:
   """Delete elements + their side-tables + any in-taxonomy associations.
 
-  The self-referential ``parent_id`` FK is RESTRICT-ON-DELETE, so
-  inter-sibling parents within the removal set must be NULL-cleared
-  before the batch DELETE. The validator already rejected any element
-  whose non-removed children would become orphans.
+  The self-referential ``parent_id`` FK has no ON DELETE (NO ACTION);
+  parent links inside the removal set are NULL-cleared before the batch
+  DELETE. The validator already rejected removals that would orphan a
+  remaining child.
   """
   if not payload.elements_to_remove:
     return
@@ -361,10 +346,7 @@ def apply_elements_to_remove(
     .values(parent_id=None)
   )
 
-  # Rules targeting the removed elements (or the associations that go with
-  # them) and the classification rows on those associations FK them with no
-  # ON DELETE — the same dependents `cascade_delete_taxonomy` clears; without
-  # this the element DELETE dies on the constraint.
+  # Rules and association classifications FK these rows with no ON DELETE.
   association_ids = (
     session.execute(
       select(Association.id).where(
@@ -446,12 +428,8 @@ def apply_structures_to_remove(
 ) -> None:
   """Delete structures + their derived rows, in FK-dependency order.
 
-  Verification results FK the structures and their rules, fact sets FK
-  the structures, classification rows FK the associations — all with no
-  ON DELETE — so each goes before its referent (same order as
-  ``delete_schedule``, the sibling structure-removal surface). Facts
-  stamped to the structure and facts inside its fact sets are derived
-  artifacts of the structure and are removed with it.
+  The dependents FK their referents with no ON DELETE, so each goes first.
+  Facts stamped to the structures or inside their fact sets go with them.
   """
   if not payload.structures_to_remove:
     return

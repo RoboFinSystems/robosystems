@@ -1,17 +1,4 @@
-"""Event Block commands — create, update, and preview operations.
-
-Functions are pure: ``(Session, RequestModel, created_by) → ResponseModel``.
-
-- ``create_event_block``: persists an event row. With ``apply_handlers=False``
-  the row lands in ``status='captured'`` and nothing else is written. With
-  ``apply_handlers=True`` the event is resolved against the Python registry
-  first, falling back to the DSL registry; the matched handler fires and
-  produces GL rows atomically with the event row.
-- ``update_event_block``: applies status transitions and field corrections to
-  an existing event.
-- ``preview_event_block``: dry-runs handler resolution + template evaluation
-  and returns the plan without persisting anything.
-"""
+"""Event Block commands: create, update, preview, and execute (publish to source)."""
 
 from __future__ import annotations
 
@@ -111,17 +98,9 @@ class EventNotPublishableError(Exception):
 class EventEffectsAlreadyLandedError(Exception):
   """Raised when a retraction would orphan effects the books already hold.
 
-  Retracting an event drops it from `is_live`, which is what materialization,
-  QuickBooks write-back, and every reporting read filter on. That is the right
-  answer while the event's ledger rows are still drafts — nothing has hit the
-  books, so removing the event removes the whole story. It is the wrong answer
-  once a row has posted or the event has published to QuickBooks: the effect
-  stays where it landed while the event that explains it disappears, leaving a
-  GL balance no query can attribute and a QuickBooks entry with no local
-  counterpart.
-
-  Past that line the correction is a reversal, not a retraction — the same
-  split `JournalEntryNotDraftError` draws for entries.
+  Retracting drops the event from `is_live`, which every downstream read
+  filters on. Once a row has posted or published to QuickBooks, the effect
+  would outlive the event that explains it, so the correction is a reversal.
   """
 
   def __init__(self, event_id: str, status: str, reason: str) -> None:
@@ -138,12 +117,9 @@ class EventEffectsAlreadyLandedError(Exception):
 class DuplicateEventError(Exception):
   """Raised when (source, external_id) already names an event on this graph.
 
-  `idx_events_source_external` is the deduplication key for external
-  integrations: it is what makes re-delivering the same upstream record safe.
-  Without this check the insert reached the database and the IntegrityError
-  escaped as an opaque 500, so a connector retrying a delivery — or a demo
-  re-run — could not tell "already ingested" from a real fault, which is the
-  one distinction the index exists to provide.
+  `idx_events_source_external` is the dedup key that makes re-delivering an
+  upstream record safe; this lets a retrying connector tell "already
+  ingested" from a real fault.
   """
 
   def __init__(self, source: str, external_id: str) -> None:
@@ -154,30 +130,12 @@ class DuplicateEventError(Exception):
     self.external_id = external_id
 
 
-# Valid outbound transitions from each status.
-# `voided` and `superseded` are the retracted states and have empty sets — a
-# retraction is final. `superseded` is reachable from every other state so
-# corrections can replace an event regardless of how far it has progressed.
-#
-# `fulfilled` is the *end of the work*, not the end of the record. A handler
-# can target it while its ledger rows are still `draft`, because drafts post
-# at close — `asset_disposed` does. That left the pair unretractable:
-# `delete_journal_entry` refuses to delete the last draft of a live event and
-# tells the caller to void or supersede it, while an empty transition set
-# made that impossible — so a disposal draft could never be discarded, only
-# posted and then reversed. (`journal_entry_reversed` also targets
-# `fulfilled` but posts its reversing entry immediately, so the guard below
-# refuses it from the start — the correction there is another reversal.)
-#
-# What gates a retraction is `_assert_retractable`, which asks whether the
-# event's rows have landed — never which status it is being retracted from.
-# The table decides reachability; the guard decides safety.
-#
-# `captured → classified` is the inbox's "account chosen, awaiting post" — a
-# bank-feed line whose classification a person or Claude recorded without
-# posting it yet. Handlers set `classified` on their own at capture; the
-# transition is open to callers so the choice can be recorded ahead of the
-# commit that fires the handler.
+# Valid outbound transitions from each status. The retracted states
+# (`voided`, `superseded`) are final. `fulfilled` can still be retracted
+# because a handler may reach it with its rows still draft (they post at
+# close). This table decides reachability; `_assert_retractable` decides
+# whether a retraction is safe. `captured → classified` records an inbox
+# choice ahead of the commit that fires the handler.
 _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
   "captured": frozenset({"classified", "committed", "voided", "superseded"}),
   "classified": frozenset(
@@ -193,13 +151,9 @@ _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
 # Retracted statuses — `Event.is_live` is `status NOT IN` this set.
 _RETRACTED_STATUSES = frozenset({"voided", "superseded"})
 
-# Entry/Transaction statuses that mean the effect is in the books to stay.
-# `reversed` counts: the original posted, and a reversing entry stands against
-# it. Retracting the event would strand both halves of that pair.
-#
-# Imported rather than restated: this is the same question the balance reads ask
-# ("is this entry in the books?"), and the two answering it separately is exactly
-# how the reversal defect survived — see `roboledger.entry_status`.
+# Entry/Transaction statuses that mean the effect is in the books to stay
+# (`reversed` included: retracting would strand both halves of the pair).
+# Shared with the balance reads so the two can't disagree.
 _LANDED_ENTRY_STATUSES = LANDED_ENTRY_STATUSES
 _LANDED_TRANSACTION_STATUSES = frozenset({"posted"})
 
@@ -235,23 +189,13 @@ def _retraction_fence_dates(session: Session, event_id: str) -> list[date]:
 def _assert_retractable(session: Session, event: Event) -> None:
   """Refuse a retraction that would orphan posted or published effects.
 
-  Consulted for every retraction, not just from `fulfilled`. An earlier
-  status is not evidence that nothing is behind the event: `classified` and
-  `committed` handlers (`schedule_entry_due`, `journal_entry_recorded`,
-  `schedule_created`) write their ledger rows when they fire, and close
-  promotes any draft in the period whose event is not already retracted —
-  it filters on `voided`/`superseded`, not on `fulfilled`. So a `committed`
-  event can sit across a close, collect posted entries, and reach here
-  looking retractable. What decides is whether anything landed, which is
-  what this reads; the status never did.
+  Decided by what landed, never by status: a `committed` event can sit
+  across a close and collect posted entries.
 
-  Correctness depends on the caller having taken the shared period fence
-  (`_retraction_fence_dates` → `assert_period_not_closed`) *before* the
-  event row lock. The row lock alone is not enough: close promotes drafts
-  with a bulk `UPDATE` over `entries` filtered by posting date, and never
-  touches the owning `Event` row — so it does not contend on that lock, and
-  a count taken under it can read zero while close is mid-flight. The fence
-  is the only thing that serializes the two.
+  The caller must hold the shared period fence (`_retraction_fence_dates` →
+  `assert_period_not_closed`) before the event row lock. Close promotes
+  drafts with a bulk `UPDATE` that never locks the `Event` row, so the fence
+  is the only thing serializing the two.
   """
   if event.metadata_ and event.metadata_.get("qb_external_id"):
     raise EventEffectsAlreadyLandedError(
@@ -291,9 +235,8 @@ def _assert_retractable(session: Session, event: Event) -> None:
     )
 
 
-# Execute must not post these. A repeat execute of an already-``fulfilled``
-# event is an idempotent no-op instead (see ``qb_external_id`` / status
-# checks in ``execute_event_block``), so it stays out of this set.
+# Execute refuses these; a repeat execute of a ``fulfilled`` event is an
+# idempotent no-op instead.
 _UNPUBLISHABLE_STATUSES = frozenset({"voided", "superseded"})
 
 
@@ -323,12 +266,8 @@ def _assert_not_duplicate(session: Session, body: CreateEventBlockRequest) -> No
 def _flush_new_event(
   session: Session, event: Event, body: CreateEventBlockRequest
 ) -> None:
-  """Flush a freshly added Event, translating the partial unique index on
-  ``(source, external_id)`` into ``DuplicateEventError``.
-
-  ``_assert_not_duplicate`` ran first, but two identical posts racing past
-  it both reach the insert; the index is the truth and its answer is the
-  same one the pre-check gives — not a 500.
+  """Flush a new Event, mapping the ``(source, external_id)`` unique index to
+  ``DuplicateEventError`` for posts that race past ``_assert_not_duplicate``.
   """
   try:
     session.flush()
@@ -341,11 +280,8 @@ def _flush_new_event(
 class ConnectionNotOnGraphError(ValueError):
   """A ``connection_id`` that is not one of this graph's connections.
 
-  Connection ids are platform-wide, so an id alone says nothing about which
-  tenant owns it. Every place an event names a connection — the routing
-  ``metadata.connection_id`` at capture, a patch to it, the override on
-  execute — must resolve to a connection registered on the *calling* graph,
-  or the publish would post into (and refresh the tokens of) another
+  Connection ids are platform-wide; every place an event names one must
+  resolve on the calling graph, or a publish would post into another
   tenant's source-of-truth system.
   """
 
@@ -372,18 +308,12 @@ def _validate_routed_connection(metadata: dict | None, graph_id: str) -> None:
 def _validate_event_source(source: str, graph_id: str) -> None:
   """A source is valid iff it's platform-emitted or registered on the graph.
 
-  Registered means a live platform Connection whose ``provider`` matches
-  (adapter sources: quickbooks/xero/plaid) or an ``external`` connection
-  whose ``source_name`` matches. Static sources short-circuit before any
-  platform-DB access. A platform-DB fault here surfaces through the
-  registrar's generic error path, not as a validation failure.
+  Registered means a Connection whose ``provider`` matches, or an
+  ``external`` connection whose ``source_name`` matches.
   """
   if source in _STATIC_EVENT_SOURCES:
     return
 
-  # Platform-DB lookup — local imports for the same reason as
-  # `execute_event_block`: capture/preview callers shouldn't pull the
-  # platform DB into their import graph.
   from robosystems.database import SessionFactory as _PlatformSessionFactory
   from robosystems.models.core.connection.connection import Connection
 
@@ -447,27 +377,15 @@ def create_event_block(
   *,
   graph_id: str,
 ) -> EventBlockEnvelope:
-  """Persist an event block, optionally firing the handler engine.
+  """Persist an event block and commit, optionally firing its handler.
 
-  ``apply_handlers=False``: capture-only — persists the event row in
-  ``status='captured'`` and writes no GL rows.
-  ``apply_handlers=True``: resolves the event_type to a handler and fires
-  it atomically alongside the event row.
+  ``apply_handlers=False`` captures the row (``status='captured'``, no GL
+  rows). ``apply_handlers=True`` resolves a handler (Python registry first,
+  then the DSL ``event_handlers`` table) and fires it atomically with the
+  row. Any validation failure persists nothing.
 
-  Handler resolution order:
-    1. Python registry (hub-defined complex workflows, e.g., asset_disposed)
-    2. DSL registry (event_handlers table, tenant-configurable simple templates)
-
-  ``body.source`` must be platform-emitted or registered on the graph
-  (``_validate_event_source``) — validated before anything is persisted.
-
-  On validation failure (no handler, ambiguous, template error, engine error)
-  nothing is persisted — the exception propagates and the caller's session
-  rolls back.
-
-  Commits. An operation that creates an event as one step of a larger unit
-  of work wants :func:`create_event_block_in_session` instead, so a later
-  failure takes the event down with it.
+  Use :func:`create_event_block_in_session` when the event is one step of a
+  larger unit of work.
   """
   _event, envelope = create_event_block_in_session(
     session, body, created_by, graph_id=graph_id
@@ -483,16 +401,9 @@ def create_event_block_in_session(
   *,
   graph_id: str,
 ) -> tuple[Event, EventBlockEnvelope]:
-  """Persist an event block without committing; return the row and envelope.
+  """:func:`create_event_block` without the commit; returns row and envelope.
 
-  The body of :func:`create_event_block`, minus the commit, for callers
-  that compose event creation with other writes in one transaction —
-  ``resolve_reconciling_item`` posts a catch-up entry and clears the
-  originating event's flag together, and a half-applied version of that
-  pair is a worse state than either whole.
-
-  The envelope is built before the caller commits for the reason the
-  committing wrapper documents: ``commit()`` expires the instance, so
+  The envelope is built here because ``commit()`` expires the instance, and
   reading attributes afterwards can raise on a write that succeeded.
   """
   _validate_event_source(body.source, graph_id)
@@ -500,7 +411,6 @@ def create_event_block_in_session(
   _assert_not_duplicate(session, body)
 
   if body.apply_handlers:
-    # 1. Python registry wins over DSL registry
     python_handler = get_python_handler(body.event_type)
     if python_handler is not None:
       try:
@@ -520,19 +430,11 @@ def create_event_block_in_session(
           [{"event_id": event.id, "dimension_id": d} for d in body.dimension_ids],
         )
 
-      # Handler executes; errors roll back the whole unit of work.
       python_handler.dispatch(session, event, typed_metadata, created_by)
 
-      # Read the row into the envelope BEFORE committing. `commit()` expires
-      # every attribute on the instance, so a later `event.id` triggers a
-      # reload — and if that reload comes back empty the ORM raises
-      # ObjectDeletedError, which surfaces as a 500 for a write that already
-      # succeeded. That is the worst failure shape available: the caller is
-      # told the write failed, so a retry duplicates a committed event.
       envelope = _to_envelope(event, body.dimension_ids)
       return event, envelope
 
-    # 2. Fall through to the DSL registry
     agent_type = resolve_agent_type(session, body.agent_id)
     handler = resolve_handler(
       session,
@@ -554,14 +456,11 @@ def create_event_block_in_session(
         [{"event_id": event.id, "dimension_id": d} for d in body.dimension_ids],
       )
 
-    # Fire handler — flushes Transaction + Entry + LineItems inside
     apply_handler(session, event, handler, created_by=created_by)
 
-    # Envelope before commit — see the python-handler path above.
     envelope = _to_envelope(event, body.dimension_ids)
     return event, envelope
 
-  # Capture-only path (apply_handlers=False)
   event = _build_event_row(body, created_by, status="captured")
   session.add(event)
   _flush_new_event(session, event, body)
@@ -572,7 +471,6 @@ def create_event_block_in_session(
       [{"event_id": event.id, "dimension_id": d} for d in body.dimension_ids],
     )
 
-  # Envelope before commit — see the python-handler path above.
   envelope = _to_envelope(event, body.dimension_ids)
   return event, envelope
 
@@ -582,22 +480,11 @@ def fire_handler_on_commit(
   event: Event,
   created_by: str,
 ) -> None:
-  """Resolve and fire a Python handler against the captured event metadata.
+  """Fire the event's Python handler against its captured metadata.
 
-  Called when an event transitions to ``committed`` from a pre-handler
-  state (``captured`` or ``classified``). For events whose ``event_type``
-  has a registered Python handler, this validates the captured metadata
-  against the handler's schema and dispatches — producing the GL rows
-  the handler is responsible for. Events whose ``event_type`` has no
-  handler fall through silently (e.g., support events with no GL
-  impact, or future event types not yet wired).
-
-  Errors propagate to the caller so the surrounding transaction rolls
-  back — a bad approval cannot leave the event in ``committed`` with
-  no GL rows behind it.
-
-  Public (no underscore) because the loader's auto-commit path also
-  calls this from outside this module.
+  Called on ``captured``/``classified`` → ``committed``. Event types with no
+  Python handler are a silent no-op. Errors propagate so the transaction
+  rolls back rather than leave a ``committed`` event with no GL rows.
   """
   python_handler = get_python_handler(event.event_type)
   if python_handler is None:
@@ -644,38 +531,19 @@ def update_event_block(
 ) -> EventBlockEnvelope:
   """Apply a status transition and/or field corrections to an event block.
 
-  When the requested transition is ``captured → committed`` or
-  ``classified → committed``, the event's Python handler (if any) fires
-  against the captured metadata to produce the corresponding GL rows,
-  unless it already wrote them when the event was created.
-  Handler errors roll back the entire update, including the status
-  change — a failed commit leaves the event in its pre-approval state.
-  ``captured → classified`` gives the same handler a veto: a choice it
-  could not post is refused here, with the reason, rather than at commit.
+  ``captured``/``classified`` → ``committed`` fires the event's Python
+  handler unless it already wrote rows at creation; handler errors roll back
+  the whole update. ``captured → classified`` gives the handler a veto.
   """
-  # Lock the row for the life of the transaction. The transition check below
-  # is read-decide-write, and the decision is only sound if nothing else can
-  # move the event in between. More than one path can advance the same event —
-  # inbox approval and the sync's auto-commit pass (`extensions/loader.py`,
-  # which locks its batch for the same reason) — and each fires the handler
-  # once, so the transition must be decided under the lock. Under READ
-  # COMMITTED the blocked reader re-reads the committed row once the lock
-  # releases, sees the new status, and raises InvalidEventTransitionError as
-  # it should.
-  #
-  # Bounded, because the conflicting writer is usually a sync or a promotion
-  # sweep that runs long — see `locking.bounded_lock_wait`.
+  # The transition check is read-decide-write and several paths (inbox
+  # approval, the sync's auto-commit) can advance the same event, so it is
+  # decided under a row lock.
   session.flush()  # pairs with populate_existing below; autoflush is off here
   peek = session.get(Event, body.event_id)
   if peek is None:
     raise EventNotFoundError(f"Event not found: {body.event_id}")
-  # Fence before the event row lock — same order as journal update/delete
-  # and as close's exclusive fence. Approving (event lock, then handler
-  # fence) against a closer (exclusive fence, then event lock) used to
-  # sit until lock_timeout and fail close mid-publish. Both the current
-  # posting date and the one ``body.effective_at`` would move it to, as
-  # ``update_journal_entry`` does — the handler posts against the patched
-  # date, and its own fence runs after the lock.
+  # Period fence before the event row lock, matching close's order. Covers
+  # both the current posting date and the one ``body.effective_at`` moves to.
   if body.transition_to == "committed":
     fence_dates = {
       posting_date_for_event(
@@ -691,14 +559,8 @@ def update_event_block(
         )
       )
     assert_period_not_closed(session, *sorted(fence_dates))
-  # A retraction drops the event from `is_live` while close is separately
-  # promoting its drafts to posted. Close excludes only events already
-  # retracted, and reaches the entries through a bulk `UPDATE` that never
-  # locks the `Event` row — so nothing but this fence orders the two, and
-  # without it the guard below can read zero posted rows in the window where
-  # close is about to post them. Fenced on the rows' own posting dates, not
-  # the event's: an event with no ledger rows has nothing to strand and
-  # stays retractable even where its date falls in a closed period.
+  # Retraction fence (see `_assert_retractable`), on the rows' own posting
+  # dates: an event with no ledger rows stays retractable in a closed period.
   if body.transition_to in _RETRACTED_STATUSES:
     retraction_dates = _retraction_fence_dates(session, peek.id)
     if retraction_dates:
@@ -708,19 +570,10 @@ def update_event_block(
     f"Event {body.event_id} is being written by another process "
     "(most likely a running sync). Retry in a moment.",
   ):
-    # Lock **every row this operation will write**, in one ordered statement.
-    # The supersede path mutates the successor as well, so taking only this
-    # event's lock leaves two callers superseding each other in opposite
-    # directions (A←B here, B←A there) each holding what the other needs, and
-    # the resulting deadlock surfaces at commit rather than here. Ordering by
-    # `ordered_lock_column()` makes that cycle impossible instead of
-    # translating it afterwards.
-    #
-    # `populate_existing` for the same reason as `execute_event_block`: every
-    # production caller opens a fresh session per request, so the identity map
-    # is empty today, but a caller that reused a session would otherwise get
-    # the lock and a stale status — the one combination this guard exists to
-    # prevent. The flush that pairs with it is there too, one line up.
+    # Lock every row this operation writes (the supersede successor too) in
+    # one ordered statement, so opposing supersedes cannot deadlock.
+    # `populate_existing` so a reused session can't hold the lock over a
+    # stale status.
     wanted = {body.event_id}
     if body.transition_to == "superseded" and body.superseded_by_id:
       wanted.add(body.superseded_by_id)
@@ -746,10 +599,6 @@ def update_event_block(
         f"Allowed transitions: {sorted(allowed) if allowed else 'none (terminal state)'}."
       )
 
-    # A retraction is allowed only while nothing the event wrote has landed —
-    # see `_assert_retractable`, which also explains why the status it is
-    # retracted *from* does not narrow this. Runs under the row lock taken
-    # above and the period fence taken before it, ahead of any field write.
     if body.transition_to in _RETRACTED_STATUSES:
       _assert_retractable(session, event)
 
@@ -760,7 +609,6 @@ def update_event_block(
         )
       if body.superseded_by_id == event.id:
         raise InvalidEventTransitionError("An event cannot supersede itself.")
-      # Locked above alongside `event`, in id order.
       successor = locked.get(body.superseded_by_id)
       if successor is None:
         raise EventNotFoundError(
@@ -771,13 +619,9 @@ def update_event_block(
       event.replaced_by_event_id = successor.id
       successor.replaces_event_id = event.id
 
-    # A handler that ran when the event was created has already written its
-    # entry: a journal entry, bill or payment recorded as a draft arrives
-    # `classified` with that draft linked. Firing again on approval would
-    # write a second one, and close would post both. What decides is whether
-    # the handler already wrote anything, draft or posted, not the status.
-    # Drafts must count: narrowing this to the posted and reversed statuses
-    # `_assert_retractable` checks would bring the duplicate back.
+    # A handler that ran at creation already wrote its entry (often a draft,
+    # arriving `classified`); firing again would duplicate it. Drafts must
+    # count here.
     fire_handler = (
       body.transition_to == "committed"
       and event.status in ("captured", "classified")
@@ -811,12 +655,10 @@ def update_event_block(
     _validate_classification(event)
 
   if fire_handler:
-    # Handler runs after metadata patches so it sees the final shape.
-    # Errors propagate; the surrounding transaction rolls back.
+    # After the metadata patch so the handler sees the final shape.
     fire_handler_on_commit(session, event, created_by)
 
-  # Envelope before commit — see `create_event_block`. The dimension read has
-  # to happen here too: it reads `event.id`, which is expired by the commit.
+  # Before commit, which expires `event`.
   envelope = _to_envelope(event, _load_dimension_ids(session, event.id))
   session.commit()
   return envelope
@@ -833,20 +675,13 @@ def _python_preview_to_response(
   """
 
   def _line_element_ref(li: dict) -> str:
-    # The metadata schema requires exactly one of element_id or
-    # element_external_id per line. QB-captured lines carry only
-    # element_external_id; manual/native lines may carry element_id
-    # already. Either is human-meaningful for preview display.
+    # Each line carries exactly one of element_id or element_external_id.
     return li.get("element_id") or li.get("element_external_id") or ""
 
   planned: list[TransactionPreview] = []
   for entry_idx, entry in enumerate(preview.planned_entries):
     line_items = entry.get("line_items", [])
-    # Python handlers emit multi-leg entries; expose them as a simple list
-    # with (entry_index, debit_element_id, credit_element_id) where possible.
-    # For entries with >2 legs (disposal), pick the first debit + first credit
-    # pair as a summary — full detail is available in handler_metadata /
-    # the echoed planned_entries via the underlying preview data.
+    # Multi-leg entries are summarized by their first debit and first credit.
     first_debit = next((li for li in line_items if li.get("debit_amount", 0) > 0), None)
     first_credit = next(
       (li for li in line_items if li.get("credit_amount", 0) > 0), None
@@ -881,14 +716,9 @@ def preview_event_block(
   body: CreateEventBlockRequest,
   created_by: str,
 ) -> PreviewEventBlockResponse:
-  """Dry-run: resolve handler + evaluate template, return plan without persisting.
-
-  Python registry wins over DSL registry, same as create_event_block.
-  No rows are written.
-  """
+  """Dry-run handler resolution and template evaluation; writes nothing."""
   from robosystems.operations.roboledger.reads.event_handler import handler_to_response
 
-  # 1. Python registry
   python_handler = get_python_handler(body.event_type)
   if python_handler is not None:
     try:
@@ -903,7 +733,6 @@ def preview_event_block(
     preview = python_handler.dispatch_preview(session, body, typed_metadata)
     return _python_preview_to_response(preview, python_handler)
 
-  # 2. DSL registry fallback
   errors: list[str] = []
   matched_handler_response = None
   planned: list[TransactionPreview] = []
@@ -948,7 +777,6 @@ def preview_event_block(
   except (ClosedPeriodError, RowLockedError) as e:
     errors.append(str(e))
 
-  # Dry-evaluate template without writing
   template = handler.transaction_template or {}
   event_ctx = {
     "id": "preview",
@@ -1014,11 +842,6 @@ def preview_event_block(
   )
 
 
-# ───────────────────────────────────────────────────────────────────────────
-# execute-event-block — publish to source-of-truth
-# ───────────────────────────────────────────────────────────────────────────
-
-
 def execute_event_block(
   session: Session,
   body: ExecuteEventBlockRequest,
@@ -1034,34 +857,21 @@ def execute_event_block(
   ones in the period it is closing, so an event whose entries span periods
   publishes each with its own period.
 
-  Flow:
-  1. Load Event by id. Read `metadata.connection_id`.
-  2. Resolve the connection's `write_policy` from the platform DB.
-  3. If `'native'`: fast-path return — no QB write, status unchanged.
-  4. If `'qb_authoritative'` / `'hybrid'`:
-     - Post each unpublished draft Entry linked to the event as its own
-       QB JournalEntry via `qb_writeback.post_event_to_qb`, recording
-       entry id → QB id in `metadata.qb_entry_ids` and promoting the
-       entries that landed to `'posted'`.
-     - When no draft of the event remains, transition to `'fulfilled'`
-       and promote its Transaction rows.
-     - On rejection (`QBWritebackError`): keep what landed, stamp
-       `metadata.last_outbound_error`, move to `'pending'` where that
-       transition is legal. The rest stay draft for retry.
+  A ``native`` connection (or none) is a no-op. Otherwise each unpublished
+  draft Entry posts as its own QB JournalEntry, recorded in
+  ``metadata.qb_entry_ids`` and promoted to ``posted``; once no draft
+  remains the event goes ``fulfilled``. On rejection what landed is kept,
+  ``metadata.last_outbound_error`` is stamped, and the event moves to
+  ``pending`` where legal.
 
-  Idempotency: each QB POST carries the entry id as its RequestId, and an
-  entry already in `metadata.qb_entry_ids` is never posted again. An event
-  published before per-entry tracking (``qb_external_id`` without
-  ``qb_entry_ids``), or already ``fulfilled``, is returned as-is.
-  ``voided`` / ``superseded`` raise :class:`EventNotPublishableError`
-  before any external write.
+  Idempotent: each POST carries the entry id as its RequestId, and an entry
+  already in ``qb_entry_ids`` is never re-posted. ``voided``/``superseded``
+  raise :class:`EventNotPublishableError` before any external write.
 
-  ``acquire_period_fence`` is the request-facing default. Close already
-  holds the exclusive fence on a dedicated connection; taking the
-  shared side here would wait on that exclusive lock and time out.
+  Close passes ``acquire_period_fence=False``: it already holds the
+  exclusive fence, and taking the shared side would deadlock on it.
   """
-  # Local imports to avoid pulling QB SDK + platform-DB session into
-  # callers that only need create/update/preview.
+  # Local imports keep the QB SDK and platform DB out of create/update callers.
   from robosystems.adapters.quickbooks.client.api import QBAuthFailedError, QBClient
   from robosystems.database import SessionFactory as _PlatformSessionFactory
   from robosystems.models.core.connection.connection import Connection
@@ -1082,25 +892,11 @@ def execute_event_block(
     published_entry_ids,
   )
 
-  # Locked, and for a sharper reason than the other paths: between this read
-  # and the status write below sits a POST to QuickBooks. A concurrent void or
-  # supersede would otherwise be clobbered by the `fulfilled`/`pending` stamp
-  # *after* the external write already happened — QB's request_id dedup covers
-  # a repeated post, not an event that was voided and published anyway.
-  #
-  # `populate_existing` is load-bearing, not belt-and-braces: close_service's
-  # QB pre-publish loop calls this on a **shared** session that already loaded
-  # these events, so without it the lock would be taken while `event.status`
-  # kept the value it held before blocking.
-  #
-  # The flush pairs with it and is not optional. This factory is
-  # `autoflush=False` (`db/extensions.py`), so a re-read would otherwise
-  # overwrite any in-flight change to this row that the caller had not yet
-  # written — silently, since the discarded value simply stops existing. Flush
-  # first and the re-read returns our own pending write along with anything
-  # another transaction committed. No caller has pending event writes here
-  # today; this makes that a property of the function rather than of its
-  # callers.
+  # Locked: a QB POST sits between this read and the status write, and a
+  # concurrent void must not be overwritten by `fulfilled` afterwards.
+  # `populate_existing` is required because close calls this on a shared
+  # session that already loaded the event; the flush first keeps the re-read
+  # from discarding unflushed changes (autoflush is off).
   session.flush()
   peek = session.get(Event, body.event_id)
   if peek is None:
@@ -1147,11 +943,10 @@ def execute_event_block(
       qb_external_id=None,
       qb_error=None,
     )
-  # Same rule close selects by (`writeback_source_clause`): an explicit
-  # publish_to_source decides; otherwise only RL-originated sources publish.
-  # It outranks the caller-supplied connection — close passes its writeback
-  # connection to every event in the batch, and a synced-in QuickBooks event
-  # sent back would land in QuickBooks twice.
+  # Same rule as close's `writeback_source_clause`: an explicit
+  # publish_to_source decides, else only RL-originated sources publish. It
+  # outranks the caller's connection, or a synced-in QB event would be sent
+  # back to QB.
   publish_flag = metadata.get(PUBLISH_TO_SOURCE_KEY)
   publishes = (
     publish_flag is True
@@ -1174,9 +969,6 @@ def execute_event_block(
   # where schedule events don't carry connection_id in metadata).
   connection_id = body.connection_id or metadata.get("connection_id")
 
-  # Native fast-path: event isn't bound to a source-of-truth connection
-  # OR the connection's policy is native (RoboSystems is system of
-  # record). No QB write fires.
   if not connection_id:
     logger.debug(
       f"Event {event.id} has no connection_id in metadata — native path, no QB write."
@@ -1188,7 +980,6 @@ def execute_event_block(
       qb_error=None,
     )
 
-  # Platform-DB lookup for the connection's write_policy + credentials.
   with _PlatformSessionFactory() as platform_session:
     connection = Connection.get_by_id(connection_id, platform_session)
     if connection is None:
@@ -1218,7 +1009,6 @@ def execute_event_block(
       )
 
     if connection.provider != "quickbooks":
-      # Only QB write-back is implemented. Other providers fast-path.
       logger.debug(
         f"Event {event.id} on non-QB provider {connection.provider} — "
         f"write-back not implemented; status unchanged."
@@ -1243,9 +1033,8 @@ def execute_event_block(
       f"Connection {connection_id} has no realm_id — cannot write to QB."
     )
 
-  # Instantiating QBClient runs the auth path: rotated tokens get persisted,
-  # AuthClientError flips the connection to needs_reauth, and transient
-  # errors raise QBAuthFailedError.
+  # Constructing QBClient runs the auth path (persists rotated tokens, flags
+  # needs_reauth on auth failure).
   try:
     qb_client = QBClient(
       realm_id=str(realm_id),
@@ -1256,9 +1045,8 @@ def execute_event_block(
     # Surface to the caller — the operator must reconnect via OAuth.
     raise
 
-  # The ledger rows are what publishes: an event whose handler never drafted
-  # any has nothing in the books to mirror, and posting its captured metadata
-  # would put an entry in QuickBooks that the ledger never holds.
+  # Only ledger rows publish; without them QB would get an entry the ledger
+  # never holds.
   has_rows = (
     session.query(Entry.id).filter(Entry.triggered_by_event_id == event.id).first()
     is not None

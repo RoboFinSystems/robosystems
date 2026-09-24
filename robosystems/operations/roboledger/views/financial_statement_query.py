@@ -1,13 +1,8 @@
-"""Financial statement analytical view — graph-backed Cypher query.
+"""Financial statement view: the `Structure → FactSet → Fact` traversal over
+any graph with the roboledger schema materialized.
 
-Traverses the roboledger XBRL hypercube (`Structure → FactSet → Fact`)
-against LadybugDB. Works on any graph with the roboledger schema
-materialized — the SEC shared repository today, any entity graph
-post-materialization tomorrow.
-
-SEC-specific knowledge (ticker auto-resolution, `10-K` / `10-Q` form
-codes) lives in `adapters/sec/mcp/report_resolver.py`. This module is
-purely a generic graph-schema query.
+SEC-specific resolution (tickers, form codes) lives in
+`adapters/sec/mcp/report_resolver.py`.
 """
 
 from __future__ import annotations
@@ -27,42 +22,21 @@ async def query_financial_statement(
   period_type: str | None = None,
   limit: int = 50,
 ) -> list[dict[str, Any]]:
-  """Run the `Fact → FactSet → Structure` traversal for a statement.
+  """Run the statement traversal for ``report_id`` or ``ticker`` (one required).
 
-  Either ``report_id`` or ``ticker`` must be provided. **Both paths lead
-  with the selective, indexed anchor and reach the globally-scoped
-  ``Structure {canonical_type: ...}`` node LAST**, through facts that are
-  already constrained:
+  Both paths anchor on the indexed Report / Entity node and reach
+  ``Structure {canonical_type}`` last: canonical_type is unindexed and shared
+  by one structure per filing (~53k on SEC), so leading with it times out.
 
-  - ``report_id`` path: anchors on the single ``Report`` node, expands to
-    its facts, then up to each fact's FactSet and that FactSet's Structure.
-  - ``ticker`` path: anchors on the single ``Entity`` node, same expansion.
-
-  This ordering matters. ``canonical_type`` is not indexed and ~53k
-  ``Structure`` nodes share ``income_statement`` on the SEC repo (one per
-  filing). Leading with ``(s:Structure {canonical_type})`` makes the
-  planner scan every such structure → every FactSet → millions of facts
-  before intersecting down to one report, which times out. Leading with
-  the indexed anchor (``Report.identifier`` / ``Entity.ticker``) keeps the
-  intermediate result set to a single filer's facts.
-
-  ``period_type`` drives inline ``Period`` filters:
-
-  - ``instant`` → point-in-time facts only
-  - ``annual`` → duration facts with ``duration_type='annual'``
-  - ``quarterly`` → duration facts with ``duration_type='quarterly'``
-  - ``None`` for ``balance_sheet`` → instant (balance sheets are instant)
-  - ``None`` otherwise → no period filter
-
-  Returns a list of row dicts (raw, pre-dedup). Caller should run the
-  result through ``deduplicate_facts`` and truncate to ``limit``.
+  ``period_type`` of ``None`` means instant for a balance sheet and no period
+  filter otherwise. Rows come back raw; the caller runs ``deduplicate_facts``
+  and truncates to ``limit``.
   """
   if not report_id and not ticker:
     raise ValueError("Either report_id or ticker must be provided")
 
   parameters: dict[str, Any] = {"statement_type": statement_type}
 
-  # Inline Period filter for planner hints.
   if period_type == "instant":
     period_props = " {period_type: 'instant'}"
   elif period_type == "annual":
@@ -76,9 +50,6 @@ async def query_financial_statement(
 
   period_match = f"(f)-[:FACT_HAS_PERIOD]->(p:Period{period_props})"
 
-  # Reach the globally-scoped Structure node LAST, through already-constrained
-  # facts. The standalone Structure anchor is the FactSet→Structure tail —
-  # never the scan root. See the docstring for why ordering is load-bearing.
   structure_match = (
     "(s:Structure {canonical_type: $statement_type})"
     + "-[:STRUCTURE_HAS_FACT_SET]->(fs)"
@@ -86,7 +57,6 @@ async def query_financial_statement(
   factset_match = "(fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f)"
 
   if report_id:
-    # Anchor on the single indexed Report node.
     match_parts = [
       (
         "(r:Report {identifier: $report_id})"
@@ -99,7 +69,6 @@ async def query_financial_statement(
     ]
     parameters["report_id"] = report_id
   else:
-    # Anchor on the single indexed Entity node.
     match_parts = [
       (
         "(ent:Entity {ticker: $ticker})"
@@ -130,39 +99,18 @@ async def query_financial_statement(
     "LIMIT $limit"
   )
 
-  # Read-only analytical query. ``operation_type="read"`` is load-bearing for
-  # shared repositories (SEC): it routes to the replica ALB instead of the
-  # shared master, whose discovery path (DynamoDB lookup + retry/backoff) blows
-  # past the MCP tool timeout. For tenant entity graphs the user-graph router
-  # ignores operation_type (single instance per graph), so this is a no-op there.
+  # "read" is load-bearing on shared repos (SEC): the master's discovery path
+  # outlasts the MCP tool timeout, so route to the replicas. Tenants ignore it.
   repository = await get_graph_repository(graph_id, operation_type="read")
   return await repository.execute_query(query, parameters)
 
 
 def deduplicate_facts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-  """Deduplicate facts by the full period identity:
-  ``(qname, start_date, end_date, period_type, duration_type)``.
+  """Deduplicate on the full period identity, keeping the most precise fact.
 
-  An XBRL duration fact is identified by *(start, end)*, not by end alone.
-  The key was ``(qname, end_date)`` until 2026-08-14, when ``duration_type``
-  was added because Q4 and FY share a ``qname`` and an ``end_date`` and were
-  collapsing into whichever row the engine returned first — ``ORDER BY
-  end_date DESC`` does not break the tie, so the survivor was *unstable*
-  between identical calls, a wrong number rather than an error on the public
-  SEC surface. ``duration_type`` alone is still only a coarse bucket
-  (``quarterly`` / ``annual`` / ``other`` …): two ``other``-length stubs
-  ending on the same day, or a 52- and a 53-week year with one end date,
-  share every field but ``start_date``. Keying on both ends closes the class
-  rather than the instance; the sibling ``fact_query._deduplicate_fact_rows``
-  keys the same way. ``start_date`` is NULL for instants, which is fine —
-  an instant's identity is its ``end_date``.
-
-  Within one key the survivor is the most precise fact by ``decimals``
-  (see ``fact_dedup``). Until 2026-09-03 it was the first row the engine
-  returned, and a figure a filer reports both on the statement face and,
-  rounded, in the narrative — the same element, period, and context —
-  came back as the rounded one about half the time (3M FY2024 R&D:
-  1,100 for 1,085). Equal precision keeps the first row seen.
+  Keyed on both period ends because an XBRL duration is identified by
+  (start, end): Q4 and FY, or two stubs, can share an end date. ``start_date``
+  is NULL for instants, whose identity is their end date.
   """
   return keep_most_precise(
     rows,

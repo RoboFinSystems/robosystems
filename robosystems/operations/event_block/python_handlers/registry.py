@@ -1,14 +1,5 @@
-"""Event Block Python handler registry — discriminator-keyed dispatch table.
-
-Hub-defined handlers for complex event workflows. Each registry value is an
-EventBlockPythonHandler frozen dataclass. Resolution happens in
-`create_event_block` (commands.py) before the DSL fallback.
-
-Adding a new handler:
-  1. Create a new module under python_handlers/ (e.g., revenue_recognition.py)
-  2. Define its EventBlockPythonHandler constant
-  3. Register it below
-"""
+"""Event Block Python handler registry, keyed by event_type. Consulted before
+the DSL registry."""
 
 from __future__ import annotations
 
@@ -28,31 +19,20 @@ EVENT_BLOCK_PYTHON_REGISTRY: dict[str, EventBlockPythonHandler] = {
   SCHEDULE_ENTRY_DUE_HANDLER.event_type: SCHEDULE_ENTRY_DUE_HANDLER,
   JOURNAL_ENTRY_RECORDED_HANDLER.event_type: JOURNAL_ENTRY_RECORDED_HANDLER,
   JOURNAL_ENTRY_REVERSED_HANDLER.event_type: JOURNAL_ENTRY_REVERSED_HANDLER,
-  # AR/AP duality handlers — same GL shape as journal_entry_recorded
-  # plus a post-dispatch step that resolves discharges_event_id to the
-  # originating invoice/bill via QB's LinkedTxn refs (with a
-  # reference_number fallback).
+  # Journal GL shape plus the discharges_event_id link to the invoice/bill.
   PAYMENT_RECEIVED_HANDLER.event_type: PAYMENT_RECEIVED_HANDLER,
   BILL_PAID_HANDLER.event_type: BILL_PAID_HANDLER,
-  # Remaining QB source-class events still dispatch through the journal
-  # handler — same GL shape, no class-specific side effect yet.
+  # QB source-class event types: distinct labels, same journal GL shape.
   "invoice_issued": JOURNAL_ENTRY_RECORDED_HANDLER,
   "bill_received": JOURNAL_ENTRY_RECORDED_HANDLER,
   "sales_receipt_recorded": JOURNAL_ENTRY_RECORDED_HANDLER,
-  # Additional QB source-class events. The dbt model routes each QB
-  # transaction type to its own event_type so the purchase / treasury
-  # semantic QB carries survives ingest. They all dispatch through the
-  # journal handler because the on-approve GL shape is identical — only the
-  # inbox label, event_category, and downstream filtering differ.
   "cash_expense_recorded": JOURNAL_ENTRY_RECORDED_HANDLER,
   "check_written": JOURNAL_ENTRY_RECORDED_HANDLER,
   "credit_card_charge": JOURNAL_ENTRY_RECORDED_HANDLER,
   "credit_card_refund": JOURNAL_ENTRY_RECORDED_HANDLER,
   "deposit_received": JOURNAL_ENTRY_RECORDED_HANDLER,
   "inventory_adjusted": JOURNAL_ENTRY_RECORDED_HANDLER,
-  # Bank-feed events (Mercury, Plaid): captured with a suggestion, posted only once
-  # classified — the handler builds the entry from the account choice and
-  # refuses an unclassified commit.
+  # Bank-feed events post only once classified.
   **BANK_FEED_HANDLERS,
 }
 

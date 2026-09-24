@@ -1,21 +1,8 @@
-"""Back-solve a scenario's levers from what actually happened.
+"""Back-solve a scenario's levers from the closed months' actuals.
 
-The lever grid answers *"what am I assuming?"* for the months ahead.
-Behind the seam that question has a factual answer instead: the rate the
-book actually ran at. This module inverts the ``rs-driver`` Derive rules
-against the closed months' canonical statement sets so the Assumptions
-block reads as ONE continuous series across the seam — realized rates on
-the left, asserted rates on the right.
-
-It also handles a scenario whose horizon opened before today: it still holds
-asserted lever values for months that have since closed, and rendering those
-as-is presents an assumption as though it described history. Those months are
-facts now, so the realized value supersedes the assertion — the same
-actual-beats-forecast rule :func:`envelope.load_statement_fact_set_series`
-applies to statement columns (the moving seam).
-
-**Inversion is generic, not per-rule.** Every seeded driver rule is
-affine in its lever operand::
+Inverts the ``rs-driver`` Derive rules against the actual statement sets so
+the assumptions grid shows realized rates behind the seam and asserted rates
+ahead of it. Inversion is generic: every driver rule is affine in its lever::
 
     Revenues               = Revenues[t-1] * (1 + RevenueGrowthRate)
     CostOfRevenue          = Revenues * CostOfRevenueRate
@@ -28,16 +15,8 @@ target value::
 
     target = a + b*lever    ⇒    lever = (target_actual - a) / b
 
-Nothing is hardcoded to the four catalog drivers: a fifth lever whose
-rule is affine in it back-solves for free, and a rule that isn't (slope
-0) blanks its historical cells rather than guessing. Every failure mode
-— unbound operand, missing prior month, no actual target, ``avg()`` in
-the expression — blanks that one cell and leaves the rest of the grid
-standing.
-
-Read-only and deterministic: nothing here writes facts. The realized
-rate is a *rendering* of actuals already stamped by close, not a new
-fact-producing path.
+A zero slope, unbound operand, missing prior month or ``avg()`` blanks that
+one cell. Read-only.
 """
 
 from __future__ import annotations
@@ -117,12 +96,8 @@ def numeric_facts(session: Session, fact_set_id: str) -> list[Fact]:
 
 
 def newest_actual_structure_id(session: Session, block_type: str) -> str | None:
-  """Structure behind the entity's newest actual report set of a block type.
-
-  Data-driven (never by name) — multi-variant reporting styles mean the
-  'income_statement' structure a tenant actually reports under is
-  whichever one its newest actual ``'report'`` FactSet instantiates.
-  """
+  """Structure behind the newest actual report set of a block type (not by
+  name: reporting styles have several variants per block type)."""
   return session.execute(
     select(FactSet.structure_id)
     .join(Structure, FactSet.structure_id == Structure.id)
@@ -137,7 +112,7 @@ def newest_actual_structure_id(session: Session, block_type: str) -> str | None:
 
 
 def _lookup_element(session: Session, qname: str) -> Element | None:
-  """One element by qname — the operand/target resolution seam."""
+  """One element by qname."""
   return session.execute(
     select(Element).where(Element.qname == qname).limit(1)
   ).scalar_one_or_none()
@@ -148,8 +123,7 @@ class LeverHistory:
   """Realized lever + line values for the closed months.
 
   ``months`` is every month the actual statement series covers, ascending
-  ``YYYY-MM`` — the same column identities the Plan grid's statement
-  sections carry, so the lever rows land in register with them.
+  ``YYYY-MM``, matching the statement columns.
   """
 
   months: list[str] = field(default_factory=list)
@@ -183,9 +157,7 @@ def back_solve_lever_history(
   asserted horizon alone.
   """
   lever_qnames = {lever.qname for lever in mechanics.levers}
-  # Line assertions AND line-growth targets: both grid families render
-  # the line's own actuals behind the seam (growth rows derive the
-  # realized rate from consecutive actuals at render time).
+  # Asserted and grown lines both render their own actuals behind the seam.
   line_element_ids = {
     assertion.element_id for assertion in mechanics.line_assertions
   } | {entry.element_id for entry in mechanics.line_growth}
@@ -203,9 +175,6 @@ def back_solve_lever_history(
   if not solvable and not line_element_ids:
     return LeverHistory()
 
-  # Only the elements the grid actually needs — the whole point of a
-  # targeted read is that the lever grid stays cheap next to the
-  # statement series envelopes it renders beside.
   needed_element_ids = set(line_element_ids)
   for rule in solvable:
     needed_element_ids.add(rule.target_element_id)
@@ -224,8 +193,6 @@ def back_solve_lever_history(
       value = _back_solve(rule, current, prior)
       if value is not None:
         history.lever_values.setdefault(rule.lever_qname, {})[month] = value
-    # An asserted line's realized counterpart is simply the line's own
-    # actual — no inversion needed, it IS the statement value.
     for element_id in line_element_ids:
       actual = current.get(element_id)
       if actual is not None:
@@ -251,8 +218,7 @@ def _solvable_rules(
     }
     if not qname_by_name:
       continue
-    # The lever this rule is driven by — and only levers this scenario
-    # actually asserts (an unasserted catalog rule has no row to fill).
+    # Only rules driven by a lever this scenario asserts.
     lever_names = [
       name
       for name, qname in qname_by_name.items()
@@ -271,8 +237,7 @@ def _solvable_rules(
     expr, prior_operands = desugar_priors(raw)
     expr, avg_operands = desugar_aggregates(expr)
     if avg_operands:
-      # avg() needs a begin/end pair this walk doesn't track — the same
-      # honest skip compute-forecast takes.
+      # avg() needs a begin/end pair this walk doesn't track.
       continue
     operand_names = list(qname_by_name)
     try:
@@ -361,10 +326,8 @@ def _actual_monthly_values(
 ) -> tuple[list[str], dict[str, dict[str, float]]]:
   """Actual values per closed month for exactly the elements asked for.
 
-  Months come from the FactSet series, not from the facts — a month with
-  no binding value is still a column (it renders blank), which is how a
-  gap in the operand data reads honestly rather than silently shifting
-  the grid.
+  Months come from the FactSet series, not the facts, so a month with no
+  value is still a (blank) column.
   """
   months: set[str] = set()
   by_month: dict[str, dict[str, float]] = {}
@@ -375,8 +338,7 @@ def _actual_monthly_values(
     structure_id = newest_actual_structure_id(session, block_type)
     if structure_id is None:
       continue
-    # scenario_id=None → actuals only. The same loader the statement
-    # series columns come from, so the months line up by construction.
+    # Same loader as the statement columns, so months line up.
     series = load_statement_fact_set_series(session, structure_id, None)
     if not series:
       continue

@@ -1,38 +1,13 @@
-"""Shared definition of which RoboLedger-originated drafts publish to
-QuickBooks on period close.
+"""Which RoboLedger-originated drafts publish to QuickBooks on period close.
 
-Single source of truth for both the close path
-(``close_service._publish_drafts_to_qb``, which actually publishes) and
-the outbox read (``reads.period_drafts.list_period_drafts``, which
-previews what *will* publish). Keeping the predicate here keeps the
-preview from drifting from the actual write — if the two diverged, the
-outbox would show a disclosure the close doesn't honor.
-
-The predicate has two halves:
-
-- **connection** (platform DB): the graph has a non-deleted QuickBooks
-  ``Connection`` whose ``write_policy`` is qb_authoritative / hybrid.
-- **eligible drafts** (extensions DB): in-period ``draft`` entries whose
-  triggering ``Event`` publishes (see below), is not retracted (``status``
-  not ``voided`` / ``superseded``), and that are not already in QB (no id
-  recorded for the entry in ``qb_entry_ids``).
-
-A draft publishes on close iff both hold.
-
-Whether an event publishes is decided in two steps, and only here:
-
-1. ``metadata.publish_to_source``, when the event carries it, is the
-   answer — ``true`` publishes, ``false`` keeps the entry local.
-2. Otherwise ``Event.source`` decides: RL-originated sources
-   (``schedule``/``manual``) publish; everything else — synced-in QB
-   transactions, which already live in QB, and ``system`` entries — does
-   not.
-
-The explicit flag exists because ``source`` alone conflates provenance
-with destination. An alignment entry that mirrors a change already made
-upstream must not travel back, or the change applies twice; before the
-flag the only way to express that was to choose a source the predicate
-happened to exclude.
+Shared by the close path (which publishes) and the outbox read (which
+previews), so the preview can't drift from the write. A draft publishes iff
+the graph has a write-back QB connection (platform DB) and the draft is
+eligible (extensions DB): in period, its event not retracted, not already in
+QB, and the event publishes. ``metadata.publish_to_source`` decides that
+when present; otherwise ``Event.source`` does. The explicit flag exists so an
+entry mirroring a change already made upstream can stay local instead of
+applying twice.
 """
 
 from __future__ import annotations
@@ -46,33 +21,26 @@ from sqlalchemy.orm import Session
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 
-# RL-originated event sources whose draft GL rows write back to QB on
-# close. Synced-in QB transactions (``source='quickbooks'``) already live
-# in QB and are excluded.
+# Synced-in QB transactions already live in QB, so they are not here.
 WRITEBACK_EVENT_SOURCES = ("schedule", "manual")
 
-# Retracted events keep leftover draft GL rows. Close must not publish
-# or locally-post those drafts — void/supersede already said the work
-# is off the books.
+# Retracted events can keep leftover draft rows; close neither publishes
+# nor posts them.
 WRITEBACK_EXCLUDED_EVENT_STATUSES = ("voided", "superseded")
 
-# Connection write policies that publish RL-originated drafts back to the
-# source of truth on close (``native`` does not — RoboSystems is the SoR).
+# ``native`` is absent: there RoboSystems is the system of record.
 WRITEBACK_WRITE_POLICIES = ("qb_authoritative", "hybrid")
 
-# Event metadata key carrying an explicit publish decision, overriding the
-# source default in both directions. Written by
-# ``JournalEntryRecordedMetadata.publish_to_source``.
+# Explicit publish decision on the event, overriding the source default
+# either way.
 PUBLISH_TO_SOURCE_KEY = "publish_to_source"
 
 
 def writeback_source_clause() -> ColumnElement[bool]:
-  """The publish half of the predicate: explicit flag, else source default.
+  """Explicit flag, else source default.
 
-  ``->>`` renders a JSON boolean as the text ``'true'`` / ``'false'``, and
-  yields SQL NULL both when the key is absent and when it holds JSON
-  ``null`` — so ``IS NULL`` is exactly "no explicit answer", which is the
-  case that falls through to ``Event.source``.
+  ``->>`` yields SQL NULL for both an absent key and JSON ``null``, so
+  ``IS NULL`` is exactly "no explicit answer".
   """
   flag = Event.metadata_[PUBLISH_TO_SOURCE_KEY].astext
   return or_(
@@ -92,14 +60,7 @@ class WritebackConnection:
 def resolve_writeback_connection(
   platform_session: Session, graph_id: str
 ) -> WritebackConnection | None:
-  """Return the QB connection that close-period would publish to, or None.
-
-  Mirrors the connection selection in
-  ``PeriodCloseService._publish_drafts_to_qb``: the most-recently-created
-  non-deleted QuickBooks connection on the graph whose ``write_policy`` is
-  qb_authoritative / hybrid. Most graphs have at most one; when several
-  exist the newest by ``created_at`` wins.
-  """
+  """The QB connection close publishes to, or None. Newest wins if several."""
   from robosystems.models.core.connection.connection import Connection
 
   candidate = (
@@ -138,13 +99,7 @@ def _entry_not_yet_in_qb() -> ColumnElement[bool]:
 def select_writeback_eligible_entries(
   session: Session, period_start: date, period_end: date
 ) -> list[Row[tuple[Entry, Event]]]:
-  """In-period draft entries from publishing events not yet in QB.
-
-  The extensions-side half of the publish predicate, shared by the close
-  path (which publishes these) and the outbox read (which previews them).
-  Connection ``write_policy`` is checked separately (platform DB) — these
-  are the entries that publish *if* a writeback connection exists.
-  """
+  """Entries that publish on close *if* a write-back connection exists."""
   return (
     session.query(Entry, Event)
     .join(Event, Event.id == Entry.triggered_by_event_id)
@@ -163,12 +118,6 @@ def select_writeback_eligible_entries(
 def writeback_eligible_entry_ids(
   session: Session, period_start: date, period_end: date
 ) -> set[str]:
-  """Entry ids that publish to QB on close — given a writeback connection.
-
-  The outbox read combines this with
-  :func:`resolve_writeback_connection`: an entry's ``will_publish_to_qb``
-  is true iff it is in this set *and* a writeback connection exists.
-  """
   return {
     str(entry.id)
     for entry, _event in select_writeback_eligible_entries(

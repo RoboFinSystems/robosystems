@@ -1,11 +1,6 @@
-"""Schedule service — operations for schedule lifecycle.
-
-Schedules are structured fact tables of planned values (depreciation,
-amortization, accruals) organized by element and period. They use the
-existing XBRL taxonomy model: Taxonomy → Structure → Association → Fact.
-
-This service is the shared operation layer called by both API routes
-and MCP tools.
+"""Schedule lifecycle: fact tables of planned values (depreciation,
+amortization, accruals) by element and period, stored as
+Taxonomy → Structure → Association → Fact.
 """
 
 from __future__ import annotations
@@ -50,8 +45,6 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 # arcrole. A cm:Debit / cm:Credit ─has-part→ CoA-element arc declares that
 # element as the debit / credit leg of a schedule's posting template.
 CM_HAS_PART_ARCROLE = "https://github.com/seattlemethod/universal/cm/arcrole/has-part"
-
-# ── Data classes ─────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -100,33 +93,16 @@ class PeriodCloseStatus:
   schedules: list[PeriodCloseItem]
   total_draft: int
   total_posted: int
-  # The receipt stamped by the close that locked this period, when there
-  # is one. None for an open period, and also for a period closed before
-  # receipts shipped — "closed with no receipt" is a real state, not an
-  # error, and callers must not read its absence as a failed close.
+  # None for an open period and for a period closed before receipts existed;
+  # absence does not mean a failed close.
   close_receipt: dict | None = None
 
 
 @dataclass
 class ClosingEntryResult:
-  """Result of a create_closing_entry call.
+  """Result of create_closing_entry; outcomes are documented there.
 
-  The `outcome` field describes what the call did:
-
-  - **created**: no prior draft existed and a fact exists → new draft created
-  - **unchanged**: prior draft exists and still matches the current schedule
-    fact → no-op, returning the existing entry unchanged
-  - **regenerated**: prior draft exists but is stale (amount or template
-    changed on the schedule) → prior deleted, fresh draft created
-  - **removed**: prior draft exists but schedule no longer produces an
-    in-scope fact for this period (e.g., schedule truncated) → prior deleted,
-    no new draft, `entry_id` is None
-  - **skipped**: no prior draft, no in-scope fact for this period → nothing
-    to do, `entry_id` is None
-
-  Entry metadata fields (entry_id, status, amount, etc.) are populated
-  when `outcome` is created/unchanged/regenerated; they are None when
-  `outcome` is removed/skipped.
+  Entry fields are None when ``outcome`` is removed or skipped.
   """
 
   outcome: str  # created | unchanged | regenerated | removed | skipped
@@ -141,16 +117,9 @@ class ClosingEntryResult:
   reversal: ClosingEntryResult | None = None
 
 
-# ── Service ──────────────────────────────────────────────────────────────
-
-
 class ScheduleService:
-  """Schedule lifecycle operations.
-
-  All methods take an extensions DB session with search_path already
-  set to the tenant schema. Callers (routes, MCP tools) handle session
-  management.
-  """
+  """All methods take an extensions session with search_path already set to
+  the tenant schema."""
 
   def _build_schedule_structure(
     self,
@@ -167,17 +136,10 @@ class ScheduleService:
     created_by: str,
     source_transaction_id: str | None,
   ) -> tuple[Structure, dict, dict, str]:
-    """Create the Structure row, its element associations, and the
-    cm:Debit/cm:Credit has-part posting arcs for a new schedule.
-
-    Factored out of :meth:`create_schedule` so the rebuild path
-    (``existing_structure``) can reuse the same fact-generation tail
-    without re-creating the structure, associations, or arcs (those are
-    preserved on rebuild).
-
-    Returns ``(structure, metadata, artifact_mechanics, taxonomy_id)``.
+    """Create the Structure, its element associations, and the
+    cm:Debit/cm:Credit has-part posting arcs. Not called on rebuild, which
+    keeps all three.
     """
-    # Resolve or create taxonomy
     if not taxonomy_id:
       taxonomy_id = self._ensure_schedule_taxonomy(session, created_by)
 
@@ -217,13 +179,9 @@ class ScheduleService:
       )
       session.add(assoc)
 
-    # Emit Conceptual-Model has-part posting arcs so the debit/credit pairing
-    # lives as first-class, queryable atoms of the schedule IB (its envelope
-    # `connections`) rather than only as opaque entry_template mechanics:
-    #   cm:Debit  ─has-part→ debit account
-    #   cm:Credit ─has-part→ credit account
-    # Best-effort: a tenant whose library lacks the cm concepts skips this
-    # silently, and entry_template remains the generation source of truth.
+    # cm:Debit / cm:Credit ─has-part→ account arcs make the posting pair
+    # queryable. Best-effort: skipped when the library lacks the cm concepts;
+    # entry_template remains the generation source of truth.
     cm_role_ids = {
       e.qname: e.id
       for e in session.execute(
@@ -264,13 +222,8 @@ class ScheduleService:
     schedule_metadata: ScheduleMetadata | None,
     source_transaction_id: str | None,
   ) -> tuple[dict, dict]:
-    """Build the ``metadata_`` and ``artifact_mechanics`` JSONB blobs that
-    persist a schedule's reproducible definition.
-
-    ``monthly_amount`` + ``period_start`` + ``period_end`` are stored
-    alongside the entry template + schedule metadata so a later
-    ``rebuild_schedule`` can reconstruct the exact generation inputs
-    unambiguously (no derivation from facts required).
+    """Build the ``metadata_`` and ``artifact_mechanics`` blobs, which carry
+    every generation input so ``rebuild_schedule`` needs nothing from facts.
     """
     metadata: dict[str, object] = {
       "entry_template": {
@@ -280,8 +233,6 @@ class ScheduleService:
         "memo_template": entry_template.memo_template or f"Monthly schedule - {name}",
         "auto_reverse": entry_template.auto_reverse,
       },
-      # Reproducible generation inputs — let rebuild_schedule reconstruct
-      # the schedule from metadata alone without re-deriving from facts.
       "monthly_amount": monthly_amount,
       "period_start": period_start.isoformat(),
       "period_end": period_end.isoformat(),
@@ -296,13 +247,9 @@ class ScheduleService:
         "periodic_amounts": schedule_metadata.periodic_amounts,
       }
 
-    # Both blobs are stamped: artifact_mechanics is the typed column the
-    # envelope builder reads, and metadata_ stays populated so rows without
-    # artifact_mechanics still resolve.
-    #
-    # periods_with_entries is a transient read-time value (queried from facts),
-    # not a stored property — deliberately excluded here rather than using
-    # ScheduleMechanics.model_dump(); the envelope builder injects it.
+    # artifact_mechanics is what the envelope builder reads; metadata_ stays
+    # populated for rows without it. periods_with_entries is read-time only
+    # (the envelope builder injects it), hence no ScheduleMechanics.model_dump().
     artifact_mechanics: dict[str, object] = {
       "kind": "closing_entry_generator",
       "entry_template": metadata["entry_template"],
@@ -331,11 +278,7 @@ class ScheduleService:
     source_transaction_id: str | None = None,
     existing_structure: Structure | None = None,
   ) -> Structure:
-    """Create a schedule with pre-generated facts.
-
-    Creates a structure (type=schedule), associations to the referenced
-    elements, and facts for each monthly period between period_start and
-    period_end.
+    """Create a schedule with one generated fact set per monthly period.
 
     ``monthly_amount`` is in cents. ``taxonomy_id=None`` uses or creates a
     default "Schedules" taxonomy. ``element_ids`` are the elements the
@@ -352,8 +295,6 @@ class ScheduleService:
     definition blobs, facts, and obligation events are rewritten, and
     ``element_ids`` is ignored. The caller (``rebuild_schedule``) must void
     the old obligation chain and delete the old facts/rules first.
-
-    Returns the created (or rebuilt) Structure.
     """
     if existing_structure is not None:
       structure = existing_structure
@@ -387,20 +328,11 @@ class ScheduleService:
         )
       )
 
-    # Generate facts for each monthly period
     fact_set_id = generate_prefixed_ulid("fs")
     entity_id = self._get_entity_id(session)
 
-    # Block = Fact Set. Create the fact_sets row first so the facts we
-    # stamp below reference an existing parent; lets the FK
-    # facts.fact_set_id → fact_sets.id hold without orphan risk.
-    # Explicit flush so the FactSet row hits the DB before the bulk
-    # fact INSERTs — SQLAlchemy's session-flush ordering is by INSERT
-    # statement type, not by FK dependency, and would otherwise emit
-    # facts INSERTs ahead of the FactSet row in the same flush.
-    # A custom periodic-amounts curve is an *asserted* projection (the
-    # caller supplied the balanced amounts); a template/straight-line
-    # schedule is *schedule*-derived from method + params.
+    # A custom periodic-amounts curve is asserted by the caller; a
+    # straight-line schedule is derived from method + params.
     if schedule_metadata is not None and schedule_metadata.periodic_amounts is not None:
       provenance = AssertedProvenance(
         source_system="custom_amortization_curve",
@@ -432,6 +364,8 @@ class ScheduleService:
       created_by=created_by,
       provenance=provenance,
     )
+    # Flush the FactSet before the facts: SQLAlchemy orders INSERTs by
+    # statement type, not FK dependency.
     session.flush()
 
     periods = _generate_monthly_periods(period_start, period_end)
@@ -442,39 +376,22 @@ class ScheduleService:
       else None
     )
 
-    # The credit fact tracks the running balance of the credited account, and
-    # its direction depends on that account's role:
-    #   • contra-asset (Accumulated Depreciation/Amortization) or a credit-
-    #     balance account (a liability) — the period credit INCREASES it, so
-    #     the balance accumulates UP from a zero opening: value = accumulated.
-    #   • directly-credited asset (a prepaid) — the period credit DECREASES it,
-    #     so the balance draws DOWN from its opening cost: value = original -
-    #     accumulated.
-    # A contra-asset is asset/debit-normal in QuickBooks, so ``balance_type``
-    # alone can't distinguish it from a prepaid — the contraAsset EFS trait
-    # (applied at sync from the CoA AccountSubType) is the authoritative role
-    # signal. Only a debit-balance, non-contra asset draws down.
+    # The credit fact is the credited account's running balance. A contra-asset
+    # or credit-balance account accumulates up from zero; a directly-credited
+    # asset (a prepaid) draws down from cost. QuickBooks types contra-assets as
+    # debit-normal, so the contraAsset trait decides, not balance_type.
     credit_balance_type = session.execute(
       select(Element.balance_type).where(Element.id == entry_template.credit_element_id)
     ).scalar()
-    # Only debit-normal accounts can be contra-assets, so skip the trait
-    # lookup for credit-balance accounts (liabilities, deferred revenue) —
-    # the common case.
     credit_is_contra = credit_balance_type == "debit" and _element_is_contra_asset(
       session, entry_template.credit_element_id
     )
     credit_draws_down = credit_balance_type == "debit" and not credit_is_contra
-    # Drawing down needs an opening cost basis. When the author didn't supply
-    # original_amount, derive it from the straight-line curve (monthly x
-    # periods) so the prepaid balance declines from cost to ~0 instead of
-    # falling back to the (wrong-for-a-prepaid) accumulating form. Custom
-    # amortization curves always carry original_amount (validated below), so
-    # this only fills the straight-line gap; contra/accumulate schedules are
-    # untouched (they open at zero and need no cost basis).
+    # Drawing down needs a cost basis; without original_amount, derive it from
+    # the straight-line curve (custom curves always carry one).
     if credit_draws_down and original_dollars is None and periods:
       original_dollars = round(amount_dollars * len(periods), 2)
-    # If a draw-down still has no opening (e.g. no periods), fall back to
-    # accumulate rather than emit a garbage curve.
+    # No opening basis (e.g. no periods): accumulate instead.
     credit_draws_down = credit_draws_down and original_dollars is not None
 
     # The schedule expenses cost less residual (salvage) value; the carrying
@@ -490,16 +407,8 @@ class ScheduleService:
         )
       depreciable_dollars = round(original_dollars - residual_cents / 100.0, 2)
 
-    # Custom amortization curve: caller supplies one integer (cents) per
-    # period, pre-balanced. The generator uses the explicit values
-    # instead of the straight-line formula. Use cases: day-count
-    # interest accrual, effective-interest bond discount amortization,
-    # variable lease payments, any pre-computed schedule.
-    #
-    # Invariants (enforced here so the downstream loop stays simple):
-    #   - len(periodic_amounts) == len(periods)
-    #   - sum(periodic_amounts) == original_amount - residual_value (cents, exact)
-    #   - each entry >= 0 (the SumEquals rule assumes non-negative terms)
+    # Custom curve: one pre-balanced cents value per period, used verbatim.
+    # Non-negative terms because the SumEquals rule assumes them.
     custom_amounts_dollars: list[float] | None = None
     if schedule_metadata and schedule_metadata.periodic_amounts is not None:
       if len(schedule_metadata.periodic_amounts) != len(periods):
@@ -532,12 +441,9 @@ class ScheduleService:
           f"be negative."
         )
 
-    # Roll-forward opening balances. A roll_forward block has a Beginning
-    # Balance, so every rolled balance gets one instant fact at the schedule's
-    # first-period start (accumulated = 0) — making the series Begin → movements
-    # → End rather than starting after the first movement. Same formulas as the
-    # in-loop balance/NBV facts at accumulated_debit == 0: a contra opens at 0;
-    # a directly-credited asset (and the net-book-value asset) opens at gross.
+    # Opening-balance instant facts at the first period start, so the
+    # roll-forward reads Begin → movements → End. Same formulas as the loop at
+    # accumulated == 0: a contra opens at 0, a drawn-down or NBV asset at cost.
     if periods:
       opening_instant = periods[0][0]
       opening_scope = (
@@ -588,7 +494,6 @@ class ScheduleService:
       is_last = i == len(periods) - 1
 
       if custom_amounts_dollars is not None:
-        # Pre-balanced curve — use verbatim, no rounding fudge needed.
         period_amount = custom_amounts_dollars[i]
       else:
         # Straight-line: final period absorbs rounding so
@@ -600,13 +505,10 @@ class ScheduleService:
         )
       accumulated_debit = round(accumulated_debit + period_amount, 2)
 
-      # Scope: facts in periods already closed are historical (not acted on
-      # by the close workflow). Only periods > closed_through are in_scope.
       fact_scope = (
         "historical" if closed_through and p_end <= closed_through else "in_scope"
       )
 
-      # Fact for the periodic amount (expense/amortization)
       session.add(
         Fact(
           element_id=entry_template.debit_element_id,
@@ -622,8 +524,6 @@ class ScheduleService:
         )
       )
 
-      # Fact for the credited account's running balance — contra accumulates,
-      # a directly-credited asset draws down (see credit_draws_down above).
       credit_value = (
         round(original_dollars - accumulated_debit, 2)
         if credit_draws_down and original_dollars is not None
@@ -644,10 +544,8 @@ class ScheduleService:
         )
       )
 
-      # Net book value if we have a DISTINCT asset element. Skip when the asset
-      # is the credited account itself (a direct-drawdown prepaid) — the credit
-      # fact above already carries that account's running balance, so emitting
-      # NBV here would double-stamp the same element/period.
+      # Net book value, unless the asset is the credited account itself (the
+      # credit fact already carries its balance).
       if (
         schedule_metadata
         and schedule_metadata.asset_element_id
@@ -668,12 +566,8 @@ class ScheduleService:
           )
         )
 
-    # Auto-generate a SumEquals rule so the engine can verify that
-    # the sum of period debit facts equals original_amount - residual_value. The rule binds
-    # the debit element by id (via variable_element_id) — tenant CoA accounts
-    # carry a null qname, so qname-only binding would skip the rule entirely
-    # for the normal case (a schedule debiting a CoA expense account). qname
-    # is still recorded for display when present.
+    # SumEquals rule: Σ debit facts == original_amount - residual_value. Bound
+    # by element id because tenant CoA accounts have a null qname.
     if depreciable_dollars is not None:
       debit_qname: str | None = session.execute(
         select(Element.qname)
@@ -703,11 +597,8 @@ class ScheduleService:
         )
       )
 
-    # Materialize the obligation register: one `schedule_created` event
-    # (originator) + one `pending` `schedule_entry_due` event per period,
-    # linked via `obligated_by_event_id`. The obligation sensor flips the
-    # pending events to `classified` at each period boundary and dispatches
-    # the existing handler.
+    # Obligation register: the obligation sensor classifies each pending
+    # schedule_entry_due at its period boundary and dispatches the handler.
     schedule_created_event_id, pending_event_count = (
       self._materialize_pending_obligations(
         session,
@@ -722,9 +613,6 @@ class ScheduleService:
       )
     )
 
-    # Stash the originator event id on the structure so disposal and
-    # supersession paths can find the obligation chain without an extra
-    # query.
     metadata["schedule_created_event_id"] = schedule_created_event_id
     metadata["pending_event_count"] = pending_event_count
     structure.metadata_ = metadata
@@ -732,9 +620,7 @@ class ScheduleService:
     artifact_mechanics["pending_event_count"] = pending_event_count
     structure.artifact_mechanics = artifact_mechanics
 
-    # On the rebuild path the Structure already lives in the DB, so the
-    # in-place JSONB reassignment above must be flagged for SQLAlchemy to
-    # emit the UPDATE (a fresh-create row is dirty regardless).
+    # A persisted Structure needs the JSONB change flagged to emit an UPDATE.
     if existing_structure is not None:
       from sqlalchemy.orm.attributes import flag_modified
 
@@ -757,21 +643,12 @@ class ScheduleService:
     created_by: str,
     closed_through: date | None = None,
   ) -> tuple[str, int]:
-    """Emit `schedule_created` + N `schedule_entry_due` events.
+    """Emit `schedule_created` + one `schedule_entry_due` per period.
 
-    Periods at or before ``closed_through`` are emitted as ``voided``
-    (with `metadata.void_reason='historical'`) so the close-period
-    gate doesn't treat backfilled historical periods as outstanding
-    obligations. Periods after ``closed_through`` (and all periods
-    when ``closed_through`` is None) are emitted as ``pending``.
-
-    The returned ``pending_event_count`` reflects only the still-open
-    obligations — historical voids are excluded from the count.
-
-    IDs are generated Python-side so the obligation linkage is set
-    without depending on a session flush — this keeps the linkage
-    verifiable in MagicMock-based tests and lets us add all rows in a
-    single batch.
+    Periods at or before ``closed_through`` are emitted ``voided``
+    (``void_reason='historical'``) so the close gate ignores them; the
+    returned pending count excludes them. IDs are generated Python-side so
+    the linkage needs no flush.
 
     Returns ``(schedule_created_event_id, pending_event_count)``.
     """
@@ -782,19 +659,12 @@ class ScheduleService:
       1 for _p_start, p_end in periods if not closed_through or p_end > closed_through
     )
 
-    # `event_category='other'` reflects that schedule_created is an
-    # operator/system act of recording an obligation register, not a
-    # GL-impact event in any of the standard REA categories. The
-    # actual GL events are the per-period schedule_entry_due children
-    # (event_category='recognition'), which the handler dispatches.
     session.add(
       Event(
         id=schedule_created_event_id,
         event_type="schedule_created",
-        # Setting up a schedule moves no resource — it is the operational
-        # act that arranges future recognition, not the recognition. Filed
-        # as economic/other until 2026-09-05 because no other class would
-        # take it; the recognition events it later emits stay economic.
+        # Moves no resource: it arranges future recognition, which the
+        # economic schedule_entry_due children carry.
         event_category="schedule",
         event_class="operational",
         occurred_at=now,
@@ -814,8 +684,7 @@ class ScheduleService:
     )
 
     for p_start, p_end in periods:
-      # End-of-day so a same-day sensor sweep at midnight picks the
-      # period up exactly when it closes.
+      # End of day, so the sweep picks the period up exactly when it closes.
       occurred_at = datetime.combine(p_end, time(23, 59, 59), tzinfo=UTC)
       is_historical = closed_through is not None and p_end <= closed_through
       event_metadata: dict[str, object] = {
@@ -825,10 +694,8 @@ class ScheduleService:
         "period_end": p_end.isoformat(),
       }
       if is_historical:
-        # Stamped at create time — never picked up by the close gate
-        # or the promotion sensor (both filter on status='pending').
-        # Kept in the obligation register as an audit-trail "I knew
-        # about this period; it predates the close".
+        # Kept as an audit record; the close gate and promotion sensor both
+        # filter on status='pending'.
         event_metadata["void_reason"] = "historical"
       session.add(
         Event(
@@ -858,53 +725,26 @@ class ScheduleService:
     period_start_after: date | None = None,
     include_classified: bool = False,
   ) -> int:
-    """Void all `pending` schedule_entry_due events for a schedule.
+    """Void a schedule's pending schedule_entry_due events; returns the count.
 
-    Shared helper for the lifecycle paths that retire a schedule's
-    remaining obligations:
+    - Disposal passes ``voided_by_event_id`` (the disposal event) for the
+      audit chain.
+    - Deletion passes none; the originator is about to be deleted, and
+      orphaned pending children would trip the close gate.
+    - Termination passes ``period_start_after`` (only obligations starting
+      strictly after it) and ``include_classified=True`` to retire
+      matured-but-undrafted strays past the cutoff.
 
-    - **Disposal** (asset_disposed handler): pass ``voided_by_event_id``
-      = the disposal event id so the audit chain answers "what voided
-      this obligation?". Caller also clears the schedule's SumEquals
-      rule and posts the disposal entry.
-    - **Schedule deletion** (cmd_delete_schedule): pass no
-      ``voided_by_event_id`` — the originating ``schedule_created``
-      event row is about to be deleted along with the schedule, so the
-      pending children are voided pre-emptively to keep them from
-      tripping the close-period gate after their parent disappears.
-    - **Termination** (cmd_terminate_schedule): pass
-      ``period_start_after`` = the truncation cutoff so obligations for
-      periods the schedule still covers are left alone, and
-      ``include_classified=True`` so matured-but-undrafted strays past
-      the cutoff are retired too (the terminate command deletes draft
-      entries past the cutoff first and is blocked by posted ones, so a
-      classified row it reaches can only be an undrafted stray).
-
-    ``period_start_after`` filters on the obligation's
-    ``metadata.period_start`` (ISO date string comparison): only rows
-    whose period starts strictly after the given date are voided.
-
-    Returns the number of voided rows. Returns 0 (no-op) when the
-    schedule has no ``schedule_created_event_id`` stamped (rows from
-    before the obligation register existed) or when no pending
-    obligations exist.
-
-    Also decrements the originator's ``metadata.pending_event_count``
-    so reads of the obligation register stay accurate (the count is
-    stamped at create time and represents "still-open obligations").
+    Also decrements the originator's ``metadata.pending_event_count``.
     """
     from sqlalchemy.orm.attributes import flag_modified
 
     metadata = structure.metadata_ or {}
     schedule_created_event_id = metadata.get("schedule_created_event_id")
     if not schedule_created_event_id:
-      # Fallback: recover the originator from the obligations' own link —
-      # every schedule_entry_due carries metadata.schedule_id == this
-      # structure's id and obligated_by_event_id == the schedule_created
-      # originator. Without it, a structure missing the
-      # `schedule_created_event_id` stamp no-ops silently here and orphans its
-      # pending obligations on delete, leaving phantom obligations that
-      # double-post at close.
+      # Recover the originator from the obligations' own link; otherwise an
+      # unstamped structure orphans its pending obligations on delete and
+      # they double-post at close.
       schedule_created_event_id = session.execute(
         select(Event.obligated_by_event_id)
         .where(
@@ -919,13 +759,10 @@ class ScheduleService:
 
     from robosystems.operations.locking import ordered_lock_column
 
-    # Lock first, in the shared order, then update by id. A bare multi-row
-    # UPDATE takes its row locks in scan order, and the promotion sweep holds
-    # these same pending rows in `id` order — two orders over one row set is
-    # the deadlock the ordered discipline exists to rule out, and it would
-    # surface at flush, outside any lock-wait translation. The status
-    # predicate stays on the UPDATE: it is the invariant that a row this
-    # call did not lock as `pending` is never voided.
+    # Lock in the shared order, then update by id: a bare multi-row UPDATE
+    # locks in scan order and deadlocks against the promotion sweep. The
+    # status predicate stays on the UPDATE so a row not locked as voidable is
+    # never voided.
     voidable_statuses = (
       ("pending", "classified") if include_classified else ("pending",)
     )
@@ -934,8 +771,7 @@ class ScheduleService:
       Event.status.in_(voidable_statuses),
     ]
     if period_start_after is not None:
-      # Obligation periods live in metadata as ISO date strings, so a
-      # lexicographic comparison IS a date comparison.
+      # ISO date strings, so lexicographic order is date order.
       select_filters.append(
         Event.metadata_["period_start"].astext > period_start_after.isoformat()
       )
@@ -963,8 +799,6 @@ class ScheduleService:
     if voided_count == 0:
       return 0
 
-    # Decrement the originator's pending_event_count and stamp the
-    # void_reason so audits can attribute the void wave to its cause.
     originator = session.get(Event, schedule_created_event_id)
     if originator is not None:
       orig_meta = dict(originator.metadata_ or {})
@@ -990,24 +824,11 @@ class ScheduleService:
     structure: Structure,
     created_by: str,
   ) -> int:
-    """Void each pending obligation and emit a replacement linked via the
-    correction chain.
-
-    Used by ``update_schedule`` when the ``entry_template`` changes — the
-    period range stays the same (periods aren't editable), but the new
-    template represents a different intent for each future closing entry.
-    Re-materializing the pending events under the same originating
-    ``schedule_created`` event keeps the obligation register pointing at
-    a consistent set of "what's still due" with a queryable supersession
-    history (``replaces_event_id`` ↔ ``replaced_by_event_id``).
-
-    Already-classified / fulfilled / voided events are untouched — the
-    new template applies prospectively. Returns the number of
-    replacement events created.
-
-    Returns 0 when the schedule has no ``schedule_created_event_id``
-    stamped (rows from before the obligation register existed) or when
-    no pending events exist.
+    """Void each pending obligation and emit a replacement linked by
+    ``replaces_event_id`` / ``replaced_by_event_id``, under the same
+    originator. Used when ``entry_template`` changes; non-pending events are
+    untouched (the template applies prospectively). Returns the number of
+    replacements.
     """
     metadata = structure.metadata_ or {}
     schedule_created_event_id = metadata.get("schedule_created_event_id")
@@ -1016,12 +837,8 @@ class ScheduleService:
 
     from robosystems.operations.locking import ordered_lock_column
 
-    # Locked: this reads `pending` obligations and voids them, and the
-    # promotion sweep reads the same rows to classify and draft their closing
-    # entries. Unlocked, both can proceed from the same snapshot — the sweep
-    # drafts a GL entry for an obligation this call is voiding, and the
-    # schedule ends up with a closing entry for a period it no longer has an
-    # obligation for. Whichever gets the lock first wins; the other re-reads.
+    # Locked against the promotion sweep, which would otherwise draft a
+    # closing entry for an obligation this call is voiding.
     existing_pending = list(
       session.execute(
         select(Event)
@@ -1029,8 +846,7 @@ class ScheduleService:
           Event.obligated_by_event_id == schedule_created_event_id,
           Event.status == "pending",
         )
-        # Same order as the promotion sweep's candidate load — the two overlap
-        # on exactly these rows. See `locking.ordered_lock_column`.
+        # Same order as the promotion sweep's candidate load.
         .order_by(ordered_lock_column())
         .with_for_update()
       ).scalars()
@@ -1046,8 +862,6 @@ class ScheduleService:
       period_start_iso = old_meta.get("period_start")
       period_end_iso = old_meta.get("period_end")
       if not period_start_iso or not period_end_iso:
-        # Malformed row — skip rather than crash. The void below is also
-        # skipped so we don't strand a row in an inconsistent state.
         logger.warning(
           "supersede_pending_obligations: skipping malformed event %s "
           "on schedule %s (missing period_start/period_end metadata)",
@@ -1057,9 +871,6 @@ class ScheduleService:
         continue
 
       new_event_id = generate_prefixed_ulid("evt")
-      # Both sides of the supersession chain so the audit trail resolves
-      # backward and forward: same shape as update_event_block's superseded
-      # transition.
       old_evt.status = "voided"
       old_evt.replaced_by_event_id = new_event_id
 
@@ -1103,9 +914,7 @@ class ScheduleService:
     pending count agrees with the obligation gate. Terminated, run-to-term
     and not-yet-started schedules are absent rather than listed at zero.
     """
-    # Get all schedule structures with their facts and best entry status for this period.
-    # The best_entry CTE picks the most-advanced entry per structure
-    # (posted > draft > reversed, via CASE ordering).
+    # best_entry: the most-advanced entry per structure (posted > draft > other).
     result = session.execute(
       text(f"""
         WITH best_entry AS (
@@ -1222,13 +1031,9 @@ class ScheduleService:
     created_by: str,
     memo: str | None = None,
   ) -> ClosingEntryResult:
-    """Idempotently create (or refresh) a draft closing entry from a schedule.
+    """Idempotently reconcile a schedule's draft closing entry for a period.
 
-    This method is safe to call repeatedly — it reconciles the draft state
-    with the current schedule, regenerating or removing the draft when the
-    schedule has been edited since the prior call.
-
-    Five outcomes:
+    Outcomes:
 
     - **created** — no prior draft, fact exists → new draft created
     - **unchanged** — prior draft matches current schedule fact → no-op
@@ -1243,18 +1048,11 @@ class ScheduleService:
     the reopen flow to change a posted entry). Stale or non-existent drafts
     produce structured outcomes, not errors.
     """
-    # Locked, because everything below decides from this row: the entry
-    # template that becomes the draft's DR/CR legs, and the reconcile that
-    # decides whether to create, regenerate or leave alone. Two writers on
-    # different event rows — the Dagster sweep and an operator or MCP close
-    # co-pilot firing `schedule_entry_due` for the same period — both read
-    # "no entry", both insert, and close posts the depreciation twice.
-    #
-    # `uq_entries_one_primary_per_schedule_period` is the database's half of
-    # this and the half nothing can route around; the lock is what turns the
-    # loser into a clean 409 instead of an IntegrityError, and what protects
-    # the template read that the index cannot see. Bounded: this runs on a
-    # request path as well as the sweep, and `RowLockedError` is retryable.
+    # Locked so two writers for the same period (the sweep and an operator)
+    # cannot both see "no entry" and double-post. The unique index
+    # uq_entries_one_primary_per_schedule_period is the backstop; the lock
+    # turns the loser into a retryable RowLockedError and covers the template
+    # read the index cannot see.
     from robosystems.operations.locking import lock_by_id
 
     structure = lock_by_id(
@@ -1274,9 +1072,7 @@ class ScheduleService:
     debit_element_id = template["debit_element_id"]
     credit_element_id = template["credit_element_id"]
 
-    # Same fence the journal writers take. A schedule draft created after
-    # close has selected its batch is either omitted from QB publish or
-    # swept into posted without review; both are wrong.
+    # Same period fence the journal writers take.
     fence_dates = [posting_date]
     if template.get("auto_reverse", False):
       if period_end.month == 12:
@@ -1285,20 +1081,10 @@ class ScheduleService:
         fence_dates.append(date(period_end.year, period_end.month + 1, 1))
     assert_period_not_closed(session, *fence_dates)
 
-    # ── Look up the existing entry (if any) for this structure + period ──
-    #
-    # Excluding generated reversals is load-bearing, not tidiness. An
-    # `auto_reverse` schedule posts its accrual on `period_end` and the
-    # reversing entry on the FIRST DAY OF THE NEXT PERIOD, both carrying this
-    # same `source_structure_id`, so without this predicate next month's
-    # reconcile finds last month's reversal, reads it as "this period's entry",
-    # and (its DR/CR being flipped) judges it stale and deletes it. The accrual
-    # then never reverses and the liability compounds every month.
-    #
-    # Keyed on the reversal LINK, not on entry type: `entry_type` is
-    # caller-authored and may legitimately be "reversing", and excluding those
-    # would make this lookup miss the schedule's own entry and draft a duplicate
-    # on every run. See `entry_status.PRIMARY_ENTRY_SQL`.
+    # PRIMARY_ENTRY_SQL excludes generated reversals: an auto_reverse
+    # schedule's reversal lands on the first day of the next period with the
+    # same source_structure_id, and would otherwise be judged stale and
+    # deleted. Keyed on the reversal link, not entry_type (caller-authored).
     existing_row = session.execute(
       text(f"""
         SELECT id, status
@@ -1318,10 +1104,7 @@ class ScheduleService:
     ).fetchone()
 
     existing_entry_id: str | None = existing_row.id if existing_row else None
-    # Anything that has LANDED is refused, not just `posted`. `reversed` is the
-    # third status an entry can hold, and letting it through here sends a
-    # posted-and-reversed pair into the regenerate path below, which deletes
-    # both halves out of the books.
+    # Any landed status, including `reversed`, which regenerate would delete.
     if existing_row and existing_row.status in LANDED_ENTRY_STATUSES:
       raise ValueError(
         f"Closing entry for schedule '{structure_id}' in period "
@@ -1329,7 +1112,6 @@ class ScheduleService:
         f"(status: {existing_row.status}). Use the reopen flow to modify it."
       )
 
-    # ── Find the current in_scope fact for this period ──
     fact_row = session.execute(
       text("""
         SELECT value FROM facts
@@ -1348,10 +1130,8 @@ class ScheduleService:
       },
     ).fetchone()
 
-    # ── Cases where no fact exists ──
     if not fact_row:
       if existing_entry_id:
-        # Schedule no longer covers this period — remove the stale draft
         self._delete_draft_entry(session, existing_entry_id)
         return ClosingEntryResult(
           outcome="removed",
@@ -1368,11 +1148,10 @@ class ScheduleService:
     amount_dollars = fact_row.value
     amount_cents = round(amount_dollars * 100)
 
-    # Build the memo first so we can detect memo staleness too.
+    # Built before the staleness check, which compares memos too.
     memo_template = template.get("memo_template", "")
     entry_memo = memo or memo_template.replace("{structure_name}", structure.name)
 
-    # ── Cases where an existing draft exists ──
     if existing_entry_id:
       current = session.execute(
         text("""
@@ -1401,7 +1180,6 @@ class ScheduleService:
       )
 
       if not is_stale:
-        # Unchanged — return existing draft without touching the DB
         return ClosingEntryResult(
           outcome="unchanged",
           entry_id=existing_entry_id,
@@ -1413,21 +1191,14 @@ class ScheduleService:
           amount=amount_dollars,
         )
 
-      # Stale — delete and fall through to create fresh
       self._delete_draft_entry(session, existing_entry_id)
       regenerated = True
     else:
       regenerated = False
 
-    # No `transaction_id`, deliberately. A schedule-derived entry has no
-    # source-system record behind it, and the schema supports a standalone
-    # entry on purpose — `Entry.transaction_id` is nullable and
-    # `Entry.triggered_by_event_id` exists precisely so an entry with no
-    # parent can still carry its event chain (see the comment on that
-    # column). `create_journal_entry` mints a Transaction when none is
-    # supplied; that is right for its callers and wrong here. Do not
-    # "fix" this by synthesizing one — it would manufacture rows in the
-    # adapter mirror to satisfy a read, and reads anchor on Entry.
+    # No transaction_id, deliberately: a schedule entry has no source-system
+    # record, and synthesizing a Transaction would manufacture adapter-mirror
+    # rows. Reads anchor on Entry.
     entry = Entry(
       type=template.get("entry_type", "closing"),
       status="draft",
@@ -1440,7 +1211,6 @@ class ScheduleService:
     session.add(entry)
     session.flush()
 
-    # Create line items (DR/CR)
     session.add(
       LineItem(
         entry_id=entry.id,
@@ -1462,7 +1232,7 @@ class ScheduleService:
 
     session.flush()
 
-    # Auto-reverse: create a reversing entry on the first day of the next period
+    # Auto-reverse on the first day of the next period.
     reversal_result = None
     if template.get("auto_reverse", False):
       if period_end.month == 12:
@@ -1485,7 +1255,6 @@ class ScheduleService:
       session.add(reversal_entry)
       session.flush()
 
-      # Flipped DR/CR: debit element becomes credit, credit becomes debit
       session.add(
         LineItem(
           entry_id=reversal_entry.id,
@@ -1540,43 +1309,20 @@ class ScheduleService:
     entry_type: str = "closing",
     provenance: str = "manual_entry",
   ) -> ClosingEntryResult:
-    """Create a manual (non-schedule) draft closing entry.
+    """Create a non-schedule draft entry with any number of balanced lines
+    (disposals, impairments, reclassifications).
 
-    Used for one-off adjustments that aren't derived from a schedule:
-    asset disposals, impairments, reclassifications, correcting entries.
-
-    ``provenance`` defaults to ``manual_entry`` — a person made this
-    adjustment — but every caller today is an event handler, which should
-    pass ``event_handler`` so the entry says what actually produced it.
-    "Manual" here means *not schedule-derived*, which is a different
-    question from who wrote it.
-
-    The resulting entry has:
-    - `source_structure_id = None` (not tied to any schedule)
-    - `provenance` as given (see above)
-    - `status = 'draft'` (posted by close-period like any other draft)
-
-    Unlike schedule-derived entries which have exactly 2 line items (DR/CR
-    from the template), manual entries can have any number of line items as
-    long as total_debit == total_credit. This supports 4-sided disposal
-    entries (DR Cash, DR Accum Depr, CR Asset, CR Gain).
-
-    Each ``line_items`` dict carries ``element_id`` (required),
-    ``debit_amount`` / ``credit_amount`` in cents (default 0, exactly one > 0
-    per line) and an optional ``description``. ``memo`` is required and
-    usually cites the business event. ``entry_type`` accepts 'closing'
-    (default), 'adjusting' or 'standard'.
-
-    Returns a ``ClosingEntryResult`` with ``outcome='created'``. Raises
-    ``ValueError`` when ``line_items`` is empty, doesn't balance, has an
-    invalid debit/credit combination, or ``memo`` is empty.
+    "Manual" means not schedule-derived, not who wrote it: event-handler
+    callers should pass ``provenance='event_handler'``. Each ``line_items``
+    dict has ``element_id``, cents ``debit_amount`` / ``credit_amount``
+    (exactly one > 0) and optional ``description``. Raises ``ValueError`` on
+    an empty memo, no lines, a bad debit/credit pair, or an imbalance.
     """
     if not memo or not memo.strip():
       raise ValueError("Manual entry requires a non-empty memo")
     if not line_items:
       raise ValueError("Manual entry requires at least one line item")
 
-    # Normalize + validate each line
     total_debit = 0
     total_credit = 0
     normalized: list[dict] = []
@@ -1608,14 +1354,9 @@ class ScheduleService:
         f"total_debit={total_debit} total_credit={total_credit}"
       )
 
-    # Reject drafts with posting_date in an already-closed fiscal period.
-    # Without this check, the draft would be inserted but close-period would
-    # later refuse to transition it to posted (period is closed), leaving an
-    # orphaned draft inside a locked month. To make an adjustment to a closed
-    # period, the caller must reopen it first.
+    # A draft in a closed period could never be posted.
     self._assert_period_not_closed(session, posting_date)
 
-    # Create the draft entry
     entry = Entry(
       type=entry_type,
       status="draft",
@@ -1641,8 +1382,6 @@ class ScheduleService:
       )
     session.flush()
 
-    # For the result, report the first DR/CR element as a summary signal.
-    # The caller has full line items on hand so they don't need to re-inspect.
     first_debit = next(
       (li["element_id"] for li in normalized if li["debit_amount"] > 0), None
     )
@@ -1674,38 +1413,18 @@ class ScheduleService:
     reason: str,
     updated_by: str,
   ) -> dict:
-    """End a schedule early — delete facts with period_start > new_end_date.
+    """End a schedule early: hard-delete facts and draft entries after
+    ``new_end_date`` (a month-end, not before the first fact). The structure
+    and earlier facts stay as the audit trail.
 
-    Used for events that cut a schedule's lifespan short: an asset is sold,
-    a prepaid is cancelled, a contract is terminated. The schedule stays
-    (preserving its audit trail and remaining in-scope facts), but all facts
-    after the new end date are hard-deleted so they never produce future
-    closing entries.
-
-    Historical facts (periods ≤ closed_through) are unaffected — they
-    remain as the record of what was recognized before the truncation.
-
-    ``new_end_date`` is the last date the schedule covers; facts with
-    ``period_start`` beyond it are deleted. It cannot precede the schedule's
-    earliest existing fact — that would be a delete, not a truncate.
-    ``reason`` is required and captured in metadata for audit.
-
-    Returns a dict with ``facts_deleted``, ``new_end_date`` and ``reason``.
-    Raises ``ValueError`` when the structure isn't a schedule, when
-    ``new_end_date`` precedes the schedule's first fact, or when any matching
-    fact is linked to a posted entry.
+    Raises ``ValueError`` when the structure isn't a schedule, the date is
+    out of range, or a landed entry exists after it.
     """
     if not reason or not reason.strip():
       raise ValueError("truncate_schedule requires a non-empty reason")
 
-    # new_end_date must be the last day of its month. Schedule facts are
-    # stored as full-month rows (period_start is day 1, period_end is the
-    # last day). A mid-month end (e.g., 2026-03-15) would leave March's
-    # fact in place because period_start=2026-03-01 is NOT > 2026-03-15,
-    # meaning full-month depreciation still draws for a partial month. If
-    # the user needs to split March, they should truncate to 2026-02-28
-    # (drop March entirely) or 2026-03-31 (keep full March) — and book a
-    # prorated manual adjustment for any difference.
+    # Facts are whole-month rows; a mid-month end would keep that month's
+    # full-month fact.
     from calendar import monthrange
 
     last_day = monthrange(new_end_date.year, new_end_date.month)[1]
@@ -1723,7 +1442,6 @@ class ScheduleService:
     if not structure or structure.block_type != "schedule":
       raise ValueError(f"Schedule structure '{structure_id}' not found")
 
-    # Check there are any facts, and that new_end_date is within range
     bounds = session.execute(
       text("""
         SELECT
@@ -1744,11 +1462,8 @@ class ScheduleService:
         f"fact ({bounds.first_start}). Deactivate the schedule instead."
       )
 
-    # Refuse to delete facts whose period overlaps a landed (non-draft) entry.
-    # A landed entry carries the record of that period's recognition — truncating
-    # underneath it would orphan the audit trail. `reversed` counts: the original
-    # and its reversing entry are both history, and the comment said "non-draft"
-    # long before the predicate did.
+    # A landed entry (reversed included) after the cutoff is the record of
+    # that period's recognition; truncating under it would orphan it.
     overlap = session.execute(
       text("""
         SELECT COUNT(*) AS c
@@ -1767,8 +1482,8 @@ class ScheduleService:
         "not clear this guard."
       )
 
-    # Fence before the deletes below take their row locks — the order every
-    # ledger writer keeps against close (exclusive fence, then rows).
+    # Fence before the deletes take row locks: fence, then rows, as every
+    # ledger writer does against close.
     stale_dates = (
       session.execute(
         text("""
@@ -1784,7 +1499,6 @@ class ScheduleService:
     )
     assert_period_not_closed(session, *stale_dates)
 
-    # Delete any draft entries that fall past the new end date (they're now stale)
     session.execute(
       text("""
         DELETE FROM line_items
@@ -1807,7 +1521,6 @@ class ScheduleService:
       {"sid": structure_id, "new_end": new_end_date},
     )
 
-    # Delete facts beyond the new end date
     del_result = session.execute(
       text("""
         DELETE FROM facts
@@ -1818,7 +1531,6 @@ class ScheduleService:
     )
     facts_deleted = del_result.rowcount or 0
 
-    # Update schedule metadata to record the truncation event for audit
     now = datetime.now(UTC)
     metadata = dict(structure.metadata_ or {})
     schedule_meta = dict(metadata.get("schedule_metadata", {}))
@@ -1842,7 +1554,6 @@ class ScheduleService:
       "schedule_metadata": metadata.get("schedule_metadata"),
     }
 
-    # Force SQLAlchemy to detect the JSONB change
     from sqlalchemy.orm.attributes import flag_modified
 
     flag_modified(structure, "metadata_")
@@ -1861,28 +1572,15 @@ class ScheduleService:
     }
 
   def _assert_period_not_closed(self, session: Session, posting_date: date) -> None:
-    """Raise ClosedPeriodError if a FiscalPeriod containing `posting_date` is closed.
-
-    Delegates to the shared guard so schedule-derived writes take the same
-    period fence as journal-entry commands and close.
-    """
+    """Raise ClosedPeriodError if `posting_date` falls in a closed period."""
     assert_period_not_closed(session, posting_date)
 
   def _delete_draft_entry(self, session: Session, entry_id: str) -> None:
-    """Delete a DRAFT entry and its line items. Refuses anything that landed.
+    """Delete a draft entry, its draft auto-reversal, and their line items.
 
-    The "must be status='draft'" part used to live only in this docstring while
-    every statement below ran unconditionally — including
-    `DELETE FROM entries WHERE reversal_of = :eid`, which targets a **posted**
-    reversing entry by construction. A caller that reached here with a
-    posted-and-reversed pair erased both halves from the ledger, and no foreign
-    key stopped it: `entries.triggered_by_event_id -> events(id) ON DELETE
-    RESTRICT` protects the referenced *event*, never the referencing entry.
-
-    So the precondition is enforced here, under a lock, rather than trusted from
-    the call site. Raising is correct over silently skipping: a caller that
-    believes it is regenerating a draft has a bug worth surfacing, and this
-    function is not a safe place to guess.
+    Raises for any landed entry rather than skipping: a caller that thinks it
+    is regenerating a draft has a bug worth surfacing, and no FK stops a
+    landed entry from being deleted.
     """
     row = session.execute(
       text("SELECT status FROM entries WHERE id = :eid FOR UPDATE"),
@@ -1897,10 +1595,7 @@ class ScheduleService:
         "through the ledger instead."
       )
 
-    # A draft never has a reversing entry against it (only posted entries can be
-    # reversed), so the cascade below can only match rows this schedule drafted
-    # alongside it — an auto-reversal still in draft. Bounded to drafts for the
-    # same reason as above.
+    # Only a draft auto-reversal can reference a draft.
     session.execute(
       text("""
         DELETE FROM line_items
@@ -1914,7 +1609,7 @@ class ScheduleService:
       text("DELETE FROM entries WHERE reversal_of = :eid AND status = 'draft'"),
       {"eid": entry_id},
     )
-    # Line items first (FK cascade not guaranteed at the model layer)
+    # Line items first: FK cascade is not guaranteed at the model layer.
     session.execute(
       text("DELETE FROM line_items WHERE entry_id = :eid"),
       {"eid": entry_id},
@@ -1925,15 +1620,9 @@ class ScheduleService:
     )
     session.flush()
 
-  # ── Private helpers ──────────────────────────────────────────────────
-
   def _ensure_schedule_taxonomy(self, session: Session, created_by: str) -> str:
-    """Get or create the default schedule taxonomy.
-
-    Each tenant schema gets at most one schedule taxonomy. The race window
-    is narrow (single-tenant sessions) and a duplicate is harmless — the
-    LIMIT 1 query will always pick one consistently.
-    """
+    """Get or create the tenant's schedule taxonomy. A racing duplicate is
+    harmless; LIMIT 1 picks one."""
     row = session.execute(
       text("""
         SELECT id FROM taxonomies
@@ -1959,7 +1648,6 @@ class ScheduleService:
     return taxonomy.id
 
   def _get_entity_id(self, session: Session) -> str:
-    """Get the primary entity ID."""
     result = session.execute(
       text("SELECT id FROM entities ORDER BY created_at ASC LIMIT 1")
     )
@@ -1969,21 +1657,9 @@ class ScheduleService:
     return row.id
 
 
-# ── Utility ──────────────────────────────────────────────────────────────
-
-
 def _element_is_contra_asset(session: Session, element_id: str) -> bool:
-  """True if the element carries the FASB ``contraAsset`` EFS trait.
-
-  A contra-asset (accumulated depreciation/amortization, the allowance for
-  doubtful accounts) accumulates *up* toward the gross asset's cost; a
-  directly-credited asset (a prepaid) draws *down* from cost to zero. The
-  two are indistinguishable by ``balance_type`` — QuickBooks types both as
-  asset/debit-normal — so the schedule roll-forward direction is keyed off
-  this trait, which the sync applies from the source CoA's AccountSubType
-  (see ``operations/extensions/loader.py``). Reading the trait keeps this
-  generator source-agnostic rather than re-deriving from QB-specific
-  metadata strings.
+  """True if the element carries the FASB ``contraAsset`` EFS trait, applied
+  at sync from the source CoA's AccountSubType (``operations/extensions/loader.py``).
   """
   return (
     session.execute(
@@ -2001,7 +1677,7 @@ def _element_is_contra_asset(session: Session, element_id: str) -> bool:
 
 
 def _generate_monthly_periods(start: date, end: date) -> list[tuple[date, date]]:
-  """Generate monthly (first-of-month, last-of-month) periods."""
+  """(first-of-month, last-of-month) pairs covering start..end."""
   from calendar import monthrange
 
   periods: list[tuple[date, date]] = []
@@ -2012,7 +1688,6 @@ def _generate_monthly_periods(start: date, end: date) -> list[tuple[date, date]]
     month_end = date(current.year, current.month, last_day)
     periods.append((current, month_end))
 
-    # Next month
     if current.month == 12:
       current = date(current.year + 1, 1, 1)
     else:

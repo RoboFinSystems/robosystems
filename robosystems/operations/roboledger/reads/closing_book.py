@@ -1,8 +1,5 @@
-"""Closing book read operations.
-
-Provides the structure overview for the digital closing book viewer —
-all structure categories in one call for the sidebar navigation.
-"""
+"""Closing book structure overview: every category for the viewer's sidebar in
+one call."""
 
 from __future__ import annotations
 
@@ -19,16 +16,12 @@ from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
 
-# Structure types that represent financial statements. `cash_flow_statement`
-# is absent because roboledger has no renderer for it; SEC XBRL cash-flow
-# parsing is a separate path and is unaffected.
 _STATEMENT_TYPES = {
   "income_statement",
   "balance_sheet",
   "equity_statement",
 }
 
-# Display labels for statement types
 _STATEMENT_LABELS = {
   "income_statement": "Income Statement",
   "balance_sheet": "Balance Sheet",
@@ -37,16 +30,10 @@ _STATEMENT_LABELS = {
 
 
 def get_closing_book_structures(session: Session) -> ClosingBookStructuresResponse:
-  """Aggregate closing-book categories for the sidebar navigation.
-
-  Merges period-close status, statements (from the latest report),
-  schedules, account rollups, and trial-balance availability into a
-  single response.
-  """
+  """Aggregate closing-book categories for the sidebar navigation."""
   categories: list[ClosingBookCategory] = []
 
-  # 1. Period Close hub — always first so it's the operational home
-  # for the close workflow. Frontend defaults to this item on load.
+  # Period Close first: the frontend opens on it.
   categories.append(
     ClosingBookCategory(
       label="Period Close",
@@ -60,7 +47,7 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
     )
   )
 
-  # 2. Statements — from the most recent report's taxonomy structures
+  # Statements, from the most recent report
   latest_report = session.execute(
     select(Report)
     .where(Report.generation_status.in_(["complete", "published", "generating"]))
@@ -95,7 +82,7 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
     if statement_items:
       categories.append(ClosingBookCategory(label="Statements", items=statement_items))
 
-  # 3. Account Rollups — from mapping structures
+  # Account Rollups
   mappings = (
     session.execute(
       select(Structure)
@@ -120,7 +107,7 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
     ]
     categories.append(ClosingBookCategory(label="Account Rollups", items=rollup_items))
 
-  # 4. Schedules — active schedule structures
+  # Schedules
   schedules = (
     session.execute(
       select(Structure)
@@ -146,7 +133,7 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
     ]
     categories.append(ClosingBookCategory(label="Schedules", items=schedule_items))
 
-  # 5. Trial Balance — always present if there are posted entries
+  # Trial Balance, when anything is posted
   has_posted = session.execute(
     text(
       "SELECT EXISTS(SELECT 1 FROM entries WHERE status IN :landed_entry_statuses)"

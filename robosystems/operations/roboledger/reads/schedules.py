@@ -1,9 +1,4 @@
-"""Schedule read operations.
-
-Thin read-side wrappers over `ScheduleService` that assemble the
-wire-facing Pydantic responses. Both the REST router and the GraphQL
-resolvers call these so the response shape is defined once.
-"""
+"""Schedule reads: ScheduleService results shaped into API responses."""
 
 from __future__ import annotations
 
@@ -46,20 +41,13 @@ def get_period_close_status(
     ],
     total_draft=status.total_draft,
     total_posted=status.total_posted,
-    # The stored receipt is validated on the way out rather than trusted:
-    # rows written by an older shape (or hand-edited) surface as no receipt
-    # instead of failing the whole close-status read.
     close_receipt=_parse_receipt(status.close_receipt),
   )
 
 
 def _parse_receipt(raw: dict | None) -> CloseReceiptResponse | None:
-  """Project a stored close receipt onto its typed response model.
-
-  Returns None for a missing or unreadable receipt. `get-period-close-status`
-  is the read an operator runs when a close's response was lost, so it must
-  not be the thing that breaks on a receipt it cannot parse.
-  """
+  """None for a missing or unreadable receipt: this read is how an operator
+  recovers a lost close response, so a bad receipt must not fail it."""
   if not raw:
     return None
   try:

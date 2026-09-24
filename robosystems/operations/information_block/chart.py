@@ -1,19 +1,9 @@
 """Chart View projection — panel/series config over a rendering.
 
-A ``type-of View`` arm, server-shaped like ``rendering``. The server's
-value-add is the grouping logic: mixed-unit catalogs are unplottable on one
-y-axis, so rows group into one panel per ``item_type`` format family (NULL
-falls back to the ``is_monetary`` binary), panel order following first
-appearance in presentation-arc order. The projection carries structure only
-— series values live in ``rendering.rows`` (joined by ``element_id``) and
-the x-axis is ``rendering.periods`` — so the chart arm never duplicates the
-value matrix.
-
-Rendering-generic: the metric envelope builder is the only caller today, but
-any builder whose rendering rows carry plottable per-period values
-(statements, schedules) can adopt it unchanged. Subtotal rows are excluded —
-statement charts need subtotal curation first, which is the adopting
-builder's problem, not this helper's.
+Mixed units can't share a y-axis, so rows group into one panel per
+``item_type`` family, in first-appearance order. The projection carries
+structure only; values stay in ``rendering.rows`` and the x-axis is
+``rendering.periods``. Subtotal rows are excluded.
 """
 
 from __future__ import annotations
@@ -40,12 +30,8 @@ _FAMILY_LABELS = {
 
 
 def _family_for(element: Element | None) -> tuple[str | None, str | None]:
-  """(item_type family, panel label) for one row's element.
-
-  NULL ``item_type`` falls back to the ``is_monetary`` binary — the
-  same fallback the unit mapping uses — so untyped catalogs still get
-  coherent monetary/pure panels.
-  """
+  """(item_type family, panel label) for one row's element; NULL
+  ``item_type`` falls back to ``is_monetary``."""
   if element is None:
     return None, None
   if element.item_type is not None:
@@ -59,12 +45,8 @@ def build_chart_projection(
   rendering: RenderingLite | None,
   elements_by_id: dict[str, Element],
 ) -> ChartLite | None:
-  """Group a rendering's plottable rows into format-family chart panels.
-
-  Returns ``None`` when there is nothing to plot (no rendering, no
-  rows) — the envelope simply omits the arm and the frontend's chart
-  mode renders its empty state.
-  """
+  """Group a rendering's plottable rows into format-family chart panels;
+  ``None`` when there is nothing to plot."""
   if rendering is None or not rendering.rows:
     return None
 

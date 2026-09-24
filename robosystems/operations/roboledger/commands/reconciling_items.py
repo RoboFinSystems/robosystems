@@ -1,29 +1,15 @@
-"""Reconciling items — reading what changed upstream, and disposing of it.
+"""Reconciling items: planning and disposing of upstream changes to posted events.
 
-When a sync finds that an already-posted event's source payload has
-changed, it does not touch the books: approved entries are immutable to
-re-sync. It flags the event, stashes the incoming payload at
-``metadata.drift_payload``, and moves on. The flag is what makes the change
-visible; this module is what makes it *resolvable*.
+A sync that finds a posted event's source payload changed does not touch the
+books; it flags the event and stashes the payload at ``metadata.drift_payload``.
+``plan_reconciling_item`` reports the difference (read-only) and
+``resolve_reconciling_item`` carries out a disposition.
 
-Two operations:
-
-- :func:`plan_reconciling_item` reads the difference — the posted entries
-  against the accepted payload, netted per account — and reports which
-  disposition applies by default and what would stand in the way of the
-  others. It writes nothing.
-- :func:`resolve_reconciling_item` carries out a disposition and clears the
-  flag.
-
-**Why clearing the flag means replacing the payload.** The sync decides an
-event has changed by comparing its live metadata against the incoming
-payload (:func:`~robosystems.operations.extensions.loader.comparable_payload`).
-Setting ``payload_drift = False`` alone would therefore last exactly until
-the next sync, which would find the same difference and flag it again —
-which is how dispositions agreed with a customer came to be re-raised every
-month. So every disposition, including the one that posts nothing, sets the
-live payload to the accepted one. The disposition trail is written to
-``metadata.reconciliation_history``, a key that comparison excludes.
+Every disposition, including the one that posts nothing, replaces the live
+payload with the accepted one: the sync detects drift by comparing live
+metadata to the incoming payload, so clearing the flag alone would be re-raised
+on the next sync. The trail goes to ``metadata.reconciliation_history``, which
+that comparison excludes.
 """
 
 from __future__ import annotations
@@ -86,11 +72,7 @@ class ReconcilingItemNotFoundError(LookupError):
 
 
 class NotAReconcilingItemError(ValueError):
-  """The event is not flagged, so there is nothing to dispose of.
-
-  Also the answer to a repeat call: the first one cleared the flag, and the
-  trail on the event says what it did.
-  """
+  """The event is not flagged (including on a repeat call after resolving)."""
 
   def __init__(self, event_id: str, *, last_disposition: dict | None = None) -> None:
     if last_disposition:
@@ -172,12 +154,9 @@ def _resolve_element_labels(
   source: str,
   connection_id: str | None,
 ) -> tuple[dict[str, tuple[str | None, str | None]], dict[str, str]]:
-  """Look up code/name by element id, and element ids by external id.
-
-  Returns ``(labels_by_element_id, element_id_by_external_id)``. External
-  ids resolve the same way the handler resolves them at dispatch, so the
-  preview names the accounts the write would actually hit.
-  """
+  """Returns ``(labels_by_element_id, element_id_by_external_id)``. External
+  ids resolve as the handler resolves them at dispatch, so the preview names
+  the accounts the write would hit."""
   by_external: dict[str, str] = {}
   if external_ids:
     stmt = select(Element.id, Element.external_id).where(
@@ -296,32 +275,23 @@ def _event_entries(session: Session, event_id: str) -> list[Entry]:
 def _restate_blockers(
   session: Session, event: Event, entries: list[Entry], accepted: dict
 ) -> list[str]:
-  """Everything that would make regenerating these entries unsafe.
-
-  Each is a case where deleting the current rows would either fail against
-  a foreign key, quietly take something else with it, or leave the event
-  disagreeing with the rows beneath it.
-  """
+  """Reasons regenerating these entries would be unsafe: a delete that fails
+  on a foreign key, takes something else with it, or leaves the event
+  disagreeing with its rows."""
   blockers: list[str] = []
   entry_ids = [str(e.id) for e in entries]
 
-  # A terminal event whose accepted payload drafts its entries would end up
-  # `fulfilled` over draft rows: the handler only ever upgrades status to
-  # fulfilled, never back down, and downgrading a terminal state silently
-  # would be the worse answer. Unreachable through QuickBooks — the loader
-  # derives this status from the source, and QuickBooks always posts — but
-  # reachable for a source that does not auto-commit, so refuse rather than
-  # produce the mismatch.
+  # The handler never downgrades `fulfilled`, so drafting its entries would
+  # leave a fulfilled event over draft rows. Unreachable via QuickBooks (it
+  # always posts) but reachable for a source that does not auto-commit.
   if str(event.status) == "fulfilled" and accepted.get("status") == "draft":
     blockers.append(
       "the accepted payload would draft this event's entries while the event "
       "is 'fulfilled' — resolve it as catch_up, or correct the payload's status"
     )
 
-  # Restate regenerates the rows from the accepted payload. A payload with no
-  # entry in it — the source retracted the line, or the line was posted
-  # through a rule the feed could not re-plan — has nothing to regenerate to,
-  # and the handler would rebuild the old rows from the event's own columns.
+  # With no entry in the accepted payload the handler would rebuild the old
+  # rows from the event's own columns.
   if not _entry_specs(accepted):
     if accepted.get("source_removed"):
       blockers.append(
@@ -430,16 +400,8 @@ def _default_catch_up_date(session: Session, graph_id: str) -> date | None:
 def find_unresolved_reconciling_items(
   session: Session, *, as_of: date
 ) -> list[tuple[str, str | None]]:
-  """Flagged events with entries posting on or before ``as_of``.
-
-  Returns ``(event_id, external_id)`` pairs. The date bound is what makes
-  this answerable for one period: a later-dated item says nothing about
-  the months being closed, while an earlier one would have its catch-up
-  entry land in the period under review.
-
-  Read by the close gate, which refuses to stamp statements over a known
-  disagreement with the source system unless told to.
-  """
+  """``(event_id, external_id)`` of flagged events with entries posting on or
+  before ``as_of``; read by the close gate."""
   return [
     (str(event_id), external_id)
     for event_id, external_id in session.query(Event.id, Event.external_id)
@@ -466,14 +428,11 @@ def plan_reconciling_item(
 def _plan_with_stamp(
   session: Session, event_id: str, *, graph_id: str
 ) -> tuple[ReconcilingItemPlan, str | None]:
-  """The plan, plus the raw ``drift_detected_at`` string it was built from.
+  """The plan, plus the raw stored ``drift_detected_at`` string.
 
-  The resolver compares that string against the row it later locks, to catch
-  a re-flag in between. It has to be the stored value rather than the plan's
-  parsed one: ``datetime.fromisoformat`` accepts both ``Z`` and ``+00:00``
-  and re-serializes either as ``+00:00``, so a round-tripped comparison
-  would report a re-flag that never happened — and an unparseable stamp
-  would do it permanently, leaving the item impossible to resolve at all.
+  The resolver compares the raw string to detect a re-flag; a parsed and
+  re-serialized timestamp (``Z`` vs ``+00:00``) would report false re-flags,
+  and an unparseable one would block resolution forever.
   """
   event = _load_event(session, event_id)
   accepted = _require_flagged(event)
@@ -587,13 +546,9 @@ def preview_reconciling_item(
 def _accepted_metadata(
   *, live: dict, accepted: dict, record: dict[str, Any]
 ) -> dict[str, Any]:
-  """The metadata that leaves this event matching the source system.
-
-  The accepted payload verbatim, plus the disposition trail. Nothing is
-  carried over from the live payload: any key the adapter does not send
-  would differ from every future incoming payload and re-raise the item
-  forever. Keys worth keeping are recorded on the trail instead.
-  """
+  """The accepted payload verbatim plus the disposition trail. Nothing is kept
+  from the live payload: a key the adapter does not send would re-raise the
+  item on every sync."""
   history = live.get(RECONCILIATION_HISTORY_KEY)
   history = list(history) if isinstance(history, list) else []
   history.append(record)
@@ -624,15 +579,9 @@ def resolve_reconciling_item(
   *,
   graph_id: str,
 ) -> ResolveReconcilingItemResponse:
-  """Dispose of one reconciling item and clear its flag.
+  """Dispose of one reconciling item and clear its flag. Does not commit.
 
-  Does not commit — the caller's session boundary owns that, so a catch-up
-  entry and the flag it clears land together or not at all.
-
-  Order of operations matters and follows the ledger's rule: take the
-  period fence before any row lock, because close holds the exclusive side
-  of that fence across its own row locks, and acquiring in the other order
-  deadlocks against it.
+  Takes the period fence before any row lock (the order close uses).
   """
   plan, planned_stamp = _plan_with_stamp(session, body.event_id, graph_id=graph_id)
   disposition: ReconcilingItemDisposition = body.disposition or plan.default_disposition
@@ -668,9 +617,7 @@ def resolve_reconciling_item(
   accepted = _require_flagged(event)
   live = dict(event.metadata_ or {})
 
-  # The plan was built before the lock. If the sync flagged a *newer*
-  # payload in between, the operator would be accepting something they
-  # never saw — make them look again rather than resolve the wrong thing.
+  # A newer payload flagged since planning is one the operator never saw.
   if live.get("drift_detected_at") != planned_stamp:
     raise RowLockedError(
       f"Event {body.event_id} was re-flagged with a newer payload while this "
@@ -713,11 +660,9 @@ def resolve_reconciling_item(
     if blockers:
       raise RestateBlockedError(str(event.id), blockers)
     _delete_event_gl_rows(session, str(event.id), entry_ids)
-    # Written before dispatch because the handler regenerates the entries
-    # from `event.metadata_`, and written again below once the rebuilt ids
-    # exist — they cannot go on the trail before the rows they name. Both
-    # calls build their history from the pre-mutation `live`, so the second
-    # replaces the first rather than appending a second record.
+    # Written before dispatch (the handler reads it) and again below with the
+    # rebuilt ids; both build from the pre-mutation `live`, so the second
+    # replaces rather than appends.
     event.metadata_ = _accepted_metadata(live=live, accepted=accepted, record=record)
     fire_handler_on_commit(session, event, created_by)
     session.flush()
@@ -809,12 +754,8 @@ def _catch_up_request(
   status: str,
   note: str | None,
 ) -> CreateEventBlockRequest:
-  """The alignment entry that brings the books level without touching history.
-
-  ``source='system'`` and an explicit ``publish_to_source=False`` both say
-  the same thing, deliberately: this entry mirrors a change the source
-  system already made, so sending it back would apply that change twice.
-  """
+  """The alignment entry that levels the books without touching history. Never
+  published: it mirrors a change the source already made."""
   line_items = []
   for line in plan.delta:
     if line.delta == 0 or line.element_id is None:

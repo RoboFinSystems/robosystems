@@ -1,14 +1,7 @@
-"""Update-path validator — projects the post-delta state and reuses create phases.
-
-Update scope covers all deltas: ``_to_add``, ``_to_update``, and
-``_to_remove`` for every atom type, plus ``rules_to_add`` /
-``rules_to_remove`` and top-level field updates. This validator
-synthesizes a virtual :class:`CreateTaxonomyBlockRequest` representing
-the post-delta state of the taxonomy (DB rows minus removals, with
-mutations applied, plus additions), then runs the create-time phases
-against that projection. Delta-specific guards (library origin
-immutability, live fact/line-item dependencies, cross-taxonomy
-mappings, orphan children) run after the projection check.
+"""Update-path validator: projects the post-delta taxonomy as a virtual
+:class:`CreateTaxonomyBlockRequest` and runs the create-time phases on it,
+then the delta-specific guards (library immutability, live facts and line
+items, cross-taxonomy mappings, orphaned children).
 """
 
 from __future__ import annotations
@@ -83,12 +76,9 @@ def validate_update_envelope(
   element_id_by_qname = {e.qname: e.id for e in current_elements if e.qname}
   trait_by_element_id = _load_efs_traits(session, current_elements)
 
-  # Elements without a qname cannot be projected: patches key on qname, and
-  # an association endpoint reconstructing as None crashes the request
-  # models. Report them once, legibly, and exclude them (and their arcs)
-  # from the projection so the rest of the update still validates. Adapter
-  # elements get their qname written at connection sync — the heal is a
-  # re-sync, not a manual repair.
+  # Elements without a qname can't be projected; report them once and
+  # exclude them and their arcs so the rest still validates. (Adapter
+  # elements get their qname at connection sync, so a re-sync heals them.)
   missing_qname_element_ids = {str(e.id) for e in current_elements if not e.qname}
   if missing_qname_element_ids:
     unnamed = [e for e in current_elements if not e.qname]
@@ -206,14 +196,9 @@ def validate_update_envelope(
     )
   virtual_structures.extend(payload.structures_to_add)
 
-  # Arcs that leave the taxonomy — a chart's mapping arcs into the rs-gaap
-  # library, or any block's arc to a concept it does not own — are created
-  # by the mapping commands, not by an envelope, and the create validator
-  # can only resolve a foreign endpoint through a *parent* taxonomy
-  # (``_load_library_qnames``). Projecting them for an unparented block
-  # would report every one as a phantom and refuse any update on a chart
-  # that has ever been mapped. They are left out of the projection; the
-  # mapping commands own their integrity.
+  # Arcs to concepts outside the taxonomy (e.g. a chart's mapping arcs) are
+  # owned by the mapping commands. Without a parent taxonomy the create
+  # validator can't resolve them, so they're left out of the projection.
   current_element_ids = {str(e.id) for e in current_elements}
   resolves_foreign = taxonomy.parent_taxonomy_id is not None
 
@@ -332,12 +317,9 @@ def _resolve_foreign_element_qnames(
 ) -> None:
   """Fold library-element qnames into the projection's id→qname map.
 
-  Extend-mode taxonomies arc from / parent under LIBRARY concepts, whose
-  Element rows live in the parent taxonomy — without resolving those
-  foreign ids the projection stringifies them to ``""`` and every update
-  fails reference resolution (``phantom_from_ref``), even though the
-  create validator resolves the same refs via ``_load_library_qnames``.
-  Mutates ``qname_by_element_id`` in place.
+  Extend-mode taxonomies arc to and parent under library concepts, which
+  would otherwise project as ``""`` and fail reference resolution. Mutates
+  ``qname_by_element_id`` in place.
   """
   foreign_ids = {
     eid
@@ -363,11 +345,8 @@ def _load_efs_traits(
 ) -> dict[str, str]:
   """Primary EFS trait identifier per element id, from the junction table.
 
-  The projection re-runs the create-time phases, and the CoA
-  type-specific phase rejects EVERY element with ``trait=None`` — not
-  just newly added ones — so existing rows must carry their live
-  classification into the virtual create request or any update on a
-  chart_of_accounts block fails validation wholesale.
+  The CoA create phase rejects any element with ``trait=None``, so existing
+  rows must carry their classification into the projection.
   """
   return _load_efs_traits_by_id(session, [e.id for e in current_elements])
 

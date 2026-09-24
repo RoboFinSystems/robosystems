@@ -22,12 +22,7 @@ def cmd_evaluate_rules(
   body: EvaluateRulesRequest,
   created_by: str,
 ) -> EvaluateRulesResponse:
-  """Run the rule engine for a structure and return the evaluation summary.
-
-  Calls :func:`evaluate_rules_for_structure`, projects results to
-  :class:`VerificationResultLite`, and builds a ``summary`` dict keyed
-  by status (``pass``, ``fail``, ``error``, ``skipped``).
-  """
+  """Run the rule engine for a structure; the summary counts results by status."""
   rows = evaluate_rules_for_structure(
     session,
     body.structure_id,

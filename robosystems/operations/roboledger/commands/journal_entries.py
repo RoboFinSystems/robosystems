@@ -1,35 +1,10 @@
-"""Journal entry CRUD commands — native accounting write path.
+"""Journal entry write commands: create, update and delete drafts, reverse posted.
 
-Pure functions over an extensions `Session`, returning Pydantic
-response models. These are the single source of truth for journal
-entry writes; REST routes, MCP tools, and agents all delegate here.
-
-Design notes:
-
-- **Transaction auto-created.** Every journal entry needs a parent
-  Transaction so the graph has a traversal path (Entity → Transaction →
-  Entry → LineItem). When the caller does not supply a `transaction_id`,
-  a synthetic Transaction of type "journal_entry" is created in the same
-  flush. Callers that already hold a Transaction (e.g., the QB pipeline)
-  pass it explicitly and no synthetic row is written.
-
-- **Draft-only edits.** `update_journal_entry` and `delete_journal_entry`
-  only operate on entries with `status='draft'`. Posted entries are
-  immutable and must be corrected via `reverse_journal_entry`. This
-  matches standard double-entry bookkeeping practice — the audit trail
-  never silently loses posted entries.
-
-- **Reversal semantics.** `reverse_journal_entry` creates a new Entry
-  with flipped line items (debits ↔ credits), sets `reversal_of` to
-  the original's id, and marks the original `status='reversed'`. The
-  reversing entry is posted immediately. Both rows stay in the ledger
-  forever — the audit trail shows original + reversal side by side.
-
-- **Closed-period gate.** Enforced via `assert_period_not_closed()` from
-  `_guards.py`. That guard takes the shared period fence, so a write
-  cannot land after close has finished. Applied to create, update
-  (existing date and any new date), delete, and reverse (original and
-  reversal dates).
+Posted entries are immutable and corrected only by reversal, which posts a new
+entry with flipped lines and marks the original ``reversed``. An entry created
+without a ``transaction_id`` gets a synthetic ``journal_entry`` Transaction so
+the graph keeps its Entity → Transaction → Entry path. Every write takes the
+closed-period fence (``_guards.assert_period_not_closed``).
 """
 
 from __future__ import annotations
@@ -61,20 +36,12 @@ from robosystems.operations.roboledger.commands._guards import (
 
 
 class JournalEntryNotFoundError(LookupError):
-  """Raised when a journal entry is not found by id."""
-
   def __init__(self, entry_id: str) -> None:
     super().__init__(f"Journal entry not found: {entry_id}")
     self.entry_id = entry_id
 
 
 class JournalEntryNotDraftError(ValueError):
-  """Raised when trying to update or delete a non-draft entry.
-
-  Posted and reversed entries are immutable — the caller must use
-  `reverse_journal_entry` instead of editing or deleting them directly.
-  """
-
   def __init__(self, entry_id: str, status: str) -> None:
     super().__init__(
       f"Journal entry {entry_id} is {status!r}; only draft entries can be "
@@ -87,15 +54,10 @@ class JournalEntryNotDraftError(ValueError):
 
 
 class JournalEntryAlreadyReversedError(ValueError):
-  """Raised when the entry already has a reversing entry against it.
+  """The entry already has a reversing entry.
 
-  Reachable without any race: a schedule with ``auto_reverse`` creates the
-  reversal at generation time and leaves the original's status untouched, so
-  the ``status == 'posted'`` check below passes on an entry that is already
-  reversed. Before `uq_entries_one_reversal_per_original` that produced a
-  second reversal — the double-post this work exists to stop; after it, the
-  insert would fail on the index. Neither is an answer a caller can act on,
-  so the state gets named here instead.
+  Reachable without a race: a schedule with ``auto_reverse`` creates the
+  reversal up front and leaves the original ``posted``.
   """
 
   def __init__(self, entry_id: str, reversing_entry_id: str) -> None:
@@ -108,16 +70,9 @@ class JournalEntryAlreadyReversedError(ValueError):
 
 
 class JournalEntryOwnedByEventError(ValueError):
-  """Raised when a delete would leave a live event with no ledger rows.
-
-  A draft is the ledger's version of its event; the event is the record of
-  what happened. Deleting the last draft of an event that has not been
-  retracted leaves a committed event `execute` will still publish, with
-  nothing behind it in the books. The retraction belongs on the event —
-  void or supersede it — after which its leftover drafts are deletable.
-  Multi-entry events keep the surface: deleting one of several drafts is a
-  correction, and the rows that remain are what publishes.
-  """
+  """A delete would leave a live (not voided or superseded) event with no
+  ledger rows, which `execute` would still publish. Deleting one of several
+  drafts is allowed."""
 
   def __init__(self, entry_id: str, event_id: str, event_status: str) -> None:
     super().__init__(
@@ -134,13 +89,11 @@ _RETRACTED_EVENT_STATUSES = frozenset({"voided", "superseded"})
 
 
 def _lock_owning_event(session: Session, entry: Entry) -> Event | None:
-  """Lock the event a draft belongs to, before the draft's own row.
+  """Lock the draft's event before the draft itself.
 
-  `execute_event_block` and close both take the event row and then write its
-  entries; a correction that took the entry first and the event never (or
-  second) would either interleave with a publish — QuickBooks receiving the
-  version from before the correction — or acquire in the opposite order.
-  Event, then entry, everywhere. Bounded like the entry lock.
+  Lock order is event, then entry, everywhere (`execute_event_block` and close
+  use it), so a correction serializes with a publish instead of deadlocking or
+  letting QuickBooks receive the pre-correction rows.
   """
   if entry.triggered_by_event_id is None:
     return None
@@ -154,12 +107,6 @@ def _lock_owning_event(session: Session, entry: Entry) -> Event | None:
 
 
 class JournalEntryNotPostedError(ValueError):
-  """Raised when trying to reverse a non-posted entry.
-
-  Draft entries should be deleted; already-reversed entries should
-  not be reversed again.
-  """
-
   def __init__(self, entry_id: str, status: str) -> None:
     super().__init__(
       f"Journal entry {entry_id} is {status!r}; only posted entries can be "
@@ -170,8 +117,6 @@ class JournalEntryNotPostedError(ValueError):
 
 
 class UnbalancedJournalEntryError(ValueError):
-  """Raised when the line items in a journal entry do not balance."""
-
   def __init__(self, total_debit: int, total_credit: int) -> None:
     super().__init__(
       f"Journal entry does not balance: "
@@ -189,15 +134,9 @@ _FLOW_TAG_KEY = "transaction_description_code"
 
 
 def resolve_flow_element_id(session: Session, metadata: dict | None) -> str | None:
-  """Resolve a line's flow tag (``transaction_description_code`` qname) to its
-  Element id for ``LineItem.flow_element_id``.
-
-  Source-named: points at the element the qname names directly — rs-gaap in
-  production (the enrichment classifier emits rs-gaap-valued tags), the source
-  vocabulary (e.g. ``mini``) in cross-taxonomy projections. Returns ``None`` when
-  the tag is absent or doesn't resolve. Logs (advisory) when the resolved element
-  lacks an ``activityType`` trait — i.e. isn't a recognized flow concept; trait
-  coverage is backfilled in the rs-gaap content phase.
+  """Resolve a line's flow tag (``transaction_description_code`` qname) to the
+  Element id it names, or ``None`` when absent or unresolved. Warns, without
+  failing, when the element has no ``activityType`` trait.
   """
   if not metadata:
     return None
@@ -236,12 +175,7 @@ def resolve_flow_element_id(session: Session, metadata: dict | None) -> str | No
 
 
 def _split_flow_tag(metadata: dict | None) -> dict:
-  """Return a shallow copy of ``metadata`` with the flow-tag key removed.
-
-  The flow concept is a first-class ``flow_element_id`` FK, so its qname must
-  not also ride in JSONB. Other metadata keys (source-system refs, etc.) are
-  preserved.
-  """
+  """``metadata`` without the flow tag, which lives in ``flow_element_id``."""
   meta = dict(metadata or {})
   meta.pop(_FLOW_TAG_KEY, None)
   return meta
@@ -250,12 +184,8 @@ def _split_flow_tag(metadata: dict | None) -> dict:
 def validate_and_normalize_lines(
   lines: list[JournalEntryLineItemInput],
 ) -> tuple[list[dict], int, int]:
-  """Validate each line and compute totals. Returns (normalized, dr, cr).
-
-  Each input line must have exactly one positive amount (debit XOR
-  credit), both must be non-negative, and `element_id` is required.
-  The returned `normalized` list is ready to pass into `LineItem(...)`.
-  """
+  """Validate lines (element required, exactly one positive side, balanced)
+  and return ``(normalized, total_debit, total_credit)``."""
   if not lines:
     raise ValueError("Journal entry requires at least one line item")
 
@@ -294,7 +224,6 @@ def validate_and_normalize_lines(
 def _entry_to_response(
   entry: Entry, line_items: list[LineItem]
 ) -> JournalEntryResponse:
-  """Build a `JournalEntryResponse` from an Entry row and its line items."""
   line_item_responses = [
     JournalEntryLineItemResponse(
       id=li.id,
@@ -342,14 +271,9 @@ def _load_entry_or_404(session: Session, entry_id: str) -> Entry:
 
 
 def _raise_if_posting_date_moved(entry: Entry, peeked_date) -> None:
-  """Refuse to take a period fence after the entry row is already locked.
-
-  Fence-then-row is the documented order. Re-fencing here because the
-  posting date moved under us would invert that — a close holding the
-  new period's exclusive fence and waiting to update this entry
-  deadlocks. The caller retries, peeks the current date, and acquires
-  in the right order.
-  """
+  """Refuse instead of re-fencing: lock order is fence, then row, and fencing
+  the new period while holding the row could deadlock with close. The caller
+  retries."""
   if entry.posting_date != peeked_date:
     raise RowLockedError(
       f"Journal entry {entry.id} was moved to another period by another "
@@ -360,13 +284,8 @@ def _raise_if_posting_date_moved(entry: Entry, peeked_date) -> None:
 # ── Create ───────────────────────────────────────────────────────────────
 
 
-# `Event.source` is an open vocabulary: the platform emits `manual`, `system`
-# and `schedule`, and every other value is a connection provider validated at
-# the ops layer against the graph's registered Connections (see the comment on
-# `Event.source` — it deliberately carries no CHECK so registering a connection
-# opens a source name without a schema change). So the mapping is closed on the
-# platform side and open-by-default on the adapter side: anything not emitted
-# by the platform came in over a connection, which is a sync.
+# Sources the platform itself emits. `source` is otherwise an open vocabulary
+# of connection providers, so anything not listed here is a sync.
 _PLATFORM_SOURCE_PROVENANCE = {
   "manual": "manual_entry",
   "native": "manual_entry",
@@ -376,14 +295,7 @@ _PLATFORM_SOURCE_PROVENANCE = {
 
 
 def provenance_for_source(source: str | None) -> str:
-  """Map a Transaction/Event source onto `Entry.provenance`.
-
-  `create_journal_entry` hardcoded `manual_entry` regardless of origin,
-  so every QuickBooks-synced entry claimed to be hand-entered and
-  `source_sync` — a value the constraint allows — was never written by
-  anything. `Entry.provenance` is meant to answer "where did this come
-  from", and the entry write already receives the answer.
-  """
+  """Map a Transaction/Event source onto `Entry.provenance`."""
   if not source:
     return "manual_entry"
   return _PLATFORM_SOURCE_PROVENANCE.get(source, "source_sync")
@@ -396,30 +308,20 @@ def create_journal_entry(
 ) -> JournalEntryResponse:
   """Create a journal entry with balanced line items.
 
-  Defaults to `status='draft'` for ongoing native writes. Pass
-  `status='posted'` for historical data import — the entry is
-  immediately posted with `posted_at=now()`, bypassing the
-  draft→review→close-period workflow.
-
-  The closed-period gate applies to both statuses: you cannot create
-  an entry (draft or posted) with a `posting_date` in a closed period.
-  Reopen the period first if the entry belongs there.
+  ``status='posted'`` (historical import) posts immediately, bypassing the
+  draft-review-close workflow. Either status is refused in a closed period.
 
   Raises:
-    `ClosedPeriodError` (422) if `posting_date` falls in a closed period.
-    `UnbalancedJournalEntryError` (422) if total debits ≠ total credits.
-    `InactiveAccountError` (422) if a line names a retired account — except
-      for a synced ledger's own replayed history (`body.source` is a synced
-      provider and `status='posted'`, the shape the loader produces).
-    `ValueError` (422) for invalid line items (negative amounts, missing
-      element_id, both debit and credit set, etc.).
+    `ClosedPeriodError`, `UnbalancedJournalEntryError`, `ValueError` for a
+      malformed line.
+    `InactiveAccountError` if a line names a retired account, except for a
+      synced ledger's replayed history (a synced `source` with `status='posted'`).
   """
   assert_period_not_closed(session, body.posting_date)
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
-  # A synced ledger's replayed history arrives `posted` (the loader stamps
-  # it so); a draft is authored whatever source it names, so only the
-  # posted shape carries the source into the guard's exemption.
+  # Only posted (replayed) history carries the source into the exemption; a
+  # draft is authored whatever source it names.
   assert_accounts_postable(
     session,
     (li["element_id"] for li in normalized),
@@ -484,27 +386,18 @@ def create_journal_entry(
 def update_journal_entry(
   session: Session, body: UpdateJournalEntryRequest
 ) -> JournalEntryResponse:
-  """Update a draft journal entry.
-
-  Only `status='draft'` entries can be updated. Omitted fields are
-  left unchanged. If `line_items` is provided, the existing line items
-  are replaced atomically and the new set must balance.
+  """Update a draft journal entry; omitted fields are unchanged, and
+  ``line_items`` replaces the whole set.
 
   Raises:
-    `JournalEntryNotFoundError` (404) if the entry does not exist.
-    `JournalEntryNotDraftError` (422) if the entry is posted or reversed.
-    `ClosedPeriodError` (422) if the existing or new `posting_date`
-      falls in a closed period.
-    `RowLockedError` (409) if another writer holds the entry, or if the
-      posting date moved under us (retry so locks are acquired in order).
-    `UnbalancedJournalEntryError` (422) if replacement line items don't
-      balance.
+    `JournalEntryNotFoundError`, `JournalEntryNotDraftError`,
+    `UnbalancedJournalEntryError`.
+    `ClosedPeriodError` if the existing or new `posting_date` is closed.
+    `RowLockedError` if another writer holds the entry or its date moved.
   """
-  # Peek dates, fence, then lock and refresh. An unlocked load that we
-  # then trust for `status` can mutate a posted entry: another request
-  # posts it while we wait on the fence. Capture the peeked date as a
-  # value — after `lock_by_id` the peeked instance is the same identity
-  # and `populate_existing` would make `peek.posting_date` lie.
+  # Peek, fence, then lock and re-check status. Keep the peeked date as a
+  # value: after `lock_by_id` refreshes the same identity, `peek.posting_date`
+  # would report the new date.
   peek = _load_entry_or_404(session, body.entry_id)
   peeked_date = peek.posting_date
   dates = [peeked_date]
@@ -512,9 +405,6 @@ def update_journal_entry(
     dates.append(body.posting_date)
   assert_period_not_closed(session, *dates)
 
-  # Event before entry — the order `execute` and close use — so a
-  # correction and a publish serialize, and QuickBooks receives the rows as
-  # corrected rather than the version a concurrent publish read first.
   _lock_owning_event(session, peek)
   entry = lock_by_id(
     session,
@@ -529,7 +419,6 @@ def update_journal_entry(
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
 
-  # Scalar field updates (only mutate what the caller explicitly set).
   updates = body.model_dump(exclude_unset=True)
   updates.pop("entry_id", None)
   replacement_lines = updates.pop("line_items", None)
@@ -538,8 +427,7 @@ def update_journal_entry(
     setattr(entry, key, value)
 
   if replacement_lines is not None:
-    # Validate + normalize the new line items before touching the
-    # database so a bad batch never clobbers the existing ones.
+    # Validate before deleting, so a bad batch never clobbers the old lines.
     new_line_inputs = [
       JournalEntryLineItemInput(**li) if isinstance(li, dict) else li
       for li in replacement_lines
@@ -577,27 +465,18 @@ def update_journal_entry(
 
 
 def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> dict:
-  """Hard delete a draft journal entry.
-
-  Only `status='draft'` entries can be deleted. Line items are
-  removed via the `ondelete="CASCADE"` on `LineItem.entry_id`.
+  """Hard delete a draft journal entry (line items cascade).
 
   Raises:
-    `JournalEntryNotFoundError` (404) if the entry does not exist.
-    `JournalEntryNotDraftError` (422) if the entry is posted or reversed.
-    `ClosedPeriodError` (422) if the entry's posting_date is in a closed
-      period.
-    `RowLockedError` (409) if another writer holds the entry, or if the
-      posting date moved under us (retry so locks are acquired in order).
-    `JournalEntryOwnedByEventError` (422) if this is the last ledger entry
-      of an event that has not been voided or superseded.
+    `JournalEntryNotFoundError`, `JournalEntryNotDraftError`,
+    `ClosedPeriodError`, `JournalEntryOwnedByEventError`.
+    `RowLockedError` if another writer holds the entry or its date moved.
   """
   peek = _load_entry_or_404(session, body.entry_id)
   peeked_date = peek.posting_date
   assert_period_not_closed(session, peeked_date)
 
-  # Event before entry — see `_lock_owning_event`. Under the event lock the
-  # sibling count below cannot change before the delete.
+  # Under the event lock the sibling count below cannot change.
   owner = _lock_owning_event(session, peek)
   entry = lock_by_id(
     session,
@@ -636,38 +515,25 @@ def reverse_journal_entry(
   body: ReverseJournalEntryRequest,
   created_by: str,
 ) -> JournalEntryResponse:
-  """Reverse a posted journal entry.
+  """Post a reversing entry with flipped lines and mark the original ``reversed``.
 
-  Creates a new Entry with flipped line items (debits ↔ credits),
-  points its `reversal_of` at the original, marks the original as
-  `status='reversed'`, and posts the reversing entry immediately.
-
-  Posting date defaults to today if not provided; memo defaults to
-  an auto-generated string citing the original entry id.
+  ``posting_date`` defaults to today.
 
   Raises:
-    `JournalEntryNotFoundError` (404) if the entry does not exist.
-    `JournalEntryNotPostedError` (422) if the entry is draft or
-      already reversed.
-    `ClosedPeriodError` (422) if the reversal's posting_date falls in
-      a closed period.
+    `JournalEntryNotFoundError`, `JournalEntryNotPostedError`,
+    `JournalEntryAlreadyReversedError`.
+    `ClosedPeriodError` if the original's or the reversal's date is closed.
   """
-  # Period fence first, then the entry row. Close takes the exclusive
-  # fence and then bulk-updates entries; a reversal that locked the
-  # entry first and the fence second would deadlock with that order.
+  # Fence first, then the row: close takes the fence and then updates entries.
   peek = session.get(Entry, body.entry_id)
   if peek is None:
     raise JournalEntryNotFoundError(body.entry_id)
   posting_date = body.posting_date or datetime.now(UTC).date()
   assert_period_not_closed(session, peek.posting_date, posting_date)
 
-  # Locked, because everything below decides from `original.status`. Two
-  # concurrent reversals of the same entry both read 'posted', both pass the
-  # guard, and both write a full reversing entry — the entry gets reversed
-  # twice. Each reversing entry is internally balanced, so the trial balance
-  # stays happy while the books sit a full entry off in the other direction.
-  # `uq_entries_one_reversal_per_original` is the database's half of this;
-  # the lock is what turns a would-be IntegrityError into a clean 409.
+  # Locked so two concurrent reversals cannot both see 'posted' and reverse
+  # twice (balanced, so the trial balance would not catch it).
+  # `uq_entries_one_reversal_per_original` backs this at the database.
   original = lock_by_id(
     session,
     Entry,
@@ -680,10 +546,6 @@ def reverse_journal_entry(
   if original.status != "posted":
     raise JournalEntryNotPostedError(original.id, original.status)
 
-  # Checked under the lock, so the answer cannot go stale between here and the
-  # insert. `uq_entries_one_reversal_per_original` still backs it — this turns
-  # the constraint from the thing that reports the problem into the thing that
-  # guarantees it.
   existing_reversal = session.execute(
     select(Entry.id).where(Entry.reversal_of == original.id)
   ).scalar_one_or_none()
@@ -702,9 +564,7 @@ def reverse_journal_entry(
     status="posted",
     posting_date=posting_date,
     memo=memo,
-    # Deliberately not inherited from the original. A reversal is an act by
-    # whoever asked for it, not a re-sync — reversing a QuickBooks-sourced
-    # entry is still a decision someone made here.
+    # Not inherited: reversing even a synced entry is a decision made here.
     provenance="manual_entry",
     reversal_of=original.id,
     posted_at=now,
@@ -718,14 +578,10 @@ def reverse_journal_entry(
       LineItem(
         entry_id=reversing_entry.id,
         element_id=li.element_id,
-        # Carry the flow concept through to the reversal so the rollforward
-        # filter engine sees the offsetting flow on the reversal period.
+        # Rollforwards need the offsetting flow on the reversal period.
         flow_element_id=li.flow_element_id,
-        # Flip: original debit → reversal credit, and vice versa.
         debit_amount=int(li.credit_amount),
         credit_amount=int(li.debit_amount),
-        # Preserve any remaining per-line metadata (source-system refs, etc.).
-        # Shallow copy is sufficient (JSON-shaped dict).
         metadata_=dict(li.metadata_ or {}),
         description=(
           f"Reversal of line {li.line_order}"

@@ -1,13 +1,4 @@
-"""Taxonomy Block type registry.
-
-Single source of truth for every taxonomy-block type the system knows
-about. Populated at module import; frozen thereafter. Registered types:
-``chart_of_accounts`` (declarative tenant CoA), ``schedule`` (thin
-container for Schedule info blocks), ``reporting_standard`` (library,
-read-only), ``reporting_extension`` (tenant extension of a library
-reporting taxonomy), and ``custom_ontology`` (declarative tenant
-ontology).
-"""
+"""Taxonomy Block type registry, keyed by ``taxonomy_type``."""
 
 from __future__ import annotations
 

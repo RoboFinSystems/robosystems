@@ -1,28 +1,14 @@
 """Shared rs-gaap calculation-DAG loading + bottom-up subtotal resolution.
 
-The single source of truth for "resolve subtotal values over the
-``rs-gaap-calculations`` DAG". The fact PRODUCER (``fact_grid``'s
-``_emit_subtotal_facts`` / ``_reconcile_operating_to_cash``) and the rollup
-VALIDATOR (``information_block.rules``) both go through here so they derive
-subtotals *identically* — a validator that re-derives the rollup its own way
-reports false failures whenever the two disagree (a subtotal footing over a
-sibling concept, or over two facts in one period).
+The fact producer (``fact_grid``) and the rollup validator
+(``information_block.rules``) both resolve subtotals here, so they can never
+disagree.
 
-Children always come from the arcs, never from a frozen child enumeration,
-for the same reason.
-
-Resolution semantics:
-
-- children come from ``association_type='calculation'`` arcs of the
-  ``rs-gaap-calculations`` taxonomy standard (direct parent→child + weight);
-- a DIRECT fact for an element wins over the calc sum (calc is the fallback for
-  an un-reported subtotal, never an override), keyed on PRESENCE not a non-zero
-  test so a legitimately-zero direct fact isn't overwritten by the calc sum;
+- children come from the ``rs-gaap-calculations`` calculation arcs;
+- a direct fact wins over the calc sum, keyed on presence, so a legitimately
+  zero fact is not overwritten;
 - an absent summand contributes 0;
-- targets are resolved in topological order, so a subtotal whose summand is
-  itself a subtotal (e.g. ``...IncludingGoodwill`` = ``...ExcludingGoodwill`` +
-  ``Goodwill``) is resolved from its own children first and collapses to the
-  present leaf.
+- targets resolve in topological order, so chained subtotals work.
 """
 
 from __future__ import annotations
@@ -36,10 +22,7 @@ def load_rs_gaap_calculations(
 ) -> dict[str, list[tuple[str, float]]]:
   """Load the rs-gaap-calculations DAG as ``parent_element_id → [(child_id, weight)]``.
 
-  Global to the taxonomy standard (not scoped to any one report structure) —
-  which is what makes subtotal resolution independent of which presentation
-  structure is being rendered or validated. This is the same query the fact
-  producer runs (``fact_grid._emit_subtotal_facts``).
+  Global to the standard, not scoped to any presentation structure.
   """
   rows = session.execute(
     text("""
@@ -55,11 +38,7 @@ def load_rs_gaap_calculations(
   calculations: dict[str, list[tuple[str, float]]] = {}
   seen: set[tuple[str, str]] = set()
   for r in rows:
-    # The merge is keyed on (parent → child) across every calc structure of
-    # the standard. The shipped package has no duplicate pairs today, but a
-    # future edit that arcs the same pair in a second structure would
-    # silently double-count the child in every subtotal — dedupe rather
-    # than trust the package forever.
+    # A pair arced in two calc structures would double-count the child.
     if (r.parent, r.child) in seen:
       continue
     seen.add((r.parent, r.child))
@@ -74,14 +53,9 @@ def merge_calculations(
 ) -> dict[str, list[tuple[str, float]]]:
   """Merged DAG for evaluating one structure: LOCAL arcs win per parent.
 
-  A structure's own calculation arcs are its footing spec — a disclosure
-  note that decomposes ``rs-gaap:Revenues`` into its own members must foot
-  against THOSE members. The global DAG's statement-level children are
-  absent from the note's FactSet, so letting global win would report the
-  rollup as skipped or failed. The global DAG stays the fallback for every
-  parent the structure doesn't re-arc, so statement subtotals resolve
-  exactly as the fact producer resolved them. Pure: neither input is
-  mutated.
+  A note decomposing ``rs-gaap:Revenues`` into its own members must foot
+  against those, not the global children absent from its FactSet. Neither
+  input is mutated.
   """
   merged = dict(global_calcs)
   merged.update(local_calcs)
@@ -91,23 +65,15 @@ def merge_calculations(
 def topo_sort_calculations(
   calculations: dict[str, list[tuple[str, float]]],
 ) -> list[str]:
-  """Return calc subtotal targets in topological dependency order.
-
-  When calcs chain (e.g., GrossProfit = Rev - COGS, then OperatingIncome =
-  GrossProfit - OpEx, then NetIncome = OperatingIncome - Tax), resolution must
-  compute them in order so each depends on the already-resolved values of the
-  prior ones. Targets with no internal dependencies come first.
-  """
+  """Return calc subtotal targets in topological dependency order."""
   targets = set(calculations.keys())
-  # Edge: target → target it depends on (when its summand is itself a calc
-  # target). Inputs that are leaves (not calc targets) don't create edges.
   deps: dict[str, set[str]] = {t: set() for t in targets}
   for target, sources in calculations.items():
     for src_id, _ in sources:
       if src_id in targets:
         deps[target].add(src_id)
 
-  # Kahn's algorithm: emit nodes with no remaining deps; remove from graph.
+  # Kahn's algorithm.
   ready = [t for t, d in deps.items() if not d]
   ordered: list[str] = []
   while ready:
@@ -118,9 +84,7 @@ def topo_sort_calculations(
         other_deps.discard(n)
         if not other_deps and other not in ordered and other not in ready:
           ready.append(other)
-  # Any remaining targets indicate a cycle in the calc DAG — emit them last in
-  # arbitrary order. (Cycles are rejected upstream at authoring/framework-build;
-  # this degrades rather than crashes if one slips through.)
+  # Leftovers are a cycle (rejected upstream); degrade rather than crash.
   for t in targets:
     if t not in ordered:
       ordered.append(t)
@@ -135,11 +99,8 @@ def resolve_calc_dag(
 ) -> dict[str, float]:
   """Resolve every calc target bottom-up: direct fact wins, else Σ child·weight.
 
-  ``balances`` maps ``element_id → summed fact value`` for the period; ``present``
-  is the set of element_ids that have a direct fact (presence, not non-zero).
-  Returns the resolved value map — a superset of ``balances`` that also carries
-  each computed subtotal, so callers can read both a subtotal and the leaves
-  under it. Pass a precomputed ``order`` to avoid re-sorting across periods.
+  ``present`` is the element_ids with a direct fact. Returns ``balances`` plus
+  every computed subtotal. Pass ``order`` to avoid re-sorting per period.
   """
   if order is None:
     order = topo_sort_calculations(calculations)

@@ -1,22 +1,9 @@
-"""Journal entry read operations — the entry-centric view of the ledger.
+"""Journal entry reads: the entry-centric view of the ledger.
 
-`transactions.py` reads the ledger as transactions with entries hanging
-off them. That shape cannot see an entry with no parent, and parentless
-entries are a supported shape, not an anomaly: `Entry.transaction_id` is
-nullable by design, `create_closing_entry` / `create_manual_closing_entry`
-never set it, and `Entry.triggered_by_event_id` exists precisely to carry
-the event chain for entries that have no transaction to carry it.
-
-The practical consequence, before this module existed: every entry the
-close posted was invisible to every list surface in the product. The
-trial balance saw them (it joins line items directly), the statements
-saw them, and nothing a user could browse did — an entry left the only
-surface that showed it, the close-review outbox, at the moment it was
-posted.
-
-This module owns the entry projection and the row→entry grouping for
-*both* readers. `period_drafts.list_period_drafts` is a caller, so the
-close-review query and the journal query cannot drift apart.
+Unlike `transactions.py`, this sees entries with no parent transaction, a
+supported shape (closing entries never set ``transaction_id``). It owns the
+entry projection for both the journal and `period_drafts.list_period_drafts`,
+so the two cannot drift.
 """
 
 from __future__ import annotations
@@ -36,10 +23,8 @@ from robosystems.models.api.extensions.transactions import (
   LedgerLineItemResponse,
 )
 
-# One projection, two orderings. The ORDER BY is the only part that varies
-# between the close-review read and the journal read, and it cannot be a
-# bind parameter — so it is interpolated from this fixed, internal map and
-# never from anything a caller supplies.
+# ORDER BY cannot be a bind parameter, so it is interpolated, only ever from
+# the fixed `EntryOrder` values, never caller input.
 _ENTRY_ROWS_TEMPLATE = """
   WITH matched AS (
     SELECT e.id
@@ -103,19 +88,9 @@ _COUNT_SQL = text("""
 
 
 class EntryOrder(StrEnum):
-  """The orderings this projection supports, and the only values that ever
-  reach the interpolated ORDER BY.
+  """The only values that reach the interpolated ORDER BY."""
 
-  An enum rather than a bare string so a bad caller is a type error at
-  check time instead of a KeyError at request time — and so nothing can
-  wire a client-supplied ordering through by accident if this ever grows
-  a public ``orderBy`` argument.
-  """
-
-  # Close review reads chronologically, grouped by schedule — the order a
-  # reviewer walks the outbox in.
   PERIOD_REVIEW = "e.posting_date, s.name NULLS LAST, e.id"
-  # The journal reads newest first, matching the transaction list beside it.
   RECENT_FIRST = "e.posting_date DESC, e.id"
 
 
@@ -123,18 +98,12 @@ _SQL_BY_ORDER = {
   order: text(_ENTRY_ROWS_TEMPLATE.format(order_by=order.value)) for order in EntryOrder
 }
 
-# A limit is always bound (the CTE needs one), so "no pagination" is a
-# ceiling rather than an absent clause.
+# The CTE always binds a limit, so "no pagination" is a ceiling.
 _NO_LIMIT = 1_000_000
 
 
 class EntryRow(NamedTuple):
-  """One entry with its line items, in raw DB units (cents).
-
-  Unit conversion belongs to each caller's response contract — the close
-  outbox reports cents, the journal reports dollars — so the shared
-  fetch stays unit-neutral.
-  """
+  """One entry with its line items, in cents; callers convert units."""
 
   entry_id: str
   number: str | None
@@ -165,13 +134,8 @@ def fetch_entry_rows(
   offset: int = 0,
   order_by: EntryOrder = EntryOrder.RECENT_FIRST,
 ) -> list[EntryRow]:
-  """Fetch entries with their line items, grouped, in raw cents.
-
-  Every filter is optional and independent. No filter on
-  `transaction_id` means parentless and parented entries come back
-  together — which is the whole point; a caller that wants only
-  standalone entries has to say so, and today none does.
-  """
+  """Fetch entries with their line items, in cents. Without a
+  ``transaction_id`` filter, parentless entries are included."""
   rows = session.execute(
     _SQL_BY_ORDER[order_by],
     {
@@ -238,12 +202,8 @@ def list_journal_entries(
   limit: int = 100,
   offset: int = 0,
 ) -> LedgerJournalEntryListResponse:
-  """List journal entries with line items expanded, newest first.
-
-  Entry-centric: an entry is returned on its own terms whether or not it
-  has a parent transaction. Amounts are dollars, matching the
-  transaction reads this sits beside; pagination counts entries.
-  """
+  """List journal entries with line items, newest first. Amounts are dollars;
+  pagination counts entries."""
   params = {
     "start_date": start_date,
     "end_date": end_date,

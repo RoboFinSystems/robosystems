@@ -1,30 +1,11 @@
-"""Handlers for the statement family of Information Block types.
+"""Envelope builder for the statement family of Information Block types.
 
-Four block types — ``balance_sheet``, ``income_statement``,
-``cash_flow_statement``, ``equity_statement`` — share one envelope
-builder parameterised on the block_type string. Each corresponds to a
-library-seeded Structure in ``public.structures``; seeds live in
-:mod:`robosystems.taxonomy.seed` (``seed_reporting_taxonomy``).
-
-Statements exercise the **compositional** construction mode: the
-Structure exists before any tenant action; per-tenant facts come from
-``create-report`` calls; the envelope materialises on GET by pulling
-the library atoms together with the tenant's most-recent report facts.
-
-Statements aren't created via ``create-information-block``; the
-``dispatch_create``/``update``/``delete`` handlers in the registry
-entry are the not-implemented stubs built by
-``make_not_implemented_handler``.
-
-**Rendering projection.** The envelope populates ``view.rendering`` with the
-server-computed statement grid (rows + periods + validation), so a frontend
-consumes ``envelope.view.rendering`` directly with no client-side rollup or
-hierarchy walk. The pure in-memory rollup helpers (``_build_rows``,
-``_facts_to_balance_dict``, ``_natural_sign``) are imported from
-:mod:`robosystems.operations.roboledger.reports.fact_grid`; the hierarchy +
-classifications are derived from the already-loaded envelope atoms, and
-calculations compose cross-structure for ``arithmetic`` blocks (see
-``_build_statement_rendering``).
+The statement block types share one builder parameterised on block_type.
+Their Structures are library-seeded; tenant facts come from report sets, and
+the envelope carries a server-computed ``view.rendering`` grid (rows,
+periods, validation). Statements aren't created via
+``create-information-block``: their create/update/delete slots are
+not-implemented stubs.
 """
 
 from __future__ import annotations
@@ -103,41 +84,16 @@ def _build_statement_envelope(
 ) -> InformationBlockEnvelope | None:
   """Pack the Information Block envelope for a statement-family block.
 
-  Returns ``None`` when the structure doesn't exist or is not the
-  expected block_type — lets :func:`get_information_block` cleanly
-  return nothing to the caller.
+  ``None`` when the structure doesn't exist or isn't ``block_type``.
+  Without ``series``, facts come from one set: ``fact_set_id`` if pinned,
+  else the latest set (a scenario's latest forecast month when
+  ``scenario_id`` is given, with columns labelled as forecast).
 
-  **Read path.** Facts are loaded by ``fact_set_id`` — the canonical
-  Block-instance pin (a Block and a Fact Set are the same thing).
-  ``load_base_envelope_atoms`` already loads the latest FactSet for this
-  Structure (ordered by ``period_end`` desc, ``created_at`` desc); facts
-  are filtered to that FactSet's id. On the library sentinel and on
-  tenant graphs with no generated reports the FactSet is null and
-  ``facts`` comes back empty — the correct behaviour for both.
-
-  **Scenario slice.** ``scenario_id=None`` binds actuals (the
-  scenario-pinned latest-set read); a non-None value binds the
-  scenario's latest computed forecast month and every rendered period
-  column carries a ``"... (forecast)"`` label so the surface is honest
-  about what it shows.
-
-  **Series mode.** ``series=True`` binds the structure's WHOLE
-  report-set series instead of one set — one rendered column per
-  period, actuals-preferred at the seam when a scenario is selected
-  (:func:`envelope.load_statement_fact_set_series`). This is the
-  statement analog of the metric time series and the data spine of the
-  Plan grid. Facts are windowed per set to the set's own period so an
-  annual report's comparative facts can't leak into a monthly column.
-  An explicit ``fact_set_id`` pin bypasses series mode (a snapshot is
-  a single set by definition).
-
-  **Series window.** ``series_history`` / ``series_forecast`` trim the
-  series to its seam-adjacent columns BEFORE facts load — the last N
-  actual columns and the first N forecast columns
-  (:func:`envelope.window_series_sets`). ``None`` = unbounded. The Plan
-  page passes its visible window so a deep-history tenant's envelope
-  stays proportional to what's on screen rather than to the ledger's
-  age.
+  ``series=True`` (ignored when ``fact_set_id`` is pinned) renders one
+  column per period across the whole report-set series, actuals preferred
+  at the seam. ``series_history`` / ``series_forecast`` trim it to the last
+  N actual and first N forecast columns before facts load; ``None`` is
+  unbounded.
   """
   atoms = load_base_envelope_atoms(
     session,
@@ -172,9 +128,8 @@ def _build_statement_envelope(
         .scalars()
         .all()
       )
-      # Window each fact to its OWN set's period — a set may carry
-      # comparative-period facts (annual reports do) and those belong
-      # to another column, not this one.
+      # Window each fact to its own set's period: annual sets carry
+      # comparative-period facts that belong to other columns.
       window_by_set = {fs.id: (fs.period_start, fs.period_end) for fs in series_sets}
       for f in all_facts:
         window = window_by_set.get(f.fact_set_id or "")
@@ -202,17 +157,13 @@ def _build_statement_envelope(
       .all()
     )
 
-  # Mechanics are read from the typed ``artifact_mechanics`` column when
-  # populated; library-seeded rows that haven't been enriched fall back
-  # to an empty tagged body so the discriminated union still validates.
+  # Un-enriched library rows have no mechanics; an empty tagged body keeps
+  # the discriminated union valid.
   if structure.artifact_mechanics:
     mechanics = StatementMechanics.model_validate(structure.artifact_mechanics)
   else:
     mechanics = StatementMechanics(kind="statement_renderer")
 
-  # Compute the Rendering view projection from already-loaded atoms +
-  # the loaded facts. Adds one classification lookup query; everything
-  # else (hierarchy, calculations, root order) is derived in-memory.
   rendering = _build_statement_rendering(
     session,
     elements=atoms.elements,
@@ -223,11 +174,8 @@ def _build_statement_envelope(
     concept_arrangement=structure.concept_arrangement,
   )
 
-  # Stamp forecast columns — label + machine-readable flag — so tables
-  # and chart axes read honestly. Series mode marks exactly the columns
-  # whose winning set is a scenario set (the seam falls out of the
-  # actuals-preferred collapse); single-set scenario mode marks every
-  # column of the bound forecast month.
+  # Mark forecast columns: in series mode, those whose winning set is a
+  # scenario set; in single-set scenario mode, every column.
   if series_mode and forecast_period_ends:
     rendering = rendering.model_copy(
       update={
@@ -257,10 +205,8 @@ def _build_statement_envelope(
       }
     )
 
-  # Statement-family types carry fixed display strings; block types that
-  # share this builder without an entry (regulatory_disclosure) display
-  # as the structure's own name — a disclosure note is named by its
-  # author/taxonomy, not by its type.
+  # Types without a display entry (regulatory_disclosure) use the
+  # structure's own name.
   display_name, _display_plural = STATEMENT_DISPLAY.get(
     block_type, (structure.name, structure.name)
   )
@@ -299,16 +245,9 @@ def _build_statement_envelope(
   )
 
 
-# ── Rendering projection — server-side computed at envelope build ─────────
-
-
 def _forecast_period_label(period_end: date) -> str:
-  """Display-ready column label for a forecast period — ``"Mar 2027 (forecast)"``.
-
-  The full label (month + marker), not a bare suffix, so any consumer —
-  table header, chart axis — can use it verbatim without composing.
-  Actual columns keep ``label=None`` and format their own dates as today.
-  """
+  """Full column label, e.g. ``"Mar 2027 (forecast)"``; actual columns keep
+  ``label=None``."""
   return f"{period_end.strftime('%b %Y')} (forecast)"
 
 
@@ -322,37 +261,16 @@ def _build_statement_rendering(
   block_type: str,
   concept_arrangement: str | None = None,
 ) -> RenderingLite:
-  """Compute the Rendering view projection for a statement-family block.
-
-  Reuses the pure in-memory rollup logic from
-  :mod:`robosystems.operations.roboledger.reports.fact_grid` (``_build_rows``)
-  and the guard-rail checks from
-  :mod:`robosystems.operations.roboledger.reports.guard_rails`
-  (``validate_report``). The hierarchy is derived from the already-loaded
-  ``associations``; classifications are fetched in a single trait-axis
-  query. Calculations follow the block's concept arrangement:
-  ``arithmetic`` composes the calc DAG cross-structure in one query
-  (calc arcs live in sibling calculation structures, not in the
-  presentation block's own associations); other CAPs derive them from
-  the in-envelope associations with no extra SQL.
-
-  Empty-fact case: returns ``RenderingLite`` with an empty ``rows`` list
-  and an empty ``periods`` list — the envelope still validates and the
-  frontend renders an empty state.
-  """
-  # 1) Empty-fact short-circuit — no rendering work to do, no
-  # classification query needed.
+  """Compute the Rendering view projection for a statement-family block,
+  using ``fact_grid``'s rollup and ``guard_rails``' validation. No facts
+  yields empty rows and periods."""
   if not facts:
     return RenderingLite(rows=[], periods=[], validation=None, unmapped_count=0)
 
-  # 2) Look up element metadata + per-element classification (FASB
-  # elementsOfFinancialStatements trait axis). Single batched query.
   element_ids = [e.id for e in elements]
   classification_by_id = _load_element_classifications(session, element_ids)
   elements_by_id = {e.id: e for e in elements}
 
-  # 3) Derive periods from facts. Order by (period_end, period_start) so
-  # comparative columns appear in chronological order.
   period_keys: set[tuple[date, date]] = set()
   for f in facts:
     pe = f.period_end
@@ -366,10 +284,7 @@ def _build_statement_rendering(
     PeriodSpec(start=ps, end=pe, label="") for ps, pe in ordered_periods
   ]
 
-  # 3) Convert envelope Fact ORM rows to ReportFact dataclasses (the
-  # shape ``_build_rows`` consumes downstream). Facts already carry
-  # natural-sign values from generate_report_facts at write time, so
-  # _build_rows is called with pre_signed=True.
+  # Facts are natural-signed at write time, hence pre_signed=True below.
   report_facts: list[ReportFact] = []
   for f in facts:
     elem = elements_by_id.get(f.element_id)
@@ -394,21 +309,15 @@ def _build_statement_rendering(
       )
     )
 
-  # 4) Build hierarchy from already-loaded associations.
   hierarchy = _build_hierarchy_from_atoms(
     structure_id, elements_by_id, classification_by_id, associations
   )
   if not hierarchy:
     return RenderingLite(rows=[], periods=[], validation=None, unmapped_count=0)
 
-  # Calculation arcs — mirrors ``render_structure_view``. ``arithmetic``
-  # Disclosures keep presentation and calculation in SEPARATE structures
-  # (e.g. the rs-gaap Multi-step presentation block carries only
-  # presentation arcs; its calc DAG lives in the sibling "… calculation"
-  # structure), so the block's own associations can't identify Gross
-  # Profit / Operating Income as calc-target subtotals. Compose the calc
-  # DAG cross-structure in that case; other CAPs keep the in-envelope
-  # associations (single-structure convention, no extra SQL).
+  # ``arithmetic`` disclosures keep their calc arcs in a sibling
+  # calculation structure, so compose the calc DAG cross-structure; other
+  # CAPs carry calc arcs in the block's own associations.
   if concept_arrangement == "arithmetic":
     calculations = _load_calculations(
       session, element_ids=_collect_hierarchy_element_ids(hierarchy)
@@ -416,20 +325,15 @@ def _build_statement_rendering(
   else:
     calculations = _calculations_from_associations(associations)
 
-  # 5) Per-period balance dicts (one per column).
   period_balances = [
     _facts_to_balance_dict_for_period(report_facts, p.start, p.end) for p in periods
   ]
 
-  # 6) The pure in-memory rollup walker — produces FactRow per row with
-  # depth + is_subtotal + per-period values.
   rows: list[FactRow] = _build_rows(
     hierarchy, period_balances, calculations, pre_signed=True
   )
 
-  # 7) Validation — guard-rail checks on every rendered column. Columns
-  # carry no display label here (the frontend formats the dates), so a
-  # finding names its column by period end.
+  # Columns have no display label here, so findings name them by period end.
   validation_result = validate_report(
     block_type, rows, period_labels=[p.end.isoformat() for p in periods]
   )
@@ -468,21 +372,11 @@ def _facts_to_balance_dict_for_period(
   period_start: date,
   period_end: date,
 ) -> dict[str, _Balance]:
-  """Build a `_Balance` dict for one period from in-memory `ReportFact` rows.
+  """Build a `_Balance` dict for one period from natural-signed facts.
 
-  Mirrors :func:`fact_grid._facts_to_balance_dict` but lives here so the
-  envelope rendering path stays self-contained. Facts are already
-  natural-signed by ``generate_report_facts``, so ``balance_type`` is
-  set to "debit" to keep ``_build_rows`` from re-applying sign
-  conversion (it dispatches on balance_type when ``pre_signed=False``;
-  with ``pre_signed=True`` the balance is returned as-is).
-
-  Multiple facts on the same ``element_id`` for the same period sum —
-  the fact-generation contract (see ``_derive_cash_flow_facts``) allows
-  it, and the stamped CF carries a derived ΔWC fact plus the
-  cash-reconciliation plug on the same operating leaf. Overwriting here
-  would drop the plug from the rendered cell while the stamped subtotal
-  still includes it, so the section stops footing.
+  Multiple facts on one element sum rather than overwrite: the stamped CF
+  carries a derived ΔWC fact plus the cash-reconciliation plug on the same
+  operating leaf, and dropping the plug stops the section footing.
   """
   balances: dict[str, _Balance] = {}
   for fact in facts:
@@ -510,29 +404,12 @@ def _build_hierarchy_from_atoms(
   classification_by_id: dict[str, str],
   associations: list[Association],
 ) -> list[_HierarchyNode]:
-  """Build the presentation hierarchy from already-loaded atoms.
+  """Build the presentation hierarchy from already-loaded atoms, no SQL.
 
-  Works off the associations + elements that ``load_base_envelope_atoms``
-  already loaded, so no extra queries — unlike the SQL-heavy
-  ``fact_grid._load_reporting_structure``.
-
-  Two root-anchor conventions are supported:
-
-  - **structure_id-rooted** (seed.py convention): presentation arcs with
-    ``from_element_id == structure_id`` mark the top of the tree; the
-    structure itself is the implicit root and its children become the
-    rendered top-level rows.
-  - **abstract-element-rooted** (XBRL standard, used by FAC / rs-gaap /
-    rs-gaap-type-subtype reference taxonomies): an abstract element (e.g.
-    ``fac:BalanceSheetAbstract``) is the top of the tree; the structure
-    itself doesn't appear in any presentation arc. Detected by
-    ``from_set - to_set`` — elements that appear as ``from_element_id``
-    but never as ``to_element_id``.
-
-  Children are walked depth-first via the parent → child mapping,
-  sorted by ``order_value``.
+  Roots are either the children of an arc anchored at ``structure_id``
+  (seed.py convention) or, failing that, the XBRL-standard abstract roots
+  (elements that are arc sources but never targets).
   """
-  # Presentation children grouped by parent_id (preserving order_value).
   children_by_parent: dict[str, list[tuple[float, str]]] = {}
   for a in associations:
     if a.association_type != "presentation":
@@ -547,23 +424,15 @@ def _build_hierarchy_from_atoms(
   for parent_id in children_by_parent:
     children_by_parent[parent_id].sort(key=lambda pair: pair[0])
 
-  # Roots = children of the structure_id anchor (seed.py convention).
   root_ids = [child_id for _, child_id in children_by_parent.get(structure_id, [])]
 
-  # Fallback: structures from FAC / rs-gaap / rs-gaap-type-subtype reference
-  # taxonomies anchor at an abstract element instead of the structure_id.
-  # Detect roots via the standard XBRL convention — elements that appear
-  # as ``from_element_id`` but never as ``to_element_id``.
   if not root_ids:
     from_ids = set(children_by_parent.keys())
     to_ids = {c for children in children_by_parent.values() for _, c in children}
     root_ids = list(from_ids - to_ids)
 
-  # Sort roots by qname so the visible order is deterministic and
-  # alphabetic — this puts ``rs-gaap:Assets`` before
-  # ``rs-gaap:LiabilitiesAndStockholdersEquity`` on the BS, matching
-  # standard financial-statement convention. Element IDs are random
-  # UUIDs and would otherwise sort by hash.
+  # Sort roots by qname for a deterministic order (puts Assets before
+  # LiabilitiesAndStockholdersEquity on the BS).
   root_ids.sort(
     key=lambda rid: (
       elements_by_id[rid].qname
@@ -572,14 +441,9 @@ def _build_hierarchy_from_atoms(
     )
   )
 
-  # Render each element at most once globally per structure walk. The
-  # rs-gaap-presentation hierarchy is a DAG (a concept may have
-  # multiple parents — e.g. "Cash" rolls up under both Current Assets
-  # and the Cash Flow reconciliation). Without global dedup the walk
-  # would expand a shared subtree under each parent, producing
-  # exponential row counts and double-counting facts at render time.
-  # The first parent that reaches a node owns it; subsequent parents
-  # treat the node as already-rendered. Mirrors ``fact_grid._build_tree``.
+  # The presentation hierarchy is a DAG; render each element once (first
+  # parent wins) or shared subtrees expand under every parent and
+  # double-count.
   emitted: set[str] = set()
 
   def _make_node(element_id: str, depth: int) -> _HierarchyNode | None:
@@ -597,7 +461,6 @@ def _build_hierarchy_from_atoms(
       depth=depth,
     )
     for _order, child_id in children_by_parent.get(element_id, []):
-      # Skip self-references (defensive — root anchors live above).
       if child_id == element_id:
         continue
       child_node = _make_node(child_id, depth + 1)
@@ -616,11 +479,7 @@ def _build_hierarchy_from_atoms(
 def _calculations_from_associations(
   associations: list[Association],
 ) -> dict[str, list[tuple[str, float]]]:
-  """Project calculation associations into the dict shape `_build_rows` expects.
-
-  Mirrors :func:`fact_grid._load_calculations` but works off the already-
-  loaded associations list — no SQL.
-  """
+  """Project calculation associations into the dict shape `_build_rows` expects."""
   calculations: dict[str, list[tuple[str, float]]] = {}
   ordered = sorted(
     associations,
@@ -639,18 +498,8 @@ def _calculations_from_associations(
 def _load_element_classifications(
   session: Session, element_ids: list[str]
 ) -> dict[str, str]:
-  """Fetch primary FASB elementsOfFinancialStatements trait per element.
-
-  Returns ``{element_id: identifier}`` where identifier is one of
-  ``'asset'`` / ``'liability'`` / ``'equity'`` / ``'revenue'`` /
-  ``'expense'`` (the FASB SFAC 6 axis). Elements with no primary trait
-  on this axis are absent from the dict — callers default to the empty
-  string for the resulting :class:`RenderingRowLite.classification`.
-
-  Single batched query; mirrors the LEFT JOIN that
-  :func:`fact_grid._load_reporting_structure` does inline, but separates
-  the trait lookup from the hierarchy walk.
-  """
+  """Primary FASB elementsOfFinancialStatements (SFAC 6) trait per element,
+  e.g. ``'asset'``; elements with none are absent."""
   if not element_ids:
     return {}
   placeholders = ", ".join(f":e{i}" for i in range(len(element_ids)))
@@ -673,19 +522,7 @@ def _load_element_classifications(
 def make_statement_handlers(
   block_type: str,
 ) -> Callable[..., InformationBlockEnvelope | None]:
-  """Build the envelope handler for one statement type.
-
-  ``functools.partial`` binds the ``block_type`` keyword on the envelope
-  builder so the registry entry holds a callable matching
-  :class:`BlockTypeRegistryEntry.dispatch_build_envelope`'s signature
-  ``(session, structure_id, fact_set_id?=None) -> envelope | None``.
-  The ``fact_set_id`` arg is used by Report Block rehydration to pin
-  the envelope to a specific FactSet snapshot.
-
-  The create / update / delete handlers for statement block types are
-  not built here — the registry installs not-implemented stubs via
-  ``make_not_implemented_handler`` for those slots.
-  """
+  """Build the envelope handler for one statement type."""
   return partial(_build_statement_envelope, block_type=block_type)
 
 

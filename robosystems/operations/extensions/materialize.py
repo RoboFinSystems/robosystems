@@ -1,21 +1,9 @@
 """Extensions materialization: PostgreSQL OLTP -> DuckDB staging -> LadybugDB.
 
-Connector-agnostic — it materializes whatever is in the extensions tenant
-schema, whichever connector (QuickBooks, Xero, Plaid, native) wrote it.
-
-DuckDB's ``postgres_scanner`` reads the extensions database directly and shapes
-each OLTP table into a graph-shaped staging table; the handoff to LadybugDB is
-an Arrow record-batch stream (DuckDB result vectors -> Arrow -> COPY), with no
-intermediate file. All of it runs on the instance that holds the graph::
-
-    ExtensionsMaterializer.materialize(graph_id, entity_id)
-      -> get_graph_client(graph_id, operation_type="write")   # routes to EC2
-      -> client.query_table(sql)                              # -> staging table
-      -> client.materialize_table(table_name)                 # -> LadybugDB
-
-Order is a correctness constraint, not an optimization: ``NODE_TABLES`` runs
-before ``RELATIONSHIP_TABLES``, and both lists are ordered so an edge's
-endpoints are always staged first.
+DuckDB's ``postgres_scanner`` shapes each OLTP table into a graph-shaped staging
+table on the instance that holds the graph, then streams it into LadybugDB over
+Arrow. Order is a correctness constraint: ``NODE_TABLES`` before
+``RELATIONSHIP_TABLES``, each ordered so an edge's endpoints are staged first.
 """
 
 import time
@@ -40,18 +28,13 @@ _LOCK_ACQUIRE_TIMEOUT_SECONDS = 5
 class MaterializationLockError(RuntimeError):
   """The per-graph materialization lock could not be taken, or lapsed mid-run.
 
-  Raised instead of proceeding unlocked. A materialization is a retryable
-  background job — the staleness sensor re-fires within minutes — whereas an
-  unlocked double-writer silently duplicates relationship-table edges (edge
-  tables have no primary key), so the run must fail closed.
+  Fails closed: the run is retryable, while an unlocked double-writer silently
+  duplicates edges (edge tables have no primary key).
   """
 
 
-# Association types the graph renderer needs. Anything omitted here exists in
-# OLTP but is invisible to the graph — dropping `mapping`, for instance, empties
-# every report while the CoA mappings still sit in PostgreSQL. Used as
-# ``WHERE association_type IN <_MATERIALIZED_ASSOCIATION_TYPES>`` in the four
-# SQL strings below.
+# Association types the graph renderer needs. Anything omitted exists in OLTP
+# but is invisible to the graph (dropping `mapping` empties every report).
 #   presentation     — rendering hierarchies on Reporting Style structures
 #   mapping          — CoA → rs-gaap projection
 #   calculation      — XBRL rollup arcs
@@ -88,14 +71,10 @@ class MaterializeResult:
   errors: list[str] = field(default_factory=list)
 
 
-# Node tables in materialization order
 NODE_TABLES = [
   "Entity",
   "Element",
-  # REA primitives (base ontology).
-  # Agent before Event so EVENT_INVOLVES_AGENT can reference it. Event
-  # before Entry so EVENT_TRIGGERS_TRANSACTION (Event→Transaction) and
-  # the entry-side audit chain land in the right order.
+  # REA primitives
   "Agent",
   "Event",
   "Transaction",
@@ -112,15 +91,14 @@ NODE_TABLES = [
   "Unit",
   "Fact",
   "FactSet",
-  # Investor layer (empty tables if roboinvestor not enabled — that's fine)
+  # Investor layer
   "Portfolio",
   "Security",
   "Position",
 ]
 
-# Relationship tables in materialization order (nodes must exist first)
 RELATIONSHIP_TABLES = [
-  # REA edges (base ontology — Entity, Agent, Event, Element all exist by here)
+  # REA edges
   "ENTITY_HAS_AGENT",
   "ENTITY_HAS_EVENT",
   "EVENT_INVOLVES_AGENT",
@@ -164,17 +142,9 @@ RELATIONSHIP_TABLES = [
   "ENTITY_ISSUES_SECURITY",
 ]
 
-# Table → extension mapping. Tables marked "base" are always materialized
-# (their corresponding graph tables come from schemas/base.py and exist on
-# any extensions graph). Tables marked with an extension name are only
-# materialized when that extension is enabled for the target graph —
-# otherwise their graph tables don't exist and materialization would fail
-# with "Table does not exist."
-#
-# For relationships, the rule is "whichever endpoint's extension is more
-# specific." ENTITY_HAS_PORTFOLIO has Entity (base) → Portfolio (investor),
-# so the edge belongs to roboinvestor because Portfolio's node table only
-# exists when roboinvestor is installed.
+# Owning extension per table; a non-base table is materialized only when its
+# extension is enabled, since otherwise its graph table doesn't exist. An edge
+# belongs to its more specific endpoint's extension.
 TABLE_EXTENSIONS: dict[str, str] = {
   # ── Nodes ────────────────────────────────────────────────────────────
   "Entity": "base",
@@ -186,7 +156,7 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "Taxonomy": "base",
   "Period": "base",
   "Unit": "base",
-  # REA primitives (base — universal across RoboX extensions)
+  # REA primitives
   "Agent": "base",
   "Event": "base",
   # roboledger nodes
@@ -201,7 +171,7 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "Security": "roboinvestor",
   "Position": "roboinvestor",
   # ── Relationships ────────────────────────────────────────────────────
-  # Base ontology edges (both endpoints are base nodes)
+  # Base ontology edges
   "ENTITY_HAS_TAXONOMY": "base",
   "TAXONOMY_EXTENDS_TAXONOMY": "base",
   "STRUCTURE_HAS_TAXONOMY": "base",
@@ -209,7 +179,7 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "ASSOCIATION_HAS_FROM_ELEMENT": "base",
   "ASSOCIATION_HAS_TO_ELEMENT": "base",
   "ELEMENT_HAS_TRAIT": "base",
-  # REA edges (base — Entity/Agent/Event/Element all in base)
+  # REA edges
   "ENTITY_HAS_AGENT": "base",
   "ENTITY_HAS_EVENT": "base",
   "EVENT_INVOLVES_AGENT": "base",
@@ -248,30 +218,18 @@ TABLE_EXTENSIONS: dict[str, str] = {
 def _filter_tables_for_extensions(
   tables: list[str], enabled_extensions: set[str]
 ) -> list[str]:
-  """Return only the tables whose owning extension is enabled.
+  """Tables whose owning extension is enabled; base and unknown tables always pass.
 
-  Tables mapped to "base" are always included. Tables mapped to a specific
-  extension are included only if that extension is in `enabled_extensions`.
-  Unknown tables (not in TABLE_EXTENSIONS) are included by default — prefer
-  "fail loud with unknown table" over "silently skip a typo."
+  Unknown tables are kept so a typo fails loud instead of being skipped.
   """
   effective = set(enabled_extensions) | {"base"}
   return [t for t in tables if TABLE_EXTENSIONS.get(t, "base") in effective]
 
 
-# Schema tables intentionally NOT materialized by the extensions pipeline.
-# Each entry falls into one of two categories:
-#   (1) Populated via SEC XBRL ingestion (adapters/sec/...), not from OLTP.
-#       These live in schemas/base.py or schemas/extensions/roboledger.py but
-#       the extensions materializer correctly skips them — they're written
-#       by the SEC processor when filings are ingested, not from
-#       postgres_scanner.
-#   (2) Declared in schemas/extensions/roboinvestor.py for schema
-#       completeness but not yet backed by OLTP tables or materialization
-#       SQL — not yet implemented.
+# Schema tables this pipeline deliberately skips.
 _UNMATERIALIZED_TABLES: frozenset[str] = frozenset(
   {
-    # Category 1: SEC XBRL-only (not written from extensions OLTP)
+    # Written only by SEC XBRL ingestion
     "Label",
     "Reference",
     "Classification",
@@ -283,7 +241,7 @@ _UNMATERIALIZED_TABLES: frozenset[str] = frozenset(
     "DIMENSION_HAS_MEMBER_ELEMENT",
     "ASSOCIATION_HAS_CLASSIFICATION",
     "FACT_HAS_DIMENSION",
-    # Category 2: roboinvestor schema-declared, OLTP not yet wired
+    # roboinvestor schema-declared, OLTP not yet wired
     "Trade",
     "Benchmark",
     "MarketData",
@@ -297,12 +255,7 @@ _UNMATERIALIZED_TABLES: frozenset[str] = frozenset(
 
 
 def _get_all_extension_schema_tables() -> set[str]:
-  """Return the union of node+relationship names across every extension the
-  extensions pipeline is expected to handle.
-
-  Composes schemas for both roboledger and roboinvestor because the
-  extensions materializer serves both products from a shared pipeline.
-  """
+  """Node and relationship names across the roboledger and roboinvestor schemas."""
   from robosystems.schemas.loader import get_contextual_schema_loader
 
   tables: set[str] = set()
@@ -314,23 +267,10 @@ def _get_all_extension_schema_tables() -> set[str]:
 
 
 def validate_materializer_against_schema() -> None:
-  """Fail loud if the extensions materializer has drifted from the schema.
+  """Raise if the materializer's table lists have drifted from the schemas.
 
-  Three drift modes to catch:
-
-  1. Schema declares a table the materializer doesn't know about (and it's
-     not in the SEC-only / deferred allow-list). Usually means someone added
-     a node or edge to schemas/ and forgot to wire it into NODE_TABLES,
-     RELATIONSHIP_TABLES, TABLE_EXTENSIONS, and _staging_sql().
-  2. Materializer references a table not declared in any extension schema.
-     Usually means a schema entry was removed but the materializer still has
-     stale references.
-  3. Materializer-registered table has no TABLE_EXTENSIONS entry. Means the
-     extension-filter pass would treat it as "base" by default, which might
-     be wrong.
-
-  Called at test time as a consistency check. When it fails, the message
-  tells you exactly what to fix.
+  Catches a schema table not wired in, a wired table no schema declares, and a
+  wired table missing from TABLE_EXTENSIONS. Run as a test-time check.
   """
   schema_tables = _get_all_extension_schema_tables()
   materializer_tables = set(NODE_TABLES) | set(RELATIONSHIP_TABLES)
@@ -380,10 +320,8 @@ def validate_materializer_against_schema() -> None:
 def build_postgres_connstr() -> str:
   """Connection string for ``postgres_scan()`` against the extensions database.
 
-  The scanner runs inside the *Graph API* process, so the host has to be
-  reachable from there, not from the caller: the RDS endpoint in production,
-  the Docker service hostname locally. Both come from ``DATABASE_ENDPOINT`` in
-  that process's environment.
+  Built from this process's ``EXTENSIONS_DATABASE_URL``, but the scanner runs
+  inside the Graph API process, so the host must be reachable from there.
   """
   from robosystems.config import env
 
@@ -409,10 +347,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   """
   c = connstr  # shorthand for SQL interpolation
   s = graph_id  # tenant schema name in the extensions database
-  # `is_live` means "in the books" — which includes a `reversed` original,
-  # because its reversing entry is a `posted` row that only nets it to zero
-  # if both halves are summed. Sourced from the ledger's own predicate so the
-  # graph cannot drift from the OLTP reads. See `roboledger.entry_status`.
+  # `is_live` includes a `reversed` original: its reversal only nets to zero
+  # if both halves are summed. Shared predicate with the OLTP reads.
   entry_is_live = landed_is_live_sql("status")
   lineitem_is_live = landed_is_live_sql("e.status")
 
@@ -451,14 +387,10 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'entities')
   """
 
-  # Scenario guard: fact sets stamped with a scenario_id are forecast
-  # months (NULL means actuals — see FactSet.scenario_id). The graph
-  # schema carries no scenario discriminator, so materializing them would
-  # blend plan into history for every graph reader (fact grids, Cypher,
-  # analytical views). Until an OLAP scenario leg exists, scenario facts
-  # and fact sets stay OLTP-only: every projection below that reads
-  # `facts` goes through this derived table, and every `fact_sets`
-  # projection filters `scenario_id IS NULL` directly.
+  # Forecast (scenario_id set) facts and fact sets stay OLTP-only: the graph
+  # has no scenario discriminator, so they would blend plan into history.
+  # Every projection reading `facts` goes through this derived table, and
+  # every `fact_sets` projection filters `scenario_id IS NULL`.
   actual_facts = (
     f"(SELECT f.* FROM postgres_scan('{c}', '{s}', 'facts') f "
     f"LEFT JOIN postgres_scan('{c}', '{s}', 'fact_sets') sfs "
@@ -530,11 +462,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'traits')
   """
 
-  # ── REA primitives (base ontology) ──────────────────────────────────
-  # Agent + Event are universal across RoboX extensions. Skip JSONB
-  # columns (Agent.address, Agent.metadata_, Event.metadata_) — graph
-  # layer is a curated knowledge surface. Event.amount converts cents to
-  # currency-major (matches Transaction.amount convention).
+  # ── REA primitives ──────────────────────────────────────────────────
+  # JSONB columns are not projected. Event.amount converts cents to major
+  # units, like Transaction.amount.
 
   tables["Agent"] = f"""
     CREATE OR REPLACE TABLE "Agent" AS
@@ -624,11 +554,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'entries')
   """
 
-  # LineItem has no status of its own; its liveness is its parent Entry's.
-  # Denormalize the entry's landed-status test as is_live via the entry join so ad-hoc /
-  # AI aggregations anchored at LineItem can filter with `WHERE li.is_live`
-  # without traversing back to Entry. entry_id is NOT NULL, so the inner join
-  # drops no rows.
+  # is_live is denormalized from the parent Entry so aggregations anchored at
+  # LineItem need not traverse back. entry_id is NOT NULL, so the join drops
+  # no rows.
   tables["LineItem"] = f"""
     CREATE OR REPLACE TABLE LineItem AS
     SELECT
@@ -878,8 +806,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   """
 
   # ── REA edges ────────────────────────────────────────────────────────
-  # Entity is the per-graph singleton; fan it out to every Agent / Event.
-  # Sibling edges populated only when the OLTP column is non-null.
+  # Entity is the per-graph singleton, fanned out to every Agent / Event.
 
   tables["ENTITY_HAS_AGENT"] = f"""
     CREATE OR REPLACE TABLE ENTITY_HAS_AGENT AS
@@ -942,10 +869,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     WHERE replaces_event_id IS NOT NULL
   """
 
-  # McCarthy bridge — the GL Transaction this Event triggered. OLTP
-  # source is transactions.triggered_by_event_id (audit column from
-  # migration 0005). Edge exists only for transactions originating from
-  # an Event; manual-only transactions have no event.
+  # McCarthy bridge: the GL Transaction an Event triggered, if any.
   tables["EVENT_TRIGGERS_TRANSACTION"] = f"""
     CREATE OR REPLACE TABLE EVENT_TRIGGERS_TRANSACTION AS
     SELECT
@@ -956,10 +880,6 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   """
 
   # ── Reporting Layer ────────────────────────────────────────────────────
-  # These tables are populated from reports and facts
-  # (generated by the report builder). They may be empty if no reports
-  # have been generated yet — that's fine, they'll be populated on next
-  # materialization after report creation.
 
   tables["Taxonomy"] = f"""
     CREATE OR REPLACE TABLE Taxonomy AS
@@ -1048,9 +968,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::VARCHAR, NULL::VARCHAR
   """
 
-  # decimals: numeric rows fall back to the legacy '-2' when unspecified so
-  # existing graph output is unchanged; Nonnumeric rows pass NULL through
-  # (XBRL nonNumeric facts carry no @decimals).
+  # decimals: numeric rows default to '-2'; nonNumeric facts carry none.
   tables["Fact"] = f"""
     CREATE OR REPLACE TABLE Fact AS
     SELECT
@@ -1152,13 +1070,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       AND rd.source_graph_id IS NOT NULL
   """
 
-  # Inner-joined to `taxonomies` for the same reason as `FACT_HAS_ELEMENT`
-  # below: `reports.taxonomy_id` carries no foreign key, so a report whose
-  # taxonomy is absent from this schema — the cross-graph share case, where
-  # the sender's reporting extension may not have travelled — reaches here
-  # intact and costs the recipient their entire rebuild. Dropping the one
-  # edge is the proportionate response; `_ensure_shared_elements` is
-  # responsible for the taxonomy actually arriving.
+  # Inner-joined to `taxonomies` for the same reason as `FACT_HAS_ELEMENT`:
+  # `reports.taxonomy_id` has no FK, and a shared report's taxonomy may not
+  # have travelled.
   tables["REPORT_USES_TAXONOMY"] = f"""
     CREATE OR REPLACE TABLE REPORT_USES_TAXONOMY AS
     SELECT
@@ -1182,15 +1096,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       AND fs.scenario_id IS NULL
   """
 
-  # Inner-joined to `elements` on purpose. `facts.element_id` has no
-  # foreign key, so an unresolvable concept reaches this point without
-  # complaint — and LadybugDB then rejects the edge, which blue/green
-  # scores as a partial run and answers by abandoning the entire WIP
-  # database. One dangling id would otherwise cost the graph everything,
-  # including rows with no relationship to whatever wrote the bad
-  # reference. Dropping the single edge is the proportionate response; the
-  # write paths are responsible for not creating the dangle in the first
-  # place (see `_ensure_shared_elements` for the cross-graph case).
+  # Inner-joined to `elements` on purpose: `facts.element_id` has no FK, and
+  # one dangling edge would make LadybugDB reject the table, failing the
+  # whole blue/green build. Drop the edge instead.
   tables["FACT_HAS_ELEMENT"] = f"""
     CREATE OR REPLACE TABLE FACT_HAS_ELEMENT AS
     SELECT
@@ -1281,10 +1189,6 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   """
 
   # ── Investor Layer ─────────────────────────────────────────────────────
-  # These tables are populated from roboinvestor OLTP tables (portfolios,
-  # securities, positions). They produce empty staging tables if the
-  # roboinvestor extension isn't enabled — the materializer handles that
-  # gracefully (0-row tables are still valid).
 
   tables["Portfolio"] = f"""
     CREATE OR REPLACE TABLE Portfolio AS
@@ -1390,13 +1294,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
 
 
 class ExtensionsMaterializer:
-  """Materializes extensions OLTP data to the LadybugDB graph.
-
-  Connector-agnostic — reads whatever is in the extensions tenant schema
-  and materializes it to graph nodes and relationships. The OLTPLoader
-  is the reverse operation (load into OLTP); this is the forward path
-  (OLTP → graph).
-  """
+  """Materializes a graph's extensions OLTP schema into LadybugDB."""
 
   async def materialize(
     self,
@@ -1448,11 +1346,8 @@ class ExtensionsMaterializer:
 
     try:
       async with client:
-        # One per-graph lock for both paths. The first build (no database yet)
-        # is as exposed to a double-writer as a rebuild: a stale-sensor run
-        # and a user-initiated materialize can otherwise both create and COPY
-        # into the same fresh graph. Any cross-plane cap on total concurrent
-        # materializations would attach here, after the per-graph acquire.
+        # One lock for both paths: a first build is as exposed to a
+        # double-writer as a rebuild.
         lock = await self._acquire_lock(graph_id)
         try:
           db_exists = await client.database_exists(graph_id)

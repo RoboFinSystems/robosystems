@@ -93,17 +93,13 @@ def get_reporting_taxonomy(session: Session) -> TaxonomyResponse | None:
 # ── Elements ──────────────────────────────────────────────────────────────
 
 
-# Local aliases for the shared library helpers, to keep call sites terse.
 _efs_by_element = efs_trait_by_element
 _liquidity_by_element = liquidity_by_element
 
 
 def element_to_response(row: Element, trait: str | None = None) -> ElementResponse:
-  """Map an Element row to the wire-facing ElementResponse.
-
-  Callers that batch-load should use :func:`_efs_by_element` once and
-  pass the lookup in to avoid N+1 on the EFS trait.
-  """
+  """Batch callers should load traits once with ``_efs_by_element`` and pass
+  ``trait`` in, avoiding an N+1."""
   return ElementResponse(
     id=row.id,
     code=row.code,
@@ -136,11 +132,8 @@ def list_elements(
   limit: int = 100,
   offset: int = 0,
 ) -> ElementListResponse:
-  """List elements filtered by taxonomy / source / trait / abstract.
-
-  ``trait`` filters on the FASB elementsOfFinancialStatements
-  trait via the element_traits junction table.
-  """
+  """List active elements; ``trait`` is the FASB elementsOfFinancialStatements
+  trait."""
   query = select(Element).where(Element.is_active.is_(True))
   count_query = (
     select(func.count()).select_from(Element).where(Element.is_active.is_(True))
@@ -219,34 +212,18 @@ def suggest_mapping_candidates(
   reporting_style_id: str | None = None,
   liquidity: str | None = None,
 ) -> list[ElementResponse]:
-  """Return rs-gaap candidates for a CoA element, narrowed by EFS trait
-  (and ``liquidity`` when supplied).
+  """rs-gaap mapping candidates for a CoA element with EFS ``trait``, narrowed
+  by ``liquidity`` when supplied.
 
-  Filters active ``rs-gaap`` elements by the FASB
-  elementsOfFinancialStatements trait (via element_traits), restricted
-  to concepts that **actually render** under the active Reporting Style
-  (via ``_load_renderable_concepts``). When ``reporting_style_id`` isn't
-  supplied, falls back to the wider rs-gaap-presentation set so the
-  function stays usable in test contexts and partial deployments.
-  Subtotal rollups whose value comes from rendering, not from a leaf
-  fact, are excluded via ``RS_GAAP_SUBTOTAL_DENYLIST``.
-
-  Candidates are rs-gaap only, keeping this suggester consistent with the
-  renderer. The filter narrows to ``reporting_style_networks`` rather than
-  the full rs-gaap-presentation taxonomy, which would admit concepts the
-  renderer never walks — e.g. ``AccountsPayableCurrent`` is in
-  rs-gaap-presentation but the BS Classified rendering structure uses the
-  more aggregated ``AccountsPayableAndAccruedLiabilitiesCurrent`` — so the
-  "guaranteed to render" promise holds.
-
-  ``element_id`` is reserved for future per-element overrides but is
-  currently unused — ``trait`` (+ optional ``liquidity``) drive the filter.
+  Restricted to concepts that render under the Reporting Style
+  (``_load_renderable_concepts``), falling back to the wider
+  rs-gaap-presentation set when no style is given, and excluding rollups whose
+  value comes from rendering rather than a leaf fact. ``element_id`` is unused.
   """
   del element_id  # reserved for future per-element narrowing
   if trait is None:
     return []
 
-  # Lazy import to avoid pulling agent constants into every read path.
   from robosystems.operations.operators.implementations.mapping.constants import (
     RS_GAAP_SUBTOTAL_DENYLIST,
     RS_GAAP_SYNTHESIZED_DETAIL_ALLOW,
@@ -278,22 +255,14 @@ def suggest_mapping_candidates(
     .all()
   )
 
-  # Liquidity narrowing (current / noncurrent): when the CoA element
-  # carries a liquidity trait, drop candidates whose liquidity *contradicts*
-  # it (a "Bank" / current account never surfaces noncurrent-asset
-  # candidates, and vice versa). Candidates with no liquidity trait are
-  # kept — absence isn't a contradiction, and the EFS filter still applies.
-  # No-op when liquidity is None (manual elements that didn't set it, or
-  # equity/revenue/expense which have no liquidity axis).
+  # Drop candidates whose liquidity contradicts the element's; a candidate
+  # with no liquidity trait is not a contradiction.
   if liquidity:
     candidate_liquidity = _liquidity_by_element(session, [r.id for r in rows])
     rows = [r for r in rows if candidate_liquidity.get(r.id) in (None, liquidity)]
 
-  # Structure-aware rollup guard: when a Reporting Style is active and
-  # seeded, deny a target only if it actually rolls up on that Style (its
-  # children render). On a thin Style where the concept IS the leaf,
-  # mapping to it is correct. Without a seeded Style (tests / partial
-  # deployments) fall back to the static denylist.
+  # With a seeded Style, deny only targets that roll up on it (on a thin Style
+  # the concept may be the leaf); otherwise fall back to the static denylist.
   rollup_set = (
     _load_rollup_concepts(session, reporting_style_id) if reporting_style_id else set()
   )
@@ -303,11 +272,9 @@ def suggest_mapping_candidates(
       return r.id in rollup_set
     return r.qname in RS_GAAP_SUBTOTAL_DENYLIST
 
-  # Synthesized-detail concepts (PP&E Gross + accumulated depreciation)
-  # aren't in the presentation set — the renderer absorbs them into a
-  # synthesized PropertyPlantAndEquipmentNet — but they're the correct
-  # mapping grain for fixed-asset / contra accounts (lets CF Investing
-  # read ΔGross as capex). Admit them past the presentation filter.
+  # PP&E gross and accumulated depreciation are absorbed into a synthesized
+  # PP&E Net at render, but are the right grain for fixed-asset and contra
+  # accounts (CF Investing reads ΔGross as capex), so admit them.
   filtered = [
     r
     for r in rows
@@ -334,7 +301,6 @@ def list_unmapped_elements(
   )
   coa_elements = session.execute(coa_query).scalars().all()
 
-  # Get mapped element IDs (from_element_id in mapping associations)
   if mapping_id:
     mapped_query = select(Association.from_element_id).where(
       Association.structure_id == mapping_id,
@@ -373,29 +339,11 @@ def _load_renderable_concepts(
   session: Session,
   reporting_style_id: str,
 ) -> set[str]:
-  """Return element_ids that render under a given Reporting Style.
+  """Element ids on either end of a ``presentation`` arc in the Style's
+  rendering structures: exactly what ``generate_report_facts`` walks.
 
-  Walks ``reporting_style_networks`` to find each Statement-type rendering
-  structure attached to the Style (BS Classified, IS Multi-step, CF
-  Indirect, SE Roll Forward, etc.), then collects every concept that
-  appears as either parent or child of a ``presentation`` association on
-  those structures.
-
-  This is the "guaranteed-to-render" filter — it matches what
-  ``generate_report_facts`` traverses. Prefer it over the
-  ``_load_rs_gaap_presentation_set`` fallback, which filters on the whole
-  rs-gaap-presentation taxonomy: a superset of what the renderer walks,
-  since rendering structures use a more aggregated vocabulary (e.g.
-  ``AccountsPayableAndAccruedLiabilitiesCurrent`` rather than
-  ``AccountsPayableCurrent``). Suggestions made against the wider set can
-  land on concepts that never render.
-
-  Empty result = caller treats as "no filter" so a partially-provisioned
-  tenant (no reporting_style_networks rows yet) still gets candidates.
-
-  Cached on the session keyed by reporting_style_id: switching Style
-  mid-session is rare and the same id is queried repeatedly inside a single
-  auto-map run.
+  Empty means "no filter" (Style not provisioned yet). Cached on the session
+  per style id.
   """
   cache_attr = f"{_RENDERABLE_CONCEPTS_ATTR_PREFIX}{reporting_style_id}"
   cached = getattr(session, cache_attr, None)
@@ -435,23 +383,12 @@ def _load_rollup_concepts(
   session: Session,
   reporting_style_id: str,
 ) -> set[str]:
-  """Return element_ids that are *rolled up at render* under a Reporting Style.
+  """Element ids that are the parent of a ``presentation`` arc on the Style's
+  rendering structures, i.e. summed at render; mapping a CoA account to one
+  would double-count.
 
-  A concept is rolled up at render iff it appears as the **parent**
-  (``from_element_id``) of a ``presentation`` arc on one of the Style's
-  rendering structures — its value comes from summing the children the
-  renderer walks, so a CoA account must not map to it (the leaf fact would
-  double-count). A concept that is **not** in this set is a leaf on the
-  active Style, and mapping a CoA account to it is correct.
-
-  Structure-aware, so preferred over the static
-  ``RS_GAAP_SUBTOTAL_DENYLIST``: the static list over-denies on thin Style
-  structures where, e.g., ``rs-gaap:Revenues`` has no rendering children
-  and is itself the leaf. Empty result = no Style structures seeded →
-  callers fall back to the static denylist.
-
-  Cached on the session keyed by reporting_style_id (same pattern as
-  ``_load_renderable_concepts``).
+  Empty means no Style seeded (callers use the static denylist). Cached on
+  the session per style id.
   """
   cache_attr = f"{_ROLLUP_CONCEPTS_ATTR_PREFIX}{reporting_style_id}"
   cached = getattr(session, cache_attr, None)
@@ -479,24 +416,11 @@ def _load_rollup_concepts(
 
 
 def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
-  """Return the set of element_ids that appear in any
-  ``rs-gaap-presentation`` structure (as either parent or child).
-
-  Used as a **wider-net fallback** when a Reporting Style isn't
-  available — prefer ``_load_renderable_concepts(reporting_style_id)``
-  when the caller has graph context. Returns an empty set if the
-  presentation taxonomy isn't seeded — caller treats empty as "no
-  filter" so partial deployments still function.
-
-  **Cached on the session** under a private attribute. The UNION query
-  walks `associations → structures → taxonomies` twice and is invariant
-  for the lifetime of a tenant session (rs-gaap-presentation is
-  library-seeded and immutable per-tenant).
+  """Element ids in any ``rs-gaap-presentation`` structure: the wider fallback
+  when no Reporting Style is available. Empty means "no filter". Cached on the
+  session (the library set is immutable per tenant).
   """
-  # ``isinstance(..., set)`` guards against MagicMock sessions: a vanilla
-  # ``getattr(mock, attr, None)`` returns a fresh MagicMock (not None),
-  # so the sentinel fallback wouldn't fire. The type check returns False
-  # for MagicMock and treats the test session as uncached.
+  # isinstance, not a None check: getattr on a MagicMock session returns a mock.
   cached = getattr(session, _RS_GAAP_PRESENTATION_SET_ATTR, None)
   if isinstance(cached, set):
     return cached
@@ -520,8 +444,7 @@ def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
   try:
     setattr(session, _RS_GAAP_PRESENTATION_SET_ATTR, result)
   except (AttributeError, TypeError):
-    # MagicMock sessions in unit tests sometimes reject arbitrary
-    # attribute writes; fall through without caching in that case.
+    # Some test sessions reject attribute writes.
     pass
   return result
 
@@ -560,7 +483,7 @@ def list_structures(
 
 
 def list_mappings(session: Session) -> StructureListResponse:
-  """List all active mapping structures (block_type = 'coa_mapping')."""
+  """List active ``coa_mapping`` structures."""
   rows = (
     session.execute(
       select(Structure)
@@ -634,19 +557,11 @@ def get_mapping_detail(
 
 
 def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageResponse:
-  """Return mapping coverage stats (total, mapped, unmapped, confidence).
+  """Mapping coverage stats (total, mapped, unmapped, confidence).
 
-  Raises ``MappingStructureNotFoundError`` when ``mapping_id`` does not
-  resolve to an existing Structure row. Without this guard the count
-  query returns 0 mapped associations regardless of whether the
-  structure exists, silently misleading callers into thinking coverage
-  is 0 / 100 when in fact they're querying a nonexistent id.
+  Raises ``MappingStructureNotFoundError`` for an unknown id rather than
+  reporting 0% coverage.
   """
-  # Lazy import: the commands module pulls in the full taxonomy write
-  # surface (assert_not_library_origin, generate_prefixed_ulid, etc.)
-  # which we don't need on the read path. Importing at the call site
-  # keeps the reads module cheap to import for callers that never hit
-  # this function.
   from robosystems.operations.roboledger.commands.taxonomies import (
     MappingStructureNotFoundError,
   )
@@ -730,18 +645,9 @@ def is_target_reachable(
   _calc_parents: dict[str, set[str]] | None = None,
   _root_ids: set[str] | None = None,
 ) -> bool:
-  """True if ``target_element_id`` traces to a canonical rs-gaap root.
-
-  Walks upward through ``association_type='calculation'`` arcs (each
-  step takes ``to_element_id`` → ``from_element_id`` — calc arcs point
-  parent→child, so we invert to walk child→parent). Reaches one of the
-  rs-gaap root concepts (Assets / LiabilitiesAndStockholdersEquity /
-  NetIncomeLoss / CashAndCashEquivalentsPeriodIncreaseDecrease) iff
-  the target is renderable.
-
-  The internal cache parameters let callers batch a full mapping check
-  against a single calc-DAG snapshot.
-  """
+  """True if ``target_element_id`` walks up the calc DAG to a canonical
+  rs-gaap root, i.e. renders. The underscore parameters let a batch check
+  share one calc-DAG snapshot."""
   if _calc_parents is None:
     _calc_parents = _load_calc_parents(session)
   if _root_ids is None:
@@ -769,18 +675,13 @@ def check_mapping_reachability(
   session: Session,
   mapping_assocs: list[Association],
 ) -> list[UnreachableMapping]:
-  """Return the subset of mapping associations whose targets don't reach a root.
-
-  Single calc-DAG snapshot is loaded once and reused across all
-  targets — keeps the check ~linear in the number of associations.
-  """
+  """The mapping associations whose targets don't reach a root."""
   if not mapping_assocs:
     return []
 
   calc_parents = _load_calc_parents(session)
   root_ids = _resolve_root_ids(session)
 
-  # Element metadata lookup for response detail
   target_ids = {a.to_element_id for a in mapping_assocs}
   source_ids = {a.from_element_id for a in mapping_assocs}
   element_lookup: dict[str, Element] = {
@@ -819,14 +720,8 @@ def check_mapping_reachability(
 
 
 def _load_calc_parents(session: Session) -> dict[str, set[str]]:
-  """Return ``child_element_id → {parent_element_id, …}`` for all calc arcs.
-
-  Calc arcs are declared parent→child (``from_element_id = parent``,
-  ``to_element_id = child``). To walk *up* from a target we want the
-  inverse mapping. Cached on the session — the calc DAG is constant
-  for the lifetime of a tenant request and the reachability check fires
-  on every `get_mapping_coverage` call.
-  """
+  """``child_element_id → {parent_element_id, …}`` over all calc arcs (the
+  inverse of their declared direction). Cached on the session."""
   cached = getattr(session, "_calc_parents_cache", None)
   if isinstance(cached, dict):
     return cached
@@ -848,11 +743,7 @@ def _load_calc_parents(session: Session) -> dict[str, set[str]]:
 
 
 def _resolve_root_ids(session: Session) -> set[str]:
-  """Return the element_id set for canonical rs-gaap roots.
-
-  Cached on the session — root concept ids don't change within a
-  request and the reachability check refers to this on every call.
-  """
+  """Element ids of the canonical rs-gaap roots. Cached on the session."""
   cached = getattr(session, "_root_ids_cache", None)
   if isinstance(cached, set):
     return cached
@@ -910,11 +801,7 @@ def get_mapped_trial_balance(
   end_date: date | str | None = None,
 ) -> MappedTrialBalanceResponse:
   """Trial balance rolled up to reporting concepts via mapping associations.
-
-  Accepts both `date` objects (preferred — the GraphQL resolver passes
-  these so the wire schema exposes a `Date` scalar) and ISO-8601 strings
-  (REST callers). SQLAlchemy parameter binding handles either.
-  """
+  Dates may be `date` objects or ISO strings."""
   result = session.execute(
     _MAPPED_TRIAL_BALANCE_SQL,
     {

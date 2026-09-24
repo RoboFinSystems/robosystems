@@ -1,14 +1,8 @@
 """Envelope rule projection — ``rules`` table → ``TaxonomyBlockRule`` list.
 
-Shared across CoA / reporting_extension / custom_ontology /
-reporting_standard / schedule_container handlers'
-``build_envelope`` implementations.
-
-One SELECT per taxonomy projection — pulls every rule that targets
-the taxonomy itself OR any of its in-taxonomy structures OR any of
-its in-taxonomy elements. ``target_kind='association'`` rules are not
-surfaced: the envelope model carries associations by from/to qname,
-not keyed by id, so there is nothing to attach them to.
+Rules targeting the taxonomy, its structures or its elements.
+Association-targeted rules are omitted: envelope associations have no id to
+attach them to.
 """
 
 from __future__ import annotations
@@ -29,12 +23,8 @@ def project_rules(
   structure_ids: Iterable[str],
   qname_by_element_id: dict[str, str],
 ) -> list[TaxonomyBlockRule]:
-  """Fetch and project rules scoped to this taxonomy.
-
-  ``qname_by_element_id`` is consumed for projecting
-  ``target_kind='element'`` rules as an element qname (the
-  human-readable identifier) rather than the element's id.
-  """
+  """Fetch and project rules scoped to this taxonomy; element targets are
+  projected as qnames via ``qname_by_element_id``."""
   element_id_list = list(element_ids)
   structure_id_list = list(structure_ids)
 

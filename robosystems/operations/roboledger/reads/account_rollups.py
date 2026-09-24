@@ -1,9 +1,5 @@
-"""Account rollups read operation.
-
-Shows how CoA accounts roll up to reporting line items — the mapping
-taxonomy rendered with current trial balance balances. This is what
-accountants call a "lead schedule."
-"""
+"""Account rollups: CoA accounts under the reporting line items they map to,
+with trial balance balances (the accountant's "lead schedule")."""
 
 from __future__ import annotations
 
@@ -25,7 +21,7 @@ from robosystems.operations.roboledger.entry_status import (
 
 
 class MappingNotFoundError(LookupError):
-  """Raised when a user-supplied mapping_id does not exist."""
+  """A caller-supplied mapping_id does not exist."""
 
 
 def _natural_sign(net_balance: float, balance_type: str) -> float:
@@ -116,10 +112,8 @@ def get_account_rollups(
 ) -> AccountRollupsResponse:
   """Return CoA accounts grouped by reporting element with balances.
 
-  When `mapping_id` is `None`, auto-discovers the first active
-  `coa_mapping` structure. Returns an empty response if no mapping
-  exists at all. Raises `MappingNotFoundError` if a caller-supplied
-  `mapping_id` does not resolve to a structure.
+  Without `mapping_id`, uses the first active `coa_mapping` structure (empty
+  response if none). Raises `MappingNotFoundError` for an unknown id.
   """
   if not mapping_id:
     mapping = session.execute(

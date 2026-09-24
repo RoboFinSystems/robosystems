@@ -1,10 +1,4 @@
-"""Worker tasks for RoboLedger.
-
-Each task extends ``BaseTask`` and registers itself with ``@register_task`` so
-the worker consumer loop can dispatch it, mirroring
-:mod:`robosystems.operations.graph.tasks`. The business logic stays in
-``operations/``; the worker supplies only the infrastructure.
-"""
+"""Worker tasks for RoboLedger, registered via ``@register_task``."""
 
 # Imported for side effects: importing the module runs its @register_task.
 from robosystems.operations.roboledger.tasks import period_close as period_close

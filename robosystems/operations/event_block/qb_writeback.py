@@ -1,30 +1,9 @@
-"""QuickBooks write-back helpers.
+"""QuickBooks write-back: post an event's draft Entry rows as QB JournalEntries.
 
-Translates a RoboSystems-side `Event` row's `metadata` payload into a
-`quickbooks.objects.JournalEntry` and posts it via the QB API with a
-RequestId for idempotency. Returns the `qb_txn_id` on success.
-
-Used by `operations/event_block/commands.execute_event_block`.
-
-The QB SDK's `JournalEntry.save(qb=client, request_id=event.id)`
-treats `request_id` as the RequestId header — QB recognises duplicate
-RequestIds for ~5 minutes and returns the prior result rather than
-creating a new entry, so our retry-on-network-blip path is safe.
-
-`Event.metadata` shape accepted (mirrors the journal_entry_recorded
-handler's `JournalEntryRecordedMetadata` Pydantic):
-
-- **Flat**: top-level `posting_date`, `memo`, `line_items` (a single
-  entry per event — the common case for manual JE and schedule drafts).
-- **Nested**: top-level `entries` array, each with its own
-  `posting_date`, `memo`, `line_items` (multi-entry path used by QB
-  ingest; one event → multiple journal entries on the QB side).
-
-Each draft Entry linked to the event posts as its own QB JournalEntry,
-keyed by the entry id, and the QB id it receives is recorded per entry in
-``metadata.qb_entry_ids``. An event whose entries span periods therefore
-publishes one period at a time, and a partial failure keeps the ids of the
-entries that did land.
+Each draft Entry posts as its own JournalEntry with the entry id as its
+RequestId (QB dedups repeats for ~5 minutes, so retries are safe), and the
+QB id is recorded per entry in ``metadata.qb_entry_ids``. Entries spanning
+periods publish one period at a time; a partial failure keeps what landed.
 """
 
 from __future__ import annotations
@@ -53,11 +32,8 @@ from robosystems.models.extensions.roboledger.line_item import LineItem
 
 
 class QBWritebackError(Exception):
-  """QB API rejected the journal-entry write.
-
-  Carries a structured payload the caller stamps on
-  `event.metadata.last_outbound_error` for the reconciliation queue.
-  """
+  """QB rejected the write; ``payload`` goes to
+  `event.metadata.last_outbound_error`."""
 
   def __init__(self, payload: dict[str, Any]) -> None:
     super().__init__(payload.get("message", "QB JE write rejected"))
@@ -76,14 +52,8 @@ def published_entry_ids(metadata: dict[str, Any] | None) -> dict[str, str]:
 
 
 def _validated_cents(value: Any, field: str) -> int:
-  """Coerce a line-item amount to integer cents (``None`` maps to 0).
-
-  Amounts are integer cents end-to-end. A float would silently lose
-  precision via `int(125.50)` → `125`, so any non-``int`` type raises
-  `QBWritebackError` rather than being coerced. ``bool`` counts as invalid
-  even though `isinstance(True, int)` is True in Python — a True/False
-  arriving as an amount is a caller bug.
-  """
+  """Integer cents (``None`` → 0); any non-int, including bool, raises
+  rather than risk silent precision loss."""
   if value is None:
     return 0
   if isinstance(value, bool) or not isinstance(value, int):
@@ -101,12 +71,7 @@ def _validated_cents(value: Any, field: str) -> int:
 
 
 def _resolve_qb_account_id(session: Session, element_id: str) -> str:
-  """Local element_id → QB Account.Id (the `external_id` we captured
-  at QB-import time).
-
-  Raises if the element isn't QB-sourced or has no external_id — both
-  cases mean we can't post this line to QB.
-  """
+  """Local element_id → QB Account.Id (the element's `external_id`)."""
   element = session.query(Element).filter(Element.id == element_id).first()
   if element is None:
     raise QBWritebackError(
@@ -133,14 +98,7 @@ def _build_qb_line(
   session: Session,
   line_item: dict[str, Any],
 ) -> JournalEntryLine:
-  """Translate one RL line_item dict into a QB JournalEntryLine.
-
-  RL line shape: `{element_id, debit_amount, credit_amount, description}`.
-  Exactly one of debit_amount / credit_amount is non-zero (validated by
-  the JE handler upstream). Amounts are integer cents — a float would
-  silently lose precision via `int()` truncation, so we fail loud on
-  any non-integer type.
-  """
+  """Translate one line_item dict (amounts in cents) into a QB JournalEntryLine."""
   debit = _validated_cents(line_item.get("debit_amount"), "debit_amount")
   credit = _validated_cents(line_item.get("credit_amount"), "credit_amount")
   if debit > 0 and credit > 0:
@@ -189,8 +147,7 @@ def _build_qb_journal_entry(
   memo: str | None,
   line_items: list[dict[str, Any]],
 ) -> QBJournalEntry:
-  """Build one QB JournalEntry from the (posting_date, memo, line_items)
-  triple. Caller iterates over nested-shape entries when applicable."""
+  """Build one QB JournalEntry from (posting_date, memo, line_items)."""
   je = QBJournalEntry()
   je.TxnDate = (
     posting_date.isoformat()
@@ -207,10 +164,8 @@ def _draft_entries(
 ) -> list[tuple[str, dict[str, Any]]]:
   """(entry_id, entry dict) for the event's draft GL rows, in creation order.
 
-  These rows are the ledger's version of the event — the drafts close will
-  post — and so the thing to publish; ``event.metadata`` is the capture,
-  which a draft correction leaves behind. ``entry_ids`` narrows the set to
-  the entries a caller is publishing (close passes the ones in its period).
+  The rows, not ``event.metadata``, are published: a draft correction
+  leaves the captured metadata behind.
   """
   query = session.query(Entry).filter(
     Entry.triggered_by_event_id == event_id, Entry.status == "draft"
@@ -300,13 +255,7 @@ def post_event_to_qb(
 
 @_QB_RETRY
 def _qb_save_with_retry(je: QBJournalEntry, qb_client, request_id: str):
-  """Inner save call — decorated with `_QB_RETRY` so transient
-  transport errors retry per `_is_retryable_qb_error` (network +
-  429/5xx). Lets exceptions propagate raw so the decorator can decide
-  whether to retry; the outer `_save_with_retry` wrapper catches what
-  the decorator re-raises (after retry exhaustion or for non-retryable
-  errors) and converts to `QBWritebackError`.
-  """
+  """Raw save; exceptions propagate so `_QB_RETRY` can decide on retry."""
   return je.save(qb=qb_client, request_id=request_id)
 
 
@@ -316,21 +265,9 @@ def _save_with_retry(
   request_id: str,
   event_id: str,
 ) -> str:
-  """Wrap `_qb_save_with_retry` in `QBWritebackError` conversion.
-
-  `_QB_RETRY` (applied to the inner function) retries on transient
-  transport errors. QB's RequestId dedup window (`request_id`
-  parameter forwarded into the API call) keeps the retry safe —
-  repeated POSTs with the same RequestId return the prior result
-  rather than creating a new entry.
-
-  Caught exception types (after retry decisions):
-  - `requests.exceptions.RequestException` (network / timeout /
-    transport): tenacity retries; if it exhausts attempts the
-    exception comes out here and we wrap as `qb_transport_error`.
-  - `QuickbooksException` (QB API error envelope — validation,
-    balance, closed-period in QB, auth): non-retryable per the
-    predicate; surfaces immediately. Wrap as `qb_validation_error`.
+  """Save with retry, converting failures to `QBWritebackError`
+  (`qb_transport_error` after retries are exhausted, `qb_validation_error`
+  for a QB API error). Returns the QB Id.
   """
   try:
     saved = _qb_save_with_retry(je, qb_client, request_id)

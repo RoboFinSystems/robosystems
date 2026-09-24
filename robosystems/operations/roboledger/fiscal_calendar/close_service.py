@@ -1,12 +1,6 @@
-"""PeriodCloseService — the single source of truth for month-end close.
+"""PeriodCloseService: the month-end close flow shared by REST and MCP.
 
-Used by both the REST router and the MCP tool. Encapsulates the full
-close flow (gate, draft-to-posted transition, BS balance check, calendar
-advance/reclose) behind one service method so bug fixes and behavior
-changes land in one place instead of two.
-
-This module does NOT handle HTTP/MCP response shaping — callers translate
-the domain exceptions defined here into their respective error formats.
+Callers translate the domain exceptions here into their own error formats.
 """
 
 from __future__ import annotations
@@ -40,25 +34,13 @@ if TYPE_CHECKING:
     StatementStampResult,
   )
 
-# ────────────────────────────────────────────────────────────────────────────
-# Errors
-# ────────────────────────────────────────────────────────────────────────────
-
 
 class PeriodCloseError(Exception):
-  """Base class for all period-close failures."""
+  """Base class for period-close failures."""
 
 
 class CloseGateFailed(PeriodCloseError):
-  """Raised when the closeable gate rejects the request.
-
-  Carries the full :class:`CloseableGateResult` so callers can surface
-  the enriched payload (``pending_obligation_count``,
-  ``pending_obligation_sample``, ``earliest_pending_period``,
-  ``sync_stale_days``) without re-fetching the calendar. ``blockers``
-  / ``no_calendar`` are kept as direct attributes for the common
-  branches; full detail lives on ``gate``.
-  """
+  """The closeable gate rejected the close; detail lives on ``gate``."""
 
   def __init__(self, gate: CloseableGateResult):
     super().__init__(f"Cannot close period: blockers={gate.blockers}")
@@ -68,21 +50,13 @@ class CloseGateFailed(PeriodCloseError):
 
 
 class PeriodNotFoundError(PeriodCloseError):
-  """Raised when no FiscalPeriod row exists for the target period."""
-
   def __init__(self, period: str):
     super().__init__(f"Fiscal period {period!r} not found.")
     self.period = period
 
 
 class PeriodAlreadyClosedError(PeriodCloseError):
-  """Raised when the period is already closed at the post-publish revalidation.
-
-  The exclusive period fence is supposed to stop a second closer before
-  this, but the database close still re-locks the FiscalPeriod row after
-  the QuickBooks commit and refuses `status='closed'`. Without that
-  check a closer that skipped the fence would stamp again.
-  """
+  """The period was found closed at the post-publish row-lock revalidation."""
 
   def __init__(self, period: str):
     super().__init__(f"Fiscal period {period!r} is already closed.")
@@ -90,12 +64,7 @@ class PeriodAlreadyClosedError(PeriodCloseError):
 
 
 class UnbalancedLedgerError(PeriodCloseError):
-  """Raised when debits != credits for the period being closed.
-
-  Detected as a pre-flight check against the combined draft + posted
-  line items — we never mutate state when the ledger is unbalanced,
-  so no rollback is needed.
-  """
+  """Debits != credits across the period's draft + posted entries."""
 
   def __init__(self, total_debit: int, total_credit: int):
     super().__init__(
@@ -107,13 +76,10 @@ class UnbalancedLedgerError(PeriodCloseError):
 
 
 class WritebackFailed(PeriodCloseError):
-  """Raised when the close-period pre-publish step fails to write one or
-  more in-period drafts to QuickBooks.
+  """One or more in-period drafts failed to publish to QuickBooks.
 
-  Atomic: a single QB rejection rolls back the entire close — no
-  half-published periods. The exception carries the offending event
-  IDs and their per-event error payloads so the operator can fix the
-  underlying issue (mapping, balance, closed-in-QB-already) and retry.
+  Raised before any close state mutates; the markers for drafts that did
+  reach QB are already committed, so a retry won't re-publish them.
   """
 
   def __init__(self, failed_events: list[dict]):
@@ -124,21 +90,12 @@ class WritebackFailed(PeriodCloseError):
     self.failed_events = failed_events
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# Result
-# ────────────────────────────────────────────────────────────────────────────
-
-
 @dataclass
 class PeriodCloseResult:
-  """Outcome of a successful `PeriodCloseService.close()` call.
+  """Outcome of a successful close.
 
-  ``entries_posted`` is the TOTAL entries the close transitioned to
-  posted, across both post paths: the QB pre-publish step (which promotes
-  each published draft immediately) and the bulk draft→posted transition
-  that follows. Counting only the bulk path would under-report a
-  fully-published period as 0. The split rides on
-  ``entries_published_to_qb`` / ``entries_posted_locally``.
+  ``entries_posted`` is the total across the QB pre-publish step and the
+  local draft→posted pass; the split is on the two fields below.
   """
 
   period: str
@@ -146,21 +103,13 @@ class PeriodCloseResult:
   target_auto_advanced: bool
   calendar: FiscalCalendar
   was_reclose: bool
-  # The two post paths behind entries_posted.
   entries_published_to_qb: int = 0
   entries_posted_locally: int = 0
-  # Auto-run rules on close. None if no schedules with facts in the
-  # period had rules attached. Otherwise a dict tallying outcomes:
-  # {"pass": int, "fail": int, "error": int, "skipped": int}.
+  # {"pass", "fail", "error", "skipped"} counts; None when no schedule
+  # had facts in the period.
   rule_summary: dict[str, int] | None = None
-  # ids of schedule Structures whose rules were evaluated. Empty when no
-  # schedule structures had facts in the closed period.
   evaluated_structure_ids: tuple[str, ...] = ()
-  # Canonical statement stamping (close-time pivot). False + note when
-  # the tenant hasn't set up reporting (soft-skip); True with the minted
-  # structure_id -> fact_set_id map otherwise. A stamp failure on a
-  # reporting-configured tenant raises StatementStampError instead —
-  # the close rolls back rather than holing the statement series.
+  # False with a note when the tenant hasn't set up reporting.
   statements_stamped: bool = False
   statement_stamp_note: str | None = None
   stamped_statement_sets: dict[str, str] = dataclass_field(default_factory=dict)
@@ -179,12 +128,9 @@ def _build_close_receipt(
   actor_type: str,
   closed_at: datetime,
 ) -> dict:
-  """Render a `PeriodCloseResult` as the JSON receipt stored on the period.
+  """Project a close result to the JSON receipt stored on the period.
 
-  Deliberately a projection, not a dump: `calendar` is a live ORM-backed
-  object whose state moves on with the ledger, and a receipt that changes
-  after the fact is not a receipt. Everything here is a scalar captured at
-  close time.
+  Scalars only: `calendar` is a live ORM object and would drift after close.
   """
   return {
     "version": CLOSE_RECEIPT_VERSION,
@@ -206,49 +152,12 @@ def _build_close_receipt(
   }
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# Service
-# ────────────────────────────────────────────────────────────────────────────
-
-
 class PeriodCloseService:
-  """Execute the full period close flow in one atomic operation.
+  """Run a period close as one transaction, which the caller commits.
 
-  The service runs, in order:
-
-  1. **Closeable gate check** — sequence, period_complete, sync_current.
-  2. **BS balance pre-flight** — SUM(debits) vs SUM(credits) across
-     `draft` + `posted` entries in the period. Raises
-     `UnbalancedLedgerError` BEFORE mutating state, so we never need a
-     rollback after flipping drafts to posted.
-  3. **Draft → posted transition** — all draft entries whose posting_date
-     falls in the period are bulk-updated to `posted`.
-  4. **Calendar advance or reclose** — advance_closed_through if this is
-     a first-close or latest-reopen reclose, otherwise record_reclose.
-     Runs BEFORE the FiscalPeriod flip: the never-closed
-     (`closed_through IS NULL`) sequence check resolves the expected
-     close from the earliest non-closed FiscalPeriod, which must still
-     be the period being closed.
-  5. **FiscalPeriod transition** — `status='closed'`, `closed_at=now`,
-     `closed_by=actor_id`.
-  5b. **Canonical statement stamping** — pivot the posted ledger and
-     stamp the period's statement FactSets (`report_id NULL`), replacing
-     any prior canonical sets for the window (reclose/retry idempotency).
-     Soft-skips when the tenant hasn't set up reporting; raises
-     `StatementStampError` (rolling back the close) when reporting is
-     configured but the pivot fails. Runs after the draft→posted
-     transition because the pivot reads posted entries only.
-
-  Callers commit the session. One exception: the QB pre-publish step
-  (2b, before any close mutation) commits its own qb_external_id
-  markers — they record external writes that already happened and must
-  survive a failed close (see `_publish_drafts_to_qb`). All failures
-  raise domain exceptions that the REST / MCP caller translates into
-  its native error format.
-
-  ``statement_stamper`` is injectable for tests; the default resolves
-  :func:`stamp_canonical_statement_sets` lazily so this module stays
-  free of information-block imports at module load.
+  The one exception is the QB pre-publish step, which commits its own
+  qb_external_id markers: they record external writes that must survive a
+  failed close. ``statement_stamper`` is injectable for tests.
   """
 
   def __init__(
@@ -274,8 +183,6 @@ class PeriodCloseService:
     allow_reconciling_items: bool = False,
     note: str | None = None,
   ) -> PeriodCloseResult:
-    """Close `period` atomically. See class docstring for the full flow."""
-    # 1. Gate
     gate = self._fcs.closeable_gate(
       session,
       graph_id,
@@ -297,34 +204,17 @@ class PeriodCloseService:
 
     period_start, period_end = period_date_range(period)
 
-    # 2. Pre-flight BS balance check. Run against draft + posted together
-    # so we know the ledger will still balance after the transition — no
-    # state is mutated yet, so a mismatch just raises cleanly.
+    # Draft + posted together, before anything mutates.
     self._preflight_bs_check(session, period_start, period_end)
 
-    # 2b. Pre-publish step. For graphs with a QB connection in
-    # `write_policy='qb_authoritative'` / `'hybrid'`, batch-publish every
-    # in-period draft Entry whose triggering Event has
-    # `source IN ('schedule', 'manual')`. Any QB rejection raises
-    # `WritebackFailed` before the draft→posted transition below, so the
-    # close itself never half-runs — but the step COMMITS the
-    # qb_external_id markers for entries that did reach QB (see its
-    # docstring), so a failed close never re-publishes them on retry.
     published_to_qb = self._publish_drafts_to_qb(
       session, graph_id, period_start, period_end, actor_id=actor_id
     )
 
-    # The exclusive period fence (taken by `close_period` / `reopen_period`
-    # around this call and their commit) is what serializes the whole
-    # operation, including the QB publish above. That fence is
-    # session-scoped on a dedicated connection because the publish
-    # **commits** — a FOR UPDATE taken before it would be released.
-    #
-    # The row lock here is the second half: it serializes the database
-    # close against anyone who skipped the fence, and it revalidates
-    # status so a loser cannot treat `closed` as a normal first-close
-    # and stamp again. Writers participate via the shared side of the
-    # same fence in `assert_period_not_closed`.
+    # The caller's session-scoped period fence serializes the whole close
+    # (a FOR UPDATE would not survive the publish's commit). This row lock
+    # guards against anyone who skipped the fence, and the status recheck
+    # stops a losing closer from stamping again.
     session.flush()
     with bounded_lock_wait(
       session,
@@ -344,10 +234,7 @@ class PeriodCloseService:
       raise PeriodAlreadyClosedError(period)
     is_reclose = fp.status == "closing"
 
-    # 3. Draft → posted. The pre-publish step already promoted every
-    # draft it published, so this bulk pass covers only what remains
-    # (local-only drafts); the receipt's entries_posted is the sum of
-    # both paths.
+    # Drafts the pre-publish step published are already posted.
     now = datetime.now(UTC)
     retracted_event_ids = session.query(Event.id).filter(
       Event.status.in_(WRITEBACK_EXCLUDED_EVENT_STATUSES)
@@ -371,19 +258,12 @@ class PeriodCloseService:
     entries_posted = posted_locally + published_to_qb
     session.flush()
 
-    # 4. Advance / reclose. Capture target before so we can report
-    # auto-advance to the caller. This runs BEFORE the FiscalPeriod
-    # transition below: on a never-closed calendar (closed_through IS
-    # NULL) both `advance_closed_through`'s sequence check and
-    # `is_latest_sequential_close` resolve the expected next close from
-    # the earliest NON-closed FiscalPeriod — flipping this period's
-    # status first would make that lookup land on the FOLLOWING month
-    # and reject (or mis-route) every first close.
+    # Must run before this period flips to closed: on a never-closed
+    # calendar the sequence check resolves the expected close from the
+    # earliest non-closed FiscalPeriod, which has to still be this one.
     cal_before = self._fcs.get(session, graph_id)
     target_before = cal_before.close_target_period if cal_before else None
 
-    # Build an audit-friendly note. When the sync gate was overridden, we
-    # record that explicitly so compliance audits can flag the close.
     effective_note = self._audit_note(
       note,
       allow_stale_sync=allow_stale_sync and has_sync_connection,
@@ -395,7 +275,6 @@ class PeriodCloseService:
       ),
     )
 
-    # Route: latest-reopen vs older-reopen reclose vs normal advance
     if is_reclose and not self._fcs.is_latest_sequential_close(
       session,
       graph_id,
@@ -425,18 +304,15 @@ class PeriodCloseService:
       and calendar.close_target_period is not None
     )
 
-    # 5. FiscalPeriod transition
     fp.status = "closed"
     fp.closed_at = now
     fp.closed_by = actor_id
     session.flush()
 
-    # 5b. Canonical statement stamping — the close IS the act that
-    # persists the month's statements. Replace semantics inside the
-    # stamper make this idempotent for first-close, reclose, and
-    # retry-after-failure; StatementStampError propagates so the whole
-    # close (including the transitions above) rolls back rather than
-    # leaving a closed month with no canonical sets.
+    # Replace semantics make this idempotent across reclose and retry.
+    # StatementStampError rolls back the whole close rather than leave a
+    # closed month with no canonical statements. Runs after draft→posted
+    # because the pivot reads posted entries only.
     stamp = self._stamp_statement_sets(
       session,
       graph_id=graph_id,
@@ -445,13 +321,7 @@ class PeriodCloseService:
       actor_id=actor_id,
     )
 
-    # 6. Auto-run rules on schedules with facts in the closing period.
-    # Rule failures are isolated from the close result: the close succeeds
-    # even if a rule errors, and the failure surfaces only in rule_summary
-    # / verification_results for downstream inspection. This keeps the
-    # close path as the "single source of truth" while letting the
-    # validation panel accumulate fresh results without an explicit
-    # `POST /evaluate-rules` call.
+    # Rule failures never fail the close; they surface in rule_summary.
     rule_summary, evaluated_ids = self._evaluate_schedule_rules_in_period(
       session,
       period_start=period_start,
@@ -486,19 +356,14 @@ class PeriodCloseService:
       statement_rule_summary=stamp.rule_summary,
     )
 
-    # 7. Stamp the receipt onto the period row. This assignment rides the
-    # SAME transaction as the `status='closed'` flip in step 5, so a
-    # committed close always carries its receipt and a rolled-back one
-    # carries none — the two can never disagree. Everything above is
-    # already computed; nothing here can fail the close.
+    # Same transaction as the status flip, so a close and its receipt
+    # commit or roll back together.
     fp.close_receipt = _build_close_receipt(
       result, actor_id=actor_id, actor_type=actor_type, closed_at=now
     )
     session.flush()
 
     return result
-
-  # ── Private helpers ────────────────────────────────────────────────────
 
   def _stamp_statement_sets(
     self,
@@ -509,13 +374,6 @@ class PeriodCloseService:
     period_end,
     actor_id: str,
   ) -> StatementStampResult:
-    """Run the canonical statement stamper (injected or lazily resolved).
-
-    Lazy import mirrors `_evaluate_schedule_rules_in_period` — the close
-    service stays free of information-block/report dependencies at module
-    import time, and mocked-session tests inject a stub stamper instead
-    of exercising the pivot.
-    """
     stamper = self._statement_stamper
     if stamper is None:
       from robosystems.operations.roboledger.reports.statement_sets import (
@@ -540,37 +398,15 @@ class PeriodCloseService:
     *,
     actor_id: str,
   ) -> int:
-    """Close-period pre-publish step. Returns the count published.
+    """Publish in-period RoboLedger-originated drafts to QuickBooks.
 
-    For graphs with at least one QB connection in
-    ``write_policy='qb_authoritative'`` / ``'hybrid'``, batch-publish
-    every in-period draft Entry whose triggering Event has
-    ``source IN ('schedule', 'manual')`` to that QB connection. Each
-    successful publish also promotes its draft to posted, so the
-    returned count feeds the close receipt's ``entries_posted`` total
-    (the bulk transition that follows no longer sees these drafts).
+    Only for graphs with a write-back QB connection. Each publish also posts
+    its draft; returns the count published. Every rejection is collected,
+    then `WritebackFailed` is raised before the close mutates anything.
 
-    Any per-event QB rejection collects into a list and raises
-    `WritebackFailed` BEFORE the close's draft→posted transition, so no
-    close state mutates on failure. The operator fixes the offending
-    entries (mapping issue, balance error, period closed in QB) and
-    retries.
-
-    NOT atomic with the close, deliberately: each successful publish
-    stamps `Event.metadata['qb_external_id']` — the only dedupe marker —
-    and those markers are COMMITTED at the end of this step, before any
-    failure can roll them back. A QB JournalEntry is an external write
-    that already happened; losing its marker to a rollback would make
-    the retried close re-publish the same drafts as duplicates in the
-    customer's QuickBooks. Retries skip already-marked events via
-    `select_writeback_eligible_entries`.
-
-    Skipped silently when:
-    - No QB connection on the graph has qb_authoritative / hybrid policy
-      (operator hasn't opted into write-back).
-    - Period has no draft entries from RL-originated sources (no work
-      to do — handler-approved drafts already wrote-back, or it's a
-      native-only graph).
+    Deliberately not atomic with the close: the `qb_external_id` markers
+    (the only dedupe key) are committed here so a failed close can't roll
+    them back and have the retry publish duplicates into QuickBooks.
     """
     from robosystems.database import SessionFactory as _PlatformSessionFactory
     from robosystems.models.api.event_block import ExecuteEventBlockRequest
@@ -581,9 +417,8 @@ class PeriodCloseService:
       select_writeback_eligible_entries,
     )
 
-    # Resolve the QB connection close publishes to. Shared with the
-    # outbox read (`list_period_drafts`) so the preview of "what will
-    # publish" can't drift from this actual write.
+    # Shared with the outbox read (`list_period_drafts`) so its preview
+    # matches this write.
     with _PlatformSessionFactory() as platform_session:
       writeback = resolve_writeback_connection(platform_session, graph_id)
     if writeback is None:
@@ -594,8 +429,6 @@ class PeriodCloseService:
       return 0
     qb_connection_id = writeback.connection_id
 
-    # In-period draft entries from RL-originated events not already in QB
-    # (same predicate the outbox read previews — see qb_writeback.py).
     drafts_to_publish = select_writeback_eligible_entries(
       session, period_start, period_end
     )
@@ -612,11 +445,7 @@ class PeriodCloseService:
       f"event(s) to QB connection {qb_connection_id} before close"
     )
 
-    # Heads-up: each publish does a synchronous QB API round-trip
-    # (~1-3s) inside the open extensions session. A large batch holds
-    # the extensions transaction open + consumes connection-pool
-    # capacity for the duration. Visible batches are flagged below so
-    # the operational signal is in the logs.
+    # Each publish is a synchronous QB round-trip inside the open transaction.
     if len(drafts_to_publish) > 5:
       logger.warning(
         f"Graph {graph_id}: pre-publishing {len(drafts_to_publish)} drafts in "
@@ -625,25 +454,13 @@ class PeriodCloseService:
         f"windows)."
       )
 
-    # Publish each, collecting failures rather than failing fast — the
-    # operator wants to see ALL offenders, not the first.
+    # Collect every failure rather than failing fast.
     failed_events: list[dict] = []
     for entry, event in drafts_to_publish:
       try:
-        # Each publish runs in its own SAVEPOINT so a database error here
-        # cannot take the whole batch down with it.
-        #
-        # `execute_event_block` bounds its wait for the event's row lock, so a
-        # conflicting writer surfaces as an error over an **aborted**
-        # transaction rather than as a block. Without a savepoint the loop
-        # would carry on collecting failures while every later statement failed
-        # on that aborted transaction, and the `session.commit()` below — the
-        # one whose entire purpose is to make the qb_external_id markers
-        # durable — would go down with it. QuickBooks would be holding journal
-        # entries the ledger has no record of sending, and the retried close
-        # would publish them a second time once QB's RequestId dedup window
-        # expired. The savepoint keeps a failed publish to the one entry that
-        # failed, so the markers for entries that did reach QB still commit.
+        # Savepoint: a database error (e.g. a lock-wait timeout) would
+        # otherwise abort the transaction and take down the marker commit
+        # below, leaving QB entries the ledger has no record of sending.
         with session.begin_nested():
           result = execute_event_block(
             session,
@@ -657,7 +474,6 @@ class PeriodCloseService:
             entry_ids=[str(entry.id)],
           )
         if result.qb_error is not None:
-          # QB rejected — collect for the batch error.
           failed_events.append(
             {
               "event_id": str(event.id),
@@ -668,8 +484,6 @@ class PeriodCloseService:
             }
           )
       except Exception as e:
-        # Unexpected (auth, network, ValueError). Capture and continue
-        # so the operator sees the full failure surface.
         failed_events.append(
           {
             "event_id": str(event.id),
@@ -680,18 +494,9 @@ class PeriodCloseService:
           }
         )
 
-    # Durability boundary: the qb_external_id markers written by the loop
-    # record JournalEntries that now exist in QuickBooks, so they must
-    # survive whatever happens to the rest of the close. This is the
-    # close's first mutation point. The session stays bound to the tenant
-    # across it — `extensions_session` re-binds search_path on every
-    # transaction, not just the first (see `db.extensions.bind_search_path`),
-    # so the connection the pool hands back for the rest of the close is
-    # scoped the same as the one this commit released. Without this
-    # commit, a later failure — the WritebackFailed below, a
-    # StatementStampError, a failed final commit — would roll the markers
-    # back while the QB writes stand, and the retried close would
-    # re-publish the same drafts into QuickBooks as duplicates.
+    # Durability boundary for the qb_external_id markers. The session stays
+    # tenant-scoped across it: `extensions_session` re-binds search_path on
+    # every transaction.
     session.commit()
 
     if failed_events:
@@ -705,13 +510,6 @@ class PeriodCloseService:
     period_start,
     period_end,
   ) -> None:
-    """Pre-flight check: does debit total equal credit total for the period?
-
-    Runs across BOTH draft and posted entries — the draft entries are
-    about to be posted, so they need to balance for the close to succeed.
-    Raises `UnbalancedLedgerError` if not. Because this runs before any
-    mutation, there's no state to roll back.
-    """
     row = session.execute(
       text("""
         SELECT
@@ -738,28 +536,16 @@ class PeriodCloseService:
     period_end,
     actor_id: str,
   ) -> tuple[dict[str, int] | None, tuple[str, ...]]:
-    """Run the rule engine for every schedule Structure with facts in the
-    closing period. Returns (rule_summary, evaluated_structure_ids).
+    """Evaluate rules on every schedule with facts in the period.
 
-    Failures from individual rule evaluations are caught and logged —
-    they cannot break the close path, which has already succeeded by
-    the time this is called. The rule engine itself converts
-    binding/dispatch failures into ``VerificationResult`` rows with
-    ``status='error'``; this wrapper only guards against an outright
-    engine exception.
+    Returns (rule_summary, evaluated_structure_ids). An engine exception is
+    logged and skipped; it never fails the close.
     """
-    # Lazy import — keeps the close service free of information-block
-    # dependencies at module import time.
     from robosystems.operations.information_block.rules.engine import (
       evaluate_rules_for_structure,
     )
 
-    # Unqualified table names — relies on `extensions_session(graph_id)`
-    # having SET the tenant's search_path before this method runs. The
-    # close service is only called from that session context (REST
-    # handler + MCP tool both go through `cmd_close_period`); any
-    # refactor that bypasses the tenant session must qualify these
-    # tables explicitly to avoid silently querying the wrong schema.
+    # Unqualified table names: relies on the tenant search_path.
     structure_ids = (
       session.execute(
         text(
@@ -785,11 +571,8 @@ class PeriodCloseService:
     tally: dict[str, int] = {"pass": 0, "fail": 0, "error": 0, "skipped": 0}
     for sid in structure_ids:
       try:
-        # Under a savepoint: rule evaluation writes VerificationResult rows,
-        # and a database-level failure there would otherwise abort the close's
-        # transaction after the QB markers committed — the final commit then
-        # fails on flush pointing at the wrong thing, deterministically, with
-        # QuickBooks already holding the entries.
+        # Savepoint: a database error in rule writes must not abort the
+        # close's transaction after the QB markers committed.
         with session.begin_nested():
           rows = evaluate_rules_for_structure(
             session,
@@ -814,12 +597,7 @@ class PeriodCloseService:
     stranded_overridden_count: int = 0,
     reconciling_overridden_count: int = 0,
   ) -> str | None:
-    """Annotate the audit note when a close gate was overridden.
-
-    This ensures the `period_closed` event reflects that a human asserted
-    "the data is complete despite the stale sync" — or knowingly closed
-    over undrafted obligations — which matters for compliance review.
-    """
+    """Append a marker to the audit note for each overridden close gate."""
     suffixes: list[str] = []
     if allow_stale_sync:
       suffixes.append("[sync gate overridden — allow_stale_sync=true]")

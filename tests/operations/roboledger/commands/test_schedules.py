@@ -1109,7 +1109,8 @@ class TestScheduleLoaderTakesABoundedLock:
     return source[start : source.index("\ndef ", start + 1)]
 
   def test_takes_the_row_lock(self):
-    assert "with_for_update()" in self._source()
+    body = self._source()
+    assert "lock_by_id(" in body or "with_for_update(" in body
 
   def test_bounds_the_wait(self):
     body = self._source()

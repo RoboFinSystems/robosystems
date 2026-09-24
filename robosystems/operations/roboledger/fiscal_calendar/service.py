@@ -1,25 +1,9 @@
 """Rolling close state for the fiscal calendar.
 
-Tracks closed_through and close_target pointers and validates closeable
-preconditions; close workflow orchestration lives in the close-period
-operation.
-
-Responsibilities:
-
-- Lazily creates a `FiscalCalendar` row per graph (idempotent)
-- Maintains the `closed_through_period` ← `close_target_period` pointers
-- Validates every closeable precondition (sequence / period complete / sync current)
-- Advances `closed_through` when a period is closed, auto-advancing
-  `close_target` when reached
-- Appends an audit event to `fiscal_calendar_events` on every mutation
-
-Routers / higher-level services call this class; it takes an extensions
-DB session and operates within the caller's transaction.
-
-The sync-current gate needs information from the platform DB (connections
-table), which the service does not access directly. Callers pass it in via
-the `last_sync_at` parameter on `closeable_gate`. None means "no QB
-connection exists," which passes the gate unconditionally.
+Owns the `closed_through_period` / `close_target_period` pointers, the
+closeable gate, and the `fiscal_calendar_events` audit trail. Operates
+within the caller's extensions-DB transaction; close orchestration lives in
+the close-period operation.
 """
 
 from __future__ import annotations
@@ -47,19 +31,10 @@ from .periods import (
   previous_period,
 )
 
-# ────────────────────────────────────────────────────────────────────────────
-# Types
-# ────────────────────────────────────────────────────────────────────────────
-
 
 @dataclass
 class PendingObligationDetail:
-  """One pending schedule-derived obligation that's blocking close.
-
-  Surfaced on `CloseableGateResult` when the `pending_obligations`
-  blocker is present so callers (AI close agent, UI, audit) can name
-  which schedules need promotion without a sidecar query.
-  """
+  """One schedule-derived obligation blocking close, named for the caller."""
 
   event_id: str
   schedule_id: str | None
@@ -69,50 +44,32 @@ class PendingObligationDetail:
 
 @dataclass
 class CloseableGateResult:
-  """Outcome of the closeable gate check for a single period.
+  """Outcome of the closeable gate for one period.
 
-  When `is_closeable` is False, `blockers` holds one or more well-known
-  reason codes that the caller can surface as structured validation errors.
-
-  When a specific blocker has actionable detail (count of items, sample
-  names, age), the relevant `*_detail` fields below are populated. These
-  default to None / 0 / [] when the corresponding blocker isn't active.
+  `blockers` holds the reason codes below. The detail fields default to
+  None / 0 / [] when their blocker isn't active.
   """
 
   is_closeable: bool
   blockers: list[str] = field(default_factory=list)
 
-  # Detail fields for `pending_obligations` — populated when the blocker
-  # fires so an agent can name which schedules to promote rather than
-  # falling back to a sidecar Cypher / SQL query.
   pending_obligation_count: int = 0
   pending_obligation_sample: list[PendingObligationDetail] = field(default_factory=list)
   earliest_pending_period: str | None = None
 
-  # Detail field for `sync_stale` — days since the last successful sync,
-  # so callers can phrase "sync is N days stale" instead of guessing.
-  # None when the blocker is not active.
+  # None when not stale, or when the connection has never synced.
   sync_stale_days: int | None = None
 
-  # Detail fields for `stranded_obligations` — matured obligations already
-  # flipped to `classified` (by a co-pilot sweep) whose closing entry was
-  # never drafted. These are always populated when such obligations exist,
-  # even when the blocker is bypassed via allow_stranded_obligations, so
-  # the close audit trail can record how many entries were knowingly
-  # omitted.
+  # Stranded and reconciling details populate even when their blocker is
+  # bypassed, so the close audit trail records what was knowingly closed over.
   stranded_obligation_count: int = 0
   stranded_obligation_sample: list[PendingObligationDetail] = field(
     default_factory=list
   )
 
-  # Detail fields for `reconciling_items` — posted events whose source
-  # payload changed afterwards and that nobody has dispositioned yet.
-  # Populated even when bypassed via allow_reconciling_items, so the close
-  # audit trail records what was knowingly closed over.
   reconciling_item_count: int = 0
   reconciling_item_sample: list[str] = field(default_factory=list)
 
-  # Machine-readable codes
   SEQUENCE = "sequence_violation"
   PERIOD_INCOMPLETE = "period_incomplete"
   SYNC_STALE = "sync_stale"
@@ -121,11 +78,6 @@ class CloseableGateResult:
   PENDING_OBLIGATIONS = "pending_obligations"
   STRANDED_OBLIGATIONS = "stranded_obligations"
   RECONCILING_ITEMS = "reconciling_items"
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# Validation errors
-# ────────────────────────────────────────────────────────────────────────────
 
 
 class FiscalCalendarError(ValueError):
@@ -144,23 +96,10 @@ class AdvanceSequenceError(FiscalCalendarError):
   """Raised when advance_closed_through() receives a non-sequential period."""
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# Service
-# ────────────────────────────────────────────────────────────────────────────
-
-
 class FiscalCalendarService:
-  """Manages fiscal calendar state for a graph.
-
-  All methods take an extensions DB session with search_path already set
-  to the tenant schema. Callers (routers, other services) handle session
-  lifecycle and transaction management.
-  """
-
-  # ── Read ────────────────────────────────────────────────────────────────
+  """Fiscal calendar state for a graph. Sessions arrive tenant-scoped."""
 
   def get(self, session: Session, graph_id: str) -> FiscalCalendar | None:
-    """Return the fiscal calendar for a graph, or None if not initialized."""
     return (
       session.query(FiscalCalendar)
       .filter(FiscalCalendar.graph_id == graph_id)
@@ -168,7 +107,6 @@ class FiscalCalendarService:
     )
 
   def require(self, session: Session, graph_id: str) -> FiscalCalendar:
-    """Return the fiscal calendar for a graph, raising if not initialized."""
     calendar = self.get(session, graph_id)
     if calendar is None:
       raise FiscalCalendarError(
@@ -180,15 +118,10 @@ class FiscalCalendarService:
   def require_locked(self, session: Session, graph_id: str) -> FiscalCalendar:
     """`require`, with the calendar row locked for the write that follows.
 
-    The pointer writers — set-close-target, close's advance, reopen's
-    retreat — are read-decide-write over ``closed_through_period`` /
-    ``close_target_period``. Close and reopen already run under the
-    exclusive period fence and the FiscalPeriod row lock, but
-    set-close-target takes neither, so an operator moving the target while
-    a close auto-advances it was a lost update on whichever wrote second.
-    Locking the calendar row serializes the three; taken after the
-    FiscalPeriod row where both are held, so the order is one-directional.
-    Bounded, because every caller is request-facing.
+    Serializes the pointer writers (set-close-target, close's advance,
+    reopen's retreat); set-close-target holds no period fence, so without
+    this it races a close's auto-advance. Lock order: FiscalPeriod row
+    first, then this. The wait is bounded because callers are request-facing.
     """
     from robosystems.operations.locking import bounded_lock_wait
 
@@ -212,8 +145,6 @@ class FiscalCalendarService:
       )
     return calendar
 
-  # ── Create / initialize ─────────────────────────────────────────────────
-
   def get_or_create(
     self,
     session: Session,
@@ -222,12 +153,7 @@ class FiscalCalendarService:
     fiscal_year_start_month: int = 1,
     created_by: str | None = None,
   ) -> FiscalCalendar:
-    """Return the existing calendar for a graph, or create a fresh one.
-
-    This is the idempotent entry point — safe to call repeatedly without
-    side effects. Does NOT set `closed_through_period` or `close_target_period`
-    on creation. Use `initialize` for the full setup flow.
-    """
+    """Idempotent. Leaves both pointers unset; `initialize` does full setup."""
     calendar = self.get(session, graph_id)
     if calendar is not None:
       return calendar
@@ -242,8 +168,7 @@ class FiscalCalendarService:
     try:
       session.flush()
     except IntegrityError as exc:
-      # Two initializations racing past the `get` above: the second one
-      # trips `uq_fiscal_calendar_graph`. Say what happened instead of 500.
+      # Two initializations raced past the `get` above.
       if not violates(exc, "uq_fiscal_calendar_graph"):
         raise
       raise CalendarAlreadyInitializedError(
@@ -268,17 +193,11 @@ class FiscalCalendarService:
   ) -> FiscalCalendar:
     """One-time ledger initialization.
 
-    Creates the fiscal calendar, sets `closed_through_period` to the given
-    value (or None for "fresh business, never closed"), and sets
-    `close_target_period` to the period immediately after `closed_through`
-    (or None if closed_through is None — caller will set target explicitly).
+    `closed_through=None` means a fresh business that has never closed; the
+    target is then left for the caller to set. Otherwise the target becomes
+    the month after `closed_through`, which must be a completed month.
 
-    `closed_through` must be ≤ the last completed calendar month;
-    `fiscal_year_start_month` is 1-12; `actor_type` is one of 'user',
-    'agent', 'system'.
-
-    Raises `CalendarAlreadyInitializedError` if the graph is already
-    initialized (use the reopen flow to undo prior closes), and
+    Raises `CalendarAlreadyInitializedError` if already initialized, and
     `InvalidCloseTargetError` if `closed_through` is malformed or future.
     """
     existing = self.get(session, graph_id)
@@ -330,8 +249,6 @@ class FiscalCalendarService:
     )
     return calendar
 
-  # ── Target management ───────────────────────────────────────────────────
-
   def set_close_target(
     self,
     session: Session,
@@ -342,18 +259,12 @@ class FiscalCalendarService:
     actor_type: str = "user",
     note: str | None = None,
   ) -> FiscalCalendar:
-    """Set the close target for a graph.
+    """Set the close target: a completed month at or after `closed_through`.
 
-    Validates that:
-    - `period` is a well-formed YYYY-MM string
-    - `period` is ≤ last completed calendar month
-    - `period` is ≥ current `closed_through_period` (moving target backward
-      uses the reopen flow, not this operation)
+    Moving it before `closed_through` is the reopen flow's job. Setting the
+    current value still records a `target_changed` event.
 
-    Emits a `target_changed` event. Safe to call with the current value
-    (no-op with an audit event, useful for "touching" the target).
-
-    Raises ``InvalidCloseTargetError`` on any validation failure, and
+    Raises ``InvalidCloseTargetError`` on validation failure, and
     ``FiscalCalendarError`` if the calendar has not been initialized.
     """
     try:
@@ -395,21 +306,11 @@ class FiscalCalendarService:
     logger.info(f"Fiscal calendar {graph_id} close_target {previous_value} → {period}")
     return calendar
 
-  # ── Closed-through advance / retreat ───────────────────────────────────
-
   def _earliest_open_period(self, session: Session, graph_id: str) -> str | None:
-    """Return the name (YYYY-MM) of the earliest non-closed FiscalPeriod, or None.
+    """Earliest non-closed FiscalPeriod name (YYYY-MM), or None if none exist.
 
-    Used to determine the expected first close when `closed_through` is None.
-    The invariant is that the first close must be the chronologically earliest
-    open period — otherwise closing (say) March first would strand Jan and Feb
-    forever because `closed_through` jumps past them and the sequence gate
-    would permanently reject earlier periods.
-
-    A period is considered "open" if its status is not 'closed'. An empty
-    return means no FiscalPeriod rows exist at all, in which case the caller
-    should accept any well-formed period (initialize hasn't run, or the graph
-    has no period rows yet).
+    The first close must be this period: closing a later one first would move
+    `closed_through` past the earlier months and strand them for good.
     """
     row = (
       session.query(FiscalPeriod.name)
@@ -427,21 +328,9 @@ class FiscalCalendarService:
     calendar: FiscalCalendar,
     period: str,
   ) -> bool:
-    """Whether `period` is the "next sequential close" for this calendar.
+    """Whether closing `period` should advance `closed_through`.
 
-    This is the public version of the comparison used by the close flow to
-    route a re-close of a reopened FiscalPeriod:
-
-    - ``True``  → the period IS the sequential next close (either because
-      ``next_period(closed_through) == period`` when the pointer is set, or
-      because ``period`` equals the earliest open FiscalPeriod when it is
-      ``None``). The close flow should advance ``closed_through``.
-    - ``False`` → anything else. For a reopened period that does not match,
-      the close flow should just record a reclose event without moving the
-      pointer.
-
-    Callers should use this helper rather than reaching into
-    ``_earliest_open_period`` directly.
+    False routes a reopened period to `record_reclose` instead.
     """
     if calendar is None:
       return False
@@ -459,33 +348,19 @@ class FiscalCalendarService:
     actor_type: str = "user",
     note: str | None = None,
   ) -> FiscalCalendar:
-    """Advance `closed_through_period` to `period`.
+    """Advance `closed_through_period` to `period` after a close.
 
-    Called by the period-close flow after a period has been marked closed.
-    Requires strict sequence:
+    `period` must be `closed_through + 1`, or the earliest open FiscalPeriod
+    when `closed_through` is None. Reaching the target auto-advances it to
+    the next month (a `target_advanced_auto` event).
 
-    - If `closed_through` is set: `period == closed_through + 1`
-    - If `closed_through` is None: `period` must equal the earliest open
-      FiscalPeriod for this graph. This prevents closing Mar first when
-      Jan and Feb are still open — which would orphan the earlier months.
-
-    Auto-advances `close_target_period` to `period + 1` when advancement
-    reaches the current target, ensuring a healthy steady-state where the
-    user always has "next month" ready and waiting.
-
-    Emits a `period_closed` event. If auto-advance fires, also emits a
-    `target_advanced_auto` event.
-
-    Raises ``AdvanceSequenceError`` if `period` is not the next sequential
-    period.
+    Raises ``AdvanceSequenceError`` if `period` is out of sequence.
     """
     calendar = self.require_locked(session, graph_id)
 
     if calendar.closed_through_period:
       expected: str | None = next_period(calendar.closed_through_period)
     else:
-      # First close — must target the earliest open FiscalPeriod to avoid
-      # stranding earlier months that haven't been closed yet.
       expected = self._earliest_open_period(session, graph_id) or period
 
     if period != expected:
@@ -513,7 +388,6 @@ class FiscalCalendarService:
       note=note,
     )
 
-    # Auto-advance target when closed_through reaches it
     if (
       calendar.close_target_period is not None
       and calendar.closed_through_period >= calendar.close_target_period
@@ -552,13 +426,10 @@ class FiscalCalendarService:
     actor_type: str = "user",
     note: str | None = None,
   ) -> FiscalCalendar:
-    """Record the re-close of a previously reopened period.
+    """Re-close a reopened period without moving `closed_through_period`.
 
-    Unlike `advance_closed_through`, this does NOT move the
-    `closed_through_period` pointer — a reopened period that is not the
-    latest close never caused the pointer to retreat, so re-closing it
-    shouldn't shift it either. We just bump `last_close_at` and emit a
-    `period_closed` event for the audit trail.
+    A reopen of a non-latest period never retreated the pointer, so its
+    re-close must not advance it.
     """
     calendar = self.require_locked(session, graph_id)
     calendar.last_close_at = datetime.now(UTC)
@@ -593,21 +464,12 @@ class FiscalCalendarService:
     actor_type: str = "user",
     note: str | None = None,
   ) -> FiscalCalendar:
-    """Move `closed_through_period` backward in response to a reopen.
+    """Retreat `closed_through_period` by one if `reopened_period` is it.
 
-    Used by the reopen flow. If the reopened period is the current
-    `closed_through_period`, retreats it to `reopened_period - 1`.
-    Otherwise this is a no-op. The public `reopen_period` never reaches
-    that branch — it refuses any period other than `closed_through`, so a
-    later month is never left stamped from numbers that just became
-    mutable. The backfill's restamp does reach it: it reopens and recloses
-    an interior month in one transaction and walks forward to
-    `closed_through`, so the series is consistent when it finishes.
-
-    Does NOT modify `close_target_period` — that's a separate user decision
-    after reopening.
-
-    Emits a `period_reopened` event with the required `reason`.
+    Otherwise only the event is recorded: the public reopen refuses any
+    other period, and the backfill restamp reopens an interior month and
+    recloses forward within one transaction. `close_target_period` is left
+    alone.
     """
     if not reason:
       raise FiscalCalendarError("reopen requires a non-empty reason")
@@ -638,8 +500,6 @@ class FiscalCalendarService:
     )
     return calendar
 
-  # ── Closeable gate ──────────────────────────────────────────────────────
-
   def closeable_gate(
     self,
     session: Session,
@@ -653,40 +513,16 @@ class FiscalCalendarService:
     allow_stranded_obligations: bool = False,
     allow_reconciling_items: bool = False,
   ) -> CloseableGateResult:
-    """Check whether `period` can be closed right now.
+    """Check whether `period` can be closed now. Read-only; every blocker is
+    returned, not just the first.
 
-    The gates (checked in order; all blockers returned, not short-circuited):
+    Gates: sequence; period complete; sync current; no pending obligations;
+    no stranded obligations (bypass: `allow_stranded_obligations`); no
+    unresolved reconciling items (bypass: `allow_reconciling_items`).
 
-    1. **Sequence**: `period == closed_through + 1` (or `period` is the first
-       close if `closed_through` is None).
-    2. **Period complete**: `period.end_date < today`. The current month cannot
-       be closed until it ends.
-    3. **Sync current**: if `has_sync_connection` is True, `last_sync_at` must
-       be >= `period.end_date`. A missing `last_sync_at` with an active
-       connection is treated as stale (never synced). When `has_sync_connection`
-       is False the gate passes unconditionally.
-    4. **Pending obligations**: no matured `pending` `schedule_entry_due`
-       events remain (promote or void them).
-    4b. **Stranded obligations**: no matured `classified` obligation lacks a
-       drafted closing entry — the population a co-pilot sweep creates and
-       the pending count can't see; closing over them silently omits
-       adjusting entries. Bypass with `allow_stranded_obligations` (the
-       count still populates for the audit trail). The remedy is
-       `promote-obligations` with `dispatch_handlers=true`, which reaches
-       them, or voiding the obligation.
-    4c. **Reconciling items**: no posted event in or before this period is
-       still flagged as changed upstream. Each is a difference between the
-       books and the source system that someone has to decide about;
-       closing over one stamps statements the next sync will contradict.
-       Bypass with `allow_reconciling_items` (the count still populates).
-       The remedy is `resolve-reconciling-item` per item.
-
-    Callers fetch `has_sync_connection` and `last_sync_at` from the platform
-    DB (connections table). The two are distinct signals — a fresh connection
-    exists with `last_sync_at=None`, and that MUST block closing, whereas no
-    connection at all passes.
-
-    This method is **read-only** — it does not mutate state or emit events.
+    `has_sync_connection` and `last_sync_at` come from the platform DB and
+    are distinct: no connection passes the sync gate, but a connection that
+    has never synced (`last_sync_at=None`) blocks.
     """
     today = today or date.today()
     blockers: list[str] = []
@@ -698,11 +534,8 @@ class FiscalCalendarService:
         blockers=[CloseableGateResult.NO_CALENDAR],
       )
 
-    # Is this a re-close of a previously reopened period? A reopened
-    # FiscalPeriod has status='closing' and may live anywhere in the
-    # closed range (we intentionally don't retreat closed_through for
-    # non-latest reopens). Re-closes skip the sequence / already_closed
-    # gates — they're filling in an existing gap, not advancing the cursor.
+    # A reopened period ('closing') can sit anywhere in the closed range;
+    # re-closing it fills a gap, so the sequence gates don't apply.
     fp_row = (
       session.query(FiscalPeriod)
       .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
@@ -710,12 +543,6 @@ class FiscalCalendarService:
     )
     is_reclose = fp_row is not None and fp_row.status == "closing"
 
-    # Gate 1: sequence
-    #
-    # When closed_through is set, the next close must be closed_through + 1.
-    # When it's None (fresh business, first close), the next close must be
-    # the earliest open FiscalPeriod for this graph — otherwise closing a
-    # later period first would permanently strand earlier open months.
     if not is_reclose:
       if calendar.closed_through_period:
         expected: str | None = next_period(calendar.closed_through_period)
@@ -724,7 +551,6 @@ class FiscalCalendarService:
       if expected is not None and period != expected:
         blockers.append(CloseableGateResult.SEQUENCE)
 
-    # Gate 1b: period already closed? Skipped for re-closes.
     if (
       not is_reclose
       and calendar.closed_through_period is not None
@@ -732,28 +558,16 @@ class FiscalCalendarService:
     ):
       blockers.append(CloseableGateResult.ALREADY_CLOSED)
 
-    # Gate 2: period complete
-    #
-    # Use strict `>=` not `>`: a period cannot be closed until the day
-    # AFTER its last calendar day. Example: January cannot be closed on
-    # Jan 31 — you must wait until Feb 1. The reason is that intraday
-    # transactions (bank feeds, QB polling) can still post on the last
-    # day of the month, and closing before EOD risks missing them. This
-    # is stricter than some accounting systems that allow "close on
-    # last day," and it's intentional.
+    # Not closeable until the day after month end: transactions can still
+    # post during the last day.
     period_start, period_end = period_date_range(period)
     if period_end >= today:
       blockers.append(CloseableGateResult.PERIOD_INCOMPLETE)
 
-    # Gate 3: sync current (soft fail). Only applies when a sync connection exists.
-    # "Connection exists but never synced" (last_sync_at is None) is treated as
-    # stale and blocks the close — you can't commit a period that hasn't seen
-    # any data from the authoritative source.
     sync_stale_days: int | None = None
     if not allow_stale_sync and has_sync_connection:
       if last_sync_at is None:
         blockers.append(CloseableGateResult.SYNC_STALE)
-        # "Never synced" — no meaningful day count to report.
       else:
         last_sync_date = (
           last_sync_at.date() if hasattr(last_sync_at, "date") else last_sync_at
@@ -762,14 +576,7 @@ class FiscalCalendarService:
           blockers.append(CloseableGateResult.SYNC_STALE)
           sync_stale_days = (period_end - last_sync_date).days
 
-    # Gate 4: pending obligations. Schedules materialize one `pending`
-    # `schedule_entry_due` event per period. The period cannot be closed
-    # while any of those obligations remain pending: the corresponding
-    # draft entries have either not yet been classified by the obligation
-    # sensor or the operator has not yet voided them. The user-facing
-    # remedy is to promote each obligation (manually via
-    # `update-event-block`, or automatically via the obligation sensor)
-    # or to void them.
+    # Matured schedule obligations still pending: promote or void them.
     period_end_dt = datetime.combine(period_end, time(23, 59, 59), tzinfo=UTC)
     pending_count = (
       session.query(Event)
@@ -784,10 +591,6 @@ class FiscalCalendarService:
     earliest_pending_period: str | None = None
     if pending_count > 0:
       blockers.append(CloseableGateResult.PENDING_OBLIGATIONS)
-      # Look up the earliest few pending obligations + their schedule names
-      # so callers can name what's blocking close. Cap at 5 to keep the
-      # response compact; full enumeration is available via list-event-blocks
-      # filtered by event_type=schedule_entry_due&status=pending.
       pending_events = (
         session.query(Event)
         .filter(
@@ -800,19 +603,12 @@ class FiscalCalendarService:
         .all()
       )
       pending_sample = self._obligation_sample(session, pending_events)
-      # earliest = the period of the first pending event (already
-      # ordered ASC by occurred_at).
       if pending_sample:
         earliest_pending_period = pending_sample[0].period
 
-    # Gate 4b: stranded obligations. A co-pilot promotion sweep flips
-    # pending → classified without dispatching the drafting handler, so an
-    # obligation can sit at `classified` with no closing entry — invisible
-    # to Gate 4's pending count while representing an adjusting entry the
-    # close would silently omit. The count and sample always populate so
-    # the read surface and the close audit trail can report them; the
-    # blocker is skipped when the caller explicitly accepts the omission
-    # (allow_stranded_obligations).
+    # A promotion sweep that doesn't dispatch handlers leaves obligations
+    # `classified` with no drafted entry: invisible to the pending count, and
+    # an adjusting entry the close would silently omit.
     from robosystems.operations.event_block.promotion import (
       find_stranded_obligations,
     )
@@ -825,13 +621,9 @@ class FiscalCalendarService:
         blockers.append(CloseableGateResult.STRANDED_OBLIGATIONS)
       stranded_sample = self._obligation_sample(session, stranded_events[:5])
 
-    # Gate 4c: unresolved reconciling items. A posted event whose source
-    # payload changed afterwards is a known disagreement between the books
-    # and the source system. Scoped to entries posting on or before this
-    # period's end: a later-dated item says nothing about the months being
-    # closed, while an earlier one would have its catch-up entry land here.
-    # Sample the source identifiers so the operator can name what is
-    # blocking without a second call.
+    # Posted events whose source payload changed afterwards. Items dated
+    # after this period don't affect it; earlier ones would land their
+    # catch-up entry here.
     from robosystems.operations.roboledger.commands.reconciling_items import (
       find_unresolved_reconciling_items,
     )
@@ -863,7 +655,6 @@ class FiscalCalendarService:
   def _obligation_sample(
     session: Session, events: list[Event]
   ) -> list[PendingObligationDetail]:
-    """Build detail rows (with schedule names) for obligation `events`."""
     from robosystems.models.extensions.roboledger import Structure
 
     schedule_ids = {
@@ -882,7 +673,6 @@ class FiscalCalendarService:
       meta = evt.metadata_ or {}
       sid = meta.get("schedule_id")
       period_end_iso = meta.get("period_end") or ""
-      # period_end is "YYYY-MM-DD" — derive "YYYY-MM" for the response.
       evt_period = period_end_iso[:7] if period_end_iso else ""
       sample.append(
         PendingObligationDetail(
@@ -894,8 +684,6 @@ class FiscalCalendarService:
       )
     return sample
 
-  # ── Derived state ──────────────────────────────────────────────────────
-
   def gap_periods(
     self,
     calendar: FiscalCalendar,
@@ -903,14 +691,7 @@ class FiscalCalendarService:
     session: Session | None = None,
     graph_id: str | None = None,
   ) -> int:
-    """Return the number of periods between the first-to-close and `close_target`.
-
-    - If target is None → 0 (nothing pending)
-    - If both set → count of periods in (closed_through, target]
-    - If closed_through is None AND session is provided → count from the
-      earliest open FiscalPeriod up to and including target
-    - If closed_through is None and no session → 1 (the target alone)
-    """
+    """Number of periods still to close up to the target."""
     seq = self.catch_up_sequence(calendar, session=session, graph_id=graph_id)
     return len(seq)
 
@@ -921,17 +702,11 @@ class FiscalCalendarService:
     session: Session | None = None,
     graph_id: str | None = None,
   ) -> list[str]:
-    """Return the ordered list of periods to close up to the current target.
+    """Ordered periods to close up to the current target.
 
-    When `closed_through` is set, the sequence starts at `closed_through + 1`.
-    When it is None (fresh business, first close), the sequence starts at
-    the earliest open FiscalPeriod for the graph — so a user who sets a
-    catch-up target of 2026-03 on a fresh tenant with data going back to
-    2026-01 sees ``[2026-01, 2026-02, 2026-03]`` instead of just the target.
-
-    ``session``/``graph_id`` are optional; without them the fresh-business
-    case cannot look up the earliest open period and returns just
-    ``[close_target]``.
+    With `closed_through` unset, the sequence starts at the earliest open
+    FiscalPeriod; that lookup needs `session` and `graph_id`, and without
+    them the result is just ``[close_target]``.
     """
     if calendar.close_target_period is None:
       return []
@@ -940,12 +715,10 @@ class FiscalCalendarService:
         return []
       start = next_period(calendar.closed_through_period)
     else:
-      # Fresh business — sequence starts at the earliest open period.
       if session is not None and graph_id is not None:
         earliest = self._earliest_open_period(session, graph_id)
         start = earliest or calendar.close_target_period
       else:
-        # No session to consult — the target is the whole sequence.
         return [calendar.close_target_period]
 
     periods: list[str] = []
@@ -954,8 +727,6 @@ class FiscalCalendarService:
       periods.append(current)
       current = next_period(current)
     return periods
-
-  # ── FiscalPeriod row management ────────────────────────────────────────
 
   def ensure_fiscal_periods(
     self,
@@ -966,12 +737,9 @@ class FiscalCalendarService:
     end_period: str,
     closed_through: str | None = None,
   ) -> int:
-    """Create FiscalPeriod rows for every month from start to end (inclusive).
+    """Create missing monthly FiscalPeriod rows from start to end, inclusive.
 
-    Idempotent — existing rows are left alone. Periods ≤ `closed_through`
-    are created with status='closed'; others with status='open'.
-
-    Returns the number of rows actually inserted.
+    Periods ≤ `closed_through` are created closed. Returns rows inserted.
     """
     existing_names = {
       name
@@ -1005,8 +773,6 @@ class FiscalCalendarService:
       session.flush()
     return inserted
 
-  # ── Event emission ─────────────────────────────────────────────────────
-
   def record_event(
     self,
     session: Session,
@@ -1021,11 +787,6 @@ class FiscalCalendarService:
     note: str | None = None,
     reason: str | None = None,
   ) -> FiscalCalendarEvent:
-    """Append an audit event for a fiscal calendar mutation.
-
-    Called internally by every mutating method. Public so higher-level
-    close flows can record their own meta-events against the same calendar.
-    """
     event = FiscalCalendarEvent(
       fiscal_calendar_id=calendar.id,
       graph_id=calendar.graph_id,

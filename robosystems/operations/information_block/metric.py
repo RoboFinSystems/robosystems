@@ -1,16 +1,6 @@
-"""Handlers for ``block_type='metric'`` — the derivative construction mode.
-
-:class:`MetricMechanics` is one arm of the ``ArtifactMechanics``
-discriminated union. The envelope builder renders the standing metric time
-series: every ``factset_type='metric'`` FactSet for the structure becomes
-one period column (they accumulate one per (entity, period_end) via
-``compute-metrics``), and each catalog concept becomes one row with values
-aligned across the period columns.
-
-Custom metric authoring is not supported — the create/update/delete handlers
-raise :class:`NotImplementedError` via the registry's
-``make_not_implemented_handler`` factory. The write surface is the seeded
-catalog plus ``compute-metrics`` / ``assert-metrics``.
+"""Envelope builder for ``block_type='metric'``: one column per standing
+metric FactSet, one row per catalog concept. Facts are written by
+``compute-metrics`` / ``assert-metrics``; the block write slots are stubs.
 """
 
 from __future__ import annotations
@@ -54,19 +44,11 @@ def _load_metric_fact_sets(
   fact_set_id: str | None,
   scenario_id: str | None = None,
 ) -> list[FactSet]:
-  """The structure's standing metric FactSets, oldest period first.
+  """The structure's standing metric FactSets, one per period_end, oldest
+  first (or just ``fact_set_id`` when pinned).
 
-  ``fact_set_id`` pins the series to one set (the Report Block snapshot
-  path). Without a pin, every ``factset_type='metric'`` set for the
-  structure is a period column; when several sets share a period_end
-  (defensive — the compute op upserts one per (entity, period_end)),
-  the newest wins.
-
-  ``scenario_id=None`` loads the actual series only. A non-None value
-  loads actuals AND that scenario's sets merged into one continuous
-  series — with **actuals preferred** where both cover a period_end
-  (the moving seam: a month that closes after the forecast was computed
-  reads as actual, never as the stale projection).
+  A ``scenario_id`` adds that scenario's sets; actuals win at a shared
+  period_end, then newest.
   """
   if fact_set_id is not None:
     row = session.get(FactSet, fact_set_id)
@@ -81,8 +63,6 @@ def _load_metric_fact_sets(
         if scenario_id is None
         else FactSet.scenario_id.is_(None) | (FactSet.scenario_id == scenario_id),
       )
-      # Actuals (NULL scenario) sort before scenario sets per period so
-      # the seam prefers them; newest-first within each slice.
       .order_by(
         FactSet.period_end.asc(),
         FactSet.scenario_id.asc().nulls_first(),
@@ -109,20 +89,9 @@ def build_envelope(
 ) -> InformationBlockEnvelope | None:
   """Pack a metric Structure + its standing time series into the envelope.
 
-  ``series`` is accepted for dispatch-signature parity and ignored — a
-  metric envelope IS the full series already; the flag exists for the
-  statement family, whose default read binds a single set.
-
-  Rendering: one period column per metric FactSet (ascending
-  ``period_end``), one row per catalog concept in presentation-arc
-  order, ``values`` aligned per column (None where a period lacks the
-  metric — e.g. InterestCoverage skipped for a debt-free year). A
-  never-computed block renders the catalog skeleton: rows with no
-  period columns.
-
-  ``scenario_id`` extends the series with that scenario's forward
-  columns (actuals preferred at any overlap — the moving seam); the
-  scenario-sourced columns carry ``"... (forecast)"`` period labels.
+  Always the full series (``series`` is ignored). Rows follow presentation
+  order; a never-computed block renders rows with no columns.
+  ``scenario_id`` adds that scenario's forward columns, labelled as forecast.
   """
   atoms = load_base_envelope_atoms(
     session,
@@ -180,9 +149,6 @@ def build_envelope(
       RenderingPeriodLite(
         start=fs.period_start if fs.period_start is not None else fs.period_end,
         end=fs.period_end,
-        # Scenario-sourced columns are labeled honestly AND flagged
-        # machine-readably; actual columns keep label=None (the
-        # frontend formats dates) and no flag.
         label=(
           f"{fs.period_end.strftime('%b %Y')} (forecast)"
           if fs.scenario_id is not None

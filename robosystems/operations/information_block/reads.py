@@ -1,15 +1,5 @@
-"""Read operations for Information Blocks — envelope lookups + listing.
-
-The two public reads are the source of truth for both the GraphQL field
-(``informationBlock`` / ``informationBlocks``) and the hand-written MCP
-tools (``get-information-block`` / ``list-information-blocks``). Shape
-is defined once; agents, SDK callers, and the UI all see the same
-envelope.
-
-Unknown ``block_type`` filters raise :class:`ValueError`; new block
-types register themselves in the registry and surface here without
-changes to this module.
-"""
+"""Information Block reads (envelope lookup + listing), shared by GraphQL and
+the MCP tools."""
 
 from __future__ import annotations
 
@@ -34,30 +24,10 @@ def get_information_block(
 ) -> InformationBlockEnvelope | None:
   """Fetch one block by id, dispatching via the structure's block_type.
 
-  Returns ``None`` when the structure doesn't exist or its type isn't
-  registered — callers map that to a GraphQL null / REST 404. When
-  ``fact_set_id`` is provided the envelope is rehydrated from that
-  specific FactSet instead of the latest one (used by Report Block
-  rehydration to surface a frozen snapshot) and ``scenario_id`` /
-  ``series`` are ignored — an explicit pin bypasses both.
-
-  ``scenario_id`` selects the FactSet slice the envelope binds:
-  ``None`` = actuals; a forecast block's structure id = that scenario
-  (statement envelopes bind its latest computed month, metric envelopes
-  extend the series with its forward columns). Block types without
-  scenario slices (schedule, rollforward, disclosure) accept and
-  ignore it.
-
-  ``series=True`` renders a statement block as its whole report-set
-  time series — one column per period, actuals-preferred at the seam
-  when combined with ``scenario_id``. Non-statement block types accept
-  and ignore it (metric envelopes are always the full series).
-
-  ``series_history`` / ``series_forecast`` window the series to its
-  seam-adjacent columns — the last N actual columns and the first N
-  forecast columns; ``None`` = unbounded. Only meaningful with
-  ``series=True`` on statement-family blocks; other block types accept
-  and ignore them (signature parity).
+  ``None`` when the structure doesn't exist or its type isn't registered.
+  A ``fact_set_id`` pin overrides ``scenario_id`` and ``series``.
+  ``scenario_id`` (a forecast block's id; ``None`` = actuals) and the
+  ``series*`` options are ignored by block types they don't apply to.
   """
   structure = session.get(Structure, structure_id)
   if structure is None:
@@ -65,9 +35,6 @@ def get_information_block(
   try:
     entry = registry_module.get(structure.block_type)
   except KeyError:
-    # Existing rows whose block_type isn't a registered block type
-    # surface as ``None`` rather than raising — the envelope just can't
-    # be built.
     return None
   return entry.dispatch_build_envelope(
     session,
@@ -83,17 +50,7 @@ def get_information_block(
 def get_information_block_for_fact_set(
   session: Session, fact_set_id: str
 ) -> InformationBlockEnvelope | None:
-  """Rehydrate the Information Block envelope pinned to a FactSet.
-
-  Looks up the FactSet's Structure, then dispatches the registered
-  block-type handler with the explicit fact_set pin. Returns ``None``
-  when the FactSet doesn't exist, has no Structure, or its
-  ``block_type`` isn't a registered block type.
-
-  Used by the Report Block read path: each ReportBlockItem pins a
-  ``fact_set_id``; assembling the envelope for that item is exactly
-  this lookup.
-  """
+  """Rehydrate the Information Block envelope pinned to a FactSet, or ``None``."""
   fact_set = session.get(FactSet, fact_set_id)
   if fact_set is None or fact_set.structure_id is None:
     return None
@@ -112,21 +69,10 @@ def list_information_blocks(
 ) -> list[InformationBlockEnvelope]:
   """List blocks with optional block_type + category filters.
 
-  When ``library_sentinel=True`` (request routed to the library
-  ``graph_id='library'`` endpoint), results are restricted to block
-  types whose registry entry declares ``surfaces_in_library=True`` —
-  keeps canonical library structures from leaking as block envelopes
-  until their block type is explicitly modeled.
-
-  On a tenant graph_id (``library_sentinel=False``), no such filter
-  applies.
-
-  ``scenario_id`` threads into each envelope's FactSet binding (see
-  :func:`get_information_block`) — the Structure selection itself is
-  scenario-independent.
+  ``library_sentinel`` (the ``library`` graph) restricts results to block
+  types with ``surfaces_in_library``. ``scenario_id`` affects each
+  envelope's binding, not which structures are listed.
   """
-  # Resolve the candidate block_type id set based on the sentinel flag
-  # and any explicit caller-supplied filter.
   if block_type is not None:
     try:
       entry = registry_module.get(block_type)
@@ -148,15 +94,9 @@ def list_information_blocks(
   if not candidate_ids:
     return []
 
-  # Tenant-authored blocks sort before library-seeded ones so a default
-  # `list-information-blocks` call surfaces the tenant's own work first.
-  # Without this, library-seeded statements (dozens per tenant graph)
-  # swamp the default `limit=50` and a user browsing without filters
-  # never sees their schedules.
-  # A disclosure structure renders only when it owns a presentation arc; the
-  # rs-gaap-disclosures package seeds ~17 arc-less `disclosures:*` identity rows
-  # per tenant whose envelopes build to None. Excluding them at the SQL level
-  # keeps them out of the LIMIT/OFFSET window so pages don't come back short.
+  # Tenant-authored blocks sort first so library statements don't swamp the
+  # default page. Arc-less disclosure rows build to None, so they're
+  # excluded in SQL to keep pages full.
   has_presentation_arc = (
     select(Association.id)
     .where(Association.structure_id == Structure.id)

@@ -1,19 +1,8 @@
 """Change-reporting-style command (entity-scoped, tenant-only).
 
-Flips ``entities.reporting_style_id`` after validating the target Style is a
-renderable Structure (``block_type='reporting_style'`` — or legacy
-``'custom'``) with a complete composition (one Network per required
-statement_type) in the graph's tenant schema.
-
-The Reporting Style lives on the entity, co-located with the ``structures``
-/ ``reporting_style_networks`` it points at, so this is a pure extensions-DB
-write — no platform round-trip. Entities in a multi-entity hierarchy can each
-carry their own Style while resolving to the same canonical calc-DAG
-subtotals.
-
-Filed Reports are unaffected — each ``Report``'s FactSet rows pin their
-``structure_id`` at create-time, so historical packages keep rendering against
-the Networks they were authored with. New reports use the new Style.
+Sets ``entities.reporting_style_id`` after validating the target is a
+renderable Style with a Network for every required statement type. Existing
+Reports are unaffected: their FactSets pin ``structure_id`` at creation.
 """
 
 from __future__ import annotations
@@ -29,9 +18,7 @@ from robosystems.models.api.extensions.entity import (
 )
 from robosystems.models.extensions import Entity
 
-# The picker iterates over these four statement types at render time; every
-# Reporting Style must compose a Network for each. ``comprehensive_income``
-# stays optional (only Styles that split OCI from the regular IS use it).
+# Every Style needs a Network for each; ``comprehensive_income`` is optional.
 _REQUIRED_STATEMENT_TYPES: tuple[str, ...] = (
   "balance_sheet",
   "income_statement",
@@ -41,20 +28,16 @@ _REQUIRED_STATEMENT_TYPES: tuple[str, ...] = (
 
 
 class EntityNotFoundError(LookupError):
-  """Raised when the target (or primary) entity doesn't exist in the graph."""
+  """The target (or primary) entity doesn't exist in the graph."""
 
 
 class ReportingStyleInvalidError(ValueError):
-  """Raised when the target Style is missing, inactive, wrong-typed, or has
-  an incomplete Network composition in the tenant schema."""
+  """The target Style is missing, inactive, wrong-typed, or incomplete."""
 
 
 def _resolve_entity(session: Session, entity_id: str | None) -> Entity:
-  """Resolve the target entity: the given id, else the primary entity.
-
-  Primary = earliest-created, matching ``_get_entity_id`` in the report path
-  so the Style set here is the one the renderer resolves for that entity.
-  """
+  """The given entity, else the primary (earliest-created, as the renderer's
+  ``_get_entity_id`` resolves it)."""
   if entity_id:
     entity = session.get(Entity, entity_id)
     if entity is None:
@@ -71,23 +54,14 @@ def _resolve_entity(session: Session, entity_id: str | None) -> Entity:
 def change_reporting_style(
   session: Session, body: ChangeReportingStyleRequest
 ) -> ChangeReportingStyleResponse:
-  """Switch a reporting entity's Reporting Style.
+  """Switch a reporting entity's Reporting Style (default: the primary entity).
 
-  Args:
-      session: Extensions session with the tenant schema active.
-      body: Target Style id and optional entity id (defaults to primary).
-
-  Raises:
-      EntityNotFoundError: target/primary entity doesn't exist.
-      ReportingStyleInvalidError: target Style not found, inactive, has the
-          wrong block_type, or has an incomplete composition.
+  Raises `EntityNotFoundError` or `ReportingStyleInvalidError`.
   """
   entity = _resolve_entity(session, body.entity_id)
 
   previous_style_id = entity.reporting_style_id or None
 
-  # Same-target is an idempotent no-op so a retry doesn't churn the row or
-  # surface a spurious change downstream.
   if previous_style_id == body.reporting_style_id:
     return ChangeReportingStyleResponse(
       entity_id=entity.id,
@@ -97,9 +71,6 @@ def change_reporting_style(
       changed=False,
     )
 
-  # Validate the target Style in the tenant's ``structures`` (search_path).
-  # Style rows — seeded or customer-authored — live in the tenant schema, so
-  # this is the only place that can confirm the row exists and is renderable.
   row = session.execute(
     text(
       """
@@ -114,9 +85,7 @@ def change_reporting_style(
     raise ReportingStyleInvalidError(
       f"Reporting Style {body.reporting_style_id!r} not found in tenant schema."
     )
-  # ``custom`` is accepted so a Style row that was never promoted to
-  # ``block_type='reporting_style'`` stays selectable. The picker doesn't
-  # filter on block_type either.
+  # Legacy ``custom`` Style rows stay selectable; the picker accepts them too.
   if row.block_type not in ("reporting_style", "custom"):
     raise ReportingStyleInvalidError(
       f"Structure {body.reporting_style_id!r} has block_type={row.block_type!r}; "
@@ -147,8 +116,7 @@ def change_reporting_style(
       f"missing reporting_style_networks rows before switching."
     )
 
-  # 4-segment Reporting Style code (e.g. BSC-CORP-IS02-CF1), stamped into the
-  # Style Structure's metadata at seed time. None on an unstamped Style.
+  # e.g. BSC-CORP-IS02-CF1, stamped at seed time; None if unstamped.
   metadata = row.metadata if isinstance(row.metadata, dict) else {}
   reporting_style_code = metadata.get("reporting_style_code")
 

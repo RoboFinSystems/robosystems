@@ -1,23 +1,7 @@
 """Handlers for ``taxonomy_type='reporting_extension'`` — tenant extension of a library.
 
-A reporting extension is a tenant taxonomy that extends a library
-``reporting_standard`` (us-gaap, ifrs, ...). Its elements can reference
-library parents by qname; the handler resolves ``parent_ref`` /
-``from_ref`` / ``to_ref`` against a merged symbol table:
-
-1. Envelope-local qnames (just inserted in pass 1) win.
-2. Library fallback — a scoped lookup in the parent taxonomy
-   (``taxonomy_id == parent_taxonomy_id``) resolves qnames the tenant
-   pulled in from the library.
-
-Any qname that resolves neither locally nor in the parent library is a
-ValueError. No global search — ambiguity is an error, not a convenience.
-
-``build_envelope`` projects the extension's own atoms. When an element's
-``parent_id`` points outside this taxonomy (i.e., at a library element),
-the CoA pattern of ``element_qname_by_id`` from in-taxonomy rows only
-misses it; a scoped second query resolves just those cross-taxonomy
-parent ids to qnames.
+Refs resolve against envelope-local qnames first, then the parent library
+taxonomy only (no global search); anything else is a ValueError.
 """
 
 from __future__ import annotations
@@ -105,11 +89,7 @@ def create(
   payload: CreateTaxonomyBlockRequest,
   created_by: str,
 ) -> str:
-  """Create a reporting_extension taxonomy that references a library parent.
-
-  Returns the new taxonomy_id. Two-pass insert with local-first /
-  library-fallback parent resolution.
-  """
+  """Create a reporting_extension taxonomy; returns the new taxonomy_id."""
   if payload.taxonomy_type != REPORTING_EXTENSION_BLOCK_TYPE:
     raise ValueError(
       f"reporting_extension handler received payload with taxonomy_type="

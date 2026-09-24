@@ -1,13 +1,7 @@
-"""Information Block type registry.
+"""Information Block type registry, keyed by block_type.
 
-Single source of truth for every block type the system knows about.
-Populated at module import; frozen thereafter. Callers look up entries
-by ``id`` string (the block_type discriminator).
-
-Adding a block type: declare a new :class:`BlockTypeRegistryEntry`
-literal next to the Schedule one below and add it to the ``REGISTRY``
-dict. The entry's handlers live alongside the registration (own module
-per block type — ``schedule.py``, ``statement.py``, ...).
+To add a block type, declare a :class:`BlockTypeRegistryEntry` (handlers in
+their own module) and add it to ``REGISTRY``.
 """
 
 from __future__ import annotations
@@ -57,17 +51,8 @@ METRIC_CATEGORY = metric_handlers.METRIC_CATEGORY
 
 
 def make_not_implemented_handler(operation: str, message: str) -> Callable[..., Any]:
-  """Build a dispatch handler that raises :class:`NotImplementedError`.
-
-  Used by block types whose ``dispatch_{create,update,delete}`` handler
-  is intentionally a stub — either because the construction path lives
-  elsewhere (statement family flows through ``create-report``) or because
-  the evaluator has not been implemented yet (metric blocks).
-
-  The returned callable accepts and ignores the standard handler
-  arguments ``(session, payload, actor)`` so it can be plugged into
-  :class:`BlockTypeRegistryEntry` without signature gymnastics.
-  """
+  """Build a dispatch handler that raises :class:`NotImplementedError`, for
+  block types constructed through another path."""
 
   def _handler(*_args: Any, **_kwargs: Any) -> str:
     raise NotImplementedError(message)
@@ -88,8 +73,6 @@ class _EmptyPayload(BaseModel):
 
   model_config = ConfigDict(extra="forbid")
 
-
-# ── Schedule ────────────────────────────────────────────────────────────────
 
 SCHEDULE_BLOCK = BlockTypeRegistryEntry(
   id=schedule_handlers.SCHEDULE_BLOCK_TYPE,
@@ -114,23 +97,12 @@ SCHEDULE_BLOCK = BlockTypeRegistryEntry(
   dispatch_update=schedule_handlers.update,
   dispatch_delete=schedule_handlers.delete,
   dispatch_build_envelope=schedule_handlers.build_envelope,
-  # Schedules are tenant-only — they exist against live ledger data.
-  # Don't surface them on the library sentinel.
   surfaces_in_library=False,
 )
 
 
-# ── Statements (compositional) ─────────────────────────────────────────────
-
-
 def _make_statement_entry(block_type: str, icon: str) -> BlockTypeRegistryEntry:
-  """Build a registry entry for a statement-family block type.
-
-  All four statement block types share the same construction mode,
-  category, Information Model defaults, and dispatch handlers — they
-  differ only in their ``block_type`` discriminator and display
-  strings. This helper factors the common shape.
-  """
+  """Build a registry entry for a statement-family block type."""
   display_name, display_plural = STATEMENT_DISPLAY[block_type]
   build_envelope = make_statement_handlers(block_type)
   return BlockTypeRegistryEntry(
@@ -177,14 +149,10 @@ def _make_statement_entry(block_type: str, icon: str) -> BlockTypeRegistryEntry:
       "originating Report via the report APIs (`delete-report`).",
     ),
     dispatch_build_envelope=build_envelope,
-    # Statement Structures live in public.structures (library-immutable)
-    # and should surface on the library sentinel, with facts=[] because
-    # reports live in tenant schemas.
+    # Library-seeded, so they surface on the library sentinel (with no facts).
     surfaces_in_library=True,
   )
 
-
-# ── Rollforward (declarative) ──────────────────────────────────────────────
 
 ROLLFORWARD_BLOCK = BlockTypeRegistryEntry(
   id=rollforward_handlers.ROLLFORWARD_BLOCK_TYPE,
@@ -211,14 +179,9 @@ ROLLFORWARD_BLOCK = BlockTypeRegistryEntry(
   dispatch_update=rollforward_handlers.update,
   dispatch_delete=rollforward_handlers.delete,
   dispatch_build_envelope=rollforward_handlers.build_envelope,
-  # Rollforwards are tenant-authored — they exist against live ledger
-  # data and reference tenant-resolved element_ids. Like schedules, they
-  # don't surface on the library sentinel.
   surfaces_in_library=False,
 )
 
-
-# ── Forecast (declarative) ─────────────────────────────────────────────────
 
 FORECAST_BLOCK = BlockTypeRegistryEntry(
   id=forecast_handlers.FORECAST_BLOCK_TYPE,
@@ -248,13 +211,8 @@ FORECAST_BLOCK = BlockTypeRegistryEntry(
   dispatch_update=forecast_handlers.update,
   dispatch_delete=forecast_handlers.delete,
   dispatch_build_envelope=forecast_handlers.build_envelope,
-  # Forecasts are tenant-authored scenarios against live ledger data —
-  # never on the library sentinel.
   surfaces_in_library=False,
 )
-
-
-# ── Statements (compositional) ─────────────────────────────────────────────
 
 
 BALANCE_SHEET_BLOCK = _make_statement_entry("balance_sheet", "scale-3d")
@@ -263,8 +221,6 @@ CASH_FLOW_STATEMENT_BLOCK = _make_statement_entry("cash_flow_statement", "waves"
 EQUITY_STATEMENT_BLOCK = _make_statement_entry("equity_statement", "pie-chart")
 COMPREHENSIVE_INCOME_BLOCK = _make_statement_entry("comprehensive_income", "activity")
 
-
-# ── Disclosure notes (compositional) ───────────────────────────────────────
 
 DISCLOSURE_BLOCK = BlockTypeRegistryEntry(
   id=disclosure_handlers.DISCLOSURE_BLOCK_TYPE,
@@ -310,14 +266,10 @@ DISCLOSURE_BLOCK = BlockTypeRegistryEntry(
     "`delete-taxonomy-block`.",
   ),
   dispatch_build_envelope=disclosure_handlers.build_envelope,
-  # Library-seeded disclosure rows are arc-less identity envelopes —
-  # build_envelope returns None for them, and the sentinel shouldn't
-  # list them either.
+  # Library-seeded disclosure rows are arc-less; build_envelope returns None.
   surfaces_in_library=False,
 )
 
-
-# ── Metric (derivative) ────────────────────────────────────────────────────
 
 METRIC_BLOCK = BlockTypeRegistryEntry(
   id=METRIC_BLOCK_TYPE,
@@ -365,8 +317,6 @@ METRIC_BLOCK = BlockTypeRegistryEntry(
 )
 
 
-# ── Registry ────────────────────────────────────────────────────────────────
-
 REGISTRY: dict[str, BlockTypeRegistryEntry] = {
   SCHEDULE_BLOCK.id: SCHEDULE_BLOCK,
   ROLLFORWARD_BLOCK.id: ROLLFORWARD_BLOCK,
@@ -382,12 +332,8 @@ REGISTRY: dict[str, BlockTypeRegistryEntry] = {
 
 
 def get(block_type: str) -> BlockTypeRegistryEntry:
-  """Return the registry entry for ``block_type`` or raise ``KeyError``.
-
-  Callers that want a 422 on unknown block_type should catch ``KeyError``
-  and translate (e.g. into :class:`ValueError`, which the REST/MCP error
-  maps already route to 422 / invalid_arguments).
-  """
+  """Return the registry entry for ``block_type`` or raise ``KeyError``
+  (translate to ``ValueError`` for a 422)."""
   try:
     return REGISTRY[block_type]
   except KeyError as exc:

@@ -1,34 +1,11 @@
 """Handler for the ``regulatory_disclosure`` Information Block type.
 
-Disclosure notes are the first render targets beyond the statement
-family — an inventory-by-category note, a PP&E-by-class breakdown, a
-debt-maturity schedule. Like statements they exercise the
-**compositional** construction mode: the Structure (with its
-presentation + calculation arcs) exists before any report runs — either
-library-seeded or tenant-authored through the TaxonomyBlock envelope —
-and per-tenant facts land when ``create-report`` picks the structure
-because its concepts received mapped facts (fact-driven picking in
-``commands/reports.py``; disclosures are NOT composed by the Reporting
-Style, which pins statement layouts only).
-
-The envelope builder is the statement family's, parameterised on the
-block_type — ``_build_rows`` and the hierarchy walker are CAP-agnostic,
-so a ``roll_up`` note renders rows + footed subtotals through the same
-machinery. Two disclosure-specific behaviours layer on top:
-
-- **Arc-less structures return no envelope.** The rs-gaap-disclosures
-  package seeds one identity Structure per disclosure
-  (``disclosures:BalanceSheet`` … — envelope rows with no arcs). Those
-  are disclosure *registry* entries, not renderable blocks; surfacing
-  them would flood ``list-information-blocks`` with empty envelopes.
-- **Display name = the structure's own name** (a note is named by its
-  author/taxonomy, not its type) — handled by the statement builder's
-  fallback.
-
-Creation does not flow through ``create-information-block`` — disclosure
-structures are vocabulary, authored via ``create-taxonomy-block``
-(reporting_extension); the registry installs not-implemented stubs for
-the write slots.
+Disclosure notes render through the statement family's builder (text-block
+CAPs through the text-block builder). Facts land when ``create-report`` picks
+the structure because its concepts received mapped facts; the Reporting Style
+doesn't compose them. Arc-less structures (the library's disclosure identity
+rows) return no envelope. Structures are authored via
+``create-taxonomy-block``, not ``create-information-block``.
 """
 
 from __future__ import annotations
@@ -50,8 +27,6 @@ if TYPE_CHECKING:
 DISCLOSURE_DISPLAY_NAME = "Disclosure"
 DISCLOSURE_CATEGORY = "Reporting"
 
-# The statement family's envelope builder, bound to this block_type — the
-# public factory, so disclosure.py doesn't reach for statement internals.
 _build_disclosure_envelope = make_statement_handlers(DISCLOSURE_BLOCK_TYPE)
 
 
@@ -66,17 +41,8 @@ def build_envelope(
 ) -> InformationBlockEnvelope | None:
   """Pack the envelope for a disclosure-note structure.
 
-  Dispatches by CAP: text-block CAPs render narrative rows through
-  :func:`build_text_block_envelope`; every other CAP (roll_up, ...)
-  renders the numeric grid through the statement family's builder.
-
-  Returns ``None`` when the structure doesn't exist, isn't a
-  ``regulatory_disclosure``, or carries neither arcs nor content (the
-  library's disclosure-identity envelopes — not renderable blocks).
-
-  ``scenario_id`` is accepted for dispatch-signature parity and ignored
-  — disclosures bind standing document/report content, not scenario
-  slices (the forecast engine never emits disclosure sets).
+  ``None`` when the structure is missing, isn't a ``regulatory_disclosure``,
+  or has no arcs. ``scenario_id`` is ignored.
   """
   structure = session.get(Structure, structure_id)
   if structure is None or structure.block_type != DISCLOSURE_BLOCK_TYPE:

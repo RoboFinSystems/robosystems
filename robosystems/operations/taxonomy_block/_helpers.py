@@ -1,9 +1,4 @@
-"""Shared helpers for taxonomy block handlers.
-
-Small utilities shared across the CoA / custom_ontology /
-reporting_extension handlers. Factored here so the per-block-type
-modules don't drift on the common derivations.
-"""
+"""Shared helpers for taxonomy block handlers."""
 
 from __future__ import annotations
 
@@ -23,10 +18,7 @@ def structure_from_request(
 ) -> Structure:
   """Project a structure request onto a new ``Structure`` row.
 
-  Centralizes the request→Structure derivation — block_type,
-  concept_arrangement, and the role_uri-rides-in-``metadata_`` convention the
-  envelope readers rely on — so the create / update / ontology handlers don't
-  drift as request fields are added. The caller still ``session.add``s the row.
+  ``role_uri`` rides in ``metadata_``. The caller ``session.add``s the row.
   """
   structure_metadata = dict(req.metadata)
   if req.role_uri:
@@ -51,9 +43,8 @@ def qname_for(
 ) -> str:
   """Derive the envelope-local qname when the tenant didn't supply one.
 
-  Falls back to ``<standard or default_namespace>:<code or name-without-spaces>``
-  so qname is always set; the DB column is nullable but the envelope
-  treats qname as the canonical identifier.
+  ``<standard or default_namespace>:<code or name-without-spaces>``; the
+  envelope treats qname as the identifier though the column is nullable.
   """
   ns = standard or default_namespace
   token = code or name.replace(" ", "")

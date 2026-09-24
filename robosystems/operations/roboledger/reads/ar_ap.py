@@ -1,19 +1,9 @@
-"""Open AR / AP reads driven by the event duality chain.
+"""Open AR / AP from the event duality chain, not the GL.
 
-Open balance = sum of originating-event amounts minus sum of discharging-event
-amounts that point at them. The math runs on ``events.amount`` directly,
-so the answer is one SQL query and doesn't depend on GL roll-up.
-
-The originating event-type set is config — AR uses ``invoice_issued`` (+
-``sales_receipt_recorded`` for QB-imported deposit applications); AP
-uses ``bill_received``. The discharge side is whichever event whose
-``discharges_event_id`` happens to point at an originating row, so we
-don't have to enumerate payment event types — the FK is the contract.
-
-Status filter: only ``committed`` and ``fulfilled`` events contribute.
-Captured/classified events represent inbox-pending data the operator
-hasn't approved yet; counting them would inflate AR/AP with unconfirmed
-amounts. Voided/superseded events are excluded for the obvious reason.
+Open balance = originating event amounts minus the amounts of events whose
+``discharges_event_id`` points at them (the FK is the contract, so payment
+event types need not be enumerated). Only ``committed`` and ``fulfilled``
+events count; inbox-pending and voided/superseded ones do not.
 """
 
 from __future__ import annotations
@@ -29,17 +19,10 @@ from robosystems.models.api.extensions.ar_ap import (
 )
 from robosystems.models.extensions.roboledger.event import Event
 
-# Event types that originate an AR obligation (something the entity is
-# owed). QB-imported invoices and sales receipts both produce AR rows
-# whose ``discharges_event_id`` can be pointed at by a later payment.
 _AR_ORIGINATING_TYPES: tuple[str, ...] = ("invoice_issued", "sales_receipt_recorded")
 
-# Event types that originate an AP obligation (something the entity owes).
 _AP_ORIGINATING_TYPES: tuple[str, ...] = ("bill_received",)
 
-# Status values that contribute to open-balance math. ``captured`` and
-# ``classified`` are pre-handler / inbox-pending; ``voided`` /
-# ``superseded`` are terminal off-ramps that shouldn't count.
 _OPEN_BALANCE_STATUSES: tuple[str, ...] = ("committed", "fulfilled")
 
 
@@ -47,18 +30,12 @@ def _build_open_balance_subquery(
   *,
   originating_types: Iterable[str],
 ):
-  """Per-event open-balance subquery: amount minus sum of discharges.
+  """``(originating_id, agent_id, open_amount, currency)`` per originating
+  event; ``open_amount`` is negative when overpaid.
 
-  Returns a Core Selectable that yields ``(originating_id, agent_id,
-  open_amount, currency)`` for each originating event. ``open_amount``
-  is signed (positive for normal AR/AP; negative when overpaid). Rows
-  with no discharges still appear — the LEFT JOIN coalesces NULL to 0.
-
-  Implementation: aliases the events table at the Core level so the
-  self-join (originating events LEFT JOIN their discharging events)
-  compiles with a distinct table alias. ORM-level ``aliased(Event)``
-  doesn't propagate through ``Event.__table__.outerjoin(...)`` and
-  emits ``"events" specified more than once`` against Postgres.
+  The self-join aliases at the Core level: ORM ``aliased(Event)`` does not
+  propagate through ``Event.__table__.outerjoin`` and Postgres rejects the
+  duplicate table name.
   """
   originating = Event.__table__
   discharges = Event.__table__.alias("discharges_e")
@@ -96,7 +73,6 @@ def _build_open_balance_subquery(
 def _aggregate(
   session: Session, *, originating_types: Iterable[str]
 ) -> OpenBalanceAggregate:
-  """Roll a per-event subquery into the graph-wide totals."""
   per_event = _build_open_balance_subquery(
     originating_types=originating_types
   ).subquery("per_event")
@@ -125,16 +101,9 @@ def _by_agent(
   originating_types: Iterable[str],
   agent_id: str | None,
 ) -> list[OpenBalanceByAgent]:
-  """Per-agent open-balance rows.
-
-  When ``agent_id`` is None, returns one row per agent with any
-  nonzero open balance, ordered by absolute balance descending.
-  When ``agent_id`` is set, returns at most one row (the matching
-  agent, or [] when zero).
-
-  Agents with NULL on the originating events are aggregated under a
-  single NULL key — the caller can decide whether to surface them.
-  """
+  """Nonzero open balances per agent, by absolute balance descending (at most
+  one row when ``agent_id`` is set). Events without an agent group under a
+  NULL key."""
   per_event = _build_open_balance_subquery(
     originating_types=originating_types
   ).subquery("per_event")

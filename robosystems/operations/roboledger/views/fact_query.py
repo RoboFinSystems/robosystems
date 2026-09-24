@@ -1,26 +1,12 @@
-"""Fact grid Cypher query for the roboledger XBRL hypercube.
+"""Fact grid Cypher query for the roboledger XBRL hypercube, shared by the
+``build-fact-grid`` REST operation and the MCP tool.
 
-Shared by the REST endpoint (`routers/extensions/roboledger/views.py`) and
-the MCP tool (`middleware/mcp/tools/fact_grid_tool.py`). Both surfaces get
-the same LadybugDB-specific optimizations:
-
-- **Inline node anchoring** for single-element / single-ticker filters
-  (e.g. ``(el:Element {qname: 'us-gaap:Assets'})``). This pins the
-  traversal to specific nodes and avoids full Fact scans on large graphs.
-  Parameterized node patterns are not supported by LadybugDB so string
-  interpolation is required — ``_safe_str`` / ``_is_ticker`` guard the
-  injection surface.
-- **Inline boolean filters silently return zero results** in LadybugDB,
-  so ``f.has_dimensions = false`` stays in WHERE.
-- **``DISTINCT`` + ``ORDER BY`` together returns empty results**, so
-  we run without either clause in Cypher and do dedup + sort in Python.
-- **``ORDER BY`` + ``LIMIT`` is not a cheap top-N.** Ordering forces a
-  full materialize-then-sort: over the ~269k ``us-gaap:Assets`` facts on
-  the SEC repository, ``ORDER BY p.end_date DESC LIMIT 5`` times out at
-  25s while a bare ``count(f)`` on the same anchored pattern returns
-  promptly. ``limit`` is therefore applied in Python after dedup + sort,
-  where it bounds the *payload* deterministically (most recent first).
-  Bounding the *query* is the job of anchoring and the caller's filters.
+Single-element / single-ticker filters are anchored as node-pattern
+properties interpolated into the query (``(el:Element {qname: '...'})``);
+``_safe_str`` / ``_is_ticker`` guard that interpolation. Dedup, sort and ``limit`` run in Python: dedup keeps the most
+precise fact, which DISTINCT cannot express, and ``ORDER BY ... LIMIT`` is not
+a cheap top-N in LadybugDB (it materializes and sorts every match, which times
+out on large anchored patterns).
 """
 
 from __future__ import annotations
@@ -38,21 +24,13 @@ _TICKER_RE = re.compile(r"[A-Za-z][A-Za-z0-9.\-]{0,9}")
 
 
 def _safe_str(value: str) -> str | None:
-  """Return ``value`` if it's safe to interpolate into an inline Cypher node
-  filter (only ``[a-zA-Z0-9_:-]`` characters), otherwise ``None`` so the
-  caller falls back to a parameterized WHERE clause.
-  """
+  """``value`` if safe to interpolate into an inline node filter, else ``None``
+  (caller falls back to a parameterized WHERE)."""
   return value if _SAFE_STR_RE.fullmatch(value) else None
 
 
 def _is_ticker(value: str) -> bool:
-  """Heuristic: does ``value`` look like a stock ticker (letter-led,
-  <=10 chars, alphanumeric with ``.`` or ``-``)?
-
-  Distinguishes tickers from CIKs (all-digit) and company names
-  (contain spaces). Only tickers get the inline ``{ticker: 'x'}``
-  optimization; CIKs and names fall back to the parameterized WHERE.
-  """
+  """Tells a ticker from a CIK (all digits) or a company name (has spaces)."""
   return bool(_TICKER_RE.fullmatch(value))
 
 
@@ -61,9 +39,6 @@ def _build_element_match(
   canonical_concepts: list[str] | None,
   parameters: dict[str, Any],
 ) -> tuple[str, list[str]]:
-  """Return the ``(el:Element …)`` match pattern and any extra WHERE
-  clauses. Uses inline anchoring for single-value queries when safe.
-  """
   if elements and len(elements) == 1 and not canonical_concepts:
     safe = _safe_str(elements[0])
     if safe:
@@ -102,12 +77,6 @@ def _build_entity_match(
   entity_list: list[str] | None,
   parameters: dict[str, Any],
 ) -> tuple[str | None, list[str]]:
-  """Return the ``(ent:Entity …)`` match pattern (or ``None`` when no
-  entity filter) plus any extra WHERE clauses.
-
-  Single tickers get the inline anchor; CIKs, names, and multi-entity
-  queries fall back to a parameterized WHERE.
-  """
   if not entity_list:
     return None, []
 
@@ -123,25 +92,12 @@ def _build_entity_match(
 
 
 def _deduplicate_fact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-  """Dedup on the full period signature, keeping the most precise
-  occurrence, then sort by ``period_end`` DESC.
+  """Dedup on ``(element, period_start, period_end, entity)`` keeping the most
+  precise fact, then sort by ``period_end`` descending.
 
-  DISTINCT + ORDER BY returns empty results in LadybugDB, so the query
-  omits both and we handle dedup + sort here.
-
-  The key is ``(element, period_start, period_end, entity)``. Both ends of
-  the period are load-bearing: an XBRL duration fact is identified by
-  *(start, end)*, not by end alone, so a 10-Q reports the same element for
-  the 3-month AND the 9-month window ending on the same day. Keying on
-  ``period_end`` alone would collapse those into one arbitrary row, silently
-  handing back year-to-date to a caller who asked for a quarter. Entity is
-  in the key for the same reason: without it two filers reporting the same
-  element for the same period collapse into one row.
-
-  Within one key the most precise fact by ``decimals`` survives (see
-  ``fact_dedup``): a figure reported on the statement face and again,
-  rounded, in the narrative shares every key field, and keeping the first
-  row the engine returned handed back the rounded one about half the time.
+  Both period ends are in the key because a 10-Q reports the same element for
+  the 3-month and 9-month windows ending on the same day; entity is in it so
+  two filers never collapse into one row.
   """
   deduped = keep_most_precise(
     rows,
@@ -171,9 +127,6 @@ async def query_fact_grid(
 ) -> tuple[list[dict[str, Any]], bool]:
   """Query deduplicated facts for the roboledger XBRL hypercube.
 
-  Shared by REST (`build-fact-grid`) and MCP (`BuildFactGridTool`). See
-  module docstring for the LadybugDB-specific optimizations applied here.
-
   ``elements`` are qnames (``us-gaap:Assets``), ``canonical_concepts`` are
   canonical names (``revenue``), ``periods`` are ``YYYY-MM-DD`` end dates,
   ``entity`` accepts a ticker / CIK / name while ``entities`` takes tickers,
@@ -196,13 +149,9 @@ async def query_fact_grid(
   entity_filter, entity_where = _build_entity_match(entity_list, parameters)
   entity_pattern = entity_filter or "(ent:Entity)"
 
-  # Lead the MATCH with whichever pattern is selective, never with (f:Fact) —
-  # that forces a full scan of the 100M+ Fact nodes. With an entity filter the
-  # planner seeds from the ~thousands of Entity nodes (a single ticker is
-  # inline-anchored to one); without one it seeds from the Element, which for
-  # a specific qname is a single node. Multi-entity / CIK / name filters have
-  # no inline anchor, so without this lead they degrade to a full Fact scan
-  # (25s+ timeout).
+  # Lead with the selective node (Entity if filtered, else Element), never
+  # (f:Fact): the planner seeds from the first pattern, and a Fact lead scans
+  # every fact and times out.
   if entity_filter:
     lead = f"{entity_pattern}<-[:FACT_HAS_ENTITY]-(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}"
   else:
@@ -239,17 +188,9 @@ async def query_fact_grid(
       where_clauses.append("r.fiscal_period_focus = $fiscal_period")
       parameters["fiscal_period"] = fiscal_period
 
-  # Omit DISTINCT + ORDER BY — both broken together in LadybugDB; dedup
-  # and sort happen in Python below. Entity columns are always returned:
-  # every Fact carries a FACT_HAS_ENTITY edge (verified on SEC — the
-  # us-gaap:Assets fact count is identical with and without the traversal,
-  # and materialize.py builds the edge for native and shared facts alike),
-  # so the join drops nothing and the caller can always tell filers apart.
-  #
-  # period_start and duration_type are projected because an XBRL duration
-  # fact is identified by (start, end): without start_date the dedup key
-  # cannot distinguish a quarterly fact from the year-to-date fact sharing
-  # its end_date, and the caller has no way to tell which one it received.
+  # No DISTINCT / ORDER BY / LIMIT: dedup and sort run in Python (see module
+  # docstring). Every Fact has a FACT_HAS_ENTITY edge, so the entity join
+  # drops nothing. period_start is projected because the dedup key needs it.
   return_clause = (
     "\n      RETURN\n"
     "        el.qname as element_id,\n"
@@ -268,9 +209,7 @@ async def query_fact_grid(
   query += "\nWHERE " + "\n  AND ".join(where_clauses)
   query += return_clause
 
-  # Read-only analytical query — route to read endpoint. On shared repos (SEC)
-  # this hits the replica ALB rather than the shared master's slow discovery
-  # path; on tenant graphs operation_type is ignored (single instance).
+  # "read" routes shared repos (SEC) to the replicas; tenant graphs ignore it.
   repository = await get_graph_repository(graph_id, operation_type="read")
   results = await repository.execute_query(query, parameters)
 

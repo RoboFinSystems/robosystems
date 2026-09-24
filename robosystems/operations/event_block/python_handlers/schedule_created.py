@@ -1,25 +1,6 @@
-"""Schedule created event handler — capture-only originator for materialized obligations.
-
-Fires when create-event-block runs with event_type='schedule_created'.
-Holds no GL-write side effects; its sole job is to be the row that
-materialized `schedule_entry_due` events point at via
-`obligated_by_event_id`. The event chain becomes:
-
-    schedule_created (committed, captured-only)
-        ▲
-        │ obligated_by_event_id
-        │
-    schedule_entry_due (pending) x N periods
-        │ on period boundary, sensor flips → classified
-        │ handler drafts the closing entry, links via triggered_by_event_id
-        ▼
-    Entry (draft → posted at close-period)
-
-ScheduleService.create_schedule emits this event directly inside its
-own unit of work — it is NOT created via create-event-block by
-external callers. Registering it here is what gives the row a known
-event_type, a metadata schema for validation, and a place for agents
-to dry-run via preview.
+"""schedule_created handler: capture-only. The event is the row a schedule's
+materialized `schedule_entry_due` obligations point at via
+`obligated_by_event_id`; ScheduleService.create_schedule emits it itself.
 """
 
 from __future__ import annotations
@@ -70,14 +51,7 @@ def dispatch(
   metadata: ScheduleCreatedMetadata,
   created_by: str,
 ) -> HandlerResult:
-  """No-op dispatch.
-
-  The materialization side-effect (inserting N pending schedule_entry_due
-  rows) is performed by ScheduleService.create_schedule, which emits this
-  event itself. When/if external callers ever fire a schedule_created event
-  via create-event-block, the only meaningful side-effect is the event row
-  itself — the schedule + facts are already in place.
-  """
+  """No-op: ScheduleService.create_schedule materializes the obligations."""
   return HandlerResult()
 
 

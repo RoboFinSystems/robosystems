@@ -1,10 +1,5 @@
-"""Cross-cutting guard checks shared by multiple command modules.
-
-These guards run inside an open extensions session and raise domain
-exceptions that callers map to HTTP status codes. They are NOT
-OperationSpec `pre_validate` hooks (which run before the session
-opens) — they require DB access.
-"""
+"""Guard checks shared by command modules. They need an open extensions
+session, unlike OperationSpec ``pre_validate`` hooks."""
 
 from __future__ import annotations
 
@@ -33,18 +28,9 @@ def rule_summary(results: list) -> dict[str, int] | None:
 
 
 class LibraryImmutableError(PermissionError):
-  """Raised when a mutation targets a library-seeded row in a tenant schema.
+  """A mutation targets a library-seeded row (``created_by='library-seeder'``).
 
-  Library-origin rows are distinguished by ``created_by='library-seeder'``
-  (applied by ``robosystems/operations/taxonomy_block/library_creator.py``
-  during the canonical JSON-LD load). Tenant schemas carry a copy of those rows
-  for search-path shadowing; they are read-only from tenant-scoped command
-  paths. Tenant authoring happens via tenant-origin rows that coexist with
-  the library copy, distinguished by their own ``created_by`` audit value.
-
-  This raises before PostgreSQL's ``raise_library_immutable`` trigger
-  would, giving callers a clean domain exception to map to HTTP 403
-  rather than a bare ``ProgrammingError``.
+  Raised ahead of the ``raise_library_immutable`` trigger for a clean 403.
   """
 
   def __init__(self, kind: str, identifier: str) -> None:
@@ -58,12 +44,6 @@ class LibraryImmutableError(PermissionError):
 
 
 def assert_not_library_origin(row: Any) -> None:
-  """Raise :class:`LibraryImmutableError` if ``row`` was library-seeded.
-
-  Accepts any SQLAlchemy row (or any object with ``created_by`` and
-  ``id`` attributes). No-op if ``created_by`` is absent or not the
-  library-seeder literal.
-  """
   if row is None:
     return
   if getattr(row, "created_by", None) == _LIBRARY_SEEDER:
@@ -73,11 +53,7 @@ def assert_not_library_origin(row: Any) -> None:
 
 
 class ClosedPeriodError(ValueError):
-  """Raised when a write targets a posting_date inside a closed fiscal period.
-
-  The caller should map this to HTTP 422 with the detail message
-  explaining which period is closed and how to proceed (reopen first).
-  """
+  """A write targets a posting_date inside a closed fiscal period."""
 
   def __init__(self, period_name: str, posting_date: date) -> None:
     super().__init__(
@@ -105,19 +81,12 @@ def _period_covering(session: Session, posting_date: date):
 
 
 def assert_period_not_closed(session: Session, *posting_dates: date) -> None:
-  """Raise `ClosedPeriodError` if any fiscal period covering the given
-  dates is closed.
+  """Raise `ClosedPeriodError` if any period covering the dates is closed.
 
-  Takes the shared period fence on each distinct period (sorted, so two
-  writers that touch overlapping months cannot deadlock) and re-reads
-  status under that fence. Close holds the exclusive side of the same
-  fence across its QuickBooks publish and the database close, so a
-  writer cannot observe `open` and then commit after the close has
-  finished.
-
-  No-op if no `FiscalPeriod` row covers a date (e.g., fresh tenant
-  without periods seeded). The shared fence is transaction-scoped and
-  released when the caller's session commits or rolls back.
+  Takes the shared, transaction-scoped period fence on each distinct period in
+  sorted order (so overlapping writers cannot deadlock) and re-reads status
+  under it; close holds the exclusive side, so a writer cannot see `open` and
+  commit after the close. Dates with no `FiscalPeriod` pass.
   """
   dates = [d for d in posting_dates if d is not None]
   if not dates:
@@ -152,13 +121,8 @@ def assert_period_not_closed(session: Session, *posting_dates: date) -> None:
 
 
 class InactiveAccountError(ValueError):
-  """A line item names a retired (``is_active=false``) chart account.
-
-  Retiring an account keeps its history and closes it to new activity — the
-  QuickBooks meaning of "inactive". Reactivate it with
-  ``update-taxonomy-block`` (``elements_to_update[].is_active=true``) or pick
-  another account.
-  """
+  """A line item names a retired (``is_active=false``) chart account, which
+  keeps its history but is closed to new activity."""
 
   def __init__(self, accounts: list[tuple[str, str | None, str | None]]) -> None:
     self.accounts = accounts
@@ -177,15 +141,9 @@ def assert_accounts_postable(
 ) -> None:
   """Raise `InactiveAccountError` if any line-item element is retired.
 
-  Applies to authored postings — manual entries, event handlers, bank feeds.
-  A synced ledger's own history is exempt: QuickBooks retires accounts
-  after they carry activity, and a full rebuild replays every historical
-  entry against them verbatim, so a ``source`` in `SEVERABLE_SOURCES`
-  passes through untouched. Callers pass ``source`` only for the replay
-  shape (the loader posts history as ``status='posted'``); a draft that
-  merely names a synced source is authored and is checked. A tenant can
-  still hand-author a posted event under its own live QuickBooks source —
-  that is its own graph and its own books, accepted as in scope.
+  A ``source`` in `SEVERABLE_SOURCES` is exempt: a synced ledger replays
+  history against accounts retired after use. Callers pass ``source`` only for
+  that replay shape (posted history), never for drafts.
   """
   if source and source.lower() in SEVERABLE_SOURCES:
     return

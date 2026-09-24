@@ -73,9 +73,8 @@ def update_agent(
   body: UpdateAgentRequest,
   created_by: str,
 ) -> LedgerAgentResponse:
-  # Locked: `metadata_patch` is a read-modify-write of a JSON blob, and two
-  # concurrent patches on an unlocked row would each merge into the version
-  # they read — the loser's keys silently gone.
+  # Locked: `metadata_patch` is a read-modify-write, and concurrent patches
+  # would silently drop each other's keys.
   from robosystems.operations.locking import lock_by_id
 
   agent = lock_by_id(

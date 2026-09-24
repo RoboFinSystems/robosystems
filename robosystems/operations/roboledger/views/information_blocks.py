@@ -1,34 +1,11 @@
-"""Information-block analytical views — the map and the block, over a report held whole.
+"""The ``disclosures`` and ``information-block`` views, served from the same
+xbrlkit functions ``xbrlkit serve`` runs, over a report held whole in memory.
 
-``disclosures`` (the families a report's sections form) and
-``information-block`` (one section read whole: rows in presentation order,
-the same rows by the section's own axes, its calculation arcs footed, its
-text blocks) are the two shaped tools ``xbrlkit serve`` runs over a loaded
-filing. This module serves them over a report the platform holds, from the
-same two functions in the xbrlkit library, so the hosted tools and the local
-server answer from one implementation.
-
-**A whole filing is a file; the graph answers what crosses filings.** A
-section read whole wants the whole report in memory, and the platform has
-two ways to get one that never touch the graph:
-
-- On a shared repository the report is a published filing: the SEC pipeline
-  writes every processed filing as a holon to the public data bucket while
-  it holds the parsed model (``ref/shared-data.md`` §5), and xbrlkit's holon
-  reader gives the model back in well under a second. A filing processed
-  before the artifacts existed answers *not published yet* — never a
-  whole-report walk of the corpus-scale graph, which costs tens of seconds
-  of replica IO per filing.
-- On a tenant graph the report is the ledger's own: the bundle the Tavi and
-  holon exports already build from the extensions database
-  (``build_report_bundle`` → ``bundle_to_xbrl_model``), live, with its
-  presentation and calculation networks and its facts pinned to their
-  structures.
-
-The model is cached per report in Valkey (``MCP_CACHE``), so every block on
-a report after the first is served from memory. Registered on shared repos
-and tenants alike; the report is chosen the way ``financial-statement-
-analysis`` chooses one.
+The graph is not in the path: on a shared repository the report is the
+published holon in the public bucket (a filing processed before artifacts
+existed answers *not published yet*, never a whole-report graph walk); on a
+tenant it is the live report bundle built from the extensions database. The
+model is cached per report in Valkey (``MCP_CACHE``).
 """
 
 from __future__ import annotations
@@ -88,10 +65,7 @@ MAX_BLOCK_MEMBERS = xbrlkit_serve.MAX_BLOCK_MEMBERS_CAP
 # live and regenerates, so its model goes stale sooner.
 MODEL_CACHE_TTL_SHARED_SECONDS = 6 * 60 * 60
 MODEL_CACHE_TTL_TENANT_SECONDS = 5 * 60
-# Bump when the readers or the emitters change what a cached model holds:
-# v3 = xbrlkit 0.15.0 (targetRole read back, Calculations 1.1 as calculation);
-# v4 = a published filing's model is cached as its holon carries it, with each
-# text block still a pointer to its fragment.
+# Bump when the readers or the emitters change what a cached model holds.
 MODEL_CACHE_VERSION = "4"
 # Text-block fragments fetched from the public bucket per request.
 FRAGMENT_WORKERS = 8
@@ -102,9 +76,7 @@ FRAGMENT_TEXT_BUDGET_CHARS = 8_000_000
 # The largest published holon read whole.
 HOLON_BUDGET_CHARS = 48_000_000
 
-# The filing's coordinates in the public bucket, from the report it is on the
-# graph: one anchored statement, the kind the shared replica answers in a
-# fraction of a second.
+# The filing's coordinates in the public bucket, from its Report node.
 COORDINATES_QUERY = (
   "MATCH (r:Report {identifier: $report})<-[:ENTITY_HAS_REPORT]-(e:Entity) "
   "RETURN r.accession_number AS accession, r.filing_date AS filing_date, "
@@ -121,8 +93,8 @@ _redis_unavailable = False
 
 
 def _cache() -> Any:
-  """The shared MCP_CACHE client, created on first use; ``None`` when the
-  cache is unreachable, so a Valkey outage costs a read, not the call."""
+  """The MCP_CACHE client, or ``None`` when unreachable: a Valkey outage costs
+  a read, not the call."""
   global _redis_client, _redis_unavailable
   if _redis_client is None and not _redis_unavailable:
     try:
@@ -140,9 +112,7 @@ def _cache_key(graph_id: str, report_id: str) -> str:
 
 
 async def load_report_model(graph_id: str, report_id: str) -> tuple[XbrlModel, bool]:
-  """The report as xbrlkit's model: from the cache when it is there, else
-  read from where the platform holds it and cached. Returns the model and
-  whether the cache served it."""
+  """The report as xbrlkit's model, and whether the cache served it."""
   key = _cache_key(graph_id, report_id)
   cache = _cache()
   if cache is not None:
@@ -178,8 +148,6 @@ async def load_report_model(graph_id: str, report_id: str) -> tuple[XbrlModel, b
 
 
 def _freeze(model: XbrlModel) -> bytes:
-  """The model as the cache holds it. Serializing a 10-K's model is CPU work
-  of a few hundred milliseconds, so it runs off the loop like the reads."""
   return zlib.compress(model.model_dump_json().encode("utf-8"))
 
 
@@ -188,10 +156,9 @@ def _thaw(blob: bytes) -> XbrlModel:
 
 
 async def _published_model(graph_id: str, report_id: str) -> XbrlModel:
-  """A shared repository's report from its published holon in the public
-  bucket. Its text blocks stay pointers to their fragments: a response reads
-  the ones it returns (``_inline_text``), so the cached model stays the size
-  of the holon."""
+  """A shared repository's report from its published holon. Text blocks stay
+  pointers to their fragments (read per response by ``_inline_text``), so the
+  cached model stays the size of the holon."""
   repository = await get_graph_repository(graph_id, operation_type="read")
   rows = await repository.execute_query(COORDINATES_QUERY, {"report": report_id})
   if not rows:
@@ -240,13 +207,10 @@ def _fragment_key(url: str, bucket: str) -> str:
 
 
 def _inline_fragments(s3: S3Client, model: XbrlModel, concepts: set[str]) -> int:
-  """Replace these text blocks' fragment URLs with the fragments.
+  """Replace these text blocks' fragment URLs with the fragments, in place.
 
-  The pipeline externalizes a large text block to the public bucket and the
-  holon carries its URL; the block tool wants the text, for its preview and
-  its length, so the fragments of the concepts a response returns are read
-  here in parallel. One that cannot be read, or that would take the response
-  past its budget, stays a URL and the block says so.
+  A fragment that cannot be read, or would exceed the response budget, stays a
+  URL. Returns how many were inlined.
   """
   pending = [
     fact
@@ -291,8 +255,6 @@ def _is_external_text(model: XbrlModel, fact: Any) -> bool:
 
 
 def _tenant_model(graph_id: str, report_id: str) -> XbrlModel:
-  """A tenant's report from the ledger, as the exports build it: live, with
-  its networks and its facts pinned to their structures."""
   from robosystems.db.extensions import extensions_session
   from robosystems.operations.serialization import (
     build_report_bundle,
@@ -326,8 +288,7 @@ async def resolve_report(
   """
   shared = is_shared_repository_or_subgraph(graph_id)
   if not shared and is_subgraph(graph_id):
-    # A subgraph shares its parent's ledger schema and has no report of its
-    # own; the session factory would refuse the id deep inside the read.
+    # A subgraph has no ledger of its own; fail here rather than deep in the read.
     raise ReportSelectorError(
       "A subgraph has no ledger of its own; read the report on its parent graph."
     )

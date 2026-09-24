@@ -1,61 +1,14 @@
-"""Pending-obligation promotion — reusable core sweep.
+"""Pending-obligation promotion sweep.
 
-Materialized ``pending`` ``schedule_entry_due`` events sit dormant until
-their period boundary passes. At that point a sweep flips them to
-``classified`` (committing to the obligation), then optionally dispatches
-the ``schedule_entry_due`` Python handler to draft the closing entry on the
-GL.
+Matured ``pending`` ``schedule_entry_due`` events are flipped to
+``classified``; in autopilot mode (``dispatch_handlers=True``, per graph via
+``Graph.auto_dispatch_obligations``) the handler also drafts the closing
+entry. Called by the Dagster sensor and on demand; the caller owns the
+transaction. Re-running is safe.
 
-Two surfaces call this:
-
-- The Dagster sensor + per-graph job (production path; runs every few
-  minutes and processes whatever has matured).
-- An admin CLI / REPL helper that promotes a single graph on demand
-  (operator-driven during incidents or backfills).
-
-Both paths share the same pure function: ``promote_pending_obligations``.
-The session is provided by the caller; this module never opens or commits
-its own transaction.
-
-Autopilot vs co-pilot
----------------------
-
-The ``dispatch_handlers`` flag distinguishes the two operating modes:
-
-- ``False`` (co-pilot, default): flip status only. The operator (or
-  another job) is responsible for actually drafting the entry. Useful
-  when handler dispatch should be observable before it's automatic.
-- ``True`` (autopilot): also call the registered Python handler so the
-  draft entry lands in the GL immediately on the same tick.
-
-Mode is selected per graph via ``Graph.auto_dispatch_obligations``, with the
-``EXTENSIONS_PROMOTION_AUTO_DISPATCH`` env var as the deployment-wide default
-when the column is NULL.
-
-Idempotence
------------
-
-The flip is ``UPDATE … WHERE status='pending' AND occurred_at <= :as_of``
-so re-running the function is safe — already-classified rows are
-skipped. Handler dispatch is idempotent at the schedule-entry level
-(``ScheduleService.create_closing_entry`` reconciles to the existing
-draft when one already exists).
-
-Stranded obligations
---------------------
-
-A co-pilot sweep flips pending → classified *without* dispatching, so an
-obligation can sit at ``classified`` with no closing entry ever drafted —
-invisible to a later autopilot sweep that only dispatches what it flips,
-and invisible to the close gate's pending count. Those are adjusting
-entries a close would silently omit. The sweep therefore also scans
-matured ``classified`` obligations whose (schedule, period) has no
-``entries`` row — "stranded" — and dispatches them in autopilot mode
-(co-pilot surfaces them on the result for the operator). The has-a-draft
-test is keyed the same way ``create_closing_entry``'s reconcile is
-(``source_structure_id`` + ``posting_date`` inside the period, any
-status), so an obligation whose entry was drafted through a *different*
-event — or already posted — is never re-dispatched.
+A co-pilot sweep can leave obligations ``classified`` with no closing entry
+("stranded"), invisible to the close gate's pending count. The sweep also
+finds those: autopilot dispatches them, co-pilot reports them.
 """
 
 from __future__ import annotations
@@ -91,11 +44,8 @@ class PromotionResult:
   classified_event_ids: list[str] = field(default_factory=list)
   dispatched_event_ids: list[str] = field(default_factory=list)
   voided_orphan_event_ids: list[str] = field(default_factory=list)
-  # Matured obligations found already at `classified` with no closing entry
-  # drafted for their (schedule, period) — after orphan voiding. In autopilot
-  # mode these were dispatched this sweep (also present in
-  # dispatched_event_ids); in co-pilot mode they're surfaced so the operator
-  # can re-run with dispatch_handlers=True or void them.
+  # Classified obligations with no closing entry for their (schedule, period).
+  # Autopilot also lists them in dispatched_event_ids.
   stranded_event_ids: list[str] = field(default_factory=list)
   errors: list[tuple[str, str]] = field(default_factory=list)
 
@@ -121,12 +71,8 @@ class PromotionResult:
 
 
 def _obligation_window(event: Event) -> tuple[str, date, date] | None:
-  """Extract (schedule_id, period_start, period_end) from obligation metadata.
-
-  Returns None when any of the three is missing or unparseable — such an
-  event can't be checked for a draft (and handler dispatch would reject
-  its metadata anyway).
-  """
+  """(schedule_id, period_start, period_end) from metadata, or None if any is
+  missing or unparseable."""
   meta = event.metadata_ or {}
   schedule_id = meta.get("schedule_id")
   if not schedule_id:
@@ -142,13 +88,8 @@ def _obligation_window(event: Event) -> tuple[str, date, date] | None:
 def filter_stranded_obligations(session: Session, events: list[Event]) -> list[Event]:
   """Return the subset of obligation `events` with no drafted closing entry.
 
-  "Has a draft" mirrors ``ScheduleService.create_closing_entry``'s
-  reconcile lookup: any ``entries`` row — draft or posted, regardless of
-  which event triggered it — with ``source_structure_id`` equal to the
-  obligation's schedule and ``posting_date`` inside its period window.
-  Matching on the (schedule, period) key rather than
-  ``triggered_by_event_id`` keeps obligations whose entry was drafted
-  through a different event (or already posted) out of the stranded set.
+  Mirrors ``ScheduleService.create_closing_entry``'s reconcile: any entry,
+  of any status and from any event, on the schedule within the period.
   """
   windows: dict[str, tuple[str, date, date]] = {}
   for evt in events:
@@ -160,17 +101,9 @@ def filter_stranded_obligations(session: Session, events: list[Event]) -> list[E
 
   schedule_ids = {sid for sid, _, _ in windows.values()}
   entry_dates: dict[str, list[date]] = {}
-  # Generated reversals are excluded for the same reason `create_closing_entry`'s
-  # reconcile excludes them: an auto-reversal carries its schedule's
-  # `source_structure_id` and posts on the first day of the NEXT period, so it
-  # falls inside that period's window and would answer "this period already has
-  # its entry" when nothing has been drafted — leaving a genuinely stranded
-  # obligation invisible to the sweep that exists to find it.
-  #
-  # Keyed on the reversal link rather than entry type, and shared with that
-  # reconcile: `entry_type` is caller-authored and "reversing" is a legal value
-  # for a schedule's own entry, so a type filter would misread those schedules
-  # as stranded. See `entry_status.PRIMARY_ENTRY_SQL`.
+  # Exclude generated reversals: they post on the first day of the next
+  # period and would falsely mark it as drafted. Keyed on the reversal link,
+  # not `entry_type` (caller-authored), as in `entry_status.PRIMARY_ENTRY_SQL`.
   for entry in (
     session.query(Entry)
     .filter(
@@ -199,13 +132,7 @@ def filter_stranded_obligations(session: Session, events: list[Event]) -> list[E
 
 
 def find_stranded_obligations(session: Session, *, as_of: datetime) -> list[Event]:
-  """Matured `classified` obligations whose closing entry was never drafted.
-
-  The population a co-pilot sweep creates: flipped past `pending` without
-  dispatch, so invisible to the close gate's pending count — adjusting
-  entries a close would otherwise silently omit. The close gate counts
-  these; the autopilot sweep dispatches them.
-  """
+  """Matured `classified` obligations whose closing entry was never drafted."""
   classified = (
     session.query(Event)
     .filter(
@@ -222,15 +149,11 @@ def find_stranded_obligations(session: Session, *, as_of: datetime) -> list[Even
 def _preview_write_set(
   session: Session, candidate_filter: list
 ) -> tuple[list[Event], list[Event]]:
-  """Unlocked read of what this sweep will write: the ``pending`` candidates
-  and the stranded ``classified`` ones.
+  """Unlocked read of what this sweep will write: ``pending`` candidates and
+  stranded ``classified`` ones.
 
-  Dispatched obligations rest at ``classified`` for good (see
-  ``schedule_entry_due``), so the classified candidate set is the schedule's
-  whole history. Only the stranded subset is written; the rest is neither
-  fenced nor locked — locking it would hold every historical obligation for
-  the length of the sweep and fail close's publish against them, and fencing
-  it would fence every period that ever held a schedule.
+  Dispatched obligations stay ``classified`` forever, so only the stranded
+  subset is fenced and locked, not the schedule's whole history.
   """
   preview = session.query(Event).filter(*candidate_filter).all()
   pending = [evt for evt in preview if evt.status == "pending"]
@@ -242,10 +165,8 @@ def _preview_write_set(
 def _fence_write_set(session: Session, write_set: list[Event]) -> list[tuple[str, str]]:
   """Take the shared period fence for every obligation autopilot will write.
 
-  Returns ``(event_id, reason)`` for obligations whose period is closed, so
-  the caller can leave them out and report them. A fence that cannot be
-  taken because a closer holds the exclusive side propagates as
-  ``RowLockedError`` — that one is retryable and does apply to the sweep.
+  Returns ``(event_id, reason)`` for obligations in closed periods. A fence
+  held exclusively by a closer propagates as retryable ``RowLockedError``.
   """
   by_date: dict[date, list[Event]] = {}
   for evt in write_set:
@@ -256,9 +177,6 @@ def _fence_write_set(session: Session, write_set: list[Event]) -> list[tuple[str
     by_date.setdefault(posting_date, []).append(evt)
 
   closed: list[tuple[str, str]] = []
-  # Sorted so two sweeps fence periods in the same order. Shared fences do
-  # not contend with each other, so this is tidiness rather than a
-  # deadlock guard — the row locks that follow are the ones ordered for that.
   for posting_date in sorted(by_date):
     try:
       assert_period_not_closed(session, posting_date)
@@ -277,43 +195,21 @@ def promote_pending_obligations(
 ) -> PromotionResult:
   """Flip matured `pending` `schedule_entry_due` events to `classified`.
 
-  Also scans matured `classified` obligations with no drafted closing
-  entry ("stranded" — see module docstring): autopilot dispatches them,
-  co-pilot surfaces them on ``result.stranded_event_ids``.
-
-  ``session`` must be tenant-scoped (search_path set to the target graph's
-  schema) and the caller owns commit/rollback; ``graph_id`` is for logging
-  only, since the data scope comes from the search_path. Events with
-  ``occurred_at <= as_of`` are eligible — pass ``datetime.now(UTC)`` for a
-  wall-clock sweep.
-
-  Per-event handler errors are collected rather than raised, so a single bad
-  row can't poison the sweep: those events stay at ``classified`` (the flip
-  already happened) and surface in ``result.errors``.
+  ``session`` must be tenant-scoped and the caller owns commit/rollback;
+  ``graph_id`` is for logging only. Per-event handler errors are collected
+  in ``result.errors`` rather than raised. The caller bounds lock waits.
   """
-  # Locked: everything below is read-decide-write against these rows — the
-  # co-pilot flip, the orphan void, and the autopilot dispatch all act on the
-  # status this read observed. The sensor runs every few minutes on every
-  # graph, so it races an on-demand `promote-obligations`, an inbox approval,
-  # and (if a tick overruns) its own successor. See `locking` for the
-  # bounded-vs-unbounded split: this function is called from both a Dagster
-  # sweep and a request handler, and it is the *caller* that bounds the wait.
   candidate_filter = [
     Event.event_type == "schedule_entry_due",
     Event.status.in_(("pending", "classified")),
     Event.occurred_at <= as_of,
   ]
   result = PromotionResult(graph_id=graph_id)
-  # Unlocked preview of the write set, then lock exactly that — not the whole
-  # candidate set. See `_preview_write_set` for why the classified history
-  # stays out of both the fence and the lock.
+  # Unlocked preview of the write set, then lock exactly that.
   preview_pending, preview_stranded = _preview_write_set(session, candidate_filter)
   write_set = preview_pending + preview_stranded
-  # Autopilot writes GL, so the period fence has to come *before* the
-  # event row locks. Close takes exclusive fence then event locks;
-  # locking first and fencing in the handler was the inversion that
-  # failed close mid-publish. An obligation whose period is already
-  # closed is left out of the sweep and reported, not fatal to it.
+  # Autopilot writes GL: fence before the row locks, matching close's order.
+  # Obligations in closed periods are skipped and reported.
   if dispatch_handlers and write_set:
     closed = _fence_write_set(session, write_set)
     if closed:
@@ -323,46 +219,29 @@ def promote_pending_obligations(
   if not write_set:
     return result
 
-  # The preview above put these rows in the identity map, so the locked
-  # read must `populate_existing` — otherwise it takes the lock and hands
-  # back the status the preview saw, and a void or approval that committed
-  # in between is acted on as if it never happened. Flush first: this
-  # factory is `autoflush=False`, and a refresh would otherwise discard an
-  # in-flight change without a word (nothing is pending here today; this
-  # keeps it a property of the read rather than of its callers).
+  # The preview loaded these rows, so the locked read must `populate_existing`
+  # or it returns stale statuses; flush first (autoflush is off).
   session.flush()
   candidates = (
     session.query(Event)
     .filter(
       Event.id.in_([evt.id for evt in write_set]),
-      # Re-checked under the lock: a row that left the candidate set while
-      # we waited is not returned at all — the same guard the bulk updates
-      # below carry, and independent of the refresh.
       Event.status.in_(("pending", "classified")),
     )
-    # Ordered so this and `supersede_pending_obligations` / the schedule
-    # void — whose row sets overlap on pending obligations — can never
-    # acquire in opposing orders. See `locking.ordered_lock_column`.
+    # Same order as `supersede_pending_obligations` / the schedule void.
     .order_by(ordered_lock_column())
     .populate_existing()
     .with_for_update()
     .all()
   )
-  # Re-derived from the locked rows: status is decided here, not by the
-  # preview. A row that moved between the two reads (voided, approved,
-  # drafted) drops out on its own.
+  # Status decided from the locked rows, not the preview.
   pending = [evt for evt in candidates if evt.status == "pending"]
   classified = [evt for evt in candidates if evt.status == "classified"]
 
   stranded = filter_stranded_obligations(session, classified) if classified else []
 
-  # Orphan guard: an obligation whose schedule structure no longer exists is
-  # orphaned — the schedule was deleted but its register wasn't voided. Never
-  # draft an orphan into a closing entry; void it in place so it stops
-  # blocking close, and surface it. This is the catch-all that stops a deleted
-  # schedule from double-posting at promotion regardless of how the orphan
-  # arose, and it covers stranded classified obligations too — a deleted
-  # schedule's classified leftovers void rather than error at dispatch.
+  # Orphans (schedule structure deleted) are voided in place, never drafted,
+  # so they stop blocking close.
   guard_pool = pending + stranded
   if guard_pool:
     candidate_schedule_ids = {
@@ -409,27 +288,14 @@ def promote_pending_obligations(
     return result
 
   if not dispatch_handlers:
-    # Co-pilot mode: single bulk UPDATE instead of per-row ORM mutation.
-    # No need to keep the ORM objects in the dirty set — we don't dispatch
-    # a handler that would read event.status, so the round-trip savings are
-    # significant on long schedules (a 30-year mortgage is 360 rows).
-    # Stranded obligations are already classified — a status flip can't help
-    # them; they ride out on result.stranded_event_ids instead.
+    # Co-pilot: one bulk UPDATE. Stranded ones are only reported.
     if pending:
       candidate_ids = [evt.id for evt in pending]
-      # The status predicate is not redundant with the lock above — it is the
-      # invariant stated where it is relied on. Without it this UPDATE would
-      # write `classified` over whatever the row now holds, so a concurrently
-      # voided or committed obligation would be silently reverted to an earlier
-      # state. That is a lost update, not just a redundant one, and it is the
-      # same guard the orphan void a few lines up already carries.
+      # The status predicate prevents reverting a concurrently moved row.
       session.query(Event).filter(
         Event.id.in_(candidate_ids), Event.status == "pending"
       ).update({"status": "classified"}, synchronize_session="fetch")
-      # Accurate because the candidate read is locked: the UPDATE's guard
-      # cannot filter any of these out, so every id did in fact flip. If that
-      # read ever loses its lock, this list has to come from the statement's
-      # rowcount instead of being assumed.
+      # Accurate only because the candidate read is locked.
       result.classified_event_ids.extend(candidate_ids)
     logger.info(
       "promote_pending_obligations[%s]: classified=%s stranded=%s (co-pilot mode)",
@@ -439,8 +305,7 @@ def promote_pending_obligations(
     )
     return result
 
-  # Autopilot mode: mutate ORM rows so subsequent handler.dispatch calls
-  # see status='classified' without an extra round trip.
+  # Autopilot: mutate ORM rows so handler dispatch sees the new status.
   for event in pending:
     event.status = "classified"
     result.classified_event_ids.append(event.id)
@@ -449,8 +314,7 @@ def promote_pending_obligations(
   if handler is None:  # pragma: no cover — registered at module import
     raise RuntimeError("schedule_entry_due handler is missing from the registry")
 
-  # Dispatch newly flipped obligations AND stranded ones — the reconcile
-  # inside the handler is idempotent per (schedule, period).
+  # The handler's reconcile is idempotent per (schedule, period).
   for event in pending + stranded:
     try:
       typed_metadata = handler.metadata_schema.model_validate(event.metadata_ or {})
@@ -464,26 +328,19 @@ def promote_pending_obligations(
       continue
 
     try:
-      # Each dispatch runs under its own savepoint: a database-level failure
-      # inside one handler (a constraint violation, say) would otherwise abort
-      # the whole transaction, every later dispatch would fail with "current
-      # transaction is aborted" and be collected as if it were its own error,
-      # and the caller's commit would fail — one poison obligation blocking
-      # every other one on the graph, every tick.
+      # Savepoint per dispatch so one DB-level failure doesn't abort the
+      # whole transaction.
       with session.begin_nested():
         handler.dispatch(session, event, typed_metadata, created_by)
       result.dispatched_event_ids.append(event.id)
     except HandlerMetadataValidationError as e:
       result.errors.append((event.id, f"handler validation failed: {e}"))
     except (RowLockedError, OperationalError):
-      # A lock wait or a connection fault is not "one bad event" — it is the
-      # sweep's own condition, and the caller's bounded wait / retry policy
-      # must see it rather than a per-event error line.
+      # The sweep's own condition, not one bad event: let the caller retry.
       raise
     except Exception as e:
-      # Catch-all so one bad event doesn't sink the sweep. The status
-      # change above stays in the session — caller decides whether to
-      # commit (preserving classified) or rollback (full retry next tick).
+      # One bad event must not sink the sweep; the status flip stays in the
+      # session for the caller to commit or roll back.
       result.errors.append((event.id, f"dispatch raised {type(e).__name__}: {e}"))
 
   logger.info(

@@ -1,13 +1,7 @@
 """Portfolio Block write operations — molecule-level command surface.
 
-:func:`create_portfolio_block`, :func:`update_portfolio_block` and
-:func:`delete_portfolio_block` each validate the entire envelope before any
-DB write and apply all changes atomically — partial failures roll back via
-the caller's session.
-
-`PortfolioNotFoundError` is imported from
-``robosystems.operations.roboinvestor.reads.holdings`` so the read and write
-surfaces share one 404 sentinel.
+Each validates the whole envelope before writing; the caller's session owns
+rollback.
 """
 
 from __future__ import annotations
@@ -114,9 +108,7 @@ def create_portfolio_block(
 ) -> PortfolioBlockEnvelope:
   """Create a portfolio with optional initial positions, return its envelope.
 
-  Validates every referenced security up front so we never partially
-  write a portfolio with bad position data; on validation failure no
-  rows are added.
+  Validates every referenced security before adding any row.
   """
   _validate_securities_exist(session, [p.security_id for p in body.positions])
 
@@ -145,9 +137,7 @@ def update_portfolio_block(
 ) -> PortfolioBlockEnvelope:
   """Patch portfolio fields and apply position deltas atomically.
 
-  `add` items mint new positions; `update` patches by position id;
-  `dispose` flips status to `disposed`. Partial failures abort the
-  whole envelope — the caller's session boundary owns the rollback.
+  `dispose` flips status to `disposed`. A failure aborts the whole envelope.
   """
   portfolio = session.execute(
     select(Portfolio).where(Portfolio.id == body.portfolio_id)
@@ -183,11 +173,8 @@ def update_portfolio_block(
   for field, value in portfolio_patch.items():
     setattr(portfolio, field, value)
 
-  # Disposals and patches first, adds last. `_add_position` flushes each add
-  # so a duplicate active position surfaces as its typed error — and the
-  # partial unique index is on *active* positions, so disposing a security's
-  # current position and re-adding it in the same call is legitimate only if
-  # the disposal has reached the database before the add is flushed.
+  # Disposals must reach the database before adds flush: the unique index is
+  # on *active* positions, so dispose-and-re-add in one call is legitimate.
   for spec in body.positions.dispose:
     row = position_map[spec.id]
     row.status = "disposed"
@@ -207,8 +194,7 @@ def update_portfolio_block(
   for spec in body.positions.add:
     _add_position(session, body.portfolio_id, spec, created_by)
 
-  # Bump updated_at on the portfolio so the envelope reflects this write
-  # even when only positions changed.
+  # Bump even when only positions changed.
   portfolio.updated_at = datetime.now(UTC)
 
   session.flush()

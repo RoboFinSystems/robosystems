@@ -1,27 +1,13 @@
 """Re-sync library taxonomy content into already-provisioned tenant schemas.
 
-The provisioning-time copy (``taxonomy/writer.py::copy_library_into_tenant``) is
-additive-only, so in-place library fixes (rule logic, element attributes, trait
-names/bindings, calc weights, presentation order) never reach a tenant once it
-is provisioned. This module is the catch-up path: it runs
-``resync_library_into_tenant`` (the ``DO UPDATE`` sibling) inside a transaction
-that has executed ``SET LOCAL robosystems.library_resync = 'on'`` — the GUC the
-immutability trigger honors so the seeder, and only the seeder, may update
-library-origin rows in tenant scope.
+The provisioning-time copy is additive-only, so in-place library fixes never
+reach a provisioned tenant. These wrappers run ``resync_library_into_tenant``
+(the ``DO UPDATE`` sibling) under ``SET LOCAL robosystems.library_resync =
+'on'``, the GUC the immutability trigger honors.
 
-**The two wrappers here have no callers.** Propagation in production runs the
-lower-level ``resync_library_into_tenant`` directly from a migration, each
-fanning one **package-pinned** resync across ``for_each_tenant_schema``. These
-functions are the seam for an operator entrypoint that doesn't require
-authoring a migration. Note the consequence of the package-pinned pattern: a
-package no migration has pinned has never been re-propagated to a provisioned
-tenant.
-
-Propagation policy: only safe for **in-place fixes within a framework version**
-(mapping targets stay version-stable; filed reports pin their own FactSets; live
-reports re-derive on next render — that is how a tenant *gets* the fix).
-Structural reorganizations belong to a new framework version + opt-in re-pin,
-never a silent re-sync.
+These wrappers have no callers: production propagation runs package-pinned
+resyncs from migrations. Only safe for in-place fixes within a framework
+version; structural changes need a new framework version.
 """
 
 from __future__ import annotations
@@ -36,8 +22,7 @@ from robosystems.taxonomy.writer import (
   resync_library_into_tenant,
 )
 
-# Tenant schemas are graph-id-named: ``kg`` + 16+ hex chars (mirrors
-# ``migrations/extensions/helpers.py::for_each_tenant_schema``).
+# Mirrors ``migrations/extensions/helpers.py::for_each_tenant_schema``.
 _TENANT_SCHEMA_SQL = text(
   "SELECT schema_name FROM information_schema.schemata "
   "WHERE schema_name ~ '^kg[0-9a-f]{16,}$' ORDER BY schema_name"
@@ -54,10 +39,7 @@ def list_tenant_schemas() -> list[str]:
 def resync_tenant(graph_id: str, pin: dict[str, str] | None = None) -> CopyStats:
   """Catch one tenant up to the current public library.
 
-  ``extensions_session`` validates the schema name and owns commit/rollback; the
-  bypass GUC is set inside that transaction so the immutability trigger permits
-  the library UPDATEs, then the ``DO UPDATE`` fan-out runs across all 12 library
-  tables on the same connection/transaction.
+  The bypass GUC must be set in the same transaction as the updates.
   """
   with extensions_session(graph_id, statement_timeout_ms=None) as session:
     session.execute(text(SET_LIBRARY_RESYNC))
@@ -75,14 +57,8 @@ def resync_all_tenants(
 ) -> dict[str, CopyStats]:
   """Catch every provisioned tenant up to the current public library.
 
-  Each schema runs in its own ``extensions_session`` transaction, so a failure on
-  one tenant rolls back only that tenant and does not block the rest. Failures are
-  logged and the schema is omitted from the returned map; the caller decides how
-  to surface partial completion.
-
-  **Sequential by design** — `O(N)` independent transactions over the tenant
-  schemas. If the fleet grows enough that a full-fleet re-sync becomes slow,
-  batch or parallelize here; each schema is independent.
+  One transaction per schema, sequentially; a failed schema is logged and
+  omitted from the returned map.
   """
   schemas = list_tenant_schemas()
   logger.info("[taxonomy-resync] re-syncing %d tenant schema(s)", len(schemas))

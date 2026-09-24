@@ -1,10 +1,5 @@
-"""Handlers for ``taxonomy_type='chart_of_accounts'`` — tenant CoA curation.
-
-The CoA block is the reference implementation of the **declarative**
-construction mode for taxonomy blocks — tenant declares the full
-envelope (taxonomy + structures + elements + associations) and the
-handler writes every atom in one transaction.
-"""
+"""Handlers for ``taxonomy_type='chart_of_accounts'``: the tenant declares the
+full envelope and every atom is written in one transaction."""
 
 from __future__ import annotations
 
@@ -135,10 +130,8 @@ def _update_efs_classification(
 def _auto_link_entity(session: Session, taxonomy_id: str) -> None:
   """Link the graph entity to this CoA as primary chart_of_accounts.
 
-  No-op when no entity exists in the graph (e.g. during tests or
-  seeding). Clears any existing primary CoA link before setting the new
-  one — only one primary CoA per entity at a time. If the link already
-  exists but is non-primary, promotes it rather than returning early.
+  No-op without an entity. Demotes any existing primary CoA link (one
+  primary per entity) and promotes an existing non-primary link.
   """
   entity = resolve_parent_entity(session)
   if entity is None:
@@ -201,11 +194,8 @@ def create(
 ) -> str:
   """Create a CoA taxonomy + its elements, structures, and associations.
 
-  Returns the new taxonomy_id. Parent resolution across envelope-local
-  qnames is done in two passes: pass 1 inserts every element with
-  ``parent_id=None``; pass 2 fills in ``parent_id`` using the qname
-  lookup table. This keeps the insert order independent of the
-  envelope's element order.
+  Returns the new taxonomy_id. Parents are filled in a second pass, so
+  element order in the envelope doesn't matter.
   """
   if payload.taxonomy_type != COA_BLOCK_TYPE:
     raise ValueError(

@@ -1,13 +1,8 @@
 """Guard rails — structural and semantic validation for generated reports.
 
-Structural checks are deterministic arithmetic (hard failures).
-Semantic checks are pattern matching against known report structures (warnings).
-
-Every check runs once per rendered period column. A statement with a
-comparative column is two statements sharing one row layout, and a green
-result that inspected only the first column says nothing about the other —
-so on a multi-column statement each failure and warning names the column it
-was found in (``[Prior] Balance sheet does not balance …``).
+Structural checks are arithmetic (failures); semantic checks are warnings.
+Every check runs once per rendered period column, and on a multi-column
+statement each finding names its column (``[Prior] Balance sheet …``).
 """
 
 from __future__ import annotations
@@ -35,11 +30,8 @@ STATUS_INCONCLUSIVE = "inconclusive"
 class ValidationResult:
   """Result of guard rail validation.
 
-  ``status`` is the load-bearing field: ``passed`` (every rule ran on every
-  rendered column and produced zero failures), ``failed`` (at least one rule
-  failed), or ``inconclusive`` (no rule exists for the block type — nothing
-  was checked). ``passed`` is ``True`` only for ``status == "passed"``: a
-  statement nobody checked is not a statement that passed.
+  ``status`` is ``passed``, ``failed``, or ``inconclusive`` (no rules exist
+  for the block type). ``passed`` is True only for ``status == "passed"``.
   """
 
   passed: bool = True
@@ -69,19 +61,9 @@ def validate_report(
 ) -> ValidationResult:
   """Run structural and semantic validation for a rendered structure.
 
-  ``period_labels`` names the columns of ``rows[*].values`` (``Current`` /
-  ``Prior``, a period end date, …) so a finding on a comparative statement
-  says which column it belongs to. Missing labels fall back to ``column N``.
-
-  `_check_totals_foot` (shared) is the load-bearing CF check: it verifies the
-  net-change-in-cash line foots to Op + Inv + Fin and that each section foots
-  to its leaves — i.e. the investing/financing flows actually roll up. The
-  cross-statement ΔCash reconciliation (CF net-change == BS cash movement)
-  lives at the fact-bundle level in ``fact_grid._check_cash_flow_tie_out``,
-  since the rendered CF rows carry no independent beginning/ending cash.
-
-  `equity_statement` and `comprehensive_income` have no validators yet, so
-  they come back ``inconclusive`` rather than vacuously passed.
+  ``period_labels`` names the columns of ``rows[*].values``; missing labels
+  fall back to ``column N``. Block types with no validators
+  (``equity_statement``, ``comprehensive_income``) come back ``inconclusive``.
   """
   validator = _VALIDATORS.get(block_type)
   if validator is None:
@@ -146,8 +128,7 @@ def _note_check(result: ValidationResult, name: str) -> None:
 
 
 def _fail(result: ValidationResult, message: str) -> None:
-  """Record a failure — deduplicated, so a column-independent finding (a
-  missing classification rollup) is stated once, not once per column."""
+  """Record a failure, deduplicated so column-independent findings appear once."""
   if message not in result.failures:
     result.failures.append(message)
   result.passed = False
@@ -161,16 +142,9 @@ def _validate_income_statement(
 ) -> None:
   _check_totals_foot(rows, result, column, sign_by_balance=True)
 
-  # Structural: Net Income must reconcile against EVERY income-statement
-  # line by natural balance — credit-nature lines (operating AND
-  # nonoperating revenue, gains) add; debit-nature lines (expenses, losses,
-  # interest, tax) subtract.
-  #
-  # Summing the reported LEAVES (atomic facts) rather than subtotals avoids
-  # double-counting and captures nonoperating items that a single-step
-  # "Revenue minus Expenses" identity misses on a multi-step statement.
-  # Keying on balance_type rather than classification makes contras
-  # (e.g. sales returns) net correctly.
+  # Net Income = Σ credit leaves - Σ debit leaves. Leaves avoid
+  # double-counting and catch nonoperating items; balance_type (not
+  # classification) nets contras correctly.
   _note_check(result, "net_income_equation")
 
   net_income_row = _net_income_row(rows)
@@ -179,9 +153,7 @@ def _validate_income_statement(
   credit_leaves = 0
   debit_leaves = 0
   for row in rows:
-    # Skip subtotals/abstracts (would double-count) and the reported Net
-    # Income row itself (it's the target, not a component) — guarded by
-    # identity so it's excluded even if its is_subtotal flag is unset.
+    # The NI row is excluded by identity, even if is_subtotal is unset.
     if row.is_subtotal or row.is_abstract or row is net_income_row:
       continue
     value = _value(row, column.index)
@@ -191,14 +163,11 @@ def _validate_income_statement(
     elif row.balance_type == "debit":
       implied_ni -= value
       debit_leaves += 1
-    # else: per-share / ratio metrics carry no monetary balance — skip.
+    # Per-share / ratio metrics have no balance type.
 
   inconclusive = False
   if credit_leaves == 0 and debit_leaves == 0:
-    # Statement reported only at the subtotal level (no leaf detail). Fall
-    # back to the top-most Revenue minus Expenses subtotals — the same approach
-    # as the balance sheet, handling FAC's parallel subtotals + qname
-    # inference.
+    # Subtotal-only statement: fall back to top-most Revenue - Expenses.
     revenue_row = _top_most_subtotal_for_classification(rows, "revenue", column.index)
     expense_row = _top_most_subtotal_for_classification(rows, "expense", column.index)
     if revenue_row is None or expense_row is None:
@@ -218,7 +187,6 @@ def _validate_income_statement(
     else:
       implied_ni = _value(revenue_row, column.index) - _value(expense_row, column.index)
   elif credit_leaves == 0:
-    # Leaf detail present but no revenue/income line — can't reconcile.
     _fail(
       result,
       "Income statement validation inconclusive: no revenue/income line "
@@ -240,9 +208,7 @@ def _validate_income_statement(
         f"Σ(income − expense) ({implied_ni:.2f}), difference: {diff:.2f}",
       )
   elif implied_ni != 0.0:
-    # Informational warning — not a failure. A missing NetIncome row
-    # is common in multi-step structures whose final line is
-    # "Income from Continuing Operations" or similar.
+    # Warning only: multi-step structures often end on another line.
     result.warnings.append(
       f"{column.prefix}No Net Income line found; implied NI = "
       f"Σ(income − expense) = {implied_ni:.2f}"
@@ -256,25 +222,14 @@ def _top_most_subtotal_for_classification(
 
   Priority order:
 
-  1. Smallest depth wins — top of the rollup tree.
-  2. Among ties on depth, prefer the subtotal (Revenue rolled up across
-     subcategories) over the leaf (a single Revenue line).
-  3. Among ties on depth + subtotal-flag, prefer the larger absolute
-     value in column ``col`` (zero-valued placeholder rows must not beat
-     the real rollup — see the FAC ``Temporary Equity`` tie scenario covered
-     in ``test_among_ties_at_same_depth_largest_value_wins``).
+  1. Smallest depth wins.
+  2. At equal depth, a subtotal beats a leaf (a leaf is still accepted: a
+     single-step statement may report ``Revenues`` as a leaf).
+  3. Then the larger absolute value in column ``col``, so a zero placeholder
+     never beats the real rollup.
 
-  Combined L+E rollups are skipped via the qname check (won't classify
-  cleanly as either liability or equity).
-
-  Classification falls back to qname-based inference when ``row.classification``
-  is empty (FAC, rs-gaap, rs-gaap-type-subtype reference taxonomies).
-
-  Single-step income statements often have ``Revenues`` as a leaf row
-  (no children to roll up). The validator must accept the leaf as the
-  revenue total in that case — earlier the ``is_subtotal`` requirement
-  filtered such rows out and the validator produced an "inconclusive
-  failure" against a perfectly-renderable single-step IS.
+  Combined L+E rollups are skipped. Classification falls back to qname
+  inference when ``row.classification`` is empty.
   """
   best: FactRow | None = None
   for row in rows:
@@ -305,10 +260,8 @@ def _top_most_subtotal_for_classification(
 def _net_income_row(rows: list[FactRow]) -> FactRow | None:
   """Find the row that reports Net Income (or Net Loss).
 
-  Matches by qname token (case-insensitive). When multiple candidates
-  exist (e.g. FAC's ``fac:NetIncomeLoss`` plus a ``[Roll Up]`` parent),
-  prefers a subtotal at the smallest depth so the canonical "bottom
-  line" wins.
+  Matches by qname token; among several, prefers a subtotal at the smallest
+  depth.
   """
   candidates = [
     r
@@ -327,22 +280,9 @@ def _validate_balance_sheet(
 ) -> None:
   _check_totals_foot(rows, result, column, sign_by_balance=True)
 
-  # Structural: Assets = Liabilities + Equity.
-  #
-  # Resolution: pick the **top-most** subtotal per classification (smallest
-  # depth) so we use the rolled-up parent rather than summing every
-  # subtotal at every level (which would double-count). Combined "L+E"
-  # rollups (qname containing both "liabilit" and "equity") are skipped —
-  # they conflate two classifications and would inflate the equity total.
-  #
-  # Classification falls back to qname-based inference (FAC, rs-gaap,
-  # rs-gaap-type-subtype reference taxonomies often lack FASB element_traits).
+  # Assets = Liabilities + Equity, using the top-most row per classification.
   _note_check(result, "accounting_equation")
 
-  # Reuses the IS validator's resolution chain (smallest depth → subtotal
-  # over leaf → larger value) so a single-step BS variant where, for
-  # example, ``Equity`` is a leaf rather than a roll-up still resolves
-  # cleanly. See :func:`_top_most_subtotal_for_classification`.
   candidates: dict[str, FactRow] = {}
   for cls in ("asset", "liability", "equity"):
     pick = _top_most_subtotal_for_classification(rows, cls, column.index)
@@ -352,10 +292,7 @@ def _validate_balance_sheet(
   required = {"asset", "liability", "equity"}
   missing = required - candidates.keys()
   if missing:
-    # No silent pass: if we couldn't identify totals for all three
-    # classifications the validator can't make any claim about the
-    # equation. Report explicitly so callers don't read a phantom green
-    # check as proof of correctness.
+    # No silent pass when a classification total is missing.
     _fail(
       result,
       "Balance sheet validation inconclusive: missing classification "
@@ -381,17 +318,13 @@ def _validate_balance_sheet(
 def _validate_cash_flow(
   rows: list[FactRow], result: ValidationResult, column: _Column
 ) -> None:
-  """Cash flow validation — structural footing of the rendered CF.
+  """Structural footing of the rendered cash flow statement.
 
-  `_check_totals_foot` verifies the net-change line foots to Op + Inv + Fin
-  and each section foots to its leaves (so the investing/financing flow facts
-  emitted by ``fact_grid._emit_flow_facts`` actually roll up). The ΔCash
-  reconciliation against the balance sheet is a fact-bundle check
-  (``fact_grid._check_cash_flow_tie_out``), not a per-statement one.
+  The ΔCash tie to the balance sheet is checked at the fact-bundle level
+  (``fact_grid._check_cash_flow_tie_out``); rendered rows carry no cash
+  balances.
   """
-  # Cash-flow rows are cash-effect signed by ``_derive_cash_flow_facts`` and
-  # ``_reconcile_operating_to_cash`` — a section foots as a plain sum by
-  # construction, whatever balance type each element declares.
+  # Cash-flow rows are cash-effect signed, so sections foot as plain sums.
   _check_totals_foot(rows, result, column, sign_by_balance=False)
   _check_operating_plug(rows, result, column)
 
@@ -415,29 +348,16 @@ def _check_totals_foot(
 ) -> None:
   """Verify that subtotal rows equal the sum of their children.
 
-  ``_build_rows`` emits post-order — children first, then their parent
-  subtotal — so a subtotal's children are the rows immediately BEFORE it
-  with depth = subtotal.depth + 1, scanning back until a row at the same
-  or lower depth. Scanning FORWARD instead would foot each subtotal against
-  the next section's children (e.g. 'Revenues' against Cost of Revenue's
-  leaves), producing spurious warnings while skipping the real check.
+  Rows are post-order (children, then their subtotal), so a subtotal's
+  direct children are the preceding rows at depth + 1, back to the first row
+  at its own depth or shallower.
 
-  ``sign_by_balance`` applies the XBRL calculation-weight rule: a child
-  whose balance type differs from its parent's enters with weight -1
-  (interest expense under Nonoperating Income, a contra under Revenues,
-  accumulated depreciation under PP&E net). Income-statement and
-  balance-sheet rows are natural-signed per element, so that is exactly
-  how the calc DAG produced the subtotal — a plain sum counted a 3,755.70
-  interest expense with the wrong sign and reported a 7,511.40 "difference"
-  on a subtotal that was right. Cash-flow rows are cash-effect signed and
-  foot as a plain sum, so that validator passes ``False``. A row with no
-  usable balance type enters with weight +1 either way.
+  ``sign_by_balance`` applies the XBRL calculation-weight rule: a child whose
+  balance type differs from its parent's enters at -1 (a contra, interest
+  expense under nonoperating income). Unknown balance types enter at +1.
 
-  Calc-target subtotals with no presentation children (Gross Profit,
-  Operating Income) have no preceding deeper rows and fall out via the
-  zero child_sum guard; their arithmetic is covered by the calc DAG and
-  the net-income equation. Value-less structural headers (abstract rows
-  rendered with all-None values) are skipped outright.
+  Subtotals with no presentation children (Gross Profit) sum to zero and are
+  skipped; the calc DAG and net-income equation cover them.
   """
   _note_check(result, "totals_foot")
 
@@ -448,9 +368,6 @@ def _check_totals_foot(
       continue
     child_sum = 0.0
 
-    # Children precede the subtotal (post-order) at depth = subtotal.depth + 1.
-    # Only sum direct children, not grandchildren — grandchildren are
-    # already rolled into their parent subtotals.
     for j in range(idx - 1, -1, -1):
       child = rows[j]
       if child.depth <= subtotal.depth:
@@ -471,8 +388,6 @@ def _check_totals_foot(
 
 
 def _child_weight(child: FactRow, subtotal: FactRow, sign_by_balance: bool) -> float:
-  """Calculation weight of ``child`` under ``subtotal``: -1 when their balance
-  types differ, +1 when they agree or either is unknown."""
   if not sign_by_balance:
     return 1.0
   parent = subtotal.balance_type
@@ -511,18 +426,10 @@ def _check_operating_plug(
 ) -> None:
   """Warn when the operating-CF reconciling plug is large vs operating cash.
 
-  ``fact_grid._reconcile_operating_to_cash`` foots the indirect CF to actual
-  cash by booking the aggregate non-cash operating adjustment (gain/loss on
-  disposal, unrealized MTM, write-offs, …) onto
-  ``IncreaseDecreaseInOtherOperatingCapitalNet``. That makes the statement
-  articulate *by construction* — and so silently absorbs any investing/financing
-  misclassification too. A plug that dwarfs operating cash is the signal that a
-  material item is un-itemized or mis-tagged; surface it so it isn't invisible.
-
-  Row-level approximation: that line also carries any tenant-mapped "other
-  operating capital" content, but it's a system catch-all rarely mapped
-  directly, so the row value ≈ the plug in practice. Warning-only — the CF still
-  foots and renders.
+  The plug makes the indirect CF foot to actual cash by construction, so it
+  silently absorbs misclassified flows too; a plug that dwarfs operating cash
+  signals an un-itemized or mis-tagged item. The row may also carry
+  tenant-mapped content, so its value only approximates the plug.
   """
   _note_check(result, "operating_plug")
   plug = next((r for r in rows if r.element_qname == _CF_RECONCILING_LEAF_QNAME), None)

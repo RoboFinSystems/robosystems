@@ -1,31 +1,14 @@
-"""Handlers for ``block_type='forecast'`` — the authored scenario container.
+"""Handlers for ``block_type='forecast'``, the authored scenario container.
 
-The forecast block is the FP&A engine's authored surface: scenario identity
-(name + ``scenario_kind``), horizon, base period, lever assertions on
-``rs-driver:*`` catalog elements, direct **line assertions** on statement
-leaves (manual overrides that win over driver rules and carry-forward for
-the months they name), and **line growth** entries (per-line
-month-over-month trajectories — the generic form of the revenue growth
-lever, for lines the catalog doesn't drive). The block IS the scenario —
-its structure id is the ``scenario_id`` every derived forward FactSet
-carries (NULL = actuals), and deleting the block removes the whole
-scenario slice.
+The block holds the scenario's horizon, base period, lever assertions on
+``rs-driver:*`` elements, line assertions on statement leaves, and per-line
+growth rates. The block IS the scenario: its structure id is the
+``scenario_id`` every derived FactSet carries (NULL = actuals).
 
-Persistence follows the rules-for-mechanics / **facts-for-values**
-doctrine: lever *mechanics* are the library-seeded rs-driver Derive
-rules; lever and line-assertion *values* land as authored Numeric facts
-in ONE ``factset_type='custom'`` FactSet whose ``scenario_id`` is the
-forecast block itself (self-referential — the assertions belong to the
-scenario, cascade-delete with it, and stay invisible to actuals reads
-and to metric operand binding, which only joins ``('report', 'metric')``
-sets).
-
-``create`` / ``update`` / ``delete`` follow the Schedule/rollforward
-declarative pattern; ``build_envelope`` renders the lever grid
-metric-style (one row per lever, one column per horizon month) so the
-frontend reuses the metric rendering path unchanged. The derivation
-itself is ``compute-forecast`` (:mod:`.forecast_compute`) — authoring
-never computes.
+Lever and line-assertion values are stored as facts in one
+``factset_type='custom'`` FactSet whose ``scenario_id`` is the block itself,
+so they stay out of actuals reads. Authoring never computes; derivation is
+``compute-forecast`` (:mod:`.forecast_compute`).
 """
 
 from __future__ import annotations
@@ -105,13 +88,9 @@ _LEVER_SOURCE = "rs-driver"
 def _resolve_base_period(
   session: Session, entity_id: str, requested: str | None
 ) -> str:
-  """Resolve the seed month the walk projects forward from.
-
-  Request value → fiscal calendar ``closed_through_period`` → the entity's
-  newest actual report month. The last fallback is data-driven because the
-  calendar is not the period spine for annual-comparative tenants. Stored
-  resolved in the mechanics so recompute is deterministic.
-  """
+  """Resolve the base period: request value, then the fiscal calendar's
+  ``closed_through_period``, then the entity's newest actual report month
+  (annual-comparative tenants have no calendar spine)."""
   if requested is not None:
     return requested
 
@@ -140,13 +119,11 @@ def _expand_levers(
   base_period: str,
   horizon_months: int,
 ) -> list[LeverAssertionLite]:
-  """Resolve + expand wire-level lever assertions to explicit per-month maps.
+  """Resolve + expand wire-level lever assertions to explicit per-month maps
+  (uniform ``value`` fill, then per-month overrides).
 
-  Every qname must resolve to an ``rs-driver``-source element; the
-  expansion applies the uniform ``value`` fill then the per-month
-  overrides, so compute never interpolates. Overrides naming months
-  outside the horizon are rejected (silent drops would make the
-  asserted set lie).
+  Qnames must be ``rs-driver`` elements; override months outside the horizon
+  are rejected rather than dropped.
   """
   months = [add_months(base_period, i) for i in range(1, horizon_months + 1)]
   month_set = set(months)
@@ -213,14 +190,10 @@ def _expand_line_assertions(
   base_period: str,
   horizon_months: int,
 ) -> list[LineAssertionLite]:
-  """Resolve + expand wire-level line assertions to explicit per-month maps.
+  """Resolve + expand wire-level line assertions, as for levers.
 
-  Same grammar and expansion as levers; the validation differs: an
-  assertion names a **statement leaf** — any resolvable non-abstract
-  concept that isn't an rs-driver lever or rs-metric output, and isn't
-  a parent in the global rs-gaap calc DAG (**leaves only** — subtotals
-  stay derived so a manual line still articulates and stays
-  verification-gated).
+  An assertion must name a non-abstract statement leaf that isn't a lever or
+  metric; subtotals stay derived so a manual line still articulates.
   """
   if not assertions:
     return []
@@ -302,13 +275,9 @@ def _expand_line_growth(
 ) -> list[LineGrowthLite]:
   """Resolve + expand wire-level line-growth entries to per-month rate maps.
 
-  Same grammar and expansion as levers/assertions; the validation is the
-  line-assertion set plus **duration leaves only** — a balance-sheet
-  line rolls from the IS and the working-capital levers, so growing it
-  directly would fight the roll. Cross-list conflicts (a grown line
-  that's also asserted, or already driven by an active catalog rule)
-  are checked by :func:`_check_line_growth_conflicts` against the FINAL
-  lists, because an update can change one list without the other.
+  Line-assertion validation plus duration lines only: a balance-sheet line
+  rolls from the IS, so growing it would fight the roll. Cross-list
+  conflicts are checked separately by :func:`_check_line_growth_conflicts`.
   """
   if not entries:
     return []
@@ -392,14 +361,9 @@ def _check_line_growth_conflicts(
   line_assertions: list[LineAssertionLite],
   line_growth: list[LineGrowthLite],
 ) -> None:
-  """One owner per line — validated against the FINAL authored lists.
-
-  A grown line that's also line-asserted, or already driven by a catalog
-  rule whose levers this scenario sets, would have two writers with
-  order-dependent outcomes. Runs on both create and update (an update
-  can replace ``levers`` alone and silently activate a rule over a
-  stored growth entry).
-  """
+  """Reject a grown line that is also asserted or driven by an active catalog
+  rule. Must run on the final lists: an update replacing ``levers`` alone can
+  activate a rule over a stored growth entry."""
   if not line_growth:
     return
   growth_qnames = {g.qname for g in line_growth}
@@ -454,14 +418,8 @@ def _load_lever_fact_set(session: Session, structure_id: str) -> FactSet | None:
 
 
 def _ensure_scenario_dimension(session: Session, scenario_id: str, name: str) -> str:
-  """Get-or-create the ``scenario`` Dimension for a forecast Structure.
-
-  ``value`` is the structure id (stable across renames — the unique
-  constraint on ``(dimension_type, value)`` makes this idempotent);
-  ``name`` carries the display legibility. Shared by both scenario fact
-  producers: the lever-set writer here and ``_upsert_month_set`` in
-  :mod:`.forecast_compute`.
-  """
+  """Get-or-create the ``scenario`` Dimension for a forecast Structure, keyed
+  by structure id (stable across renames)."""
   existing = session.execute(
     select(Dimension.id).where(
       Dimension.dimension_type == "scenario",
@@ -505,10 +463,8 @@ def _write_lever_fact_set(
 ) -> FactSet:
   """Persist the lever + line assertions as authored facts in one scenario set.
 
-  Line-growth rates are deliberately NOT written as facts (a rate on a
-  monetary statement element would be a unit-lying fact — the mechanics
-  copy is their single authored store), but their months still widen
-  the set's period envelope so it spans everything the scenario asserts.
+  Growth rates aren't facts (see ``forecast_compute``) but their months
+  still widen the set's period envelope.
   """
   asserted_months = sorted(
     {m for lv in mechanics.levers for m in lv.values_by_period}
@@ -594,10 +550,7 @@ def create(
   payload: CreateForecastRequest,
   created_by: str,
 ) -> str:
-  """Create a forecast block. Persists the Structure + typed mechanics +
-  the lever FactSet; returns the new structure_id. Never computes —
-  run ``compute-forecast`` to derive the forward months.
-  """
+  """Create a forecast block and its lever FactSet; returns the structure_id."""
   entity_id = payload.entity_id or _default_entity_id(session)
   base_period = _resolve_base_period(session, entity_id, payload.base_period)
   levers = _expand_levers(session, payload.levers, base_period, payload.horizon_months)
@@ -619,9 +572,7 @@ def create(
     line_growth=line_growth,
   )
 
-  # The lever elements all live in the tenant's rs-driver taxonomy —
-  # the natural owner for the scenario container (rollforward precedent:
-  # owning taxonomy of the anchor element).
+  # The scenario is owned by the levers' (rs-driver) taxonomy.
   lever_element = session.get(Element, levers[0].element_id)
   assert lever_element is not None  # resolved in _expand_levers
   structure = Structure(
@@ -644,10 +595,8 @@ def create(
 
 
 def _load_forecast_or_404(session: Session, structure_id: str) -> Structure:
-  # Locked: `update` merges into the `artifact_mechanics` JSON read here, so
-  # two concurrent updates on an unlocked row would each write the version
-  # they read. `delete` decides from the same read. `RowLockedError` on
-  # contention, mapped to 409 by the surface.
+  # Locked: `update` read-modify-writes `artifact_mechanics`. Contention
+  # raises `RowLockedError` (409).
   from robosystems.operations.locking import lock_by_id
 
   structure = lock_by_id(
@@ -670,14 +619,9 @@ def update(
 ) -> str:
   """Update a forecast block in place.
 
-  Mutable: name, scenario_kind, horizon_months, base_period, base_anchor,
-  levers.
-  Changing ``horizon_months`` or ``base_period`` requires re-supplying
-  ``levers`` — the persisted expansion can't be re-derived (the
-  uniform-vs-override distinction is gone), so re-expansion needs the
-  wire-level assertions. A lever replacement rewrites the lever FactSet
-  wholesale. Already-computed scenario months are NOT recomputed — they go
-  stale until the next ``compute-forecast`` run.
+  Changing ``horizon_months`` or ``base_period`` requires re-supplying the
+  authored lists: the stored expansion has lost the uniform-vs-override
+  distinction. Computed months go stale until the next ``compute-forecast``.
   """
   structure = _load_forecast_or_404(session, payload.structure_id)
   current = ForecastMechanics.model_validate(structure.artifact_mechanics or {})
@@ -724,8 +668,6 @@ def update(
     line_growth = _expand_line_growth(
       session, payload.line_growth, base_period, horizon_months
     )
-  # Against the FINAL lists — replacing `levers` alone can activate a
-  # catalog rule over a STORED growth entry.
   _check_line_growth_conflicts(session, levers, line_assertions, line_growth)
 
   next_mechanics = ForecastMechanics(
@@ -765,14 +707,9 @@ def delete(
   payload: DeleteForecastRequest,
   deleted_by: str,
 ) -> str:
-  """Hard-delete a forecast block and its entire scenario slice.
-
-  Explicitly deletes every FactSet keyed to this scenario (the lever
-  set AND the computed forward statement/metric months — they attach to
-  OTHER structures, so the structure delete alone wouldn't reach them;
-  the DB-level ``scenario_id ... ON DELETE CASCADE`` is the backstop).
-  Actuals are never touched.
-  """
+  """Hard-delete a forecast block and every FactSet keyed to its scenario
+  (computed months attach to other structures, so the structure delete
+  alone wouldn't reach them)."""
   structure = _load_forecast_or_404(session, payload.structure_id)
   structure_id = structure.id
 
@@ -781,9 +718,7 @@ def delete(
     .scalars()
     .all()
   )
-  # Verification rows pin the scenario's month sets (compute-forecast
-  # verifies each month); no DB-level FK ties them to fact_sets, so sweep
-  # them here or they orphan invisibly.
+  # VerificationResult.fact_set_id has no FK; sweep explicitly.
   set_ids = [fs.id for fs in scenario_sets]
   if set_ids:
     from robosystems.models.extensions import VerificationResult
@@ -814,34 +749,14 @@ def build_envelope(
   series_history: int | None = None,
   series_forecast: int | None = None,
 ) -> InformationBlockEnvelope | None:
-  """Reload a forecast Structure and pack its envelope.
+  """Reload a forecast Structure and pack its envelope as the assumptions grid.
 
-  ``scenario_id`` is accepted for dispatch-signature parity and ignored
-  — the forecast block IS the scenario; its envelope is the lever grid
-  regardless of which scenario filter the read carried.
-
-  Renders the **lever grid** metric-style: one row per lever (authoring
-  order, ``item_type`` driving percent/days formatting), values from the
-  mechanics' expanded assertions, then one row per line assertion and per
-  line-growth entry. ``computed_months`` is filled from the scenario's
-  derived statement sets. No chart arm — the scenario's time-series
-  surface is the metric/statement blocks read with the scenario filter,
-  not the container itself.
-
-  Columns span the **closed months plus the horizon**, not the horizon
-  alone (:mod:`.forecast_history`): behind the seam each lever shows the
-  rate the book actually ran at, recovered by inverting its own Derive
-  rule against the month's actuals, so an assumption reads as one series
-  across the seam. Actual beats forecast at overlap — a horizon month
-  that has since closed renders its realized rate, never the stale
-  assertion made for it. ``periods[].forecast`` marks the forward columns
-  exactly as the statement series does, and its presence anywhere in the
-  rendering is a client's signal that the envelope carries history.
-
-  ``series_history`` / ``series_forecast`` window the month axis with
-  statement-series semantics (last N actual months, first N forecast
-  months; ``None`` = unbounded) so the assumptions grid stays in
-  register with windowed statement reads on the Plan page.
+  ``scenario_id`` is ignored (the block is the scenario). Rows are levers,
+  then line assertions, then line-growth rates; columns span the closed
+  months plus the horizon. Behind the seam each row shows the realized value
+  (:mod:`.forecast_history`), and a horizon month that has since closed
+  shows its actual, not the stale assertion. ``series_history`` /
+  ``series_forecast`` window the axis as for statement series.
   """
   atoms = load_base_envelope_atoms(
     session,
@@ -855,7 +770,6 @@ def build_envelope(
 
   mechanics = ForecastMechanics.model_validate(structure.artifact_mechanics or {})
 
-  # Runtime state: how many forward months have computed scenario sets.
   computed_months = (
     session.execute(
       select(FactSet.period_end)
@@ -870,9 +784,7 @@ def build_envelope(
   )
   mechanics = mechanics.model_copy(update={"computed_months": len(computed_months)})
 
-  # Authored elements (levers + line assertions) are not reachable via
-  # associations (the container is arc-less) — load them off the
-  # mechanics for the envelope's element list and the row metadata.
+  # The container is arc-less, so authored elements load off the mechanics.
   authored_element_ids = (
     [lv.element_id for lv in mechanics.levers]
     + [la.element_id for la in mechanics.line_assertions]
@@ -888,20 +800,12 @@ def build_envelope(
   horizon_months = [
     add_months(mechanics.base_period, i) for i in range(1, mechanics.horizon_months + 1)
   ]
-  # The realized side of the grid: each lever's rule inverted against the
-  # closed months' actuals, so an assumption reads as one series across
-  # the seam instead of starting from nothing at the horizon.
   history = back_solve_lever_history(session, mechanics)
   actual_months = set(history.months)
-  # Actual beats forecast at overlap — a horizon month that has since
-  # closed is history now, and its cell shows the rate the book ran at,
-  # not the rate that was asserted for it.
   months = sorted(actual_months | set(horizon_months))
   forecast_months = {month for month in horizon_months if month not in actual_months}
-  # Seam-adjacent windowing, in register with the statement series: the
-  # Plan grid unions this axis with the windowed statement columns, so
-  # an unwindowed assumptions axis would resurface every trimmed month
-  # as a phantom column (statement rows blank, mis-read as forecast).
+  # Must match the statement series' window: the Plan grid unions the axes,
+  # and an unwindowed axis would resurface trimmed months as phantom columns.
   months = window_month_axis(months, forecast_months, series_history, series_forecast)
 
   def lever_value(lever: LeverAssertionLite, month: str) -> float | None:
@@ -915,9 +819,8 @@ def build_envelope(
     return history.line_values.get(assertion.element_id, {}).get(month)
 
   def growth_value(entry: LineGrowthLite, month: str) -> float | None:
-    """Asserted rate ahead of the seam; the rate the line actually ran
-    at behind it (``v[t]/v[t-1] - 1`` — the trivial inversion), blanked
-    when either month's actual is missing or the prior is zero."""
+    """Asserted rate ahead of the seam; realized ``v[t]/v[t-1] - 1`` behind
+    it, blank when either actual is missing or the prior is zero."""
     if month in forecast_months:
       return entry.values_by_period.get(month)
     values = history.line_values.get(entry.element_id, {})
@@ -942,8 +845,6 @@ def build_envelope(
     )
     for lever in mechanics.levers
   ]
-  # Line assertions render as additional assumption rows — the manual
-  # overrides sit in the same grid the levers do, in authoring order.
   rows.extend(
     RenderingRowLite(
       element_id=assertion.element_id,
@@ -963,8 +864,6 @@ def build_envelope(
     )
     for assertion in mechanics.line_assertions
   )
-  # Line-growth entries render as rate rows — asserted rates ahead of
-  # the seam, realized month-over-month rates behind it.
   rows.extend(
     RenderingRowLite(
       element_id=entry.element_id,
@@ -986,9 +885,6 @@ def build_envelope(
       RenderingPeriodLite(
         start=period_date_range(month)[0],
         end=period_date_range(month)[1],
-        # The seam marker, same contract as the statement series: True
-        # only where the column is the scenario's own forward month,
-        # absent on realized months.
         forecast=True if month in forecast_months else None,
       )
       for month in months

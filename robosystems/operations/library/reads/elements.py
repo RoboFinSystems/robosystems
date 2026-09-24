@@ -65,13 +65,7 @@ def _references_for(
 def _labels_by_element(
   session: Session, element_ids: list[str]
 ) -> dict[str, list[LibraryLabelResponse]]:
-  """Batch-load labels for every element in `element_ids`.
-
-  Single ``WHERE element_id IN (...)`` query avoids the N+1 pattern when
-  a caller (e.g., `list_elements(include_labels=True)`) would otherwise
-  issue one query per element. Returns a dict keyed by ``element_id``
-  with an empty list for elements that have no labels.
-  """
+  """Labels per element in one query; unlabelled elements map to ``[]``."""
   grouped: dict[str, list[LibraryLabelResponse]] = {eid: [] for eid in element_ids}
   if not element_ids:
     return grouped
@@ -94,18 +88,10 @@ def _labels_by_element(
 def primary_trait_by_element(
   session: Session, element_ids: list[str], category: str
 ) -> dict[str, str]:
-  """Batch-load the primary trait identifier for a given trait ``category``.
+  """``{element_id: identifier}`` of each element's primary trait in ``category``.
 
-  Returns ``{element_id: identifier}`` — e.g., for
-  ``elementsOfFinancialStatements``, ``{"elem_xyz": "asset"}``. Elements
-  without an assignment in that category are absent from the map (callers
-  should default to ``None``).
-
-  ``ORDER BY is_primary DESC`` ensures the primary assignment wins when
-  multiple rows exist for one element in the category (the junction
-  supports a single primary plus alternates). Single source of truth for
-  primary-trait lookups — any read path that needs the primary tag for a
-  category should call this instead of re-implementing the query.
+  Elements with no assignment in the category are absent. The primary row
+  wins when an element has alternates.
   """
   result: dict[str, str] = {}
   if not element_ids:
@@ -125,15 +111,10 @@ def primary_trait_by_element(
 
 
 def efs_trait_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
-  """Batch-load the primary FASB elementsOfFinancialStatements trait
-  identifier — ``{element_id: "asset" | "liability" | …}``."""
   return primary_trait_by_element(session, element_ids, "elementsOfFinancialStatements")
 
 
 def liquidity_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
-  """Batch-load the primary liquidity trait identifier —
-  ``{element_id: "current" | "noncurrent"}``. Absent for elements with no
-  liquidity assignment (equity / revenue / expense, or unclassified)."""
   return primary_trait_by_element(session, element_ids, "liquidity")
 
 
@@ -143,7 +124,6 @@ _efs_trait_by_element = efs_trait_by_element
 def _references_by_element(
   session: Session, element_ids: list[str]
 ) -> dict[str, list[LibraryReferenceResponse]]:
-  """Batch-load references for every element in `element_ids`."""
   grouped: dict[str, list[LibraryReferenceResponse]] = {eid: [] for eid in element_ids}
   if not element_ids:
     return grouped
@@ -175,14 +155,8 @@ def _element_to_response(
   include_references: bool = True,
   efs_map: dict[str, str] | None = None,
 ) -> LibraryElementResponse:
-  """Convert an Element row to its library response.
-
-  ``efs_map`` is a pre-loaded ``{element_id: classification}`` batch. When
-  omitted, a single-element query fires — convenient for standalone
-  callers but **N+1 when walking a tree or iterating a list**. Tree /
-  list walkers must build the map once via
-  :func:`_efs_trait_by_element` and pass it through.
-  """
+  """Without ``efs_map`` this queries the trait per element, which is N+1 for
+  tree and list walkers; they must batch it via :func:`_efs_trait_by_element`."""
   labels = _labels_for(session, element.id) if include_labels else []
   refs = _references_for(session, element.id) if include_references else []
   if efs_map is None:
@@ -209,7 +183,6 @@ def _element_to_response(
 
 
 def _trait_filter_subquery(category: str, identifier: str):
-  """Select element_ids whose traits include (category, identifier)."""
   return (
     select(ElementTrait.element_id)
     .join(Trait, Trait.id == ElementTrait.trait_id)
@@ -236,21 +209,10 @@ def list_elements(
 ) -> list[LibraryElementResponse]:
   """List library elements with filters + pagination.
 
-  `include_labels` / `include_references` default False to keep list
-  queries cheap; callers enable them for detail views.
-
-  `trait` filters on the FASB elementsOfFinancialStatements axis
-  (asset / liability / equity / revenue / expense / ...). `activity_type`
-  filters on the cash-flow activity axis (operatingActivity /
-  investingActivity / financingActivity). Both filters apply independently
-  via separate EXISTS subqueries on the `element_traits` junction
-  and can be combined (AND).
-
-  `is_abstract=True` returns only abstract grouping concepts; `False`
-  returns only concrete. `None` returns both.
-
-  `include_inactive=False` (default) hides deactivated elements (e.g. CoA
-  accounts synced as inactive); set `True` for admin/debug views.
+  `trait` filters on the elementsOfFinancialStatements trait and
+  `activity_type` on the cash-flow activity trait; combined, both must match.
+  Deactivated elements (e.g. QuickBooks "(deleted)" accounts) are hidden
+  unless `include_inactive`.
   """
   limit = max(1, min(limit, MAX_ELEMENT_LIMIT))
 
@@ -272,10 +234,6 @@ def list_elements(
   if is_abstract is not None:
     query = query.where(Element.is_abstract.is_(is_abstract))
   if not include_inactive:
-    # Hide deactivated elements by default — tenant CoA elements synced from
-    # a source (e.g. QuickBooks "(deleted)" accounts) carry is_active=False;
-    # library-seeded elements are all active, so this is a no-op for them.
-    # Mirrors the roboledger CoA reads, which filter is_active.
     query = query.where(Element.is_active.is_(True))
   query = query.order_by(Element.qname.asc()).limit(limit).offset(offset)
 
@@ -283,9 +241,6 @@ def list_elements(
   if not elements:
     return []
 
-  # Batch-load labels + references + EFS classifications in one query each
-  # (avoids N+1 when include_labels=True; label/ref loaders are no-ops
-  # when the flag is False).
   element_ids = [e.id for e in elements]
   labels_by_id = _labels_by_element(session, element_ids) if include_labels else {}
   refs_by_id = (
@@ -319,7 +274,6 @@ def get_element(
   session: Session,
   element_id: str,
 ) -> LibraryElementResponse | None:
-  """Get a single element by id with labels + references."""
   element = session.execute(
     select(Element).where(Element.id == element_id)
   ).scalar_one_or_none()
@@ -329,7 +283,6 @@ def get_element(
 
 
 def get_element_by_qname(session: Session, qname: str) -> LibraryElementResponse | None:
-  """Get an element by qname ('fac:Assets', 'fac:CostOfRevenue', …)."""
   element = session.execute(
     select(Element).where(Element.qname == qname)
   ).scalar_one_or_none()
@@ -344,15 +297,13 @@ def search_elements(
   limit: int = DEFAULT_ELEMENT_LIMIT,
   source: str | None = None,
 ) -> list[LibraryElementResponse]:
-  """Substring search across qname + name + label text.
+  """Substring search across qname, name and label text.
 
-  Matches with ILIKE — there is no full-text index on the library tables,
-  so this scales with library size rather than with the result set.
+  ILIKE with no index, so cost scales with library size.
   """
   limit = max(1, min(limit, MAX_ELEMENT_LIMIT))
   pattern = f"%{query_text.lower()}%"
 
-  # Matches on element qname, name, or any standard-label text.
   q = (
     select(Element)
     .outerjoin(ElementLabel, ElementLabel.element_id == Element.id)
@@ -380,16 +331,11 @@ def get_element_tree(
   max_depth: int = 5,
   structure_id: str | None = None,
 ) -> LibraryElementTreeNode | None:
-  """Walk parent→children descendants using `parent-child` associations.
+  """The element and its presentation-arc descendants up to `max_depth`.
 
-  Returns the element plus a nested tree of descendants up to `max_depth`.
-
-  When ``structure_id`` is provided, arc traversal is scoped to that one
-  structure — critical for presentation seeds like ``fac-presentation``
-  which define multiple variants (classified BS vs unclassified BS,
-  multi-step vs single-step IS). Omitting it walks every structure at once,
-  so a concept reused across variants returns a blended child set that
-  corresponds to no real statement layout.
+  Pass ``structure_id`` when a taxonomy has several layout variants
+  (classified vs unclassified BS): without it, a concept reused across
+  variants gets a blended child set matching no real statement.
   """
   root = session.execute(
     select(Element).where(Element.id == element_id)
@@ -397,10 +343,7 @@ def get_element_tree(
   if root is None:
     return None
 
-  # First pass: breadth-first enumerate every element id reachable from
-  # the root within `max_depth`, plus the association ordering for each
-  # parent. This lets us batch-load elements + EFS classifications in
-  # one shot instead of hitting the DB once per node.
+  # Enumerate ids breadth-first first, so elements and traits batch-load.
   root_id = str(root.id)
   children_by_parent: dict[str, list[str]] = {}
   visited: set[str] = {root_id}
@@ -424,7 +367,6 @@ def get_element_tree(
         visited.add(child_id)
         frontier.append((child_id, depth + 1))
 
-  # Batch-load every element + its EFS classification.
   all_ids = list(visited)
   elements_by_id: dict[str, Element] = {
     str(e.id): e
@@ -443,9 +385,7 @@ def get_element_tree(
       child_node = _build(cid)
       if child_node is not None:
         child_nodes.append(child_node)
-    # Tree navigation doesn't need the per-node label + reference payload;
-    # skipping them saves 2 queries per node for deep/wide trees. Callers
-    # that need full element detail use `get_element` on a specific id.
+    # Labels and references would cost 2 queries per node.
     return LibraryElementTreeNode(
       element=_element_to_response(
         session,
@@ -464,18 +404,13 @@ def get_element_equivalents(
   session: Session,
   element_id: str,
 ) -> LibraryEquivalenceResponse | None:
-  """Return the equivalence fan-out for a library element.
-
-  Traverses `association_type='equivalence'` arcs in both directions so
-  `fac:CostOfRevenue` returns all us-gaap variants AND vice versa.
-  """
+  """The element's peers over equivalence arcs, in both directions."""
   element = session.execute(
     select(Element).where(Element.id == element_id)
   ).scalar_one_or_none()
   if element is None:
     return None
 
-  # Find equivalence arcs where this element is on either side.
   from_ids = (
     session.execute(
       select(Association.to_element_id).where(
@@ -521,20 +456,12 @@ def get_element_arcs(
   session: Session,
   element_id: str,
 ) -> list[LibraryElementArcResponse]:
-  """Return all mapping arcs where this element is source or target.
+  """Cross-taxonomy arcs where this element is source or target.
 
-  Filters to arcs whose structure belongs to a `taxonomy_type='mapping'`
-  taxonomy — the cross-taxonomy bridges (fac↔rs-gaap equivalence,
-  fac→rs-gaap equivalence, rs-gaap-type-subtype). Hierarchical arcs inside
-  a single reporting taxonomy (presentation/calculation) are excluded.
-
-  Each arc is returned once, oriented from this element's perspective:
-  `direction='outgoing'` means this element is `from_element_id`,
-  `direction='incoming'` means this element is `to_element_id`.
+  Covers mapping and classification-assignment taxonomies and CoA-mapping
+  structures; presentation/calculation arcs within one reporting taxonomy are
+  excluded. ``direction`` is from this element's side.
   """
-  # One join chain serves both directions; we read Association, the peer
-  # element id+row, Structure (for name), and Taxonomy (for standard/name
-  # and the taxonomy_type filter).
   base_select = (
     select(
       Association,
@@ -616,11 +543,7 @@ def get_element_traits(
   session: Session,
   element_id: str,
 ) -> list[LibraryElementTraitResponse]:
-  """Return all FASB metamodel traits assigned to this element.
-
-  Joins element_traits → traits, sorted by category then identifier
-  so the caller gets a stable, grouped ordering.
-  """
+  """All traits assigned to the element, ordered by category then identifier."""
   rows = session.execute(
     select(Trait, ElementTrait.is_primary)
     .join(ElementTrait, Trait.id == ElementTrait.trait_id)

@@ -1,26 +1,11 @@
-"""Initialize a chart of accounts from a shipped template.
+"""Initialize a chart of accounts from a shipped template, once, for a company
+with no chart (a QuickBooks-synced tenant's chart arrives with the sync).
 
-The fresh-company half of the native accounting cutover
-(``specs/ledger/native-accounting-cutover.md`` §4; the templates themselves
-are data — ``specs/taxonomy/chart-templates-as-data.md``). A
-QuickBooks-synced tenant never needs this — its chart arrives with the sync
-and stays the chart after a sever. A company with no chart initializes one
-here, once, and customizes it with ``update-taxonomy-block``.
-
-One transaction, in three steps: the Taxonomy Block envelope (the chart plus
-one ``coa_mapping`` structure per framework the template maps into and the
-tenant carries) through the declarative CoA handler; then, per framework,
-the template's mapping arcs resolved by qname against the tenant's library
-copy. The handler resolves association refs only against envelope-local
-qnames, so the library targets are a second step — the demo runner does the
-same two steps over HTTP; here they are one unit of work.
-
-A template is a stencil, not library content: the file is read, the chart
-is minted as tenant-owned ``coa:*`` elements, and the tenant owns it from
-then on. The op follows the graph's framework pin through the tenant's
-library copy — a mapping set applies when its framework's concepts are
-present — so a plural pin yields a chart mapped into every framework it
-carries, with no change here.
+One transaction, two steps: the Taxonomy Block envelope (the chart plus one
+``coa_mapping`` structure per framework the tenant carries) through the CoA
+handler, then each framework's mapping arcs resolved by qname against the
+tenant's library copy, since the handler resolves refs only within the
+envelope. The chart is minted as tenant-owned ``coa:*`` elements.
 """
 
 from __future__ import annotations
@@ -262,9 +247,7 @@ def _create_mapping_set(
     from_id = coa_by_code.get(code)
     to_id = library_by_qname.get(qname)
     if from_id is None:
-      # A template whose mapping names a code it does not declare is a
-      # template bug; report it as unresolved rather than failing the
-      # chart the customer can already use.
+      # A template bug; report it rather than fail a usable chart.
       unresolved.append(f"{code} -> {qname} (no such account in template)")
       continue
     if to_id is None:

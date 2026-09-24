@@ -1,9 +1,7 @@
 """Validator pipeline for Taxonomy Block create payloads.
 
-Runs before any handler writes. Collects every issue across all
-checks and surfaces them as a single
-:class:`TaxonomyBlockValidationError`, so tenants see every problem in
-one response rather than only the first failure.
+Runs before any handler writes and collects every issue into one
+:class:`TaxonomyBlockValidationError`. Every issue is fatal.
 
 Checks:
 
@@ -20,11 +18,6 @@ Checks:
   in ``elements[]``.
 * Rule expression parse — safe-AST parse of every tenant rule
   expression; every ``variable_qname`` resolves.
-
-Returned issues don't distinguish fatal / warning — every issue
-aborts the envelope. The `severity` field on tenant-authored rules is
-separate (it scopes the *evaluation outcome*, not the *envelope
-validation*).
 """
 
 from __future__ import annotations
@@ -51,13 +44,8 @@ from robosystems.operations.information_block.rules.expressions import (
 
 @dataclass(frozen=True)
 class ValidationIssue:
-  """One problem discovered by the validator.
-
-  ``phase`` names which check caught it (for diagnosis); ``code`` is a
-  stable machine-readable tag (for API consumers); ``message`` is
-  human-readable; ``context`` carries the offending atoms (qnames,
-  structure names, etc.) for reconstruction.
-  """
+  """One problem discovered by the validator; ``code`` is a stable
+  machine-readable tag."""
 
   phase: str
   code: str
@@ -417,9 +405,7 @@ def _phase_rule_expression_parse(
       {name for name in variable_names if variable_names.count(name) > 1}
     )
     if duplicates:
-      # The engine binds facts in dicts keyed by variable_name, so two
-      # same-named variables silently merge — one element double-counted,
-      # the other dropped.
+      # The engine keys bindings by variable_name; duplicates would merge.
       issues.append(
         ValidationIssue(
           phase="rule_expression_parse",
@@ -433,11 +419,7 @@ def _phase_rule_expression_parse(
       )
       continue
 
-    # Derive rules may use the avg($Var) aggregate — desugar to the
-    # synthesized operand form the compute path evaluates, so authored
-    # avg expressions validate the same way they run. Other patterns
-    # keep the raw expression: a stray avg() there is a genuine
-    # ast.Call and fails the whitelist below, as it should.
+    # Only Derive rules may use avg(); elsewhere it fails the whitelist.
     expression = rule.expression
     parse_names = variable_names
     if rule.rule_pattern == "Derive":
@@ -475,9 +457,7 @@ def _phase_rule_expression_parse(
       continue
 
     if rule.rule_pattern == "RollUp":
-      # The arc-derived evaluator resolves the parent subtotal from the
-      # expression LHS, falling back to variables[0] — keep both
-      # producers' parent-first invariant enforced at the gate.
+      # The RollUp evaluator falls back to variables[0] as the parent.
       try:
         lhs = lhs_variable_names(parsed)
       except InvalidRuleExpression:
@@ -498,9 +478,6 @@ def _phase_rule_expression_parse(
   return issues
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────
-
-
 def _element_qname(
   element: TaxonomyBlockElementRequest, payload: CreateTaxonomyBlockRequest
 ) -> str:
@@ -513,10 +490,8 @@ def _element_qname(
 
 
 def _default_namespace_for_type(taxonomy_type: str) -> str:
-  """Default namespace token used when tenant didn't supply qname/standard.
-
-  Matches the handler's inline defaults.
-  """
+  """Default namespace token when the tenant supplied no qname/standard
+  (matches the handler's defaults)."""
   return {
     "chart_of_accounts": "coa",
     "custom_ontology": "custom",
@@ -542,14 +517,10 @@ def _phase_library_namespace_protection(
 ) -> list[ValidationIssue]:
   """Library namespaces are platform-owned — tenants must not declare in them.
 
-  The library evolves wholesale (rs-gaap reseeds, new packages), so a
-  tenant-minted ``rs-gaap:*`` element would fork the namespace and shadow
-  the real concept in schema-wide qname lookups. Tenants author in their
-  OWN extension namespace and *anchor* to library concepts — arcs and
-  ``parent_ref`` referencing library qnames stay legal (resolved via
-  :func:`_load_library_qnames`); only *declarations* under a
-  library-owned prefix are refused. Prefixes are derived from the seeded
-  rows themselves, so future library packages are protected automatically.
+  A tenant-minted ``rs-gaap:*`` element would shadow the real concept in
+  qname lookups. Referencing library qnames stays legal; only declarations
+  under a library prefix are refused. Prefixes come from the seeded rows,
+  so new library packages are covered automatically.
   """
   reserved = _load_library_prefixes(session)
   if not reserved:
@@ -615,11 +586,7 @@ def _load_library_qnames(
 
 
 def _detect_cycle(arcs: list[tuple[str, str]]) -> list[str] | None:
-  """Iterative DFS; return the cycle path or None.
-
-  Treat `arcs` as directed edges from→to. Cycle = any node reachable
-  from itself.
-  """
+  """Iterative DFS over directed from→to arcs; return a cycle path or None."""
   if not arcs:
     return None
   adj: dict[str, list[str]] = defaultdict(list)

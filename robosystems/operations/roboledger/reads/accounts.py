@@ -26,14 +26,11 @@ from robosystems.operations.library.reads import efs_trait_by_element
 
 
 def coa_element_clause():
-  """Predicate for "this elements row is a Chart-of-Accounts account".
+  """Predicate for a Chart-of-Accounts element.
 
-  ``source`` alone cannot discriminate: envelope-authored framework
-  concepts (``reporting_extension`` / ``custom_ontology`` / ``schedule``
-  taxonomies) share ``source='native'`` with natively-authored CoA
-  accounts, and would otherwise leak into every CoA-scoped read.
-  Adapter-imported accounts (QuickBooks, …) carry no ``taxonomy_id``,
-  so NULL-taxonomy rows stay in.
+  ``source`` alone is not enough: envelope-authored framework concepts also
+  carry ``source='native'``. Adapter-imported accounts have no
+  ``taxonomy_id``, so NULL-taxonomy rows stay in.
   """
   return and_(
     Element.source.in_(COA_SOURCES),
@@ -61,12 +58,7 @@ _efs_by_element = efs_trait_by_element
 
 
 def account_to_response(row: Element, trait: str | None = None) -> AccountResponse:
-  """Map an Element row to the wire-facing AccountResponse.
-
-  Callers that batch-load elements should also batch-load the FASB EFS
-  trait via :func:`_efs_by_element` and pass it through, so
-  list endpoints avoid N+1 lookups.
-  """
+  """Batch callers should load EFS traits once and pass ``trait`` in."""
   meta = _parse_meta(row.metadata_)
   return AccountResponse(
     id=row.id,
@@ -94,11 +86,8 @@ def list_accounts(
   limit: int = 100,
   offset: int = 0,
 ) -> AccountListResponse:
-  """List Chart of Accounts elements filtered by trait + is_active.
-
-  ``trait`` filters on the FASB elementsOfFinancialStatements
-  trait via the element_traits junction table.
-  """
+  """List CoA elements; ``trait`` is the FASB elementsOfFinancialStatements
+  trait."""
   query = select(Element).where(coa_element_clause())
   count_query = select(func.count()).select_from(Element).where(coa_element_clause())
 
@@ -136,12 +125,8 @@ def get_account_tree(
 ) -> AccountTreeResponse:
   """Return the Chart of Accounts as a parent/child tree.
 
-  Filters to ``is_active=True`` by default. Inactive accounts (deleted
-  in the source system but still referenced by historical journal
-  lines — see the QB adapter's ``Active IN (true, false)`` fetch) are
-  load-bearing for the materializer's foreign-key integrity but clutter
-  every CoA-facing view. Pass ``include_inactive=True`` to surface them
-  (admin / cleanup contexts only).
+  Inactive accounts (retired upstream, kept for historical lines) are
+  excluded unless ``include_inactive``.
   """
   query = select(Element).where(coa_element_clause())
   if not include_inactive:

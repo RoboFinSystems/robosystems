@@ -1,9 +1,6 @@
-"""What kind of books a graph keeps — the predicates behind the provider guard.
-
-``specs/ledger/native-accounting-cutover.md`` §2: native and synced ledgers
-never mix. A bank feed needs a chart to resolve against and cannot sit
-beside a live QuickBooks connection; QuickBooks cannot become the source
-of truth over books a tenant already keeps natively.
+"""What kind of books a graph keeps: the predicates behind the provider guard.
+Native and synced ledgers never mix, so a bank feed needs a chart and no live
+QuickBooks connection, and QuickBooks cannot take over native books.
 """
 
 from __future__ import annotations
@@ -33,10 +30,8 @@ def graph_has_chart(session: Session) -> bool:
 def graph_has_native_line_items(session: Session, *, synced_source: str) -> bool:
   """True when posted line items sit on elements ``synced_source`` did not create.
 
-  A tenant whose only chart came from ``synced_source`` (and whose manual
-  entries post to that chart) has none. A severed tenant has them by
-  construction — its elements are ``native`` and carry the history — which
-  is what makes the QuickBooks → native lifecycle one-way.
+  A severed tenant always has them (its elements became ``native``), which
+  makes the QuickBooks → native lifecycle one-way.
   """
   return bool(
     session.execute(

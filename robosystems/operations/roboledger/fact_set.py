@@ -1,14 +1,6 @@
-"""Blessed construction path for FactSet rows.
-
-Every FactSet must be stamped with a typed ``FactProvenance`` descriptor
-at emission (the auditability spine — see ``models/api/fact_provenance``).
-``create_fact_set`` is the single place that validates the descriptor and
-writes it to the first-class ``fact_sets.provenance`` column; the
-``before_insert`` backstop on the model fails any insert that bypasses it.
-
-The three producers (report pivot, schedule, cross-graph share) route
-through here; future producers (metrics, rev-rec, disclosures) inherit
-the contract by doing the same.
+"""The one construction path for FactSet rows: ``create_fact_set`` validates the
+typed ``FactProvenance`` and writes it to ``fact_sets.provenance``; a
+``before_insert`` backstop fails any insert that bypasses it.
 """
 
 from __future__ import annotations
@@ -41,14 +33,8 @@ def create_fact_set(
 ) -> FactSet:
   """Construct + ``session.add`` a stamped FactSet and return it.
 
-  ``provenance`` is validated through the discriminated union and stored
-  as JSON on the dedicated ``provenance`` column. Pass an arm instance
-  (``PivotProvenance(...)`` etc.); a raw dict is accepted and validated.
-
-  ``scenario_id`` is the scenario axis (the forecast engine): NULL —
-  the default every existing producer keeps — means actuals; non-NULL
-  points at the owning forecast Structure and keys the set into that
-  scenario's parallel universe.
+  ``provenance`` may be an arm instance or a raw dict. ``scenario_id`` NULL
+  means actuals; otherwise it is the owning forecast Structure.
   """
   validated = _PROVENANCE.validate_python(provenance)
   fact_set = FactSet(

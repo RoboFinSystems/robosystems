@@ -1,11 +1,6 @@
-"""Event Block reads — get and list event envelopes.
-
-Owns the canonical ``_load_dimension_ids`` and ``_to_envelope`` helpers used
-by both the read path here and the write path in
-``operations/event_block/commands.py``. ``_to_envelope`` populates every
-field declared on ``EventBlockEnvelope``, including ``event_class`` and the
-REA duality links (``obligated_by_event_id``, ``discharges_event_id``), so
-agents reading events via MCP see the same shape that creators wrote.
+"""Event Block reads. Owns ``_load_dimension_ids`` and ``_to_envelope``, which
+the write path in ``operations/event_block/commands.py`` also uses, so readers
+see the same envelope creators wrote.
 """
 
 from __future__ import annotations

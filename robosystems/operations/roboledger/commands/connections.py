@@ -1,9 +1,5 @@
-"""Graph-side effects of a connection lifecycle event.
-
-The sever half of the native accounting cutover
-(``specs/ledger/native-accounting-cutover.md`` §3): when a QuickBooks
-tenant goes native, the chart QuickBooks created becomes the tenant's own.
-"""
+"""Graph-side effects of a connection lifecycle event: severing a synced chart
+when a tenant goes native, and purging a bank feed on disconnect."""
 
 from __future__ import annotations
 
@@ -22,14 +18,10 @@ def sever_synced_chart(
 ) -> int:
   """Stamp the elements a synced connection created as native-owned.
 
-  One statement does three jobs. Nulling ``external_source`` /
-  ``connection_id`` / ``external_id`` takes the rows out of the loader's
-  upsert key (``idx_elements_upsert_key``), so a later sync of the same
-  provider can neither overwrite nor re-adopt them and the trait heal never
-  sees them. ``source='native'`` keeps them visible as chart accounts
-  (``native`` is in ``COA_SOURCES``) and marks them editable. The qname is
-  kept: facts, associations, line items and reports reference element ids,
-  and a rename would reopen the adapter's qname-collision path.
+  Nulling the external keys takes the rows out of the loader's upsert key, so a
+  later sync can neither overwrite nor re-adopt them; ``source='native'``
+  keeps them chart accounts and makes them editable. The qname is kept (a
+  rename would reopen the adapter's qname-collision path).
 
   Returns the number of elements stamped.
   """
@@ -51,14 +43,8 @@ def sever_synced_chart(
   return int(result.rowcount or 0)
 
 
-# ---------------------------------------------------------------------------
-# Bank feed purge — the disconnect half of a bank-feed connection
-# ---------------------------------------------------------------------------
-
-# Event metadata a bank feed wrote from its source's payload (Mercury's or
-# Plaid's). Scrubbed from accepted (posted) events on disconnect; the
-# accounting keys — the amount, the accounts, the classification — are the
-# tenant's own and stay.
+# Provider payload keys scrubbed from accepted events on disconnect; the
+# accounting keys (amount, accounts, classification) are the tenant's and stay.
 BANK_FEED_PAYLOAD_KEYS: frozenset[str] = frozenset(
   {
     "account_id",
@@ -112,10 +98,8 @@ _UNPOSTED_STATUSES: tuple[str, ...] = ("captured", "classified", "voided")
 def scrub_payload_keys(value: Any) -> Any:
   """Drop the feed's payload keys wherever they sit in the metadata.
 
-  A reconciling item stashes a whole payload under ``drift_payload`` and a
-  resolution writes the trail under ``reconciliation_history``, so the keys
-  live nested as well as at the top level — and a resolution after the purge
-  would copy a nested payload back into the live metadata.
+  Recursive because ``drift_payload`` and ``reconciliation_history`` nest whole
+  payloads, which a later resolution would copy back into the live metadata.
   """
   if isinstance(value, dict):
     return {
@@ -133,20 +117,14 @@ def purge_bank_feed(
 ) -> dict[str, int]:
   """Delete what a bank feed captured and scrub what it left on posted rows.
 
-  The deletion a bank partnership's data agreement asks for on disconnect:
-  events the feed captured that were never posted are hard-deleted (their
-  dimension junctions first); events that were accepted into the books keep
-  their accounting content but lose the provider's payload keys — at the top
-  level and inside any stashed payload or trail — and the deep link back to
-  it; counterparties the feed created and nothing
-  references are deleted; the link on the chart accounts the feed linked or
-  created is cleared. Flushes; the caller commits.
+  What the bank's data agreement requires on disconnect: unposted captured
+  events are hard-deleted; accepted events keep their accounting content but
+  lose the provider's payload keys and deep link; unreferenced counterparties
+  the feed created are deleted; chart-account links are cleared. Flushes; the
+  caller commits.
 
-  Everything is scoped to ``connection_id``: events by the
-  ``metadata.connection_id`` the feed stamps on every row it captures, chart
-  links by the connection recorded in ``metadata.bank_feed``. The create path
-  allows one live connection per provider per graph, but a disconnect must
-  never reach past its own connection even if that ever changes.
+  Strictly scoped to ``connection_id``, even though only one live connection
+  per provider is allowed today.
   """
   from sqlalchemy import delete, select
 

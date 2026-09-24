@@ -1,42 +1,22 @@
 """What curation may never destroy or disturb: filed snapshots and closed-month history.
 
-Two producers write statement FactSets that the rest of the ledger treats as
-immutable — a Report that has been *filed* keeps its publication snapshot
-(``fact_sets.report_id`` set, ``reports.filing_status`` in filed/archived),
-and close mints the *canonical* sets for a month (``report_id IS NULL``,
-``factset_type='report'``, ``scenario_id IS NULL``) which only reopen may
-retract. ``regenerate_report`` and ``delete_report`` refuse a filed report;
-reopen is the only path to a closed month's canonical sets.
+Immutable sets are a filed Report's snapshot (``report_id`` set, report
+filed/archived) and a closed month's canonical sets (``report_id IS NULL``,
+``factset_type='report'``, no scenario), which only reopen may retract.
 
-Curation reaches those sets two ways, and this module is the single check
-for both:
+- **Destroy**: the taxonomy-block cascade deletes facts by element and by
+  structure; both populations are protected.
+- **Disturb**: reads rebuild a stamped month's rows, sign and rollups from
+  the live mapping arcs and element attributes, so re-mapping an account
+  with landed history in a closed month, or changing its ``balance_type`` /
+  ``period_type`` / EFS trait, changes what the stamp means. Only closed
+  canonical sets are protected here; a filed snapshot is expected to drift.
 
-- **Destroy.** The taxonomy-block cascade (``delete-taxonomy-block
-  cascade_facts=true``, ``update-taxonomy-block structures_to_remove``)
-  deletes facts by element and by structure, so it can reach both kinds of
-  set. Both populations are protected.
-- **Disturb.** A canonical stamp freezes each statement line's amount, but
-  every read rebuilds the row set, hierarchy, classification, sign and
-  rollups from the live mapping arcs and element attributes
-  (``reports/fact_grid.py``). Re-mapping an account that has landed history
-  in a closed month, or changing such an account's ``balance_type`` /
-  ``period_type`` / EFS trait, changes what the stamped month *means* while
-  the stamp keeps the old answer — two authoritative-looking statements for
-  one closed month, with no reopen and no audit row. Only the closed-month
-  canonical population is protected against this: a filed report is a
-  snapshot by contract and is expected to drift from the live render.
+The disturb predicate is ``posting_date <= period_end`` (history reaches
+forward through balances and retained-earnings carry-ins).
 
-History reaches forward, so the disturb predicate is ``posting_date <=
-period_end``, not within-window: an instant balance carries every earlier
-posting, and a P&L→balance-sheet remap moves net income into every later
-retained-earnings carry-in. A P&L→P&L remap of an account with no activity
-in a later closed month is refused with it; the message names the earliest
-month so the operator knows how far back to reopen.
-
-Neither check takes the period fence. A close that stamps a month between
-this read and the curation's write is a race the fence would close; it
-needs a cascade delete to land inside a close window and has never been
-observed. The ledger README carries it as the un-park trigger.
+Neither check takes the period fence, so a close landing between this read
+and the curation's write is an unguarded race.
 """
 
 from __future__ import annotations
@@ -141,12 +121,7 @@ def _affected_fact_set_ids(
   structure_ids: Sequence[str],
   element_ids: Sequence[str],
 ) -> list[str]:
-  """FactSets a cascade over these structures/elements would touch.
-
-  Facts die two ways — by referencing an element being deleted, and by
-  membership in a set attached to (or facts stamped with) a structure being
-  deleted — so the affected sets are the union of both routes.
-  """
+  """FactSets a cascade over these structures/elements would touch."""
   predicates = []
   if structure_ids:
     predicates.append(FactSet.structure_id.in_(structure_ids))
@@ -192,14 +167,11 @@ def _disturbed_fact_set_ids(
 ) -> list[str]:
   """Closed canonical sets whose meaning this change would alter.
 
-  Two roles an element can play in a stamp, checked together. As a
-  *source* — a chart account the pivot reads through a mapping arc — it
-  disturbs every closed month at or after its first landed posting. As a
-  *target* — an element the stamp holds a fact on — a ``balance_type`` /
-  ``period_type`` / trait change re-signs or re-places that fact at read
-  time. ``account_ids`` are sources only; ``semantic_element_ids`` are
-  checked in both roles, since the caller does not know which one an
-  element plays.
+  A *source* (chart account read through a mapping arc) disturbs every
+  closed month at or after its first landed posting; a *target* (element the
+  stamp holds a fact on) is re-signed or re-placed by an attribute change.
+  ``account_ids`` are sources only; ``semantic_element_ids`` are checked in
+  both roles.
   """
   sources = sorted({*account_ids, *semantic_element_ids})
   targets = sorted(set(semantic_element_ids))
