@@ -20,7 +20,7 @@ from sqlalchemy import (
   String,
   Text,
 )
-from sqlalchemy.orm import Session, relationship
+from sqlalchemy.orm import Session, backref, relationship
 
 from robosystems.database import Base
 from robosystems.utils.ulid import generate_prefixed_ulid
@@ -73,7 +73,9 @@ class SourceFile(Base):
   )
   processed_at = Column(DateTime(timezone=True), nullable=True)
   last_attempt_at = Column(DateTime(timezone=True), nullable=True)
-  graph = relationship("Graph", backref="source_files")
+  # The FK cascades in the database; without passive_deletes the ORM would
+  # null graph_id (NOT NULL) on a Graph delete before the cascade ran.
+  graph = relationship("Graph", backref=backref("source_files", passive_deletes="all"))
 
   def __repr__(self) -> str:
     return (

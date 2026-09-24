@@ -24,6 +24,8 @@ from .exceptions import (
   GraphTransientError,
 )
 
+BACKUP_DOWNLOAD_READ_TIMEOUT_SECONDS = 1800.0
+
 
 class GraphClient(BaseGraphClient):
   """Asynchronous client for Graph API operations."""
@@ -1265,6 +1267,9 @@ class GraphClient(BaseGraphClient):
     response = await self.client.post(
       f"/databases/{graph_id}/backup-download",
       headers=self.config.headers,
+      # A multi-GB dump takes minutes to produce and send; the client's 30s
+      # default failed every large graph's nightly backup.
+      timeout=httpx.Timeout(BACKUP_DOWNLOAD_READ_TIMEOUT_SECONDS, connect=10.0),
     )
     response.raise_for_status()
 

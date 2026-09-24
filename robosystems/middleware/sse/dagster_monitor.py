@@ -79,6 +79,10 @@ class DagsterRunMonitor:
     logger.info(f"Dagster job {job_name} submitted with run_id: {run_id}")
     return run_id
 
+  def terminate_run(self, run_id: str) -> None:
+    """Ask Dagster to terminate a run; it stops asynchronously."""
+    self._get_client().terminate_run(run_id)
+
   def get_run_status(self, run_id: str) -> dict[str, Any]:
     """Return a run's status mapped onto the SSE status vocabulary."""
     client = self._get_client()

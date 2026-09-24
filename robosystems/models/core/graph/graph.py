@@ -8,7 +8,7 @@ User graphs are owned by one org (the billing party) and grant access through
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from sqlalchemy import (
   Boolean,
@@ -577,6 +577,33 @@ class Graph(Model):
     self.graph_stale_reason = reason
     self.graph_stale_at = datetime.now(UTC)
     session.commit()
+
+  def settle_rebuild(self, session: Session, status: str, error: str | None = None):
+    """End a rebuild: ``available`` or ``rebuild_failed``. Commits.
+
+    A rebuild marks the graph ``rebuilding``, and the Graph API refuses its
+    queries until the status changes, so every way out of a rebuild must
+    come through here.
+    """
+    import time
+
+    metadata: dict[str, Any] = dict(cast(dict[str, Any], self.graph_metadata or {}))
+    metadata["status"] = status
+    if status == "available":
+      completed = time.time()
+      metadata["rebuild_completed_at"] = completed
+      started = metadata.get("rebuild_started_at")
+      if isinstance(started, (int, float)):
+        metadata["last_rebuild_duration_seconds"] = completed - started
+    else:
+      metadata["rebuild_failed_at"] = time.time()
+      metadata["rebuild_error"] = error
+    self.graph_metadata = metadata
+    session.commit()
+
+  @property
+  def is_rebuilding(self) -> bool:
+    return (self.graph_metadata or {}).get("status") == "rebuilding"
 
   def mark_fresh(self, session: Session, *, started_at: datetime | None = None) -> bool:
     """Record a completed materialization. Returns True if staleness cleared.

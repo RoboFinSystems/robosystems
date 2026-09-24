@@ -13,7 +13,7 @@ from sqlalchemy import (
   UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Session, relationship
+from sqlalchemy.orm import Session, backref, relationship
 
 from robosystems.database import Base
 from robosystems.utils.ulid import generate_prefixed_ulid
@@ -56,7 +56,9 @@ class GraphTable(Base):
     onupdate=lambda: datetime.now(UTC),
   )
 
-  graph = relationship("Graph", backref="tables")
+  # The FK cascades in the database; without passive_deletes the ORM would
+  # null graph_id (NOT NULL) on a Graph delete before the cascade ran.
+  graph = relationship("Graph", backref=backref("tables", passive_deletes="all"))
   files = relationship(
     "GraphFile", back_populates="table", cascade="all, delete-orphan"
   )
