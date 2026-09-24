@@ -1,8 +1,4 @@
-"""SEC Download Asset.
-
-This module contains the sec_raw_filings asset for downloading SEC XBRL filings
-using EFTS discovery.
-"""
+"""sec_raw_filings: EFTS discovery and download of SEC XBRL ZIPs to S3."""
 
 from dagster import (
   AssetExecutionContext,
@@ -34,7 +30,6 @@ from .configs import (
     "stage": "download",
     "mode": "full",
   },
-  # Run all partitions sequentially in a single run to prevent SEC rate limiting
   backfill_policy=BackfillPolicy.single_run(),
 )
 def sec_raw_filings(
@@ -43,23 +38,13 @@ def sec_raw_filings(
   s3: S3Resource,
   db: DatabaseResource,
 ) -> MaterializeResult:
-  """Download SEC XBRL filings for a specific quarter using EFTS discovery.
+  """Download one quarter's XBRL ZIPs and register them as SourceFiles.
 
-  Uses SEC EFTS API to discover all filings matching criteria in a single query,
-  then downloads them with async rate-limited parallelism.
-
-  EFTS has a 10k result limit per query. Quarterly partitions typically return
-  5-7k filings, safely under the limit.
-
-  Uses BackfillPolicy.single_run() to run all partitions sequentially in a single
-  run, preventing SEC rate limiting during backfills.
+  Refuses a multi-quarter selection: run each quarter separately.
   """
   import asyncio
 
-  # Get all partition keys (handles both single partition and backfill ranges)
   partition_keys = context.partition_keys
-
-  # Multi-partition backfills are not supported - process one quarter at a time
   if len(partition_keys) > 1:
     context.log.warning(
       f"Multi-partition backfill not supported. Selected {len(partition_keys)} partitions: {partition_keys}. "
@@ -72,7 +57,6 @@ def sec_raw_filings(
 
   partition_key = partition_keys[0]
 
-  # Parse partition key: "2024-Q1" -> year=2024, quarter=1
   year, quarter_str = partition_key.split("-Q")
   year = int(year)
   quarter = int(quarter_str)
@@ -81,7 +65,6 @@ def sec_raw_filings(
   bucket = env.SHARED_RAW_BUCKET
 
   async def run_efts_download():
-    # Import here to avoid circular imports at module load time
     import aiohttp
     from xbrlkit.edgar import EftsClient, EftsHit
 
@@ -95,19 +78,16 @@ def sec_raw_filings(
     SEC_BASE_URL = SEC_CONFIG["base_url"]
     SEC_HEADERS = SEC_CONFIG["headers"]
 
-    # Phase 1: Discover filings via EFTS
     context.log.info("Phase 1: Discovering filings via EFTS...")
 
     # EFTS discovery and the submissions header are xbrlkit's synchronous
     # clients (their own spacing and Retry-After handling); they run in a
     # thread so the event loop that drives the parallel downloads stays free.
     efts = EftsClient(xbrlkit_config(), per_sec=5.0)
-    # Build CIK filter if specified
     cik_filter = None
     if config.ciks:
       cik_filter = config.ciks
     elif config.tickers:
-      # Resolve tickers to CIKs using company list
       companies_raw = await asyncio.to_thread(edgar_client().company_tickers)
       cik_filter = []
       for _, company in companies_raw.items():
@@ -116,8 +96,7 @@ def sec_raw_filings(
           cik = str(company.get("cik_str", company.get("cik", "")))
           cik_filter.append(cik)
 
-    # Split form types into batches to avoid EFTS 10k limit (especially Q2 proxy season)
-    # Each batch is queried separately and results are combined
+    # One EFTS query per form batch to stay under its 10k cap.
     requested_forms = set(config.form_types)
     form_batches = []
     for batch in SEC_FORM_TYPE_BATCHES:
@@ -125,13 +104,11 @@ def sec_raw_filings(
       if batch_forms:
         form_batches.append(batch_forms)
 
-    # Also include any forms not in predefined batches (custom forms)
     known_forms = {f for batch in SEC_FORM_TYPE_BATCHES for f in batch}
     custom_forms = [f for f in config.form_types if f not in known_forms]
     if custom_forms:
       form_batches.append(custom_forms)
 
-    # Query each batch and combine results
     hits = []
     for batch_idx, batch_forms in enumerate(form_batches):
       context.log.info(f"EFTS batch {batch_idx + 1}/{len(form_batches)}: {batch_forms}")
@@ -158,9 +135,7 @@ def sec_raw_filings(
         "dry_run": config.dry_run,
       }
 
-    # Phase 2: Fetch submissions data for unique CIKs (parallel with rate limiting)
-    # This provides company metadata (name, SIC, fiscal year end, etc.)
-    # Can be skipped with skip_submissions=True to avoid rate limiting issues
+    # Submissions supply company metadata (name, SIC, fiscal year end).
     submissions_fetched = 0
     submissions_failed = 0
 
@@ -172,10 +147,8 @@ def sec_raw_filings(
         f"Phase 2: Fetching submissions for {len(unique_ciks)} unique companies..."
       )
 
-      # Always refresh submissions for CIKs with discovered filings.
-      # The skip_existing flag controls ZIP downloads, not submissions metadata.
-      # New filings discovered via EFTS may not be in stale submissions snapshots,
-      # so we always do an incremental update (or full build if no existing file).
+      # Always refreshed (skip_existing governs ZIPs only): a stored snapshot
+      # may predate the filings EFTS just found.
       ciks_to_fetch = unique_ciks
 
       context.log.info(f"Submissions: {len(ciks_to_fetch)} to refresh")
@@ -184,19 +157,17 @@ def sec_raw_filings(
         import json
         from datetime import UTC, datetime
 
-        # Rate limiter and semaphore for parallel fetching (configurable)
         submissions_limiter = AsyncRateLimiter(rate=config.submissions_rate)
         submissions_semaphore = asyncio.Semaphore(config.submissions_concurrency)
 
         def build_complete_submissions_sync(cik: str) -> dict:
-          """Build complete master submissions file (all pagination files)."""
+          """Every page of the filer's submissions, as one master file."""
           return edgar_client().complete_submissions(cik)
 
         def incremental_update_submissions(
           existing: dict, cik: str, new_recent: dict
         ) -> dict:
-          """Incrementally update existing submissions with new filings from recent page."""
-          # Get new filings from recent page
+          """Prepend the recent page's unseen filings to the stored master."""
           new_accessions = set(
             new_recent.get("filings", {}).get("recent", {}).get("accessionNumber", [])
           )
@@ -204,16 +175,13 @@ def sec_raw_filings(
             existing.get("filings", {}).get("accessionNumber", [])
           )
 
-          # Find truly new accession numbers
           new_only = new_accessions - existing_accessions
           if not new_only:
-            return existing  # No new filings
+            return existing
 
-          # Find indices of new filings in the recent data
           recent_data = new_recent.get("filings", {}).get("recent", {})
           recent_accessions = recent_data.get("accessionNumber", [])
 
-          # Prepend new filings to existing (new filings go at the front)
           for field in existing["filings"]:
             if field in recent_data:
               new_values = [
@@ -223,7 +191,6 @@ def sec_raw_filings(
               ]
               existing["filings"][field] = new_values + existing["filings"][field]
 
-          # Update metadata
           existing["_metadata"] = existing.get("_metadata", {})
           existing["_metadata"]["totalFilings"] = len(
             existing["filings"].get("accessionNumber", [])
@@ -241,33 +208,28 @@ def sec_raw_filings(
           async with submissions_semaphore:
             async with submissions_limiter:
               try:
-                # Check if master file already exists
                 existing_data = None
                 try:
                   response = s3.client.get_object(Bucket=bucket, Key=submissions_key)
                   existing_data = json.loads(response["Body"].read().decode("utf-8"))
                 except Exception:
-                  pass  # File doesn't exist
+                  pass
 
                 if existing_data is None:
-                  # No existing file - build complete master (sync, fetches all pages)
                   context.log.info(
                     f"Building complete submissions master for CIK {cik}..."
                   )
-                  # Run sync function in thread pool to not block event loop
                   loop = asyncio.get_event_loop()
                   submissions_data = await loop.run_in_executor(
                     None, build_complete_submissions_sync, cik
                   )
                 else:
-                  # Existing file - do incremental update from recent page only
                   new_recent = await asyncio.to_thread(edgar_client().submissions, cik)
 
                   submissions_data = incremental_update_submissions(
                     existing_data, cik, new_recent
                   )
 
-                # Store to S3
                 s3.client.put_object(
                   Bucket=bucket,
                   Key=submissions_key,
@@ -282,7 +244,6 @@ def sec_raw_filings(
                 submissions_failed += 1
                 return False
 
-        # Run all fetches in parallel
         tasks = [fetch_submission(cik) for cik in ciks_to_fetch]
         completed = 0
         for coro in asyncio.as_completed(tasks):
@@ -295,14 +256,12 @@ def sec_raw_filings(
       f"Submissions complete: {submissions_fetched} fetched, {submissions_failed} failed"
     )
 
-    # Apply max_filings limit if specified
     if config.max_filings > 0 and len(hits) > config.max_filings:
       context.log.info(
         f"Limiting to {config.max_filings} filings (of {len(hits)} discovered)"
       )
       hits = hits[: config.max_filings]
 
-    # Dry run mode - just report what would be downloaded
     if config.dry_run:
       context.log.info(f"[DRY RUN] Would download {len(hits)} filings:")
       for hit in hits[:10]:
@@ -319,7 +278,6 @@ def sec_raw_filings(
         "dry_run": True,
       }
 
-    # Phase 3: Download filings with async rate limiting
     context.log.info(f"Phase 3: Downloading {len(hits)} filings...")
 
     limiter = AsyncRateLimiter(rate=config.download_rate)
@@ -327,18 +285,16 @@ def sec_raw_filings(
     semaphore = asyncio.Semaphore(config.download_concurrency)
 
     downloaded = 0
-    skipped = 0  # Already exists in S3
-    no_xbrl = 0  # Filing exists but no XBRL ZIP available
-    no_xbrl_filings: list[str] = []  # Track which filings lack XBRL
+    skipped = 0  # already in S3
+    no_xbrl = 0  # filing has no XBRL ZIP
+    no_xbrl_filings: list[str] = []
     failed = 0
 
-    # Track files for SourceFile creation
     source_file_records: list[dict] = []
 
     async def download_filing(hit: EftsHit) -> bool:
       nonlocal downloaded, skipped, no_xbrl, failed, source_file_records
 
-      # Construct S3 key
       s3_key = get_raw_key(
         DataSourceType.SEC,
         f"year={year}",
@@ -346,13 +302,11 @@ def sec_raw_filings(
         f"{hit.accession}.zip",
       )
 
-      # Skip if exists
       if config.skip_existing:
         try:
           head_response = s3.client.head_object(Bucket=bucket, Key=s3_key)
           skipped += 1
-          # Track for SourceFile creation (existing file)
-          # Include quarter in partition_key for accurate batch processing
+          # The quarter prefix is what the processing sensor groups by.
           partition_key = f"{year}-Q{quarter}_{hit.cik}_{hit.accession}"
           source_file_records.append(
             {
@@ -364,9 +318,8 @@ def sec_raw_filings(
           )
           return True
         except Exception:
-          pass  # File doesn't exist, continue to download
+          pass
 
-      # Construct XBRL ZIP URL
       cik_no_zeros = str(int(hit.cik))
       accno_no_dash = hit.accession.replace("-", "")
       url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik_no_zeros}/{accno_no_dash}/{hit.accession}-xbrl.zip"
@@ -377,7 +330,6 @@ def sec_raw_filings(
             async with aiohttp.ClientSession(headers=SEC_HEADERS) as session:
               async with session.get(url) as response:
                 if response.status == 404:
-                  # No XBRL ZIP for this filing
                   no_xbrl += 1
                   no_xbrl_filings.append(f"{hit.cik}/{hit.accession}")
                   return True
@@ -402,7 +354,6 @@ def sec_raw_filings(
             failed += 1
             return False
 
-      # Upload to S3
       try:
         s3.client.put_object(
           Bucket=bucket,
@@ -411,8 +362,6 @@ def sec_raw_filings(
           ContentType="application/zip",
         )
         downloaded += 1
-        # Track for SourceFile creation (newly downloaded)
-        # Include quarter in partition_key for accurate batch processing
         partition_key = f"{year}-Q{quarter}_{hit.cik}_{hit.accession}"
         source_file_records.append(
           {
@@ -428,7 +377,6 @@ def sec_raw_filings(
         failed += 1
         return False
 
-    # Execute downloads with progress logging
     tasks = [download_filing(hit) for hit in hits]
     completed = 0
 
@@ -443,7 +391,6 @@ def sec_raw_filings(
           f"[{downloaded} new, {skipped} cached, {no_xbrl} no XBRL, {failed} failed]"
         )
 
-    # Log filings without XBRL (limit to first 20 to avoid log spam)
     if no_xbrl_filings:
       sample = no_xbrl_filings[:20]
       context.log.info(
@@ -462,7 +409,6 @@ def sec_raw_filings(
       "source_file_records": source_file_records,
     }
 
-  # Run async code in sync Dagster context
   result = asyncio.run(run_efts_download())
 
   if result.get("dry_run"):
@@ -476,14 +422,13 @@ def sec_raw_filings(
       f"{result.get('no_xbrl', 0)} no XBRL, {result['failed']} failed"
     )
 
-  # Create SourceFile records for downloaded/cached files
   source_file_records = result.get("source_file_records", [])
   source_files_created = 0
   source_files_existed = 0
   if source_file_records and not result.get("dry_run"):
     context.log.info(f"Creating {len(source_file_records)} SourceFile records...")
     with db.get_session() as session:
-      # Ensure SEC graph exists (SourceFile has FK to graphs table)
+      # SourceFile has an FK to graphs.
       Graph.find_or_create_repository(
         graph_id="sec",
         graph_name="SEC EDGAR Filings",

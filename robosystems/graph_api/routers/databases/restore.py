@@ -34,23 +34,17 @@ from robosystems.utils.path_validation import get_lance_index_path
 
 router = APIRouter(prefix="/databases", tags=["Backup"])
 
-# Name of the manifest inside a full-dump archive. Its *presence* is load-bearing:
-# an archive without it predates memory support and therefore makes no claim
-# about the memory store, which is a different thing from claiming there is none.
+# Its presence is load-bearing: an archive without it makes no claim about the
+# memory store, which differs from claiming there is none.
 BACKUP_MANIFEST_NAME = "backup-manifest.json"
 
 
 def _count_copied_database(db_path: FilePath) -> tuple[int, int]:
   """Node and relationship counts read from a copied database file.
 
-  Opened read-only and separately from the connection pool: the point is to
-  measure the artifact that is about to be uploaded, so reusing the live
-  connection would defeat the check by answering from the source instead.
-
-  A database with no schema at all — the shape the dropped-WAL bug produced —
-  raises rather than returning zero, so the failure is folded into ``(0, 0)``.
-  That mismatches any non-empty source and fails the backup upstream, which is
-  the intended outcome.
+  Opened apart from the pool so it measures the artifact, not the live
+  source. Any failure (a schemaless file raises) returns ``(0, 0)``, which
+  mismatches a non-empty source and fails the backup upstream, as intended.
   """
   import ladybug as lbug
 
@@ -84,21 +78,11 @@ async def perform_restore(
 ) -> None:
   """Run the restore in the background, updating task status for monitoring.
 
-  ``connection_pool`` is the LadybugDB pool, needed to close open connections
-  before the database files are replaced.
-
-  ``create_system_backup`` snapshots the existing database to S3 before it is
-  overwritten; a failed snapshot aborts the restore rather than leaving the
-  old data unrecoverable.
-
-  Nothing on disk is touched until the replacement payload has been downloaded
-  and its checksum verified. ``restore_backup`` does both before it reaches the
-  importer, and the importer takes the safety snapshot immediately before it
-  overwrites — so every abort short of the final copy leaves the existing
-  database exactly as it was.
-
-  Encryption and compression are read from the backup's own S3 metadata, so
-  the caller does not describe them.
+  Nothing on disk is touched until the payload is downloaded and
+  checksum-verified, and the importer takes the ``create_system_backup``
+  snapshot just before overwriting (a failed snapshot aborts). Any abort short
+  of the final copy leaves the existing database as it was. Encryption and
+  compression come from the backup's own S3 metadata.
   """
   try:
     await restore_task_manager.update_task(
@@ -124,20 +108,14 @@ async def perform_restore(
       f"original_size: {backup_metadata.original_size}"
     )
 
-    # Only this process holds the LadybugDB connections, so they must close
-    # here — but closing is all that happens now. The files themselves are
-    # replaced by the importer, after the payload is verified and the safety
-    # snapshot is taken. Deleting them here instead used to defeat both: a
-    # failed download left the graph with nothing, and the importer's
-    # abort-on-failed-snapshot guard was dead code because it is conditioned on
-    # the database still existing.
+    # Close connections only; the importer replaces the files after
+    # verification and the safety snapshot. Deleting them here would leave a
+    # failed download with nothing.
     if connection_pool and force_overwrite:
       connection_pool.close_database_connections(graph_id)
       logger.info(f"[Task {task_id}] Closed LadybugDB connections for {graph_id}")
 
-    # drop_existing=False: the full-dump importer overwrites in place, and
-    # doing it there keeps the existing database intact until the replacement
-    # is on disk and checksum-verified.
+    # drop_existing=False: the importer overwrites in place, after verification.
     restore_job = RestoreJob(
       graph_id=graph_id,
       backup_metadata=backup_metadata,
@@ -288,24 +266,15 @@ async def download_backup(
 
     from robosystems.middleware.graph.utils import MultiTenantUtils
 
-    # Fold the WAL into the main database file before copying it. LadybugDB
-    # holds recent writes in {graph_id}.lbug.wal until a checkpoint, and this
-    # path copies only the main file — so without this, a graph that has not
-    # been evicted since its last write backs up as of its last checkpoint,
-    # which for a young graph is an empty database. The default
-    # checkpoint_threshold is 512 MB, which a tenant graph never reaches.
-    #
-    # Mirrors OnInstanceBackupService._checkpoint, which the replica and
-    # duckdb_staging paths have always used. Safe to open here because the
-    # list_databases() membership check above already ran: LadybugDB creates a
-    # database when the path is absent, so checkpointing an unknown graph would
-    # mint an empty one and pass the existence guard below.
+    # Fold the WAL into the main file, which is all this copies; a tenant
+    # graph rarely reaches the 512 MB auto-checkpoint threshold. Must follow the
+    # list_databases() check above: a read-write open creates an absent
+    # database.
     try:
       with ladybug_service.db_manager.get_connection(graph_id, read_only=False) as conn:
         conn.execute("CHECKPOINT")
     except Exception as e:
-      # Fail the backup rather than fall through to a silently stale copy —
-      # a backup that reports success over incomplete data is worse than none.
+      # A stale copy reported as success is worse than no backup.
       logger.error(f"CHECKPOINT failed for {graph_id}, aborting backup: {e!s}")
       raise HTTPException(
         status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -331,18 +300,12 @@ async def download_backup(
         copied_db = temp_path / graph_id
         shutil.copytree(db_path, copied_db)
 
-      # Count what actually landed in the copy, not what the live database
-      # holds. The caller compares this against its own live-query stats and
-      # refuses to record `completed` on a mismatch — which is the check that
-      # would have caught the dropped-WAL bug, where the record described the
-      # graph and the payload described a stale file with nothing in it.
+      # Count the copy, not the live database: the caller compares these to
+      # its own live stats and refuses to record `completed` on a mismatch.
       payload_nodes, payload_rels = _count_copied_database(copied_db)
 
-      # The memory store is lazily created — most graphs never write one — so
-      # absence is an ordinary outcome, not an error. Resolve the path rather
-      # than constructing a LanceMemoryStore, whose __init__ mkdirs its base
-      # path: a backup that materializes the directory it is testing for would
-      # make every later absence check ambiguous.
+      # Resolve the path rather than construct a LanceMemoryStore, whose
+      # __init__ would mkdir the directory being tested for.
       lance_dir = get_lance_index_path(graph_id)
       memory_included = lance_dir.is_dir() and any(lance_dir.rglob("*"))
 
@@ -352,11 +315,7 @@ async def download_backup(
         "database_form": "file" if os.path.isfile(db_path) else "directory",
         "node_count": payload_nodes,
         "relationship_count": payload_rels,
-        # Tri-state. "included"/"absent" distinguish a graph that has memory
-        # from one that never wrote any; a backup with no manifest at all is
-        # the third case — it predates memory support and makes no claim
-        # either way. The manifest's presence is what carries that distinction,
-        # so absence of the file must never be read as "no memory".
+        # Tri-state with "no manifest"; see BACKUP_MANIFEST_NAME.
         "memory": "included" if memory_included else "absent",
       }
 

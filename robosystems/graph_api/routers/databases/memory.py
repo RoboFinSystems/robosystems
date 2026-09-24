@@ -1,24 +1,5 @@
-"""Memory management endpoints for graph databases.
-
-These endpoints allow external orchestrators (like Dagster) to manage memory
-allocation for staging and materialization operations.
-
-Endpoints:
-- /boost: Increase memory limits before heavy operations
-- /restore: Reset memory limits to defaults (config only)
-- /release: Close connections and free buffers to OS
-- /status: Check current boost status
-
-Usage pattern:
-1. Before staging: POST /databases/{graph_id}/memory/boost {"target": "duckdb"}
-2. Run all staging table creations
-3. After staging: POST /databases/{graph_id}/memory/release {"target": "duckdb"}
-4. Before materialization: POST /databases/{graph_id}/memory/boost {"target": "ladybug"}
-5. Run all materialization
-6. After completion: POST /databases/{graph_id}/memory/release {"target": "both"}
-
-Note: /restore only reconfigures memory limits. To actually free memory back to
-the OS, use /release which closes connections and releases buffers.
+"""Memory boost/restore/release endpoints for orchestrated staging and
+materialization runs. /restore only lowers limits; /release frees memory.
 """
 
 from enum import Enum
@@ -139,7 +120,6 @@ async def boost_memory(
         elif result.endswith("MB"):
           duckdb_boost_mb = int(result[:-2])
       except (ValueError, AttributeError) as e:
-        # Non-fatal: boost succeeded but we couldn't parse the size for response
         logger.warning(f"Could not parse DuckDB boost value '{result}': {e}")
       logger.info(f"DuckDB memory boosted to {result} for {graph_id}")
     else:

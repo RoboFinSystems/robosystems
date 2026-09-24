@@ -1,7 +1,7 @@
 """Transform — Plaid transactions into captured-event payloads.
 
-The adapter thesis (``ref/adapters.md``): an adapter emits *events*, never GL
-rows. Every posted Plaid transaction lands ``captured`` in the inbox with a
+An adapter emits *events*, never GL rows. Every posted Plaid transaction
+lands ``captured`` in the inbox with a
 Tier-0 suggestion from its personal-finance category; posting is a
 classification made once. The event types are the bank-feed contract's:
 

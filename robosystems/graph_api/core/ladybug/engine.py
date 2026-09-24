@@ -19,19 +19,10 @@ from robosystems.logger import log_app_error, log_db_query, logger
 
 
 def describe_param_shape(params: dict[str, Any] | None) -> dict[str, str]:
-  """Describe bound query parameters without their values.
+  """Map each bound parameter to its type name, for logging.
 
-  Cypher parameter values are customer data by construction — entity names,
-  email addresses, account identifiers, amounts — so there is no safe subset to
-  allowlist and no value belongs in a log line. Deliberately *not* built on
-  ``SENSITIVE_QUERY_PARAMS``: that set is sixteen credential names matched
-  against URL query strings, correctly scoped to what it does, and growing it
-  into a PII list would produce something that looks like protection and is
-  not.
-
-  What actually diagnoses a failed query is which parameters were bound and
-  what types they carried — a missing key, an unexpected ``None``, a string
-  where a number was expected. That is what this returns.
+  Parameter values are customer data by construction, so no value belongs in a
+  log line; names and types are what diagnose a failed query.
   """
   if not params:
     return {}
@@ -67,16 +58,13 @@ class Engine(GraphEngineInterface):
 
   @property
   def conn(self):
-    """Get the LadybugDB connection object."""
     return self._conn
 
   @property
   def db(self):
-    """Get the LadybugDB database object."""
     return self._db
 
   def _connect(self) -> None:
-    """Establish connection to LadybugDB database."""
     try:
       logger.debug(f"Connecting to LadybugDB database: {self.database_path}")
 
@@ -281,10 +269,8 @@ class Engine(GraphEngineInterface):
   ) -> list[list[dict[str, Any]]]:
     """Execute operations in order, returning one result list per operation.
 
-    NOT atomic. LadybugDB exposes no explicit transaction here, so a failure
-    part-way through leaves the earlier operations applied — there is no
-    rollback. Design callers to be re-runnable rather than relying on
-    all-or-nothing.
+    NOT atomic: a failure part-way through leaves earlier operations applied,
+    so callers must be re-runnable.
     """
     logger.debug(f"Starting graph transaction with {len(operations)} operations")
 
@@ -324,7 +310,6 @@ class Engine(GraphEngineInterface):
       }
 
   def close(self) -> None:
-    """Close the database connection."""
     try:
       if self._conn:
         logger.debug(f"Closing graph connection: {self.database_path}")
@@ -367,11 +352,9 @@ class Engine(GraphEngineInterface):
       return []
 
   def __enter__(self):
-    """Context manager entry."""
     return self
 
   def __exit__(self, exc_type, exc_val, exc_tb):
-    """Context manager exit."""
     self.close()
 
 
@@ -428,7 +411,7 @@ class Repository:
   def execute_transaction(
     self, operations: list[GraphOperation]
   ) -> list[list[dict[str, Any]]]:
-    """Execute multiple operations in a single transaction."""
+    """Execute operations in order. Not atomic — see ``Engine.execute_transaction``."""
     return self.engine.execute_transaction(operations)
 
   def count_nodes(self, label: str, filters: dict[str, Any] | None = None) -> int:
@@ -475,7 +458,6 @@ class Repository:
     return self.engine.health_check()
 
   def close(self) -> None:
-    """Close the database connection."""
     self.engine.close()
 
   def _is_write_operation(self, cypher: str) -> bool:
@@ -485,9 +467,7 @@ class Repository:
     return is_write_operation(cypher)
 
   def __enter__(self):
-    """Context manager entry."""
     return self
 
   def __exit__(self, exc_type, exc_val, exc_tb):
-    """Context manager exit."""
     self.close()

@@ -1,10 +1,5 @@
-"""SEC DuckDB Staging Assets.
-
-This module contains the DuckDB staging assets:
-- sec_duckdb_staged: Full rebuild staging for sec (primary) graph
-- sec_historical_duckdb_staged: Full rebuild staging for sec_historical graph
-- sec_duckdb_incremental_staged: Incremental staging for current quarter
-"""
+"""SEC DuckDB staging assets: full rebuilds for sec and sec_historical, and the
+nightly incremental quarter."""
 
 from dagster import AssetExecutionContext, Failure, MaterializeResult, asset
 
@@ -28,19 +23,8 @@ def sec_duckdb_staged(
   context: AssetExecutionContext,
   config: SECStageConfig,
 ) -> MaterializeResult:
-  """Stage SEC processed files to persistent DuckDB (full rebuild).
-
-  Creates DuckDB tables from scratch using all S3 parquet files.
-  Persists to disk so materialization can run independently.
-
-  Options:
-  - reset_staging: Delete existing DuckDB file before staging (fresh start)
-  - year: Optional single year filter for partial staging
-  - start_year/end_year: Optional year range filter
-
-  Run with:
-    uv run dagster asset materialize -m robosystems.dagster --select sec_duckdb_staged
-  """
+  """Rebuild the persistent DuckDB staging from the processed parquet files, so
+  materialization can run (and re-run) on its own."""
   import asyncio
 
   from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
@@ -56,7 +40,7 @@ def sec_duckdb_staged(
   if config.reset_staging:
     context.log.info("Reset staging enabled - will delete DuckDB file first")
 
-  # Boost DuckDB memory before staging (only applies to ladybug-shared tier)
+  # Only takes effect on the ladybug-shared tier.
   duckdb_memory_mb: int | None = None
   try:
     from robosystems.graph_api.client.factory import boost_graph_memory
@@ -69,12 +53,10 @@ def sec_duckdb_staged(
 
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
-  # Progress callback for Dagster logging (visible in Dagster UI)
   def dagster_progress(msg: str) -> None:
     context.log.info(msg)
 
   async def run_staging():
-    # Ensure repository exists
     context.log.info("Ensuring SEC repository metadata exists...")
     repo_result = await ensure_shared_repository_exists(
       repository_name=config.graph_id,
@@ -83,10 +65,9 @@ def sec_duckdb_staged(
     )
     context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
 
-    # Publish the busy counter against the shared-tier master that actually
-    # runs the DuckDB writes, so GHA pre-refresh waits before cycling it.
-    # Imports are lazy so an adapter-load-time import chain does not pull
-    # boto3 / GraphClientFactory into every SEC module at startup.
+    # The busy counter on the master running the DuckDB writes makes a deploy's
+    # pre-refresh wait before cycling it. Imported lazily to keep boto3 and
+    # GraphClientFactory out of SEC module load.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_SEC_STAGING,
       begin_destructive_op,
@@ -97,7 +78,6 @@ def sec_duckdb_staged(
     busy_instance_id = await resolve_instance_id_for_graph(config.graph_id)
     await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
     try:
-      # Run full staging from all S3 parquet files
       result = await processor.stage_to_duckdb(
         year=config.year,
         start_year=config.start_year,
@@ -129,7 +109,6 @@ def sec_duckdb_staged(
     f"{result.total_files} files, {result.duration_ms / 1000:.2f}s"
   )
 
-  # Release DuckDB memory after staging (closes connections, frees buffers)
   try:
     from robosystems.graph_api.client.factory import release_graph_memory
 
@@ -167,18 +146,8 @@ def sec_historical_duckdb_staged(
   context: AssetExecutionContext,
   config: SECHistoricalStageConfig,
 ) -> MaterializeResult:
-  """Stage SEC historical data to a separate DuckDB database.
-
-  Creates a DuckDB staging database for the sec_historical subgraph.
-  Year range is controlled by config (start_year/end_year).
-
-  Uses the same processed S3 parquet files as the primary sec graph,
-  but filtered to the historical year range. The sec_historical subgraph
-  is automatically created if it doesn't exist.
-
-  Run with:
-    uv run dagster asset materialize -m robosystems.dagster --select sec_historical_duckdb_staged
-  """
+  """Stage the historical year range of the same processed files into the
+  sec_historical subgraph's own DuckDB, creating the subgraph if needed."""
   import asyncio
 
   from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
@@ -196,7 +165,7 @@ def sec_historical_duckdb_staged(
   if config.reset_staging:
     context.log.info("Reset staging enabled - will delete DuckDB file first")
 
-  # Boost DuckDB memory before staging (only applies to ladybug-shared tier)
+  # Only takes effect on the ladybug-shared tier.
   duckdb_memory_mb: int | None = None
   try:
     from robosystems.graph_api.client.factory import boost_graph_memory
@@ -213,7 +182,6 @@ def sec_historical_duckdb_staged(
     context.log.info(msg)
 
   async def run_staging():
-    # Ensure the sec_historical subgraph exists (LadybugDB + PostgreSQL)
     subgraph_result = await ensure_shared_subgraph_exists(
       parent_repository_name="sec",
       subgraph_name="historical",
@@ -223,7 +191,7 @@ def sec_historical_duckdb_staged(
     )
     context.log.info(f"Subgraph status: {subgraph_result.get('status')}")
 
-    # See sec_duckdb_staged above for why we publish a busy counter here.
+    # Busy counter: see sec_duckdb_staged.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_SEC_STAGING,
       begin_destructive_op,
@@ -234,7 +202,6 @@ def sec_historical_duckdb_staged(
     busy_instance_id = await resolve_instance_id_for_graph(graph_id)
     await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
     try:
-      # Run staging with year range filter
       result = await processor.stage_to_duckdb(
         start_year=start_year,
         end_year=end_year,
@@ -248,7 +215,6 @@ def sec_historical_duckdb_staged(
 
   result = asyncio.run(run_staging())
 
-  # Release DuckDB memory after staging
   try:
     from robosystems.graph_api.client.factory import release_graph_memory
 
@@ -305,22 +271,17 @@ def sec_duckdb_incremental_staged(
   context: AssetExecutionContext,
   config: SECIncrementalStageConfig,
 ) -> MaterializeResult:
-  """INSERT current quarter's files into existing DuckDB tables.
+  """INSERT one quarter's net-new rows into the existing staging tables.
 
-  Points at entire quarter's parquet files and uses INSERT INTO with
-  UNION ALL + ROW_NUMBER deduplication. Safe to run daily - only net
-  new rows are added, duplicates are automatically filtered out.
-
-  Precondition: Initial full staging must have been done (tables exist).
-
-  Run with:
-    uv run dagster asset materialize -m robosystems.dagster --select sec_duckdb_incremental_staged
+  Idempotent (ROW_NUMBER dedup), so safe to repeat. Requires a prior full
+  staging. A partial result fails the run so materialization never proceeds on
+  incomplete data.
   """
   import asyncio
 
   from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
 
-  # Boost DuckDB memory before staging (only applies to ladybug-shared tier)
+  # Only takes effect on the ladybug-shared tier.
   try:
     from robosystems.graph_api.client.factory import boost_graph_memory
 
@@ -332,7 +293,7 @@ def sec_duckdb_incremental_staged(
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
   async def run_incremental():
-    # See sec_duckdb_staged above for why we publish a busy counter here.
+    # Busy counter: see sec_duckdb_staged.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_SEC_STAGING,
       begin_destructive_op,
@@ -353,7 +314,6 @@ def sec_duckdb_incremental_staged(
 
   result = asyncio.run(run_incremental())
 
-  # Release DuckDB memory after staging (closes connections, frees buffers)
   try:
     from robosystems.graph_api.client.factory import release_graph_memory
 
@@ -402,7 +362,7 @@ def sec_duckdb_incremental_staged(
       "year": config.year,
       "quarter": config.quarter,
       "tables_staged": len(result.table_names),
-      "total_rows": result.total_rows,  # Net new rows
+      "total_rows": result.total_rows,  # net new
       "duration_ms": result.duration_ms,
     }
   )

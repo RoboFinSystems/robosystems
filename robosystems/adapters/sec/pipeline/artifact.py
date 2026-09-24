@@ -1,18 +1,6 @@
-"""SEC Knowledge Artifact Generation Asset.
-
-Generates precomputed Parquet artifacts from the full DuckDB staging database
-for graph-based confidence refinement during XBRL enrichment.
-
-Artifacts:
-  - element_knowledge.parquet: Graph-structural signals per element qname
-  - structure_profiles.parquet: Element frequency distributions per canonical_type
-  - structure_consensus.parquet: Cross-filing majority-vote for identical structures
-  - disclosure_profiles.parquet: Element frequency distributions per disclosure type
-  - disclosure_consensus.parquet: Cross-filing majority-vote for disclosure types
-
-Dev: opens local DuckDB at {DUCKDB_STAGING_PATH}/{source}.duckdb
-Prod: downloads from S3 first (same pattern as DuckDBAnalyticsContext)
-"""
+"""sec_knowledge_artifacts: precomputed parquet artifacts (element knowledge,
+structure and disclosure profiles/consensus) built from the full DuckDB staging,
+used for confidence refinement during XBRL enrichment."""
 
 import gc
 from typing import TYPE_CHECKING
@@ -33,14 +21,9 @@ class SECArtifactConfig(Config):
   """Configuration for SEC artifact generation."""
 
   duckdb_source: str = "sec"
-  # DuckDB memory budget per builder connection, bounded on both sides. Too
-  # low and DuckDB itself OOMs on un-spillable block pins during the
-  # structure-composition extraction (an 8GB budget died this way on the
-  # Jul 2026 ~55GB corpus, regardless of task size). Too close to the ECS
-  # task memory (24GB, see jobs.py) and the result set materialized in
-  # Python on top of DuckDB's buffer starves the kernel into OOM-killing
-  # the task (SIGKILL — a 14GB budget on the older 16GB task). 16GB leaves
-  # ~8GB of Python headroom and cleared the Jul 2026 corpus.
+  # Bounded both ways: too low and DuckDB OOMs on un-spillable block pins
+  # (8 GB failed); too close to the 24 GB task (jobs.py) and the Python result
+  # on top gets the task SIGKILLed. 16 GB leaves ~8 GB of headroom.
   memory_limit: str = Field(
     default="16GB",
     description="DuckDB memory budget per builder; keep well below task memory.",
@@ -59,12 +42,10 @@ def sec_knowledge_artifacts(
   context: AssetExecutionContext,
   config: SECArtifactConfig,
 ) -> MaterializeResult:
-  """Generate all knowledge artifacts for graph-based confidence refinement.
+  """Build every knowledge artifact from the DuckDB staging file.
 
-  Downloads the DuckDB staging file (in prod) or opens it locally (in dev),
-  then runs each builder sequentially. Each artifact is uploaded to S3
-  immediately after generation (in non-dev), and the builder is freed before
-  the next one starts to keep peak memory bounded.
+  Builders run one at a time and are freed before the next to bound peak
+  memory; outside dev each artifact uploads as soon as it is built.
   """
   from robosystems.adapters.sec.knowledge.artifact import (
     DisclosureProfileBuilder,
@@ -78,8 +59,8 @@ def sec_knowledge_artifacts(
   is_prod = env.ENVIRONMENT != "dev"
   _log_memory("asset start")
 
-  # Keep context open for temp dir lifetime (prod S3 download), but close the
-  # idle DuckDB connection immediately — builders open their own connections.
+  # The context owns the temp dir holding the downloaded file, so it stays
+  # open; its idle connection is closed since builders open their own.
   with DuckDBAnalyticsContext(
     duckdb_source=config.duckdb_source,
     memory_limit="256MB",
@@ -90,7 +71,6 @@ def sec_knowledge_artifacts(
       f"Building artifacts from DuckDB at: {db_path} ({db_size_gb:.1f} GB)"
     )
 
-    # Log available disk space (important: 104GB file on 200GB ephemeral)
     try:
       import shutil
 
@@ -100,15 +80,13 @@ def sec_knowledge_artifacts(
         f"{disk.free / (1024**3):.1f} GB free of {disk.total / (1024**3):.1f} GB"
       )
     except Exception:
-      pass  # Non-fatal: disk usage logging is best-effort
+      pass
 
-    # Close the idle DuckDB connection to free its memory buffer.
-    # The context stays open to keep the temp directory alive (prod S3 download).
     ctx.close_connection()
     gc.collect()
     _log_memory("after DuckDB download + connection close")
 
-    # --- Element knowledge (must run first — PageRank used by disclosure profiles) ---
+    # First: disclosure profiles use its PageRank.
     context.log.info("Building element knowledge artifact")
     element_builder = ElementKnowledgeBuilder(memory_limit=config.memory_limit)
     element_path = element_builder.build(db_path)
@@ -122,7 +100,6 @@ def sec_knowledge_artifacts(
         context, element_path, "element_knowledge.parquet", config.publish_r2
       )
 
-    # --- Structure knowledge ---
     context.log.info("Building structure knowledge artifacts")
     structure_builder = StructureKnowledgeBuilder(memory_limit=config.memory_limit)
     profiles_path, consensus_path = structure_builder.build(db_path)
@@ -140,7 +117,6 @@ def sec_knowledge_artifacts(
         context, consensus_path, "structure_consensus.parquet", config.publish_r2
       )
 
-    # --- Disclosure knowledge (uses PageRank from element_knowledge) ---
     context.log.info("Building disclosure knowledge artifacts")
     disclosure_builder = DisclosureProfileBuilder(memory_limit=config.memory_limit)
     disc_profiles_path, disc_consensus_path = disclosure_builder.build(db_path)
@@ -175,24 +151,18 @@ def _upload_artifact(
   filename: str,
   publish_r2: bool = False,
 ) -> None:
-  """Upload a single artifact to S3 and optionally R2.
-
-  S3 is the primary store for prod/staging enrichment (private).
-  R2 provides public downloads for local development (zero egress).
-  R2 upload only runs when publish_r2=True (set via Dagster config).
-  """
+  """Upload to S3 (read by prod/staging enrichment) and, with publish_r2, to
+  the public R2 bucket that dev enrichment downloads from."""
   from robosystems.config import env
   from robosystems.config.storage.shared import DataSourceType, get_processed_key
   from robosystems.operations.aws.s3 import S3Client
 
-  # S3 upload (primary — used by prod/staging enrichment)
   s3 = S3Client()
   bucket = env.SHARED_PROCESSED_BUCKET
   s3_key = get_processed_key(DataSourceType.SEC, "artifacts", filename)
   context.log.info(f"Uploading {filename} to s3://{bucket}/{s3_key}")
   s3.upload_file(str(local_path), bucket, s3_key)
 
-  # R2 upload (public — used by dev enrichment)
   if publish_r2:
     _upload_artifact_r2(context, local_path, filename)
 
@@ -202,7 +172,7 @@ def _upload_artifact_r2(
   local_path: "Path",
   filename: str,
 ) -> None:
-  """Upload a single artifact to the public R2 bucket for dev downloads."""
+  """Best-effort; a no-op when R2 is not configured."""
   from robosystems.config import env
   from robosystems.config.storage.shared import get_artifact_r2_key
 

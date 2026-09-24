@@ -1,16 +1,5 @@
-"""External asset specs for user graph operations.
-
-These asset definitions allow AssetMaterializations reported from the API
-(via direct execution) to appear in the Dagster UI's Assets tab.
-
-Direct graph operations bypass Dagster job orchestration for performance
-(eliminating 30-60s ECS cold start), but report materializations for
-observability.
-
-Asset categories:
-- Lifecycle: Graph creation, subgraph creation, repository provisioning
-- Data pipeline: File staging (DuckDB), graph materialization (LadybugDB)
-"""
+"""External asset specs so materializations reported outside Dagster jobs (direct API
+execution, which skips the ECS cold start) appear in the Assets tab."""
 
 from dagster import AssetSpec
 
@@ -18,9 +7,6 @@ from dagster import AssetSpec
 # Lifecycle Assets (graph/repository provisioning)
 # ============================================================================
 
-# Materializations reported from operations/graph/tasks/graph_creation.py and
-# operations/graph/provisioning_service.py. The 'provisioning_method' metadata
-# field distinguishes direct API creation from subscription provisioning.
 user_graph_creation_source = AssetSpec(
   key="user_graph_creation",
   description=(
@@ -67,8 +53,6 @@ user_subgraph_creation_source = AssetSpec(
 # Data Pipeline Assets (staging → materialization)
 # ============================================================================
 
-# Materializations reported from
-# operations/graph/engine/direct_staging.py
 user_graph_file_staging_source = AssetSpec(
   key="user_graph_file_staging",
   description=(
@@ -84,7 +68,6 @@ user_graph_file_staging_source = AssetSpec(
   kinds={"duckdb"},
 )
 
-# DuckDB → LadybugDB; materializations reported from materialize_graph_job
 user_graph_materialized_source = AssetSpec(
   key="user_graph_materialized",
   description=(
@@ -100,7 +83,6 @@ user_graph_materialized_source = AssetSpec(
   kinds={"ladybug"},
 )
 
-# PostgreSQL OLTP → LadybugDB; reported from extensions_materialize_job
 user_graph_extensions_materialized_source = AssetSpec(
   key="user_graph_extensions_materialized",
   description=(
@@ -119,7 +101,6 @@ user_graph_extensions_materialized_source = AssetSpec(
 # Lifecycle Assets (backup)
 # ============================================================================
 
-# Materializations reported from backup_graph_job (create_backup op)
 user_graph_backup_source = AssetSpec(
   key="user_graph_backup",
   description=(

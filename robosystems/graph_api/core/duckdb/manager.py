@@ -263,12 +263,10 @@ class DuckDBTableManager:
         GROUP BY {group_by_clause}
       """
     elif has_from_to and column_names:
-      # Relationship table: deduplicate on (from, to) and rename to src/dst
-      # IMPORTANT: LadybugDB expects columns in order: src, dst, then properties
+      # Relationship table: LadybugDB expects src, dst first, then properties.
       null_cols = null_columns or set()
       dedupe_cols = ["from", "to"]
       other_cols = [c for c in column_names if c not in dedupe_cols]
-      # Build select: src, dst first, then FIRST() for other columns
       select_parts = ['"from" AS src', '"to" AS dst'] + [
         _dedup_col_expr(c, null_cols) for c in other_cols
       ]
@@ -456,7 +454,6 @@ class DuckDBTableManager:
           )
           conn.execute(sql)
         else:
-          # No file_id tracking.
           sql = self._build_table_sql(
             quoted_table,
             has_identifier,
@@ -479,7 +476,6 @@ class DuckDBTableManager:
             sql = sql.replace("__FILES_PLACEHOLDER__", files_list)
             conn.execute(sql)
           else:
-            # Parameter binding for the glob pattern.
             conn.execute(sql, [request.s3_pattern])
 
         count_result = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
@@ -913,9 +909,7 @@ class DuckDBTableManager:
     except Exception as e:
       from robosystems.security.error_handling import redact_connection_secrets
 
-      # postgres_scan() statements carry the extensions DSN; a failure can echo
-      # the statement, so scrub the credential before it goes to the log or the
-      # 400 detail returned to the caller.
+      # A failure can echo the statement, DSN included.
       safe = redact_connection_secrets(str(e))
       logger.error(f"Write failed for graph {request.graph_id}: {safe}")
       raise HTTPException(
@@ -938,12 +932,6 @@ class DuckDBTableManager:
       f"Executing streaming query for graph {request.graph_id}: {request.sql[:100]}..."
     )
 
-    # Fetch everything (bounded by MAX_QUERY_ROWS) first, holding the per-graph
-    # read lock only for the fetch and only on this thread, then stream the
-    # buffer. The connection and its lock must NOT be held across a `yield`:
-    # Starlette's iterate_in_threadpool resumes this generator on arbitrary
-    # worker threads, and a threading lock released on a different thread than
-    # acquired it raises and wedges the lock permanently.
     try:
       columns, result = self._fetch_readonly(request)
     except HTTPException as e:

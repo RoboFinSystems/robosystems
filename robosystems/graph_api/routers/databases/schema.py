@@ -23,7 +23,6 @@ from robosystems.logger import logger
 router = APIRouter(prefix="/databases", tags=["Graph Schema"])
 
 
-# DDL Statement validation patterns
 ALLOWED_DDL_PATTERNS = {
   # Node table creation (with optional IF NOT EXISTS, optional backtick-quoted identifier)
   r"^\s*CREATE\s+NODE\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?`?\w+`?\s*\(",
@@ -258,7 +257,6 @@ async def get_schema(
         # Escaped because the name is interpolated into the Cypher below.
         safe_table_name = escape_identifier(table_name)
 
-        # TABLE_INFO returns: index, name, type, default, isPrimaryKey
         info_request = QueryRequest(
           database=validated_graph_id,
           cypher=f"CALL TABLE_INFO('{safe_table_name}') RETURN *",
@@ -274,15 +272,15 @@ async def get_schema(
             if isinstance(values, list) and len(values) >= 3:
               properties.append(
                 {
-                  "name": values[1],  # property name
-                  "type": values[2],  # property type
+                  "name": values[1],
+                  "type": values[2],
                 }
               )
           elif isinstance(prop_row, list) and len(prop_row) >= 3:
             properties.append(
               {
-                "name": prop_row[1],  # property name
-                "type": prop_row[2],  # property type
+                "name": prop_row[1],
+                "type": prop_row[2],
               }
             )
 

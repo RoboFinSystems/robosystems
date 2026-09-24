@@ -44,10 +44,7 @@ from robosystems.models.api.graphs.query import translate_neo4j_to_lbug
 
 from .manager import LadybugDatabaseManager
 
-# OpenTelemetry imports - conditional based on OTEL_ENABLED
 
-
-# Create a no-op tracer if OTEL is disabled
 class NoOpSpan:
   """No-op span for when tracing is disabled."""
 
@@ -67,8 +64,6 @@ class NoOpTracer:
   def start_as_current_span(self, name, **kwargs):
     return NoOpSpan()
 
-
-# Only import real tracer if OTEL is enabled
 
 if env.OTEL_ENABLED:
   try:
@@ -152,11 +147,8 @@ def _extract_column_aliases_from_cypher(cypher_query: str) -> list[str]:
     return []
 
 
-# Hard backstop on rows pulled from a single streaming query. Streaming is the
-# large-export path (100x the non-streaming 10k cap), but an unbounded
-# cartesian or variable-length query would otherwise pin an instance pulling
-# rows forever. On hit, the stream stops and the final chunk is flagged
-# `truncated` so the client can paginate rather than silently lose data.
+# Backstop on rows pulled from one streaming query, so an unbounded query
+# cannot pin the instance. On hit the final chunk is flagged `truncated`.
 MAX_STREAMING_ROWS = 1_000_000
 
 
@@ -194,10 +186,9 @@ def validate_cypher_query(cypher: str) -> None:
         detail=f"Query contains forbidden keyword: {keyword}",
       )
 
-  # Defense in depth behind the keyword list: this process holds the embedded
-  # engine and its disk access, so engine-level operations are refused here
-  # regardless of how the request arrived. The tokenizer-based predicates from
-  # the shared analyzer are the same ones the MCP write-query guard uses.
+  # Defense in depth: this process holds the embedded engine and its disk
+  # access, so engine-level operations are refused here however the request
+  # arrived.
   from robosystems.security.cypher_analyzer import (
     is_admin_operation,
     is_bulk_operation,
@@ -205,10 +196,8 @@ def validate_cypher_query(cypher: str) -> None:
     is_schema_ddl,
   )
 
-  # `is_write_operation` is deliberately not among these: writer instances run
-  # ordinary graph writes (CREATE/SET/MERGE/DELETE) through this path. Bulk
-  # load, schema DDL and index creation have dedicated endpoints that do not
-  # reach this validator.
+  # `is_write_operation` is deliberately absent: writers run ordinary graph
+  # writes through this path.
   if (
     is_bulk_operation(cypher)
     or is_admin_operation(cypher)
@@ -273,7 +262,6 @@ class LadybugService:
         raise ConfigurationError(
           config_key="node_type", reason="Writer nodes cannot be read-only"
         )
-      # Writers can now handle both entity and shared repositories
 
     elif self.node_type == NodeType.SHARED_MASTER:
       if self.read_only:
@@ -334,10 +322,6 @@ class LadybugService:
           validated_graph_id, read_only=self.read_only
         ) as conn:
           try:
-            # Planning and execution run on a worker thread so they can be
-            # bounded by a timeout. Cancelling the HTTP coroutine does not
-            # stop the engine, so an expensive query would otherwise pin the
-            # instance for as long as it takes.
             query_timeout = TuningConfig.get_graph_query_timeout()
 
             def _execute_streaming():
@@ -444,8 +428,6 @@ class LadybugService:
             }
             return
 
-        # Caller aliases win over the engine's schema names, but only when the
-        # counts agree — a mismatch means the parse was wrong.
         columns = []
         extracted_aliases = _extract_column_aliases_from_cypher(translated_cypher)
 
@@ -580,20 +562,17 @@ class LadybugService:
         with self.db_manager.get_connection(
           validated_graph_id, read_only=self.read_only
         ) as conn:
-          # Tunable at runtime via SSM.
           query_timeout = TuningConfig.get_graph_query_timeout()
 
           # A worker thread, not a signal-based alarm: signals only fire on the
-          # main thread and would not survive a worker process.
+          # main thread.
           def execute_query_with_params():
-            """Run the query on a worker thread so it can be timed out."""
             if request.parameters:
               return conn.execute(translated_cypher, request.parameters)
             else:
               return conn.execute(translated_cypher)
 
           try:
-            # Execute the query with timeout using thread pool
             with ThreadPoolExecutor(max_workers=1) as executor:
               future = executor.submit(execute_query_with_params)
               try:
@@ -612,7 +591,6 @@ class LadybugService:
                 logger.warning(
                   f"Query timeout for {validated_graph_id} after {query_timeout} seconds"
                 )
-                # Frees the caller; the engine keeps running the query.
                 future.cancel()
                 raise HTTPException(
                   status_code=status.HTTP_408_REQUEST_TIMEOUT,

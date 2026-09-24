@@ -1,7 +1,6 @@
 {% macro normal_balance(classification_expr) %}
 {#
   Determine the normal balance (debit or credit) from QB Classification.
-  Mirrors the logic from local/qb_transactions.py:564-574.
 
   Debit normal: Asset, Expense, Other Expense
   Credit normal: Liability, Equity, Revenue, Other Income

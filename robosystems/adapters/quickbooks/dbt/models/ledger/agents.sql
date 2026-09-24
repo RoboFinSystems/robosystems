@@ -4,7 +4,7 @@
   )
 }}
 
--- Phase 2: Agents mart — UNION of customers / vendors / employees from QB.
+-- Agents mart — UNION of customers / vendors / employees from QB.
 -- Loader UPSERTs into the extensions Agent table keyed on
 -- (connection_id, source='quickbooks', external_id).
 

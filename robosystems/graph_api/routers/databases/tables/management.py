@@ -89,7 +89,6 @@ class StagingTaskManager:
       },
     }
 
-    # Store in Redis with 24-hour TTL
     redis_client = await self.get_redis()
     await redis_client.setex(
       f"lbug:task:{task_id}",
@@ -128,7 +127,6 @@ class StagingTaskManager:
     return None
 
 
-# Global staging task manager
 staging_task_manager = StagingTaskManager()
 
 
@@ -142,17 +140,9 @@ async def _run_table_background_op(
 ) -> None:
   """Shared background-task driver for create/insert table operations.
 
-  Runs ``table_manager_fn(request)`` in a worker thread with a hard timeout,
-  interrupts any in-flight DuckDB connections on timeout, publishes task state
-  transitions to Redis for SSE monitoring, and wraps the whole thing in an
-  ``instance_busy`` counter so GHA pre-refresh workflows know the instance is
-  doing destructive work.
-
-  ``table_manager_fn`` is a sync callable — ``table_manager.create_table`` or
-  ``table_manager.insert_into_table`` — taking one ``TableCreateRequest`` and
-  returning an object with ``status``, ``table_name``, ``execution_time_ms``,
-  and ``row_count``. ``op_label`` ("creation" or "insert") appears in logs and
-  error messages.
+  Runs the sync ``table_manager_fn(request)`` in a worker thread under a hard
+  timeout, publishes task state for SSE monitoring, and holds the
+  ``instance_busy`` counter throughout.
   """
   # Imported here to avoid a circular dependency with pool initialization.
   from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
@@ -177,9 +167,7 @@ async def _run_table_background_op(
           timeout=timeout_seconds,
         )
       except TimeoutError:
-        # asyncio.wait_for() raises but the worker thread keeps running, so the
-        # DuckDB connection must be interrupted to cancel the in-flight query —
-        # otherwise the thread is a zombie holding the query open.
+        # The worker thread outlives wait_for; interrupt its query.
         try:
           pool = get_duckdb_pool()
           interrupted = pool.interrupt_connections(request.graph_id)
@@ -232,11 +220,7 @@ async def perform_table_creation(
   request: TableCreateRequest,
   timeout_seconds: int = 1800,  # 30 minutes default
 ) -> None:
-  """Create a staging table in the background.
-
-  Thin wrapper around :func:`_run_table_background_op`, which owns the shared
-  lifecycle (busy counter, SSE state transitions, timeout + DuckDB interrupt).
-  """
+  """Create a staging table in the background."""
   await _run_table_background_op(
     task_id=task_id,
     request=request,
@@ -252,11 +236,7 @@ async def perform_table_insert(
   request: TableCreateRequest,
   timeout_seconds: int = 1800,  # 30 minutes default
 ) -> None:
-  """Append to an existing staging table in the background.
-
-  Thin wrapper around :func:`_run_table_background_op`, which owns the shared
-  lifecycle (busy counter, SSE state transitions, timeout + DuckDB interrupt).
-  """
+  """Append to an existing staging table in the background."""
   await _run_table_background_op(
     task_id=task_id,
     request=request,

@@ -1,8 +1,4 @@
-"""
-Base Graph API Client.
-
-Shared functionality for sync and async clients.
-"""
+"""Retry, circuit-breaker and error-mapping logic for the Graph API client."""
 
 import random
 import time
@@ -69,7 +65,6 @@ class BaseGraphClient:
     self.graph_id: str | None = None
 
   def _build_url(self, path: str) -> str:
-    """Build full URL from base and path."""
     if path.startswith("/"):
       path = path[1:]
     return urljoin(self.config.base_url + "/", path)
@@ -131,7 +126,6 @@ class BaseGraphClient:
       )
 
   def _record_failure(self) -> None:
-    """Record a failure for circuit breaker."""
     self._circuit_breaker_failures += 1
     self._circuit_breaker_last_failure = time.time()
 
@@ -142,7 +136,6 @@ class BaseGraphClient:
       )
 
   def _record_success(self) -> None:
-    """Record a success for circuit breaker."""
     self._circuit_breaker_failures = 0
     self._circuit_breaker_open = False
 

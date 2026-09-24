@@ -1,7 +1,4 @@
-"""Dagster billing jobs.
-
-These jobs handle credit allocation and usage reporting.
-"""
+"""Dagster billing jobs: Stripe webhook handling, credit allocation, usage reporting."""
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -25,22 +22,11 @@ from robosystems.models.core import (
 from robosystems.models.core.graph.graph_credits import CreditTransactionType
 from robosystems.operations.graph.credit_service import CreditService
 
-# ============================================================================
-# Environment-based Schedule Status
-# ============================================================================
-
-# Billing schedules require database access for credit/usage tracking.
-# RUNNING in prod/staging, STOPPED in dev.
 BILLING_SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
   if env.ENVIRONMENT != "dev"
   else DefaultScheduleStatus.STOPPED
 )
-
-
-# ============================================================================
-# Stripe Webhook Processing Job
-# ============================================================================
 
 
 async def _handle_checkout_completed(
@@ -94,11 +80,9 @@ async def _handle_checkout_completed(
       subscription.status in TERMINAL_SUBSCRIPTION_STATUSES
       and not subscription.resource_id
     ):
-      # The row was retired locally (the customer retried checkout) but its
-      # hosted session was paid before it could be expired at the provider.
-      # Money moved, so deliver: reopen the row so the provisioning claim can
-      # take it, rather than binding a live provider subscription to a
-      # terminal row that the claim refuses and the org listing hides.
+      # Retired locally (customer retried checkout) but this session was paid
+      # before it expired at the provider. Money moved, so reopen the row for
+      # the provisioning claim, which refuses terminal rows.
       previous_status = subscription.status
       subscription.status = "pending_payment"
       subscription.ends_at = None
@@ -136,13 +120,10 @@ async def _handle_checkout_completed(
 
     if stripe_subscription_id:
       subscription.stripe_subscription_id = stripe_subscription_id
-      # Preserve the ORIGINAL checkout session id (from the event) before we
-      # overwrite provider_subscription_id with the Stripe subscription id.
-      # Must create a new dict — SQLAlchemy won't detect in-place JSONB mutation.
-      # Read it from session_id, NOT provider_subscription_id: on a webhook
-      # redelivery that column is already the Stripe sub id, so storing it would
-      # clobber the real cs_… id and break the checkout-status lookup. Guard on
-      # absence so a redelivery stays idempotent.
+      # Keep the cs_… id for the checkout-status lookup before
+      # provider_subscription_id is overwritten. Take it from the event, not the
+      # column (already the sub id on redelivery), and only if absent. New dict:
+      # SQLAlchemy won't detect in-place JSONB mutation.
       existing_metadata = subscription.subscription_metadata or {}
       if "checkout_session_id" not in existing_metadata:
         subscription.subscription_metadata = {
@@ -157,11 +138,8 @@ async def _handle_checkout_completed(
 
     context.log.info(f"Payment collected for org {customer.org_id}")
 
-    # Deliberately does NOT set "provisioning" here. The status transition is
-    # the provisioning claim, and it belongs to the sink so that every trigger
-    # contends for it on the same terms — setting it up front would hand this
-    # caller the claim before the sink could arbitrate, and would also stamp
-    # "provisioning" onto an already-active subscription.
+    # Don't set "provisioning" here: that transition is the claim, arbitrated
+    # inside the sink so every trigger contends on equal terms.
     await _trigger_resource_provisioning(subscription, db_session, context)
 
   else:
@@ -169,19 +147,11 @@ async def _handle_checkout_completed(
 
 
 class SubscriptionNotFoundError(Exception):
-  """Raised when a webhook event cannot be matched to a BillingSubscription.
-
-  Caught separately from ValueError/Exception in the webhook handler so that
-  "not found" triggers a Stripe retry, while unrelated errors are logged.
-  """
+  """No BillingSubscription matches the webhook event; the handler lets Stripe retry."""
 
 
 def _extract_stripe_subscription_id(data: dict) -> str | None:
-  """Extract subscription ID from any Stripe event payload.
-
-  Stripe's payload structure varies across API versions and event types.
-  Instead of assuming a single location, search all known paths.
-  """
+  """Stripe subscription id from any event payload; its location varies by API version."""
   # The object IS a subscription (customer.subscription.updated/deleted)
   obj_id = data.get("id", "")
   if isinstance(obj_id, str) and obj_id.startswith("sub_"):
@@ -216,11 +186,8 @@ def _extract_stripe_subscription_id(data: dict) -> str | None:
 def _extract_local_subscription_id(data: dict) -> str | None:
   """Our own `BillingSubscription.id` from the Stripe payload's metadata.
 
-  The create paths write `subscription_id` into the Stripe subscription's
-  metadata, and Stripe copies that onto derived objects such as invoices. It
-  identifies one exact row, so it is a far better disambiguator than the
-  customer id, which maps to an org that may hold many concurrent
-  subscriptions.
+  Stripe copies it onto derived objects such as invoices. It names one exact
+  row, unlike the customer id, whose org may hold many subscriptions.
   """
   candidates = [data.get("metadata")]
   if parent := data.get("parent"):
@@ -245,23 +212,14 @@ def _resolve_subscription(
 ) -> Any:
   """Resolve the BillingSubscription for any Stripe event.
 
-  Tries the Stripe subscription id first (several payload locations), then our
-  own id from the payload metadata, then — only when the caller permits it and
-  the answer is unambiguous — the billing customer.
+  Order: Stripe subscription id, then our id from the payload metadata, then
+  (if allowed and unambiguous) the billing customer's sole candidate.
 
-  `allow_customer_fallback=False` is required for handlers that mutate or
-  cancel what they resolve. A `customer.subscription.*` payload IS the
-  subscription, so `_extract_stripe_subscription_id` always finds an id in it;
-  failing to match that id locally means the subscription genuinely is not in
-  our database, and picking a different one from the same org would apply the
-  event to the wrong resource. Raising instead lets Stripe retry.
-
-  The customer fallback exists for invoice events, where `invoice.created` can
-  legitimately arrive before `checkout.session.completed` has written the local
-  row. It is kept for those, but only when the org has exactly one candidate:
-  `BillingCustomer.org_id` is the primary key, so one Stripe customer maps to
-  an org that may hold one subscription per graph plus one per member per
-  repository — with several candidates there is no safe guess.
+  Handlers that mutate or cancel must pass `allow_customer_fallback=False`: a
+  `customer.subscription.*` payload always carries its own id, so a miss means
+  we don't have it, and another row from the same org would be the wrong one.
+  The fallback exists for invoice events, which can arrive before
+  `checkout.session.completed` writes the local row.
 
   Raises SubscriptionNotFoundError if the subscription cannot be resolved.
   """
@@ -309,9 +267,8 @@ def _resolve_subscription(
         .limit(2)
         .all()
       )
-      # Exactly one candidate or none — never a guess between several. An
-      # invoice misattributed here is permanent, because invoices dedupe on
-      # `stripe_invoice_id` and no later event revisits the association.
+      # Never guess between several: invoices dedupe on `stripe_invoice_id`,
+      # so a misattribution here is permanent.
       if len(candidates) == 1:
         context.log.info(
           f"Resolved subscription {candidates[0].id} via customer {customer_id} "
@@ -338,10 +295,7 @@ def _create_invoice_from_stripe(
   db_session: Any,
   context: Any,
 ) -> Any:
-  """Create a BillingInvoice and line items from Stripe invoice data.
-
-  Returns the invoice (newly created or existing).
-  """
+  """Create a BillingInvoice and line items from Stripe data; idempotent on the Stripe id."""
   from robosystems.models.core.billing import BillingInvoice, BillingInvoiceLineItem
 
   stripe_invoice_id: str = invoice_data.get("id", "")
@@ -422,11 +376,7 @@ def _create_invoice_from_stripe(
 async def _handle_invoice_created(
   invoice_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle invoice.created event from Stripe.
-
-  Creates a BillingInvoice from Stripe data, using Stripe's invoice number
-  and syncing all line items from the Stripe invoice.
-  """
+  """Handle invoice.created event from Stripe."""
   subscription = _resolve_subscription(invoice_data, db_session, context)
   _create_invoice_from_stripe(invoice_data, subscription, db_session, context)
 
@@ -436,9 +386,8 @@ async def _handle_payment_succeeded(
 ) -> None:
   """Handle invoice.payment_succeeded event.
 
-  If the invoice record doesn't exist yet (race condition: invoice.created
-  fires before checkout.session.completed updates the subscription's
-  provider_subscription_id), this handler creates it.
+  Creates the invoice if invoice.created was missed (it can fire before
+  checkout.session.completed links the subscription).
   """
   from robosystems.models.core.billing import (
     BillingAuditLog,
@@ -477,7 +426,6 @@ async def _handle_payment_succeeded(
 
     context.log.info(f"Marked invoice {invoice.invoice_number} as paid")
   else:
-    # invoice.created was missed (race condition) — create it now
     context.log.info(
       f"Invoice not found for payment_succeeded: {stripe_invoice_id}, "
       "creating from payment data"
@@ -517,13 +465,9 @@ async def _handle_payment_failed(
 ) -> None:
   """Handle invoice.payment_failed event.
 
-  A first invoice that fails leaves the subscription ``unpaid`` (it never
-  activated). A renewal that fails against a live subscription moves it to
-  ``past_due`` here as well as through ``customer.subscription.updated`` —
-  Stripe makes the same transition on its side at the first failed attempt,
-  and a missed or unmarked ``updated`` event must not leave a subscription
-  reading ``active`` while the provider is dunning it. ``updated`` stays the
-  authority for the way back: it restores ``active`` once the retry succeeds.
+  A failed first invoice -> ``unpaid``; a failed renewal -> ``past_due``, so a
+  missed ``customer.subscription.updated`` can't leave it ``active`` while
+  Stripe duns. ``updated`` alone restores ``active`` after a successful retry.
   """
   from robosystems.models.core.billing import BillingAuditLog, BillingEventType
 
@@ -542,9 +486,6 @@ async def _handle_payment_failed(
     db_session.commit()
     subscription._invalidate_access_cache()
 
-  # Logged unconditionally: a failure against an already-active subscription is
-  # the dunning case, and is more consequential than one against a subscription
-  # that never activated.
   BillingAuditLog.log_event(
     session=db_session,
     event_type=BillingEventType.PAYMENT_FAILED,
@@ -565,11 +506,7 @@ async def _handle_payment_failed(
 async def _handle_invoice_updated(
   invoice_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle invoice.updated event from Stripe.
-
-  Updates mutable fields on an existing invoice: status, PDF URL, hosted URL.
-  If the invoice transitioned to paid, sets paid_at and payment_method.
-  """
+  """Handle invoice.updated event from Stripe."""
   from robosystems.models.core.billing import BillingInvoice
 
   stripe_invoice_id = invoice_data.get("id")
@@ -634,11 +571,7 @@ async def _handle_invoice_voided(
 async def _handle_charge_refunded(
   charge_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle charge.refunded event from Stripe.
-
-  Adds a negative line item to the invoice for the refunded amount,
-  which naturally reduces the invoice total via _recalculate_totals.
-  """
+  """Handle charge.refunded: record the refund as a negative invoice line item."""
   from robosystems.models.core.billing import (
     BillingAuditLog,
     BillingEventType,
@@ -664,7 +597,6 @@ async def _handle_charge_refunded(
     context.log.warning(f"Invoice not found for refunded charge: {stripe_invoice_id}")
     return
 
-  # Add refund as a negative line item
   refund_item = BillingInvoiceLineItem(
     invoice_id=invoice.id,
     resource_type="refund",
@@ -700,29 +632,17 @@ async def _handle_charge_refunded(
 async def _handle_subscription_updated(
   subscription_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle customer.subscription.updated event.
-
-  Handles three key scenarios:
-  1. Portal cancellation: cancel_at_period_end=true → cancel locally (access until period end)
-  2. Portal reactivation: cancel_at_period_end=false on a canceled sub → reactivate
-  3. Status transitions: past_due, unpaid, etc.
-  """
+  """Handle customer.subscription.updated: portal cancel/reactivate and status sync."""
   from datetime import UTC, datetime
 
   status = subscription_data.get("status")
   cancel_at_period_end = subscription_data.get("cancel_at_period_end", False)
 
-  # No customer fallback: this handler mutates and can cancel what it
-  # resolves, and a customer.subscription.* payload always carries its own
-  # id — so a miss means we do not have this subscription, not that we
-  # should pick another one from the same org. Raising lets Stripe retry.
   subscription = _resolve_subscription(
     subscription_data, db_session, context, allow_customer_fallback=False
   )
 
-  # Sync billing period dates from Stripe
-  # Newer Stripe API versions moved these from the subscription root
-  # to items.data[].current_period_start/end
+  # Newer Stripe API versions moved these to items.data[].
   period_start = subscription_data.get("current_period_start")
   period_end = subscription_data.get("current_period_end")
 
@@ -737,10 +657,8 @@ async def _handle_subscription_updated(
   if period_end:
     subscription.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
 
-  # --- Tier upgrade in progress ---
-  # When a graph tier upgrade changes the Stripe price, Stripe fires
-  # subscription.updated with status=active. Don't overwrite "upgrading"
-  # — the worker task manages the upgrading → active transition.
+  # A tier upgrade changes the price and Stripe reports active; the worker
+  # owns the upgrading -> active transition.
   if subscription.status == "upgrading" and status == "active":
     context.log.info(
       f"Subscription {subscription.id} upgrading (infra migration), "
@@ -749,8 +667,7 @@ async def _handle_subscription_updated(
     db_session.commit()
     return
 
-  # --- Portal cancellation (cancel_at_period_end) ---
-  # Mirrors the UI cancel: mark canceled, keep access until period end
+  # Portal cancel mirrors the UI cancel: access continues to period end.
   if cancel_at_period_end:
     if subscription.status != "canceled":
       subscription.cancel(db_session, immediate=False)
@@ -765,7 +682,7 @@ async def _handle_subscription_updated(
       )
     return
 
-  # --- Portal reactivation (user removed pending cancellation) ---
+  # Portal reactivation: the user removed a pending cancellation.
   if (
     not cancel_at_period_end
     and subscription.status == "canceled"
@@ -778,7 +695,6 @@ async def _handle_subscription_updated(
     subscription.ends_at = None
     subscription.updated_at = datetime.now(UTC)
 
-    # Restore graph if it was suspended
     if subscription.resource_type == "graph" and subscription.resource_id:
       from robosystems.models.core.graph import Graph, GraphStatus
 
@@ -796,7 +712,6 @@ async def _handle_subscription_updated(
     context.log.info(f"Subscription {subscription.id} reactivated via Stripe portal")
     return
 
-  # --- Other status transitions ---
   status_mapping = {
     "active": "active",
     "past_due": "past_due",
@@ -812,8 +727,7 @@ async def _handle_subscription_updated(
   if new_status != subscription.status:
     old_status = subscription.status
     if new_status == "canceled":
-      # Use cancel() to properly set canceled_at and ends_at
-      # cancel() calls _invalidate_access_cache() internally
+      # cancel() sets canceled_at/ends_at and invalidates the access cache.
       subscription.cancel(db_session, immediate=True)
     else:
       subscription.status = new_status
@@ -825,45 +739,33 @@ async def _handle_subscription_updated(
       f"Subscription {subscription.id} status: {old_status} -> {new_status}"
     )
   else:
-    # Commit period date sync even if status unchanged
+    # Still commit the period-date sync.
     db_session.commit()
 
 
 async def _handle_subscription_deleted(
   subscription_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle customer.subscription.deleted event.
-
-  Fired when the Stripe subscription is fully terminated (e.g., period ended
-  after a cancel_at_period_end cancellation, or immediate deletion).
-  """
+  """Handle customer.subscription.deleted: the Stripe subscription fully terminated."""
   from datetime import UTC, datetime
 
-  # No customer fallback: this handler mutates and can cancel what it
-  # resolves, and a customer.subscription.* payload always carries its own
-  # id — so a miss means we do not have this subscription, not that we
-  # should pick another one from the same org. Raising lets Stripe retry.
   subscription = _resolve_subscription(
     subscription_data, db_session, context, allow_customer_fallback=False
   )
 
   if subscription.status == "canceled":
-    # Already canceled (via portal updated handler, UI cancel button, or the
-    # delete-graph op). Preserve the original canceled_at timestamp.
+    # Already canceled locally; keep the original canceled_at.
     from robosystems.models.core.billing.subscription import CancellationType
 
     now = datetime.now(UTC)
     if subscription.cancellation_type == CancellationType.IMMEDIATE.value:
-      # The cancel was explicitly IMMEDIATE (delete-graph / immediate UI cancel),
-      # so the cancel path already set ends_at<=now on purpose. Do NOT push it out
-      # to the paid-through period end here — that would defeat the immediate
-      # teardown and strand the graph until period end, since the graph-lifecycle
-      # sensors gate suspension on ends_at < now. Keep ends_at no later than now.
+      # Don't extend an immediate cancel to period end: the lifecycle sensors
+      # gate teardown on ends_at < now.
       if subscription.ends_at is None or subscription.ends_at > now:
         subscription.ends_at = now
     else:
-      # Period-end cancel: honor Stripe's period end (the user paid for the
-      # current period). Period end may be item-level in newer Stripe APIs.
+      # Period-end cancel: the user paid through Stripe's period end (item-level
+      # in newer API versions).
       period_end_ts = subscription_data.get("current_period_end")
       if not period_end_ts:
         items = subscription_data.get("items", {}).get("data", [])
@@ -881,7 +783,6 @@ async def _handle_subscription_deleted(
       f"(was canceled at {subscription.canceled_at})"
     )
   else:
-    # Direct/unexpected deletion — cancel immediately
     subscription.cancel(db_session, immediate=True)
     context.log.info(f"Subscription {subscription.id} canceled via Stripe deletion")
 
@@ -889,12 +790,7 @@ async def _handle_subscription_deleted(
 async def _handle_setup_intent_succeeded(
   setup_intent_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle setup_intent.succeeded event.
-
-  Fired when a customer adds a payment method via the Stripe portal.
-  Updates has_payment_method on the BillingCustomer so direct subscription
-  creation knows they can be charged, and records which payment method it was.
-  """
+  """Handle setup_intent.succeeded: a payment method was added via the portal."""
   from robosystems.models.core.billing import (
     BillingAuditLog,
     BillingCustomer,
@@ -911,10 +807,7 @@ async def _handle_setup_intent_succeeded(
     context.log.warning(f"Customer not found for setup intent: {customer_id}")
     return
 
-  # Webhook payloads are unexpanded, so `payment_method` is normally the id
-  # string; tolerate an expanded object in case the endpoint is ever configured
-  # to expand it. Recording the id is what makes dunning and support able to say
-  # *which* card, rather than only that one exists.
+  # Normally an id string (webhooks are unexpanded); tolerate an expanded object.
   payment_method = setup_intent_data.get("payment_method")
   if isinstance(payment_method, dict):
     payment_method = payment_method.get("id")
@@ -931,8 +824,7 @@ async def _handle_setup_intent_succeeded(
   else:
     context.log.info(f"Customer {customer.org_id} already has payment method on file")
 
-  # Always refresh the id — a later setup intent means a newer default card,
-  # even when has_payment_method was already true.
+  # A later setup intent means a newer default card.
   if payment_method_id and customer.default_payment_method_id != payment_method_id:
     customer.default_payment_method_id = payment_method_id
     changed = True
@@ -958,11 +850,7 @@ async def _handle_setup_intent_succeeded(
 def _merge_subscription_metadata(
   subscription: Any, updates: dict, db_session: Any
 ) -> None:
-  """Merge keys into ``subscription_metadata`` so SQLAlchemy sees the change.
-
-  The column is JSONB and mutating the dict in place is invisible to the unit
-  of work, so every write has to rebind the attribute to a new dict.
-  """
+  """Merge into ``subscription_metadata`` via a new dict (in-place JSONB edits go unseen)."""
   subscription.subscription_metadata = {
     **(subscription.subscription_metadata or {}),
     **updates,
@@ -973,10 +861,8 @@ def _merge_subscription_metadata(
 def _fail_subscription(subscription: Any, error: str, db_session: Any) -> None:
   """Mark a subscription failed with a reason an operator can read.
 
-  ``failed`` is terminal, so this is only for conditions no retry can fix.
-  ``ends_at`` starts the retention clock the lifecycle sensors measure, which
-  is what lets any infrastructure the attempt created get reclaimed instead of
-  running unbilled forever.
+  Terminal: only for conditions no retry can fix. Setting ``ends_at`` starts the
+  lifecycle sensors' retention clock so any infrastructure created is reclaimed.
   """
   now = datetime.now(UTC)
   subscription.status = "failed"
@@ -995,11 +881,9 @@ def _record_provisioning_error(
 ) -> None:
   """Record why a provisioning attempt failed, leaving the row retryable.
 
-  Deliberately does not mark the subscription failed. The customer has paid,
-  the provider will redeliver, and the claim's staleness window will let that
-  redelivery through — writing a terminal status on the first failure would
-  throw away both. A row that never succeeds is written off by the stalled
-  provisioning reaper instead, which is the one place that decision is made.
+  Not marked failed: the customer paid and the provider redelivers past the
+  claim's staleness window. The stalled-provisioning reaper writes off rows
+  that never succeed.
   """
   subscription.subscription_metadata = {
     **(subscription.subscription_metadata or {}),
@@ -1012,16 +896,10 @@ def _record_provisioning_error(
 async def _trigger_resource_provisioning(
   subscription: Any, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Trigger resource provisioning after payment confirmation.
+  """Provision the paid-for resource inline.
 
-  Directly provisions the resource, eliminating sensor polling delay and
-  ECS cold start.
-
-  More than one provider event legitimately reaches this function for the same
-  subscription, and provider redelivery can re-enter it with an event that was
-  never marked processed because the first attempt did not finish. Both are
-  arbitrated by ``claim_for_provisioning``, which is the single gate here — a
-  future third trigger inherits it for free.
+  Several provider events and redeliveries can reach this for one subscription;
+  ``claim_for_provisioning`` is the single gate that arbitrates them.
   """
   from robosystems.models.core import OrgRole, OrgUser
 
@@ -1035,9 +913,8 @@ async def _trigger_resource_provisioning(
     )
     return
 
-  # The subscriber column is authoritative; the metadata copy covers rows
-  # written before it existed. The org-owner fallback is last resort — with
-  # more than one member it can provision to the wrong person.
+  # Column is authoritative; metadata covers older rows. The org-owner fallback
+  # can pick the wrong person in a multi-member org.
   user_id = subscription.user_id or subscription.subscription_metadata.get("user_id")
   if not user_id:
     owner = (
@@ -1054,8 +931,6 @@ async def _trigger_resource_provisioning(
       return
     user_id = owner.user_id
 
-  # Persist whoever we resolved so cancellation and off-boarding can find the
-  # subscriber without re-deriving it from metadata or org roles.
   if not subscription.user_id:
     subscription.user_id = user_id
     db_session.commit()
@@ -1068,8 +943,6 @@ async def _trigger_resource_provisioning(
   )
 
   if resource_type == "graph":
-    # The claim already put the row in "provisioning"; only the config copy
-    # is left to persist.
     _merge_subscription_metadata(subscription, resource_config, db_session)
 
     tier = subscription.plan_name
@@ -1253,16 +1126,10 @@ def cleanup_old_usage_records(
   db: DatabaseResource,
   cleanup_result: dict[str, Any],
 ) -> dict[str, Any]:
-  """Apply the retention policy to ``graph_usage``.
+  """Apply twelve-month retention to ``graph_usage``.
 
-  ``graph_usage`` is the higher-volume table — a row per AI operation, plus one
-  per active graph per usage-sensor tick — and until now had no reaper at all,
-  while its lower-volume sibling ``graph_credit_transactions`` was pruned every
-  month. `GraphUsage.cleanup_old_records` was written for this and never wired.
-
-  Retention matches that sibling at twelve months, and the default
-  ``keep_monthly_summaries`` drops only the per-call rows: storage snapshots and
-  allocations survive so period rollups stay reproducible.
+  The default ``keep_monthly_summaries`` drops only per-call rows; storage
+  snapshots and allocations survive so period rollups stay reproducible.
   """
   from robosystems.models.core.graph.graph_usage import GraphUsage
 

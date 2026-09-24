@@ -1,40 +1,10 @@
-"""Dagster SEC pipeline jobs and schedules.
+"""Dagster SEC pipeline jobs.
 
-Pipeline Architecture (3 phases, run independently):
-
-  Phase 1 - Download (EFTS-based, quarterly partitions):
-    sec_download_job: sec_raw_filings
-    Uses SEC EFTS API to discover and download XBRL ZIPs to S3.
-    Quarterly partitions (e.g., 2024-Q1) to stay under EFTS 10k result limit.
-    Creates SourceFile records in PostgreSQL for processing tracking.
-
-  Phase 2 - Process (quarterly batch with consolidated output):
-    sec_process_job: sec_processed_filings
-    Each run processes an entire quarter's worth of filings.
-    Outputs consolidated parquet files (one per table per quarter).
-    Individual filing failures tracked in SourceFile; job continues processing.
-    Parallel across quarters via DAGSTER_MAX_CONCURRENT_RUNS.
-
-  Phase 3 - Materialize (two-stage pipeline):
-    sec_stage_job: sec_duckdb_staged (DuckDB staging - full rebuild)
-    sec_materialize_job: sec_graph_materialized (LadybugDB materialization)
-
-    If LadybugDB materialization fails, just re-run sec_materialize_job.
-
-Workflow:
-  just sec-download 10 2024    # Download top 10 companies (all 4 quarters)
-  # Enable sec_processing_sensor in Dagster UI to auto-process quarters
-  just sec-materialize         # Stage to DuckDB + Materialize to LadybugDB
-
-  # Decoupled (for checkpointing/retry):
-  just sec-stage               # Stage 1: Stage to DuckDB only (full mode)
-  just sec-materialize-graph   # Stage 2: Materialize to LadybugDB (retry-safe)
-
-  # Manual quarter processing (via Dagster UI):
-  # Launch sec_process job with partition_key: "2024-Q1"
-
-  # Or all-in-one for demos:
-  just sec-load NVDA 2024      # Chains all steps for single company
+Phases: download (EFTS, quarter-partitioned) → process (one batch of filings
+to parquet per run, re-triggered by the sensor) → stage to DuckDB →
+materialize to LadybugDB → publish. Staging and materialization are separate
+jobs so a failed materialize re-runs without re-staging. Local recipes:
+``just sec-download``, ``just sec-materialize``, ``just sec-load``.
 """
 
 from dagster import (
@@ -68,15 +38,10 @@ from .text_index import (
   sec_narratives_indexed,
 )
 
-# ============================================================================
-# SEC Pipeline Jobs
-# ============================================================================
+# Stage/materialize/publish jobs run on a light on-demand task: the work
+# happens on the LadybugDB instance via the Graph API, and a long
+# orchestration run should not be Spot-interrupted.
 
-
-# Phase 1: Download (quarter-partitioned)
-# Downloads raw XBRL ZIPs to S3 using EFTS discovery.
-# Uses quarterly partitions to stay under EFTS 10k result limit.
-# Use with sec_processing_sensor to trigger parallel processing.
 sec_download_job = define_asset_job(
   name="sec_download",
   description="Download SEC XBRL filings from EFTS to S3.",
@@ -88,14 +53,9 @@ sec_download_job = define_asset_job(
 )
 
 
-# Phase 2: Process (quarterly batch processing)
-# Each run processes up to 250 filings, flushes to S3, then exits.
-# Sensor re-triggers while pending files remain. Parallel execution across
-# quarters is controlled by DAGSTER_MAX_CONCURRENT_RUNS.
-#
-# Uses Enhanced profile (4 vCPU, 16 GB) - embedding enrichment is memory-intensive.
-# Spot-preferred: 250-filing batches keep runs to ~3-5 hrs, reducing Spot
-# interruption risk. On reclaim, pending filings are re-triggered by sensor.
+# One batch per run; the sensor re-triggers while pending files remain.
+# 4 vCPU / 16 GB for embedding enrichment. Spot is safe: completed filings
+# are restored from the S3 cache on the next run.
 sec_process_job = define_asset_job(
   name="sec_process",
   description="Process SEC filings into parquet files.",
@@ -106,22 +66,14 @@ sec_process_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "process",
-    # No dagster/max_retries here on purpose: the sec_processing_sensor is the
-    # single recovery authority. It re-triggers any quarter with pending
-    # SourceFiles every 5 min (skipping already-processed filings via the S3
-    # cache + SourceFile status), so a Spot-killed run is picked up on the next
-    # tick. Dagster's async auto-retry was redundant with that and raced the
-    # sensor's active-run guard (which only sees STARTED/QUEUED), spawning a
-    # second concurrent run for the same quarter → duplicate parquet part files.
-    # Omitting the tag disables auto-retry for THIS job only; global
-    # run_retries stays on for jobs that carry the tag. tag_concurrency_limits
-    # on `quarter` (dagster_prod.yaml) is the structural backstop.
-    # Enhanced profile: 4 vCPU, 16 GB, 50 GB storage - embedding enrichment is memory-intensive
+    # No dagster/max_retries on purpose: the processing sensor is the single
+    # recovery path, and Dagster's auto-retry races its active-run guard
+    # (which sees only STARTED/QUEUED), producing a second run for the quarter
+    # and duplicate part files. The `quarter` tag_concurrency_limit in
+    # dagster_prod.yaml is the backstop.
     "ecs/cpu": "4096",
     "ecs/memory": "16384",
     "ecs/ephemeral_storage": "50",
-    # Spot-preferred: S3 cache makes runs fully resilient to Spot interruptions.
-    # On reclaim, completed filings are restored from cache on next run.
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
@@ -132,18 +84,8 @@ sec_process_job = define_asset_job(
 )
 
 
-# ============================================================================
-# Phase 3: Materialize (Decoupled Staging + Materialization)
-# ============================================================================
-# Decoupled design enables retry of materialization without re-staging:
-# - sec_stage_job: Stage to persistent DuckDB (2+ hours for full SEC)
-# - sec_materialize_job: Materialize from DuckDB to LadybugDB (retry-safe)
-#
-# If LadybugDB materialization fails, just re-run sec_materialize_job.
-
-# Stage 1: DuckDB Staging
-# Discovers processed files from S3 and stages to persistent DuckDB.
-# Actual DuckDB work happens on LadybugDB instance via Graph API.
+# Full staging takes 2+ hours; a failed materialize re-runs from the
+# preserved staging.
 sec_stage_job = define_asset_job(
   name="sec_stage",
   description="Stage SEC parquet files to DuckDB (full rebuild).",
@@ -151,11 +93,9 @@ sec_stage_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "stage",
-    # Light profile: HTTP orchestration to Graph API
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -164,10 +104,6 @@ sec_stage_job = define_asset_job(
   },
 )
 
-# Stage 2: LadybugDB Materialization
-# Materializes to LadybugDB from existing DuckDB staging.
-# Retry-safe: if this fails, just re-run it - DuckDB staging is preserved.
-# Actual materialization happens on LadybugDB instance via Graph API.
 sec_materialize_job = define_asset_job(
   name="sec_materialize",
   description="Materialize SEC graph from DuckDB to LadybugDB.",
@@ -175,17 +111,13 @@ sec_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "materialize",
-    # One writer per target database: paired with the tag_concurrency_limits
-    # entry in dagster_home/dagster_prod.yaml, this queues a duplicate launch
-    # instead of letting it race. Job-level so sensor-fired AND manually
-    # launched runs both carry it. Concurrent COPYs into the same LadybugDB
-    # database silently duplicate rel-table edges (no primary key).
+    # One writer per database (tag_concurrency_limits in dagster_prod.yaml):
+    # concurrent COPYs silently duplicate rel-table edges, which have no
+    # primary key. Job-level so manual launches carry it too.
     "materialize_db": "sec",
-    # Light profile: HTTP orchestration to Graph API
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -194,9 +126,6 @@ sec_materialize_job = define_asset_job(
   },
 )
 
-# Combined: Run both stages in sequence
-# Useful for full rebuilds with checkpointing between stages.
-# Actual work happens on LadybugDB instance via Graph API.
 sec_staged_materialize_job = define_asset_job(
   name="sec_staged_materialize",
   description="Stage and materialize SEC graph (DuckDB + LadybugDB).",
@@ -204,11 +133,9 @@ sec_staged_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "full",
-    # Light profile: HTTP orchestration to Graph API
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -218,17 +145,8 @@ sec_staged_materialize_job = define_asset_job(
 )
 
 
-# ============================================================================
-# Phase 3b: Incremental DuckDB Staging (Keep DuckDB in Sync)
-# ============================================================================
-# Incremental staging to DuckDB for nightly SEC updates.
-# INSERT new quarter files with dedup - only net new rows added.
-#
-# After staging, sec_stage_to_materialize_sensor triggers a full
-# LadybugDB rebuild from DuckDB (feasible because sec graph is 2024+ only).
-#
-# Chain: process → stage (this) → materialize → entity update → S3 sync
-
+# Nightly: net-new rows only. The follow-on materialize is a full LadybugDB
+# rebuild, feasible because the sec graph is 2024+ only.
 sec_incremental_stage_job = define_asset_job(
   name="sec_incremental_stage",
   description="Stage current quarter to SEC DuckDB (incremental).",
@@ -236,11 +154,9 @@ sec_incremental_stage_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "mode": "incremental",
-    # Light profile: HTTP orchestration to Graph API
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -249,12 +165,6 @@ sec_incremental_stage_job = define_asset_job(
   },
 )
 
-
-# ============================================================================
-# Phase 3c: Historical DuckDB Stage + Materialize (for sec_historical)
-# ============================================================================
-# Two-stage pipeline for sec_historical: DuckDB staging then LadybugDB materialization.
-# Uses the same decoupled pattern as the primary sec graph.
 
 sec_historical_stage_job = define_asset_job(
   name="sec_historical_stage",
@@ -313,13 +223,8 @@ sec_historical_staged_materialize_job = define_asset_job(
 )
 
 
-# ============================================================================
-# Phase 4: S3 Publish (LadybugDB + DuckDB)
-# ============================================================================
-# Post-materialization publish chain (sequential to avoid overloading instance):
-#   materialize → lbug S3 publish → duckdb S3 publish
-# Orchestrated by sec_post_materialize_publish_sensor.
-
+# Publishes run sequentially after materialize (lbug, then duckdb) so the
+# instance is not overloaded; sec_post_materialize_publish_sensor chains them.
 sec_lbug_s3_publish_job = define_asset_job(
   name="sec_lbug_s3_publish",
   description="Publish SEC LadybugDB database to S3 for replica cluster.",
@@ -327,11 +232,9 @@ sec_lbug_s3_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "lbug_s3_publish",
-    # Light profile: HTTP orchestration to Graph API
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -347,11 +250,9 @@ sec_duckdb_s3_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "duckdb_s3_publish",
-    # Light profile: HTTP orchestration to Graph API
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -367,11 +268,9 @@ sec_historical_duckdb_s3_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "duckdb_s3_publish",
-    # Light profile: HTTP orchestration to Graph API
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -381,8 +280,7 @@ sec_historical_duckdb_s3_publish_job = define_asset_job(
 )
 
 
-# Historical LadybugDB publish - run ad-hoc after historical graph rebuild.
-
+# Run ad hoc after a historical graph rebuild.
 sec_historical_lbug_s3_publish_job = define_asset_job(
   name="sec_historical_lbug_s3_publish",
   description="Publish SEC historical database to S3 for replica cluster.",
@@ -390,11 +288,9 @@ sec_historical_lbug_s3_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "s3_publish",
-    # Light profile: HTTP orchestration to Graph API
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -404,13 +300,8 @@ sec_historical_lbug_s3_publish_job = define_asset_job(
 )
 
 
-# ============================================================================
-# Phase 5b: R2 Publish (Zero-egress subscriber downloads)
-# ============================================================================
-# Publishes raw .lbug to Cloudflare R2 for subscriber downloads.
-# Same on-instance backup pattern as S3 publish, but R2 has zero egress fees.
-# Creates/updates GraphBackup record so file appears in download list.
-
+# R2 has zero egress fees; the GraphBackup record puts the file in the
+# subscriber download list.
 sec_lbug_r2_publish_job = define_asset_job(
   name="sec_lbug_r2_publish",
   description="Publish SEC database to R2 for zero-egress subscriber downloads.",
@@ -418,11 +309,9 @@ sec_lbug_r2_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "r2_publish",
-    # Light profile: HTTP orchestration to Graph API
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -432,13 +321,8 @@ sec_lbug_r2_publish_job = define_asset_job(
 )
 
 
-# ============================================================================
-# Phase 5c: Hugging Face Publish (public dataset, manual only)
-# ============================================================================
-# Copies the R2 snapshot to the public Hugging Face dataset via a Hub-side
-# Job, so the bytes never leave AWS a second time. No sensor or schedule
-# launches this; it is run by hand from the Dagster UI.
-
+# Manual only. A Hub-side Job copies from R2, so the bytes never leave AWS
+# a second time.
 sec_lbug_hf_publish_job = define_asset_job(
   name="sec_lbug_hf_publish",
   description="Copy the SEC R2 snapshot to the public Hugging Face dataset. Manual only.",
@@ -446,11 +330,10 @@ sec_lbug_hf_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "hf_publish",
-    # Light profile: presign + Hub API calls; the Job on HF moves the bytes
+    # The HF Job moves the bytes; this task only presigns and polls.
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand: the run polls the Hub for hours and must not be interrupted
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -460,26 +343,10 @@ sec_lbug_hf_publish_job = define_asset_job(
 )
 
 
-# ============================================================================
-# Phase 6: Artifact Generation (Knowledge artifacts for enrichment refinement)
-# ============================================================================
-# Generates precomputed Parquet artifacts from DuckDB staging for graph-based
-# confidence refinement. Compute-heavy: runs graph algorithms locally.
-
-# ============================================================================
-# Phase 5c: Text Search Indexing (OpenSearch)
-# ============================================================================
-# Index filing text content into OpenSearch for full-text search.
-# Two assets: XBRL text blocks (already externalized) + narrative sections (extracted from raw HTML).
-
 SEC_INDEX_ECS_TAGS = {
-  # Retry on Spot reclaim: OpenSearch incremental skip means retries only index remaining batches.
+  # Spot-safe: the incremental skip means a retry indexes only what remains.
   "dagster/max_retries": 5,
-  # Default: 4 vCPU, 16 GB sized for embeddings (fastembed ONNX runtime +
-  # model weights + lookup data). Override down to 1 vCPU/4 GB for
-  # text-only runs via Launchpad tags.
-  # Spot-preferred with OpenSearch incremental skip providing crash
-  # resilience (completed batches survive Spot reclaim).
+  # Sized for embeddings; override to 1 vCPU / 4 GB for text-only runs.
   "ecs/cpu": "4096",
   "ecs/memory": "16384",
   "ecs/ephemeral_storage": "21",
@@ -554,16 +421,10 @@ sec_artifact_generation_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "artifact",
-    # Downloads full DuckDB staging file from S3 then runs graph algorithms.
-    # DuckDB uses threads=1 + spill-to-disk (preserve_insertion_order=false) so
-    # its buffer stays bounded (~memory_limit, 16GB default) and overflows to
-    # ephemeral. Spill only bounds spillable operators: the Jul 2026 corpus
-    # OOM'd inside DuckDB at an 8GB budget on un-spillable block pins, which is
-    # why the default budget is 16GB (see SECArtifactConfig). Peak task usage
-    # is the DuckDB budget + the Python result materialized on top, so 24 GB
-    # keeps ~8 GB of Python headroom (a 14GB budget on the older 16 GB task
-    # SIGKILL'd). 4 vCPU unlocks the >16 GB Fargate memory tier.
-    # Ephemeral: 200GB covers the DuckDB file + spill + artifacts.
+    # Peak is the DuckDB budget (16 GB, see SECArtifactConfig; un-spillable
+    # block pins OOM'd at 8 GB) plus the Python result on top, so 24 GB leaves
+    # ~8 GB headroom. 4 vCPU unlocks the >16 GB Fargate tier. 200 GB ephemeral
+    # holds the DuckDB file, spill, and artifacts.
     "ecs/cpu": "4096",
     "ecs/memory": "24576",
     "ecs/ephemeral_storage": "200",

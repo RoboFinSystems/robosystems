@@ -1,22 +1,13 @@
 """Mercury API client — the read side of the bank feed, over either credential.
 
-Two credential modes, one client. ``oauth`` (the hosted default) holds the
-partner client's tokens in ``ConnectionCredentials``: a one-hour access token
-and a 30-day single-use refresh token that rotates on every refresh, so the
-rotated value is written back the moment a refresh succeeds. ``api_key``
-(self-hosted and local deployments only) is a personal read-only token and
-never changes. Nothing below the ``TokenSource`` seam cares which.
+Two credential modes behind the ``TokenSource`` seam: ``oauth`` (hosted; a
+one-hour access token and a single-use refresh token that rotates on every
+refresh) and ``api_key`` (self-hosted only; a static read-only token).
 
-Mercury's most common partner failure is a refresh sent without ``scope``;
-the refresh here always re-sends the granted scope. ``needs_reauth`` flips
-only on ``invalid_grant`` / ``invalid_scope`` / ``invalid_client`` — a network
-blip or a 5xx is retried on the next sync and never strands the connection.
-
-API notes, verified against the sandbox 2026-09-10: ``GET /transactions``
-spans every account in the org, takes ``start`` / ``end`` (dates) and pages
-by ``start_after`` (the last id of the previous page); there is no
-``postedStart`` and no single-transaction fetch. ``/credit`` answers 403 or
-404 for an org with no IO card. Docs: https://docs.mercury.com/reference
+``GET /transactions`` spans every account in the org, takes ``start`` / ``end``
+dates and pages by ``start_after``; there is no single-transaction fetch.
+``/credit`` answers 403 or 404 for an org with no IO card.
+Docs: https://docs.mercury.com/reference
 """
 
 from __future__ import annotations
@@ -98,14 +89,11 @@ def refresh_access_token(
   *,
   http: httpx.Client | None = None,
 ) -> dict[str, Any]:
-  """Trade a refresh token for a new token set, re-sending ``scope``.
+  """Trade a refresh token for a new token set.
 
-  Synchronous on purpose: it runs inside the Dagster asset. The core
-  ``OAuthHandler.refresh_tokens`` is async and hides the provider's error
-  code behind a 400; the code is exactly what decides ``needs_reauth`` here.
-  Returns ``access_token``, ``refresh_token`` (the rotated one, or the old
-  one when Mercury did not rotate), ``expires_at`` (aware datetime) and
-  ``scope``.
+  Always re-sends ``scope``: omitting it is Mercury's most common partner
+  failure. Not ``OAuthHandler.refresh_tokens``, which is async and hides the
+  provider error code that decides ``needs_reauth``. ``expires_at`` is aware.
   """
   form = {
     "grant_type": "refresh_token",

@@ -1,37 +1,22 @@
 """Per-filing public artifacts: the holon, the Tavi model, the primary document.
 
-Written by the processor, at process time, from the xbrlkit model it already
-holds — no graph, no second parse. One folder per filing in the public-data
-bucket, the same key family as the externalized text blocks, so a filing's
-portable representations sit beside the note text they reference:
+Written at process time from the xbrlkit model already in hand, into the
+filing's public-data folder beside its externalized text blocks:
 
-    {year}/{cik}/{accession}/holon.jsonld     the dataset-form JSON-LD holon
-    {year}/{cik}/{accession}/tavi.json        the Project Tavi compiled model
-    {year}/{cik}/{accession}/tavi.gaps.json   what the draft could not hold
+    {year}/{cik}/{accession}/holon.jsonld     JSON-LD holon
+    {year}/{cik}/{accession}/tavi.json        Project Tavi compiled model
+    {year}/{cik}/{accession}/tavi.gaps.json   what the Tavi draft could not hold
     {year}/{cik}/{accession}/{primary doc}    the filing as filed
     {year}/{cik}/{accession}/manifest.json    what was written, with sizes
 
-The holon is xbrlkit's projection of the parse with one platform touch: a
-text-block fact the externalizer moved to the CDN carries that URL as its
-value, the way the graph's Fact row does, so the holon stays small and a
-renderer embeds the note from the CDN. The Tavi carries the text blocks
-inline — the draft has no external-value construct — and its gaps sidecar
-records what the filing carries that the draft has nowhere to put.
-
-The holon, the Tavi and the filed document are stored gzipped, as
-``Content-Encoding: gzip`` under the same key and media type: a browser or an
-HTTP library decodes that before anything reads a byte, and the CDN serves a
-stored encoding as it is — where it would compress neither ``application/ld+json``
-nor anything over 10 MB itself. The manifest's ``bytes`` stay the decoded size,
-and the manifest and the gaps sidecar stay plain.
-
-Every write is a whole object, and the emitters are deterministic, so a
-reprocessed filing rewrites the same bytes unless the emitter moved (a new
-Tavi draft, a holon vocabulary change) — which is exactly when a rewrite is
-wanted. A failure here never fails the filing: the parquet is the product,
-the artifacts are a projection of it, and the catalog lists a filing by its
-manifest, so a filing whose artifacts failed is absent from the pages until
-it is reprocessed.
+In the holon an externalized text block's value is its CDN URL, as in the
+graph; the Tavi carries text blocks inline (the draft has no external-value
+construct). The holon, Tavi and filed document are stored with
+``Content-Encoding: gzip`` because the CDN compresses neither
+``application/ld+json`` nor objects over 10 MB; manifest ``bytes`` are decoded
+sizes. Emitters are deterministic, so a reprocess rewrites identical bytes.
+A failure never fails the filing; the catalog lists filings by manifest, so
+one without artifacts is absent until reprocessed.
 """
 
 from __future__ import annotations

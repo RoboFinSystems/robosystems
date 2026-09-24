@@ -1,11 +1,6 @@
-"""Dagster graph operations jobs.
+"""Dagster graph jobs: backup, restore, DuckDB staging and materialization.
 
-These jobs handle:
-- Backup and restore
-- DuckDB staging and graph materialization
-
-Graph creation is not here: it runs in the background worker
-(operations/graph/tasks/graph_creation.py) via GraphCreationService.
+Graph creation runs in the background worker, not here.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -25,21 +20,13 @@ from dagster import (
 
 from robosystems.dagster.resources import DatabaseResource, GraphResource, S3Resource
 
-# ============================================================================
-# Helper Functions
-# ============================================================================
-
 
 def _emit_graph_result_to_sse(
   context: OpExecutionContext,
   operation_id: str,
   result: dict[str, Any],
 ) -> None:
-  """Store the job result on the SSE operation metadata.
-
-  The monitor reads this metadata when it emits the final
-  OPERATION_COMPLETED event, so the graph_id reaches the client.
-  """
+  """Store the result on the SSE operation so the final event carries graph_id."""
   try:
     from robosystems.middleware.sse.event_storage import SSEEventStorage
 
@@ -118,9 +105,7 @@ class BackupGraphConfig(Config):
   retention_days: int = 30
   compression: bool = True
   initiated_by: str = "user"
-  # Set when the caller already reserved a row against the daily quota. The
-  # job adopts it rather than inserting a second one — see the reservation
-  # comment in the create-backup route.
+  # A row the caller already reserved against the daily quota; adopted, not duplicated.
   backup_id: str | None = None
 
 
@@ -205,19 +190,14 @@ def create_backup(
   }
   extension = format_extensions.get(config.backup_format.lower(), ".lbug.zip")
 
-  # Placeholder only: the authoritative key comes back from the upload and
-  # overwrites this below. It carries no compression suffix because the payload
-  # is already a compressed archive and is stored as-is.
+  # Placeholder; the upload returns the authoritative key.
   s3_key = f"graph-backups/databases/{config.graph_id}/{config.backup_type}/backup-{timestamp_str}{extension}"
 
   with db.get_session() as session:
     s3_adapter = S3BackupAdapter(enable_compression=config.compression)
 
-    # Adopt the caller's reservation when there is one. Quota is counted from
-    # these rows, so a caller that checked the count and then let the job
-    # insert would leave a window where concurrent requests all pass the same
-    # check. Callers that don't enforce quota — the nightly schedule — insert
-    # here as before.
+    # Quota counts these rows, so quota-enforcing callers reserve one up front
+    # (closing the check-then-insert race); the nightly schedule inserts here.
     backup_record = (
       GraphBackup.get_by_id(config.backup_id, session) if config.backup_id else None
     )
@@ -268,9 +248,7 @@ def create_backup(
     backup_record = GraphBackup.get_by_id(backup_id, session)
     if backup_record:
       backup_record.s3_key = backup_info.s3_key
-      # Without this the retention sweep skips the sidecar entirely — its
-      # delete is guarded on the row knowing the key — so metadata objects
-      # outlived tier retention and rode the 90-day bucket lifecycle instead.
+      # The retention sweep deletes the sidecar only if the row knows its key.
       backup_record.s3_metadata_key = backup_info.s3_metadata_key
       backup_record.complete_backup(
         session=session,
@@ -280,11 +258,8 @@ def create_backup(
         node_count=backup_info.node_count,
         relationship_count=backup_info.relationship_count,
         backup_duration=backup_info.backup_duration_seconds,
-        # `memory` and `payload_delta` have to be carried onto the row
-        # explicitly: the richer metadata the manager assembles goes to the S3
-        # sidecar, and only what is copied here is readable through the API.
-        # Without them the listing's memory tri-state would always report "no
-        # claim", which is the one answer it must never give by accident.
+        # Only what is copied here is readable through the API (the rest goes to
+        # the S3 sidecar); without `memory` the listing would report "no claim".
         metadata={
           "backup_format": backup_info.backup_format,
           "compression_ratio": backup_info.compression_ratio,
@@ -373,10 +348,8 @@ def restore_backup(
   context.log.info(f"Restoring graph {config.graph_id} from backup {config.backup_id}")
 
   with db.get_session() as session:
-    # Graph-type gate. Restore is operator-run rather than customer-facing, so
-    # this job is the only path in and has to carry the check itself. It fails
-    # closed on an unresolvable graph — a restore is destructive, so an unknown
-    # type is a refusal, not a default-allow.
+    # This job is the only restore path, so it carries the graph-type gate.
+    # Fails closed on an unresolvable graph: restore is destructive.
     unsupported = restore_unsupported_reason(config.graph_id, session)
     if unsupported:
       raise Failure(f"Restore refused for {config.graph_id}: {unsupported[1]}")
@@ -394,11 +367,8 @@ def restore_backup(
     s3_key = backup_record.s3_key
     compression_enabled = backup_record.compression_enabled
 
-  # Snapshot the current database before overwriting it. A failure here aborts:
-  # the restore is destructive and irreversible, `create_system_backup=False` is
-  # passed downstream on the strength of this snapshot existing, and continuing
-  # would leave the graph with no rollback at all. An operator who wants the
-  # restore anyway can re-run with create_system_backup=false and say so.
+  # A failed safety snapshot aborts the restore: it is the only rollback. To
+  # restore without one, re-run with create_system_backup=false.
   if config.create_system_backup:
     context.log.info("Creating system backup before restore...")
     try:
@@ -449,11 +419,8 @@ def restore_backup(
   finally:
     loop.close()
 
-  # `restore_with_sse` reports failure by returning rather than raising, so an
-  # unchecked result reads as success and the op returns "completed" over a
-  # graph that was just overwritten by a restore that did not finish. The
-  # worker fails its task on a failed integrity check or post-restore
-  # verification, so this status is the authoritative outcome.
+  # `restore_with_sse` returns failure rather than raising; its status (which
+  # covers integrity and post-restore verification) is authoritative.
   if restore_result.get("status") != "completed":
     raise Failure(
       f"Restore of graph {config.graph_id} from backup {config.backup_id} did "
@@ -665,7 +632,6 @@ def stage_file_job():
   materialize_file_to_graph(result)
 
 
-# Standalone materialization job (for files already staged)
 @op(out={"materialize_result": Out(dict)})
 def materialize_staged_file(
   context: OpExecutionContext,
@@ -836,7 +802,7 @@ def materialize_graph_tables(
         metadata={"graph_id": graph_id},
       )
 
-    # Recover stale files (uploaded to S3 but never staged to DuckDB)
+    # Files uploaded to S3 but never staged to DuckDB.
     recovered_ids = GraphFile.recover_stale_files(graph_id, session)
     if recovered_ids:
       context.log.info(
@@ -848,8 +814,7 @@ def materialize_graph_tables(
     stale_reason = graph_record.graph_stale_reason
 
     if not was_stale and not config.force and not config.rebuild:
-      # Staged-but-unmaterialized data counts as stale even when the flag is not
-      # set, so an upload that missed the staleness marker still gets picked up.
+      # Staged-but-unmaterialized data counts as stale even without the flag.
       staged_tables_count = (
         session.query(GraphTable)
         .join(GraphFile, GraphTable.id == GraphFile.table_id)
@@ -885,17 +850,14 @@ def materialize_graph_tables(
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    # Import busy-counter helpers BEFORE the try so they're always bound in
-    # the finally, regardless of where an exception lands in the work below.
+    # Bound before the try so the finally can always use them.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_DAGSTER_MATERIALIZATION,
       begin_destructive_op,
       end_destructive_op,
     )
 
-    # Initialize busy counter tracking. The actual instance_id is discovered
-    # after client creation below; initializing to "" here keeps the finally
-    # block simple (the primitive treats empty strings as a no-op).
+    # "" is a no-op for the busy-counter primitives.
     busy_instance_id = ""
 
     try:
@@ -905,8 +867,7 @@ def materialize_graph_tables(
         get_graph_client(graph_id=graph_id, operation_type="write")
       )
 
-      # Publish busy counter on the target instance for GHA pre-refresh
-      # coordination. See robosystems/middleware/graph/instance_busy.py.
+      # Busy counter lets the deploy-time instance refresh wait for us.
       busy_instance_id = client._instance_id or ""
       loop.run_until_complete(
         begin_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
@@ -960,7 +921,6 @@ def materialize_graph_tables(
             metadata={"graph_id": graph_id, "error": str(e)},
           )
 
-      # Only tables whose files reached duckdb_status="staged" are ready
       tables_with_staged_data = (
         session.query(GraphTable)
         .join(GraphFile, GraphTable.id == GraphFile.table_id)
@@ -1100,8 +1060,6 @@ def materialize_graph_tables(
       return result
 
     finally:
-      # Decrement busy counter before loop close. Safe even if the begin
-      # call never ran (busy_instance_id == "" → primitive no-op).
       try:
         loop.run_until_complete(
           end_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)

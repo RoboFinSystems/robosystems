@@ -1,16 +1,8 @@
-"""
-On-instance backup service for Graph API.
+"""On-instance backups: CHECKPOINT, compress and upload where the files live.
 
-This service executes backup operations directly on the graph instance,
-uploading results to S3 via multipart upload with progress tracking.
-All heavy work (CHECKPOINT, compression, upload) happens on-instance,
-avoiding the need to transfer large databases over HTTP.
-
-Supports four backup types:
-- replica: Raw .lbug upload to S3 (downloaded by replica fleet at startup)
-- duckdb_staging: Raw .duckdb upload to S3 (for local dev / analytics)
-- r2_download: zstd-compressed .lbug.zst upload to Cloudflare R2 (zero-egress subscriber downloads)
-- standard: ZIP + optional encrypt to S3 (existing user backup flow)
+Backup types: ``replica`` (raw .lbug to S3, pulled by replicas at startup),
+``duckdb_staging`` (raw .duckdb to S3), ``r2_download`` (zstd .lbug.zst to
+Cloudflare R2 for zero-egress subscriber downloads).
 """
 
 import subprocess
@@ -26,19 +18,13 @@ from robosystems.config import env
 from robosystems.graph_api.core.task_manager import GenericTaskManager
 from robosystems.logger import logger
 
-# Multipart upload config: 100MB chunks for large database files
 S3_MULTIPART_CHUNKSIZE = 100 * 1024 * 1024  # 100 MB
 S3_MULTIPART_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 S3_MAX_CONCURRENCY = 4
 
 
 class OnInstanceBackupService:
-  """Run backups inside the Graph API process, where the files are.
-
-  Having direct access to the ``.lbug`` files and the connection pool is the
-  point: CHECKPOINT costs no HTTP round trip, and the database never crosses
-  the network on its way to S3.
-  """
+  """Run backups inside the Graph API process, so no database crosses HTTP."""
 
   def __init__(
     self,
@@ -93,13 +79,9 @@ class OnInstanceBackupService:
         self._duckdb_vacuum(graph_id)
         logger.info(f"[Task {task_id}] VACUUM completed")
 
-      # Existence is checked BEFORE the checkpoint, and the order is the whole
-      # point. `_checkpoint` opens a pooled connection with read_only=False, and
-      # LadybugDB creates a database when the path is absent — so checkpointing
-      # first would mint an empty 16 KB file for a graph that is not resident on
-      # this instance, satisfy the guard below that should have failed, and
-      # upload it as a successful backup. Same species as the dropped-WAL bug:
-      # the operation reports success over an artifact that holds nothing.
+      # Existence is checked BEFORE the checkpoint: a read-write open creates
+      # an absent database, which would then pass this guard and upload an
+      # empty file as a successful backup.
       if is_duckdb:
         db_path = self._resolve_duckdb_path(graph_id)
       else:
@@ -301,19 +283,11 @@ class OnInstanceBackupService:
     db_size: int,
     s3_client=None,
   ) -> dict[str, Any]:
-    """Compress database with zstd and upload to R2.
+    """Compress the database with the bundled zstd binary and upload to R2.
 
-    Uses the zstd binary bundled in the graph_api container image with
-    multithreading for maximum throughput on ARM64 (r7g) instances.
-    Temp file is written to EBS-backed directory, not /tmp (RAM-backed).
-
-    Level 15 with --long (128MB window) balances egress savings against
-    compress wall-time. The export instance is spun up per-publish and
-    billed for the compression, so higher levels (19+) roughly break even
-    at this file's low (~2.2x) compressibility -- the extra instance-time
-    cancels the egress they save. The window stays at 128MB so subscribers
-    decompress with a plain `zstd -d`; a larger --long window would force a
-    matching `--long` flag on their side for an unmeasured ratio gain.
+    Level 15: at this file's ~2.2x compressibility, higher levels cost about
+    as much export-instance time as they save in egress. The --long window
+    stays at 128MB so subscribers can decompress with a plain ``zstd -d``.
     """
     logger.info(f"[Task {task_id}] Compressing {db_path.name} with zstd before upload")
 
@@ -330,7 +304,6 @@ class OnInstanceBackupService:
       temp_path = Path(temp_dir)
       compressed_file = temp_path / f"{db_path.stem}.lbug.zst"
 
-      # zstd -T0 (all cores), --long (128MB window), -15 (see docstring for level rationale)
       compress_start = datetime.now(UTC)
       try:
         subprocess.run(
@@ -387,7 +360,6 @@ class OnInstanceBackupService:
         },
       )
 
-    # Verify upload (after temp dir cleanup)
     head = s3_client.head_object(Bucket=bucket, Key=key)
     uploaded_size = head["ContentLength"]
 

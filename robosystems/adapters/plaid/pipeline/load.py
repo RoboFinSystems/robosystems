@@ -4,33 +4,11 @@
 ``removed`` since the last cursor. Runs inside one ``extensions_session``;
 the caller commits.
 
-- **removed** — the bank retracted a line. An unposted event (``captured`` or
-  ``classified``) is deleted. A posted one is the customer's books: it is
-  flagged a reconciling item (``payload_drift`` with ``source_removed`` in the
-  stashed payload) and never touched. A transfer pair that loses one leg
-  releases the leg that remains as a single-leg event on its own date;
-  a posted pair is flagged as well, its ``legs`` narrowed to the retracted
-  one so the released leg lives on its own id.
-- **added / modified** — an event already on the graph takes a changed
-  amount or date in place while it is unposted (a captured one also takes the
-  refreshed hints). A posted one whose amount or date changed becomes a
-  reconciling item: the stashed payload carries the entry the line should now
-  have, rebuilt from its own classification, so the plan shows the difference
-  rather than a reversal. A leg already inside a pair reconciles the pair
-  (``reconcile_pairs``): while the legs still match, the pair takes the
-  change the same way; when they no longer do, the pair dissolves and each
-  leg stands on its own. A new transfer-shaped line whose other side is
-  already on the graph settles against it (``find_waiting_leg``): merged
-  into one ``internal_transfer`` while that side is unposted and either
-  unclassified or classified to this leg's bank account; captured and
-  voided when that side is posted to this leg's bank account, because the
-  movement is booked; captured on its own, naming its counterpart, when that
-  side went somewhere else. Everything else is captured through the kernel.
-- **a replaced Item** — Plaid's ids are Item-scoped, so after a re-Link (a
-  dead Item replaced in place, or a reconnect after a disconnect) the same
-  bank transactions come back under new ids. A replay re-keys the events the
-  feed already holds to the new ids instead of capturing the history again
-  beside the posted originals (``rekey_replaced_events``).
+The invariant throughout: an unposted event is edited or deleted in place; a
+posted one is the customer's books and is never touched, only flagged as a
+reconciling item (``payload_drift``) whose stashed payload carries what the
+bank now says. Plaid ids are Item-scoped, so after a re-Link a replay re-keys
+the held events (``rekey_replaced_events``) rather than capturing them again.
 """
 
 from __future__ import annotations

@@ -13,9 +13,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Cluster Metrics"])
 
-# Timeout for database metrics collection (seconds). Under heavy ingestion I/O,
-# _get_database_sizes() can block for 10+ seconds doing recursive file walks.
-# When this timeout is exceeded, cached/stale data is returned instead.
+# Sizing walks the data volume and can block for 10s+ under ingestion I/O;
+# past this many seconds the cached sizes are returned instead.
 _DATABASE_METRICS_TIMEOUT = 3.0
 
 
@@ -38,11 +37,8 @@ async def get_metrics(
   """
   metrics_collector = ladybug_service.metrics_collector
 
-  # System metrics use psutil syscalls (fast, ~100ms even under load)
   system_metrics = await asyncio.to_thread(metrics_collector.collect_system_metrics)
 
-  # Database metrics require recursive file walks that can block under heavy I/O.
-  # Run in a thread with a timeout so the endpoint always responds quickly.
   try:
     database_metrics = await asyncio.wait_for(
       asyncio.to_thread(metrics_collector.collect_database_metrics),
@@ -53,7 +49,6 @@ async def get_metrics(
       "Database metrics collection timed out (%.1fs), returning cached data",
       _DATABASE_METRICS_TIMEOUT,
     )
-    # Stale-but-available sizes beat blocking the endpoint.
     database_metrics = metrics_collector.collect_database_metrics_cached()
 
   query_metrics = metrics_collector.get_query_metrics()

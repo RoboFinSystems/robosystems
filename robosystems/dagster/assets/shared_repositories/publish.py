@@ -1,12 +1,7 @@
-"""Shared Repository Publish Helpers (S3 + R2).
+"""Publish helpers that per-repository assets delegate to.
 
-Provides the core publish logic that per-repository assets call.
-Each shared repository (SEC, future industry/economic) defines a thin
-asset with deps on its own materialization, then delegates here.
-
-Two publish targets:
-- S3: Raw .lbug/.duckdb for replica fleet (downloaded to local disk on boot)
-- R2: Raw .lbug for subscriber downloads (zero egress fees)
+S3 holds the .lbug/.duckdb the replica fleet pulls on boot; R2 holds the .lbug
+for subscriber downloads (zero egress).
 """
 
 import asyncio

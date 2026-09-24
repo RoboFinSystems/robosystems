@@ -107,13 +107,8 @@ class DuckDBConnectionPool:
   def get_connection(self, graph_id: str):
     """Check out a pooled read-write connection for ``graph_id``.
 
-    The connection has httpfs/parquet/postgres_scanner loaded and S3
-    credentials configured. Results must be fully materialized before the
-    block exits — the connection may be handed to another caller immediately.
-
-    Example:
-        with pool.get_connection("graph123") as conn:
-            result = conn.execute("SELECT * FROM my_table").fetchall()
+    Results must be fully materialized before the block exits — the
+    connection may be handed to another caller immediately.
     """
     connection_info = None
     try:
@@ -125,19 +120,13 @@ class DuckDBConnectionPool:
 
   @contextmanager
   def get_readonly_connection(self, graph_id: str):
-    """Open a hardened, sandboxed read-only connection for untrusted tenant SQL.
+    """Open a hardened, unpooled read-only connection for untrusted tenant SQL.
 
-    Opens the staging file ``read_only`` with ``enable_external_access=false``
-    and ``lock_configuration=true``, and loads no httpfs/postgres_scanner. That
-    blocks external ``ATTACH``, httpfs egress, ``read_text``/``read_blob``,
-    ``postgres_scan`` and ``COPY ... TO``: the connection can only read the
-    graph's own local staging tables. It is separate from the read-write
-    connection used by staging/materialization, which needs external access.
-
-    DuckDB forbids a second connection with a different configuration to the
-    same file in-process, so any read-write pool connection for this graph is
-    closed first, under the per-graph lock. This connection is not pooled — it
-    is opened per query and closed on exit.
+    ``enable_external_access=false`` + ``lock_configuration=true`` and no
+    httpfs/postgres_scanner blocks external ``ATTACH``, egress,
+    ``read_text``/``read_blob``, ``postgres_scan`` and ``COPY ... TO``. Any
+    read-write pool connection for the graph is closed first (see module
+    docstring).
 
     Raises FileNotFoundError if no staging database exists yet, ValueError if
     the resolved path escapes the base directory.
@@ -149,9 +138,6 @@ class DuckDBConnectionPool:
       raise ValueError(f"Path escapes base directory: {db_path}")
 
     with self._get_database_lock(graph_id):
-      # DuckDB won't open a second connection with a different configuration to
-      # the same file, so close any read-write connection holding it first.
-      #
       # LIMITATION: the staging write methods (create_table /
       # insert_into_table) execute outside this per-graph lock, so evicting
       # here can close a connection a concurrent staging run is mid-statement
@@ -263,7 +249,6 @@ class DuckDBConnectionPool:
       if not db_path.resolve().is_relative_to(self.base_path.resolve()):
         raise ValueError(f"Path escapes base directory: {db_path}")
 
-      # Ensure database directory exists
       db_path.parent.mkdir(parents=True, exist_ok=True)
 
       # On replicas, DuckDB files are downloaded from S3 in the background.
@@ -414,7 +399,6 @@ class DuckDBConnectionPool:
             f"Could not load AWS credentials from provider chain: {cred_err}"
           )
 
-      # Configure S3 endpoint if using LocalStack or custom endpoint
       if env.AWS_ENDPOINT_URL:
         # DuckDB expects endpoint without protocol (e.g., "localstack:4566" not "http://localstack:4566")
         endpoint = env.AWS_ENDPOINT_URL.replace("http://", "").replace("https://", "")
@@ -519,9 +503,6 @@ class DuckDBConnectionPool:
     if now - self._last_health_check > self.health_check_interval:
       self._check_connection_health()
       self._last_health_check = now
-
-    # Database files are deliberately never reaped here — staging databases
-    # persist as long as the graph does. See force_database_cleanup().
 
   def _snapshot_connections(self) -> list[tuple[str, str, DuckDBConnectionInfo]]:
     with self._global_lock:
@@ -798,13 +779,6 @@ def set_duckdb_memory_override(limit: str | None, graph_id: str = "sec") -> str 
   Only affects connections opened afterwards; use
   ``DuckDBConnectionPool.reconfigure_memory_limit`` for connections already
   open. ``core/memory_manager.py`` wraps both.
-
-  Example:
-      old_limit = set_duckdb_memory_override("58GB", graph_id="sec")
-      try:
-          # ... perform staging ...
-      finally:
-          set_duckdb_memory_override(old_limit, graph_id="sec")
   """
   global _memory_limit_overrides
   old_value = _memory_limit_overrides.get(graph_id)

@@ -59,15 +59,12 @@ class GraphClient(BaseGraphClient):
     self._purpose: str | None = None
 
   async def __aenter__(self):
-    """Async context manager entry."""
     return self
 
   async def __aexit__(self, exc_type, exc_val, exc_tb):
-    """Async context manager exit."""
     await self.close()
 
   async def close(self):
-    """Close the client and cleanup resources."""
     await self.client.aclose()
 
   async def _execute_with_retry(self, func, *args, **kwargs):
@@ -296,12 +293,9 @@ class GraphClient(BaseGraphClient):
   ) -> dict[str, Any] | AsyncGenerator[Any]:
     """Execute a Cypher query.
 
-    Returns a result dict, or — when ``streaming`` is set — an async generator
-    of NDJSON chunks produced by the server. Streaming lets the graph instance
-    do the chunking rather than materializing the full result set in memory,
-    and a malformed or empty response body degrades to an empty result rather
-    than raising. ``timeout`` overrides the client default for a non-streaming
-    call.
+    Returns a result dict, or with ``streaming`` an async generator of the
+    server's NDJSON chunks. A malformed or empty non-streaming body degrades
+    to an empty result rather than raising.
     """
     payload: dict[str, Any] = {"cypher": cypher, "database": graph_id}
     if parameters:
@@ -717,13 +711,9 @@ class GraphClient(BaseGraphClient):
     ``staging_only`` does the inverse, dropping staging and keeping the graph.
     The two are mutually exclusive.
 
-    Every delete is guarded by the base graph's materialization lock — a
-    ``-wip``/``-prev`` name because it is a build artifact, a base name because
-    the node sweeps that graph's ``-wip``/``-prev`` alongside it. A caller that
-    already holds the lock (the materialize flow cleaning up its own WIP, or
-    deleting its own base on a rebuild) passes ``lock_token`` so the endpoint
-    does not re-acquire — without it, the delete 409s against the caller's own
-    lock; without the lock at all, it 409s while a build is in progress.
+    Every delete takes the base graph's materialization lock and 409s while a
+    build holds it. A caller that already holds the lock passes
+    ``lock_token``, or the delete 409s against its own lock.
     """
     params = {}
     if preserve_duckdb:
@@ -1340,10 +1330,8 @@ class GraphClient(BaseGraphClient):
     )
     response.raise_for_status()
 
-    # `payload_*` are counted from the copied file, not from the live database,
-    # so the caller can reconcile the artifact against its own stats. A server
-    # predating that measurement sends no such headers, which reads as None —
-    # "not measured" — and must not be confused with a measured zero.
+    # Counted from the copied file, not the live database. A missing header is
+    # None ("not measured"), distinct from a measured zero.
     payload_nodes = response.headers.get("X-Backup-Node-Count")
     payload_rels = response.headers.get("X-Backup-Relationship-Count")
 

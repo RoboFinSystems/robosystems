@@ -4,13 +4,9 @@
   )
 }}
 
--- Enrich JournalReport-derived transactions with class-specific
--- event_type, event_category, and agent_external_id by LEFT JOINing the
--- per-class header staging models on the composite tx id (e.g. Invoice_123).
---
--- JournalReport stays as the GL line-item source (see entries.sql /
--- line_items.sql). The headers exist solely to surface the class +
--- counterparty that JournalReport flattens away.
+-- JournalReport-derived transactions, enriched with the class and
+-- counterparty JournalReport flattens away by LEFT JOINing the per-class
+-- header models on the composite tx id (e.g. Invoice_123).
 
 with entries as (
   select * from {{ ref('stg_qb_journal_entries') }}
@@ -36,10 +32,8 @@ sales_receipt_headers as (
   from {{ ref('stg_qb_sales_receipt_headers') }}
 ),
 purchase_headers as (
-  -- Purchase covers QB's Expense / Cash Expense / Check / Credit Card Expense.
-  -- The Python flattener emits multiple header rows per Purchase (one per
-  -- candidate tx_type JournalReport might use for that PaymentType), so the
-  -- LEFT JOIN below resolves to whichever flavor matched.
+  -- One row per candidate tx_type label, so the join matches whichever one
+  -- JournalReport used.
   select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
   from {{ ref('stg_qb_purchase_headers') }}
 ),
@@ -73,13 +67,7 @@ select
     e.id                                               as source_id,
     'posted'                                           as status,
     '{}'::json                                         as metadata,
-    -- QB JournalReport surfaces tx_type as a display label (with spaces +
-    -- parentheses), not the canonical QBO API entity name. Match the
-    -- display forms verbatim because that's what flows through the
-    -- composite Id parse in stg_qb_journal_entries. Each branch routes
-    -- to the closest matching entry in the open event_type vocabulary
-    -- so downstream consumers can branch on event_type without sniffing
-    -- metadata.qb_txn_type.
+    -- Both the normalized class names and JournalReport's display labels.
     case
       when e.tx_type = 'Invoice'                    then 'invoice_issued'
       when e.tx_type = 'Bill'                       then 'bill_received'
@@ -124,11 +112,8 @@ select
       when e.tx_type = 'Inventory Adjustment'       then 'adjustment'
       else 'adjustment'
     end                                                as event_category,
-    -- Canonical action verb — finer-grained than event_category. Must
-    -- stay in sync with QB_TXTYPE_TO_EVENT_ACTION in
-    -- adapters/quickbooks/pipeline/event_action_mapping.py. The
-    -- test_event_action_mapping parity tests enforce this. NULL falls
-    -- through the DB CHECK (event_action is nullable).
+    -- Must match QB_TXTYPE_TO_EVENT_ACTION (event_action_mapping.py); a
+    -- parity test enforces it.
     case
       when e.tx_type = 'Invoice'                    then 'transferAllRights'
       when e.tx_type = 'SalesReceipt'               then 'transferAllRights'
@@ -153,16 +138,10 @@ select
     end                                                as event_action,
     h.agent_external_id                                as agent_external_id,
     h.agent_type                                       as agent_type,
-    -- linked_txns is a JSON-stringified [{txn_id, txn_type}] list,
-    -- populated only for Payment + BillPayment headers; defaults to
-    -- '[]' elsewhere. The loader forwards it to event metadata as
-    -- qb_linked_txns; the payment_received / bill_paid handlers walk
-    -- it to set discharges_event_id.
+    -- JSON [{txn_id, txn_type}]; the payment handlers walk it (as
+    -- metadata.qb_linked_txns) to set discharges_event_id.
     coalesce(h.linked_txns, '[]')                      as linked_txns,
-    -- Per-entity SyncToken from QB. NULL for JournalReport-only rows
-    -- (JournalEntry / Deposit / Transfer) where we don't fetch a header —
-    -- these get backfilled via the NULL-token UPSERT branch on the next
-    -- sync that fetches the entity directly.
+    -- NULL for JournalReport-only rows (no header fetched).
     h.sync_token                                       as sync_token
 from entries e
 left join all_headers h

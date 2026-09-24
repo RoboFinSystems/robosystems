@@ -1,12 +1,8 @@
 """The sync-result discipline every bank-feed asset keeps.
 
-A bank feed that fails silently for 30 days and then loses its grant is
-worse than no feed, so each feed's one Dagster asset wraps its body the same
-way: any failure is recorded on the connection (``record_sync_result``
-without advancing ``last_sync``) and the per-connection sync lock is
-released either way. A success stamps ``last_sync`` with the run's summary,
-bootstraps the fiscal calendar on a fresh company, and marks the graph
-stale. Everything past the body is best-effort and never fails the run.
+Any failure is recorded on the connection without advancing ``last_sync``,
+so a silently failing feed is visible; the sync lock is released either way.
+Everything past the body is best-effort and never fails the run.
 """
 
 from __future__ import annotations
@@ -35,9 +31,7 @@ class BankFeedSyncConfig(Config):
   user_id: str
   full_rebuild: bool = False
   since_date: str = ""
-  # The lock token the dispatcher acquired; released here so the next sync
-  # can start without waiting out the lock's TTL. Empty when no lock was
-  # acquired (Valkey unavailable at dispatch).
+  # Released at the end of the run; empty when Valkey was down at dispatch.
   sync_lock_id: str = ""
 
 

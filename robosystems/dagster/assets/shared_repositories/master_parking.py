@@ -1,23 +1,7 @@
 """Wake/sleep ("parking") of the shared-master EC2 instance.
 
-Pure boto3 + DynamoDB-registry logic with no Dagster imports, so it stays
-unit-testable and reusable. Adapter pipelines (SEC today) wire the scale-to-1 /
-scale-to-0 lifecycle in as bookend ops around the master-dependent staging +
-publish steps.
-
-The shared master is a single writer instance that hosts the platform's shared
-repositories. It is SEC-only today (``sec`` + ``sec_historical``), so the health
-gate defaults to the ``sec`` volume; ``database`` is a parameter so a second
-shared repository can gate on its own volume without a code change.
-
-Load-bearing invariant: the master ASG runs
-``NewInstancesProtectedFromScaleIn=true``, so a scale-in is *cancelled* unless
-per-instance scale-in protection is cleared first. ``sleep_master`` therefore
-always clears protection before setting desired capacity to 0.
-
-The dev/test skip lives in the Dagster asset layer (``master`` module), not
-here — these functions always execute their logic so they can be unit-tested
-against mocked boto3.
+Pure boto3 + registry logic, no Dagster imports; the dev skip lives in the
+asset layer (``master``).
 """
 
 import asyncio

@@ -26,11 +26,8 @@ class SendEmailConfig(Config):
   )
   to_email: str
   user_name: str
-  # Opaque reference to the raw verification/reset/invitation token, which
-  # is parked in Valkey for CacheDefaults.EMAIL_TOKEN_REF_TTL. The raw token
-  # never enters run config: Dagster persists run config indefinitely in run
-  # storage and renders it in its UI, while the platform DB deliberately
-  # holds only the token's hash.
+  # Reference to the raw token parked in Valkey. The raw token must never enter
+  # run config, which Dagster persists indefinitely and shows in its UI.
   token_ref: str | None = None
   app: str = "roboledger"
   operation_id: str | None = None  # For SSE tracking
@@ -215,7 +212,6 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
     )
   else:
     context.log.error(f"Failed to send {config.email_type} email to {config.to_email}")
-    # Raise to trigger retry
     raise RuntimeError(f"Failed to send {config.email_type} email to {config.to_email}")
 
   if config.token_ref:
@@ -258,29 +254,11 @@ def _emit_email_result_to_sse(
 def send_email_job():
   """Send an email via SES, with 3 retries at exponential backoff.
 
-  Usage:
-    from robosystems.middleware.sse import run_and_monitor_dagster_job, build_email_job_config
-
-    # Queue email send with SSE monitoring. The raw token is parked in
-    # Valkey by build_email_job_config; run config carries a reference.
-    background_tasks.add_task(
-      run_and_monitor_dagster_job,
-      job_name="send_email_job",
-      operation_id=operation_id,
-      run_config=build_email_job_config(
-        email_type="email_verification",
-        to_email="user@example.com",
-        user_name="John",
-        token="abc123",
-        app="roboledger",
-        operation_id=operation_id,
-      ),
-    )
+  Build run config with ``build_email_job_config``, which parks the raw token.
   """
   send_email_op()
 
 
-# Convenience function for building email job config
 def build_email_job_config(
   email_type: str,
   to_email: str,
@@ -295,14 +273,8 @@ def build_email_job_config(
 ) -> dict:
   """Build the Dagster run_config for send_email_job.
 
-  Args:
-    email_type: email_verification, password_reset, welcome, or org_invitation
-    token: Raw verification/reset/invitation token (required for all but
-      welcome). Parked in Valkey for CacheDefaults.EMAIL_TOKEN_REF_TTL; the
-      run config carries only an opaque reference to it.
-    app: App identifier (roboledger, roboinvestor, robosystems)
-    operation_id: SSE operation ID for progress tracking
-    org_name: Organization name (required for org_invitation)
+  ``token`` (required except for welcome) is parked in Valkey; the run config
+  carries only an opaque reference. ``org_name`` is required for org_invitation.
   """
   from robosystems.config import env
 
@@ -337,7 +309,6 @@ def build_email_job_config(
     },
   }
 
-  # In local development, use in_process executor
   if env.ENVIRONMENT == "dev":
     run_config["execution"] = {"config": {"in_process": {}}}
 

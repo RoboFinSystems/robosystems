@@ -1,18 +1,7 @@
-"""
-DuckDB Staging Operations for XBRL Graph Ingestion.
+"""Ingestion stage 1: stage processed Parquet from S3 into DuckDB tables.
 
-This module handles Stage 1 of the ingestion pipeline: staging processed
-Parquet files from S3 into DuckDB tables. The staged data can then be
-materialized to LadybugDB using the materialization module.
-
-Key features:
-- Schema-driven: Table names come from RoboLedgerContext
-- Glob patterns: Efficient file discovery via DuckDB (not S3 ListObjects)
-- Spill-to-disk: DuckDB external aggregation handles large tables efficiently
-- Retry logic: Automatic retries with backoff for transient failures
-
-Classes:
-    DuckDBStager: Handles all DuckDB staging operations
+Table names come from the RoboLedgerContext schema; materialization to
+LadybugDB is a separate stage.
 """
 
 import asyncio
@@ -44,13 +33,7 @@ from .models import (
 
 
 class DuckDBStager:
-  """
-  Stage 1: loads processed Parquet files from S3 into DuckDB tables.
-
-  Work is driven through the Graph API rather than done locally — the DuckDB
-  pool lives on the Graph API container, not on the worker. Supports full
-  rebuild and incremental staging modes.
-  """
+  """Stages S3 Parquet into DuckDB through the Graph API, which owns the DuckDB pool."""
 
   def __init__(self, graph_id: str = "sec", source_prefix: str | None = None):
     """`source_prefix` is the S3 prefix for source files ("sec/processed")."""
@@ -69,34 +52,15 @@ class DuckDBStager:
     duckdb_memory_mb: int | None = None,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
-    """
-    Stage processed Parquet files to persistent DuckDB.
+    """Full rebuild: recreate every schema table in DuckDB from S3 parquet.
 
-    This is Stage 1 of the decoupled pipeline. It ONLY stages data to DuckDB.
-    LadybugDB operations are handled separately by materialize_from_duckdb().
-
-    Schema-Driven Design:
-    - Table names come from RoboLedgerContext.get_all_table_names_for_context()
-    - No manifest file needed - schema is the source of truth
-
-    Full Rebuild Mode:
-    - Always recreates DuckDB tables from all S3 parquet files (CREATE TABLE)
-    - No incremental mode - pipeline always rebuilds from scratch
-
-    Memory Management:
-    - Uses DuckDB's external aggregation with spill-to-disk for large tables
-    - GROUP BY + FIRST() deduplication is more memory-efficient than ROW_NUMBER
-    - Large tables (LARGE_STAGING_TABLES) use per-quarter chunked staging to
-      avoid OOM when S3 data exceeds DuckDB's memory limit
-
-    Pass either `year` for a single year or `start_year`/`end_year`
-    (both inclusive) for a range. `reset_staging=True` deletes the whole
-    DuckDB staging database first.
+    Large tables whose S3 data exceeds the memory threshold are staged in
+    per-quarter chunks. Pass `year`, or `start_year`/`end_year` (inclusive).
+    `reset_staging=True` deletes the DuckDB staging database first.
     """
     start_time = time.time()
     log_progress = make_progress_logger(progress_callback)
 
-    # Determine date filter for logging
     if year:
       date_filter = f"{year}-*"
     elif start_year or end_year:
@@ -111,7 +75,6 @@ class DuckDBStager:
     duckdb_path = get_staging_duckdb_path(self.graph_id)
 
     try:
-      # Get graph client for API calls
       try:
         client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
       except Exception as client_err:
@@ -126,19 +89,16 @@ class DuckDBStager:
           duration_ms=(time.time() - start_time) * 1000,
         )
 
-      # Reset staging if requested - delete entire DuckDB staging database
       if reset_staging:
         log_progress("Resetting DuckDB staging - deleting staging database...")
         try:
-          # Use staging_only=True to delete only DuckDB, preserve LadybugDB graph
           await client.delete_database(self.graph_id, staging_only=True)
           log_progress("DuckDB staging database deleted successfully")
         except Exception as reset_err:
-          # Non-fatal - database might not exist yet
+          # Non-fatal: the staging database may not exist yet.
           logger.warning(f"Could not reset staging database: {reset_err}")
           log_progress(f"Reset skipped (staging may not exist): {reset_err}")
 
-      # Refresh client connection after reset
       try:
         client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
       except Exception as client_err:
@@ -153,7 +113,6 @@ class DuckDBStager:
           duration_ms=(time.time() - start_time) * 1000,
         )
 
-      # Step 1: Get table names from schema
       logger.info("Step 1: Getting table names from schema...")
       tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
         RoboLedgerContext.SEC_REPOSITORY
@@ -162,7 +121,6 @@ class DuckDBStager:
 
       total_files = 0
 
-      # Step 2: Create DuckDB staging tables via Graph API
       log_progress(f"Step 2: Creating {len(tables_by_type)} DuckDB staging tables...")
       successful_tables, table_infos = await self._create_tables_with_glob(
         tables_by_type,
@@ -216,30 +174,17 @@ class DuckDBStager:
     quarter: int | None = None,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
-    """
-    Stage current quarter's files incrementally to existing DuckDB tables.
+    """Insert one quarter's files into existing DuckDB tables, deduplicated.
 
-    Unlike stage_to_duckdb() which rebuilds all tables from scratch,
-    this method INSERTs data into existing tables with deduplication.
-
-    Since INSERT uses UNION ALL + ROW_NUMBER dedup, we can point at the
-    entire quarter's files every time - only truly new rows are added.
-
-    Safe to re-run daily - deduplication prevents data multiplication.
-
-    Precondition: DuckDB tables must already exist from initial full staging.
-
-    `year` / `quarter` default to the current Eastern-time quarter. Reported
-    row counts are net new rows.
+    Idempotent, so it re-reads the whole quarter on every run. Requires a prior
+    full staging. `year`/`quarter` default to the current Eastern-time quarter;
+    reported row counts are net new rows.
     """
     from robosystems.adapters.sec import get_current_quarter
 
     start_time = time.time()
     log_progress = make_progress_logger(progress_callback)
 
-    # Default to the current Eastern-time quarter (SEC filing calendar). Hard
-    # cut-over: stage exactly the target quarter, with no previous-quarter
-    # overlap.
     if year is None or quarter is None:
       year, quarter = get_current_quarter()
 
@@ -254,7 +199,6 @@ class DuckDBStager:
     try:
       client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
 
-      # Verify tables exist (must have done initial full staging)
       existing_tables = await client.list_tables(self.graph_id)
       if not existing_tables:
         return StagingResult(
@@ -272,12 +216,10 @@ class DuckDBStager:
       }
       log_progress(f"Found {len(existing_table_names)} existing tables in DuckDB")
 
-      # Get schema-defined tables
       tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
         RoboLedgerContext.SEC_REPOSITORY
       )
 
-      # Stage each table incrementally
       successful_tables: list[str] = []
       table_infos: dict[str, TableInfo] = {}
       failed_tables: list[tuple[str, str]] = []
@@ -285,7 +227,6 @@ class DuckDBStager:
 
       total_tables = len(tables_by_type)
       for i, (table_name, entity_type) in enumerate(tables_by_type.items(), 1):
-        # Skip tables that don't exist in DuckDB - no data for them
         if table_name not in existing_table_names:
           log_progress(
             f"[{i}/{total_tables}] Skipped {table_name}: not in DuckDB (no data)"
@@ -300,9 +241,7 @@ class DuckDBStager:
           )
           continue
 
-        # Build S3 patterns for all quarters, only including formats that exist.
-        # s3_get_table_patterns checks each format individually to avoid DuckDB
-        # errors from literal paths (no wildcards) that don't exist on S3.
+        # Only patterns that exist: DuckDB errors on a literal path missing from S3.
         s3_patterns: list[str] = []
         for y, q in quarters_to_scan:
           filed_pattern = f"filed={y}-Q{q}"
@@ -340,8 +279,8 @@ class DuckDBStager:
         is_entity = table_name == "Entity"
 
         if is_entity:
-          # Entity uses DELETE+INSERT (upsert) because its attributes are mutable.
-          # Other tables have immutable data and only need INSERT WHERE NOT EXISTS.
+          # Entity attributes are mutable, so it upserts (DELETE+INSERT); other
+          # tables are immutable and insert only new rows.
           log_progress(
             f"[{i}/{total_tables}] UPSERT {table_name} (Q{quarter} {year})..."
           )
@@ -378,9 +317,8 @@ class DuckDBStager:
                   )
                 return False, None, error
 
-              # DELETE+INSERT is not atomic — if interrupted between steps,
-              # deleted rows are lost but recovered automatically on retry
-              # since the upsert re-creates the temp table from S3.
+              # Not atomic: rows deleted before an interruption come back on
+              # retry, which rebuilds the temp table from S3.
               await client.execute_write(
                 graph_id=self.graph_id,
                 sql=(
@@ -390,14 +328,12 @@ class DuckDBStager:
                 timeout=timeout,
               )
 
-              # Insert all rows from temp (fresh data replaces deleted rows)
               await client.execute_write(
                 graph_id=self.graph_id,
                 sql=f'INSERT INTO "{table_name}" BY NAME SELECT * FROM "{temp_name}"',
                 timeout=timeout,
               )
 
-              # Get row count from temp table
               count_resp = await client.query_table(
                 graph_id=self.graph_id,
                 sql=f'SELECT COUNT(*) AS cnt FROM "{temp_name}"',
@@ -408,7 +344,6 @@ class DuckDBStager:
               if rows:
                 row_count = rows[0][0]
 
-              # Clean up temp table
               try:
                 await client.delete_table(self.graph_id, temp_name)
               except Exception as cleanup_err:
@@ -574,27 +509,14 @@ class DuckDBStager:
         duration_ms=(time.time() - start_time) * 1000,
       )
 
-  # =========================================================================
-  # Private Helper Methods
-  # =========================================================================
-
-  # Default chunking threshold when DuckDB memory info is unavailable.
-  # Tables exceeding this are staged per-quarter with accumulative dedup.
+  # Chunking threshold when the DuckDB memory limit is unknown.
   DEFAULT_CHUNKING_THRESHOLD_BYTES = 15 * 1024 * 1024 * 1024  # 15 GiB
 
-  # Fraction of DuckDB memory to use as chunking threshold.
-  # Single-shot CREATE TABLE from S3 must fit in DuckDB memory for decompression.
-  # 0.50 routes tables like Element historical (34.7 GiB) to chunked staging.
+  # A single-shot CREATE TABLE from S3 must fit in DuckDB memory to decompress.
   CHUNKING_MEMORY_FRACTION = 0.50
 
   def _get_chunking_threshold_bytes(self, duckdb_memory_mb: int | None) -> int:
-    """
-    Byte threshold above which a table is staged in per-quarter chunks.
-
-    When the DuckDB memory limit is known (from the boost response), the
-    threshold is CHUNKING_MEMORY_FRACTION of it; otherwise it falls back to a
-    conservative 15 GiB.
-    """
+    """Byte size above which a table is staged in per-quarter chunks."""
     if duckdb_memory_mb and duckdb_memory_mb > 0:
       threshold = int(duckdb_memory_mb * 1024 * 1024 * self.CHUNKING_MEMORY_FRACTION)
       logger.info(
@@ -614,12 +536,7 @@ class DuckDBStager:
     start_year: int,
     end_year: int,
   ) -> int:
-    """
-    Get total S3 parquet size for a table across quarterly partitions.
-
-    Sums ListObjectsV2 sizes per year/quarter prefix rather than listing the
-    whole bucket. `end_year` is inclusive.
-    """
+    """Total S3 parquet bytes for a table over the years (inclusive), per quarter prefix."""
     total_bytes = 0
     boto_client = self.s3_client.s3_client
 
@@ -632,7 +549,6 @@ class DuckDBStager:
             for obj in page.get("Contents", []):
               total_bytes += obj.get("Size", 0)
         except Exception:
-          # Non-fatal — if we can't check size, skip this partition
           continue
 
     return total_bytes
@@ -647,15 +563,10 @@ class DuckDBStager:
     total_tables: int,
     drop_on_retry: bool = True,
   ) -> tuple[bool, TableInfo | None, str | None]:
-    """
-    Retry wrapper for table staging with exponential backoff.
+    """Retry `stage_fn` with linear backoff, dropping the partial table between tries.
 
-    On failure, drops the partial table and retries from scratch. `stage_fn`
-    is an async callable returning `(success, TableInfo | None, error | None)`,
-    which is also this function's return shape.
-
-    Pass `drop_on_retry=False` for tables like Entity whose `stage_fn` manages
-    its own temp tables — dropping the main table there would be destructive.
+    Pass `drop_on_retry=False` when `stage_fn` manages its own temp tables (the
+    Entity upsert, incremental inserts): dropping the main table there destroys data.
     """
     last_error: str | None = None
 
@@ -674,7 +585,6 @@ class DuckDBStager:
           f"Retry {attempt + 2}/{STAGING_MAX_RETRIES} in {backoff}s..."
         )
 
-        # Drop partial table before retry (skip for tables that manage their own temps)
         if drop_on_retry:
           try:
             await graph_client.delete_table(self.graph_id, table_name)
@@ -682,10 +592,8 @@ class DuckDBStager:
           except Exception as drop_err:
             logger.debug(f"Could not drop table {table_name} before retry: {drop_err}")
 
-        # Re-apply DuckDB memory boost before retry. The boost is stored in an
-        # in-memory dict on the Graph API — if the container restarted (OOM kill,
-        # health check failure), the override is lost and new connections get the
-        # default 10GB limit instead of the boosted 55GB. This is idempotent.
+        # The boost lives in Graph API memory and is lost if the container
+        # restarted (e.g. OOM); re-applying is idempotent.
         try:
           await graph_client.boost_memory(self.graph_id, target="duckdb")
           logger.info(
@@ -714,28 +622,12 @@ class DuckDBStager:
     table_index: int = 0,
     total_tables: int = 0,
   ) -> tuple[bool, TableInfo | None, str | None]:
-    """
-    Stage a large table using accumulative INSERT with dedup.
+    """Stage a large table quarter by quarter into a deduplicating accumulator.
 
-    Downloads each quarter from S3, then inserts only new rows (by dedup key)
-    into an accumulator table. Uses NOT EXISTS with a hash join on identifier
-    strings rather than a GROUP BY / FIRST() aggregate.
-
-    DuckDB's hash aggregate cannot spill large aggregate state to disk, causing
-    OOM for tables with 10M+ unique groups. This approach avoids hash aggregates
-    entirely — the NOT EXISTS hash join only holds identifier strings (~500MB for
-    10.6M identifiers), which DuckDB spills correctly.
-
-    Steps:
-    1. Download first quarter from S3 → becomes the accumulator
-    2. For each subsequent quarter:
-       a. Download to temp table
-       b. INSERT INTO accumulator rows WHERE NOT EXISTS (match on dedup key)
-       c. Drop temp table
-    3. Rename accumulator to target table
-
-    Returns:
-        Tuple of (success, TableInfo or None, error or None)
+    The first quarter becomes the accumulator; each later quarter inserts rows
+    WHERE NOT EXISTS on the dedup key; the accumulator then replaces the table.
+    NOT EXISTS rather than GROUP BY: DuckDB's hash aggregate cannot spill large
+    state and OOMs at 10M+ groups, while the anti-join's key set spills fine.
     """
     if log_progress is None:
       log_progress = make_progress_logger(None)
@@ -744,11 +636,9 @@ class DuckDBStager:
     accumulator_name = f"{table_name}__acc"
     columns: list[str] | None = None
     accumulator_rows = 0
-    current_temp: str | None = None  # Track for cleanup on failure
+    current_temp: str | None = None
 
-    # Re-verify DuckDB memory boost before chunked staging. If a previous table
-    # OOMed and crashed the Graph API container, the boost (stored in-memory) is
-    # lost. Without this, subsequent tables run with the default ~9 GiB limit.
+    # A previous table's OOM may have restarted the Graph API and dropped the boost.
     try:
       await graph_client.boost_memory(self.graph_id, target="duckdb")
     except Exception as boost_err:
@@ -770,7 +660,6 @@ class DuckDBStager:
         temp_name = f"{table_name}__{year_val}_Q{q}"
         current_temp = temp_name
 
-        # Download quarter from S3
         try:
           response = await graph_client.create_table(
             graph_id=self.graph_id,
@@ -800,7 +689,6 @@ class DuckDBStager:
         total_raw_rows += rows
 
         if columns is None:
-          # First quarter — probe schema and rename to accumulator
           try:
             probe_result = await graph_client.query_table(
               graph_id=self.graph_id,
@@ -824,7 +712,6 @@ class DuckDBStager:
           )
           continue
 
-        # INSERT new rows only — NOT EXISTS hash join uses only dedup key strings
         if "identifier" in columns:
           dedup_where = (
             f'WHERE NOT EXISTS (SELECT 1 FROM "{accumulator_name}" a '
@@ -849,7 +736,6 @@ class DuckDBStager:
         )
         merge_elapsed = time.monotonic() - merge_start
 
-        # Get new accumulator row count
         count_result = await graph_client.query_table(
           graph_id=self.graph_id,
           sql=f'SELECT COUNT(*) as cnt FROM "{accumulator_name}"',
@@ -866,7 +752,6 @@ class DuckDBStager:
 
         accumulator_rows = new_acc_rows
 
-        # Drop temp table to free disk space
         try:
           await graph_client.delete_table(self.graph_id, temp_name)
           current_temp = None
@@ -874,7 +759,6 @@ class DuckDBStager:
           pass
 
       if columns is None:
-        # No quarters had data
         return (
           True,
           TableInfo(
@@ -887,13 +771,11 @@ class DuckDBStager:
           None,
         )
 
-      # Drop existing target table before renaming accumulator
       drop_sql = f'DROP TABLE IF EXISTS "{table_name}"'
       await graph_client.execute_write(
         graph_id=self.graph_id, sql=drop_sql, timeout=30.0
       )
 
-      # Rename accumulator to final target table
       rename_sql = f'ALTER TABLE "{accumulator_name}" RENAME TO "{table_name}"'
       await graph_client.execute_write(
         graph_id=self.graph_id, sql=rename_sql, timeout=30.0
@@ -926,7 +808,6 @@ class DuckDBStager:
   async def _cleanup_temp_tables(
     self, graph_client: "GraphClient", temp_tables: list[str]
   ) -> None:
-    """Drop temporary staging tables, logging but not raising on errors."""
     for temp_name in temp_tables:
       try:
         await graph_client.delete_table(self.graph_id, temp_name)
@@ -943,23 +824,16 @@ class DuckDBStager:
     duckdb_memory_mb: int | None = None,
     progress_callback: ProgressCallback | None = None,
   ) -> tuple[list[str], dict[str, TableInfo]]:
-    """
-    Create DuckDB staging tables using glob patterns.
+    """Create DuckDB tables from S3 globs; `tables` maps table name → entity type.
 
-    For large tables (LARGE_STAGING_TABLES), checks S3 data size against
-    the DuckDB memory threshold. Tables exceeding the threshold are staged
-    in per-quarter chunks to avoid OOM.
-
-    `tables` maps table name → entity type. Returns
-    `(successful_table_names, {table_name: TableInfo})`.
+    LARGE_STAGING_TABLES over the memory threshold are chunked by quarter.
+    Raises RuntimeError if any table fails.
     """
     successful_tables: list[str] = []
     table_infos: dict[str, TableInfo] = {}
     failed_tables: list[tuple[str, str]] = []
     skipped_tables: list[str] = []
 
-    # Build partition pattern(s)
-    # year_range_patterns is set when we need a list of per-year globs
     year_range_patterns: bool = False
     filed_pattern: str = "filed=*-Q*"
     range_start: int = 2009
@@ -967,14 +841,12 @@ class DuckDBStager:
     if year:
       filed_pattern = f"filed={year}-Q*"
     elif start_year is not None or end_year is not None:
-      # Year range: generate per-year patterns (passed as list to DuckDB)
       range_start = start_year or 2009
       range_end = end_year or datetime.now(UTC).year
       year_range_patterns = True
 
     log_progress = make_progress_logger(progress_callback)
 
-    # Calculate chunking threshold from DuckDB memory config
     chunking_threshold = self._get_chunking_threshold_bytes(duckdb_memory_mb)
 
     total_tables = len(tables)
@@ -983,7 +855,6 @@ class DuckDBStager:
 
       timeout = get_staging_timeout(table_name)
 
-      # For large tables, check S3 data size to decide if chunking is needed
       needs_chunking = False
       chunk_start = year if year else range_start
       chunk_end = year if year else range_end
@@ -1007,9 +878,7 @@ class DuckDBStager:
           )
 
       if needs_chunking:
-        # No retries for chunked staging — retrying re-downloads all S3 data
-        # and compounds disk usage. If it fails, something fundamental is wrong.
-        # The _stage_table_chunked method cleans up temp tables on failure.
+        # No retries: a retry re-downloads everything and compounds disk use.
         success, table_info, error = await self._stage_table_chunked(
           table_name=table_name,
           entity_type=entity_type,
@@ -1021,8 +890,6 @@ class DuckDBStager:
           total_tables=total_tables,
         )
       else:
-        # Standard single-shot staging for small/medium tables
-        # Build s3_pattern: dual-format globs supporting both old and new layouts
         if year_range_patterns:
           s3_pattern_list: list[str] = []
           for y in range(range_start, range_end + 1):
@@ -1040,7 +907,6 @@ class DuckDBStager:
           s3_pattern = f"{base}/*.parquet"
 
         if not is_large:
-          # Large tables already logged their size above
           log_progress(
             f"[{i}/{total_tables}] Staging {table_name} (timeout={timeout}s)..."
           )
@@ -1130,7 +996,6 @@ class DuckDBStager:
           progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {error}")
         failed_tables.append((table_name, error or "Unknown error"))
 
-    # Report summary
     if skipped_tables:
       logger.info(
         f"Skipped {len(skipped_tables)} tables with no files: {skipped_tables}"

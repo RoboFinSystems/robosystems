@@ -50,17 +50,12 @@ def create_app() -> FastAPI:
 
     logger.info("Graph API starting up")
 
-    # Replica warmup: load data into OS page cache before serving traffic.
-    # LadybugDB is columnar — each property is a separate column file on disk,
-    # and a plain count(n) only touches the node ID column. These queries force
-    # the OS to page in label indexes and property columns so real queries don't
-    # hit cold disk on first call. Edge columns are not warmed (untyped edge
-    # scans are too expensive on large graphs) but load quickly once node data
-    # is cached.
+    # Replica warmup: page label indexes and property columns into the OS
+    # cache before serving. LadybugDB is columnar, so count(n) alone touches
+    # only the ID column. Edges are not warmed; untyped edge scans cost too much.
     if os.getenv("LBUG_ROLE") == "replica":
 
       async def warmup_local_databases():
-        """Warm up local databases with progressive scans."""
         from robosystems.graph_api.routers.health import mark_replica_ready
 
         def _do_warmup():
@@ -68,7 +63,6 @@ def create_app() -> FastAPI:
 
           from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-          # Valid Cypher identifier: starts with letter/underscore, alphanumeric + underscore
           _valid_label = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
           service = get_ladybug_service()
@@ -114,9 +108,7 @@ def create_app() -> FastAPI:
                 failed += 1
                 logger.warning(f"Warmup [{db_name}] properties {label}: {e}")
 
-            # Partial warmup is acceptable — some labels may fail without
-            # blocking the replica from serving traffic. Only fail if every
-            # single query failed, which indicates a broken database.
+            # Partial warmup is fine; only an all-failed database is broken.
             if succeeded == 0 and failed > 0:
               raise RuntimeError(
                 f"All warmup queries failed for {db_name} ({failed} failures)"
@@ -154,9 +146,7 @@ def create_app() -> FastAPI:
         except Exception as e:
           logger.warning(f"Failed to clear extension cache at {cache_path}: {e}")
 
-    # DuckDB staging pool: masters use staging for materialization, replicas for
-    # MCP vector search. Replicas download staging files in the background after
-    # startup, so connections are lazy — created on first query, not here.
+    # Connections are lazy: replicas download staging files after startup.
     from robosystems.graph_api.core.duckdb import initialize_duckdb_pool
 
     duckdb_base_path = Path(env.DUCKDB_STAGING_PATH)
@@ -170,7 +160,7 @@ def create_app() -> FastAPI:
       "(databases persist with graph lifecycle)"
     )
 
-    yield  # Application runs here
+    yield
 
     logger.info("Graph API shutting down")
     if duckdb_pool is not None:
@@ -303,33 +293,24 @@ def create_app() -> FastAPI:
 
       return get_redoc_html(openapi_url="/openapi.json", title=api_title)
 
-  app.include_router(health.router)  # /health for load balancer health checks
-  app.include_router(info.router)  # /info for cluster info
-  app.include_router(metrics.router)  # /metrics (cluster key in prod/staging)
+  app.include_router(health.router)
+  app.include_router(info.router)
+  app.include_router(metrics.router)
 
-  # Database routers
   app.include_router(databases.management.router)
   app.include_router(databases.query.router)
   app.include_router(databases.schema.router)
   app.include_router(databases.backup.router)
   app.include_router(databases.restore.router)
   app.include_router(databases.metrics.router)
-  app.include_router(
-    databases.memory.router
-  )  # Memory management for staging/materialization
-  app.include_router(
-    databases.vector_search.router
-  )  # LanceDB vector index (build/export on writers, search on all)
-  app.include_router(
-    databases.semantic_memory.router
-  )  # LanceDB per-graph semantic memory (AI memory CRUD)
-  app.include_router(databases.swap.router)  # Blue-green swap and rollback
+  app.include_router(databases.memory.router)
+  app.include_router(databases.vector_search.router)
+  app.include_router(databases.semantic_memory.router)
+  app.include_router(databases.swap.router)
 
-  # Task management (generic for all task types)
   app.include_router(tasks.router)
   app.include_router(migration.router)
 
-  # Table routers (DuckDB staging), scoped under /databases/{graph_id}/tables
   app.include_router(databases.tables.router)
 
   return app

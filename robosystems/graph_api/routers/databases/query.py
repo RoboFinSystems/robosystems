@@ -20,9 +20,8 @@ from robosystems.models.core import Graph
 
 router = APIRouter(prefix="/databases", tags=["Graph Query"])
 
-# In-memory cache for graph rebuild status. Avoids hitting RDS on every query
-# while still protecting users from reading partial data during rebuilds.
-# Cache miss or RDS failure → fail open (assume not rebuilding).
+# Rebuild status per graph, cached to keep RDS off the query path. An RDS
+# failure fails open (assume not rebuilding).
 _rebuild_status_cache: dict[str, tuple[bool, float]] = {}
 _REBUILD_CACHE_TTL = 30  # seconds
 
@@ -131,7 +130,7 @@ def execute_query(
         "error": "Server temporarily unavailable",
         "reason": reason,
         "decision": decision,
-        "retry_after": 5,  # Suggest retry after 5 seconds
+        "retry_after": 5,
       },
     )
 

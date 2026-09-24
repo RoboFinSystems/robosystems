@@ -1,9 +1,5 @@
-"""Dagster sensors for graph lifecycle management.
-
-Monitors for graphs with expired subscriptions and transitions them
-from active to suspended, then from suspended to deprovisioned after
-the retention period.
-"""
+"""Sensors that suspend graphs whose subscriptions ended, deprovision them after
+retention, and reap stalled provisioning."""
 
 from dagster import (
   DefaultSensorStatus,
@@ -29,18 +25,8 @@ logger = get_logger(__name__)
   description="Suspends graphs whose subscriptions have expired",
 )
 def expired_graph_subscription_sensor(context: SensorEvaluationContext):
-  """Find graphs with expired subscriptions and suspend them.
-
-  Query: BillingSubscription where:
-  - resource_type = "graph"
-  - status IN ("canceled", "failed")
-  - ends_at IS NOT NULL AND (ends_at < now() OR cancellation_type = "immediate")
-  - Linked graph status = "active" (not already suspended)
-
-  ``failed`` belongs here alongside ``canceled`` for the same reason: both are
-  terminal, so neither is a subscription still in force, and a graph left
-  running under one is infrastructure nobody is paying for.
-  """
+  """Suspend active graphs whose subscription is terminal (canceled or failed)
+  and past ends_at, or was canceled immediately."""
   from datetime import UTC, datetime
 
   from sqlalchemy import or_
@@ -57,11 +43,8 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
   try:
     now = datetime.now(UTC)
 
-    # Find expired subscriptions linked to active graphs. An IMMEDIATE cancel
-    # suspends regardless of ends_at: the user asked for teardown now, and this
-    # is defense-in-depth against ends_at being pushed into the future by a
-    # downstream event (e.g. the Stripe subscription.deleted handler). Mirrors
-    # the immediate-bypass the deprovision sensor already applies.
+    # An IMMEDIATE cancel suspends regardless of ends_at, in case a later
+    # event pushed ends_at into the future.
     expired_subs = (
       db.query(BillingSubscription)
       .join(Graph, BillingSubscription.resource_id == Graph.graph_id)
@@ -109,16 +92,8 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
   description="Deprovisions suspended graphs past the retention period",
 )
 def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
-  """Find suspended graphs past retention and deprovision them.
-
-  Query: Graph where:
-  - status = "suspended"
-  - deleted_at IS NULL (not already deprovisioned)
-  - BillingSubscription.status IN ("canceled", "failed")
-  - BillingSubscription.ends_at < (now - retention_days), OR
-  - BillingSubscription.cancellation_type == "immediate" (retention bypassed
-    when the user explicitly requested immediate teardown)
-  """
+  """Deprovision suspended graphs past retention (immediate cancels bypass it),
+  and retry teardowns stranded part-way."""
   from datetime import UTC, datetime, timedelta
 
   from sqlalchemy import or_
@@ -138,11 +113,7 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
     now = datetime.now(UTC)
     cutoff = now - timedelta(days=config.retention_days)
 
-    # Find suspended user graphs past the retention period, OR any suspended
-    # graph whose subscription was canceled immediately (user explicitly
-    # asked for fast teardown — retention window doesn't apply).
-    # Shared repositories (is_repository=True) are platform-managed and
-    # must never be auto-deprovisioned.
+    # Shared repositories must never be auto-deprovisioned.
     ready_subs = (
       db.query(BillingSubscription)
       .join(Graph, BillingSubscription.resource_id == Graph.graph_id)
@@ -163,16 +134,10 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
 
     graph_ids = [sub.resource_id for sub in ready_subs if sub.resource_id]
 
-    # Re-select graphs stranded mid-teardown: deleted_at was stamped (teardown
-    # started) but status never reached DEPROVISIONED — a run killed part-way
-    # (a Dagster daemon restart on deploy; teardown includes a full backup), a
-    # DBAPI error that failed the run, or a database-delete failure that
-    # deliberately left the registry intact (deprovision_service). The query
-    # above excludes them (deleted_at IS NULL), so nothing would ever retry
-    # them and their .lbug / registry entry / tenant rows would sit forever.
-    # Gate on deleted_at being older than a threshold so a normal in-flight
-    # teardown (minutes) is not double-run; a teardown "leaving" for over an
-    # hour is genuinely stuck. deprovision_graph is idempotent on re-run.
+    # Stranded mid-teardown: deleted_at stamped but never DEPROVISIONED (run
+    # killed, or a delete failure left the registry intact). The query above
+    # excludes them. The 1h gate avoids double-running an in-flight teardown;
+    # deprovision_graph is idempotent.
     stranded_cutoff = now - timedelta(hours=1)
     stranded = (
       db.query(Graph.graph_id)
@@ -223,29 +188,12 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
   description="Writes off subscriptions stuck mid-provisioning",
 )
 def stalled_provisioning_sensor(context: SensorEvaluationContext):
-  """Find subscriptions stuck in `provisioning` and hand them to the reaper.
+  """Hand subscriptions stuck in `provisioning` to the reaper.
 
-  Query: BillingSubscription where:
-  - status = "provisioning"
-  - updated_at < now() - STALE_PROVISIONING_MINUTES
-
-  ``provisioning`` is the state a paid subscription sits in while its resource
-  is being built. Nothing revisits it if the attempt dies, and because it is
-  neither active nor terminal it is invisible to both lifecycle sensors — so a
-  customer who paid can hold a subscription that no process will ever advance
-  or clean up. This sensor is the only thing that ends that state.
-
-  The window is the same constant the provisioning claim uses, so a row this
-  sensor considers dead is exactly a row a redelivery would have been allowed
-  to re-claim. The reaper re-checks status under its own transaction, which
-  covers the case where a retry succeeds between this read and that write.
-
-  Deliberately scoped to `provisioning` only. A stalled `upgrading` row is the
-  same shape of problem with no safe automatic disposition — the graph exists
-  and is serving reads, so writing the subscription off would tear down a
-  paying customer's graph, while forcing it back to active would claim a
-  migration succeeded when its volume may still be detached. That one wants an
-  operator, and the tier task's own timeout is what keeps it rare.
+  Nothing else ends that state if an attempt dies. The window is the claim's own
+  staleness constant, and the reaper re-checks status in its transaction.
+  Stalled `upgrading` rows are out of scope: the graph is serving, so neither
+  write-off nor forcing active is safe; that needs an operator.
   """
   from datetime import UTC, datetime, timedelta
 

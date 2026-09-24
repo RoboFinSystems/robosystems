@@ -1,11 +1,7 @@
 """Transform — Mercury transactions into captured-event payloads.
 
-The adapter thesis (``ref/adapters.md``): an adapter emits *events*
-("Stripe paid us $95.14 on the 13th"), never GL rows. Every event lands
-``captured`` in the inbox with a Tier-0 suggestion attached; posting is a
-classification the operator (or Claude over MCP) makes once and remembers.
-
-Three event types come out of a bank feed:
+An adapter emits *events*, never GL rows. Every event lands ``captured`` in
+the inbox with a Tier-0 suggestion attached. Three event types:
 
 - ``bank_transaction`` — money in or out against a third party (card spend,
   ACH, wires, payouts, interest, cashback). Fees Mercury bills directly are

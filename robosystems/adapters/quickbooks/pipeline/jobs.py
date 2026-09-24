@@ -6,8 +6,7 @@ from .extract import qb_extract
 from .load import qb_load
 from .transform import qb_transform
 
-# Full sync pipeline: extract → transform → load
-# Config (QBSyncConfig) provided at runtime via run_config
+# QBSyncConfig is supplied via run_config.
 qb_sync_job = define_asset_job(
   name="qb_sync",
   description="QuickBooks sync pipeline: extract → transform → load to graph",

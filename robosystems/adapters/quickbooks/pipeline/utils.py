@@ -12,22 +12,15 @@ from robosystems.logger import logger
 
 
 def get_pipeline_work_dir(graph_id: str) -> Path:
-  """Get a deterministic work directory for a pipeline run.
-
-  All assets in the same pipeline run share this directory so they
-  can pass data between extract → transform → load without needing
-  Dagster IO managers or metadata lookups.
-
-  The directory persists for the lifetime of the temp dir (OS-managed).
-  """
+  """Deterministic per-graph directory the extract → transform → load assets
+  share in place of a Dagster IO manager."""
   base = Path(tempfile.gettempdir()) / "qb_pipeline" / graph_id
   base.mkdir(parents=True, exist_ok=True)
   return base
 
 
-# Ledger output tables from dbt (dependency order for FK resolution).
-# `agents` is UPSERTed before transactions/events so event_blocks
-# can resolve agent_id from the row's agent_external_id.
+# dbt ledger tables in FK dependency order (agents before transactions, so
+# events can resolve agent_id).
 QB_LEDGER_TABLES = [
   "elements",
   "agents",
@@ -38,11 +31,8 @@ QB_LEDGER_TABLES = [
 ]
 
 
-# JournalReport returns multi-word tx_type strings (e.g., "Bill Payment (Check)",
-# "Sales Receipt") while the per-class header pulls produce single-word class
-# names matching the python-quickbooks entity (e.g., "BillPayment",
-# "SalesReceipt"). Normalize at parse time so the JOIN key is consistent on
-# both sides of the dbt mart. Anything not in the map passes through unchanged.
+# JournalReport's display tx_type strings → python-quickbooks class names, so
+# the dbt JOIN against the header pulls has one key. Unmapped values pass through.
 _TX_TYPE_NORMALIZATION = {
   "Bill Payment (Check)": "BillPayment",
   "Bill Payment (CreditCard)": "BillPayment",
@@ -58,34 +48,21 @@ _TX_TYPE_NORMALIZATION = {
 
 
 def _normalize_tx_type(raw_tx_type: str) -> str:
-  """Map JournalReport tx_type strings to python-quickbooks class names."""
   return _TX_TYPE_NORMALIZATION.get(raw_tx_type, raw_tx_type)
 
 
-# dbt project location (relative to repo root)
 DBT_PROJECT_DIR = Path(__file__).resolve().parents[1] / "dbt"
 
 
 def parse_journal_report(
   report: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-  """Parse a QuickBooks JournalReport into entries and lines.
+  """Parse a JournalReport (every transaction type, double-entry) into rows
+  for raw_journal_entries and raw_journal_lines.
 
-  The JournalReport API returns ALL transaction types (invoices, bills,
-  payments, purchases, deposits, journal entries, etc.) in double-entry
-  format. This is the primary data source for the accounting graph.
-
-  Report row format (ColData array):
-    [0] Date, [1] Transaction Type (.id = tx ID), [2] Num,
-    [3] Name, [4] Memo, [5] Account (.id = account ID),
-    [6] Debit amount, [7] Credit amount
-
-  Transactions are grouped by "Summary" rows that separate each
-  transaction group.
-
-  Returns:
-      Tuple of (entries, lines) matching raw_journal_entries and
-      raw_journal_lines schemas.
+  ColData: [0] Date, [1] Type (.id = tx id), [2] Num, [3] Name, [4] Memo,
+  [5] Account (.id = account id), [6] Debit, [7] Credit. "Summary" rows
+  close each transaction group.
   """
   entries: list[dict[str, Any]] = []
   lines: list[dict[str, Any]] = []
@@ -95,7 +72,6 @@ def parse_journal_report(
     logger.warning("JournalReport has no rows")
     return entries, lines
 
-  # State tracking for transaction grouping
   tx_date: str | None = None
   tx_type: str | None = None
   tx_id: str | None = None
@@ -103,7 +79,6 @@ def parse_journal_report(
   tx_total = 0.0
 
   for row in report["Rows"]["Row"]:
-    # Summary rows mark the end of a transaction group
     if "Summary" in row:
       tx_date = None
       tx_type = None
@@ -116,7 +91,7 @@ def parse_journal_report(
     if len(col_data) < 8:
       continue
 
-    # First row in a group sets the date/type/id
+    # The group's first row carries the date/type/id.
     row_date = col_data[0].get("value", "")
     if row_date and not tx_date:
       tx_date = row_date
@@ -130,10 +105,8 @@ def parse_journal_report(
     if not tx_date or not tx_type or not tx_id:
       continue
 
-    # Build a stable entry ID from type + id
     entry_id = f"{tx_type}_{tx_id}"
 
-    # Parse amounts
     debit_str = col_data[6].get("value", "")
     credit_str = col_data[7].get("value", "")
     debit_amt = float(debit_str) if debit_str else 0.0
@@ -141,13 +114,11 @@ def parse_journal_report(
     amount = debit_amt or credit_amt
     posting_type = "Debit" if debit_amt else "Credit"
 
-    tx_total += debit_amt  # Total is sum of debits (= sum of credits)
+    tx_total += debit_amt
 
-    # Account info
     account_id = col_data[5].get("id", "")
     account_name = col_data[5].get("value", "")
 
-    # Build line
     lines.append(
       {
         "journal_entry_id": entry_id,
@@ -168,7 +139,6 @@ def parse_journal_report(
     )
     tx_li_num += 1
 
-    # Build entry (once per transaction)
     if entry_id not in seen_entries:
       seen_entries.add(entry_id)
       entries.append(
@@ -176,13 +146,12 @@ def parse_journal_report(
           "Id": entry_id,
           "TxnDate": tx_date,
           "DocNumber": col_data[2].get("value", ""),
-          "TotalAmt": 0.0,  # Updated after all lines processed
+          "TotalAmt": 0.0,  # filled in below
           "PrivateNote": "",
           "Adjustment": False,
         }
       )
 
-  # Update TotalAmt for each entry (sum of debits)
   total_by_entry: dict[str, float] = {}
   for line in lines:
     eid = line["journal_entry_id"]
@@ -198,11 +167,7 @@ def parse_journal_report(
 def flatten_journal_lines(
   journal_entries: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-  """Flatten journal entry Line arrays into individual rows.
-
-  Each journal entry has a Line array with one row per debit/credit.
-  This flattens them into a flat list suitable for a DataFrame.
-  """
+  """One row per journal entry Line (debit or credit)."""
   lines = []
   for entry in journal_entries:
     entry_id = str(entry.get("Id", ""))
@@ -257,17 +222,11 @@ def _flatten_address(addr: dict[str, Any] | None) -> dict[str, Any]:
 def _flatten_party(
   raw_list: list[Any], agent_type: str, ref_keys: dict[str, str]
 ) -> list[dict[str, Any]]:
-  """Shared flattener for Customer / Vendor / Employee.
-
-  Each QB party has: Id, DisplayName/CompanyName, GivenName/FamilyName,
-  PrimaryEmailAddr.Address, PrimaryPhone.FreeFormNumber, BillAddr,
-  TaxIdentifier (sometimes called TaxIdentifier or PrimaryTaxIdentifier).
-  """
+  """Shared flattener for Customer / Vendor / Employee."""
   rows: list[dict[str, Any]] = []
   for raw in raw_list:
     data = raw.to_dict() if hasattr(raw, "to_dict") else raw
-    # QB Employees often have empty DisplayName/CompanyName but populated
-    # GivenName + FamilyName, so fall through to a synthesized name.
+    # Employees often have only GivenName + FamilyName.
     given = (data.get("GivenName") or "").strip()
     family = (data.get("FamilyName") or "").strip()
     full_name = f"{given} {family}".strip()
@@ -296,14 +255,12 @@ def _flatten_party(
         "legal_name": legal,
         "email": email,
         "phone": phone,
-        # JSON-stringify so parquet sees a plain str column. pyarrow can't
+        # JSON string so parquet sees a plain str column.
         "address": json.dumps(addr) if addr else "{}",
         "tax_id": str(tax_id) if tax_id else "",
         "is_1099_recipient": bool(data.get("Vendor1099", False)),
         "is_active": bool(data.get("Active", True)),
-        # SyncToken — monotonic per-entity version counter. Empty
-        # string when absent so the parquet stays a non-null str column;
-        # loader treats "" same as missing.
+        # QB's per-entity version counter; "" (not null) when absent.
         "sync_token": str(data.get("SyncToken", "") or ""),
       }
     )
@@ -323,19 +280,11 @@ def flatten_employees(raw: list[Any]) -> list[dict[str, Any]]:
 
 
 def _extract_linked_txns(data: dict[str, Any]) -> str:
-  """Pull LinkedTxn[] refs from a QB Payment/BillPayment's Line array.
+  """The Invoices / Bills a Payment / BillPayment settles, as a JSON string
+  of ``{txn_id, txn_type}`` (a scalar column for parquet → DuckDB → dbt).
 
-  QB Payment / BillPayment carry one or more ``Line`` entries; each line
-  has a ``LinkedTxn`` list naming the Invoice (for Payment) or Bill (for
-  BillPayment) it settles. QB's canonical TxnType strings ("Invoice",
-  "Bill") align with the composite-id prefix used everywhere else in
-  this pipeline, so the discharge handler can reconstruct the
-  originating event's ``external_id`` as ``"{TxnType}_{TxnId}"``.
-
-  Returns a JSON-stringified list of ``{txn_id, txn_type}`` dicts; empty
-  string-encoded list when nothing's linked. JSON string (not dict /
-  list) because the downstream parquet → DuckDB → dbt path needs a
-  scalar column type.
+  QB's TxnType matches this pipeline's composite-id prefix, so the discharge
+  handler rebuilds the settled event's ``external_id`` as ``{TxnType}_{TxnId}``.
   """
   refs: list[dict[str, str]] = []
   for line in data.get("Line", []) or []:
@@ -355,25 +304,12 @@ def _flatten_txn_header(
   *,
   extract_linked_txns: bool = False,
 ) -> list[dict[str, Any]]:
-  """Shared flattener for Invoice / Bill / Payment headers.
+  """One header row per QB transaction, enriching the JournalReport-derived
+  events (which stay the GL posting source) with type and counterparty.
 
-  Produces one row per QB transaction with the agent reference resolved.
-  Line items are NOT extracted here — JournalReport remains the GL
-  posting source. These headers are used to enrich JournalReport-derived
-  events with `event_type`, `event_category`, and `agent_external_id`.
-
-  ``qb_class`` matches the prefix used by ``parse_journal_report`` to build
-  composite tx ids (e.g. ``Invoice_123``).
-
-  ``extract_linked_txns`` opt-in surfaces QB's LinkedTxn[] refs into the
-  ``linked_txns`` column for header types that carry duality links
-  (Payment → Invoice, BillPayment → Bill). All other header types emit
-  an empty JSON array so the UNION ALL in transactions.sql sees a
-  consistent column shape.
-
-  Per-class field notes:
-  - ``DocNumber`` exists on Invoice and Bill but NOT on Payment (per Intuit
-    API docs); ``.get(..., "")`` returns "" for Payment, which is correct.
+  ``qb_class`` is the composite-id prefix ``parse_journal_report`` uses.
+  Headers without ``extract_linked_txns`` emit ``"[]"`` so the UNION ALL in
+  transactions.sql sees one column shape.
   """
   rows: list[dict[str, Any]] = []
   for raw in raw_list:
@@ -393,8 +329,6 @@ def _flatten_txn_header(
         "agent_external_id": str(agent_ref.get("value", "")) if agent_ref else "",
         "agent_type": agent_type,
         "linked_txns": _extract_linked_txns(data) if extract_linked_txns else "[]",
-        # Monotonic per-entity version counter — joined back to the
-        # JournalReport-derived event via tx_id LEFT JOIN in transactions.sql.
         "sync_token": str(data.get("SyncToken", "") or ""),
       }
     )
@@ -425,12 +359,8 @@ def flatten_sales_receipt_headers(raw: list[Any]) -> list[dict[str, Any]]:
   return _flatten_txn_header(raw, "SalesReceipt", "CustomerRef", "customer")
 
 
-# Maps QB Purchase.PaymentType to the tx_type strings JournalReport surfaces
-# for that payment method. Each Purchase emits multiple header rows (one
-# per candidate tx_type) so the LEFT JOIN in transactions.sql matches
-# whichever flavor the JournalReport produced for that row. JournalReport's
-# emit varies between "Expense" / "Cash Expense" depending on company
-# settings, so we cover both.
+# Purchase.PaymentType → the tx_type labels JournalReport may use for it
+# ("Expense" vs "Cash Expense" varies by company settings).
 _PURCHASE_PAYMENT_TYPE_TX_TYPES: dict[str, list[str]] = {
   "Cash": ["Cash Expense", "Expense"],
   "Check": ["Check"],
@@ -439,19 +369,10 @@ _PURCHASE_PAYMENT_TYPE_TX_TYPES: dict[str, list[str]] = {
 
 
 def flatten_purchase_headers(raw: list[Any]) -> list[dict[str, Any]]:
-  """Flatten QB Purchase entities to header rows for agent enrichment.
+  """One header row per (Purchase, candidate tx_type), so the LEFT JOIN in
+  transactions.sql matches whichever label JournalReport chose.
 
-  Purchase is QB's umbrella for cash-side expenses: regular Expense,
-  Cash Expense, Check, and Credit Card Expense. The PaymentType
-  discriminator selects which tx_type variants JournalReport surfaces
-  for the row. We emit one row per (Purchase, candidate_tx_type) pair
-  so the LEFT JOIN in transactions.sql matches by (tx_type, tx_id)
-  regardless of which flavor JournalReport chose.
-
-  ``EntityRef`` carries the counterparty. Per QB API, EntityRef.type
-  can be "Customer", "Vendor", or "Employee" — we surface whichever
-  is present rather than hardcoding a single agent_type so all three
-  flow through to ``agent_external_id`` on the captured event.
+  ``EntityRef.type`` may be a customer, vendor or employee.
   """
   rows: list[dict[str, Any]] = []
   for raw_obj in raw:
@@ -478,12 +399,7 @@ def flatten_purchase_headers(raw: list[Any]) -> list[dict[str, Any]]:
       "memo": data.get("PrivateNote", "") or "",
       "agent_external_id": str(entity_ref.get("value", "")) if entity_ref else "",
       "agent_type": agent_type,
-      # Purchases (cash-side expenses) are not settlements; LinkedTxn
-      # is empty.
       "linked_txns": "[]",
-      # Same SyncToken on every emitted variant for this Purchase
-      # (the candidate_tx_types fan-out is just for the JOIN to match
-      # JournalReport's display label — the underlying entity version is one).
       "sync_token": str(data.get("SyncToken", "") or ""),
     }
     for candidate in candidate_tx_types:
@@ -492,7 +408,7 @@ def flatten_purchase_headers(raw: list[Any]) -> list[dict[str, Any]]:
 
 
 def flatten_company_info(company_info_list: list) -> list[dict[str, Any]]:
-  """Flatten CompanyInfo objects into rows matching raw_company_info schema."""
+  """Rows matching the raw_company_info schema."""
   rows = []
   for info in company_info_list:
     data = info.to_dict() if hasattr(info, "to_dict") else info
@@ -509,15 +425,9 @@ def flatten_company_info(company_info_list: list) -> list[dict[str, Any]]:
         "CompanyAddr_CountrySubDivisionCode": addr.get("CountrySubDivisionCode", ""),
         "CompanyAddr_PostalCode": addr.get("PostalCode", ""),
         "CompanyAddr_Country": addr.get("Country", "US"),
-        # Contact info — nested in QB API responses; flatten to top-level
-        # columns so the dbt staging model can read them directly.
-        # Missing nested keys collapse to empty string so the parquet
-        # schema stays stable across tenants.
         "PrimaryPhone_FreeFormNumber": primary_phone.get("FreeFormNumber", ""),
         "WebAddr_URI": web_addr.get("URI", ""),
-        # Reporting metadata — top-level scalars in QB CompanyInfo.
-        # FiscalYearStartMonth is the month *name* (January..December);
-        # the dbt model maps start-month → end-of-fiscal-year month.
+        # A month name (January..December); dbt derives the fiscal year end.
         "FiscalYearStartMonth": data.get("FiscalYearStartMonth", ""),
       }
     )
@@ -527,7 +437,7 @@ def flatten_company_info(company_info_list: list) -> list[dict[str, Any]]:
 def flatten_journal_entries(
   journal_entries: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-  """Flatten journal entries into rows matching raw_journal_entries schema."""
+  """Rows matching the raw_journal_entries schema."""
   rows = []
   for entry in journal_entries:
     rows.append(
@@ -547,7 +457,6 @@ def filter_entries_by_date(
   journal_entries: list[dict[str, Any]],
   lookback_days: int = 60,
 ) -> list[dict[str, Any]]:
-  """Filter journal entries to only include those within the lookback window."""
   cutoff = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
   filtered = [e for e in journal_entries if (e.get("TxnDate", "") or "") >= cutoff]
   logger.info(
@@ -557,7 +466,7 @@ def filter_entries_by_date(
   return filtered
 
 
-# Expected schemas for empty DataFrames (DuckDB needs at least one column)
+# Schemas for empty DataFrames: a zero-column parquet is unreadable by DuckDB.
 _JOURNAL_ENTRIES_SCHEMA = {
   "Id": "str",
   "TxnDate": "str",
@@ -606,8 +515,6 @@ _TXN_HEADER_SCHEMA = {
   "memo": "str",
   "agent_external_id": "str",
   "agent_type": "str",
-  # JSON-stringified [{txn_id, txn_type}] list — populated only for
-  # Payment + BillPayment headers; other types emit "[]".
   "linked_txns": "str",
   "sync_token": "str",
 }
@@ -616,7 +523,7 @@ _TXN_HEADER_SCHEMA = {
 def _to_dataframe(
   data: list[dict[str, Any]], schema: dict[str, str] | None = None
 ) -> pd.DataFrame:
-  """Create a DataFrame, using schema for column types when data is empty."""
+  """``schema`` supplies the columns when ``data`` is empty."""
   if data:
     return pd.DataFrame(data)
   if schema:
@@ -640,14 +547,6 @@ def write_extract_parquet(
   sales_receipt_headers: list[dict[str, Any]] | None = None,
   purchase_headers: list[dict[str, Any]] | None = None,
 ) -> None:
-  """Write extracted QB data as parquet files.
-
-  Empty datasets are written with the expected schema so DuckDB
-  can read them (parquet files with 0 columns are invalid).
-
-  Writes party + transaction-header parquet files. Line items still
-  come from JournalReport via raw_journal_lines.
-  """
   output_dir.mkdir(parents=True, exist_ok=True)
 
   pd.DataFrame(accounts).to_parquet(output_dir / "raw_accounts.parquet", index=False)

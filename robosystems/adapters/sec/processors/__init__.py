@@ -1,18 +1,4 @@
-"""
-XBRL Graph Processing
-
-This package contains components for XBRL to graph transformation,
-processing SEC XBRL filings into LadybugDB graph format via parquet files.
-
-Main Components:
-- xbrl_graph: XBRLGraphProcessor — one filing to parquet, on xbrlkit's model and projection
-- ingestion: XBRLDuckDBGraphProcessor for DuckDB-based graph ingestion
-- schema: Schema adapter and configuration generator
-- dataframe: DataFrame initialization and management
-- parquet: Schema-aware Parquet file output
-- textblock: S3 externalization for large text values
-- ids: naming utilities (ids are minted by xbrlkit's projection)
-"""
+"""SEC XBRL filings to graph parquet, and the DuckDB → LadybugDB ingestion of it."""
 
 from .cache import (
   cache_exists,
@@ -55,38 +41,25 @@ from .textblock import TextBlockExternalizer
 from .xbrl_graph import XBRL_GRAPH_PROCESSOR_VERSION, XBRLGraphProcessor
 
 __all__ = [
-  # Constants
   "QUARTER_END_DAYS",
   "SHARED_NODE_TABLES",
   "XBRL_GRAPH_PROCESSOR_VERSION",
-  # DataFrame management
   "DataFrameManager",
   "IngestTableInfo",
-  # Staging result models
   "MaterializeResult",
-  # Parquet file output
   "ParquetWriter",
-  # Filing processing
   "ProcessedFilingResult",
-  # Metadata loading
   "SECMetadataLoader",
   "SchemaIngestConfig",
   "StagingResult",
   "TableInfo",
-  # S3 externalization
   "TextBlockExternalizer",
-  # DuckDB ingestion
   "XBRLDuckDBGraphProcessor",
-  # Graph processing
   "XBRLGraphProcessor",
-  # Schema utilities
   "XBRLSchemaAdapter",
   "XBRLSchemaConfigGenerator",
-  # Consolidation functions
   "atomic_s3_upload",
-  # Cache helpers
   "cache_exists",
-  # Naming utilities
   "camel_to_snake",
   "consolidate_parquet_from_disk",
   "consolidate_parquet_tables_by_date",

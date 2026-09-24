@@ -1,12 +1,4 @@
-"""
-Async SEC filing downloader.
-
-Downloads SEC filings discovered via EFTS to S3 with:
-- Parallel async downloads
-- Precise rate limiting
-- Skip existing files
-- Progress tracking
-"""
+"""Rate-limited async download of EFTS-discovered SEC filings to S3."""
 
 from __future__ import annotations
 
@@ -32,8 +24,6 @@ SEC_HEADERS = SEC_CONFIG["headers"]
 
 @dataclass
 class DownloadStats:
-  """Statistics from a download run."""
-
   filings_found: int = 0
   downloaded: int = 0
   skipped: int = 0
@@ -43,20 +33,12 @@ class DownloadStats:
 
 @dataclass
 class SECDownloader:
-  """
-  Async SEC filing downloader with EFTS discovery.
-
-  Example:
-      downloader = SECDownloader()
-      stats = await downloader.download_year(2024)
-      print(f"Downloaded {stats.downloaded} filings")
-  """
+  """Use as an async context manager: ``async with SECDownloader() as d: ...``."""
 
   requests_per_second: float = 5.0
   max_concurrent: int = 10
   skip_existing: bool = True
 
-  # Internal state
   _limiter: AsyncRateLimiter = field(init=False)
   _monitor: RateMonitor = field(init=False)
   _semaphore: asyncio.Semaphore = field(init=False)
@@ -88,23 +70,20 @@ class SECDownloader:
       self._session = None
 
   def _get_xbrl_zip_url(self, hit: EftsHit) -> str:
-    """Construct XBRL ZIP URL from EFTS hit."""
     cik_no_leading_zeros = str(int(hit.cik))
     accno_no_dash = hit.accession.replace("-", "")
     filename = f"{hit.accession}-xbrl.zip"
     return f"{SEC_BASE_URL}/Archives/edgar/data/{cik_no_leading_zeros}/{accno_no_dash}/{filename}"
 
   def _get_s3_key(self, hit: EftsHit, year: int) -> str:
-    """Construct S3 key for filing."""
     from robosystems.config.storage.shared import DataSourceType, get_raw_key
 
-    # Format: sec/year=2024/CIK/accession.zip
+    # sec/year=2024/CIK/accession.zip
     return get_raw_key(
       DataSourceType.SEC, f"year={year}", hit.cik, f"{hit.accession}.zip"
     )
 
   async def _file_exists(self, bucket: str, key: str) -> bool:
-    """Check if file already exists in S3."""
     try:
       self._get_s3_client().s3_client.head_object(Bucket=bucket, Key=key)
       return True
@@ -129,7 +108,6 @@ class SECDownloader:
 
     s3_key = self._get_s3_key(hit, year)
 
-    # Skip if exists
     if self.skip_existing and await self._file_exists(bucket, s3_key):
       self._stats.skipped += 1
       return True
@@ -141,7 +119,6 @@ class SECDownloader:
         try:
           async with self._session.get(url) as response:
             if response.status == 404:
-              # No XBRL ZIP available for this filing
               logger.debug(f"No XBRL ZIP for {hit.accession}")
               self._stats.skipped += 1
               return True
@@ -176,7 +153,7 @@ class SECDownloader:
           self._stats.failed += 1
           return False
 
-      # Upload to S3 (inside semaphore to limit concurrent uploads)
+      # Inside the semaphore, so it also bounds concurrent uploads.
       try:
         self._get_s3_client().s3_client.put_object(
           Bucket=bucket,
@@ -207,10 +184,8 @@ class SECDownloader:
 
     logger.info(f"Downloading {len(hits)} filings to s3://{bucket}/...")
 
-    # Create download tasks
     tasks = [self._download_filing(hit, year, bucket) for hit in hits]
 
-    # Execute with progress logging
     completed = 0
     for coro in asyncio.as_completed(tasks):
       await coro
@@ -236,23 +211,14 @@ class SECDownloader:
     ciks: list[str] | None = None,
     bucket: str | None = None,
   ) -> DownloadStats:
-    """
-    Download all filings for a year using EFTS discovery.
-
-    `form_types` defaults to 10-K, 10-Q, 20-F, 40-F, DEF 14A, S-1; `ciks`
-    narrows to specific filers.
-
-    Example:
-        async with SECDownloader() as downloader:
-            stats = await downloader.download_year(2024)
-    """
+    """Discover a year's filings via EFTS and download them; `ciks` narrows the filers."""
     from xbrlkit.edgar import EftsClient
 
     from ..config import xbrlkit_config
 
     form_types = form_types or ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"]
 
-    # Discover filings via EFTS (xbrlkit's synchronous client, in a thread)
+    # xbrlkit's EFTS client is synchronous.
     efts = EftsClient(xbrlkit_config(), per_sec=self.requests_per_second)
     hits = await asyncio.to_thread(
       efts.query_by_year, year, forms=form_types, ciks=ciks
@@ -262,7 +228,6 @@ class SECDownloader:
       logger.warning(f"No filings found for {year}")
       return DownloadStats()
 
-    # Download them
     return await self.download_filings(hits, year, bucket)
 
 
@@ -273,13 +238,6 @@ async def download_sec_filings(
   requests_per_second: float = 5.0,
   skip_existing: bool = True,
 ) -> DownloadStats:
-  """
-  Convenience function to download SEC filings for a year.
-
-  Example:
-      stats = await download_sec_filings(2024)
-      print(f"Downloaded {stats.downloaded} filings")
-  """
   async with SECDownloader(
     requests_per_second=requests_per_second,
     skip_existing=skip_existing,
@@ -294,14 +252,6 @@ def download_sec_filings_sync(
   requests_per_second: float = 5.0,
   skip_existing: bool = True,
 ) -> DownloadStats:
-  """
-  Synchronous wrapper for download_sec_filings.
-
-  Example:
-      from robosystems.adapters.sec.client.downloader import download_sec_filings_sync
-
-      stats = download_sec_filings_sync(2024)
-  """
   return asyncio.run(
     download_sec_filings(
       year=year,

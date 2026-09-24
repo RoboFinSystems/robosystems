@@ -1,9 +1,4 @@
-"""
-SEC Parquet Consolidation.
-
-This module contains functions for consolidating parquet files from multiple
-SEC filings into single files for efficient DuckDB staging.
-"""
+"""Consolidate per-filing parquet into one file per table for DuckDB staging."""
 
 from io import BytesIO
 from pathlib import Path
@@ -25,15 +20,7 @@ logger = get_logger(__name__)
 def _dedup_arrow_table(
   table: pa.Table, column: str, label: str | None = None
 ) -> pa.Table:
-  """Deduplicate an Arrow table on a column, keeping first occurrence.
-
-  Uses pure Arrow operations — no Pandas round-trip. Iterates the dedup
-  column to build a set of seen values, then filters via pa.Table.take().
-  For 250-filing batches, shared tables are typically 30-60K rows, so the
-  Python set approach is fast and memory-efficient.
-
-  `label` (usually the table_key) only appears in debug logging.
-  """
+  """Deduplicate on ``column``, keeping the first occurrence; ``label`` is for logging."""
   original_rows = table.num_rows
   identifiers = table.column(column)
 
@@ -70,24 +57,16 @@ def get_quarter_end_date(year: int, quarter: int) -> str:
 def consolidate_parquet_tables_by_date(
   results: list["ProcessedFilingResult"],
 ) -> dict[str, dict[str, bytes]]:
-  """Consolidate parquet tables from multiple filing results, grouped by filing date.
+  """Merge filing results into ``{filing_date: {table_key: parquet_bytes}}``.
 
-  Merges all tables of the same type into a single parquet blob per filing
-  date, returning `{filing_date: {table_key: parquet_bytes}}` — e.g.
-  `{"2024-01-15": {"nodes/Entity": b"...", "nodes/Fact": b"..."}}`.
-
-  Used by `robosystems/scripts/sec_pipeline.py`. The Dagster asset uses
-  disk-buffered processing instead, to bound memory at corpus scale.
+  In memory; the Dagster asset uses ``consolidate_parquet_from_disk`` to bound memory.
   """
-  # Group results by filing date, then by table type
-  # Structure: {filing_date: {table_key: [pa.Table, ...]}}
   tables_by_date_and_key: dict[str, dict[str, list[pa.Table]]] = {}
 
   for result in results:
     if not result.success:
       continue
 
-    # Use filing_date from SEC metadata, fallback to "unknown" if missing
     filing_date = result.filing_date or "unknown"
 
     if filing_date not in tables_by_date_and_key:
@@ -96,12 +75,10 @@ def consolidate_parquet_tables_by_date(
     for key, parquet_bytes in result.tables.items():
       if key not in tables_by_date_and_key[filing_date]:
         tables_by_date_and_key[filing_date][key] = []
-      # Read parquet bytes into PyArrow table
       reader = pq.ParquetFile(BytesIO(parquet_bytes))
       table = reader.read()
       tables_by_date_and_key[filing_date][key].append(table)
 
-  # Consolidate each table type for each filing date
   consolidated: dict[str, dict[str, bytes]] = {}
 
   for filing_date, tables_by_key in tables_by_date_and_key.items():
@@ -109,16 +86,12 @@ def consolidate_parquet_tables_by_date(
     for key, tables in tables_by_key.items():
       if not tables:
         continue
-      # Concatenate all tables of this type for this date
       combined = pa.concat_tables(tables, promote_options="permissive")
       del tables
 
-      # Deduplicate shared node tables on identifier column (pure Arrow, no Pandas)
-      # Reduces part file size so DuckDB has less work during staging
       if key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
         combined = _dedup_arrow_table(combined, "identifier")
 
-      # Write to bytes
       buffer = BytesIO()
       pq.write_table(combined, buffer)
       consolidated[filing_date][key] = buffer.getvalue()
@@ -130,18 +103,10 @@ def consolidate_parquet_from_disk(
   work_dir: Path,
   table_key: str,
 ) -> bytes | None:
-  """Consolidate all parquet files for a table from disk into a single bytes object.
+  """Concatenate a table's parquet files under ``work_dir/table_key`` into one blob.
 
-  Reads all parquet files for a table, concatenates them via Arrow, and returns
-  consolidated parquet bytes. With batch sizes of 250 filings, peak Arrow memory
-  stays well under limits (~325 MB for Label at ~1.3 MB/file).
-
-  For shared node tables (Element, Label, Reference, Unit, Period), deduplicates
-  on the identifier column using pure Arrow. Cross-batch deduplication is handled
-  by DuckDB during staging via GROUP BY + FIRST().
-
-  `table_key` is a path fragment like "nodes/Entity". Returns None when the
-  table has no data.
+  Shared node tables are deduplicated within the batch; cross-batch dedup
+  happens in DuckDB staging. None when the table has no data.
   """
   table_dir = work_dir / table_key
   if not table_dir.exists():
@@ -183,14 +148,7 @@ def merge_with_existing_s3(
   new_data: bytes,
   table_key: str,
 ) -> bytes:
-  """Download existing S3 parquet, merge with new data, return merged bytes.
-
-  For shared tables (Element, Label, etc.), deduplicates on identifier column.
-  For per-filing tables, simply concatenates (no duplicates possible).
-
-  `s3_key` may not exist yet; in that case `new_data` is returned unchanged.
-  """
-  # Try to download existing file
+  """Merge ``new_data`` into the parquet at ``s3_key`` (if any), deduplicating shared tables."""
   existing_data: bytes | None = None
   try:
     response = s3_client.get_object(Bucket=bucket, Key=s3_key)
@@ -201,34 +159,28 @@ def merge_with_existing_s3(
       f"{len(existing_data):,}",
     )
   except s3_client.exceptions.NoSuchKey:
-    # No existing file - return new data as-is
     logger.info("No existing S3 file at %s, creating new file", s3_key)
     return new_data
   except Exception as e:
-    # Other errors - return new data as-is (will overwrite)
+    # Unreadable existing file: the new data overwrites it.
     logger.warning("Failed to read existing S3 file %s, will overwrite: %s", s3_key, e)
     return new_data
 
-  # Read both tables
   try:
     existing_table = pq.read_table(BytesIO(existing_data))
     new_table = pq.read_table(BytesIO(new_data))
   except Exception as e:
-    # If we can't parse new data but have valid existing data, keep existing
     logger.warning(
       "Failed to parse parquet for merge at %s, keeping existing: %s", s3_key, e
     )
     return existing_data
 
-  # Concatenate tables
   combined = pa.concat_tables([existing_table, new_table], promote_options="permissive")
   pre_dedup_rows = combined.num_rows
 
-  # Deduplicate shared tables on identifier (pure Arrow, no Pandas round-trip)
   if table_key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
     combined = _dedup_arrow_table(combined, "identifier", table_key)
 
-  # Write merged result
   buffer = BytesIO()
   pq.write_table(combined, buffer)
   merged_bytes = buffer.getvalue()
@@ -251,17 +203,12 @@ def atomic_s3_upload(
   final_key: str,
   data: bytes,
 ) -> None:
-  """Upload data to S3 atomically using temp file + copy pattern.
-
-  Uploads to a temp key first, then copies to final location and deletes temp.
-  This ensures the final key either has complete data or doesn't exist.
-  """
+  """Upload to a temp key then copy over ``final_key``, so readers never see a partial object."""
   import uuid
 
   temp_key = f"{final_key}.tmp.{uuid.uuid4().hex[:8]}"
 
   try:
-    # Upload to temp location
     s3_client.put_object(
       Bucket=bucket,
       Key=temp_key,
@@ -269,18 +216,15 @@ def atomic_s3_upload(
       ContentType="application/octet-stream",
     )
 
-    # Copy to final location (atomic operation)
     s3_client.copy_object(
       Bucket=bucket,
       CopySource={"Bucket": bucket, "Key": temp_key},
       Key=final_key,
     )
 
-    # Delete temp file
     s3_client.delete_object(Bucket=bucket, Key=temp_key)
 
   except Exception:
-    # Try to clean up temp file on any error
     try:
       s3_client.delete_object(Bucket=bucket, Key=temp_key)
     except Exception as cleanup_exc:

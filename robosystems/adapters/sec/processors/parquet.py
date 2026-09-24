@@ -1,9 +1,4 @@
-"""
-XBRL Parquet File Writer
-
-Handles all Parquet file I/O operations with schema validation, type fixes,
-and standardized filename generation for XBRL graph data.
-"""
+"""Schema-aware parquet writer for the processor's DataFrames."""
 
 from pathlib import Path
 
@@ -358,17 +353,14 @@ class ParquetWriter:
         "updated_at",
       ]
       for col in string_columns:
-        # Ensure column exists (create with None if missing)
         if col not in df.columns:
           df[col] = None
-        # Convert to explicit string dtype to avoid parquet type inference issues
         if col == "tax_id":
           df[col] = df[col].apply(
             lambda x: (
               str(int(x)).zfill(9) if pd.notna(x) and str(x).strip() != "" else None
             )
           )
-        # Use pyarrow-backed string type for proper Parquet handling
         _convert_to_string_dtype(df, col)
 
     elif "Unit" in filename:

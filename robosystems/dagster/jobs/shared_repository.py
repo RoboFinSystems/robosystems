@@ -1,23 +1,9 @@
-"""Dagster jobs for shared repository fleet management.
+"""Platform-generic lifecycle jobs for the shared master and its replica fleet.
 
-Shared-infrastructure lifecycle jobs — the shared master (single writer) and its
-read-replica fleet. Adapter pipelines (SEC today) contribute the deps and drive
-these via their sensor chains; the jobs themselves are platform-generic.
-
-1. shared_master_wake_job / shared_master_sleep_job (asset jobs):
-   Bookend the master-dependent portion of a pipeline run — wake scales the
-   shared master to 1 and blocks until healthy; sleep clears scale-in protection
-   and scales it back to 0 once artifacts are published.
-
-2. shared_replicas_refresh_job (asset job):
-   Materializes the shared_replicas_refreshed asset. Used by the automated
-   pipeline sensor chain (materialize → publish → refresh) so Dagster
-   tracks the materialization in asset lineage.
-
-3. shared_repository_refresh_replicas_job (standalone op job):
-   Fire-and-forget refresh for ad-hoc operations:
-   - Forcing a refresh after a failed previous refresh
-   - Rolling out non-database changes (e.g., new AMI, code updates)
+Adapter pipelines (SEC today) drive these from their sensor chains:
+wake/sleep bookend the master-dependent part of a run, and
+shared_replicas_refresh runs in asset lineage after publish.
+shared_repository_refresh_replicas_job is the ad-hoc, fire-and-forget refresh.
 """
 
 from typing import Any
@@ -34,17 +20,10 @@ from dagster import (
 
 from robosystems.config import env
 
-# ============================================================================
-# Shared-master parking (wake before staging, sleep after publish)
-# ============================================================================
-# Bookend asset jobs that scale the shared master to 1 before the
-# master-dependent staging step and back to 0 once artifacts are published to
-# S3. Light on-demand profile — the work is a few AWS API calls plus a health
-# poll. Adapter sensors (SEC today) trigger these and tag the runs with their
-# own pipeline/mode for chain lineage; the jobs themselves are platform-generic.
+# Light on-demand profile: a few AWS API calls plus a health poll. The
+# triggering sensor adds its own pipeline/mode/phase tags per run.
 _MASTER_PARKING_TAGS = {
   "pipeline": "shared",
-  # phase is set per-run by the triggering sensor (master_wake / master_sleep)
   "ecs/cpu": "512",
   "ecs/memory": "2048",
   "ecs/ephemeral_storage": "21",
@@ -70,9 +49,7 @@ shared_master_sleep_job = define_asset_job(
 )
 
 
-# Asset job: materializes shared_replicas_refreshed asset.
-# Uses AssetSelection.key() because the asset is built dynamically by
-# build_shared_replicas_refreshed() in definitions.py with adapter-specific deps.
+# Selected by key: the asset is built in definitions.py with adapter deps.
 shared_replicas_refresh_job = define_asset_job(
   name="shared_replicas_refresh",
   description="Refresh shared replica fleet (materializes shared_replicas_refreshed asset).",
@@ -80,11 +57,10 @@ shared_replicas_refresh_job = define_asset_job(
   tags={
     "pipeline": "shared",
     "phase": "replica_refresh",
-    # Light profile: just AWS API calls to start ASG refresh + polling
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid Spot interruptions during long polling
+    # On-demand: Spot interruptions would kill the long poll.
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -101,8 +77,7 @@ class ReplicaConfig(Config):
   min_healthy_percentage: int = 100
   # 200 = allow temporarily doubling fleet during refresh
   max_healthy_percentage: int = 200
-  # Set to 900s to match CloudFormation HealthCheckGracePeriod (15 min)
-  # Large database downloads from S3 need significant warmup time
+  # Matches the CloudFormation HealthCheckGracePeriod; S3 downloads are slow.
   instance_warmup_seconds: int = 900
 
 
@@ -110,19 +85,15 @@ class ReplicaConfig(Config):
 def refresh_replica_instances(
   context: OpExecutionContext, config: ReplicaConfig
 ) -> dict[str, Any]:
-  """Trigger rolling refresh of replica ASG.
+  """Start a rolling replica ASG refresh so instances pick up the new S3 database.
 
-  Starts an instance refresh that gradually replaces instances
-  so they pick up the new S3 database via ATTACH.
-
-  Checks for existing in-progress refresh and skips if one is active.
+  Skips if a refresh is already active.
   """
   autoscaling = boto3.client("autoscaling", region_name=env.AWS_REGION)
 
   asg_name = f"robosystems-shared-replicas-{env.ENVIRONMENT}-asg"
   context.log.info(f"Checking ASG: {asg_name}")
 
-  # Check if ASG exists and has instances
   response = autoscaling.describe_auto_scaling_groups(AutoScalingGroupNames=[asg_name])
 
   if not response["AutoScalingGroups"]:
@@ -145,7 +116,6 @@ def refresh_replica_instances(
       "desired_capacity": 0,
     }
 
-  # Check for existing in-progress instance refresh
   context.log.info("Checking for existing instance refresh...")
   refresh_response = autoscaling.describe_instance_refreshes(
     AutoScalingGroupName=asg_name,
@@ -157,7 +127,6 @@ def refresh_replica_instances(
     latest_refresh = existing_refreshes[0]
     refresh_status = latest_refresh["Status"]
 
-    # Active statuses that block new refresh
     if refresh_status in ("Pending", "InProgress", "Cancelling"):
       existing_id = latest_refresh["InstanceRefreshId"]
       context.log.warning(
@@ -175,7 +144,6 @@ def refresh_replica_instances(
 
   context.log.info(f"ASG has {desired_capacity} instances - starting refresh")
 
-  # Trigger rolling refresh
   refresh_response = autoscaling.start_instance_refresh(
     AutoScalingGroupName=asg_name,
     Strategy="Rolling",
@@ -204,7 +172,7 @@ def refresh_replica_instances(
   tags={
     "dagster/priority": "-1",
     "dagster/max_retries": 3,
-    # Critical infrastructure - use on-demand to avoid Spot interruptions
+    # On-demand: critical infrastructure.
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -213,14 +181,8 @@ def refresh_replica_instances(
   }
 )
 def shared_repository_refresh_replicas_job():
-  """Refresh replicas with current S3 database.
+  """Refresh replicas from the current S3 database, outside the publish lineage.
 
-  Useful for:
-  - Forcing a refresh without publishing a new database
-  - Recovering from failed refresh
-  - Rolling out non-database changes (e.g., new AMI, code updates)
-
-  The normal publish + refresh flow is handled by asset lineage:
-    sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
+  For forcing a refresh, recovering from a failed one, or rolling out AMI/code changes.
   """
   refresh_replica_instances()

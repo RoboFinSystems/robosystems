@@ -1,18 +1,8 @@
-"""Dagster sensor that turns every failed run into a CloudWatch metric.
+"""Sensor that publishes a ``RunFailure`` CloudWatch point for every failed run.
 
-Every customer-visible failure that is not "the API is down" runs through
-Dagster: QuickBooks sync, materialization, backups, invoicing, the SEC
-pipeline. Before this sensor a failed run was a red row in the Dagster UI
-and nothing else — a stage that failed two nights running went unnoticed
-for four days because nothing watched for it.
-
-One ``RunFailure`` data point per failed run goes to the
-``RoboSystems/Dagster/{environment}`` namespace the stack's other detectors
-already use, and ``DagsterRunFailureAlarm`` in ``cloudformation/dagster.yaml``
-pages on any non-zero sum. A second copy of the point carries a ``Job``
-dimension so the console can split failures by job; the alarm reads the
-dimensionless copy, because CloudWatch never aggregates a custom metric
-across dimensions.
+``DagsterRunFailureAlarm`` (cloudformation/dagster.yaml) pages on the
+dimensionless copy; a second copy carries a ``Job`` dimension for triage,
+because CloudWatch never aggregates a custom metric across dimensions.
 """
 
 from typing import Any
@@ -83,7 +73,6 @@ def run_failure_metric_sensor(context: RunStatusSensorContext) -> None:
   try:
     publish_run_failure(job_name)
   except Exception as e:
-    # The alarm treats missing data as healthy, so a publish that fails is
-    # silent downstream and the log line above is the only trace. Raising
-    # here would only add the publisher's failure to the one being reported.
+    # The alarm treats missing data as healthy, so the log line above is the
+    # only trace; raising would just add a second failure.
     logger.warning(f"Failed to publish {METRIC_NAME} for {job_name}: {e}")

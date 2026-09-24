@@ -1,13 +1,6 @@
-"""
-LadybugDB version migration service.
-
-Handles export and import of all databases on an instance for
-safe version upgrades. Uses EXPORT DATABASE / IMPORT DATABASE
-commands with Parquet format.
-
-The export runs on the old version (pre-deploy), the import runs
-on the new version (post-deploy). EBS volume persists the exported
-Parquet files across container swaps.
+"""LadybugDB engine-upgrade migration: EXPORT every database to Parquet on the
+old version (pre-deploy), IMPORT on the new one (post-deploy). The EBS volume
+carries the exports across the container swap.
 """
 
 import json
@@ -103,15 +96,10 @@ class MigrationService:
   def _checkpoint_database(self, graph_id: str) -> None:
     """Drain the WAL into the .lbug file, through the pool's single-writer path.
 
-    Must run before EXPORT. A WAL tail written by the old engine cannot be
-    replayed by the new one after an upgrade, which fails every read until the
-    import rebuilds the database; it also leaves the raw .lbug system backup
-    incomplete, since that excludes the .wal. The explicit CHECKPOINT is
-    needed because auto_checkpoint only fires past a size threshold (512 MB
-    for regular graphs), so small graphs never drain on their own.
-
-    Best-effort — the caller logs and continues on failure, since the Parquet
-    export captures committed WAL data regardless.
+    Must run before EXPORT: the new engine cannot replay an old WAL tail, and
+    the raw .lbug system backup excludes the .wal. auto_checkpoint only fires
+    past a size threshold (512 MB), so small graphs never drain on their own.
+    Best-effort — the Parquet export captures committed WAL data regardless.
     """
     from robosystems.graph_api.core.ladybug import get_ladybug_service
 
@@ -129,10 +117,8 @@ class MigrationService:
   ) -> str:
     """Upload the .lbug file to S3 as a pre-migration system backup.
 
-    ``bucket`` is supplied by the caller, as it is for the backup and restore
-    endpoints: the writer container does not set ``USER_DATA_BUCKET``, so
-    resolving it here yields the default and 404s on upload. Returns the S3
-    key.
+    ``bucket`` comes from the caller because the writer container does not
+    set ``USER_DATA_BUCKET``. Returns the S3 key.
     """
     timestamp = datetime.now(UTC)
     s3_key = get_backup_key(graph_id, "system", timestamp, extension=".lbug")
@@ -235,13 +221,9 @@ class MigrationService:
   ) -> None:
     """Export every database on this instance to Parquet, for a version upgrade.
 
-    Checks disk space, discovers the ``.lbug`` files, EXPORTs each to
-    ``exports/{graph_id}/``, and writes the ``migration.json`` manifest that
-    :meth:`import_all_databases` reads on the new engine version. Runs on the
-    OLD version, before the deploy; the EBS volume carries the exports across
-    the container swap.
-
-    Guarded by a process-wide flag — only one export runs at a time.
+    EXPORTs each ``.lbug`` to ``exports/{graph_id}/`` and writes the
+    ``migration.json`` manifest :meth:`import_all_databases` reads. Only one
+    export runs at a time.
     """
     if not _try_start_export():
       await migration_task_manager.fail_task(task_id, "Export already in progress")

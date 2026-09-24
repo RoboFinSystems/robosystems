@@ -1,8 +1,4 @@
-"""Graph construction utilities for SEC knowledge artifacts.
-
-Builds icebug graphs from DuckDB staging data using zero-copy
-Arrow → CSR ingestion, handling node indexing (qname <-> integer ID mapping).
-"""
+"""Build icebug (networkit) element graphs, with qname ↔ node-id mapping."""
 
 from __future__ import annotations
 
@@ -15,24 +11,16 @@ import pyarrow as pa
 
 @dataclass
 class ElementGraph:
-  """An icebug graph with element-to-index mapping.
-
-  Attributes:
-      graph: The icebug directed weighted graph (CSR-backed).
-      elements: Ordered list of element qnames (index = node ID).
-      element_to_idx: Mapping from qname to node index.
-  """
+  """A directed weighted CSR graph; ``elements[i]`` is node i's qname."""
 
   graph: nk.Graph
   elements: list[str] = field(default_factory=list)
   element_to_idx: dict[str, int] = field(default_factory=dict)
 
   def get_qname(self, node_id: int) -> str:
-    """Get the qname for a node index."""
     return self.elements[node_id]
 
   def get_idx(self, qname: str) -> int | None:
-    """Get the node index for a qname, or None if not found."""
     return self.element_to_idx.get(qname)
 
   @property
@@ -47,20 +35,11 @@ class ElementGraph:
 def build_element_graph_from_edges(
   edges: list[tuple[str, str, float, str]],
 ) -> ElementGraph:
-  """Build a directed weighted graph from pre-deduplicated edge tuples.
+  """Graph from deduplicated (parent, child, weight, association_type) tuples.
 
-  Calculation arcs use their XBRL weight. Presentation arcs get a
-  default weight of 0.5 and are only added for edges not already
-  present from calculation arcs.
-
-  Args:
-      edges: List of (parent_qname, child_qname, weight, association_type) tuples,
-             already deduplicated by DuckDB SQL.
-
-  Returns:
-      ElementGraph with the constructed graph and index mappings.
+  Calculation arcs keep |weight|; presentation arcs get 0.5 and only fill
+  pairs no calculation arc covers.
   """
-  # Collect unique qnames and assign stable integer IDs
   qname_set: set[str] = set()
   for parent_qname, child_qname, _weight, _assoc_type in edges:
     qname_set.add(parent_qname)
@@ -74,7 +53,6 @@ def build_element_graph_from_edges(
     graph = nk.Graph(0, weighted=True, directed=True)
     return ElementGraph(graph=graph, elements=[], element_to_idx={})
 
-  # Build COO edge list: calculation arcs first, then presentation supplements
   src_list: list[int] = []
   dst_list: list[int] = []
   wt_list: list[float] = []
@@ -110,19 +88,7 @@ def build_element_graph_from_arrow(
   nodes: pa.Array,
   edges: pa.Table,
 ) -> ElementGraph:
-  """Build a directed weighted graph from Arrow arrays via zero-copy CSR.
-
-  Uses icebug's Graph.fromCSR() for zero-copy Arrow ingestion,
-  avoiding per-element Python loops entirely.
-
-  Args:
-      nodes: Arrow string array of qnames, ordered by node ID.
-      edges: Arrow table with columns (src: int64, dst: int64, weight: float64),
-             already deduped with calc-first priority and sorted by (src, dst).
-
-  Returns:
-      ElementGraph with the constructed graph and index mappings.
-  """
+  """Graph from ``ArcExtractor.extract_graph_arrow`` output, with no per-edge Python."""
   elements = nodes.to_pylist()
   element_to_idx = {q: i for i, q in enumerate(elements)}
   n = len(elements)
@@ -145,11 +111,7 @@ def _build_csr_graph(
   dst: list[int] | np.ndarray,
   weights: list[float] | np.ndarray,
 ) -> nk.Graph:
-  """Build an icebug CSR graph from COO edge data.
-
-  Converts COO (src, dst, weight) arrays to CSR format and
-  constructs the graph via Graph.fromCSR() with Arrow zero-copy.
-  """
+  """CSR graph (outgoing and incoming) from COO edge arrays."""
   src_np = np.asarray(src, dtype=np.int64)
   dst_np = np.asarray(dst, dtype=np.int64)
   wt_np = np.asarray(weights, dtype=np.float64)
@@ -157,24 +119,20 @@ def _build_csr_graph(
   if len(src_np) == 0:
     return nk.Graph(n, weighted=True, directed=True)
 
-  # Sort by (src, dst) for outgoing CSR
   order = np.lexsort((dst_np, src_np))
   out_src = src_np[order]
   out_dst = dst_np[order]
   out_wt = wt_np[order]
 
-  # Outgoing CSR indptr
   out_indptr = np.zeros(n + 1, dtype=np.int64)
   np.add.at(out_indptr[1:], out_src, 1)
   np.cumsum(out_indptr, out=out_indptr)
 
-  # Sort by (dst, src) for incoming CSR
   order_in = np.lexsort((src_np, dst_np))
-  in_dst = dst_np[order_in]  # node receiving the edge
-  in_src = src_np[order_in]  # node sending the edge
+  in_dst = dst_np[order_in]
+  in_src = src_np[order_in]
   in_wt = wt_np[order_in]
 
-  # Incoming CSR indptr
   in_indptr = np.zeros(n + 1, dtype=np.int64)
   np.add.at(in_indptr[1:], in_dst, 1)
   np.cumsum(in_indptr, out=in_indptr)

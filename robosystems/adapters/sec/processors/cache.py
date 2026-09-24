@@ -1,17 +1,8 @@
-"""S3 zip cache for spot instance resilience.
+"""Per-filing S3 zip cache of parquet outputs, so a spot-interrupted run resumes
+without reprocessing.
 
-After processing each filing, its parquet outputs are zipped and uploaded
-to an S3 cache directory. On restart (after spot interruption), cached
-results are downloaded and extracted instead of reprocessing.
-
-S3 PUTs are atomic for single-part uploads — either the entire zip exists
-or it doesn't. No marker file needed for integrity.
-
-Cache key format:
-    sec/cache/{partition_date}/{source_file_id}.zip
-
-The zip contains the filing's parquet files preserving the directory
-structure (e.g., nodes/Entity.parquet, relationships/FACT_HAS_ENTITY.parquet).
+A single-part PUT is atomic, so an entry is complete or absent; no marker file.
+Keys are ``sec/cache/{partition_date}/{source_file_id}.zip``.
 """
 
 import io

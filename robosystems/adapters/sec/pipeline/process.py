@@ -1,8 +1,4 @@
-"""SEC Processing Asset.
-
-This module contains the sec_processed_filings asset for processing
-SEC XBRL filings into consolidated parquet files.
-"""
+"""sec_processed_filings: one batch of SEC XBRL filings to parquet part files."""
 
 import gc
 import signal
@@ -50,7 +46,6 @@ from .configs import SECProcessConfig, sec_quarter_partitions
     "stage": "process",
     "mode": "full",
   },
-  # Run all partitions sequentially in a single run to prevent memory exhaustion
   backfill_policy=BackfillPolicy.single_run(),
 )
 def sec_processed_filings(
@@ -59,33 +54,12 @@ def sec_processed_filings(
   s3: S3Resource,
   db: DatabaseResource,
 ) -> MaterializeResult:
-  """Process one batch of SEC filings, flush to S3, then exit.
+  """Process up to batch_size pending filings, write one part file per table,
+  mark them success, and exit; the sensor re-triggers while files remain.
 
-  Processes up to batch_size pending SourceFiles (default 250), writes
-  one part file per table to S3, marks them success, and exits. The sensor
-  re-triggers if more pending files remain, enabling natural memory release
-  between runs.
-
-  Spot Resilience:
-  - Each filing's results are cached to S3 as a zip immediately after processing
-  - On restart, cached results are restored from S3 (skips reprocessing)
-  - SIGTERM handler stops the loop; best-effort flush follows (if the 2-minute
-    spot window allows, filings are consolidated and marked success — if not,
-    the cache covers them on the next run)
-
-  Memory Management:
-  - One batch per run (default 250 filings), then container exits
-  - Small batch size keeps Arrow concat under ~325 MB peak (Label at ~1.3 MB/file)
-  - One part file per table per batch (no chunking needed)
-  - Shared tables (Element, Label, etc.) deduped within batch via pure Arrow
-  - DuckDB handles final cross-batch dedup during staging
-  - del + gc.collect() after each table upload to force memory release
-
-  Output Structure (part files):
-    s3://bucket/sec/processed/filed=2024-Q1/nodes/Entity/part_a1b2c3d4e5f6.parquet
-    - One part file per table per batch, multiple batches per quarter
-    - UUID naming prevents collisions across runs
-    - DuckDB reads both old format (TABLE.parquet) and new (TABLE/*.parquet)
+  Each filing's output is cached to S3 as it completes, so a Spot restart
+  restores instead of reprocessing. SIGTERM stops the loop and a best-effort
+  flush follows; whatever it misses, the cache covers next run.
   """
   import shutil
   import tempfile
@@ -94,26 +68,22 @@ def sec_processed_filings(
   raw_bucket = env.SHARED_RAW_BUCKET
   processed_bucket = env.SHARED_PROCESSED_BUCKET
 
-  # Parse partition key: "2024-Q1" -> year=2024, quarter=1
   partition_key = context.partition_key
   year, quarter_str = partition_key.split("-Q")
   year = int(year)
   quarter = int(quarter_str)
 
-  # Use quarterly partitions (e.g., "2024-Q1") - aligns Dagster partition with S3 partition
-  partition_date = partition_key  # e.g., "2024-Q1"
+  partition_date = partition_key  # also the S3 filed= partition
 
   context.log.info(
     f"Processing SEC filings for {partition_key} (quarterly partition: filed={partition_date})"
   )
 
-  # Query pending SourceFiles for this quarter
-  # Partition keys are stored as "YYYY-QN_cik_accession" format
+  # SourceFile.partition_key is "YYYY-QN_cik_accession".
   quarter_prefix = f"{year}-Q{quarter}_"
 
-  # Reset any stale "processing" files back to "pending" before starting.
-  # This handles recovery from crashed runs. Safe because the sensor ensures
-  # only one worker runs per partition at a time.
+  # Recover files a crashed run left "processing". Safe only because the
+  # sensor runs one worker per quarter.
   with db.get_session() as session:
     stale_processing = (
       session.query(SourceFile)
@@ -135,8 +105,6 @@ def sec_processed_filings(
       session.commit()
 
   with db.get_session() as session:
-    # Query pending files, ordered by discovery time, limited to batch_size.
-    # Sensor will re-trigger if more pending files exist after this batch.
     pending_files = (
       session.query(SourceFile)
       .filter(
@@ -151,7 +119,6 @@ def sec_processed_filings(
       .all()
     )
 
-    # Extract data while session is open (avoid DetachedInstanceError)
     files_to_process = [
       {
         "id": sf.id,
@@ -183,15 +150,12 @@ def sec_processed_filings(
     f"(batch_size={config.batch_size})"
   )
 
-  # Create work directory for disk-buffered processing
   work_dir = Path(tempfile.mkdtemp(prefix=f"sec_processing_{year}Q{quarter}_"))
   context.log.info(f"Work directory: {work_dir}")
 
-  # Create metadata loader for fetching SEC metadata
   metadata_loader = SECMetadataLoader()
 
-  # Create shared enricher — reuses fastembed model + taxonomies across all filings
-  # instead of loading ~130MB model per filing
+  # One enricher for the batch, not a ~130 MB model load per filing.
   from robosystems.adapters.sec.config import XBRL_SEMANTIC_ENRICHMENT
 
   shared_enricher = None
@@ -201,9 +165,8 @@ def sec_processed_filings(
     shared_enricher = SemanticEnricher()
     context.log.info("Created shared SemanticEnricher for batch processing")
 
-  # SIGTERM handler for spot instance resilience.
-  # With the S3 cache, every completed filing is already safe — SIGTERM just
-  # stops the loop so the current filing can finish and be cached before exit.
+  # Completed filings are already cached, so SIGTERM only stops the loop after
+  # the current filing.
   shutting_down = False
 
   def handle_sigterm(signum, frame):
@@ -217,36 +180,29 @@ def sec_processed_filings(
   original_sigterm = signal.getsignal(signal.SIGTERM)
   signal.signal(signal.SIGTERM, handle_sigterm)
 
-  # Track processing state
   succeeded = 0
   failed = 0
   skipped = 0
   cache_hits = 0
   failed_ids: list[str] = []
-  pending_flush: list[dict] = []  # [{...file_info}, ...]
-  flushed_cache_keys: list[str] = []  # Cache keys to delete after successful flush
+  pending_flush: list[dict] = []
+  flushed_cache_keys: list[str] = []  # deleted once the flush succeeds
   total_flushed = 0
-  tables_uploaded = 0  # Track number of table files uploaded
+  tables_uploaded = 0
 
   def flush_to_s3() -> int:
-    """Consolidate disk buffer into one part file per table on S3, mark success.
+    """Upload one part file per table from the disk buffer, then mark success.
 
-    For each table: concat all parquets in the batch (Arrow) -> upload as
-    a single part file. Shared tables deduped within the batch via pure Arrow.
-
-    Crash resilience: If the job crashes after S3 upload but before mark_success,
-    orphan part files remain on S3 and filings stay "pending". On re-run, new
-    part files are written alongside orphans (UUIDs prevent overwrites). This
-    creates duplicate rows across part files, but DuckDB handles dedup during
-    staging via GROUP BY + FIRST() with spill-to-disk.
+    A crash between upload and mark_success leaves orphan part files and the
+    filings pending; the re-run writes new UUID-named parts beside them, and
+    staging dedups the duplicate rows.
     """
     nonlocal tables_uploaded, total_flushed
 
     if not pending_flush:
       return 0
 
-    # Find all table directories in work_dir
-    # Disk structure: work_dir/nodes/Entity/...
+    # work_dir/<nodes|relationships>/<Table>/<source_file_id>.parquet
     table_keys = set()
     for subdir in work_dir.rglob("*.parquet"):
       rel_path = subdir.relative_to(work_dir)
@@ -282,7 +238,6 @@ def sec_processed_filings(
       del consolidated
       gc.collect()
 
-    # Mark all pending filings as success (data is now safely in S3)
     with db.get_session() as session:
       for file_info in pending_flush:
         sf = SourceFile.get_by_storage_key(file_info["storage_key"], session)
@@ -295,7 +250,6 @@ def sec_processed_filings(
       f"Flushed {flushed_count} filings, {tables_uploaded} table files uploaded"
     )
 
-    # Clean up S3 cache entries for flushed filings
     if config.enable_cache and flushed_cache_keys:
       try:
         deleted = delete_cache_keys(s3.client, processed_bucket, flushed_cache_keys)
@@ -304,7 +258,6 @@ def sec_processed_filings(
         context.log.warning(f"Cache cleanup failed (non-fatal): {e}")
       flushed_cache_keys.clear()
 
-    # Clear disk buffer and pending list
     for item in work_dir.iterdir():
       if item.is_dir():
         shutil.rmtree(item)
@@ -314,10 +267,8 @@ def sec_processed_filings(
 
     return flushed_count
 
-  # Process each filing
   try:
     for i, file_info in enumerate(files_to_process):
-      # Check for SIGTERM before starting a new filing
       if shutting_down:
         context.log.warning(
           f"Shutting down after SIGTERM — {i}/{len(files_to_process)} filings processed, "
@@ -329,7 +280,6 @@ def sec_processed_filings(
       storage_key = file_info["storage_key"]
       file_partition_key = file_info["partition_key"]
 
-      # Check S3 cache for previously processed results (spot resilience)
       if config.enable_cache:
         cache_key = get_cache_key(DataSourceType.SEC, partition_date, source_file_id)
         try:
@@ -340,7 +290,6 @@ def sec_processed_filings(
             )
             filing_duration = time_module.time() - filing_start
 
-            # Mark as processing then track for flush
             with db.get_session() as session:
               sf = SourceFile.get_by_storage_key(storage_key, session)
               if sf:
@@ -361,19 +310,16 @@ def sec_processed_filings(
             f"{file_partition_key}, reprocessing: {e}"
           )
 
-      # Log filing start
       context.log.info(
         f"[{i + 1}/{len(files_to_process)}] Processing: {file_partition_key}"
       )
       filing_start = time_module.time()
 
-      # Mark as processing
       with db.get_session() as session:
         sf = SourceFile.get_by_storage_key(storage_key, session)
         if sf:
           sf.mark_processing(session)
 
-      # Process filing
       result = process_single_filing_to_memory(
         storage_key=storage_key,
         partition_key=file_partition_key,
@@ -387,7 +333,6 @@ def sec_processed_filings(
 
       filing_duration = time_module.time() - filing_start
 
-      # Handle skipped filings (form type filter)
       if result.skipped_reason:
         with db.get_session() as session:
           sf = SourceFile.get_by_storage_key(storage_key, session)
@@ -403,15 +348,13 @@ def sec_processed_filings(
         continue
 
       if result.success:
-        # Write parquet files to disk (not memory accumulation)
-        # Disk structure: work_dir/nodes/Entity/...
+        # Buffered on disk, not in memory.
         for table_key, parquet_bytes in result.tables.items():
           table_dir = work_dir / table_key
           table_dir.mkdir(parents=True, exist_ok=True)
           parquet_path = table_dir / f"{source_file_id}.parquet"
           parquet_path.write_bytes(parquet_bytes)
 
-        # Cache to S3 for spot resilience (single zip, atomic PUT)
         if config.enable_cache:
           cache_key = get_cache_key(DataSourceType.SEC, partition_date, source_file_id)
           try:
@@ -426,7 +369,6 @@ def sec_processed_filings(
         succeeded += 1
         pending_flush.append(file_info)
 
-        # Log success with table counts
         table_summary = ", ".join(
           f"{k.split('/')[-1]}:{len(v) // 1024}KB"
           for k, v in sorted(result.tables.items())[:5]
@@ -438,7 +380,6 @@ def sec_processed_filings(
           f"({filing_duration:.1f}s, {len(result.tables)} tables: {table_summary})"
         )
       else:
-        # Mark failed immediately
         with db.get_session() as session:
           sf = SourceFile.get_by_storage_key(storage_key, session)
           if sf:
@@ -453,7 +394,6 @@ def sec_processed_filings(
           context.log.error(f"Stopping on error: {result.error}")
           break
 
-      # Batch progress summary every 100 filings
       if (i + 1) % 100 == 0:
         context.log.info(
           f"Progress: {i + 1}/{len(files_to_process)} processed, "
@@ -461,25 +401,20 @@ def sec_processed_filings(
           f"{cache_hits} cache hits"
         )
 
-    # Release heavy objects before flush to reclaim memory. SemanticEnricher
-    # holds the fastembed model (~130 MB) + taxonomy data, and every filing in
-    # this batch has already been processed by this point.
+    # Free the enricher's model and taxonomies before the flush's Arrow concat.
     if shared_enricher is not None:
       del shared_enricher
       context.log.info("Released SemanticEnricher before flush")
     del metadata_loader
     gc.collect()
 
-    # Flush all processed filings to S3
     if pending_flush:
       context.log.info(f"Flushing {len(pending_flush)} filings to S3...")
       flush_to_s3()
 
   finally:
-    # Restore original SIGTERM handler
     signal.signal(signal.SIGTERM, original_sigterm)
 
-    # Cleanup work directory
     if work_dir.exists():
       shutil.rmtree(work_dir)
       context.log.debug(f"Cleaned up work directory: {work_dir}")
@@ -491,7 +426,6 @@ def sec_processed_filings(
     + (" (terminated by SIGTERM)" if shutting_down else "")
   )
 
-  # Check if more pending files exist (sensor will trigger another run)
   with db.get_session() as session:
     remaining_count = (
       session.query(SourceFile)
@@ -522,7 +456,7 @@ def sec_processed_filings(
       "filings_failed": failed,
       "filings_skipped": skipped,
       "filings_flushed": total_flushed,
-      "failed_source_file_ids": failed_ids[:20],  # Limit to first 20
+      "failed_source_file_ids": failed_ids[:20],
       "cache_hits": cache_hits,
       "sigterm_received": shutting_down,
       "tables_uploaded": tables_uploaded,

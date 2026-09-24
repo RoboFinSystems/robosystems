@@ -1,8 +1,4 @@
-"""QuickBooks Load Asset.
-
-Reads OLTP-shaped tables from the dbt DuckDB output and inserts
-them into the extensions PostgreSQL database via OLTPLoader.
-"""
+"""QuickBooks load asset: dbt DuckDB output → extensions PostgreSQL via OLTPLoader."""
 
 from datetime import UTC, datetime
 
@@ -26,23 +22,8 @@ def qb_load(
   context: AssetExecutionContext,
   config: QBSyncConfig,
 ) -> MaterializeResult:
-  """Load QB data from dbt DuckDB into extensions OLTP tables.
-
-  Ingest steps:
-  1. Provisions the tenant schema if needed
-  2. Inserts/updates structural rows (elements, dimensions)
-  3. Captures each QB transaction as an event_block row with
-     ``status='captured'`` — no GL writes happen here. Handlers fire
-     when the user approves the event in the inbox, which is when
-     transactions/entries/line_items rows actually get created.
-
-  Releases the per-connection sync lock on completion (or on exception)
-  so the next sync can fire immediately without waiting for the 30-min TTL.
-
-  Returns:
-      MaterializeResult with element/dimension/event counts and
-      data-quality drop counters.
-  """
+  """Always releases the per-connection sync lock, so the next sync need not
+  wait out its TTL."""
 
   try:
     return _run_qb_load(context, config)
@@ -61,25 +42,9 @@ def _run_qb_load(
 
   context.log.info(f"Loading QB data for graph={config.graph_id}, duckdb={duckdb_path}")
 
-  # CDC watermark candidate. Captured at the START of
-  # load, NOT at extract start, by design: extract has already run by
-  # the time we get here, so any QB-side row touched between extract's
-  # finish and this moment isn't in this sync. Setting watermark =
-  # load-start means the next sync's `changedSince` will re-fetch
-  # anything that landed in that window — which the SyncToken gate
-  # then dedups as a no-op. The alternative (extract-start) would
-  # potentially skip late-landing rows; with the gate, slightly
-  # over-fetching is the safer trade. Advanced only after a successful
-  # load below — a raised exception or fatal `result.errors` leaves
-  # the prior watermark in place so the next sync replays from there.
-  #
-  # NOTE on `full_rebuild`: this advance fires unconditionally on a
-  # successful load, including full-rebuild syncs. That's intentional —
-  # a full rebuild definitively covers all history, so the next
-  # incremental should pick up from the rebuild's start, not from
-  # whatever stale watermark existed before. If you ever need the
-  # opposite (full rebuild preserves prior watermark), gate this call
-  # on `config.full_rebuild` here.
+  # CDC watermark candidate, taken after extract: the next sync re-fetches
+  # anything touched since, and the SyncToken gate dedups the overlap.
+  # Advanced only on success, full rebuilds included.
   sync_started_at = datetime.now(UTC)
 
   loader = OLTPLoader()
@@ -90,44 +55,22 @@ def _run_qb_load(
       connection_id=config.connection_id,
       duckdb_path=duckdb_path,
       created_by=config.user_id,
-      # Only operator-explicit full rebuilds trigger the
-      # pre-sync wipe. Incremental window syncs (since_date set) and
-      # default lookback (neither set) skip the wipe entirely and rely
-      # on the UPSERT path.
       full_rebuild=config.full_rebuild,
       since_date=config.since_date or None,
     )
   except Exception as exc:
-    # Legibility on failure: the operator surface that triggered this
-    # sync must be able to see it failed without CloudWatch. Recorded
-    # without advancing last_sync (the close gate reads that).
+    # last_sync is not advanced: the close gate reads it.
     _record_failed_sync_result(context, config, exc)
     raise
 
-  # Update last sync timestamp + persist the outcome summary so the operator
-  # surface can render it without reading worker logs.
   _update_last_sync(context, config, _sync_result_summary(config, result))
 
-  # Advance CDC watermark only after load success.
-  # `result.errors` carries non-fatal load warnings already; the truly
-  # fatal path raises before reaching here (and the watermark stays
-  # unchanged, so the next sync re-attempts from the prior watermark).
   _advance_cdc_watermark(context, config, sync_started_at)
 
-  # Bootstrap fiscal calendar on first sync. Idempotent: skips when the
-  # calendar is already initialized (re-sync). Without this, a fresh QB
-  # tenant lands with `calendar_not_initialized` and the entire close-period
-  # UX is unreachable until the user manually calls `initialize-ledger`.
   _bootstrap_fiscal_calendar_if_needed(context, config)
 
-  # Trigger auto-map of CoA → reporting concepts on first sync. Idempotent:
-  # skips when the mapping structure already has associations (re-sync, or
-  # user has hand-curated). Without this, a fresh QB tenant has 0% mapping
-  # coverage and `live-financial-statement` returns empty facts even though
-  # GL data is fully loaded.
   _trigger_auto_map_if_needed(context, config)
 
-  # Mark graph stale so materialization pipeline knows OLTP data changed
   try:
     from robosystems.operations.extensions.staleness import mark_graph_stale
 
@@ -140,9 +83,6 @@ def _run_qb_load(
     for error in result.errors[:10]:
       context.log.warning(f"Load warning: {error}")
 
-  # Transactions/entries/line_items are produced by handlers
-  # post-approval, not by sync — they're always 0 here. Surface the actual
-  # sync outputs (events captured/updated) and data-quality drop counters.
   context.log.info(
     f"Load complete: {result.elements} elements, {result.dimensions} dimensions, "
     f"{result.agents_inserted} agents inserted, {result.agents_updated} agents updated, "
@@ -172,14 +112,8 @@ def _run_qb_load(
 
 
 def _release_sync_lock(context: AssetExecutionContext, config: QBSyncConfig) -> None:
-  """Release the per-connection sync lock on qb_load
-  completion (success or failure).
-
-  Best-effort: any error here is logged and swallowed — the lock will
-  expire via its 30-min TTL if the explicit release fails. The lock
-  token (`config.sync_lock_id`) is empty when Valkey was unavailable
-  at acquire time; that path is a no-op too.
-  """
+  """Best-effort; the lock's TTL is the fallback. An empty ``sync_lock_id``
+  means Valkey was unavailable at acquire time."""
   if not config.sync_lock_id:
     return
   try:
@@ -269,11 +203,7 @@ def _update_last_sync(
   config: QBSyncConfig,
   result_summary: dict | None = None,
 ) -> None:
-  """Update the connection's last_sync timestamp + outcome summary.
-
-  Uses sync DB access directly to avoid asyncio.run() issues in Dagster workers
-  where an event loop may already be running.
-  """
+  """Sync DB access: a Dagster worker may already be running an event loop."""
   from robosystems.database import SessionFactory
   from robosystems.models.core.connection.connection import Connection
 
@@ -297,14 +227,7 @@ def _update_last_sync(
 def _advance_cdc_watermark(
   context: AssetExecutionContext, config: QBSyncConfig, watermark
 ) -> None:
-  """Advance the Connection's CDC watermark.
-
-  Called after a successful load. The watermark is the timestamp at the
-  START of this load run, so the next CDC fetch picks up from there. If
-  this helper itself fails (e.g., DB transient), we log and swallow:
-  worst case the next sync re-fetches the same window, and the SyncToken
-  gate skips already-ingested rows.
-  """
+  """Best-effort: a failure only means the next sync re-fetches the window."""
   from robosystems.database import SessionFactory
   from robosystems.models.core.connection.connection import Connection
 
@@ -337,17 +260,10 @@ def _advance_cdc_watermark(
 def _bootstrap_fiscal_calendar_if_needed(
   context: AssetExecutionContext, config: QBSyncConfig
 ) -> None:
-  """Initialize the fiscal calendar on the first QB sync.
-
-  Uses the same `closed_through = month_before_last` pattern the synthetic
-  demo uses: customers migrating from QB typically already closed historical
-  periods in QB, so RoboLedger starts from a sealed-history boundary with
-  exactly one period (`close_target = last_completed_month`) queued for the
-  first close.
-
-  Idempotent: re-syncs that find a calendar with `initialized_at` already
-  set skip silently. The exception type is caught explicitly so the load
-  asset doesn't fail on a benign re-init attempt.
+  """Initialize the fiscal calendar on the first QB sync, closed through the
+  month before last: QB history is already closed upstream, so exactly one
+  period is queued for the first close. Later syncs only backfill missing
+  FiscalPeriod rows.
   """
   from robosystems.db.extensions import extensions_session
   from robosystems.operations.roboledger.fiscal_calendar import (
@@ -365,10 +281,6 @@ def _bootstrap_fiscal_calendar_if_needed(
     with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
       existing = service.get(session, config.graph_id)
       if existing is not None and existing.initialized_at is not None:
-        # Self-heal: earlier bootstrap revisions seeded the calendar pointer
-        # state but skipped FiscalPeriod row creation, leaving close-period
-        # to fail with `period_not_found`. Run ensure_fiscal_periods over the
-        # canonical window so existing tenants converge on re-sync.
         current = current_month_period()
         start = add_months(current, -23)
         if existing.closed_through_period and existing.closed_through_period < start:
@@ -421,30 +333,16 @@ def _bootstrap_fiscal_calendar_if_needed(
   except CalendarAlreadyInitializedError:
     context.log.info("Fiscal calendar already initialized (race); skipping bootstrap")
   except Exception as e:
-    # Non-fatal: a failed calendar bootstrap leaves the rest of the sync
-    # intact. Operator can manually initialize via the regular endpoint.
     context.log.warning(f"Failed to bootstrap fiscal calendar (non-fatal): {e}")
 
 
 def _trigger_auto_map_if_needed(
   context: AssetExecutionContext, config: QBSyncConfig
 ) -> None:
-  """Enqueue the MappingOperator on the first sync if mapping coverage is 0.
+  """Enqueue the MappingOperator when the coa_mapping structure has no
+  associations yet; the worker queue dedups a repeat enqueue.
 
-  Looks up the tenant's `coa_mapping` Structure, checks current association
-  count, and (only if zero) enqueues a background `agent_mapping` task. The
-  agent walks unmapped CoA elements, proposes associations, and auto-approves
-  high-confidence matches — the same path users invoke via the
-  `auto-map-elements` operation.
-
-  Idempotent on two levels:
-  - Skip when the mapping structure already has ≥1 association (user has
-    started curating, or auto-map already ran).
-  - The worker queue's per-task dedup window catches a second enqueue
-    of the same (graph, mapping_id) within DEDUP_TTL.
-
-  Runs the async `enqueue_task` via `asyncio.run`. `qb_load` is a sync
-  Dagster asset and doesn't have an enclosing event loop, so this is safe.
+  ``asyncio.run`` is safe: ``qb_load`` is a sync asset with no running loop.
   """
   import asyncio
 

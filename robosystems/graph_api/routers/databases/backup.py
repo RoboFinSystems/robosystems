@@ -45,7 +45,6 @@ async def perform_backup(
   """
   try:
     if backup_type in ("replica", "duckdb_staging", "r2_download") and s3_destination:
-      # On-instance backup: CHECKPOINT + direct S3 upload
       from robosystems.graph_api.core.backup_service import OnInstanceBackupService
 
       service = OnInstanceBackupService(
@@ -68,7 +67,6 @@ async def perform_backup(
       logger.info(f"[Task {task_id}] On-instance backup completed successfully")
 
     else:
-      # Standard backup via BackupManager
       await backup_task_manager.update_task(
         task_id,
         status="running",

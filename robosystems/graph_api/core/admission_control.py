@@ -55,13 +55,10 @@ class LadybugAdmissionController:
   ):
     """Configure the thresholds.
 
-    ``memory_threshold`` (percent used) is reported, never enforced: a buffer
-    pool is meant to fill, so percent-of-total conflates that fixed allocation
-    with the query working set and a healthy warm node would latch into
-    rejection. ``min_available_mb`` is the actual memory gate — absolute, so
-    it stays correct when the buffer pool or instance size changes, and
-    measured against the tighter of host-available memory and cgroup headroom,
-    since whichever binds first is what kills the process.
+    ``memory_threshold`` (percent used) is reported, never enforced: the
+    buffer pool fills by design, so a warm node would latch into rejection.
+    ``min_available_mb`` is the gate, measured against the tighter of host
+    memory and cgroup headroom, since whichever binds first kills the process.
 
     ``cpu_threshold`` is 10 points stricter for ingestion than for queries.
     """
@@ -101,14 +98,9 @@ class LadybugAdmissionController:
   def _cgroup_available_mb(self) -> float | None:
     """Headroom before the container's cgroup memory limit binds.
 
-    psutil reads host /proc, but a Docker container is killed by its own
-    memory cgroup long before the host runs dry, so the gate must measure
-    distance to whichever limit is tighter. Returns None when no cgroup v2
-    memory limit applies (dev machines, unlimited containers).
-
-    File cache counts toward memory.current but the kernel reclaims it before
-    OOM-killing, so it is added back: it is headroom, not pressure, and
-    without it a warm node latches into rejection.
+    psutil reads host /proc, but the container's memcg binds first. Returns
+    None when no cgroup v2 limit applies. File cache counts toward
+    memory.current but is reclaimed before an OOM kill, so it is added back.
     """
     limit = _read_cgroup_limit_bytes()
     if limit is None:
@@ -154,10 +146,6 @@ class LadybugAdmissionController:
     """
     self._update_resource_cache()
 
-    # Absolute available memory, not percent used: the buffer pool is a fixed
-    # allocation that fills by design, so a warm node sits high on percent-used
-    # while still having room to serve. Available is the tighter of host memory
-    # and the container's cgroup limit — the memcg cap binds first on Docker.
     if self._cached_available_mb < self.min_available_mb:
       reason = (
         f"Insufficient memory headroom: {self._cached_available_mb:.0f}MB available "
@@ -224,7 +212,6 @@ class LadybugAdmissionController:
     }
 
 
-# Global admission controller instance
 _admission_controller: LadybugAdmissionController | None = None
 
 

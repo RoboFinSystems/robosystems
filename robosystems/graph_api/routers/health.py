@@ -17,7 +17,7 @@ from robosystems.logger import logger
 
 router = APIRouter(tags=["Cluster Health"])
 
-# Track replica warmup status (thread-safe for multi-worker setups)
+# Per-process: each worker process tracks its own warmup.
 _replica_ready = False
 _replica_lock = threading.Lock()
 

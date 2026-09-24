@@ -1,8 +1,4 @@
-"""QuickBooks Transform Asset.
-
-Runs dbt-duckdb models against extracted parquet files to produce
-OLTP tables in DuckDB for loading into PostgreSQL.
-"""
+"""QuickBooks transform asset: dbt build over the extract parquet, into DuckDB."""
 
 import json
 import os
@@ -28,12 +24,6 @@ def qb_transform(
   context: AssetExecutionContext,
   config: QBSyncConfig,
 ) -> MaterializeResult:
-  """Run dbt build on extracted QB data.
-
-  Reads extract parquet from the shared pipeline work directory,
-  runs dbt build, producing OLTP tables in DuckDB.
-  The load asset reads from this DuckDB directly.
-  """
   work_dir = get_pipeline_work_dir(config.graph_id)
   extract_dir = work_dir / "extract"
   duckdb_path = work_dir / "quickbooks.duckdb"
@@ -41,7 +31,6 @@ def qb_transform(
 
   context.log.info(f"Transform: extract_dir={extract_dir}, realm_id={config.realm_id}")
 
-  # Build dbt vars
   dbt_vars = json.dumps(
     {
       "realm_id": config.realm_id,
@@ -50,7 +39,6 @@ def qb_transform(
     }
   )
 
-  # Run dbt build
   context.log.info("Running dbt build...")
   result = subprocess.run(
     [
@@ -74,7 +62,6 @@ def qb_transform(
     },
   )
 
-  # Log stdout/stderr regardless of outcome
   if result.stdout:
     for line in result.stdout.strip().split("\n")[-20:]:
       context.log.info(f"dbt: {line.strip()}")
@@ -85,7 +72,6 @@ def qb_transform(
 
   context.log.info("dbt build succeeded")
 
-  # Count rows in OLTP tables
   import duckdb
 
   table_counts = {}

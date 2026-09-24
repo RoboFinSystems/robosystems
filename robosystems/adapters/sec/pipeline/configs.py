@@ -1,8 +1,4 @@
-"""SEC Pipeline Configuration Classes.
-
-All configuration classes for SEC Dagster assets are centralized here
-for maintainability and reuse.
-"""
+"""Dagster config classes and partition constants for the SEC pipeline."""
 
 from datetime import UTC, datetime
 from typing import Literal
@@ -12,34 +8,26 @@ from pydantic import Field
 
 from robosystems.config.constants import SEC_PROCESS_BATCH_SIZE
 
-# =============================================================================
-# Constants
-# =============================================================================
-
-# Start year for SEC data loading (XBRL filings began 2009)
+# XBRL filings began in 2009.
 SEC_START_YEAR = 2009
 
 # Tiered graph boundaries
 SEC_HISTORICAL_END_YEAR = 2023  # sec_historical: 2009-2023
 SEC_PRIMARY_START_YEAR = 2024  # sec (primary): 2024+
 
-# Form types for historical graph (annual reports only)
-# sec_historical includes 10-K and foreign equivalents (20-F, 40-F)
+# sec_historical holds annual reports only: 10-K and its foreign equivalents.
 SEC_HISTORICAL_FORM_TYPES = ["10-K", "20-F", "40-F"]
 
-# Form type batches for EFTS queries to avoid 10k result limit
-# Q2 (proxy season) can exceed 10k when all forms are included
-# Batch 1: Core financial statements
-# Batch 2: Supplementary filings (proxies, registrations)
+# EFTS caps a query at 10k results; Q2 (proxy season) exceeds that with all
+# forms in one query, so forms are queried in batches.
 SEC_FORM_TYPE_BATCHES = [
   ["10-K", "10-Q", "20-F", "40-F"],  # Core financials (~7k in Q2)
   ["DEF 14A", "S-1"],  # Supplementary (~3k in Q2)
 ]
 
-# Quarter partitions for SEC data (SEC_START_YEAR-Q1 through next year's Q4).
-# EFTS has a 10k result limit per query; quarterly partitions typically return 5-7k filings.
-# Computed at import, so next year is included: a deploy from this year keeps
-# working past Jan 1 instead of rejecting the new quarter's partition key.
+# SEC_START_YEAR-Q1 through next year's Q4. Quarterly keeps each EFTS query
+# under its 10k cap (typically 5-7k). Computed at import, so next year's
+# quarters are included and a deploy keeps accepting new partition keys past Jan 1.
 _current_year = datetime.now(UTC).year
 SEC_QUARTERS = [
   f"{year}-Q{q}"
@@ -49,23 +37,10 @@ SEC_QUARTERS = [
 sec_quarter_partitions = StaticPartitionsDefinition(SEC_QUARTERS)
 
 
-# =============================================================================
-# Download Configuration
-# =============================================================================
-
-
 class SECDownloadConfig(Config):
-  """Configuration for SEC raw filings download.
+  """SEC raw filings download. A full year (~10k filings) takes ~45 min."""
 
-  Production Scaling Notes:
-  - Each year partition runs independently (can parallelize years)
-  - Submissions fetching: ~8 req/sec, 5 concurrent (configurable)
-  - Filing downloads: ~5 req/sec, 10 concurrent (configurable)
-  - For full year (~5000 companies, ~10000 filings): ~45 min total
-  - Use max_filings for testing, dry_run for discovery only
-  """
-
-  skip_existing: bool = True  # Skip already downloaded filings
+  skip_existing: bool = True
   skip_submissions: bool = False  # Skip fetching/updating submissions.json files
   form_types: list[str] = [
     "10-K",
@@ -74,180 +49,97 @@ class SECDownloadConfig(Config):
     "40-F",
     "DEF 14A",
     "S-1",
-  ]  # Form types to download
-  tickers: list[str] = []  # Optional ticker filter (empty = all companies)
-  ciks: list[str] = []  # Optional CIK filter
+  ]
+  tickers: list[str] = []  # empty = all companies
+  ciks: list[str] = []
   max_filings: int = 0  # Max filings to download (0 = unlimited)
-  dry_run: bool = False  # If True, discover only - don't download
+  dry_run: bool = False  # discover only, don't download
 
-  # Concurrency controls for production
-  submissions_rate: float = 8.0  # Submissions requests per second
-  submissions_concurrency: int = 5  # Max concurrent submission fetches
-  download_rate: float = 5.0  # Download requests per second
-  download_concurrency: int = 10  # Max concurrent downloads
-
-
-# =============================================================================
-# Processing Configuration
-# =============================================================================
+  submissions_rate: float = 8.0  # requests per second
+  submissions_concurrency: int = 5
+  download_rate: float = 5.0  # requests per second
+  download_concurrency: int = 10
 
 
 class SECProcessConfig(Config):
-  """Configuration for batch filing processing by quarter.
+  """Batch filing processing for one quarter.
 
-  Each Dagster run processes one batch of filings and then exits.
-  The sensor will trigger another run if pending files remain, enabling
-  natural memory release between batches and crash resilience.
-
-  Individual filing failures are tracked in SourceFile records,
-  but the job continues processing remaining filings in the batch.
-
-  Memory Management:
-  - One batch per job run (default 250 filings), then container exits
-  - Small batch keeps Arrow concat under ~325 MB peak (Label at ~1.3 MB/file)
-  - One part file per table per batch (no chunking needed)
-  - Shared tables (Element, Label, etc.) deduped within batch via pure Arrow
-  - DuckDB handles final cross-batch dedup during staging
-  - del + gc.collect() after each table upload to force memory release
-
-  Output Structure (part files):
-    s3://bucket/sec/processed/filed=2024-Q1/nodes/Entity/part_a1b2c3d4e5f6.parquet
-    - One part file per table per batch, multiple batches per quarter
-    - UUID naming prevents collisions across runs
-    - DuckDB reads both old format (TABLE.parquet) and new (TABLE/*.parquet)
+  Each run processes one batch, writes one UUID-named part file per table
+  (``filed=<quarter>/nodes/<Table>/part_<uuid>.parquet``), and exits; the
+  sensor re-triggers while pending files remain, which releases memory between
+  batches. The small batch keeps the Arrow concat under ~325 MB peak. Shared
+  tables are deduped within a batch; DuckDB dedups across batches at staging.
+  Per-filing failures are recorded on SourceFile and the batch continues.
   """
 
-  # Filings per batch. Job processes this many, flushes to S3, then exits.
-  # Sensor re-triggers if more pending files remain.
-  # S3 cache makes batch size independent of Spot interruption risk.
   batch_size: int = SEC_PROCESS_BATCH_SIZE
 
-  # Continue processing even if some filings fail
-  # If False, job fails on first error (for debugging)
+  # False fails the job on the first error (for debugging).
   continue_on_error: bool = True
 
-  # Cache individual filing results to S3 for spot instance resilience.
-  # After processing each filing, its parquet outputs are zipped and uploaded
-  # to a cache directory. On restart, cached results are restored instead of
-  # reprocessing. Set to False for local dev or debugging.
+  # Per-filing outputs cached to S3 so a Spot restart restores rather than
+  # reprocesses.
   enable_cache: bool = True
 
-  # Form types to include (None = all types, no filtering).
-  # Filings with non-matching form types are marked "skipped" in SourceFile.
-  # Example: ["10-K", "20-F", "40-F"] for annual reports only.
+  # None = all forms; non-matching filings are marked "skipped" in SourceFile.
   form_types: list[str] | None = None
 
 
-# =============================================================================
-# Staging Configuration
-# =============================================================================
-
-
 class SECStageConfig(Config):
-  """Configuration for DuckDB staging (full rebuild) for the primary sec graph.
+  """Full DuckDB staging rebuild for the primary sec graph.
 
-  Creates DuckDB tables from scratch using S3 parquet files from 2024 onwards.
-
-  Note: This step only stages data to DuckDB. LadybugDB rebuild is handled
-  by the materialize step (sec_graph_materialized) via SECMaterializeConfig.rebuild_graph.
-
-  Year filtering:
-    - year: Single year filter (e.g., 2024)
-    - start_year: Defaults to SEC_PRIMARY_START_YEAR (2024). Override for broader range.
-
-  Common scenarios:
-    - Normal re-run: Use defaults. Tables are overwritten (accumulator drops before rename).
-    - Fresh start after corruption: Set reset_staging=True to delete all staging.
+  Stages only; the LadybugDB rebuild is the materialize step's
+  (``SECMaterializeConfig.rebuild_graph``). Re-runs overwrite tables;
+  ``reset_staging`` wipes staging after corruption.
   """
 
-  graph_id: str = "sec"  # Target graph ID
-  year: int | None = None  # Optional single year filter
-  start_year: int | None = (
-    SEC_PRIMARY_START_YEAR  # Default 2024; None = all years (wildcard)
-  )
-  end_year: int | None = None  # Optional end of year range (None = through current)
-  reset_staging: bool = False  # Delete entire DuckDB staging database first
+  graph_id: str = "sec"
+  year: int | None = None  # single-year filter
+  start_year: int | None = SEC_PRIMARY_START_YEAR  # None = all years
+  end_year: int | None = None  # None = through current
+  reset_staging: bool = False  # delete the whole staging database first
 
 
 class SECHistoricalStageConfig(Config):
-  """Configuration for SEC historical DuckDB staging.
+  """DuckDB staging for the sec_historical subgraph (a separate database)."""
 
-  Stages historical SEC data to a separate DuckDB database for the
-  sec_historical subgraph. Year range defaults are visible and overridable.
-  """
-
-  graph_id: str = "sec_historical"  # Target graph ID
-  start_year: int = SEC_START_YEAR  # Start of year range (default: 2009)
-  end_year: int = SEC_HISTORICAL_END_YEAR  # End of year range (default: 2023)
-  reset_staging: bool = False  # Delete entire DuckDB staging database first
+  graph_id: str = "sec_historical"
+  start_year: int = SEC_START_YEAR
+  end_year: int = SEC_HISTORICAL_END_YEAR
+  reset_staging: bool = False  # delete the whole staging database first
 
 
 class SECIncrementalStageConfig(Config):
-  """Configuration for incremental SEC staging.
+  """Incremental staging of one quarter: INSERT of net-new rows only.
 
-  Stages current quarter's files incrementally using INSERT INTO with
-  deduplication. Safe to run daily - only net new rows are added.
-
-  Precondition: Initial full staging must have been done (tables exist).
+  Requires a prior full staging (the tables must exist).
   """
 
-  graph_id: str = "sec"  # Target graph ID
-  year: int | None = None  # Year to stage (default: current year)
-  quarter: int | None = Field(
-    default=None, ge=1, le=4
-  )  # Quarter 1-4 (default: current)
-
-
-# =============================================================================
-# Materialization Configuration
-# =============================================================================
+  graph_id: str = "sec"
+  year: int | None = None  # None = current year
+  quarter: int | None = Field(default=None, ge=1, le=4)  # None = current quarter
 
 
 class SECMaterializeConfig(Config):
-  """Configuration for graph materialization (Stage 2).
+  """DuckDB staging to LadybugDB materialization.
 
-  Use this config with sec_graph_materialized asset to materialize
-  from DuckDB staging to LadybugDB.
-
-  Options:
-    graph_id: Target graph ID (default: "sec")
-    materialize_mode: "full" (default) rebuilds the LadybugDB database then COPYs
-                   every table (assumes an empty target — the reconciliation
-                   path). "incremental" skips the rebuild and COPYs only rows not
-                   already in the populated graph (per-table keyset anti-join),
-                   safe to run repeatedly against the live graph. Takes precedence
-                   over rebuild_graph — incremental never rebuilds.
-    rebuild_graph: If True (default), delete and recreate the LadybugDB database
-                   with the roboledger SEC schema before materializing.
-                   DuckDB staging is preserved. Set to False only for retry scenarios
-                   where you want to resume without losing existing graph data.
-                   Ignored when materialize_mode == "incremental".
-    batch_materialization: If True (default), use hash-based batching for tables
-                           with more rows than materialization_batch_size.
-    materialization_batch_size: Rows per batch when batch_materialization is enabled
-                                (default: 20M rows).
+  ``full`` rebuilds the database (when ``rebuild_graph``) and COPYs every
+  table into an empty target. ``incremental`` never rebuilds and COPYs only
+  rows missing from the live graph (per-table keyset anti-join), so it is safe
+  to repeat. ``rebuild_graph=False`` is for resuming a failed full run without
+  losing graph data. Tables larger than ``materialization_batch_size`` are
+  hash-batched when ``batch_materialization`` is on.
   """
 
-  graph_id: str = "sec"  # Target graph ID
+  graph_id: str = "sec"
   materialize_mode: Literal["full", "incremental"] = "full"
-  rebuild_graph: bool = True  # Rebuild LadybugDB before materialization (full mode)
-  batch_materialization: bool = True  # Hash-based batching for large tables
-  materialization_batch_size: int = Field(
-    default=20_000_000, ge=1_000_000
-  )  # Rows per batch
-
-
-# =============================================================================
-# Text Search Index Configuration
-# =============================================================================
+  rebuild_graph: bool = True
+  batch_materialization: bool = True
+  materialization_batch_size: int = Field(default=20_000_000, ge=1_000_000)
 
 
 class SECNarrativeIndexConfig(Config):
-  """Configuration for narrative section extraction and OpenSearch indexing.
-
-  Partitioned by quarter (e.g. 2026-Q1). Each run extracts and indexes
-  narrative sections from one quarter's filings.
-  """
+  """Narrative section extraction and OpenSearch indexing, per quarter."""
 
   graph_id: str = "sec"
   part_size: int = Field(
@@ -269,11 +161,7 @@ class SECNarrativeIndexConfig(Config):
 
 
 class SECiXBRLIndexConfig(Config):
-  """Configuration for iXBRL disclosure extraction and OpenSearch indexing.
-
-  Partitioned by quarter (e.g. 2026-Q1). Each run extracts and indexes
-  iXBRL disclosures from one quarter's filings.
-  """
+  """iXBRL disclosure extraction and OpenSearch indexing, per quarter."""
 
   graph_id: str = "sec"
   part_size: int = Field(
@@ -295,9 +183,9 @@ class SECiXBRLIndexConfig(Config):
 
 
 class SECFilingCatalogConfig(Config):
-  """Configuration for the per-filer catalog on the public CDN.
+  """Per-filer catalog on the public CDN, partitioned by quarter.
 
-  Partitioned by quarter. A run rewrites the catalog file of every filer
+  A run rewrites the catalog file of every filer
   with a filing in its partitions and the corpus index always; the corpus
   view it folds spans every partition from ``start_year`` on.
   """
@@ -329,12 +217,10 @@ class SECFilingCatalogConfig(Config):
 
 
 class SECHFPublishConfig(Config):
-  """Configuration for the manual Hugging Face dataset publish.
+  """Manual Hugging Face dataset publish, run as an HF Job (R2 -> Job -> Hub).
 
-  The copy runs as a Hugging Face Job on the Hub's side (R2 -> Job -> Hub),
-  so the flavor is HF hardware, not ECS. cpu-basic is enough: its hardware
-  table lists 50 GB of disk, but the job filesystem observed in practice was
-  ~1.7 TB, so a larger flavor buys download/upload speed, not room.
+  cpu-basic suffices: its job filesystem is ~1.7 TB in practice (the table
+  says 50 GB), so a larger flavor buys speed, not room.
   """
 
   job_flavor: str = Field(

@@ -1,17 +1,9 @@
-"""Per-graph Valkey distributed lock for materialization.
+"""Per-graph Valkey lock that serializes materializations of one database.
 
-Prevents concurrent materializations of the same graph database.
-Uses Valkey (Redis-compatible) with Lua-based compare-and-delete for safe release.
-
-Key design:
-- Per-graph: graph A doesn't block graph B
-- WIP/prev resolve to base: kg123-wip and kg123 compete for the same lock
-- 1-hour TTL: safety net for crashed processes
-- 5s acquire timeout: fail fast if another materialization is running
-- Compare-and-delete via Lua: prevents releasing a lock re-acquired by another process
-- Compare-and-extend via Lua: long runs refresh the TTL at checkpoints, and learn
-  when the lock has lapsed under them instead of continuing to the swap
-- Lock passthrough: callers pass token via X-Materialization-Lock-Token header
+``-wip``/``-prev`` resolve to the base id, so a build and its target share a
+lock. Release and extend are compare-and-set Lua scripts, so a holder whose
+lock lapsed cannot touch the next holder's. Callers pass the token downstream
+via the ``X-Materialization-Lock-Token`` header.
 """
 
 import re
@@ -21,17 +13,13 @@ import redis.asyncio as redis_async
 
 from robosystems.logger import logger
 
-# Lock key prefix
 _LOCK_PREFIX = "materialize_lock:"
 
-# Default TTL: 1 hour (safety net for crashed processes)
+# Crash safety net; long runs refresh it via extend().
 DEFAULT_LOCK_TTL_SECONDS = 3600
 
-# Acquire timeout: fail fast
 DEFAULT_ACQUIRE_TIMEOUT_SECONDS = 5
 
-# Lua script for atomic compare-and-delete
-# Only deletes the key if the value matches (prevents releasing someone else's lock)
 _RELEASE_SCRIPT = """
 if redis.call("get", KEYS[1]) == ARGV[1] then
     return redis.call("del", KEYS[1])
@@ -40,9 +28,6 @@ else
 end
 """
 
-# Lua script for atomic compare-and-extend
-# Only refreshes the TTL if the value matches (a lapsed lock re-acquired by
-# another process must not be extended by its previous holder)
 _EXTEND_SCRIPT = """
 if redis.call("get", KEYS[1]) == ARGV[1] then
     return redis.call("expire", KEYS[1], ARGV[2])
@@ -53,13 +38,7 @@ end
 
 
 def _resolve_base_graph_id(graph_id: str) -> str:
-  """Resolve WIP/prev suffixes to the base graph ID.
-
-  kg123-wip -> kg123
-  kg123-prev -> kg123
-  kg123 -> kg123
-  kg123_dev-wip -> kg123_dev
-  """
+  """kg123-wip -> kg123, kg123_dev-prev -> kg123_dev."""
   return re.sub(r"-(wip|prev)$", "", graph_id)
 
 
@@ -137,13 +116,9 @@ class MaterializationLock:
     """Reset the TTL to a full window, returning False if the lock is no
     longer ours.
 
-    A materialization can outlive the TTL that was meant as a crash safety
-    net; refreshing at checkpoints keeps the lock alive for as long as the run
-    is demonstrably still making progress. A False return means the key has
-    expired or been re-acquired by another process — the caller must abort
-    rather than continue to the swap. Backend errors are raised, not swallowed:
-    the caller decides whether a blip is tolerable given the TTL still on the
-    key.
+    Call at checkpoints of a long run. On False the key expired or was
+    re-acquired elsewhere, and the caller must abort rather than swap. Backend
+    errors are raised so the caller can judge a blip against the remaining TTL.
     """
     if not self._acquired:
       return False
@@ -169,9 +144,7 @@ class MaterializationLock:
   async def release(self) -> bool:
     """Release the lock, returning False if this process no longer holds it.
 
-    The compare-and-delete is what makes that safe: after a TTL expiry the key
-    may belong to another process, and deleting it unconditionally would strip
-    a lock someone else is relying on.
+    Never raises.
     """
     if not self._acquired:
       return False
@@ -198,13 +171,11 @@ class MaterializationLock:
       return False
 
   async def __aenter__(self) -> "MaterializationLock":
-    """Async context manager: acquire the lock."""
     if not await self.acquire():
       raise RuntimeError(f"Could not acquire materialization lock: {self.lock_key}")
     return self
 
   async def __aexit__(self, *args: object) -> None:
-    """Async context manager: release the lock."""
     await self.release()
 
   async def is_locked(self) -> bool:

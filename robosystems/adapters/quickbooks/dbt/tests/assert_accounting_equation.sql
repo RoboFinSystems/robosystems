@@ -1,18 +1,6 @@
 {#
-  Accounting equation: Assets = Liabilities + Equity + Net Income
-
-  For balance sheet accounts:
-  - Assets have debit normal balance (debits increase, credits decrease)
-  - Liabilities have credit normal balance (credits increase, debits decrease)
-  - Equity has credit normal balance (credits increase, debits decrease)
-
-  Net balance = debits - credits for debit-normal accounts
-  Net balance = credits - debits for credit-normal accounts
-
-  Test: total_assets - total_liabilities - total_equity - net_income should equal 0
-  (within rounding tolerance of 1 cent since amounts are in cents)
-
-  Returns rows if the equation is violated.
+  Accounting equation: Assets = Liabilities + Equity + Net Income, within a
+  1-cent tolerance (amounts are cents). Returns rows if violated.
 #}
 
 with line_items as (

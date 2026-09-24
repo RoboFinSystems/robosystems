@@ -1,24 +1,12 @@
-"""The per-filer catalog on the public CDN — the public pages' index, without a database.
+"""The per-filer catalog on the public CDN: the public pages' index, without a database.
 
 ``companies/{ticker}.json`` lists one filer's filings with their public
 representations; ``companies/index.json`` lists every filer with its latest
-filing and whether any of its filings can be rendered (``renderable``, with
-``latest_renderable`` naming the one a page would show). The public company
-pages on roboinvestor.ai select on that flag — which filers to list, which to
-put in the sitemap — so it has to be answerable from the index alone, without
-a read per filer. Both are a fold over the processed Report and Entity tables — the
-same parquet the graph is built from — joined to each filing's
-``manifest.json``, which the processor wrote beside the artifacts. They are
-regenerated whole: a run rewrites the file of every filer it touched (the
-filers with a filing in its partitions, or all of them on ``full_rebuild``)
-and the index always. Nothing is patched in place, so two overlapping runs
-cannot corrupt a file: the later write is a complete view as of its read,
-stale by at most one cycle.
-
-Reads: the Entity, Report and ENTITY_HAS_REPORT parquet of every partition
-from ``start_year`` on (three small tables), and one manifest per filing of
-a touched filer. Writes: one object per touched filer, the index, and
-``robots.txt`` when it is missing.
+filing and ``renderable`` / ``latest_renderable``, which the public company
+pages select on, so it must be answerable from the index alone. Both fold the
+processed Report/Entity parquet with each filing's ``manifest.json``. Files
+are rewritten whole, never patched, so overlapping runs cannot corrupt one:
+the later write is complete as of its read, stale by at most one cycle.
 """
 
 import json
@@ -209,11 +197,8 @@ def renderable(representations: list[dict[str, Any]] | None) -> bool:
 def renderable_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
   """Whether any of a filer's filings can be rendered, and the newest that can.
 
-  Carried on the index so a consumer can select the filers worth listing —
-  crawlable pages, a browse hub — without reading a per-filer catalog each to
-  find out. ``latest_renderable`` is the filing the page actually shows, so its
-  date is the honest last-modified for that page; ``latest`` is the newest
-  filing of any kind, which may have no artifacts at all.
+  ``latest_renderable`` is the filing the page shows, so its date is the
+  page's honest last-modified; ``latest`` may have no artifacts at all.
   """
   newest = next((e for e in entries if renderable(e["representations"])), None)
   return {
@@ -443,13 +428,10 @@ def read_manifests(
 def read_prior_renderable(s3: Any, bucket: str) -> dict[str, dict[str, Any]]:
   """The renderability the previous index recorded, keyed by ticker.
 
-  A run rewrites the catalog of the filers it *touched* but the index of *every*
-  filer, and only a touched filer's manifests are read. An untouched filer's
-  renderability therefore has to come from somewhere: it comes from the index the
-  previous run wrote — one GET, against a manifest read per filing of every filer
-  otherwise. A ``full_rebuild`` touches everything, so nothing is carried forward.
-  A missing or unreadable index is not an error: every filer is then computed from
-  this run, and the ones it did not touch settle on the next.
+  A run reads manifests only for the filers it touches but writes every filer's
+  index row; untouched filers carry theirs forward from here (one GET instead
+  of a manifest per filing). A missing index is not an error: untouched filers
+  settle on the next run.
   """
   try:
     body = s3.get_object(Bucket=bucket, Key=FILING_CATALOG_INDEX_KEY)["Body"].read()
@@ -592,9 +574,7 @@ def sec_filing_catalog(
       storage_class=PUBLIC_DATA_STORAGE_CLASS,
     )
 
-  # The reprocess that gives the corpus its artifacts lands filer by filer, so the
-  # renderable count is how far along it is — and it is what the public pages key
-  # their own indexability off.
+  # The public pages key their indexability off this count.
   renderable_filers = sum(1 for row in index["companies"] if row["renderable"])
 
   context.log.info(

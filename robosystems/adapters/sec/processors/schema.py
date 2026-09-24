@@ -1,16 +1,4 @@
-"""
-XBRL Schema Utilities
-
-Schema adapter and configuration generator for XBRL graph processing.
-Handles schema validation, column mapping, and DataFrame structure compatibility
-for XBRL data ingestion into the graph database.
-
-Classes:
-- XBRLSchemaAdapter: Adapts XBRL DataFrame structures to LadybugDB schemas
-- XBRLSchemaConfigGenerator: Generates dynamic ingestion configurations from schemas
-- IngestTableInfo: Complete table information for ingestion
-- SchemaIngestConfig: Configuration for schema-driven ingestion
-"""
+"""Schema adapter and ingestion-config generator for XBRL graph processing."""
 
 import re
 from dataclasses import dataclass
@@ -22,10 +10,6 @@ from robosystems.logger import logger
 from robosystems.schemas.models import Node, Relationship
 from robosystems.schemas.runtime.builder import LadybugSchemaBuilder
 from robosystems.schemas.runtime.manager import SchemaConfiguration, SchemaManager
-
-# =============================================================================
-# Data Classes
-# =============================================================================
 
 
 @dataclass
@@ -53,11 +37,6 @@ class SchemaIngestConfig:
   relationship_tables: dict[str, IngestTableInfo]
   file_pattern_mapping: dict[str, str]
   table_name_mapping: dict[str, str]
-
-
-# =============================================================================
-# Schema Adapter
-# =============================================================================
 
 
 class XBRLSchemaAdapter:
@@ -90,9 +69,8 @@ class XBRLSchemaAdapter:
     "AssociationToElements": "ASSOCIATION_HAS_TO_ELEMENT",
     "DimensionHasAxisElement": "DIMENSION_HAS_AXIS_ELEMENT",
     "DimensionHasMemberElement": "DIMENSION_HAS_MEMBER_ELEMENT",
-    # PascalCase variants from filename conversion in write_dataframe()
-    # (classify_associations writes parquets with underscore names that get
-    # title-cased: ASSOCIATION_HAS_CLASSIFICATION → AssociationHasClassification)
+    # write_dataframe() title-cases underscore filenames:
+    # ASSOCIATION_HAS_CLASSIFICATION → AssociationHasClassification
     "AssociationHasClassification": "ASSOCIATION_HAS_CLASSIFICATION",
     "StructureHasFactSet": "STRUCTURE_HAS_FACT_SET",
     "FactSetContainsFact": "FACT_SET_CONTAINS_FACT",
@@ -278,11 +256,9 @@ class XBRLSchemaAdapter:
       logger.debug(f"  {source} -> {target}")
 
   def _resolve_schema_name(self, table_name: str) -> str:
-    """Resolve table name to schema name using mapping."""
     return self.XBRL_TABLE_MAPPING.get(table_name, table_name)
 
   def _get_schema_info(self, schema_name: str) -> dict[str, Any] | None:
-    """Get schema info for a given schema name."""
     if schema_name in self.node_schemas:
       return self.node_schemas[schema_name]
     elif schema_name in self.relationship_schemas:
@@ -290,7 +266,7 @@ class XBRLSchemaAdapter:
     return None
 
   def _build_column_list(self, schema_info: dict[str, Any]) -> list[str]:
-    """Build complete column list for a schema."""
+    """Schema columns in COPY order: from, to (relationships), then properties."""
     columns = []
 
     if schema_info["table_type"] == "relationship":
@@ -304,7 +280,6 @@ class XBRLSchemaAdapter:
   def _process_data_with_schema(
     self, data_dict: dict[str, Any], schema_info: dict[str, Any]
   ) -> dict[str, Any]:
-    """Process data dictionary with schema requirements."""
     processed_data = {}
 
     if schema_info["table_type"] == "relationship":
@@ -328,7 +303,6 @@ class XBRLSchemaAdapter:
     return processed_data
 
   def _get_default_value_for_type(self, data_type: str) -> Any:
-    """Get appropriate default value for a data type."""
     data_type = data_type.upper()
 
     type_defaults = {
@@ -346,22 +320,9 @@ class XBRLSchemaAdapter:
     return None
 
 
-# =============================================================================
-# Schema Config Generator
-# =============================================================================
-
-
 class XBRLSchemaConfigGenerator:
-  """
-  Derives ingestion configuration from a compiled XBRL schema (base +
-  extensions), so nothing about table layout is hardcoded here:
-
-  1. Walks all nodes and relationships in the compiled schema
-  2. Generates file patterns for parquet file recognition
-  3. Creates column mappings from schema properties
-  4. Provides table information for LadybugDB ingestion
-  5. Resolves relationship structure and foreign keys
-  """
+  """Derives table info, columns and parquet file patterns from the compiled
+  schema (base + extensions), so no table layout is hardcoded."""
 
   def __init__(self, schema_config: dict[str, Any]):
     """Compile `schema_config` ("base_schema" + "extensions") into ingest config."""
@@ -588,11 +549,6 @@ class XBRLSchemaConfigGenerator:
       logger.debug(
         f"  {table_name}: {table_info.from_node} -> {table_info.to_node}, patterns: {table_info.file_patterns}"
       )
-
-
-# =============================================================================
-# Factory Functions
-# =============================================================================
 
 
 def create_roboledger_ingestion_processor() -> XBRLSchemaConfigGenerator:

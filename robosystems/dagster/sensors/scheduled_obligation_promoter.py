@@ -1,36 +1,10 @@
-"""Dagster sensor for the period-boundary obligation promoter.
+"""Sensor that fans out one obligation-promotion run per entity graph with matured
+pending ``schedule_entry_due`` events.
 
-Walks every active entity graph; for any graph that has matured `pending`
-`schedule_entry_due` events, fires a RunRequest against
-``extensions_promote_obligations_job``. Same fan-out shape as
-``stale_graph_materialization_sensor`` — one RunRequest per graph with
-work to do, deduplicated by Dagster on a stable `run_key`.
-
-The check itself is a single-row count per graph. With hundreds of
-graphs in production, sub-second per tick. The sensor opens its own
-extensions session per graph (to set the schema search_path) and closes
-it cleanly even if the count fails.
-
-Cursor
-------
-
-An `in_progress` cursor maps `graph_id → submitted_at_iso` for runs that have
-been queued and not yet observed as finished, so a graph is not resubmitted on
-the next tick. Entries expire after ``_CURSOR_EXPIRY_SECONDS``, and entries for
-graphs not seen on a tick are dropped, so a failed run or a sensor failure
-never blocks a graph permanently.
-
-Cadence
--------
-
-``minimum_interval_seconds=300`` (5 min) — this is a clean default for
-month-end / period-boundary work. The granularity of the obligation
-register is daily at most (events have day-end ``occurred_at``), so
-sub-minute polling buys nothing. Cadence is per-instance configurable
-via the standard Dagster sensor controls.
-
-Default status is ``STOPPED`` — the operator turns this on per
-deployment, mirroring the materialization sensor's posture.
+The in-progress cursor (``graph_id -> submitted_at``) stops resubmission on the
+next tick; entries expire, and are dropped for graphs no longer active, so a
+failed run never blocks a graph permanently. Obligations are day-granular, so a
+5-minute cadence is plenty. Default STOPPED: operators enable it per deployment.
 """
 
 from __future__ import annotations
@@ -55,16 +29,11 @@ from robosystems.models.extensions.roboledger.event import Event
 
 logger = get_logger(__name__)
 
-# How long a graph stays in the "in-progress" cursor before being eligible
-# for re-submission. Prevents permanent blocking if the upstream job
-# failed without touching the cursor.
-_CURSOR_EXPIRY_SECONDS = 1800  # 30 min — promotion runs are short
+_CURSOR_EXPIRY_SECONDS = 1800  # promotion runs are short
 
 
 def _has_matured_pending_obligations(graph_id: str, as_of: datetime) -> bool:
-  """Tenant-scoped count check. Returns True iff at least one pending
-  schedule_entry_due event has matured by `as_of`.
-  """
+  """Whether any pending schedule_entry_due event has matured by `as_of`."""
   try:
     with extensions_session(graph_id, statement_timeout_ms=None) as session:
       count = (
@@ -78,9 +47,7 @@ def _has_matured_pending_obligations(graph_id: str, as_of: datetime) -> bool:
       )
       return count > 0
   except Exception as exc:
-    # Schema may not exist yet for newly-provisioned graphs, or the
-    # extensions DB may be down. Skip the graph and let the next tick
-    # retry; logging is sufficient — this is not a sensor-level error.
+    # New graphs may lack a schema, or the DB may be down; retry next tick.
     logger.debug(f"obligation_promoter: skipping {graph_id}: {exc}")
     return False
 
@@ -125,9 +92,7 @@ def scheduled_obligation_promotion_sensor(context: SensorEvaluationContext):
       .all()
     )
 
-    # Per-graph autopilot flag on Graph.auto_dispatch_obligations. The env
-    # var supplies the deployment-wide default for rows where the column
-    # is NULL.
+    # Default for graphs whose auto_dispatch_obligations is NULL.
     env_default_auto_dispatch = bool(env.EXTENSIONS_PROMOTION_AUTO_DISPATCH)
     as_of_iso = now.isoformat()
 
@@ -151,9 +116,6 @@ def scheduled_obligation_promotion_sensor(context: SensorEvaluationContext):
         f"Submitting obligation promotion for {graph_id} "
         f"(as_of={as_of_iso}, dispatch={auto_dispatch})"
       )
-      # Use the as_of timestamp + graph in the run_key so two ticks
-      # within the same minute don't dedup against each other on
-      # graphs that produced new pending events between them.
       run_requests.append(
         RunRequest(
           run_key=f"promote_obligations_{graph_id}_{as_of_iso}",
@@ -173,8 +135,7 @@ def scheduled_obligation_promotion_sensor(context: SensorEvaluationContext):
       )
       new_cursor[graph_id] = now.isoformat()
 
-    # Drop cursor entries for graphs we didn't see this tick (they no
-    # longer have pending obligations or are no longer active).
+    # Drop cursor entries for graphs no longer active entity graphs.
     seen = {str(g.graph_id) for g in candidate_graphs}
     new_cursor = {gid: ts for gid, ts in new_cursor.items() if gid in seen}
 
@@ -187,11 +148,8 @@ def scheduled_obligation_promotion_sensor(context: SensorEvaluationContext):
 
   except Exception as exc:
     logger.error(f"obligation_promoter sensor failed: {exc}")
-    # Re-establish a clean cursor by leaving it untouched so we re-try
-    # next tick from the last known good state.
+    # Cursor untouched: retry next tick from the last good state.
     return []
 
   finally:
-    # `db` (platform DB) is closed here. Per-graph extensions sessions
-    # are managed by the helper above's context manager.
     db.close()

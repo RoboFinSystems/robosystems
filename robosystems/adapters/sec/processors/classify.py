@@ -1,16 +1,8 @@
-"""Association classification via embedded LadybugDB.
+"""Per-filing association classification in a temporary embedded LadybugDB.
 
-Two classification layers:
-
-1. **Structural** — Detects patterns (RollUp, RollForward, Hierarchy, etc.) by
-   running Cypher pattern-matching queries against associations and elements.
-
-2. **Semantic** — Identifies *what kind of* structure each association belongs to
-   (e.g., "AssetsRollUp", "CashFlowStatement") by matching calculation root
-   elements against the Seattle Method disclosure mechanics taxonomy (143 mappings).
-
-Results are returned as DataFrames for the existing parquet pipeline to pick up.
-This module uses ladybug directly — no Graph API, no HTTP.
+Structural patterns (RollUp, RollForward, ...) come from Cypher matches; semantic
+disclosure names come from calculation roots looked up in the Seattle Method
+disclosure mechanics map. Results are DataFrames for the parquet pipeline.
 """
 
 from __future__ import annotations
@@ -30,13 +22,10 @@ from robosystems.utils.uuid import generate_uuid7
 
 @dataclass(frozen=True)
 class FilingMeta:
-  """Enriched filing coordinates passed into FactSet construction.
+  """Filing coordinates for FactSet ``filed`` provenance and REPORT_HAS_FACT_SET.
 
-  Sourced from the processor (which holds the SEC report metadata) rather than
-  read back out of the graph: the classify context deliberately carries only an
-  identifier-only Report table, so a ``MATCH (r:Report)`` lookup can never
-  populate these. Stamped onto every FactSet's ``filed`` provenance and used to
-  emit the ``REPORT_HAS_FACT_SET`` (report → its many block FactSets) edges.
+  Passed in from the processor because the classify context has no Report
+  properties to read them from.
   """
 
   report_id: str | None = None
@@ -46,12 +35,8 @@ class FilingMeta:
   filer_cik: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# Disclosure mechanics concept map (Seattle Method taxonomy, 143 entries)
-# ---------------------------------------------------------------------------
-# Maps us-gaap element local name → Seattle Method disclosure name.
-# Source: conceptArrangementPattern-requiresConcept + concept-allowedAlternativeConcept
-# arcroles from the disclosure mechanics taxonomy.
+# us-gaap local name → Seattle Method disclosure name, from the disclosure
+# mechanics taxonomy's requiresConcept / allowedAlternativeConcept arcroles.
 
 DISCLOSURE_CONCEPT_MAP: dict[str, str] = {
   "AccountsAndOtherReceivablesNetCurrent": "AccountsNotesLoansAndFinancingReceivable",
@@ -199,13 +184,8 @@ DISCLOSURE_CONCEPT_MAP: dict[str, str] = {
   "ValuationAllowancesAndReservesBalance": "CreditLossesForFinancingReceivablesCurrent",
 }
 
-# ---------------------------------------------------------------------------
-# Disclosure-to-canonical concept bridge
-# ---------------------------------------------------------------------------
-# Maps disclosure names → canonical concept IDs. Only includes disclosures
-# where the root element unambiguously maps to a single canonical concept.
-# When an element is the calculation root of a known disclosure structure,
-# this gives us near-certain canonical identification without embeddings.
+# Disclosure name → canonical concept, only where the calculation root maps
+# unambiguously to one concept.
 
 DISCLOSURE_TO_CANONICAL: dict[str, str] = {
   # Balance Sheet
@@ -228,20 +208,14 @@ DISCLOSURE_TO_CANONICAL: dict[str, str] = {
   "CashFlowStatement": "operating_cash_flow",
 }
 
-# ---------------------------------------------------------------------------
-# Schema DDL generation (minimal subset for classification)
-# ---------------------------------------------------------------------------
-
 
 def _generate_ddl() -> list[str]:
-  """Generate minimal CREATE TABLE DDL with only the columns used by classification queries.
+  """Minimal DDL with only the columns classification reads.
 
-  Uses a hardcoded minimal schema rather than the full schema definitions.
-  This avoids column-count mismatches when loading parquet files that may not
-  have all columns (e.g., in tests or when schema evolves).
+  Hardcoded rather than derived from the full schema so parquet files missing
+  columns still load.
   """
   return [
-    # Association: only columns referenced in classification Cypher queries
     """CREATE NODE TABLE IF NOT EXISTS Association (
       identifier STRING,
       arcrole STRING,
@@ -252,7 +226,6 @@ def _generate_ddl() -> list[str]:
       preferred_label STRING,
       PRIMARY KEY (identifier)
     )""",
-    # Element: only columns referenced in classification queries
     """CREATE NODE TABLE IF NOT EXISTS Element (
       identifier STRING,
       uri STRING,
@@ -263,17 +236,14 @@ def _generate_ddl() -> list[str]:
       balance STRING,
       PRIMARY KEY (identifier)
     )""",
-    # Structure: for semantic classification (mapping calc roots → disclosure names)
     """CREATE NODE TABLE IF NOT EXISTS Structure (
       identifier STRING,
       PRIMARY KEY (identifier)
     )""",
-    # Fact: minimal for FactSet building
     """CREATE NODE TABLE IF NOT EXISTS Fact (
       identifier STRING,
       PRIMARY KEY (identifier)
     )""",
-    # Relationship tables
     "CREATE REL TABLE IF NOT EXISTS ASSOCIATION_HAS_FROM_ELEMENT (FROM Association TO Element)",
     "CREATE REL TABLE IF NOT EXISTS ASSOCIATION_HAS_TO_ELEMENT (FROM Association TO Element)",
     "CREATE REL TABLE IF NOT EXISTS STRUCTURE_HAS_ASSOCIATION (FROM Structure TO Association, association_context STRING)",
@@ -281,17 +251,8 @@ def _generate_ddl() -> list[str]:
   ]
 
 
-# ---------------------------------------------------------------------------
-# TempLadybugContext
-# ---------------------------------------------------------------------------
-
-
 class TempLadybugContext:
-  """Temporary embedded LadybugDB for per-filing Cypher-based analysis.
-
-  Creates a LadybugDB database in a temp directory, installs schema DDL,
-  and cleans up on exit. Uses ladybug directly — no Graph API.
-  """
+  """Temporary embedded LadybugDB for per-filing Cypher analysis; removed on exit."""
 
   def __init__(self, ddl_statements: list[str] | None = None):
     self._tmpdir: str | None = None
@@ -313,7 +274,6 @@ class TempLadybugContext:
     )
     self._conn = lbug.Connection(self._db)
 
-    # Install schema
     for stmt in self._ddl:
       try:
         self._conn.execute(stmt)
@@ -326,7 +286,6 @@ class TempLadybugContext:
     self.close()
 
   def execute(self, cypher: str, params: dict[str, Any] | None = None) -> list[dict]:
-    """Execute a Cypher query and return results as list of dicts."""
     if self._conn is None:
       raise RuntimeError("TempLadybugContext is not open")
 
@@ -335,7 +294,6 @@ class TempLadybugContext:
     else:
       result = self._conn.execute(cypher)
 
-    # Convert to list of dicts
     if result is None:
       return []
 
@@ -347,12 +305,7 @@ class TempLadybugContext:
     return rows
 
   def load_parquet(self, table_name: str, parquet_path: Path) -> None:
-    """Load a parquet file into a table via COPY FROM.
-
-    For node tables with extra columns in the parquet (e.g., full Element schema
-    vs our minimal classification schema), we read with pandas, select only the
-    columns we need, write a temp parquet, and load that instead.
-    """
+    """COPY a parquet file into a table, projected and reordered to the DDL columns."""
     if self._conn is None:
       raise RuntimeError("TempLadybugContext is not open")
 
@@ -365,8 +318,7 @@ class TempLadybugContext:
       # LocalFileSystem registration conflicts when DuckDB is in-process.
       import pyarrow.parquet as pq
 
-      # Always load via pandas to ensure column selection and ordering match the DDL.
-      # LadybugDB COPY FROM is position-based, so column order must match exactly.
+      # LadybugDB COPY FROM is positional, so columns must match the DDL order.
       schema_cols = self._get_table_columns(table_name)
       if not schema_cols:
         # Relationship tables with no properties — direct COPY FROM
@@ -374,7 +326,6 @@ class TempLadybugContext:
           table = pq.read_table(f)
         if table.num_rows == 0:
           return
-        # Write to temp path via file handle for LadybugDB COPY
         tmp_path = Path(self._tmpdir) / f"{table_name}_copy.parquet"
         with open(tmp_path, "wb") as f:
           pq.write_table(table, f)
@@ -382,7 +333,6 @@ class TempLadybugContext:
         logger.debug(f"Loaded {table_name} from {parquet_path}")
         return
 
-      # Read parquet header to get available columns
       with open(parquet_path, "rb") as f:
         pf = pq.ParquetFile(f)
         available_cols = pf.schema_arrow.names
@@ -401,7 +351,6 @@ class TempLadybugContext:
       with open(parquet_path, "rb") as f:
         table = pq.read_table(f, columns=cols_to_read)
       df = table.to_pandas()
-      # Reorder to match DDL and add missing columns as None
       for col in schema_cols:
         if col not in df.columns:
           df[col] = None
@@ -419,7 +368,6 @@ class TempLadybugContext:
       logger.warning(f"Failed to load {table_name} from {parquet_path}: {e}")
 
   def _get_table_columns(self, table_name: str) -> list[str]:
-    """Get column names for a node table from LadybugDB schema."""
     try:
       result = self._conn.execute(f"CALL table_info('{table_name}') RETURN name")
       cols = []
@@ -430,7 +378,6 @@ class TempLadybugContext:
       return []
 
   def close(self) -> None:
-    """Close connection and clean up temp directory."""
     try:
       if self._conn is not None:
         self._conn.close()
@@ -447,12 +394,7 @@ class TempLadybugContext:
         self._tmpdir = None
 
 
-# ---------------------------------------------------------------------------
-# Classification queries
-# ---------------------------------------------------------------------------
-
-# Each query returns association_id values that match the pattern.
-# Source for all deterministic rules is "arcrole_analysis" with confidence 1.0.
+# Each query returns the association_ids matching its pattern.
 CLASSIFICATION_QUERIES: dict[str, str] = {
   # RollUp: presentation association where same element also appears in a calculation association
   "RollUp": """
@@ -504,23 +446,11 @@ CLASSIFICATION_QUERIES: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# AssociationClassifier
-# ---------------------------------------------------------------------------
-
-
 class AssociationClassifier:
-  """Classifies associations using Cypher pattern detection on temp LadybugDB.
-
-  Loads a filing's parquet output into a temporary embedded LadybugDB,
-  runs classification queries, and returns Classification nodes and
-  ASSOCIATION_HAS_CLASSIFICATION relationships as DataFrames.
-  """
+  """Classifies a filing's associations and builds its structure FactSets."""
 
   @dataclass
   class ClassifyResult:
-    """Results from association classification and FactSet building."""
-
     classifications_df: pd.DataFrame
     assoc_classifications_df: pd.DataFrame
     canonical_hints: dict[str, tuple[str, float]]
@@ -532,23 +462,7 @@ class AssociationClassifier:
   def classify(
     self, output_dir: Path, filing_meta: FilingMeta | None = None
   ) -> ClassifyResult:
-    """Run classification on a filing's parquet output.
-
-    Runs two layers of classification, then builds structure-level FactSets:
-    1. Structural — Cypher pattern matching (RollUp, RollForward, etc.)
-    2. Semantic — Disclosure mechanics lookup (AssetsRollUp, CashFlowStatement, etc.)
-    3. FactSets — Pre-computed fact groupings per structure for rendering
-
-    Args:
-        output_dir: Directory containing nodes/ and relationships/ parquet subdirs.
-        filing_meta: Enriched filing coordinates (accession/filing_date/form/
-            filer_cik + report_id) for stamping FactSet ``filed`` provenance and
-            emitting REPORT_HAS_FACT_SET edges. Sourced from the processor, not
-            the graph — see ``FilingMeta``.
-
-    Returns:
-        ClassifyResult with classification DataFrames, canonical hints, and FactSet data.
-    """
+    """Classify a filing's parquet output (``output_dir`` holds nodes/ and relationships/)."""
     empty = self.ClassifyResult(
       classifications_df=pd.DataFrame(),
       assoc_classifications_df=pd.DataFrame(),
@@ -559,7 +473,6 @@ class AssociationClassifier:
       report_factset_rels_df=pd.DataFrame(),
     )
 
-    # Check that required parquet files exist
     nodes_dir = output_dir / "nodes"
     rels_dir = output_dir / "relationships"
 
@@ -580,7 +493,6 @@ class AssociationClassifier:
     relationships: list[dict] = []
 
     with TempLadybugContext() as ctx:
-      # Load parquet data
       ctx.load_parquet("Association", assoc_path)
       ctx.load_parquet("Element", elem_path)
       ctx.load_parquet("ASSOCIATION_HAS_FROM_ELEMENT", from_path)
@@ -590,7 +502,7 @@ class AssociationClassifier:
       ctx.load_parquet("Fact", fact_path)
       ctx.load_parquet("FACT_HAS_ELEMENT", fact_elem_path)
 
-      # Layer 1: Structural classification
+      # Structural
       for classification_type, cypher in CLASSIFICATION_QUERIES.items():
         try:
           results = ctx.execute(cypher)
@@ -620,12 +532,11 @@ class AssociationClassifier:
             }
           )
 
-      # Layer 2: Semantic classification (disclosure mechanics)
+      # Semantic (disclosure mechanics)
       semantic_classes, semantic_rels, canonical_hints = self._classify_semantic(ctx)
       classifications.extend(semantic_classes)
       relationships.extend(semantic_rels)
 
-      # Layer 3: Build structure-level FactSets
       (
         factsets_df,
         struct_fs_rels_df,
@@ -668,21 +579,15 @@ class AssociationClassifier:
   def _classify_semantic(
     self, ctx: TempLadybugContext
   ) -> tuple[list[dict], list[dict], dict[str, tuple[str, float]]]:
-    """Identify disclosure mechanics from calculation root elements.
+    """Name each structure by its calculation root's disclosure.
 
-    For each structure, finds the root calculation association, extracts the
-    element's local name, and looks it up in DISCLOSURE_CONCEPT_MAP. If found,
-    creates a Classification node attached to ALL associations in that structure.
-
-    Also builds canonical_hints: when a disclosure root maps to a known canonical
-    concept via DISCLOSURE_TO_CANONICAL, the root element gets a high-confidence
-    canonical concept hint.
+    One Classification per matched structure, linked to all its associations.
+    Roots whose disclosure maps to a canonical concept also get a hint.
     """
     classifications: list[dict] = []
     relationships: list[dict] = []
     canonical_hints: dict[str, tuple[str, float]] = {}
 
-    # Find calculation root elements per structure (include element identifier)
     try:
       roots = ctx.execute(
         """
@@ -702,18 +607,15 @@ class AssociationClassifier:
       if not structure_id or not root_qname:
         continue
 
-      # Extract local name from qname (e.g., "us-gaap:Assets" → "Assets")
       local_name = root_qname.split(":")[-1] if ":" in root_qname else root_qname
       disclosure_name = DISCLOSURE_CONCEPT_MAP.get(local_name)
       if not disclosure_name:
         continue
 
-      # Check if this disclosure root maps to a canonical concept
       canonical_id = DISCLOSURE_TO_CANONICAL.get(disclosure_name)
       if canonical_id and root_id and root_id not in canonical_hints:
         canonical_hints[root_id] = (canonical_id, 0.97)
 
-      # Get all associations in this structure
       try:
         assocs = ctx.execute(
           """
@@ -727,7 +629,6 @@ class AssociationClassifier:
         logger.debug(f"Failed to get associations for structure {structure_id}: {e}")
         continue
 
-      # Create one Classification node per structure, linked to all its associations
       class_id = generate_uuid7()
       classifications.append(
         {
@@ -753,31 +654,17 @@ class AssociationClassifier:
   def _build_structure_factsets(
     self, ctx: TempLadybugContext, filing_meta: FilingMeta
   ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Build pre-computed FactSets per Structure.
+    """One FactSet per Structure: every fact on any element the structure touches.
 
-    For each Structure, collects all Elements from its associations, then
-    finds all Facts in the report that reference those elements. Creates a
-    FactSet per Structure as a rendering manifest. Each FactSet is also
-    linked back to the filing's Report so the package can be traversed
-    via ``REPORT_HAS_FACT_SET``.
-
-    Returns:
-        (factsets_df, structure_factset_rels_df, factset_fact_rels_df,
-         report_factset_rels_df)
+    Returns (factsets, structure→factset, factset→fact, report→factset) frames.
     """
     factsets: list[dict] = []
     structure_factset_rels: list[dict] = []
     factset_fact_rels: list[dict] = []
     report_factset_rels: list[dict] = []
 
-    # Filing coordinates come from the processor (FilingMeta), not a graph
-    # lookup: the classify context carries an identifier-only Report table, so
-    # accession/filing_date/form can only be sourced from the enriched report
-    # metadata passed in. report_id (when present) drives the one-to-many
-    # REPORT_HAS_FACT_SET edges (report → each of its block FactSets).
     report_ids: list[str] = [filing_meta.report_id] if filing_meta.report_id else []
 
-    # Get all structures and their elements (both FROM and TO)
     try:
       structure_elements = ctx.execute(
         """
@@ -795,7 +682,6 @@ class AssociationClassifier:
         pd.DataFrame(),
       )
 
-    # Also get FROM elements per structure
     try:
       from_elements = ctx.execute(
         """
@@ -807,10 +693,7 @@ class AssociationClassifier:
     except Exception:
       from_elements = []
 
-    # One `filed` provenance descriptor for the whole filing — every FactSet
-    # in this report shares the same filing coordinates. JSON-encoded so the
-    # graph FactSet.provenance reads identically to the tenant materializer's
-    # (which carries the OLTP fact_sets.provenance blob).
+    # JSON-encoded to match the tenant materializer's FactSet.provenance.
     provenance_json = FiledProvenance(
       source="sec_edgar",
       accession=filing_meta.accession,
@@ -819,7 +702,6 @@ class AssociationClassifier:
       filer_cik=filing_meta.filer_cik,
     ).model_dump_json()
 
-    # Merge FROM and TO element sets per structure
     from_by_struct = {
       row["structure_id"]: set(row["from_elements"]) for row in from_elements
     }
@@ -832,7 +714,6 @@ class AssociationClassifier:
       if not element_ids:
         continue
 
-      # Find all facts referencing these elements
       try:
         facts = ctx.execute(
           """
@@ -849,9 +730,7 @@ class AssociationClassifier:
       if not facts:
         continue
 
-      # Create FactSet for this structure. Column order matches the graph
-      # FactSet node schema (identifier, factset_type, provenance) — LadybugDB
-      # COPY is positional.
+      # Column order matches the graph FactSet schema; LadybugDB COPY is positional.
       fs_id = generate_uuid7()
       factsets.append(
         {

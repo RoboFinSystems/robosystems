@@ -1,8 +1,4 @@
-"""QuickBooks Extract Asset.
-
-Fetches data from QuickBooks API and writes raw parquet files
-to a temp directory for dbt transformation.
-"""
+"""QuickBooks extract asset: QB API → raw parquet for dbt."""
 
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
@@ -25,30 +21,16 @@ from .utils import (
 
 
 class MultiCurrencyNotSupportedError(Exception):
-  """QB returned non-USD data and the dbt mart can't preserve it.
-
-  Fail-loud guard: the dbt mart at
-  `dbt/models/ledger/transactions.sql:66` + `elements.sql:35` hardcodes
-  `'USD'` even though `pipeline/utils.py` correctly extracts
-  `CurrencyRef.value` into the flattened header rows. A non-USD realm
-  would silently corrupt — reports would render numbers as if they were
-  USD. Refuse to load until full currency thread-through ships.
-  """
+  """The dbt mart (transactions.sql, elements.sql) hardcodes USD, so a
+  non-USD realm would load silently wrong; refuse it."""
 
 
 def _assert_usd_only(
   *header_groups: list[dict],
   realm_id: str,
 ) -> None:
-  """Raise MultiCurrencyNotSupportedError if any extracted header row
-  carries a non-USD currency.
-
-  Scans every header dict's `currency` field across all groups
-  (invoices / bills / payments / etc.). The flatten helpers at
-  `pipeline/utils.py:393,476` default to `'USD'` when CurrencyRef is
-  missing, so the only non-USD rows here are intentional QB-side
-  multi-currency entries.
-  """
+  """The flatteners default a missing CurrencyRef to USD, so any other code
+  here is real QB multi-currency data."""
   offending: set[str] = set()
   for rows in header_groups:
     for row in rows:
@@ -79,16 +61,6 @@ def qb_extract(
   context: AssetExecutionContext,
   config: QBSyncConfig,
 ) -> MaterializeResult:
-  """Extract QuickBooks data to parquet files.
-
-  Fetches accounts, company info, and the JournalReport (all transaction
-  types in double-entry format) from the QuickBooks API, then writes
-  raw parquet files for dbt transformation.
-
-  The JournalReport includes invoices, bills, payments, purchases,
-  deposits, and manual journal entries — everything needed for a
-  complete accounting graph.
-  """
   from datetime import datetime, timedelta
 
   from robosystems.adapters.quickbooks.client import QBClient
@@ -103,14 +75,12 @@ def qb_extract(
     f"full_rebuild={config.full_rebuild}"
   )
 
-  # Get credentials from PostgreSQL
   with SessionFactory() as session:
     creds = ConnectionCredentials.get_by_connection_id(config.connection_id, session)
     if not creds:
       raise ValueError(f"No credentials found for connection {config.connection_id}")
     credentials = creds.get_credentials()
 
-  # Initialize QB client
   realm_id = config.realm_id
   if not realm_id:
     raise ValueError("realm_id is required for QuickBooks extraction")
@@ -122,21 +92,17 @@ def qb_extract(
   )
   context.log.info("QBClient initialized, fetching data...")
 
-  # Fetch company info (always full, 1 API call)
   raw_company_info = client.get_entity_info()
   company_info = flatten_company_info(raw_company_info)
   context.log.info(f"Fetched company info: {len(company_info)} entities")
 
-  # Fetch accounts (always full, small dataset)
   accounts = client.get_accounts()
   context.log.info(f"Fetched {len(accounts)} accounts")
 
-  # Fetch JournalReport (all transaction types in double-entry format)
-  # QB API requires explicit dates to return data. Resolution order:
-  # full_rebuild → 2000-01-01, since_date if set → that, else lookback_days.
+  # JournalReport returns nothing without explicit dates.
   end_date = datetime.now().strftime("%Y-%m-%d")
   if config.full_rebuild:
-    start_date = "2000-01-01"  # Far enough back to catch all history
+    start_date = "2000-01-01"
     context.log.info(f"Full rebuild: fetching transactions from {start_date}")
   elif config.since_date:
     start_date = config.since_date
@@ -147,8 +113,6 @@ def qb_extract(
     )
     context.log.info(f"Incremental: fetching transactions from {start_date}")
 
-  # testing_migration defaults to the INTUIT_REPORTS_TESTING_MIGRATION flag,
-  # so this routes through Intuit's v2 reporting service unless SSM-disabled.
   report = client.get_transactions(start_date=start_date, end_date=end_date)
   journal_entries, journal_lines = parse_journal_report(report)
 
@@ -156,7 +120,7 @@ def qb_extract(
     f"Parsed: {len(journal_entries)} transactions, {len(journal_lines)} lines"
   )
 
-  # Party entities (full snapshot, not date-filtered)
+  # Parties are a full snapshot; headers below use the JournalReport window.
   customers = flatten_customers(client.get_customers())
   vendors = flatten_vendors(client.get_vendors())
   employees = flatten_employees(client.get_employees())
@@ -165,9 +129,7 @@ def qb_extract(
     f"{len(employees)} employees"
   )
 
-  # Transaction-class headers (date-filtered, same window as JournalReport).
-  # Headers carry agent refs that JournalReport flattens away — they enrich
-  # JournalReport-derived events with class-specific event_type + agent_id.
+  # Headers carry the agent refs JournalReport flattens away.
   invoice_headers = flatten_invoice_headers(client.get_invoices(start_date, end_date))
   bill_headers = flatten_bill_headers(client.get_bills(start_date, end_date))
   payment_headers = flatten_payment_headers(client.get_payments(start_date, end_date))
@@ -177,12 +139,6 @@ def qb_extract(
   sales_receipt_headers = flatten_sales_receipt_headers(
     client.get_sales_receipts(start_date, end_date)
   )
-  # Purchase covers Expense / Cash Expense / Check / Credit Card Expense —
-  # the four collapsed tx_types JournalReport surfaces with EntityRef
-  # populated. Each Purchase emits multiple header rows (one per candidate
-  # tx_type the JournalReport might use) so the LEFT JOIN in
-  # transactions.sql resolves the agent regardless of which display
-  # label QB picked for the row.
   purchase_headers = flatten_purchase_headers(
     client.get_purchases(start_date, end_date)
   )
@@ -193,14 +149,6 @@ def qb_extract(
     f"{len(purchase_headers)} purchases"
   )
 
-  # Multi-currency fail-loud guard. The dbt mart at
-  # `dbt/models/ledger/transactions.sql:66` and `elements.sql:35`
-  # hardcodes `'USD'`, silently dropping any non-USD `CurrencyRef`
-  # captured at extract time. Until currency is threaded through the
-  # full pipeline, refuse to load non-USD data — a Canadian/UK customer
-  # would otherwise get silent corruption (reports showing USD values
-  # for CAD/GBP amounts). Surfaces as a clean MultiCurrencyNotSupportedError
-  # on the Dagster run; operator must work with us to enable.
   _assert_usd_only(
     invoice_headers,
     bill_headers,
@@ -211,7 +159,6 @@ def qb_extract(
     realm_id=realm_id,
   )
 
-  # Write parquet to shared pipeline directory
   extract_dir = get_pipeline_work_dir(config.graph_id) / "extract"
   write_extract_parquet(
     extract_dir,

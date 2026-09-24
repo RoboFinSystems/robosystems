@@ -1,37 +1,18 @@
-"""The one Dagster asset — sync the Item's cursor, link the accounts, load the changes.
+"""The ``plaid_feed`` asset (job ``plaid_sync``): sync the Item's cursor, link
+a chart account per cash and card account, load the changes into the inbox.
 
-``plaid_feed`` (job ``plaid_sync``) pulls the Item's accounts and every
-change since the stored cursor, links a chart account to each cash and card
-account, and loads the changes into the inbox. The cursor advances only after
-the load commits, so a failed run replays the same window (every write is
-idempotent on the event's natural key).
+The cursor advances only after the load commits with no failed rows, so a
+failed run replays the same window; writes are idempotent on the event's
+natural key. ``/transactions/sync`` never resends a window on its own.
 
-A full rebuild, or an explicit ``since_date``, drops the cursor and replays
-the Item's whole history.
+Plaid pulls a new Item in two steps: ~30 recent days
+(``INITIAL_UPDATE_COMPLETE``), then the rest (``HISTORICAL_UPDATE_COMPLETE``).
+A run with only the recent window captures it but leaves the fiscal calendar
+alone: bootstrapping on 30 days would close earlier months before their
+transactions arrive, and the closed-period gate would then refuse them.
 
-Plaid pulls a new Item in two steps: the most recent ~30 days first
-(``INITIAL_UPDATE_COMPLETE``), the rest of the requested history later
-(``HISTORICAL_UPDATE_COMPLETE``), and nothing at all for the first seconds
-(``NOT_READY``). The asset waits for the history: up to ten minutes on the
-Item's first sync, a minute on any later run (a run with a cursor already
-captured what had landed; a short recheck is enough, and a worker is never
-held long on a scheduled sync). A run that still has nothing fails, so the
-connection never reads as synced with zero data. A run that has only the recent window captures it and stores the cursor
-— the rest arrives as ``added`` on a later sync — but leaves the fiscal
-calendar alone: bootstrapping it on 30 days would close every earlier month
-before its transactions arrived, and the closed-period gate would then refuse
-them. The calendar opens on the first run that sees the history complete.
-
-A row that fails to capture is retried, not lost: the cursor is not advanced
-and the run fails naming it, so the next sync replays the same window (the
-rows that did capture are found as existing). ``/transactions/sync`` never
-resends a window on its own.
-
-The body keeps the shared bank-feed discipline (``adapters/bank_feed/sync.py``).
-A login the customer has to repair marks the connection ``needs_reauth`` and
-fails. The job retries a run whose worker died, never one whose body failed:
-the client already retries rate limits and 5xx inside the run, and a dead
-login retried three times helps no one.
+The job retries a run whose worker died, never one whose body failed: the
+client already retries rate limits and 5xx.
 """
 
 import time
@@ -59,8 +40,8 @@ from robosystems.adapters.bank_feed.sync import (
 
 SOURCE = "plaid"
 SOURCE_LABEL = "Plaid"
-# How long a run waits for Plaid to finish pulling the Item's history: the
-# first sync (no cursor yet) waits the long bound, a later run rechecks briefly.
+# The first sync (no cursor) waits the long bound for Plaid's pull; a later
+# run only rechecks, so a scheduled sync never holds a worker long.
 PULL_WAIT_SECONDS = 600
 PULL_RECHECK_SECONDS = 60
 PULL_POLL_SECONDS = 10
@@ -326,12 +307,9 @@ def settle_after_history(
 ) -> Any:
   """Drain what lands with the history-complete flag.
 
-  Observed against the sandbox 2026-09-16: the status flipped to
-  ``HISTORICAL_UPDATE_COMPLETE`` on a page holding the recent window, and the
-  historical rows answered the *next* cursor a beat later. The first run to
-  see the flag keeps pulling until a cursor returns nothing, so the calendar
-  opens on the whole history; the credential bundle then records
-  ``history_complete_at`` and later runs never pay for it.
+  Plaid can raise ``HISTORICAL_UPDATE_COMPLETE`` on a page holding only the
+  recent window, with the history on the *next* cursor; keep pulling until a
+  cursor returns nothing so the calendar opens on the whole history.
   """
   for _round in range(SETTLE_ROUNDS):
     more = client.sync_transactions(access_token, sync.next_cursor)

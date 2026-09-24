@@ -1,36 +1,10 @@
-"""
-Vector index management endpoints for Graph API.
+"""Vector index endpoints, with two backends selected by ``backend``.
 
-Two backends via the `backend` field:
-
-  - **hnsw** — the live path. LadybugDB-native HNSW index on a materialized
-    table. Built here (the materialize path calls build with backend='hnsw')
-    but *searched in Cypher* via CALL QUERY_VECTOR_INDEX, not the /search
-    route, which rejects backend='hnsw' and says so.
-
-  - **lance** — no live consumer today. LanceDB IVF-PQ built from a DuckDB
-    staging query, plus a tar.gz export. It is the IVF-PQ foundation for the
-    planned `lance` vector-store subgraph, which — unlike LadybugDB — exposes
-    vector search over THESE routes rather than through Cypher. Distinct from
-    Semantic Memory (``semantic_memory.py``), the incremental-CRUD
-    specialization of the same modality.
-
-Endpoints:
-
-  POST /databases/{graph_id}/tables/{table_name}/vector/build
-    Build vector index (lance: from DuckDB query, hnsw: on materialized table)
-
-  POST /databases/{graph_id}/tables/{table_name}/vector/search
-    Query by embedding similarity (lance only)
-
-  POST /databases/{graph_id}/tables/{table_name}/vector/export
-    Package lance index as tar.gz for S3 publish (lance only)
-
-  DELETE /databases/{graph_id}/tables/{table_name}/vector
-    Delete the vector index
-
-  GET /databases/{graph_id}/tables/{table_name}/vector
-    Get index metadata
+- ``hnsw`` — the live path: a LadybugDB HNSW index on a materialized table,
+  built here but searched in Cypher (``CALL QUERY_VECTOR_INDEX``), not /search.
+- ``lance`` — no live consumer: LanceDB IVF-PQ built from a DuckDB staging
+  query, plus tar.gz export; the batch side of a planned lance vector-store
+  subgraph.
 """
 
 import asyncio
@@ -46,11 +20,6 @@ from robosystems.graph_api.core.ladybug.results import result_rows
 from robosystems.logger import logger
 
 router = APIRouter(prefix="/databases", tags=["Vector Index"])
-
-
-# ---------------------------------------------------------------------------
-# Request/response models
-# ---------------------------------------------------------------------------
 
 
 class VectorBuildRequest(BaseModel):
@@ -188,10 +157,6 @@ class VectorIndexInfo(BaseModel):
   path: str
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 _lance_manager = None
 
 
@@ -207,7 +172,6 @@ def _get_lance_manager():
 
 
 def _get_ladybug_service():
-  """Lazy-load the LadybugDB service."""
   from robosystems.graph_api.core.ladybug import get_ladybug_service
 
   return get_ladybug_service()
@@ -222,10 +186,6 @@ def _require_writer():
     )
 
 
-# ---------------------------------------------------------------------------
-# Identifier validation
-# ---------------------------------------------------------------------------
-
 _SAFE_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
@@ -233,11 +193,6 @@ def _validate_identifier(value: str, label: str = "identifier") -> None:
   """Validate a value is a safe identifier before Cypher interpolation."""
   if not _SAFE_IDENTIFIER.match(value):
     raise ValueError(f"Invalid {label}: {value!r}")
-
-
-# ---------------------------------------------------------------------------
-# HNSW backend operations
-# ---------------------------------------------------------------------------
 
 
 def _build_hnsw_index(
@@ -276,11 +231,6 @@ def _build_hnsw_index(
   }
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-
 @router.get(
   "/{graph_id}/tables/{table_name}/vector",
   response_model=VectorIndexInfo | None,
@@ -306,10 +256,8 @@ async def vector_info(
           conn.execute("INSTALL vector")
           conn.execute("LOAD EXTENSION vector")
 
-        # There is no non-destructive probe for an HNSW index: searching needs
-        # the embedding dimension, and the definitive check (DROP) destroys it.
-        # Treat the embedding column's presence as the index existing — builds
-        # are always explicit.
+        # No non-destructive probe for an HNSW index exists, so an embedding
+        # column is taken to mean an index.
         try:
           info_result = conn.execute(f"CALL TABLE_INFO('{table_name}') RETURN *")
           info_rows = result_rows(info_result)
@@ -431,7 +379,6 @@ async def vector_build(
       backend="hnsw",
     )
 
-  # Lance backend
   if request.query is None:
     raise HTTPException(
       status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -494,7 +441,6 @@ async def vector_search(
       ),
     )
 
-  # Lance backend
   manager = _get_lance_manager()
 
   try:

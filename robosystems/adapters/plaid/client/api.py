@@ -1,24 +1,8 @@
 """Plaid API client — Link, the Item, its accounts, and the transactions cursor.
 
-Plaid authenticates every call with the platform's client id and secret in the
-JSON body; the customer's credential is a per-Item ``access_token`` that never
-expires and never rotates (it dies only when the Item is removed or its login
-breaks). So there is no token source here, only the one client.
-
-Errors come back as a JSON body with ``error_type`` / ``error_code``. Two
-classes matter to the feed: a login that needs the customer back in Link
-(``ITEM_LOGIN_REQUIRED`` and friends — the connection goes ``needs_reauth``
-and Link reopens in update mode on the same Item), and a transient failure
-(rate limits, an institution down) the next sync retries without touching
-state.
-
-API notes, verified against the sandbox 2026-09-16: ``/transactions/sync``
-answers ``transactions_update_status: NOT_READY`` with an empty page until the
-Item's initial pull lands (seconds in the sandbox), then
-``INITIAL_UPDATE_COMPLETE`` while only the most recent ~30 days are in and the
-historical pull to ``days_requested`` is still running, and
-``HISTORICAL_UPDATE_COMPLETE`` once it all is; amounts are positive for money
-leaving the account; ``personal_finance_category`` arrives as v2.
+Every call carries the platform's client id and secret in the JSON body. The
+customer's per-Item ``access_token`` never expires or rotates, so there is no
+token refresh. Amounts are positive for money leaving the account.
 Docs: https://plaid.com/docs/api/
 """
 

@@ -1,14 +1,7 @@
-"""Dagster extensions materialization job.
+"""Dagster jobs for extensions: OLTP -> LadybugDB materialization, obligation promotion.
 
-Materializes extensions OLTP data (PostgreSQL) to the LadybugDB graph database.
-Connector-agnostic — works regardless of which connector (QB, Xero, Plaid, native)
-populated the OLTP tables.
-
-Can be triggered:
-- After any connector sync (e.g., chained after qb_load)
-- On-demand via API (POST /v1/graphs/{graph_id}/materialize with source=extensions)
-- On-demand via Dagster UI
-- On a schedule (future)
+Materialization is connector-agnostic; it reads whatever populated the tenant's
+OLTP tables.
 """
 
 from datetime import UTC, datetime
@@ -44,11 +37,10 @@ def materialize_extensions_to_graph(
   graph: GraphResource,
   config: ExtensionsMaterializeConfig,
 ) -> dict[str, Any]:
-  """Materialize extensions OLTP data to LadybugDB graph.
+  """Materialize extensions OLTP data to the LadybugDB graph.
 
-  Uses postgres_scanner to read from the extensions tenant schema,
-  stages into DuckDB, then materializes to LadybugDB via the Arrow
-  record-batch streaming handoff (no intermediate file).
+  postgres_scanner reads the tenant schema into DuckDB, which streams Arrow
+  record batches into LadybugDB (no intermediate file).
   """
   import asyncio
 
@@ -64,12 +56,9 @@ def materialize_extensions_to_graph(
   asyncio.set_event_loop(loop)
 
   try:
-    # Enforce the tier storage cap on this path too. The HTTP materialize
-    # command runs the same check, but this op is also reached directly by
-    # the staleness sensor, which would otherwise rebuild over-cap graphs on
-    # every sync. Unknown usage (Graph API unreachable) fails the run rather
-    # than proceeding unverified; the sensor resubmits after its cursor
-    # expiry.
+    # The staleness sensor reaches this op without the HTTP command's storage
+    # cap check, so enforce it here. Unknown usage (Graph API unreachable)
+    # fails the run rather than proceeding unverified.
     from robosystems.database import get_db_session
     from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
     from robosystems.models.core.graph.graph import Graph
@@ -106,9 +95,8 @@ def materialize_extensions_to_graph(
         },
       )
 
-    # Stamped before the source is read: a write that marks the graph stale
-    # after this point is not in the snapshot, and mark_fresh must leave the
-    # flag set for it (compare-and-clear).
+    # Compare-and-clear anchor for mark_fresh: a write stamped after this
+    # point is not in the snapshot and must keep the graph stale.
     started_at = datetime.now(UTC)
     materializer = ExtensionsMaterializer()
     result = loop.run_until_complete(
@@ -122,9 +110,10 @@ def materialize_extensions_to_graph(
     loop.close()
 
   if result.status != "success":
-    # 'partial' matters as much as 'error': a graph missing a relationship
-    # table renders empty statements. Failing here leaves graph_stale set,
-    # so the next OLTP write triggers another rebuild attempt.
+    # 'partial' fails too: a missing relationship table renders empty
+    # statements. graph_stale stays set; the sensor retries only once a later
+    # write restamps graph_stale_at (its run_key) and its 2h in-progress
+    # cursor entry has expired.
     context.log.error(f"Extensions materialization {result.status}: {result.errors}")
     raise Failure(
       description=(f"Extensions materialization {result.status} for {graph_id}"),
@@ -136,7 +125,6 @@ def materialize_extensions_to_graph(
       },
     )
 
-  # Clear staleness so the Dagster sensor does not re-submit for this event
   from robosystems.database import get_db_session
   from robosystems.models.core.graph.graph import Graph
 
@@ -194,31 +182,24 @@ def materialize_extensions_to_graph(
   description="Materialize extensions OLTP data to LadybugDB graph",
 )
 def extensions_materialize_job():
-  """Materialize all extension data from PostgreSQL OLTP to LadybugDB graph.
+  """Materialize all extension data from PostgreSQL OLTP to the LadybugDB graph.
 
-  The per-graph ``materialize_db`` concurrency tag cannot be a job-level tag
-  here (the graph is run config, not a constant like ``sec``), so every
-  launcher must set ``materialize_db=<graph_id>`` on the run — the staleness
-  sensor does; a manual Dagster UI launch should add it too. The per-graph
-  Valkey lock inside ``ExtensionsMaterializer`` is the hard backstop either
-  way; the tag turns a would-be lock refusal into a queued run.
+  Launchers must tag the run ``materialize_db=<graph_id>`` (the graph is run
+  config, so it can't be a job tag); manual UI launches should too. The tag
+  queues a would-be lock refusal; the materializer's Valkey lock is the backstop.
   """
   materialize_extensions_to_graph()
 
 
-# ─────────────────────────────────────────────────────────────────────────
 # Period-boundary obligation promotion
-# ─────────────────────────────────────────────────────────────────────────
 
 
 class PromoteObligationsConfig(Config):
   """Config for promoting matured pending obligations on one graph."""
 
   graph_id: str
-  # ISO timestamp cutoff. Events with `occurred_at <= as_of_iso` are
-  # eligible. The sensor stamps `datetime.now(UTC)` per RunRequest so
-  # each run captures its own wall clock — Dagster's run dedup keys off
-  # the timestamp + graph_id.
+  # Events with `occurred_at <= as_of_iso` are eligible. The sensor stamps it
+  # per RunRequest and it is part of the run_key.
   as_of_iso: str
   dispatch_handlers: bool = False
 
@@ -228,11 +209,7 @@ def promote_obligations_for_graph(
   context: OpExecutionContext,
   config: PromoteObligationsConfig,
 ) -> dict[str, Any]:
-  """Open a tenant-scoped session and run the promotion sweep.
-
-  Defers all real logic to ``promote_pending_obligations`` so the same
-  function can be called from an admin CLI / REPL during incidents.
-  """
+  """Run ``promote_pending_obligations`` in a tenant-scoped session."""
   from datetime import datetime
 
   from robosystems.db.extensions import extensions_session
@@ -263,8 +240,7 @@ def promote_obligations_for_graph(
   )
 
   if result.errors:
-    # Non-fatal: status flips already committed. Surface as warnings so
-    # the run is yellow not red — operators investigate via logs.
+    # Non-fatal: status flips already committed.
     for evt_id, msg in result.errors:
       context.log.warning(f"Promotion error for event {evt_id}: {msg}")
 
@@ -283,10 +259,5 @@ def promote_obligations_for_graph(
   description="Promote matured pending schedule obligations for one graph",
 )
 def extensions_promote_obligations_job():
-  """One-graph wrapper that runs the promotion sweep.
-
-  The companion sensor fires one RunRequest per graph that has work to
-  do — same fan-out shape as ``stale_graph_materialization_sensor`` so
-  Dagster's per-run logging, dedup, and retry semantics apply uniformly.
-  """
+  """Promotion sweep for one graph; the sensor fans out one run per graph with work."""
   promote_obligations_for_graph()

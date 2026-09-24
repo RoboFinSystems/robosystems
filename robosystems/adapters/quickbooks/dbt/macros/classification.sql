@@ -1,7 +1,6 @@
 {% macro period_type(classification_expr) %}
 {#
   Map QB Classification to XBRL period_type.
-  Mirrors local/qb_transactions.py:551-562.
 
   Balance sheet items (instant): Asset, Liability, Equity
   Income statement items (duration): Revenue, Expense, Other Income, Other Expense
