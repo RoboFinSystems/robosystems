@@ -675,14 +675,19 @@ class APIKeyCache:
         pass
       return None
 
-  def _read_graph_access_entry(self, cached: str | None) -> dict[str, Any] | None:
+  def _read_graph_access_entry(
+    self, cached: str | None, cache_key: str
+  ) -> dict[str, Any] | None:
     if not cached:
       return None
     if cached.startswith("{"):
       # Written before entries were sealed; a miss re-checks the database.
       return None
     data = self._decrypt_cache_data(cached)
-    if not isinstance(data, dict) or "has_access" not in data:
+    # The sealed key binds the decision to the key it was stored under.
+    if not isinstance(data, dict) or data.get("key") != cache_key:
+      return None
+    if "has_access" not in data:
       return None
     return data
 
@@ -693,6 +698,7 @@ class APIKeyCache:
     try:
       cache_key = self._get_graph_cache_key(api_key_hash, graph_id)
       cache_data = {
+        "key": cache_key,
         "has_access": has_access,
         "cached_at": datetime.now(UTC).isoformat(),
       }
@@ -709,7 +715,7 @@ class APIKeyCache:
       cache_key = self._get_graph_cache_key(api_key_hash, graph_id)
       cached_data = cast(str | None, self.redis.get(cache_key))
 
-      data = self._read_graph_access_entry(cached_data)
+      data = self._read_graph_access_entry(cached_data, cache_key)
       if data is not None:
         logger.debug(f"Graph access cache hit: {api_key_hash[:8]}... -> {graph_id}")
         return data["has_access"]
@@ -913,6 +919,7 @@ class APIKeyCache:
     try:
       cache_key = self._get_jwt_graph_cache_key(user_id, graph_id)
       cache_data = {
+        "key": cache_key,
         "has_access": has_access,
         "cached_at": datetime.now(UTC).isoformat(),
       }
@@ -930,7 +937,7 @@ class APIKeyCache:
       cache_key = self._get_jwt_graph_cache_key(user_id, graph_id)
       cached_data = cast(str | None, self.redis.get(cache_key))
 
-      data = self._read_graph_access_entry(cached_data)
+      data = self._read_graph_access_entry(cached_data, cache_key)
       if data is not None:
         logger.debug(f"JWT graph access cache hit: {user_id} -> {graph_id}")
         return data["has_access"]

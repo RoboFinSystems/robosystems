@@ -1061,3 +1061,13 @@ class TestGraphAccessEntryIntegrity:
     cache.store[cache._get_jwt_graph_cache_key("user1", "kg1")] = plain
     assert cache.get_cached_graph_access("hash123", "kg1") is None
     assert cache.get_cached_jwt_graph_access("user1", "kg1") is None
+
+  def test_an_entry_copied_to_another_key_is_a_cache_miss(self, cache):
+    cache.cache_graph_access("hash123", "kg_granted", True)
+    cache.cache_jwt_graph_access("user1", "kg_granted", True)
+    granted = cache.store[cache._get_graph_cache_key("hash123", "kg_granted")]
+    jwt_granted = cache.store[cache._get_jwt_graph_cache_key("user1", "kg_granted")]
+    cache.store[cache._get_graph_cache_key("hash123", "kg_other")] = granted
+    cache.store[cache._get_jwt_graph_cache_key("user1", "kg_other")] = jwt_granted
+    assert cache.get_cached_graph_access("hash123", "kg_other") is None
+    assert cache.get_cached_jwt_graph_access("user1", "kg_other") is None
