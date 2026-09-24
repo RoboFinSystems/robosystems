@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -2381,7 +2381,9 @@ class TestReconcileOperatingToCash:
     # Residual = -50 - (-80) = +30 booked to the operating catch-all so the
     # bottom line foots to -50.
     facts = [self._cash(150.0, self.P0), self._cash(100.0, self.P1), self._ni(-80.0)]
-    _reconcile_operating_to_cash(self._session(), facts, self._periods())
+    _reconcile_operating_to_cash(
+      self._session(), facts, self._periods(), self._opening_flat()
+    )
     recon = [f for f in facts if f.element_id == "ooc"]
     assert len(recon) == 1
     assert recon[0].value == 30.0
@@ -2391,7 +2393,9 @@ class TestReconcileOperatingToCash:
   def test_no_adjustment_when_already_ties(self):
     # Derived net change (-50) already equals ΔCash (-50) ⇒ no fact added.
     facts = [self._cash(150.0, self.P0), self._cash(100.0, self.P1), self._ni(-50.0)]
-    _reconcile_operating_to_cash(self._session(), facts, self._periods())
+    _reconcile_operating_to_cash(
+      self._session(), facts, self._periods(), self._opening_flat()
+    )
     assert not [f for f in facts if f.element_id == "ooc"]
 
   def test_noop_when_no_cash_anchor(self):
@@ -2400,12 +2404,20 @@ class TestReconcileOperatingToCash:
     _reconcile_operating_to_cash(self._session(), facts, self._periods())
     assert not [f for f in facts if f.element_id == "ooc"]
 
-  def test_single_period_noop(self):
+  def _opening_flat(self):
+    """The prior column's opening, equal to its close: no movement there."""
+    return [self._cash(150.0, date(2023, 12, 31))]
+
+  def test_a_single_period_reconciles_from_its_opening(self):
     facts = [self._cash(100.0, self.P1), self._ni(-80.0)]
     _reconcile_operating_to_cash(
-      self._session(), facts, [PeriodSpec(date(2025, 1, 1), self.P1, "Only")]
+      self._session(),
+      facts,
+      [PeriodSpec(date(2025, 1, 1), self.P1, "Only")],
+      [self._cash(150.0, self.P0)],
     )
-    assert not [f for f in facts if f.element_id == "ooc"]
+    recon = [f for f in facts if f.element_id == "ooc"]
+    assert [f.value for f in recon] == [30.0]
 
 
 class TestDeriveCashFlowFacts:
@@ -2439,16 +2451,20 @@ class TestDeriveCashFlowFacts:
     session.execute.side_effect = [deriv_result, meta_result]
     return session
 
-  def test_single_period_no_op(self):
-    facts: list[ReportFact] = [self._instant("ar", 100.0, self.CURR_E)]
-    session = MagicMock()
-    _derive_cash_flow_facts(
-      session, facts, [PeriodSpec(self.CURR_S, self.CURR_E, "Current")]
+  def test_a_single_period_derives_from_its_opening(self):
+    facts: list[ReportFact] = [self._instant("ar_src", 1000.0, self.CURR_E)]
+    session = self._session_with_derivations(
+      deriv_rows=[("cf_ar_leaf", "ar_src", -1.0)],
+      meta_rows=[("cf_ar_leaf", "rs-gaap:IncreaseDecreaseInAR", "AR Δ", "credit")],
     )
-    # No CF synthesis with <2 periods.
-    assert all(f.element_id == "ar" for f in facts)
-    # Query never executed (early return).
-    session.execute.assert_not_called()
+    _derive_cash_flow_facts(
+      session,
+      facts,
+      [PeriodSpec(self.CURR_S, self.CURR_E, "Current")],
+      [self._instant("ar_src", 400.0, self.PRIOR_E)],
+    )
+    cf = [f for f in facts if f.element_id == "cf_ar_leaf"]
+    assert [f.value for f in cf] == [-600.0]
 
   def test_asset_up_yields_negative_cf_leaf(self):
     """Indirect method: AR up → -Δ → cash use (negative for credit-balance leaf)."""
@@ -2512,6 +2528,7 @@ class TestDeriveCashFlowFacts:
         PeriodSpec(self.PRIOR_S, self.PRIOR_E, "Prior"),
         PeriodSpec(self.CURR_S, self.CURR_E, "Current"),
       ],
+      [self._instant("src", 100.0, date(2023, 12, 31))],
     )
     assert not any(f.element_id == "cf_leaf" for f in facts)
 
@@ -2786,6 +2803,7 @@ class TestCloseSourceDedupe:
         reporting_name="Revenue from Contract with Customer",
         classification="revenue",  # trait-carrying anchor
         balance_type="credit",
+        period_type="duration",
         total_debits=0,
         total_credits=1_000_000,  # $10k
       ),
@@ -2796,6 +2814,7 @@ class TestCloseSourceDedupe:
         reporting_name="Subscription Revenue",
         classification=None,  # trait-less; inferred 'revenue' from qname
         balance_type="credit",
+        period_type="duration",
         total_debits=0,
         total_credits=1_000_000,
       ),
@@ -2806,6 +2825,7 @@ class TestCloseSourceDedupe:
         reporting_name="Cost of Revenue",
         classification="expense",
         balance_type="debit",
+        period_type="duration",
         total_debits=600_000,  # $6k
         total_credits=0,
       ),
@@ -2983,8 +3003,10 @@ class TestNonContiguousPeriods:
       "robosystems.operations.roboledger.reports.fact_grid._read_mapped_balances",
       return_value={},
     ) as read:
+      # Only the earliest column's opening; Q3's is Q2's end.
       _load_opening_facts(MagicMock(), "map", contiguous, "mapping")
-      read.assert_not_called()
+      assert [c.args[2] for c in read.call_args_list] == [date(2025, 3, 31)]
+      read.reset_mock()
 
       _load_opening_facts(MagicMock(), "map", [self.PRIOR_YEAR_Q3, self.Q3], "mapping")
       assert read.call_args.args[2:4] == (self.Q3_OPENING, self.Q3_OPENING)
@@ -3010,5 +3032,6 @@ class TestNonContiguousPeriods:
         MagicMock(), "map", [self.PRIOR_YEAR_Q3, self.Q3], "mapping"
       )
     assert [(f.element_id, f.period_end) for f in openings] == [
-      ("accum_dep", self.Q3_OPENING)
+      ("accum_dep", self.PRIOR_YEAR_Q3.start - timedelta(days=1)),
+      ("accum_dep", self.Q3_OPENING),
     ]
