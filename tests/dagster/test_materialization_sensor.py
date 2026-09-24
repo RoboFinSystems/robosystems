@@ -54,7 +54,7 @@ class TestStaleGraphSensor:
 
     assert len(result) == 1
     assert "kg123" in result[0].run_key
-    # run_key uses graph_stale_at, not now — enables Dagster deduplication
+    # Keyed on the staleness event (plus the expiry window), so Dagster dedupes ticks
     assert stale_at.isoformat() in result[0].run_key
 
   def test_run_request_carries_per_graph_concurrency_tag(self):
