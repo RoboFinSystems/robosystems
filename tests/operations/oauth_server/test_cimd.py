@@ -362,3 +362,51 @@ class TestResolveClient:
       with pytest.raises(ClientError):
         resolve_client(VSCODE_ID, test_db)
     fetch.assert_not_called()
+
+
+class _DripStream(httpx.SyncByteStream):
+  def __iter__(self):
+    import time
+
+    for _ in range(100):
+      time.sleep(0.2)
+      yield b" "
+
+
+class TestFetchIsBounded:
+  def test_slow_drip_is_cut_off_at_the_deadline(self, public_dns):
+    import time
+
+    transport = _transport(lambda request: httpx.Response(200, stream=_DripStream()))
+    started = time.monotonic()
+    with patch.object(cimd, "CIMD_TIMEOUT_SECONDS", 1.0):
+      with pytest.raises(ClientError):
+        fetch_client_metadata(UNKNOWN_ID, transport=transport)
+    assert time.monotonic() - started < 2.0
+
+  def test_fetches_beyond_the_cap_are_refused_without_a_request(self, public_dns):
+    calls = []
+
+    def handler(request):
+      calls.append(request)
+      return httpx.Response(200, json={"client_id": UNKNOWN_ID})
+
+    held = 0
+    while cimd._fetch_slots.acquire(blocking=False):
+      held += 1
+    try:
+      with pytest.raises(ClientError):
+        fetch_client_metadata(UNKNOWN_ID, transport=_transport(handler))
+    finally:
+      for _ in range(held):
+        cimd._fetch_slots.release()
+    assert held == cimd.CIMD_MAX_CONCURRENT_FETCHES
+    assert calls == []
+
+  def test_a_slot_is_returned_after_a_failed_fetch(self, public_dns):
+    transport = _transport(lambda request: httpx.Response(404))
+    for _ in range(cimd.CIMD_MAX_CONCURRENT_FETCHES + 2):
+      with pytest.raises(ClientError):
+        fetch_client_metadata(UNKNOWN_ID, transport=transport)
+    assert cimd._fetch_slots.acquire(blocking=False)
+    cimd._fetch_slots.release()

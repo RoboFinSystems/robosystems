@@ -46,7 +46,9 @@ def _api_key_is_cached_valid(api_key_hash: str) -> bool:
   from robosystems.middleware.auth.cache import api_key_cache
 
   try:
-    return api_key_cache.get_cached_api_key_validation(api_key_hash) is not None
+    cached = api_key_cache.get_cached_api_key_validation(api_key_hash)
+    # An unknown key is cached as a negative entry; it is not an identity.
+    return bool(cached) and cached.get("is_active") is True
   except Exception:
     return False
 

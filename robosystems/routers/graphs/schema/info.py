@@ -55,6 +55,10 @@ async def get_graph_schema_info(
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> SchemaInfoResponse:
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  require_graph_access(graph_id, session, require_write=False)
+
   operation_logger = get_operation_logger()
 
   operation_start_time = time.time()

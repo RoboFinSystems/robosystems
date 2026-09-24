@@ -461,6 +461,7 @@ class TestOrgMembershipAuditEvents:
       "target_user_id": member.id,
       "previous_role": "member",
       "new_role": "admin",
+      "graph_admin_grants_downgraded": 0,
     }
 
   async def test_removal_is_audited(self, async_client, test_db, test_user):
@@ -676,3 +677,43 @@ class TestRemovalFromLastOrgDeactivates:
     assert OrgUser.get_by_org_and_user(org.id, member.id, test_db) is None
     details = audit.log_security_event.call_args.kwargs["details"]
     assert details["user_deactivated"] is False
+
+
+class TestDemotionDowngradesGraphAdmin:
+  async def test_demoted_admin_loses_explicit_graph_admin(
+    self, async_client, test_db, test_user
+  ):
+    from robosystems.models.core import Graph, GraphRole, GraphUser
+
+    org = Org.create(
+      name=f"Demote Org {uuid4().hex[:6]}", org_type=OrgType.TEAM, session=test_db
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.OWNER, session=test_db
+    )
+    admin = _create_user(test_db, test_user.password_hash)
+    OrgUser.create(org_id=org.id, user_id=admin.id, role=OrgRole.ADMIN, session=test_db)
+    org_graph = Graph.create(
+      graph_id=f"kg{uuid4().hex[:16]}",
+      org_id=org.id,
+      graph_name="Org Graph",
+      graph_type="generic",
+      session=test_db,
+    )
+    GraphUser.create(
+      user_id=admin.id,
+      graph_id=org_graph.graph_id,
+      role=GraphRole.ADMIN,
+      session=test_db,
+    )
+
+    response = await async_client.put(
+      f"/v1/orgs/{org.id}/members/{admin.id}",
+      json={"role": OrgRole.MEMBER.value},
+    )
+
+    assert response.status_code == 200
+    test_db.expire_all()
+    row = GraphUser.get_by_user_and_graph(admin.id, org_graph.graph_id, test_db)
+    assert GraphRole.coerce(row.role) == GraphRole.MEMBER
+    assert not GraphUser.user_has_admin_access(admin.id, org_graph.graph_id, test_db)

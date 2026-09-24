@@ -68,6 +68,10 @@ async def execute_sql(
 ) -> SqlStatementResponse:
   start_time = datetime.now(UTC)
 
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  require_graph_access(graph_id, db, require_write=False)
+
   circuit_breaker.check_circuit(graph_id, "table_query")
 
   # Shared, transport-independent authorization: SQL is read-only and blocked

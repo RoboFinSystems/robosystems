@@ -41,7 +41,12 @@ class TestGraphSchemaEndpoints:
     self, client_with_mocked_auth, test_user_graph, sample_graph
   ):
     """Get schema for a graph — exercises router + graph client."""
-    response = client_with_mocked_auth.get(f"/v1/graphs/{sample_graph.graph_id}/schema")
+    from unittest.mock import patch
+
+    with patch("robosystems.middleware.billing.enforcement.require_graph_access"):
+      response = client_with_mocked_auth.get(
+        f"/v1/graphs/{sample_graph.graph_id}/schema"
+      )
     assert response.status_code in [200, 500, 502, 503]
 
   def test_validate_schema(self, client_with_mocked_auth):
