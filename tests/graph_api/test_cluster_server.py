@@ -358,14 +358,11 @@ class TestLadybugService:
     with pytest.raises(HTTPException) as exc_info:
       service.execute_query(request)
 
-    # Note: Due to a bug in the exception handling, the 408 timeout error
-    # is caught and wrapped in a 500 error. This should be fixed in the future.
-    assert exc_info.value.status_code == 500  # Currently wrapped in 500
+    assert exc_info.value.status_code == 408
     assert "timeout" in str(exc_info.value.detail).lower()
-    assert "408" in str(exc_info.value.detail)  # Original error code is in the message
 
-    # Verify that the future was cancelled
-    mock_future.cancel.assert_called_once()
+    conn = mock_db_instance.get_connection.return_value.__enter__.return_value
+    conn.interrupt.assert_called_once()
 
     # Verify timeout was used correctly
     mock_future.result.assert_called_once_with(timeout=1.0)

@@ -83,11 +83,10 @@ class TestQueryTimeout:
     # Create request (timeout is configured via TuningConfig)
     request = QueryRequest(database="test_db", cypher="MATCH (n) RETURN n")
 
-    # Execute and expect timeout — the 408 gets wrapped in 500 by outer exception handler
     with pytest.raises(HTTPException) as exc_info:
       service.execute_query(request)
 
-    assert exc_info.value.status_code == 500
+    assert exc_info.value.status_code == 408
     assert "timeout" in str(exc_info.value.detail).lower()
 
   def test_successful_query_within_timeout(self):

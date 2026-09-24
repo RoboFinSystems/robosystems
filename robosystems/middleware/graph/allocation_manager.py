@@ -1348,37 +1348,38 @@ class LadybugAllocationManager:
         return
 
       volume_id = items[0]["volume_id"]
-      current_databases = items[0].get("databases", [])
 
-      # The condition only checks graph_id is still listed; it does not
-      # detect other concurrent edits to the list.
-      if graph_id in current_databases:
-        updated_databases = [db for db in current_databases if db != graph_id]
+      # Remove by index, conditioned on that slot still holding graph_id, so a
+      # concurrent add is never overwritten; a shifted list re-reads and retries.
+      for _ in range(3):
+        item = self.volume_table.get_item(
+          Key={"volume_id": volume_id}, ConsistentRead=True
+        ).get("Item", {})
+        databases = item.get("databases", [])
+        if graph_id not in databases:
+          logger.debug(f"Database {graph_id} was not in volume {volume_id} registry")
+          return
+        index = databases.index(graph_id)
         try:
           self.volume_table.update_item(
             Key={"volume_id": volume_id},
-            UpdateExpression="SET databases = :dbs, last_updated = :timestamp",
-            ConditionExpression="contains(databases, :gid)",
+            UpdateExpression=f"REMOVE databases[{index}] SET last_updated = :timestamp",
+            ConditionExpression=f"databases[{index}] = :gid",
             ExpressionAttributeValues={
-              ":dbs": updated_databases,
               ":gid": graph_id,
               ":timestamp": datetime.now(UTC).isoformat(),
             },
           )
-          logger.info(
-            f"Removed database {graph_id} from volume {volume_id} registry "
-            f"(now has {len(updated_databases)} databases)"
-          )
+          logger.info(f"Removed database {graph_id} from volume {volume_id} registry")
+          return
         except ClientError as e:
-          if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            logger.debug(
-              f"Database {graph_id} already removed from volume {volume_id} registry "
-              f"(concurrent modification detected)"
-            )
-          else:
+          if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
             raise
-      else:
-        logger.debug(f"Database {graph_id} was not in volume {volume_id} registry")
+
+      logger.warning(
+        f"Gave up removing {graph_id} from volume {volume_id} registry "
+        f"after repeated concurrent modification"
+      )
 
     except ClientError as e:
       logger.error(

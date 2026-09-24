@@ -1007,3 +1007,79 @@ class TestVolumeRegistrySkipDev:
     manager = _create_manager(environment="test")
     await manager._update_volume_registry_remove_database("i-12345678", "kg_test")
     manager.volume_table.scan.assert_not_called()
+
+
+class _RacingTable:
+  """A real table that lets a concurrent add land right after the first read."""
+
+  def __init__(self, table, on_first_read):
+    self._table = table
+    self._on_first_read = on_first_read
+
+  def _after_read(self, result):
+    if self._on_first_read:
+      hook, self._on_first_read = self._on_first_read, None
+      hook()
+    return result
+
+  def scan(self, **kwargs):
+    return self._after_read(self._table.scan(**kwargs))
+
+  def get_item(self, **kwargs):
+    return self._after_read(self._table.get_item(**kwargs))
+
+  def __getattr__(self, name):
+    return getattr(self._table, name)
+
+
+@pytest.mark.unit
+class TestVolumeRegistryRemoveRace:
+  @pytest.fixture
+  def volume_table(self, monkeypatch):
+    import boto3
+    from moto import mock_aws
+
+    monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+    with mock_aws():
+      table = boto3.resource("dynamodb", region_name="us-east-1").create_table(
+        TableName="volume-registry",
+        KeySchema=[{"AttributeName": "volume_id", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "volume_id", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+      )
+      table.put_item(
+        Item={
+          "volume_id": "vol-1",
+          "instance_id": "i-1",
+          "status": "attached",
+          "databases": ["kg_a", "kg_a_old"],
+        }
+      )
+      yield table
+
+  @pytest.mark.asyncio
+  async def test_concurrent_add_survives_a_remove(self, volume_table):
+    def concurrent_add():
+      volume_table.update_item(
+        Key={"volume_id": "vol-1"},
+        UpdateExpression="SET databases = list_append(databases, :new)",
+        ExpressionAttributeValues={":new": ["kg_a_new"]},
+      )
+
+    manager = _create_manager(environment="prod")
+    manager.volume_table = _RacingTable(volume_table, concurrent_add)
+
+    await manager._update_volume_registry_remove_database("i-1", "kg_a_old")
+
+    databases = volume_table.get_item(Key={"volume_id": "vol-1"})["Item"]["databases"]
+    assert databases == ["kg_a", "kg_a_new"]
+
+  @pytest.mark.asyncio
+  async def test_remove_is_a_noop_when_absent(self, volume_table):
+    manager = _create_manager(environment="prod")
+    manager.volume_table = volume_table
+
+    await manager._update_volume_registry_remove_database("i-1", "kg_missing")
+
+    databases = volume_table.get_item(Key={"volume_id": "vol-1"})["Item"]["databases"]
+    assert databases == ["kg_a", "kg_a_old"]

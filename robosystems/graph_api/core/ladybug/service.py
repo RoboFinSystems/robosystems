@@ -334,7 +334,8 @@ class LadybugService:
               try:
                 query_result = future.result(timeout=query_timeout)
               except TimeoutError:
-                future.cancel()
+                # Leaving the executor joins the worker, so stop the query first.
+                conn.interrupt()
                 logger.warning(
                   f"Streaming query timeout for {validated_graph_id} "
                   f"after {query_timeout} seconds"
@@ -591,7 +592,8 @@ class LadybugService:
                 logger.warning(
                   f"Query timeout for {validated_graph_id} after {query_timeout} seconds"
                 )
-                future.cancel()
+                # Leaving the executor joins the worker, so stop the query first.
+                conn.interrupt()
                 raise HTTPException(
                   status_code=status.HTTP_408_REQUEST_TIMEOUT,
                   detail=f"Query execution timeout ({query_timeout} seconds)",
@@ -638,6 +640,8 @@ class LadybugService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Query execution error: {error_msg}",
               )
+          except HTTPException:
+            raise
           except Exception as e:
             logger.error(f"Unexpected query error for {validated_graph_id}: {e!s}")
             span.set_attribute("error", True)
