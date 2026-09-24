@@ -220,8 +220,6 @@ demo:
     @just demo-saas-startup
     @just demo-roboinvestor
     @just demo-custom-graph
-    @just demo-seattle-method
-    @just demo-world-online
 
 # Create or reuse demo user (uses shared .local/config.json)
 demo-user *args="":
@@ -262,14 +260,6 @@ demo-roboinvestor *args="":
 # Run the custom graph demo end-to-end — your own schema
 demo-custom-graph *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.custom_graph_demo.main {{args}}
-
-# Run the Seattle Method cross-taxonomy demo — Charlie Hoffman's mini, 14 JEs
-demo-seattle-method *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.main {{args}}
-
-# Run The World Online demo — Seattle Method at scale, 22,288 GL lines
-demo-world-online *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.main {{args}}
 
 
 ## CI/CD ##

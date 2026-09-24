@@ -945,7 +945,7 @@ class TestCreateReportOp:
         "robosystems.operations.roboledger.commands.reports.create_report",
         side_effect=BundleUploadError(
           "Failed to upload JSON-LD bundle for report rpt_01 to "
-          "s3://test-bucket/graph-bundles/kg.../rpt_01/g1.jsonld; aborting publish."
+          "s3://test-bucket/graph-bundles/kg.../rpt_01/g1.tavi.json; aborting publish."
         ),
       ),
       patch("robosystems.db.extensions.extensions_session") as mock_session,
@@ -1006,7 +1006,7 @@ class TestRegenerateReportOp:
         "robosystems.operations.roboledger.commands.reports.regenerate_report",
         side_effect=BundleUploadError(
           "Failed to upload JSON-LD bundle for report rpt_01 to "
-          "s3://test-bucket/graph-bundles/kg.../rpt_01/g2.jsonld; aborting publish."
+          "s3://test-bucket/graph-bundles/kg.../rpt_01/g2.tavi.json; aborting publish."
         ),
       ),
       patch("robosystems.db.extensions.extensions_session") as mock_session,

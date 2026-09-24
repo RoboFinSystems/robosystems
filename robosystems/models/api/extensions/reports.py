@@ -535,8 +535,9 @@ class ReportBundleDownloadResponse(BaseModel):
   """Presigned-URL response for a published Report's serialization bundle.
 
   Every flavor resolves to a short-lived presigned URL pointing at the
-  bundle in S3 — JSON-LD is stamped at publish time, XBRL is
-  materialized on first download and cached by `generation_count`.
+  bundle in S3 — the Tavi model is stamped at publish time; the holon and
+  XBRL 2.1 are materialized on first download and cached by
+  `generation_count`.
   The client follows `download_url` to fetch the artifact directly
   from S3 (the API never streams the bytes). Mirrors the
   backup-download shape the frontend already consumes.
@@ -555,7 +556,7 @@ class ReportBundleDownloadResponse(BaseModel):
     ...,
     description=(
       "Serialization flavor delivered by this URL — one of the "
-      "`RdfFlavor` / `XbrlFlavor` values (e.g. `jsonld`, `xbrl-2.1`)."
+      "`RdfFlavor` / `XbrlFlavor` values (e.g. `tavi`, `xbrl-2.1`)."
     ),
   )
   generation_count: int = Field(
@@ -567,15 +568,14 @@ class ReportBundleDownloadResponse(BaseModel):
       "Content the Report carries that this flavor does not. "
       "`disclosure_notes`: the XBRL 2.1 zip ships statements only — "
       "tenant-authored disclosure notes render on screen and ride the "
-      "JSON-LD and holon flavors, but are excluded from this file. "
+      "Tavi and holon flavors, but are excluded from this file. "
       "The Tavi compiled model carries the statements and notes but has no "
       "home for `ib_envelopes` (the per-Network Information Block "
       "payloads), `definition_links` (equivalence, general-special, "
       "essence-alias and mapping arcs), `reporting_style`, "
       "`framework_pins`, `fact_sets` (the FactSet partition and each "
       "fact's structure pin) or `filing_lifecycle` (filing status, "
-      "supersession, share provenance); all of it rides the JSON-LD and "
-      "holon flavors."
+      "supersession, share provenance); all of it rides the holon flavor."
     ),
   )
 

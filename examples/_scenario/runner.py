@@ -5,7 +5,7 @@ Given an :class:`~examples._scenario.drivers.Scenario` plus its counterparty
 agents, CoA→rs-gaap mappings, and policy documents, ``run_demo`` provisions a
 RoboLedger graph and loads the whole company: chart of accounts, agents, the
 typed REA event stream, mappings, fiscal calendar, schedules, policies,
-materialization, and a filed annual report (with JSON-LD + XBRL bundles).
+materialization, and a filed annual report (with Tavi + XBRL bundles).
 
 Each episode (e.g. ``coffee_roaster_demo``, ``saas_startup_demo``) is a thin
 ``main.py`` that calls ``run_demo`` — the company *is* the scenario, so a new
@@ -944,7 +944,7 @@ def create_text_block_notes(
   each uploaded policy document to its concept as a ``Nonnumeric`` fact
   over the scenario's report period — the Document→fact bridge. Reports
   generated afterward snapshot the standing bindings, so the narrative
-  rides the report package, the JSON-LD bundle, and the graph.
+  rides the report package, the Tavi and holon bundles, and the graph.
 
   Returns the number of documents bound.
   """
@@ -2182,7 +2182,7 @@ def generate_annual_report(
 
   # Download both bundle flavors via the SDK so the demo finishes with a
   # tangible artifact on disk that the customer can open immediately.
-  # JSON-LD is the canonical projection; XBRL 2.1 is the filing-grade
+  # The Tavi is the anchor stamped at publish; XBRL 2.1 is the filing-grade
   # equivalent. Same Report, same fact set, two serializations.
   # ``--no-artifacts`` skips this whole serialization/validation pass —
   # for loop/CI runs whose local files nobody will ever open, the same

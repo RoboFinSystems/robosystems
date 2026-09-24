@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.config import env
 from robosystems.config.storage.graph import (
+  REPORT_ANCHOR_EXTENSION,
   get_report_bundle_key,
   get_report_bundle_prefix,
   get_report_bundle_uri,
@@ -66,11 +67,9 @@ from robosystems.operations.roboledger.reports.statement_sets import (  # noqa: 
   _pre_create_report_fact_sets,
 )
 from robosystems.operations.serialization import (
-  RdfFlavor,
   StatementBundle,
   build_report_bundle,
   serialize_to_holon_jsonld,
-  serialize_to_rdf,
   serialize_to_tavi,
 )
 
@@ -122,7 +121,7 @@ class TaxonomyNotFoundError(LookupError):
 
 
 class BundleUploadError(RuntimeError):
-  """The publish-time JSON-LD bundle upload failed; the publish must not commit.
+  """The publish-time bundle upload failed; the publish must not commit.
 
   Routers translate this to HTTP 502.
   """
@@ -224,83 +223,35 @@ def _snapshot_text_block_facts(
   return len(rows)
 
 
-def _record_bundle_validation(bundle: StatementBundle, report_def: Report) -> None:
-  """SHACL-validate the bundle per ``env.REPORT_BUNDLE_SHACL_VALIDATION``.
-
-  ``off`` | ``warn`` | ``strict``. The outcome is recorded on
-  ``report.metadata['bundle_validation']``; only ``strict`` blocks the publish,
-  on non-conformance or on the validator itself failing.
-  """
-  mode = (env.REPORT_BUNDLE_SHACL_VALIDATION or "off").strip().lower()
-  if mode == "off":
-    return
-  from robosystems.operations.serialization.rdf.jsonld import (
-    BundleValidationError,
-    build_graph,
-    shacl_report,
-  )
-
-  try:
-    result = shacl_report(build_graph(bundle))
-  except Exception:
-    logger.exception(
-      "SHACL validation errored for report %s (mode=%s)", report_def.id, mode
-    )
-    if mode == "strict":
-      raise
-    return
-  # Reassign (not mutate) so SQLAlchemy flags the JSONB column dirty.
-  report_def.metadata_ = {
-    **(report_def.metadata_ or {}),
-    "bundle_validation": {
-      **result.as_dict(),
-      "validated_at": datetime.now(UTC).isoformat(),
-    },
-  }
-  logger.info(
-    "Bundle SHACL for report %s: ran=%s conforms=%s violations=%d (mode=%s)",
-    report_def.id,
-    result.ran,
-    result.conforms,
-    result.violations,
-    mode,
-  )
-  if mode == "strict" and result.ran and not result.conforms:
-    raise BundleValidationError(
-      f"Report {report_def.id} bundle failed SHACL conformance "
-      f"({result.violations} violation(s)); aborting publish (strict mode)."
-    )
-
-
 def _stamp_report_bundle(
   session: Session,
   graph_id: str,
   report_def: Report,
 ) -> None:
-  """Build, upload and stamp the JSON-LD bundle for a Report about to publish.
+  """Build, upload and stamp the Tavi model for a Report about to publish.
 
-  Runs before the caller commits. Any S3 failure raises
-  :class:`BundleUploadError`: an orphan S3 object is acceptable, a published
-  Report without a bundle is not.
+  The Tavi is the report's anchor artifact: ``bundle_url`` points at it, and
+  the holon and XBRL 2.1 are derived from the bundle on first download. Runs
+  before the caller commits. Any S3 failure raises :class:`BundleUploadError`:
+  an orphan S3 object is acceptable, a published Report without a bundle is
+  not.
   """
   # The extensions session is autoflush=False; the bundler reads the new rows.
   session.flush()
   report_def.generation_count = (report_def.generation_count or 0) + 1
   bundle = build_report_bundle(session, graph_id, report_def.id)
-  _record_bundle_validation(bundle, report_def)
-  jsonld_doc = serialize_to_rdf(bundle, RdfFlavor.JSONLD)
   bucket = env.USER_DATA_BUCKET
   key = get_report_bundle_key(graph_id, report_def.id, report_def.generation_count)
-  ok = S3Client().upload_string(
-    content=jsonld_doc,
+  ok = S3Client().upload_bytes(
+    content=serialize_to_tavi(bundle),
     bucket=bucket,
     key=key,
-    content_type="application/ld+json",
+    content_type=PUBLICATION_MEDIA_TYPES[REPORT_ANCHOR_EXTENSION],
     metadata={"report-id": report_def.id, "graph-id": graph_id},
   )
   if not ok:
     raise BundleUploadError(
-      f"Failed to upload JSON-LD bundle for report {report_def.id} "
+      f"Failed to upload Tavi bundle for report {report_def.id} "
       f"to s3://{bucket}/{key}; aborting publish."
     )
   report_def.bundle_url = get_report_bundle_uri(
@@ -981,22 +932,22 @@ def revoke_report_share(
 
 
 PUBLICATION_MEDIA_TYPES: dict[str, str] = {
-  ".jsonld": "application/ld+json",
+  REPORT_ANCHOR_EXTENSION: "application/json",
   ".holon.jsonld": "application/ld+json",
-  ".tavi.json": "application/json",
 }
 
-# The artifacts derived on demand off the bundle; the flat JSON-LD is stamped
-# at publish and is never rebuilt here.
-DERIVED_ARTIFACT_EXTENSIONS: tuple[str, ...] = (".holon.jsonld", ".tavi.json")
+# What a share carries across. The anchor is stamped at publish (a generation
+# stamped before the Tavi became the anchor has it only once downloaded); the
+# holon is derived on demand. Either is built here when storage lacks it.
+PUBLICATION_EXTENSIONS: tuple[str, ...] = tuple(PUBLICATION_MEDIA_TYPES)
 
 
-def _encode_derived_artifact(extension: str, bundle: StatementBundle) -> str:
+def _encode_publication_artifact(extension: str, bundle: StatementBundle) -> str:
   if extension == ".holon.jsonld":
     return serialize_to_holon_jsonld(bundle)
-  if extension == ".tavi.json":
+  if extension == REPORT_ANCHOR_EXTENSION:
     return serialize_to_tavi(bundle).decode("utf-8")
-  raise ValueError(f"No derived encoder for {extension!r}")
+  raise ValueError(f"No publication encoder for {extension!r}")
 
 
 def _load_publication_artifacts(
@@ -1018,23 +969,10 @@ def _load_publication_artifacts(
   s3 = S3Client()
   artifacts: dict[str, str] = {}
 
-  flat = s3.download_string(
-    bucket, get_report_bundle_key(graph_id, report_id, generation_count)
-  )
-  if flat is not None:
-    artifacts[".jsonld"] = flat
-  else:
-    logger.warning(
-      "Report %s has no readable JSON-LD bundle; the recipient's copy will "
-      "carry no downloadable publication.",
-      report_id,
-    )
-
-  # Derived flavors exist only once someone downloaded them; build the missing
-  # ones off one bundle (keys are immutable per generation, so this also
-  # warms the sender's cache).
+  # Build what storage lacks off one bundle (keys are immutable per
+  # generation, so this also warms the sender's cache).
   missing: dict[str, str] = {}
-  for extension in DERIVED_ARTIFACT_EXTENSIONS:
+  for extension in PUBLICATION_EXTENSIONS:
     key = get_report_bundle_key(
       graph_id, report_id, generation_count, extension=extension
     )
@@ -1058,7 +996,7 @@ def _load_publication_artifacts(
     return artifacts
   for extension, key in missing.items():
     try:
-      content = _encode_derived_artifact(extension, bundle)
+      content = _encode_publication_artifact(extension, bundle)
     except Exception:
       logger.exception(
         "Failed to materialize the %s artifact for report %s; the recipient's "
@@ -1114,7 +1052,7 @@ def _copy_publication_artifacts(
       return
 
   shared_report.generation_count = generation_count
-  if ".jsonld" in artifacts:
+  if REPORT_ANCHOR_EXTENSION in artifacts:
     shared_report.bundle_url = get_report_bundle_uri(
       bucket, target_graph_id, shared_report.id, generation_count
     )

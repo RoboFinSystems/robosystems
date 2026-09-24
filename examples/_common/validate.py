@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
 """Container-free validation of demo bundle artifacts.
 
-Validates the artifacts a demo already wrote to ``output/`` — **without the
-running stack**: no API, no database, no Docker. Both projections of the same
-bundle are checked against independent, standards-grade tooling on the host:
+Validates the XBRL 2.1 package a demo already wrote to ``output/`` —
+**without the running stack**: no API, no database, no Docker — against the
+XBRL 2.1 spec with Arelle (the de-facto processor SEC EDGAR uses).
 
-* **JSON-LD → SHACL** against the published ontology
-  (``frameworks/ontology/v1/shapes.ttl``) — semantic conformance.
-* **XBRL 2.1 → Arelle** against the XBRL 2.1 spec — structural conformance
-  (Arelle is the de-facto processor SEC EDGAR uses).
-
-Each writes a markdown evidence report next to the artifact. Because it reads
-the on-disk ``.jsonld`` / ``.zip`` (rather than re-fetching from the API), it
-runs anywhere the host venv is installed, with the container down.
+It writes a markdown evidence report next to the artifact. Because it reads
+the on-disk ``.zip`` (rather than re-fetching from the API), it runs anywhere
+the host venv is installed, with the container down.
 
 Usage:
     uv run python -m examples._common.validate \
-        --jsonld examples/seattle_method_demo/output/seattle-method-case-1.jsonld \
-        --zip    examples/seattle_method_demo/output/seattle-method-case-1.zip \
-        --label  "Seattle Method (Test Case 1)"
+        --zip    examples/roboledger_demo/output/roboledger-demo.zip \
+        --label  "RoboLedger Demo"
 """
 
 from __future__ import annotations
@@ -28,12 +22,7 @@ import io
 import zipfile
 from pathlib import Path
 
-import rdflib
-from pyshacl import validate as _shacl_validate
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SHAPES_PATH = REPO_ROOT / "frameworks" / "ontology" / "v1" / "shapes.ttl"
-RS = rdflib.Namespace("https://robosystems.ai/vocab/")
 
 
 def _rel(p: Path) -> str:
@@ -41,60 +30,6 @@ def _rel(p: Path) -> str:
     return str(p.resolve().relative_to(REPO_ROOT))
   except ValueError:
     return str(p)
-
-
-def _count(graph: rdflib.Graph, cls: rdflib.URIRef) -> int:
-  return len(list(graph.subjects(rdflib.RDF.type, cls)))
-
-
-# ── JSON-LD → SHACL ─────────────────────────────────────────────────────────
-
-
-def validate_shacl(jsonld_path: Path, out_md: Path, label: str) -> bool:
-  """SHACL-validate a JSON-LD bundle against the ontology; write the report."""
-  graph = rdflib.Graph().parse(str(jsonld_path), format="json-ld")
-  shapes = rdflib.Graph().parse(str(SHAPES_PATH), format="turtle")
-  conforms, _, report = _shacl_validate(graph, shacl_graph=shapes, inference="none")
-
-  n_shapes = len(list(shapes.subjects(rdflib.RDF.type, rdflib.SH.NodeShape)))
-  verdict = (
-    "✅ **Conforms to RoboSystems RDF Ontology v1**"
-    if conforms
-    else "❌ **Does NOT conform** — see violations below"
-  )
-  lines = [
-    f"# {label} — SHACL Ontology Conformance",
-    "",
-    f"## Result: {verdict}",
-    "",
-    f"- **Bundle**: `{jsonld_path.name}`",
-    f"- **Graph triples**: {len(graph):,}",
-    f"- **rs:Fact nodes**: {_count(graph, RS.Fact)}",
-    f"- **rs:Association nodes**: {_count(graph, RS.Association)}",
-    f"- **rs:Element nodes**: {_count(graph, RS.Element)}",
-    (
-      f"- **SHACL shapes checked**: {n_shapes} (positive instance shapes + "
-      + "negative shapes banning the retired dialects)"
-    ),
-    "",
-    (
-      "Validated on the host with **pyshacl** against "
-      + "`frameworks/ontology/v1/shapes.ttl` — the *same* shapes that gate the "
-      + "framework seeds and the publish-time bundle validation, run here directly "
-      + "on the on-disk artifact (no API, no database, no container). Conformance "
-      + "means every `rs:Fact` references its aspects directly "
-      + "(`rs:element`/`rs:entity`/`rs:period`/`rs:unit` — no XBRL `context`), every "
-      + "`rs:Association` carries `xlink:from`/`to` + `xlink:arcrole`, and none of the "
-      + "retired dialects (`xbrli:contextRef`, `arcFrom`, direct `summationOf`) appear."
-    ),
-    "",
-    "## Violations",
-    "",
-    "_None._ Zero violations." if conforms else "```\n" + report.strip() + "\n```",
-    "",
-  ]
-  out_md.write_text("\n".join(lines))
-  return bool(conforms)
 
 
 # ── XBRL → Arelle ───────────────────────────────────────────────────────────
@@ -169,7 +104,7 @@ def validate_arelle(zip_path: Path, out_md: Path, label: str) -> bool:
       + "checks are not enabled (the instance isn't an SEC filing). Scope: "
       + "tenant-authored disclosure notes are excluded from this package — the "
       + "emitter's fixed framework prefixes cannot declare an extension concept, "
-      + "so notes ride the JSON-LD and holon flavors. A report with notes "
+      + "so notes ride the Tavi and holon flavors. A report with notes "
       + "therefore has fewer facts here than in those files."
     ),
     "",
@@ -197,37 +132,18 @@ def validate_arelle(zip_path: Path, out_md: Path, label: str) -> bool:
 
 def main() -> None:
   parser = argparse.ArgumentParser(description="Container-free bundle validation.")
-  parser.add_argument("--jsonld", type=Path, help="JSON-LD bundle → SHACL")
-  parser.add_argument("--zip", type=Path, help="XBRL 2.1 zip → Arelle")
+  parser.add_argument("--zip", type=Path, required=True, help="XBRL 2.1 zip → Arelle")
   parser.add_argument("--out-dir", type=Path, help="Where to write the reports")
   parser.add_argument("--label", required=True)
   args = parser.parse_args()
 
-  if not args.jsonld and not args.zip:
-    raise SystemExit("Pass at least one of --jsonld / --zip.")
-  ok = True
-
-  if args.jsonld:
-    jsonld = args.jsonld.resolve()
-    if not jsonld.exists():
-      raise SystemExit(f"{jsonld} missing — run the demo's download-bundles step.")
-    out = (args.out_dir or jsonld.parent) / f"{jsonld.stem}-shacl-validation.md"
-    conforms = validate_shacl(jsonld, out, args.label)
-    ok = ok and conforms
-    print(
-      f"SHACL : {jsonld.name} {'conforms' if conforms else 'VIOLATIONS'} → {_rel(out)}"
-    )
-
-  if args.zip:
-    zpath = args.zip.resolve()
-    if not zpath.exists():
-      raise SystemExit(f"{zpath} missing — run the demo's download-bundles step.")
-    out = (args.out_dir or zpath.parent) / f"{zpath.stem}-xbrl-validation.md"
-    valid = validate_arelle(zpath, out, args.label)
-    ok = ok and valid
-    print(f"Arelle: {zpath.name} {'valid' if valid else 'INVALID'} → {_rel(out)}")
-
-  if not ok:
+  zpath = args.zip.resolve()
+  if not zpath.exists():
+    raise SystemExit(f"{zpath} missing — run the demo's download-bundles step.")
+  out = (args.out_dir or zpath.parent) / f"{zpath.stem}-xbrl-validation.md"
+  valid = validate_arelle(zpath, out, args.label)
+  print(f"Arelle: {zpath.name} {'valid' if valid else 'INVALID'} → {_rel(out)}")
+  if not valid:
     raise SystemExit(1)
 
 

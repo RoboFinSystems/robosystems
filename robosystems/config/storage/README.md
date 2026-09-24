@@ -65,7 +65,7 @@ graph.get_backup_metadata_key("kg456", ts)
 # 'graph-backups/metadata/kg456/backup-20240115_123045.json'
 
 graph.get_report_bundle_key("kg456", "rpt_01K8", 1)
-# 'report-bundles/kg456/rpt_01K8/g1.jsonld'
+# 'report-bundles/kg456/rpt_01K8/g1.tavi.json'
 ```
 
 Report bundles are versioned by `Report.generation_count` (the `g` prefix reads as "generation"), so regenerating a report leaves prior generations addressable for restatement audit trails.
@@ -112,7 +112,8 @@ s3://robosystems-user-{env}/
     metadata/{graph_id}/backup-{timestamp}.json
 
   report-bundles/                # Per-Report serialization bundles
-    {graph_id}/{report_id}/g{generation}.jsonld
+    {graph_id}/{report_id}/g{generation}.tavi.json   # the anchor, stamped at publish
+    {graph_id}/{report_id}/g{generation}.holon.jsonld # derived on first download (so is .zip)
 ```
 
 ### Public data bucket

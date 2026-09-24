@@ -1,10 +1,10 @@
 """Content invariants over the committed demo artifacts (issue #1393).
 
-SHACL (``test_sample_bundles_shacl.py``) checks their *shape*, which is why two
-content drifts sat in the tree undetected: every committed holon carried zero
-element labels, and tenant concepts had lost their labels in the flat JSON-LD.
-These are the checks that fail on that class — pure Python over checked-in
-JSON, no stack.
+Shape checks alone let two content drifts sit in the tree undetected: every
+committed holon carried zero element labels, and tenant concepts had lost
+their labels in one form but not the other. These are the checks that fail on
+that class — pure Python over checked-in JSON, no stack. The two forms paired
+here are the holon and the Tavi (the anchor stamped at publish).
 
 Each failure names the artifact and the invariant, so the fix is "regenerate
 that demo".
@@ -19,19 +19,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from xbrlkit.deserialize import from_holon_report, from_tavi_report
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-ARTIFACTS = sorted(REPO_ROOT.glob("examples/*/sample_output/*.jsonld"))
-# One demo's two RDF forms, keyed by demo: (flat, holon).
+ARTIFACTS = sorted(REPO_ROOT.glob("examples/*/sample_output/*.holon.jsonld"))
+# One demo's two forms, keyed by demo: (tavi, holon).
 PAIRS = sorted(
-  (flat, flat.with_suffix("").with_suffix(".holon.jsonld"))
-  for flat in ARTIFACTS
-  if not flat.name.endswith(".holon.jsonld")
+  (holon.with_name(holon.name.replace(".holon.jsonld", ".tavi.json")), holon)
+  for holon in ARTIFACTS
 )
-
-# The flat encoder's fallthrough for a prefix its static table lacks, which is
-# every tenant's. Only the demos that author their own concepts hit it.
-_UNMAPPED_PREFIX = "https://robosystems.ai/concept/"
 
 
 def _nodes(path: Path) -> Iterator[dict[str, Any]]:
@@ -58,11 +54,22 @@ def _labels(path: Path) -> dict[str, str]:
   }
 
 
+def _model_labels(path: Path) -> dict[str, str]:
+  """``qname → standard label`` as xbrlkit reads the artifact."""
+  text = path.read_text()
+  model, _ = (from_tavi_report if path.suffix == ".json" else from_holon_report)(text)
+  return {
+    qname: label.value
+    for qname, concept in model.concepts.items()
+    for label in concept.labels
+    if label.value and (label.role or "").endswith("/label")
+  }
+
+
 def test_artifacts_exist() -> None:
-  assert ARTIFACTS, "no artifacts under examples/*/sample_output/"
-  assert PAIRS, "no flat/holon pairs found"
-  for flat, holon in PAIRS:
-    assert holon.exists(), f"{flat.name} has no holon beside it"
+  assert ARTIFACTS, "no holons under examples/*/sample_output/"
+  for tavi, holon in PAIRS:
+    assert tavi.exists(), f"{holon.name} has no Tavi beside it"
 
 
 @pytest.mark.parametrize("path", ARTIFACTS, ids=[p.name for p in ARTIFACTS])
@@ -78,76 +85,46 @@ def test_every_element_is_labelled(path: Path) -> None:
   )
 
 
-@pytest.mark.parametrize("pair", PAIRS, ids=[p[0].stem for p in PAIRS])
+@pytest.mark.parametrize("pair", PAIRS, ids=[p[1].stem for p in PAIRS])
 def test_both_forms_agree_on_every_shared_concept_label(
   pair: tuple[Path, Path],
 ) -> None:
   """Drift 2: tenant concepts kept their label in one form and not the other."""
-  flat, holon = pair
-  flat_labels, holon_labels = _labels(flat), _labels(holon)
-  shared = set(flat_labels) & set(holon_labels)
-  assert shared, f"{flat.stem}: the two forms declare no concept in common"
+  tavi, holon = pair
+  tavi_labels, holon_labels = _model_labels(tavi), _model_labels(holon)
+  shared = set(tavi_labels) & set(holon_labels)
+  assert shared, f"{holon.stem}: the two forms declare no concept in common"
   disagree = {
-    q: (flat_labels[q], holon_labels[q])
+    q: (tavi_labels[q], holon_labels[q])
     for q in shared
-    if flat_labels[q] != holon_labels[q]
+    if tavi_labels[q] != holon_labels[q]
   }
   assert not disagree, (
-    f"{flat.stem}: the flat bundle and the holon give different labels for "
+    f"{holon.stem}: the Tavi and the holon give different labels for "
     f"{len(disagree)} concept(s) — regenerate this demo. "
     f"{dict(list(disagree.items())[:3])}"
   )
 
 
-@pytest.mark.parametrize("pair", PAIRS, ids=[p[0].stem for p in PAIRS])
-def test_both_forms_agree_on_the_reporting_style(pair: tuple[Path, Path]) -> None:
-  """Drift 3: the holon claimed ``sec-as-filed`` for a tenant report.
-
-  ``rs:reportingStyle`` sits on the ``rs:Report`` node of both forms under one
-  IRI, so the two cannot disagree about it and both be right.
-  """
-  flat, holon = pair
-  styles = {}
-  for label, path in (("flat", flat), ("holon", holon)):
-    reports = [n for n in _typed(path, "rs:Report") if "reportingStyle" in n]
-    assert reports, f"{path.name}: no rs:Report node carries a reportingStyle"
-    styles[label] = reports[0]["reportingStyle"]
-  assert styles["flat"] == styles["holon"], (
-    f"{flat.stem}: the flat bundle says reportingStyle={styles['flat']!r} and "
-    f"the holon says {styles['holon']!r} — regenerate this demo"
+@pytest.mark.parametrize("path", ARTIFACTS, ids=[p.name for p in ARTIFACTS])
+def test_a_tenant_holon_never_claims_sec_as_filed(path: Path) -> None:
+  """Drift 3: the holon claimed ``sec-as-filed`` for a tenant report."""
+  reports = [n for n in _typed(path, "rs:Report") if "reportingStyle" in n]
+  assert reports, f"{path.name}: no rs:Report node carries a reportingStyle"
+  assert reports[0]["reportingStyle"] != "sec-as-filed", (
+    f"{path.name}: a tenant report claims the SEC as-filed style — regenerate this demo"
   )
 
 
-def _authors_own_concepts(flat: Path) -> bool:
-  return any(n["@id"].startswith(_UNMAPPED_PREFIX) for n in _typed(flat, "rs:Element"))
-
-
-@pytest.mark.parametrize(
-  "pair",
-  [
-    pytest.param(
-      pair,
-      marks=pytest.mark.xfail(
-        strict=True,
-        reason="rdf/jsonld.py::_concept_uri mints a tenant concept as "
-        "https://robosystems.ai/concept/<prefix>:<local> where the holon mints "
-        "https://robosystems.ai/taxonomy/<tenant>/<local> — issue #1397",
-      )
-      if _authors_own_concepts(pair[0])
-      else (),
-    )
-    for pair in PAIRS
-  ],
-  ids=[p[0].stem for p in PAIRS],
-)
+@pytest.mark.parametrize("pair", PAIRS, ids=[p[1].stem for p in PAIRS])
 def test_both_forms_name_the_same_concepts(pair: tuple[Path, Path]) -> None:
-  """The two forms are one Dataset, so a concept has one IRI in both."""
-  flat, holon = pair
-  only_flat = sorted(set(_labels(flat)) - set(_labels(holon)))
-  only_holon = sorted(set(_labels(holon)) - set(_labels(flat)))
-  assert not (only_flat or only_holon), (
-    f"{flat.stem}: a concept is named differently by the two forms — "
-    f"flat-only {only_flat[:3]}, holon-only {only_holon[:3]}"
+  """The two forms project one model, so they declare one concept set."""
+  tavi, holon = pair
+  only_tavi = sorted(set(_model_labels(tavi)) - set(_model_labels(holon)))
+  only_holon = sorted(set(_model_labels(holon)) - set(_model_labels(tavi)))
+  assert not (only_tavi or only_holon), (
+    f"{holon.stem}: a concept is named differently by the two forms — "
+    f"tavi-only {only_tavi[:3]}, holon-only {only_holon[:3]}"
   )
 
 

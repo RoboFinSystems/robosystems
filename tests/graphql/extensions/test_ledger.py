@@ -925,15 +925,15 @@ class TestReportDownloadUrl:
 
   _TARGET = "robosystems.operations.roboledger.reads.reports.get_report_download_url"
 
-  def test_returns_presigned_url_for_jsonld(self) -> None:
+  def test_defaults_to_the_tavi(self) -> None:
     mock_response = ReportBundleDownloadResponse(
-      download_url="https://signed.example/jsonld",
+      download_url="https://signed.example/tavi",
       expires_at=datetime(2030, 1, 1, tzinfo=UTC),
-      content_type="application/ld+json",
-      format="jsonld",
+      content_type="application/json",
+      format="tavi",
       generation_count=3,
     )
-    with _patch_session(), patch(self._TARGET, return_value=mock_response):
+    with _patch_session(), patch(self._TARGET, return_value=mock_response) as m:
       result = schema.execute_sync(
         'query { reportDownloadUrl(reportId: "rpt_1") '
         "{ downloadUrl contentType format generationCount } }",
@@ -943,9 +943,17 @@ class TestReportDownloadUrl:
     assert result.errors is None
     assert result.data is not None
     node = result.data["reportDownloadUrl"]
-    assert node["downloadUrl"] == "https://signed.example/jsonld"
-    assert node["format"] == "jsonld"
+    assert node["downloadUrl"] == "https://signed.example/tavi"
+    assert node["format"] == "tavi"
     assert node["generationCount"] == 3
+    assert m.call_args.kwargs["flavor"] == "tavi"
+
+  def test_the_flat_json_ld_format_is_gone_from_the_schema(self) -> None:
+    result = schema.execute_sync(
+      'query { reportDownloadUrl(reportId: "rpt_1", format: JSONLD) { format } }',
+      context_value=_ctx(),
+    )
+    assert result.errors is not None
 
   def test_passes_xbrl_format_through_to_ops(self) -> None:
     mock_response = ReportBundleDownloadResponse(

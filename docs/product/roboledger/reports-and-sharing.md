@@ -1,6 +1,6 @@
 ---
 title: Reports and sharing
-description: Build financial statements from your books with your AI, download them as XBRL or JSON-LD, and share a report with another RoboLedger or RoboInvestor graph.
+description: Build financial statements from your books with your AI, download them as XBRL or Tavi, and share a report with another RoboLedger or RoboInvestor graph.
 order: 12
 section: Work with your books
 ---
@@ -33,8 +33,7 @@ If the ledger changed after you created a report, because of a late entry or a r
 Open a report in **Reports → View Reports** to download it as:
 
 - an **XBRL 2.1 package**, the standard behind public company filings
-- a **JSON-LD bundle**
-- a **holon** (JSON-LD) or **Tavi** (JSON) file, which open in the free viewer at [xbrlkit.com](https://xbrlkit.com)
+- a **Tavi** (JSON) or **holon** (JSON-LD) file, which open in the free viewer at [xbrlkit.com](https://xbrlkit.com)
 
 ## Share it
 
@@ -54,4 +53,4 @@ Someone without a RoboLedger or RoboInvestor graph can still read your report. D
 
 ## Go deeper
 
-- [What's inside each format](https://robosystems.ai/docs/technical/serialization-and-export#whats-inside-each-format): the contents of the XBRL, JSON-LD, holon and Tavi downloads.
+- [What's inside each format](https://robosystems.ai/docs/technical/serialization-and-export#whats-inside-each-format): the contents of the XBRL, holon and Tavi downloads.

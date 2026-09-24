@@ -19,7 +19,7 @@ Reading your books uses no credits. See [Ask about your books](ask-about-your-bo
 
 ## Report
 
-Your assistant can build a report from your ledger for a period: the balance sheet, income statement, cash flow and statement of equity, published in RoboLedger. From there you can download it as an XBRL 2.1 package or JSON-LD, or share it with another RoboLedger or RoboInvestor graph. See [Reports and sharing](reports-and-sharing.md).
+Your assistant can build a report from your ledger for a period: the balance sheet, income statement, cash flow and statement of equity, published in RoboLedger. From there you can download it as an XBRL 2.1 package or a Tavi file, or share it with another RoboLedger or RoboInvestor graph. See [Reports and sharing](reports-and-sharing.md).
 
 - "Create a report for September."
 - "What changed between the August and September reports?"
