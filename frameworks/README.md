@@ -138,9 +138,9 @@ is one framework's mapping set. Full rules: [`chart-templates/README.md`](chart-
 
 ### `cm/` — the conceptual-model substrate (a framework, not a reporting taxonomy)
 
-`cm@v1` is a minimal universal upper-vocabulary forked from Charlie
-Hoffman's Seattle Method [`universal`](https://github.com/seattlemethod/universal)
-conceptual model. v1 is intentionally tiny — two abstract concepts,
+`cm@v1` is a minimal universal upper-vocabulary, bootstrapped from a
+published XBRL conceptual model and now maintained natively. v1 is
+intentionally tiny — two abstract concepts,
 `cm:Debit` and `cm:Credit`. A has-part arc from one of them to a
 Chart-of-Accounts element declares that element as the debit or credit
 leg of a Structure's posting template, which makes double-entry posting

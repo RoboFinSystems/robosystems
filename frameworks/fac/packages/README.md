@@ -1,7 +1,7 @@
 # fac v1 — Packages
 
 This directory holds the **packages owned by the `fac@v1` framework** —
-Charlie Hoffman's universal Fundamental Accounting Concepts substrate
+the universal Fundamental Accounting Concepts substrate
 (Assets, Liabilities, Equity, Revenues, Expenses, Income, Cash Flow)
 plus its presentation hierarchies and calculation identities.
 
@@ -26,13 +26,13 @@ resolution walks dependencies first, see
 
 ## Fork model
 
-These packages were originally bootstrapped from Charlie Hoffman's
-Seattle Method publications and are now maintained **directly in
+These packages were originally bootstrapped from published XBRL
+reference taxonomies and are now maintained **directly in
 JSON-LD** inside this directory:
 
 - Edits happen in the `taxonomy.jsonld` file for the relevant standard.
 - Upstream XBRL is **not** tracked. We do not re-import, rebase, or
-  reconcile against Seattle Method publications on any schedule.
+  reconcile against upstream publications on any schedule.
 - Migrations read these files verbatim from git — there is no network
   fetch in the ingest path.
 

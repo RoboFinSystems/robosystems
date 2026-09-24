@@ -420,8 +420,8 @@ class RuleLite(BaseModel):
   rule_origin: str = Field(
     "native",
     description=(
-      "Provenance — 'forked' (from an upstream artifact, e.g. Seattle "
-      "Method) or 'native' (authored in this seed or by a tenant). Enum "
+      "Provenance — 'forked' (from an upstream artifact, e.g. an external "
+      "XBRL taxonomy) or 'native' (authored in this seed or by a tenant). Enum "
       "closure enforced by the `public.rules` CHECK constraint."
     ),
   )
