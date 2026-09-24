@@ -88,3 +88,50 @@ async def test_the_claim_survives_a_commit_on_the_request_session():
     probe.execute(text("SELECT pg_advisory_unlock_all()"))
     probe.close()
     db.close()
+
+
+@pytest.mark.unit
+def test_a_failed_commit_after_the_claim_does_not_leave_it_held():
+  from robosystems.database import engine
+
+  event_id = f"evt_test_{uuid.uuid4().hex[:12]}"
+  real = engine.connect()
+
+  class FirstCommitFails:
+    def __init__(self):
+      self.commits = 0
+
+    def execute(self, *args, **kwargs):
+      return real.execute(*args, **kwargs)
+
+    def commit(self):
+      self.commits += 1
+      if self.commits == 1:
+        raise RuntimeError("commit failed")
+      real.commit()
+
+    def invalidate(self):
+      real.invalidate()
+
+    def close(self):
+      real.close()
+
+  from sqlalchemy import create_engine
+  from sqlalchemy.pool import NullPool
+
+  fake_engine = MagicMock()
+  fake_engine.connect.return_value = FirstCommitFails()
+  # Unpooled, so the probe can never be the connection that took the lock.
+  probe_engine = create_engine(engine.url, poolclass=NullPool)
+  try:
+    with patch.object(webhooks, "engine", fake_engine):
+      with pytest.raises(RuntimeError):
+        with webhooks._event_claim(event_id):
+          pass
+    with probe_engine.connect() as probe:
+      assert probe.execute(
+        text("SELECT pg_try_advisory_lock(hashtext(:key))"),
+        {"key": f"stripe-webhook:{event_id}"},
+      ).scalar()
+  finally:
+    probe_engine.dispose()

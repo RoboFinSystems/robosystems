@@ -115,6 +115,11 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
+  def charge_amount_refunded(self, charge_id: str) -> int:
+    """A charge's live refunded total, in cents."""
+    pass
+
+  @abstractmethod
   def get_subscription_state(self, subscription_id: str) -> dict[str, Any]:
     """The live ``status`` and ``cancel_at_period_end`` of a subscription."""
     pass
@@ -714,6 +719,9 @@ class StripePaymentProvider(PaymentProvider):
     )
     payments = client.deserialize(response, api_mode="V1").get("data") or []
     return payments[0].get("invoice") if payments else None
+
+  def charge_amount_refunded(self, charge_id: str) -> int:
+    return int(self.stripe.Charge.retrieve(charge_id).get("amount_refunded") or 0)
 
   def get_subscription_state(self, subscription_id: str) -> dict[str, Any]:
     subscription = self.stripe.Subscription.retrieve(subscription_id)

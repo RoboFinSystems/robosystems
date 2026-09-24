@@ -1371,9 +1371,16 @@ class TestHandleChargeRefunded:
       mock_db_session.query.return_value.filter.return_value.first.return_value = None
       mock_db_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_invoice
 
+      provider = MagicMock()
+      provider.charge_amount_refunded.return_value = 3000
+
       from robosystems.dagster.jobs.billing import _handle_charge_refunded
 
-      await _handle_charge_refunded(charge_data, mock_db_session, mock_context)
+      with patch(
+        "robosystems.operations.providers.payment_provider.get_payment_provider",
+        return_value=provider,
+      ):
+        await _handle_charge_refunded(charge_data, mock_db_session, mock_context)
 
     call_kwargs = MockAudit.log_event.call_args[1]
     assert call_kwargs["event_data"]["stripe_charge_id"] == "ch_test_123"

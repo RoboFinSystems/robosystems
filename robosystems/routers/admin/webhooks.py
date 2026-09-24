@@ -232,24 +232,26 @@ def _event_claim(event_id: str):
   """
   params = {"key": f"stripe-webhook:{event_id}"}
   conn = engine.connect()
+  acquired = False
   try:
-    acquired = conn.execute(
-      text("SELECT pg_try_advisory_lock(hashtext(:key))"), params
-    ).scalar()
+    acquired = bool(
+      conn.execute(text("SELECT pg_try_advisory_lock(hashtext(:key))"), params).scalar()
+    )
     conn.commit()
     if not acquired:
       raise HTTPException(
         status_code=409, detail="Event is already being processed; retry"
       )
-    try:
-      yield
-    finally:
+    yield
+  finally:
+    if acquired:
       try:
         conn.execute(text("SELECT pg_advisory_unlock(hashtext(:key))"), params)
         conn.commit()
       except Exception:
+        # A session-level lock outlives a pooled connection's reset; only
+        # discarding the connection guarantees it is released.
         conn.invalidate()
-  finally:
     conn.close()
 
 

@@ -608,20 +608,14 @@ async def _handle_charge_refunded(
     BillingInvoice,
     BillingInvoiceLineItem,
   )
+  from robosystems.operations.providers.payment_provider import get_payment_provider
 
+  provider = get_payment_provider("stripe")
   stripe_charge_id = charge_data.get("id")
-  # Cumulative across partial refunds; each event carries the running total.
-  amount_refunded = charge_data.get("amount_refunded", 0)
   stripe_invoice_id = charge_data.get("invoice")
   payment_intent_id = charge_data.get("payment_intent")
   if not stripe_invoice_id and payment_intent_id:
-    from robosystems.operations.providers.payment_provider import (
-      get_payment_provider,
-    )
-
-    stripe_invoice_id = get_payment_provider("stripe").invoice_for_payment_intent(
-      payment_intent_id
-    )
+    stripe_invoice_id = provider.invoice_for_payment_intent(payment_intent_id)
 
   if not stripe_invoice_id:
     context.log.info(f"Charge {stripe_charge_id} refunded but no invoice associated")
@@ -649,7 +643,6 @@ async def _handle_charge_refunded(
     )
     .first()
   )
-  recorded = -(refund_item.amount_cents or 0) if refund_item is not None else 0
   if refund_item is None:
     refund_item = BillingInvoiceLineItem(
       invoice_id=invoice.id,
@@ -661,11 +654,11 @@ async def _handle_charge_refunded(
       period_end=invoice.period_end,
     )
     db_session.add(refund_item)
-  # Deliveries arrive out of order; the running total only grows, so an
-  # older event must not shrink a larger recorded refund.
-  refunded = max(recorded, amount_refunded)
-  refund_item.unit_price_cents = -refunded
-  refund_item.amount_cents = -refunded
+  # Deliveries arrive out of order and a failed refund lowers the total, so
+  # the charge's live running total is the only reliable figure.
+  amount_refunded = provider.charge_amount_refunded(stripe_charge_id)
+  refund_item.unit_price_cents = -amount_refunded
+  refund_item.amount_cents = -amount_refunded
   invoice._recalculate_totals(db_session)
 
   BillingAuditLog.log_event(

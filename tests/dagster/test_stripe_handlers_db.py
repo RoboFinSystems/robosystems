@@ -95,74 +95,69 @@ def _paid_invoice(session, org_id: str, stripe_invoice_id: str) -> BillingInvoic
 
 @pytest.mark.unit
 class TestChargeRefunded:
-  @pytest.mark.asyncio
-  async def test_a_refund_on_a_current_charge_reaches_its_invoice(self, test_db):
-    org = _org(test_db)
-    stripe_invoice = f"in_test_{uuid.uuid4().hex[:10]}"
-    invoice = _paid_invoice(test_db, org.id, stripe_invoice)
-    payment_intent = f"pi_test_{uuid.uuid4().hex[:10]}"
+  """The line records the charge's live refunded total, whatever the event
+  says: deliveries arrive out of order and a failed refund lowers it."""
 
-    with patch(
-      "stripe.StripeClient.raw_request",
-      return_value=invoice_payments_list(stripe_invoice, payment_intent),
+  async def _deliver(self, session, charge_id, event_total, live_total, invoice_id):
+    payment_intent = f"pi_test_{charge_id}"
+    with (
+      patch(
+        "stripe.StripeClient.raw_request",
+        return_value=invoice_payments_list(invoice_id, payment_intent),
+      ),
+      patch("stripe.Charge.retrieve", return_value={"amount_refunded": live_total}),
     ):
       await _handle_charge_refunded(
-        refunded_charge("ch_test_full", payment_intent, 9900), test_db, MagicMock()
+        refunded_charge(charge_id, payment_intent, event_total), session, MagicMock()
       )
 
-    test_db.expire_all()
+  def _setup(self, session):
+    org = _org(session)
+    stripe_invoice = f"in_test_{uuid.uuid4().hex[:10]}"
+    return _paid_invoice(session, org.id, stripe_invoice), stripe_invoice
+
+  def _refunds(self, session, invoice):
+    session.expire_all()
+    return [
+      r.amount_cents
+      for r in session.query(BillingInvoiceLineItem).filter(
+        BillingInvoiceLineItem.invoice_id == invoice.id,
+        BillingInvoiceLineItem.resource_type == "refund",
+      )
+    ]
+
+  @pytest.mark.asyncio
+  async def test_a_refund_on_a_current_charge_reaches_its_invoice(self, test_db):
+    invoice, stripe_invoice = self._setup(test_db)
+    await self._deliver(test_db, "ch_test_full", 9900, 9900, stripe_invoice)
+    assert self._refunds(test_db, invoice) == [-9900]
     assert test_db.get(BillingInvoice, invoice.id).total_cents == 0
 
   @pytest.mark.asyncio
   async def test_partial_refunds_record_the_running_total_once(self, test_db):
-    org = _org(test_db)
-    stripe_invoice = f"in_test_{uuid.uuid4().hex[:10]}"
-    invoice = _paid_invoice(test_db, org.id, stripe_invoice)
-    payment_intent = f"pi_test_{uuid.uuid4().hex[:10]}"
-
-    with patch(
-      "stripe.StripeClient.raw_request",
-      return_value=invoice_payments_list(stripe_invoice, payment_intent),
-    ):
-      for cumulative in (3000, 5000, 5000):
-        await _handle_charge_refunded(
-          refunded_charge("ch_test_partial", payment_intent, cumulative),
-          test_db,
-          MagicMock(),
-        )
-
-    test_db.expire_all()
-    refunds = (
-      test_db.query(BillingInvoiceLineItem)
-      .filter(
-        BillingInvoiceLineItem.invoice_id == invoice.id,
-        BillingInvoiceLineItem.resource_type == "refund",
+    invoice, stripe_invoice = self._setup(test_db)
+    for event_total in (3000, 5000, 5000):
+      await self._deliver(
+        test_db, "ch_test_partial", event_total, event_total, stripe_invoice
       )
-      .all()
-    )
-    assert [r.amount_cents for r in refunds] == [-5000]
+    assert self._refunds(test_db, invoice) == [-5000]
     assert test_db.get(BillingInvoice, invoice.id).total_cents == 4900
 
   @pytest.mark.asyncio
   async def test_an_older_refund_event_does_not_shrink_a_larger_one(self, test_db):
-    org = _org(test_db)
-    stripe_invoice = f"in_test_{uuid.uuid4().hex[:10]}"
-    invoice = _paid_invoice(test_db, org.id, stripe_invoice)
-    payment_intent = f"pi_test_{uuid.uuid4().hex[:10]}"
+    invoice, stripe_invoice = self._setup(test_db)
+    await self._deliver(test_db, "ch_test_late", 5000, 5000, stripe_invoice)
+    await self._deliver(test_db, "ch_test_late", 3000, 5000, stripe_invoice)
+    assert self._refunds(test_db, invoice) == [-5000]
 
-    with patch(
-      "stripe.StripeClient.raw_request",
-      return_value=invoice_payments_list(stripe_invoice, payment_intent),
-    ):
-      for cumulative in (5000, 3000):
-        await _handle_charge_refunded(
-          refunded_charge("ch_test_late", payment_intent, cumulative),
-          test_db,
-          MagicMock(),
-        )
-
-    test_db.expire_all()
-    assert test_db.get(BillingInvoice, invoice.id).total_cents == 4900
+  @pytest.mark.asyncio
+  async def test_a_refund_that_later_failed_is_not_kept(self, test_db):
+    invoice, stripe_invoice = self._setup(test_db)
+    await self._deliver(test_db, "ch_test_failed", 5000, 5000, stripe_invoice)
+    # The 5000 refund failed; a new 1000 refund's event arrives.
+    await self._deliver(test_db, "ch_test_failed", 1000, 1000, stripe_invoice)
+    assert self._refunds(test_db, invoice) == [-1000]
+    assert test_db.get(BillingInvoice, invoice.id).total_cents == 8900
 
 
 def _subscription(session, status: str, **fields) -> BillingSubscription:
