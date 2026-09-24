@@ -19,6 +19,5 @@ from robosystems.operations.serialization.model import (
 
 
 def serialize_to_holon_jsonld(bundle: StatementBundle) -> str:
-  """Serialize to dataset-form JSON-LD, rooted at the same report IRI as the
-  flat JSON-LD."""
+  """Serialize to dataset-form JSON-LD, rooted at the report's IRI."""
   return to_holon(bundle_to_xbrl_model(bundle), report_id=report_identifier(bundle))

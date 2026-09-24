@@ -308,14 +308,15 @@ def get_report_download_url(
   session: Session,
   graph_id: str,
   report_id: str,
-  flavor: str = RdfFlavor.JSONLD.value,
+  flavor: str = XbrlFlavor.TAVI.value,
   expires_in: int = PRESIGN_DEFAULT_SECONDS,
 ) -> ReportBundleDownloadResponse | None:
   """Resolve a presigned URL for a published Report's serialization bundle.
 
-  The API never streams bytes. JSON-LD is stamped at publish; XBRL, the
-  holon and the Tavi model are materialized on first download and cached
-  under a ``generation_count``-versioned key, which never goes stale.
+  The API never streams bytes. The Tavi model is stamped at publish; the
+  holon and XBRL 2.1 are materialized on first download and cached under a
+  ``generation_count``-versioned key, which never goes stale. (A generation
+  stamped before the Tavi became the anchor materializes it the same way.)
 
   Returns ``None`` when ``report_id`` doesn't resolve. Raises
   :class:`ReportBundleNotAvailableError` when the report exists but has
@@ -327,9 +328,8 @@ def get_report_download_url(
     return None
   generation_count = int(report.generation_count or 0)
 
-  # HOLON_JSONLD is in RdfFlavor, so this must precede the _RDF_FLAVOR_VALUES
-  # branch. It gates on publication, not ``bundle_url`` (the flat JSON-LD),
-  # because a shared-in copy can carry a holon without a flat bundle.
+  # The holon and the Tavi gate on publication, not ``bundle_url``, because a
+  # shared-in copy can carry either without the other.
   if flavor == RdfFlavor.HOLON_JSONLD.value:
     if report.generation_status != "published":
       raise ReportBundleNotAvailableError(
@@ -345,7 +345,7 @@ def get_report_download_url(
       source_graph_id=report.source_graph_id,
     )
 
-  # Same gate as the holon; TAVI is in XbrlFlavor, so it precedes that branch.
+  # TAVI is in XbrlFlavor, so it precedes that branch.
   if flavor == XbrlFlavor.TAVI.value:
     if report.generation_status != "published":
       raise ReportBundleNotAvailableError(
@@ -366,14 +366,6 @@ def get_report_download_url(
       f"Report '{report_id}' has no published bundle — publish or "
       f"regenerate the report to produce one."
     )
-  if flavor in _RDF_FLAVOR_VALUES:
-    return _presign_stored_rdf_bundle(
-      bundle_uri=str(report.bundle_url),
-      report_id=report_id,
-      flavor=RdfFlavor(flavor),
-      generation_count=generation_count,
-      expires_in=expires_in,
-    )
   if flavor in _XBRL_FLAVOR_VALUES:
     return _materialize_and_presign_xbrl(
       session=session,
@@ -387,46 +379,6 @@ def get_report_download_url(
   raise ValueError(
     f"Unsupported download format '{flavor}'. "
     f"Supported flavors: {', '.join(_ALL_DOWNLOAD_FLAVORS)}."
-  )
-
-
-def _presign_stored_rdf_bundle(
-  bundle_uri: str,
-  report_id: str,
-  flavor: RdfFlavor,
-  generation_count: int,
-  expires_in: int,
-) -> ReportBundleDownloadResponse:
-  """Presign the JSON-LD bundle already stamped to S3 at publish time."""
-  if flavor is not RdfFlavor.JSONLD:
-    raise ValueError(f"Format '{flavor.value}' is reserved for future use.")
-
-  bucket, key = _parse_s3_uri(bundle_uri)
-  if bucket is None or key is None:
-    raise BundleSigningError(
-      f"Bundle URL for report '{report_id}' is malformed; cannot sign a download link."
-    )
-
-  download_url = S3Client().generate_presigned_url(
-    bucket=bucket,
-    key=key,
-    expires_in=expires_in,
-    response_content_type="application/ld+json",
-    response_content_disposition=(
-      f'attachment; filename="{report_id}-g{generation_count}.jsonld"'
-    ),
-  )
-  if download_url is None:
-    raise BundleSigningError(
-      f"Failed to sign download URL for report '{report_id}' bundle."
-    )
-
-  return ReportBundleDownloadResponse(
-    download_url=download_url,
-    expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
-    content_type="application/ld+json",
-    format=flavor.value,
-    generation_count=generation_count,
   )
 
 
@@ -634,23 +586,6 @@ def _materialize_and_presign_tavi(
     # Bundle content the compiled model has no home for; declared on cache hits.
     omitted_content=list(TAVI_OMITTED_CONTENT),
   )
-
-
-def _parse_s3_uri(uri: str) -> tuple[str | None, str | None]:
-  """Split an ``s3://bucket/key`` URI into ``(bucket, key)``.
-
-  Returns ``(None, None)`` on malformed input. Deliberately not checked against
-  ``env.USER_DATA_BUCKET``: a bundle stamped under another bucket must resolve.
-  """
-  if not uri.startswith("s3://"):
-    return None, None
-  remainder = uri[len("s3://") :]
-  if "/" not in remainder:
-    return None, None
-  bucket, _, key = remainder.partition("/")
-  if not bucket or not key:
-    return None, None
-  return bucket, key
 
 
 # ``ReportPackageItem.display_order`` by block type; unlisted types sort at 50.

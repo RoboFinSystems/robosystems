@@ -20,7 +20,7 @@ need AWS Bedrock configured; without it, use the default hardcoded mappings.
 ## Quick Start
 
 ```bash
-# Run the whole suite in sequence. Long — the World Online GL ingest dominates.
+# Run the whole suite in sequence (long).
 just demo
 
 # Or pick one
@@ -211,58 +211,6 @@ just demo-custom-graph --skip-queries     # load only, no verification queries
 
 Edit `schema.json` to define your own node types and relationships.
 
-### Seattle Method — record-to-report against a published reference
-
-`examples/seattle_method_demo/` · [walkthrough](seattle_method_demo/README.md)
-
-Proves that one ledger can be read through two vocabularies. Charlie Hoffman's
-`mini` reporting framework is loaded as a chart of accounts, his 14-entry
-lemonade-stand general journal is ingested against it, and the same postings
-are then projected into `rs-gaap` for a four-statement report — with both sides
-reconciled against his published figures (18/18 concepts; balance sheet balances
-at $14,450).
-
-```bash
-just demo-seattle-method                            # new graph + every step
-just demo-seattle-method --graph <id>               # against an existing graph
-just demo-seattle-method --dry-run                  # validate + report, no writes
-
-# Re-run one step against the cached graph (--help lists every step name)
-just demo-seattle-method --step reconcile           # reconciliation report only
-just demo-seattle-method --step create-report       # materialize the 4-statement report
-```
-
-Artifacts land in `examples/seattle_method_demo/output/`: two markdown reports
-plus JSON-LD, holon, and XBRL 2.1 exports with their SHACL and Arelle verdicts.
-
-### The World Online — Seattle Method at realistic scale
-
-`examples/seattle_method_world_online/` · [walkthrough](seattle_method_world_online/README.md)
-
-The scaled-up sibling of the lemonade stand: Charlie Hoffman's *The World
-Online* dataset, 22,288 GL lines across 3,389 journal entries against a
-239-account chart of accounts, tagged to MINI 2026. Same methodology, real
-company size.
-
-Opening balances are ingested as ordinary brought-forward transactions tagging
-`mini:OpeningBalance` as a first-class flow concept, rather than synthesized as
-a prior-period number. That is what lets them attribute in the rollforwards and
-reconcile line-for-line against the source pivot (22/23; balance sheet balances
-to $0.00; trial balance balances).
-
-```bash
-just demo-world-online                                 # new graph + every step
-just demo-world-online --graph <id>                    # against an existing graph
-just demo-world-online --limit 50                      # smoke-test on a GL subset
-just demo-world-online --dry-run                       # validate + report, no writes
-
-# Re-run one step against the cached graph (--help lists every step name)
-just demo-world-online --step reconcile                # pivot vs SummaryOfTransactions.csv
-just demo-world-online --step create-report            # materialize the 4-statement report
-just demo-world-online --step trial-balance            # render the trial balance
-just demo-world-online --step statement-reconcile      # statement anchors vs the reference instance
-```
-
 ## Credentials
 
 ```bash
@@ -310,10 +258,8 @@ uv run memory_subgraph.py
 Data is regenerated on every run so the Parquet identifiers line up with the
 current graph — that is why `generate_data.py` comes after `create_graph.py`.
 
-The Seattle Method demos take `--step <name>` instead; run with `--help` to
-list the step names. The `just` recipes remain the recommended path — they set
-`UV_ENV_FILE` so the scripts pick up `ROBOSYSTEMS_API_URL` and the other
-settings from `.env.local`.
+The `just` recipes remain the recommended path — they set `UV_ENV_FILE` so the
+scripts pick up `ROBOSYSTEMS_API_URL` and the other settings from `.env.local`.
 
 ## Troubleshooting
 

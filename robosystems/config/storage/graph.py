@@ -224,11 +224,16 @@ def get_backup_prefix(
 # =============================================================================
 
 
+# The artifact stamped at publish and named by ``Report.bundle_url``: the Tavi
+# compiled model. Generations stamped before it are ``.jsonld``.
+REPORT_ANCHOR_EXTENSION = ".tavi.json"
+
+
 def get_report_bundle_key(
   graph_id: str,
   report_id: str,
   generation_count: int,
-  extension: str = ".jsonld",
+  extension: str = REPORT_ANCHOR_EXTENSION,
 ) -> str:
   """Build S3 key for a per-Report serialization bundle.
 
@@ -237,7 +242,7 @@ def get_report_bundle_key(
 
   Example:
       >>> get_report_bundle_key("kg456", "rpt_01K8", 1)
-      'report-bundles/kg456/rpt_01K8/g1.jsonld'
+      'report-bundles/kg456/rpt_01K8/g1.tavi.json'
   """
   config = GRAPH_STORAGE[GraphStorageType.REPORT_BUNDLES]
   return f"{config.prefix}{graph_id}/{report_id}/g{generation_count}{extension}"

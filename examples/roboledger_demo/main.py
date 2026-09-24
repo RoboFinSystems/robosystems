@@ -1104,8 +1104,8 @@ def generate_fy2025_report(graph_id: str) -> str | None:
     print(f"  WARNING: file_report failed: {e}")
 
   # Pull the artifact set via the SDK so the demo finishes with something on
-  # disk to open. JSON-LD is the canonical projection and XBRL 2.1 is the
-  # filing-grade equivalent: same Report, same facts, two serializations.
+  # disk to open. The Tavi is the anchor stamped at publish and XBRL 2.1 is
+  # the filing-grade equivalent: same Report, same facts, two serializations.
   from .download_bundles import download_bundles_for_report
 
   download_bundles_for_report(client, graph_id, report_id)

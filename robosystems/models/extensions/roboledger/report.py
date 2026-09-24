@@ -60,7 +60,7 @@ class Report(ExtensionsBase):
   periods = Column(JSONB, nullable=True)
 
   # ``generation_count`` increments per (re)generation so each exported bundle
-  # stays addressable; ``bundle_url`` is the latest JSON-LD export.
+  # stays addressable; ``bundle_url`` is the latest anchor (the Tavi model).
   graph_report_id = Column(String, nullable=True)
   last_generated = Column(DateTime, nullable=True)
   generation_status = Column(String, nullable=False, default="pending")

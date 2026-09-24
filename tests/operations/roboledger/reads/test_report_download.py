@@ -1,9 +1,9 @@
 """Tests for ``get_report_download_url`` — the presigned-URL read that
 replaced the retired ``GET .../reports/{id}/download`` REST endpoint.
 
-Covers every flavor (JSON-LD stamped at publish; XBRL, the holon and the
-Tavi model materialized + cached on first download), the cache hit/miss
-split, and the not-found / not-available / signing-failure error paths.
+Covers every flavor (the Tavi model stamped at publish; XBRL and the holon
+materialized + cached on first download), the cache hit/miss split, and the
+not-found / not-available / signing-failure error paths.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ _REPORTS = "robosystems.operations.roboledger.reads.reports"
 
 
 def _report(
-  bundle_url: str | None = "s3://bkt/report-bundles/kg1/rpt_1/g3.jsonld",
+  bundle_url: str | None = "s3://bkt/report-bundles/kg1/rpt_1/g3.tavi.json",
   *,
   generation_count: int = 3,
   generation_status: str = "published",
@@ -52,7 +52,9 @@ class TestNotFoundAndNotAvailable:
 
   @pytest.mark.unit
   def test_unpublished_report_raises_not_available(self):
-    session = _session(_report(bundle_url=None, generation_count=0))
+    session = _session(
+      _report(bundle_url=None, generation_count=0, generation_status="pending")
+    )
     with pytest.raises(ReportBundleNotAvailableError):
       get_report_download_url(session, "kg1", "rpt_1")
 
@@ -63,9 +65,9 @@ class TestNotFoundAndNotAvailable:
       get_report_download_url(session, "kg1", "rpt_1", flavor="turtle")
 
   @pytest.mark.unit
-  def test_a_published_report_serves_a_holon_without_a_flat_bundle(self):
-    """A cross-graph shared copy has no flat bundle of its own — the sender's
-    holon is copied in beside the rows. `bundle_url` names the flat object the
+  def test_a_published_report_serves_a_holon_without_a_bundle_url(self):
+    """A cross-graph shared copy can arrive without the anchor — the sender's
+    holon is copied in beside the rows. `bundle_url` names the anchor the
     holon path never reads, so gating the holon on it would hide an artifact
     that is present and valid."""
     session = _session(_report(bundle_url=None))
@@ -158,42 +160,26 @@ class TestReceivedReportsAreNeverRederived:
     build.assert_called_once()
 
 
-class TestJsonLd:
+class TestRetiredFlatJsonLd:
   @pytest.mark.unit
-  def test_presigns_stored_bundle(self):
+  def test_the_flat_json_ld_flavor_is_no_longer_served(self):
+    session = _session(_report())
+    with pytest.raises(ValueError, match="Unsupported download format"):
+      get_report_download_url(session, "kg1", "rpt_1", flavor="jsonld")
+
+  @pytest.mark.unit
+  def test_the_default_flavor_is_the_tavi(self):
     session = _session(_report())
     with patch(f"{_REPORTS}.S3Client") as s3_cls:
       s3 = s3_cls.return_value
-      s3.generate_presigned_url.return_value = "https://signed.example/jsonld"
-      resp = get_report_download_url(session, "kg1", "rpt_1", flavor="jsonld")
+      s3.object_exists.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/tavi"
+      resp = get_report_download_url(session, "kg1", "rpt_1")
 
     assert resp is not None
-    assert resp.download_url == "https://signed.example/jsonld"
-    assert resp.content_type == "application/ld+json"
-    assert resp.format == "jsonld"
-    assert resp.generation_count == 3
-    # JSON-LD carries the disclosure notes; nothing is omitted.
-    assert resp.omitted_content == []
-    # Presigns the bucket/key parsed from the stored bundle_url.
+    assert resp.format == "tavi"
     _, kwargs = s3.generate_presigned_url.call_args
-    assert kwargs["bucket"] == "bkt"
-    assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.jsonld"
-    assert 'filename="rpt_1-g3.jsonld"' in kwargs["response_content_disposition"]
-
-  @pytest.mark.unit
-  def test_malformed_bundle_url_raises_signing_error(self):
-    session = _session(_report(bundle_url="not-an-s3-uri"))
-    with patch(f"{_REPORTS}.S3Client"):
-      with pytest.raises(BundleSigningError, match="malformed"):
-        get_report_download_url(session, "kg1", "rpt_1", flavor="jsonld")
-
-  @pytest.mark.unit
-  def test_presign_failure_raises_signing_error(self):
-    session = _session(_report())
-    with patch(f"{_REPORTS}.S3Client") as s3_cls:
-      s3_cls.return_value.generate_presigned_url.return_value = None
-      with pytest.raises(BundleSigningError, match="Failed to sign"):
-        get_report_download_url(session, "kg1", "rpt_1", flavor="jsonld")
+    assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.tavi.json"
 
 
 class TestXbrl:

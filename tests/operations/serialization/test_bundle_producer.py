@@ -692,28 +692,26 @@ class TestStatementBundleValidation:
 
 
 class TestDispatch:
-  def test_rdf_jsonld_dispatch_returns_str(self) -> None:
+  def test_rdf_holon_dispatch_returns_str(self) -> None:
     from robosystems.operations.serialization import RdfFlavor, serialize_to_rdf
 
     bundle = _build_min_bundle()
-    out = serialize_to_rdf(bundle, RdfFlavor.JSONLD)
+    out = serialize_to_rdf(bundle, RdfFlavor.HOLON_JSONLD)
     assert isinstance(out, str)
     assert '"@context"' in out
 
-  def test_rdf_default_flavor_is_jsonld(self) -> None:
-    """``serialize_to_rdf(bundle)`` without explicit flavor should
-    behave identically to passing ``RdfFlavor.JSONLD``."""
+  def test_rdf_default_flavor_is_the_holon(self) -> None:
     from robosystems.operations.serialization import RdfFlavor, serialize_to_rdf
 
     bundle = _build_min_bundle()
     default = serialize_to_rdf(bundle)
-    explicit = serialize_to_rdf(bundle, RdfFlavor.JSONLD)
+    explicit = serialize_to_rdf(bundle, RdfFlavor.HOLON_JSONLD)
     assert default == explicit
 
   def test_unknown_rdf_flavor_raises_value_error(self) -> None:
     from robosystems.operations.serialization.rdf import serialize_to_rdf as dispatch
 
-    # Forge an enum-like value that isn't JSONLD
+    # Forge an enum-like value that isn't a known flavor
     class _BogusFlavor:
       value = "bogus"
 
@@ -789,10 +787,10 @@ def _build_min_bundle() -> StatementBundle:
 
 
 class TestFlavorEnums:
-  def test_rdf_flavor_value_is_lowercase_jsonld(self) -> None:
+  def test_rdf_flavor_value_is_kebab_holon_jsonld(self) -> None:
     from robosystems.operations.serialization import RdfFlavor
 
-    assert RdfFlavor.JSONLD.value == "jsonld"
+    assert RdfFlavor.HOLON_JSONLD.value == "holon-jsonld"
 
   def test_xbrl_flavor_value_is_kebab_xbrl_2_1(self) -> None:
     from robosystems.operations.serialization import XbrlFlavor
@@ -805,7 +803,7 @@ class TestFlavorEnums:
     in the download endpoint."""
     from robosystems.operations.serialization import RdfFlavor, XbrlFlavor
 
-    assert str(RdfFlavor.JSONLD) == "jsonld"
+    assert str(RdfFlavor.HOLON_JSONLD) == "holon-jsonld"
     assert str(XbrlFlavor.XBRL_2_1) == "xbrl-2.1"
 
 

@@ -1060,8 +1060,9 @@ class LedgerQuery:
 
     The only way to download a report's bundle. Every format resolves to a
     short-lived presigned S3 URL which the client follows directly — the
-    field returns the URL, never the bytes. JSON-LD is stamped at publish
-    time; XBRL is materialized and cached on first request. `expiresIn`
+    field returns the URL, never the bytes. The Tavi model is stamped at
+    publish time; the holon and XBRL are materialized and cached on first
+    request. `expiresIn`
     is the URL's lifetime in seconds, bounded 60-3600.
 
     Returns null when the report doesn't exist; raises
@@ -1070,12 +1071,12 @@ class LedgerQuery:
 
     Args:
       report_id: The published report whose bundle to link.
-      format: Serialization flavor. Defaults to JSON-LD.
+      format: Serialization flavor. Defaults to the Tavi model.
       expires_in: URL lifetime in seconds, 60-3600. Out of range raises
         `INVALID_EXPIRES_IN`.
     """
     if format is None:
-      format = ReportDownloadFormat.JSONLD
+      format = ReportDownloadFormat.TAVI
     if expires_in is None:
       expires_in = reads_reports.PRESIGN_DEFAULT_SECONDS
     if not (60 <= expires_in <= reads_reports.PRESIGN_MAX_SECONDS):

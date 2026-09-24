@@ -1,9 +1,8 @@
-"""Cross-encoder fact-equivalence assertion (v1 graph-native).
+"""Cross-encoder fact-equivalence assertion.
 
-The ontology claim: *one bundle, three encoders, one fact set*. The JSON-LD
-encoder (graph-native: ``rs:Fact`` referencing ``rs:period``/``rs:unit``), the
-XBRL 2.1 emitter (which re-derives ``<context>``) and the Tavi flavor (xbrlkit's
-emitter, fed through the bundle → ``XbrlModel`` bridge) share the same
+The claim: *one bundle, three encoders, one fact set*. The Tavi flavor (the
+anchor stamped at publish), the holon (dataset-form JSON-LD) and the XBRL 2.1
+emitter (which re-derives ``<context>``) share the same
 :class:`StatementBundle` and produce semantically equivalent output — every
 fact emerges in all three projections with matching
 ``(concept, period, unit, value, decimals)``.
@@ -17,9 +16,8 @@ import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-import rdflib
 from lxml import etree
-from rdflib import Graph, Namespace, URIRef
+from xbrlkit.deserialize import from_holon_report
 
 from robosystems.operations.serialization import (
   RdfFlavor,
@@ -40,10 +38,7 @@ from robosystems.operations.serialization.bundle import (
   StatementBundle,
 )
 
-RS = Namespace("https://robosystems.ai/vocab/")
-XBRLI = Namespace("http://www.xbrl.org/2003/instance#")
 XBRLI_XML = "http://www.xbrl.org/2003/instance"
-RDF = rdflib.RDF
 
 
 # ── Fixture ──────────────────────────────────────────────────────────────
@@ -123,32 +118,27 @@ def _qname_local(uri: str) -> str:
   return uri.rsplit("#", 1)[-1].rsplit("/", 1)[-1]
 
 
-def _facts_from_jsonld(jsonld_str: str) -> set[_FactTuple]:
-  g = Graph().parse(data=jsonld_str, format="json-ld")
-
-  def _period_sig(p: URIRef) -> tuple[str, ...]:
-    ptype = str(next(g.objects(p, XBRLI.periodType)))
-    if ptype == "instant":
-      return ("instant", str(next(g.objects(p, XBRLI.instant))))
-    return (
-      "duration",
-      str(next(g.objects(p, XBRLI.startDate))),
-      str(next(g.objects(p, XBRLI.endDate))),
-    )
-
+def _facts_from_holon(holon: str) -> set[_FactTuple]:
+  model, _ = from_holon_report(holon)
+  periods = {p.id: p for p in model.periods}
+  measures = {u.id: u.measure for u in model.units}
   out: set[_FactTuple] = set()
-  for fact in g.subjects(RDF.type, RS.Fact):
-    element = next(g.objects(fact, RS.element))
-    period = next(g.objects(fact, RS.period))
-    unit = next(g.objects(fact, RS.unit))
-    measure = next(g.objects(unit, XBRLI.measure))
+  for fact in model.facts:
+    if fact.unit_id is None or fact.numeric_value is None:
+      continue
+    p = periods[fact.period_id]
+    period = (
+      ("instant", str(p.end))
+      if p.period_type == "instant"
+      else ("duration", str(p.start), str(p.end))
+    )
     out.add(
       _FactTuple(
-        concept=_qname_local(str(element)),
-        period=_period_sig(period),  # type: ignore[arg-type]
-        unit=_measure_local(str(measure)),
-        value=float(next(g.objects(fact, RS.numericValue))),
-        decimals=str(next(g.objects(fact, RS.decimals))),
+        concept=_qname_local(fact.concept_qname.rsplit(":", 1)[-1]),
+        period=period,
+        unit=_measure_local(measures[fact.unit_id]),
+        value=float(fact.numeric_value),
+        decimals=fact.decimals or "INF",
       )
     )
   return out
@@ -229,14 +219,14 @@ def _facts_from_tavi(tavi: bytes) -> set[_FactTuple]:
 
 
 def _both(bundle: StatementBundle) -> tuple[set[_FactTuple], set[_FactTuple]]:
-  """The JSON-LD and XBRL projections, after asserting the Tavi matches both."""
-  jsonld = serialize_to_rdf(bundle, RdfFlavor.JSONLD)
+  """The holon and XBRL projections, after asserting the Tavi matches both."""
+  holon = serialize_to_rdf(bundle, RdfFlavor.HOLON_JSONLD)
   xbrl = serialize_to_xbrl(bundle, XbrlFlavor.XBRL_2_1)
   tavi = serialize_to_xbrl(bundle, XbrlFlavor.TAVI)
-  from_jsonld, from_xbrl = _facts_from_jsonld(jsonld), _facts_from_xbrl(xbrl)
-  assert _facts_from_tavi(tavi) == from_jsonld
+  from_holon, from_xbrl = _facts_from_holon(holon), _facts_from_xbrl(xbrl)
+  assert _facts_from_tavi(tavi) == from_holon
   assert _facts_from_tavi(tavi) == from_xbrl
-  return from_jsonld, from_xbrl
+  return from_holon, from_xbrl
 
 
 # ── Tests ────────────────────────────────────────────────────────────────

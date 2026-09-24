@@ -155,7 +155,7 @@ Schedules are anchored to month offsets from the demo start date, so they stay a
 | `mappings.py` | CoA → GAAP mapping definitions |
 | `policies.py` | Accounting policy document content (markdown) |
 | `validate.py` | Post-setup checks on the Information Block machinery behind the schedules; everything it creates is torn down before it returns |
-| `download_bundles.py` | Pulls the filed Report's artifact set (JSON-LD, holon, XBRL zip, validation verdicts, DataBook) into `output/` |
+| `download_bundles.py` | Pulls the filed Report's artifact set (Tavi, holon, XBRL zip, Arelle verdict) into `output/` |
 | `_reset.py` | Demo-only cleanup between re-runs — the single path that touches PostgreSQL directly, deliberately with no API surface |
 | `prompt.md` | Claude prompt for the close workflow — paste into Claude Desktop |
 
@@ -167,7 +167,8 @@ serialization flavors of the Report bundle via the published Python SDK
 
 | File | Format |
 |---|---|
-| `output/roboledger-demo.jsonld` | JSON-LD bundle — the canonical projection of the v1.0 ontology |
+| `output/roboledger-demo.tavi.json` | Tavi compiled model — the anchor stamped at publish |
+| `output/roboledger-demo.holon.jsonld` | holon — dataset-form JSON-LD (scene / boundary / projection) |
 | `output/roboledger-demo.zip` | XBRL 2.1 report package — `instance.xml` + `report.xsd` + presentation/calc/definition linkbases |
 
 `output/` is gitignored (each run stamps fresh graph/report IDs).

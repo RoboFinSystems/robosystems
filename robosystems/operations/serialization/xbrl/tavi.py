@@ -20,7 +20,7 @@ from robosystems.operations.serialization.model import (
 
 TAVI_MEDIA_TYPE = "application/json"
 
-# The holon and the flat JSON-LD keep all of it.
+# The holon keeps all of it.
 TAVI_OMITTED_CONTENT: tuple[str, ...] = (
   "ib_envelopes",
   "definition_links",

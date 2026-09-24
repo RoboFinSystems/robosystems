@@ -691,11 +691,6 @@ class EnvConfig:
 
   GRAPH_BACKEND_TYPE = get_str_env("GRAPH_BACKEND_TYPE", "ladybug")
 
-  # SHACL validation of the report bundle at publish, recorded on
-  # Report.metadata['bundle_validation']: off | warn (never blocks) | strict
-  # (raises on non-conformance).
-  REPORT_BUNDLE_SHACL_VALIDATION = get_str_env("REPORT_BUNDLE_SHACL_VALIDATION", "off")
-
   # ===========================================================================
   # GRAPH API CONFIGURATION
   # ===========================================================================

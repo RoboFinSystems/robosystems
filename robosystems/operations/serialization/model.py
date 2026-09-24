@@ -266,8 +266,7 @@ def _networks(bundle: StatementBundle) -> list[Network]:
     *(("presentation", link) for link in bundle.linkbases.presentation_links),
     *(("calculation", link) for link in bundle.linkbases.calculation_links),
   ]
-  # Carried on the network so the holon names each structure with the same IRI
-  # as the flat bundle.
+  # Carried on the network so the holon names each structure by its IRI.
   fact_set_by_structure: dict[str, str] = {
     fact.structure_id: fact.fact_set_id
     for fact in bundle.facts

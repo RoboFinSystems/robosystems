@@ -665,7 +665,7 @@ def test_share_carries_the_senders_holon_into_the_recipients_prefix() -> None:
       source_fact_sets=[],
       source_facts=[],
       publication_artifacts={
-        ".jsonld": '{"@context": "flat"}',
+        ".tavi.json": '{"xbrlModel": "tavi"}',
         ".holon.jsonld": '{"@graph": "holon"}',
       },
       target_graph_id="kg_tgt",
@@ -679,7 +679,7 @@ def test_share_carries_the_senders_holon_into_the_recipients_prefix() -> None:
     for call in s3.upload_string.call_args_list
   }
   assert written == {
-    "report-bundles/kg_tgt/rpt_copy/g3.jsonld": '{"@context": "flat"}',
+    "report-bundles/kg_tgt/rpt_copy/g3.tavi.json": '{"xbrlModel": "tavi"}',
     "report-bundles/kg_tgt/rpt_copy/g3.holon.jsonld": '{"@graph": "holon"}',
   }
 
@@ -689,7 +689,7 @@ def test_share_carries_the_senders_holon_into_the_recipients_prefix() -> None:
     if isinstance(call.args[0], ReportModel)
   )
   assert shared.generation_count == 3
-  assert str(shared.bundle_url).endswith("report-bundles/kg_tgt/rpt_copy/g3.jsonld")
+  assert str(shared.bundle_url).endswith("report-bundles/kg_tgt/rpt_copy/g3.tavi.json")
 
 
 # ── regenerate_report filing-status gate ──────────────────────────────────
