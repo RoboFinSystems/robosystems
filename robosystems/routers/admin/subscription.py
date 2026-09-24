@@ -367,6 +367,8 @@ async def update_subscription(
       elif data.status == SubscriptionStatus.PAUSED:
         subscription.pause(session)
       elif data.status == SubscriptionStatus.ACTIVE:
+        if subscription.restore_suspended_graph(session):
+          new_values["graph_status"] = "active"
         subscription.activate(session)
 
     if data.plan_name and data.plan_name != subscription.plan_name:

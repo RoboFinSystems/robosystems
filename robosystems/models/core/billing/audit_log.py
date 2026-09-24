@@ -116,6 +116,7 @@ class BillingAuditLog(Base):
     event_data: dict | None = None,
     actor_user_id: str | None = None,
     actor_ip: str | None = None,
+    commit: bool = True,
   ) -> "BillingAuditLog":
     """Create an audit log entry.
 
@@ -144,7 +145,10 @@ class BillingAuditLog(Base):
     )
 
     session.add(audit_log)
-    session.commit()
+    if commit:
+      session.commit()
+    else:
+      session.flush()
 
     logger.info(
       f"Billing audit log: {event_type_str}",

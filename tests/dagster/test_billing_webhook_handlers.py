@@ -1320,63 +1320,7 @@ class TestHandleInvoiceVoided:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestHandleChargeRefunded:
-  async def test_adds_negative_line_item_and_recalculates(
-    self, mock_db_session, mock_context, mock_invoice
-  ):
-    """Adds negative line item for refund and calls _recalculate_totals."""
-    charge_data = make_charge_data(amount_refunded=1500)
-
-    mock_line_item_instance = MagicMock()
-
-    with (
-      patch(PATCH_BILLING_INV),
-      patch(PATCH_BILLING_LINE_ITEM) as MockLineItem,
-      patch(PATCH_BILLING_AUDIT) as MockAudit,
-      patch(PATCH_BILLING_EVENT_TYPE),
-    ):
-      mock_db_session.query.return_value.filter.return_value.first.return_value = (
-        mock_invoice
-      )
-      MockLineItem.return_value = mock_line_item_instance
-
-      from robosystems.dagster.jobs.billing import _handle_charge_refunded
-
-      await _handle_charge_refunded(charge_data, mock_db_session, mock_context)
-
-    mock_db_session.add.assert_called_once_with(mock_line_item_instance)
-    mock_invoice._recalculate_totals.assert_called_once_with(mock_db_session)
-    MockAudit.log_event.assert_called_once()
-    mock_context.log.info.assert_called_once()
-
-  async def test_negative_line_item_amount_equals_refund(
-    self, mock_db_session, mock_context, mock_invoice
-  ):
-    """Line item unit_price_cents and amount_cents are negated refund amount."""
-    charge_data = make_charge_data(amount_refunded=2500)
-    captured_kwargs: dict = {}
-
-    with (
-      patch(PATCH_BILLING_INV),
-      patch(PATCH_BILLING_LINE_ITEM) as MockLineItem,
-      patch(PATCH_BILLING_AUDIT),
-      patch(PATCH_BILLING_EVENT_TYPE),
-    ):
-      mock_db_session.query.return_value.filter.return_value.first.return_value = (
-        mock_invoice
-      )
-
-      def capture(**kwargs):
-        captured_kwargs.update(kwargs)
-        return MagicMock()
-
-      MockLineItem.side_effect = capture
-
-      from robosystems.dagster.jobs.billing import _handle_charge_refunded
-
-      await _handle_charge_refunded(charge_data, mock_db_session, mock_context)
-
-    assert captured_kwargs["unit_price_cents"] == -2500
-    assert captured_kwargs["amount_cents"] == -2500
+  """Line-item recording is covered against a real DB in test_stripe_handlers_db."""
 
   async def test_no_invoice_id_on_charge_logs_info_and_returns(
     self, mock_db_session, mock_context
@@ -1398,7 +1342,7 @@ class TestHandleChargeRefunded:
     charge_data = make_charge_data()
 
     with patch(PATCH_BILLING_INV):
-      mock_db_session.query.return_value.filter.return_value.first.return_value = None
+      mock_db_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = None
 
       from robosystems.dagster.jobs.billing import _handle_charge_refunded
 
@@ -1423,48 +1367,25 @@ class TestHandleChargeRefunded:
       patch(PATCH_BILLING_AUDIT) as MockAudit,
       patch(PATCH_BILLING_EVENT_TYPE),
     ):
-      mock_db_session.query.return_value.filter.return_value.first.return_value = (
-        mock_invoice
-      )
+      # No refund line yet for this charge.
+      mock_db_session.query.return_value.filter.return_value.first.return_value = None
+      mock_db_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_invoice
+
+      provider = MagicMock()
+      provider.charge_amount_refunded.return_value = 3000
 
       from robosystems.dagster.jobs.billing import _handle_charge_refunded
 
-      await _handle_charge_refunded(charge_data, mock_db_session, mock_context)
+      with patch(
+        "robosystems.operations.providers.payment_provider.get_payment_provider",
+        return_value=provider,
+      ):
+        await _handle_charge_refunded(charge_data, mock_db_session, mock_context)
 
     call_kwargs = MockAudit.log_event.call_args[1]
     assert call_kwargs["event_data"]["stripe_charge_id"] == "ch_test_123"
     assert call_kwargs["event_data"]["stripe_invoice_id"] == "in_stripe_abc"
     assert call_kwargs["event_data"]["amount_refunded_cents"] == 3000
-
-  async def test_refund_line_item_uses_invoice_period(
-    self, mock_db_session, mock_context, mock_invoice
-  ):
-    """Refund line item period_start/period_end inherit from the invoice."""
-    charge_data = make_charge_data()
-    captured_kwargs: dict = {}
-
-    with (
-      patch(PATCH_BILLING_INV),
-      patch(PATCH_BILLING_LINE_ITEM) as MockLineItem,
-      patch(PATCH_BILLING_AUDIT),
-      patch(PATCH_BILLING_EVENT_TYPE),
-    ):
-      mock_db_session.query.return_value.filter.return_value.first.return_value = (
-        mock_invoice
-      )
-
-      def capture(**kwargs):
-        captured_kwargs.update(kwargs)
-        return MagicMock()
-
-      MockLineItem.side_effect = capture
-
-      from robosystems.dagster.jobs.billing import _handle_charge_refunded
-
-      await _handle_charge_refunded(charge_data, mock_db_session, mock_context)
-
-    assert captured_kwargs["period_start"] == mock_invoice.period_start
-    assert captured_kwargs["period_end"] == mock_invoice.period_end
 
 
 # ---------------------------------------------------------------------------
@@ -1518,7 +1439,13 @@ class TestHandleSubscriptionUpdated:
     mock_subscription.resource_type = "other"  # Not a graph — simpler path
     sub_data = make_subscription_data(status="active", cancel_at_period_end=False)
 
-    with patch(PATCH_BILLING_SUB) as MockSub:
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(
+        "robosystems.dagster.jobs.billing._stripe_confirms_reactivation",
+        return_value=True,
+      ),
+    ):
       MockSub.get_by_provider_subscription_id.return_value = mock_subscription
 
       from robosystems.dagster.jobs.billing import _handle_subscription_updated
@@ -1546,6 +1473,10 @@ class TestHandleSubscriptionUpdated:
 
     with (
       patch(PATCH_BILLING_SUB) as MockSub,
+      patch(
+        "robosystems.dagster.jobs.billing._stripe_confirms_reactivation",
+        return_value=True,
+      ),
       patch("robosystems.models.core.graph.Graph.get_by_id", return_value=mock_graph),
       patch("robosystems.models.core.graph.GraphStatus") as MockGraphStatus,
     ):
@@ -1562,7 +1493,7 @@ class TestHandleSubscriptionUpdated:
 
     # Subscription should have been reactivated
     assert mock_subscription.status == "active"
-    mock_graph.transition_status.assert_called_once()
+    mock_subscription.restore_suspended_graph.assert_called_once_with(mock_db_session)
 
   async def test_status_transition_past_due(
     self, mock_db_session, mock_context, mock_subscription

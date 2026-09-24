@@ -105,10 +105,8 @@ def _renew_subscriptions(
         skipped_count += 1
         continue
 
-      # Use a savepoint so period rotation + invoice + audit are atomic.
-      # If any step fails, the savepoint rolls back and the subscription
-      # reappears on the next sensor tick.
-      savepoint = session.begin_nested()
+      # Rotation, invoice and audit commit together or not at all; on failure
+      # the subscription reappears, unrotated, on the next sensor tick.
       try:
         old_period_end = subscription.current_period_end
         subscription.renew_period(session)
@@ -122,6 +120,7 @@ def _renew_subscriptions(
           customer=customer,
           description=f"Graph subscription renewal - {tier_label}",
           session=session,
+          commit=False,
         )
 
         BillingAuditLog.log_event(
@@ -140,9 +139,10 @@ def _renew_subscriptions(
             "plan_name": subscription.plan_name,
             "amount_cents": subscription.base_price_cents,
           },
+          commit=False,
         )
 
-        savepoint.commit()
+        session.commit()
         renewed_count += 1
         log.info(
           f"Renewed subscription {sub_id}: "
@@ -150,7 +150,7 @@ def _renew_subscriptions(
           f"invoice {invoice.id}"
         )
       except Exception:
-        savepoint.rollback()
+        session.rollback()
         raise
 
     except Exception as e:

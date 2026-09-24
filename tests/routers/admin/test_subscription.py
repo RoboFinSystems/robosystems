@@ -517,6 +517,24 @@ class TestUpdateSubscription:
     data = response.json()
     assert data["status"] == SubscriptionStatus.ACTIVE.value
 
+  def test_reactivation_lifts_the_graph_suspension(
+    self, client, db_session, test_subscription, test_graph, mock_admin_auth
+  ):
+    from robosystems.models.core.graph import GraphStatus
+
+    test_subscription.cancel(db_session, immediate=True)
+    test_graph.transition_status(GraphStatus.SUSPENDED, db_session)
+
+    response = client.patch(
+      f"/admin/v1/subscriptions/{test_subscription.id}",
+      json={"status": "active"},
+      headers={"Authorization": "Bearer test-admin-key"},
+    )
+
+    assert response.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(Graph, test_graph.graph_id).status == GraphStatus.ACTIVE.value
+
   def test_update_subscription_status_to_paused(
     self, client, db_session, test_subscription, mock_admin_auth
   ):

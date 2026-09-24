@@ -150,6 +150,30 @@ class SubscriptionNotFoundError(Exception):
   """No BillingSubscription matches the webhook event; the handler lets Stripe retry."""
 
 
+def _as_utc(value: datetime) -> datetime:
+  """Timestamp columns load naive; compare them as the UTC they were stored."""
+  return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _stripe_confirms_reactivation(stripe_subscription_id: str | None, context) -> bool:
+  """Whether Stripe's live subscription is active with no pending cancel.
+
+  A payload emitted before a local cancel and redelivered after it looks
+  exactly like a portal reactivation; only the live object tells them apart.
+  """
+  if not stripe_subscription_id:
+    return False
+  from robosystems.operations.providers.payment_provider import get_payment_provider
+
+  live = get_payment_provider("stripe").get_subscription_state(stripe_subscription_id)
+  confirmed = live.get("status") == "active" and not live.get("cancel_at_period_end")
+  if not confirmed:
+    context.log.warning(
+      f"Ignoring stale reactivation for {stripe_subscription_id}: live state {live}"
+    )
+  return confirmed
+
+
 def _extract_stripe_subscription_id(data: dict) -> str | None:
   """Stripe subscription id from any event payload; its location varies by API version."""
   # The object IS a subscription (customer.subscription.updated/deleted)
@@ -523,6 +547,12 @@ async def _handle_invoice_updated(
 
   new_status = invoice_data.get("status", invoice.status)
   old_status = invoice.status
+  # Events arrive out of order. Paid and void are final; uncollectible can
+  # still be paid but never goes back to draft or open.
+  if old_status in ("paid", "void") or (
+    old_status == "uncollectible" and new_status in ("draft", "open")
+  ):
+    new_status = old_status
 
   invoice.status = new_status
   invoice.invoice_pdf = invoice_data.get("invoice_pdf") or invoice.invoice_pdf
@@ -578,18 +608,25 @@ async def _handle_charge_refunded(
     BillingInvoice,
     BillingInvoiceLineItem,
   )
+  from robosystems.operations.providers.payment_provider import get_payment_provider
 
-  stripe_invoice_id = charge_data.get("invoice")
+  provider = get_payment_provider("stripe")
   stripe_charge_id = charge_data.get("id")
-  amount_refunded = charge_data.get("amount_refunded", 0)
+  stripe_invoice_id = charge_data.get("invoice")
+  payment_intent_id = charge_data.get("payment_intent")
+  if not stripe_invoice_id and payment_intent_id:
+    stripe_invoice_id = provider.invoice_for_payment_intent(payment_intent_id)
 
   if not stripe_invoice_id:
     context.log.info(f"Charge {stripe_charge_id} refunded but no invoice associated")
     return
 
+  # Locked so refunds of different charges on one invoice, delivered at once,
+  # serialize on the line lookup below.
   invoice = (
     db_session.query(BillingInvoice)
     .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
+    .with_for_update()
     .first()
   )
 
@@ -597,18 +634,31 @@ async def _handle_charge_refunded(
     context.log.warning(f"Invoice not found for refunded charge: {stripe_invoice_id}")
     return
 
-  refund_item = BillingInvoiceLineItem(
-    invoice_id=invoice.id,
-    resource_type="refund",
-    resource_id=stripe_charge_id,
-    description=f"Refund - {stripe_charge_id}",
-    quantity=1,
-    unit_price_cents=-amount_refunded,
-    amount_cents=-amount_refunded,
-    period_start=invoice.period_start,
-    period_end=invoice.period_end,
+  refund_item = (
+    db_session.query(BillingInvoiceLineItem)
+    .filter(
+      BillingInvoiceLineItem.invoice_id == invoice.id,
+      BillingInvoiceLineItem.resource_type == "refund",
+      BillingInvoiceLineItem.resource_id == stripe_charge_id,
+    )
+    .first()
   )
-  db_session.add(refund_item)
+  if refund_item is None:
+    refund_item = BillingInvoiceLineItem(
+      invoice_id=invoice.id,
+      resource_type="refund",
+      resource_id=stripe_charge_id,
+      description=f"Refund - {stripe_charge_id}",
+      quantity=1,
+      period_start=invoice.period_start,
+      period_end=invoice.period_end,
+    )
+    db_session.add(refund_item)
+  # Deliveries arrive out of order and a failed refund lowers the total, so
+  # the charge's live running total is the only reliable figure.
+  amount_refunded = provider.charge_amount_refunded(stripe_charge_id)
+  refund_item.unit_price_cents = -amount_refunded
+  refund_item.amount_cents = -amount_refunded
   invoice._recalculate_totals(db_session)
 
   BillingAuditLog.log_event(
@@ -669,7 +719,12 @@ async def _handle_subscription_updated(
 
   # Portal cancel mirrors the UI cancel: access continues to period end.
   if cancel_at_period_end:
-    if subscription.status != "canceled":
+    if subscription.status == "failed":
+      context.log.info(
+        f"Subscription {subscription.id} is failed; ignoring cancel_at_period_end"
+      )
+      db_session.commit()
+    elif subscription.status != "canceled":
       subscription.cancel(db_session, immediate=False)
       context.log.info(
         f"Subscription {subscription.id} canceled via Stripe portal "
@@ -687,25 +742,19 @@ async def _handle_subscription_updated(
     not cancel_at_period_end
     and subscription.status == "canceled"
     and subscription.ends_at
-    and subscription.ends_at > datetime.now(UTC)
+    and _as_utc(subscription.ends_at) > datetime.now(UTC)
     and status == "active"
+    and _stripe_confirms_reactivation(subscription_data.get("id"), context)
   ):
     subscription.status = "active"
     subscription.canceled_at = None
     subscription.ends_at = None
     subscription.updated_at = datetime.now(UTC)
 
-    if subscription.resource_type == "graph" and subscription.resource_id:
-      from robosystems.models.core.graph import Graph, GraphStatus
-
-      graph = Graph.get_by_id(
-        subscription.resource_id, db_session, include_deprovisioned=True
+    if subscription.restore_suspended_graph(db_session):
+      context.log.info(
+        f"Restored graph {subscription.resource_id} from suspended to active"
       )
-      if graph and graph.status == GraphStatus.SUSPENDED.value:
-        graph.transition_status(GraphStatus.ACTIVE, db_session)
-        context.log.info(
-          f"Restored graph {subscription.resource_id} from suspended to active"
-        )
 
     db_session.commit()
     subscription._invalidate_access_cache()
@@ -723,6 +772,16 @@ async def _handle_subscription_updated(
   }
 
   new_status = status_mapping.get(status, subscription.status)
+
+  # A late or out-of-order event must not revive a terminal row: the only
+  # way back from canceled is the portal reactivation above.
+  if subscription.status in ("canceled", "failed"):
+    context.log.warning(
+      f"Ignoring Stripe status {status!r} for terminal subscription "
+      f"{subscription.id} ({subscription.status})"
+    )
+    db_session.commit()
+    return
 
   if new_status != subscription.status:
     old_status = subscription.status
@@ -761,7 +820,7 @@ async def _handle_subscription_deleted(
     if subscription.cancellation_type == CancellationType.IMMEDIATE.value:
       # Don't extend an immediate cancel to period end: the lifecycle sensors
       # gate teardown on ends_at < now.
-      if subscription.ends_at is None or subscription.ends_at > now:
+      if subscription.ends_at is None or _as_utc(subscription.ends_at) > now:
         subscription.ends_at = now
     else:
       # Period-end cancel: the user paid through Stripe's period end (item-level

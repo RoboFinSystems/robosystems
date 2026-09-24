@@ -93,8 +93,12 @@ class BillingInvoice(Base):
     period_end: datetime,
     session: Session,
     payment_terms: str = "net_30",
+    commit: bool = True,
   ) -> "BillingInvoice":
-    """Create a new invoice for a billing period."""
+    """Create a new invoice for a billing period.
+
+    ``commit=False`` only flushes, so the caller's transaction stays whole.
+    """
     now = datetime.now(UTC)
 
     invoice_number = cls._generate_invoice_number(session)
@@ -121,8 +125,11 @@ class BillingInvoice(Base):
     )
 
     session.add(invoice)
-    session.commit()
-    session.refresh(invoice)
+    if commit:
+      session.commit()
+      session.refresh(invoice)
+    else:
+      session.flush()
 
     logger.info(f"Created invoice {invoice_number} for org {org_id}")
 
@@ -154,6 +161,7 @@ class BillingInvoice(Base):
     session: Session,
     quantity: int = 1,
     line_metadata: dict | None = None,
+    commit: bool = True,
   ) -> "BillingInvoiceLineItem":
     """Add a line item to the invoice."""
     line_item = BillingInvoiceLineItem(
@@ -171,30 +179,43 @@ class BillingInvoice(Base):
     )
 
     session.add(line_item)
-    session.commit()
+    if commit:
+      session.commit()
 
-    self._recalculate_totals(session)
+    self._recalculate_totals(session, commit=commit)
 
     logger.info(f"Added line item to invoice {self.invoice_number}: {description}")
 
     return line_item
 
-  def _recalculate_totals(self, session: Session) -> None:
-    """Recalculate invoice totals from line items."""
+  def _recalculate_totals(self, session: Session, commit: bool = True) -> None:
+    """Recalculate invoice totals from line items.
+
+    Reloads the lines first: one added or changed through the session rather
+    than the collection is otherwise missing from a loaded ``line_items``.
+    """
+    session.flush()
+    session.refresh(self, ["line_items"])
     total = sum(item.amount_cents for item in self.line_items)
     self.subtotal_cents = total
     self.total_cents = total + (self.tax_cents or 0) - (self.discount_cents or 0)
     self.updated_at = datetime.now(UTC)
-    session.commit()
+    if commit:
+      session.commit()
+    else:
+      session.flush()
 
-  def finalize(self, session: Session) -> None:
+  def finalize(self, session: Session, commit: bool = True) -> None:
     """Finalize the invoice and mark as open."""
     self.status = InvoiceStatus.OPEN.value
     self.sent_at = datetime.now(UTC)
     self.updated_at = datetime.now(UTC)
 
-    session.commit()
-    session.refresh(self)
+    if commit:
+      session.commit()
+      session.refresh(self)
+    else:
+      session.flush()
 
     logger.info(f"Finalized invoice {self.invoice_number}")
 
