@@ -1,26 +1,9 @@
-"""Handlers for ``block_type='rollforward'`` — declarative-mode
-attribution block.
+"""Handlers for ``block_type='rollforward'``: a balance-sheet source element
+plus attribution filters, persisted as ``RollforwardMechanics``.
 
-The author declares a Structure with a balance-sheet source element and a
-list of attribution filters; at render time the filter engine
-(:mod:`robosystems.operations.roboledger.reports.rollforward_filters`)
-evaluates the filters against ledger LineItems and produces attributed facts
-per period.
-
-This module owns the authoring surface — ``create`` / ``update`` / ``delete``
-persist the typed :class:`RollforwardMechanics` to
-``structures.artifact_mechanics``; ``build_envelope`` round-trips the typed
-mechanics and an empty facts list. The filter engine is callable directly,
-but filter evaluation is not wired into the live ``fact_grid`` rendering
-pipeline — it has no in-tree consumer.
-
-Mirrors :mod:`robosystems.operations.information_block.schedule` (the
-canonical declarative-mode reference), differing in three ways:
-
-- No pre-generated facts at create time (rollforward is lazy).
-- No domain-service object (structure persistence is straight SQL).
-- No closed_through / fiscal_calendar coupling (period scoping is
-  per-render, not per-block).
+The filter engine
+(:mod:`robosystems.operations.roboledger.reports.rollforward_filters`) is not
+wired into rendering, so the envelope carries no facts.
 """
 
 from __future__ import annotations
@@ -47,21 +30,14 @@ from robosystems.operations.information_block.envelope import (
   load_base_envelope_atoms,
 )
 
-# Display identity — mirrored in the registry entry. Kept here so the
-# envelope builder can fill the wire shape without a registry re-import
-# (avoids a circular dependency — registry.py imports these handlers).
 ROLLFORWARD_BLOCK_TYPE = "rollforward"
 ROLLFORWARD_DISPLAY_NAME = "Rollforward"
 ROLLFORWARD_CATEGORY = "Reporting"
 
 
 def _resolve_qname(session: Session, qname: str, *, what: str) -> Element:
-  """Resolve a qname to its tenant Element row. Raises ValueError on miss.
-
-  ``what`` names the field for the error surface (``bs_source``,
-  ``filter target #N``, ``default_change_tag``) so the caller surfaces
-  a precise message at the API boundary.
-  """
+  """Resolve a qname to its tenant Element row. Raises ValueError on miss;
+  ``what`` names the field in the message."""
   el = session.execute(select(Element).where(Element.qname == qname)).scalar()
   if el is None:
     raise ValueError(
@@ -75,12 +51,7 @@ def _resolve_qname(session: Session, qname: str, *, what: str) -> Element:
 def _resolve_filters(
   session: Session, filters: list[AttributionFilter]
 ) -> list[AttributionFilter]:
-  """Replace each filter's ``target_element_id`` from its ``target_qname``.
-
-  The wire model accepts qname-only authorship — operators don't need
-  to know the element_id. The persisted form carries both for fast
-  filter evaluation (we hit element_id in the SQL, not qname).
-  """
+  """Fill each filter's ``target_element_id`` from its ``target_qname``."""
   resolved: list[AttributionFilter] = []
   for i, f in enumerate(filters):
     el = _resolve_qname(session, f.target_qname, what=f"filter target #{i}")
@@ -99,13 +70,7 @@ def create(
   payload: CreateRollforwardRequest,
   created_by: str,
 ) -> str:
-  """Create a rollforward block. Persists the Structure row + typed
-  mechanics; returns the new structure_id.
-
-  Resolves all qnames to element_ids at write time so the filter
-  evaluator can match on element_id without re-resolving on every
-  read. The wire model retains the qnames for caller convenience.
-  """
+  """Create a rollforward block; returns the new structure_id."""
   bs_element = _resolve_qname(session, payload.bs_source_qname, what="bs_source")
   default_tag_element = (
     _resolve_qname(session, payload.default_change_tag_qname, what="default_change_tag")
@@ -125,10 +90,7 @@ def create(
     validation_mode=payload.validation_mode,
   )
 
-  # Default taxonomy resolution mirrors the schedule pattern — owning
-  # taxonomy of the BS source element when no explicit taxonomy_id was
-  # supplied. The BS source's taxonomy is the natural owner since the
-  # rollforward decomposes its period change.
+  # Default owner: the BS source element's taxonomy.
   taxonomy_id = payload.taxonomy_id or bs_element.taxonomy_id
 
   structure = Structure(
@@ -143,21 +105,16 @@ def create(
   )
   session.add(structure)
   session.flush()
-  # Read the id off the flush, before the commit expires the instance. A
-  # post-commit attribute access issues a refresh SELECT on a connection the
-  # commit already returned to the pool, whose search_path may have been reset
-  # to `public` — so the row resolves to the wrong schema and the write comes
-  # back as a 500 despite having committed.
+  # Read the id before commit: a post-commit refresh may run on a pooled
+  # connection whose search_path was reset to `public`.
   structure_id = structure.id
   session.commit()
   return structure_id
 
 
 def _load_rollforward_or_404(session: Session, structure_id: str) -> Structure:
-  # Locked: `update` merges into the `artifact_mechanics` JSON read here, so
-  # two concurrent updates on an unlocked row would each write the version
-  # they read. `delete` decides from the same read. `RowLockedError` on
-  # contention, mapped to 409 by the surface.
+  # Locked: `update` read-modify-writes `artifact_mechanics`. Contention
+  # raises `RowLockedError` (409).
   from robosystems.operations.locking import lock_by_id
 
   structure = lock_by_id(
@@ -180,9 +137,7 @@ def update(
 ) -> str:
   """Update a rollforward block in place.
 
-  Mutable: name, default_change_tag_qname, attribution_filters,
-  validation_mode. BS source is immutable — changing it would invalidate
-  every period already rendered. To change BS source, delete and re-create.
+  The BS source is immutable; delete and re-create to change it.
   """
   structure = _load_rollforward_or_404(session, payload.structure_id)
   current = RollforwardMechanics.model_validate(structure.artifact_mechanics or {})
@@ -190,10 +145,7 @@ def update(
   if payload.name is not None:
     structure.name = payload.name
 
-  # Partial-update semantics: an absent (None) ``default_change_tag_qname``
-  # means "leave unchanged" — there's no wire-level way to clear the
-  # default tag via update. To remove it, delete and re-create the
-  # rollforward block. See UpdateRollforwardRequest's field doc.
+  # None leaves the default tag unchanged; it can't be cleared by update.
   default_tag_element_id = current.default_change_tag_element_id
   default_tag_qname = current.default_change_tag_qname
   if payload.default_change_tag_qname is not None:
@@ -234,12 +186,7 @@ def delete(
   payload: DeleteRollforwardRequest,
   deleted_by: str,
 ) -> str:
-  """Hard-delete a rollforward block.
-
-  The block's facts (if any get persisted later) cascade with the
-  Structure row. Underlying ledger LineItems are untouched — only the
-  rollforward's projection of them.
-  """
+  """Hard-delete a rollforward block; ledger LineItems are untouched."""
   structure = _load_rollforward_or_404(session, payload.structure_id)
   structure_id = structure.id
   session.delete(structure)
@@ -256,16 +203,8 @@ def build_envelope(
   series_history: int | None = None,
   series_forecast: int | None = None,
 ) -> InformationBlockEnvelope | None:
-  """Reload a rollforward Structure and pack its envelope.
-
-  ``fact_set_id`` is accepted for signature parity but unused —
-  rollforward facts are not persisted (the filter engine is called
-  directly from the reconciliation harness; the renderer wiring is not
-  yet in place). The envelope's ``facts`` list is empty. ``scenario_id``
-  is likewise parity-only — rollforwards attribute posted ledger lines.
-
-  Returns ``None`` when the structure doesn't exist or isn't a
-  rollforward.
+  """Reload a rollforward Structure and pack its envelope (no facts;
+  ``scenario_id`` is ignored). ``None`` when not found or not a rollforward.
   """
   atoms = load_base_envelope_atoms(
     session,

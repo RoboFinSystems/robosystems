@@ -1,9 +1,4 @@
-"""Read operations for report definitions and rendered statements.
-
-The helper functions (`build_periods`, `load_structures`,
-`resolve_entity_name`, `report_to_response`) are module-level so both the
-REST router and the GraphQL resolver can call them.
-"""
+"""Read operations for report definitions and rendered statements."""
 
 from __future__ import annotations
 
@@ -65,13 +60,7 @@ VALID_BLOCK_TYPES = {
   "custom",
 }
 
-# Statement types accepted by the live (OLTP) path. cash_flow_statement
-# is supported via the rs-gaap-presentation CashFlow-indirect Disclosure:
-# operating derives from net-income + non-cash add-backs + working-capital
-# deltas, and investing/financing leaves populate from each line's explicit
-# flow tag when present, else from the mapped rs-gaap element's default-flow
-# derivation arc (so untagged QB data renders too — see ``_emit_flow_facts``).
-# Shared across REST router and MCP tool so they stay in sync.
+# Statement types accepted by the live (OLTP) path, shared by REST and MCP.
 LIVE_STATEMENT_TYPES: tuple[str, ...] = (
   "income_statement",
   "balance_sheet",
@@ -79,18 +68,12 @@ LIVE_STATEMENT_TYPES: tuple[str, ...] = (
   "equity_statement",
 )
 
-# The subset offered to an AI operator. ``equity_statement`` stays servable
-# on REST (the app's Statement of Equity tab) but is not advertised on the
-# MCP surface until it articulates: today it renders equity balances, not a
-# rollforward, and a model reading two rows under a passing validation
-# presents them as the statement — on a live tenant a capital contribution
-# appeared nowhere in it.
+# The subset offered to an AI operator. ``equity_statement`` renders equity
+# balances, not a rollforward, so it stays off MCP until it articulates.
 MCP_LIVE_STATEMENT_TYPES: tuple[str, ...] = tuple(
   t for t in LIVE_STATEMENT_TYPES if t != "equity_statement"
 )
 
-# Statement types accepted by the graph-backed analysis path. The graph
-# hypercube carries cash-flow facts from XBRL filings, so it's valid here.
 ANALYSIS_STATEMENT_TYPES: tuple[str, ...] = (
   "income_statement",
   "balance_sheet",
@@ -110,24 +93,18 @@ class CoaMappingNotFoundError(LookupError):
 class ReportBundleNotAvailableError(LookupError):
   """Raised when a Report exists but has no published serialization bundle.
 
-  The report was never published (or predates the serialization
-  feature), so there's no stamped JSON-LD bundle and no
-  ``generation_count`` to key an XBRL materialization on. Distinct from
-  "report not found" (which the read surfaces as ``None``).
+  Distinct from "report not found", which the read surfaces as ``None``.
   """
 
 
 class BundleSigningError(RuntimeError):
   """Raised when the bundle artifact can't be signed or materialized.
 
-  Covers a malformed stored ``bundle_url``, an S3 presign failure, or a
-  failed XBRL upload — surfaced separately from "not available" so the
-  caller can distinguish a transient/infra fault from a missing bundle.
+  An infrastructure fault, as opposed to a missing bundle.
   """
 
 
-# Presigned-URL lifetime + ceiling. Short window — clients follow the
-# URL immediately; long-lived URLs are a share path, not a download path.
+# Clients follow the URL immediately; long-lived URLs are a share path.
 PRESIGN_DEFAULT_SECONDS = 300
 PRESIGN_MAX_SECONDS = 3600
 
@@ -145,26 +122,14 @@ def generate_adhoc_private_statement(
   periods: list[FactPeriodSpec],
   reporting_style_id: str,
 ):
-  """Generate an ad-hoc private-company statement directly from OLTP data.
+  """Build a one-shot statement from the current ledger, with no saved Report.
 
-  Unlike `get_statement`, which renders a previously-saved Report, this
-  helper builds a one-shot statement from the current ledger using the
-  active CoA→GAAP mapping. Used by the `live-financial-statement`
-  operation (both REST and MCP) — no saved Report needed.
+  The Network comes from the entity's Reporting Style. The arc walk is scoped
+  to rs-gaap-presentation, where every Default Style Network lives; a Style
+  citing Networks from another taxonomy is not yet supported.
 
-  The Network is resolved via the entity's Reporting Style composition —
-  the renderer doesn't pick among same-typed structures by recency. Pass
-  the reporting entity's ``reporting_style_id`` (see
-  ``load_entity_reporting_style`` / ``load_primary_reporting_style``).
-
-  ``generate_report_facts`` needs a ``taxonomy_id`` to scope its CoA→GAAP arc
-  walk, and rs-gaap-presentation is hard-coded as that target because every
-  Default Style Network lives in it. A Style citing Networks from another
-  taxonomy is not yet resolved per picked Network.
-
-  Returns the rendered structure grid plus an `unmapped_count` counter.
-  Raises `CoaMappingNotFoundError` if the tenant hasn't completed the
-  mapping workflow yet — the caller translates to a user-facing tip.
+  Returns ``(grid, unmapped_count)``. Raises `CoaMappingNotFoundError` if the
+  tenant has no CoA→GAAP mapping yet.
   """
   mapping = (
     session.query(Structure).filter(Structure.block_type == "coa_mapping").first()
@@ -259,11 +224,7 @@ def load_structures(session: Session, taxonomy_id: str) -> list[StructureSummary
 
 
 def resolve_entity_name(session: Session, report_def: Report) -> str | None:
-  """Resolve the entity name for a report.
-
-  For shared reports: look up the linked entity by source_graph_id.
-  For native reports: look up the parent entity.
-  """
+  """The linked entity's name for a shared-in report, else the parent entity's."""
   if report_def.source_graph_id:
     row = session.execute(
       text(
@@ -283,7 +244,6 @@ def report_to_response(
   structures: list[StructureSummary],
   entity_name: str | None = None,
 ) -> ReportResponse:
-  """Map a Report row + structures + entity_name to the wire response."""
   periods = None
   if report_def.periods:
     periods = [
@@ -354,13 +314,9 @@ def get_report_download_url(
 ) -> ReportBundleDownloadResponse | None:
   """Resolve a presigned URL for a published Report's serialization bundle.
 
-  Every flavor resolves to a short-lived presigned URL pointing at the
-  bundle in S3 — the client follows it to fetch the artifact directly
-  (the API never streams bytes). JSON-LD is stamped to S3 at publish
-  time, so the read just presigns the stored object. XBRL, the holon
-  and the Tavi model are materialized on first download and cached
-  under a ``generation_count``-versioned key; every generation is
-  immutable, so the cache never goes stale.
+  The API never streams bytes. JSON-LD is stamped at publish; XBRL, the
+  holon and the Tavi model are materialized on first download and cached
+  under a ``generation_count``-versioned key, which never goes stale.
 
   Returns ``None`` when ``report_id`` doesn't resolve. Raises
   :class:`ReportBundleNotAvailableError` when the report exists but has
@@ -372,18 +328,9 @@ def get_report_download_url(
     return None
   generation_count = int(report.generation_count or 0)
 
-  # HOLON_JSONLD is a *derived* projection — materialized + cached on demand
-  # like XBRL, not stamped at publish. It's a member of RdfFlavor, so it's also
-  # in _RDF_FLAVOR_VALUES: this branch MUST stay above the _RDF_FLAVOR_VALUES
-  # check below, which presigns the publish-stamped JSON-LD and rejects every
-  # other RDF flavor as "reserved for future use".
-  #
-  # It also sits above the ``bundle_url`` gate below, and asks about
-  # publication directly instead. ``bundle_url`` names the *flat* JSON-LD
-  # object, which the holon path never reads — it serves its own cached object
-  # or rebuilds from rows. Gating on it made the holon unreachable for a report
-  # that legitimately has no flat bundle of its own: a cross-graph shared copy,
-  # whose holon is the sender's published artifact copied in alongside the rows.
+  # HOLON_JSONLD is in RdfFlavor, so this must precede the _RDF_FLAVOR_VALUES
+  # branch. It gates on publication, not ``bundle_url`` (the flat JSON-LD),
+  # because a shared-in copy can carry a holon without a flat bundle.
   if flavor == RdfFlavor.HOLON_JSONLD.value:
     if report.generation_status != "published":
       raise ReportBundleNotAvailableError(
@@ -399,10 +346,7 @@ def get_report_download_url(
       source_graph_id=report.source_graph_id,
     )
 
-  # TAVI is derived the same way — the compiled model of the same bundle — and
-  # shares the holon's gate: publication, not ``bundle_url``, for the same
-  # reason (a received copy carries the sender's Tavi and no flat bundle). It
-  # is a member of XbrlFlavor, so it must also sit above the XBRL arm below.
+  # Same gate as the holon; TAVI is in XbrlFlavor, so it precedes that branch.
   if flavor == XbrlFlavor.TAVI.value:
     if report.generation_status != "published":
       raise ReportBundleNotAvailableError(
@@ -490,19 +434,10 @@ def _presign_stored_rdf_bundle(
 def _refuse_local_rederivation(
   report_id: str, source_graph_id: str | None, artifact: str
 ) -> None:
-  """Stop a *received* report's artifact being re-derived from local rows.
+  """Refuse to re-derive a received report's artifact from local rows.
 
-  The derived flavors are built on demand and cached, which is right for a
-  report this graph authored: the rows are the source of truth and the artifact
-  is a projection of them. It is wrong for a report that arrived from somewhere
-  else. There the artifact *is* the truth — the sender's published document,
-  copied in beside the rows — and the rows are a convenience projection of it,
-  carrying only what the share was able to bring across.
-
-  So a cache miss on a received report is a miss, not a build order. Rebuilding
-  would hand the recipient a document derived from their own copy while
-  presenting it as the sender's publication, and the difference is invisible at
-  the point of use. Better to say the artifact is gone.
+  For a shared-in report the sender's artifact is the truth and the rows are a
+  partial projection of it, so a cache miss is a miss, not a build order.
   """
   if source_graph_id is None:
     return
@@ -525,12 +460,7 @@ def _materialize_and_presign_xbrl(
 ) -> ReportBundleDownloadResponse:
   """Presign the XBRL zip, materializing + caching it on first download.
 
-  The S3 key is versioned by ``generation_count`` (immutable per
-  generation), so an existing object is always a valid cache hit. On a
-  miss, rebuild the bundle, serialize to the XBRL flavor, upload, then
-  presign. Serialization imports are deferred so the reads module stays
-  import-light for callers that never touch XBRL (Arelle stays out of
-  the hot path).
+  Serialization imports are deferred to keep Arelle off the hot path.
   """
   bucket = env.USER_DATA_BUCKET
   key = get_report_bundle_key(graph_id, report_id, generation_count, extension=".zip")
@@ -578,10 +508,8 @@ def _materialize_and_presign_xbrl(
     content_type="application/zip",
     format=flavor.value,
     generation_count=generation_count,
-    # The emitter strips tenant-authored notes on every generation
-    # (``xbrl_21._strip_disclosure_content``); a property of the flavor, so
-    # it is declared on cache hits too. The file is valid and would
-    # otherwise be silently incomplete next to the notes shown on screen.
+    # The emitter always strips tenant-authored notes; declared on cache hits
+    # too, so the file is not silently incomplete.
     omitted_content=["disclosure_notes"],
   )
 
@@ -594,17 +522,7 @@ def _materialize_and_presign_holon(
   expires_in: int,
   source_graph_id: str | None = None,
 ) -> ReportBundleDownloadResponse:
-  """Presign the dataset-form JSON-LD **holon**, materializing + caching it on
-  first download.
-
-  The holon is a *derived* projection of the same bundle the flat JSON-LD is
-  stamped from — the report as ``#scene`` / ``#boundary`` / ``#projection``
-  named graphs (see ``operations/serialization/rdf/holon.py``). Like XBRL it's
-  built on demand and cached under a ``generation_count``-versioned key
-  (immutable per generation, so an existing object is always a valid cache
-  hit), rather than stamped at publish. Serialization imports are deferred so
-  the reads module stays import-light.
-  """
+  """Presign the JSON-LD holon, materializing + caching it on first download."""
   bucket = env.USER_DATA_BUCKET
   key = get_report_bundle_key(
     graph_id, report_id, generation_count, extension=".holon.jsonld"
@@ -664,15 +582,7 @@ def _materialize_and_presign_tavi(
   expires_in: int,
   source_graph_id: str | None = None,
 ) -> ReportBundleDownloadResponse:
-  """Presign the **Tavi** compiled model, materializing + caching it on first
-  download.
-
-  The Tavi is the same bundle in the OIM-family standards form the SEC
-  pipeline publishes per filing (see ``operations/serialization/xbrl/tavi.py``),
-  derived and cached exactly as the holon is: on demand, under a
-  ``generation_count``-versioned key that is immutable per generation.
-  Serialization imports are deferred so the reads module stays import-light.
-  """
+  """Presign the Tavi compiled model, materializing + caching it on first download."""
   bucket = env.USER_DATA_BUCKET
   key = get_report_bundle_key(
     graph_id, report_id, generation_count, extension=".tavi.json"
@@ -722,8 +632,7 @@ def _materialize_and_presign_tavi(
     content_type="application/json",
     format=XbrlFlavor.TAVI.value,
     generation_count=generation_count,
-    # A property of the flavor, declared on cache hits too: the bundle content
-    # the compiled model has no home for (the holon and JSON-LD keep it).
+    # Bundle content the compiled model has no home for; declared on cache hits.
     omitted_content=list(TAVI_OMITTED_CONTENT),
   )
 
@@ -731,9 +640,8 @@ def _materialize_and_presign_tavi(
 def _parse_s3_uri(uri: str) -> tuple[str | None, str | None]:
   """Split an ``s3://bucket/key`` URI into ``(bucket, key)``.
 
-  Returns ``(None, None)`` on malformed input so the caller has a single
-  error path. Deliberately does not cross-check ``env.USER_DATA_BUCKET`` —
-  a bundle stamped under a different bucket name must still resolve.
+  Returns ``(None, None)`` on malformed input. Deliberately not checked against
+  ``env.USER_DATA_BUCKET``: a bundle stamped under another bucket must resolve.
   """
   if not uri.startswith("s3://"):
     return None, None
@@ -746,9 +654,7 @@ def _parse_s3_uri(uri: str) -> tuple[str | None, str | None]:
   return bucket, key
 
 
-# Display order for the package mode — drives ``ReportPackageItem.display_order``
-# when a Structure has no explicit ordering metadata of its own. New
-# statement-family block types should be added here as they're seeded.
+# ``ReportPackageItem.display_order`` by block type; unlisted types sort at 50.
 _BLOCK_TYPE_DISPLAY_ORDER: dict[str, int] = {
   "balance_sheet": 1,
   "income_statement": 2,
@@ -761,18 +667,10 @@ _BLOCK_TYPE_DISPLAY_ORDER: dict[str, int] = {
 def get_report_package(
   session: Session, report_id: str
 ) -> ReportPackageEnvelope | None:
-  """Rehydrate a Report as a package — metadata + N rendered items.
+  """Rehydrate a Report as metadata plus one full envelope per FactSet.
 
-  Loads the Report row, then queries its FactSets via
-  ``fact_sets.report_id`` (the Report owns its FactSets — see
-  ``models/extensions/roboledger/fact_set.py``). Each FactSet is
-  rehydrated into a full ``InformationBlockEnvelope`` via
-  :func:`get_information_block_for_fact_set` so the frontend renders
-  the package without per-section refetches.
-
-  Returns ``None`` when the Report doesn't exist. Items are ordered by
-  ``Structure.block_type`` (BS → IS → CF → Equity → Schedule) with
-  ties broken by ``fact_set.created_at``.
+  Returns ``None`` when the Report doesn't exist. Items are ordered by block
+  type (BS → IS → CF → Equity → Schedule), ties broken by FactSet id.
   """
   from robosystems.models.api.extensions.report_package import (
     ReportPackageEnvelope,
@@ -789,11 +687,7 @@ def get_report_package(
 
   entity_name = resolve_entity_name(session, report_def)
 
-  # Load FactSets (with their Structures) attached to this Report.
-  # Inner join is correct: a FactSet without a Structure can't drive a
-  # registered handler (``get_information_block_for_fact_set`` returns
-  # None for a null ``structure_id``), so the orphan is dropped here
-  # rather than dragged through the rehydration step.
+  # Inner join: a structure-less FactSet cannot be rendered as a block.
   rows = session.execute(
     select(FactSet, Structure)
     .join(Structure, Structure.id == FactSet.structure_id)
@@ -805,9 +699,7 @@ def get_report_package(
   for fs, structure in rows:
     envelope = get_information_block_for_fact_set(session, fs.id)
     if envelope is None:
-      # FactSets whose Structure isn't a registered block type are
-      # skipped — they're a real data row but the package mode has no
-      # way to render them.
+      # Structure is not a registered block type.
       continue
     block_type = structure.block_type if structure is not None else None
     items.append(
@@ -856,14 +748,9 @@ def get_statement(
 ) -> StatementResponse | None:
   """Render a financial statement for a report + block_type.
 
-  Returns `None` when the report itself doesn't exist. Raises
-  `StatementStructureNotFoundError` when the block_type isn't in
-  the report's taxonomy. The caller translates both into HTTP 404s.
-
-  ``reporting_style_id`` resolves the reporting entity's active Style. If
-  omitted, falls back to ``load_primary_reporting_style`` against the same
-  extensions session — the primary entity's Style — so no separate lookup
-  is needed. Callers that already know the entity's Style may pass it.
+  Returns `None` when the report doesn't exist. Raises
+  `StatementStructureNotFoundError` when the block_type isn't in the report's
+  taxonomy. ``reporting_style_id`` defaults to the primary entity's Style.
   """
   if block_type not in VALID_BLOCK_TYPES:
     raise ValueError(
@@ -881,9 +768,6 @@ def get_statement(
     report_def.comparative,
     report_def.periods,
   )
-  # A comparative or multi-period report pivots every period, but the
-  # earliest column of a cash flow statement is the delta basis, not a
-  # statement — same rule as the live path.
   periods = [periods[i] for i in rendered_period_indexes(block_type, periods)]
 
   if not periods:
@@ -894,19 +778,10 @@ def get_statement(
       block_type=block_type,
     )
 
-  # Two non-obvious clauses below, both guarding against double-counting:
-  #
-  # 1. The elementsOfFinancialStatements trait join is wrapped in a subquery.
-  #    An element can carry multiple ``is_primary=TRUE`` traits across
-  #    categories (e.g. primary in both the EFS and liquidity axes); joining
-  #    element_traits directly would emit one fact row per primary trait.
-  #
-  # 2. ``s.block_type = :block_type`` scopes to FactSets whose owning
-  #    Structure is the statement being rendered. A report persists some
-  #    elements into several FactSets (``rs-gaap:NetIncomeLoss`` lives in IS,
-  #    CF and SE), and ``_facts_to_balance_dict`` sums facts per element for
-  #    ancestor rollup — so unscoped, cross-structure copies would inflate
-  #    the value 2x/3x.
+  # Both guard against double-counting: the trait subquery keeps one row per
+  # fact when an element has primary traits in several categories, and the
+  # block_type filter drops copies of the same element in other statements'
+  # FactSets (NetIncomeLoss sits in IS, CF and SE; facts sum per element).
   fact_rows = session.execute(
     text("""
       SELECT rf.element_id, rf.value, rf.period_start, rf.period_end,
@@ -971,11 +846,7 @@ def get_statement(
     block_type, grid.rows, period_labels=[p.label for p in grid.periods]
   )
 
-  # Drop XBRL is_abstract rows (presentation scaffolding — *Abstract,
-  # *Table, *LineItems, *RollUp wrappers that aren't themselves reportable
-  # concepts). Same filter as :func:`get_live_financial_statement`. Without
-  # it, the IS root abstract surfaces as a row whose value is the sum of
-  # every descendant.
+  # Abstract rows are presentation scaffolding carrying their descendants' sum.
   rows = [
     FactRowResponse(
       element_id=r.element_id,
@@ -1018,7 +889,6 @@ def get_statement(
 
 
 def _last_day_of_month(year: int, month: int) -> date:
-  """Return the last calendar day of the given year/month."""
   if month == 12:
     return date(year, 12, 31)
   return date(year, month + 1, 1) - timedelta(days=1)
@@ -1042,8 +912,6 @@ def resolve_reporting_window(
     ``fiscal_year`` selects which year; defaults to the current year.
   - ``quarterly`` — current calendar quarter (3 months).
   - anything else (``instant`` or unset) — current calendar month.
-
-  Shared by the REST and MCP statement surfaces so their windows match.
   """
   today = date.today()
 
@@ -1068,19 +936,13 @@ def resolve_reporting_window(
     end = _last_day_of_month(today.year, q_start_month + 2)
     return start, end
 
-  # instant / None → current calendar month
   end = _last_day_of_month(today.year, today.month)
   start = end.replace(day=1)
   return start, end
 
 
 def build_current_and_prior_periods(start: date, end: date) -> list[FactPeriodSpec]:
-  """Return [current, prior] period specs.
-
-  Delegates to ``_compute_prior_period`` — which this module already
-  imported while also keeping a hand-copy of its body, so the two drifted
-  the moment one of them was fixed.
-  """
+  """Return [current, prior] period specs of matching duration."""
   prior_start, prior_end = _compute_prior_period(start, end)
   return [
     FactPeriodSpec(start=start, end=end, label="Current"),
@@ -1093,15 +955,9 @@ def rendered_period_indexes(
 ) -> list[int]:
   """Column indexes a statement renders, in the order ``periods`` was built.
 
-  Every period renders, except the earliest on a cash flow statement when
-  two or more were pivoted. The indirect method derives working-capital
-  deltas and the cash reconciliation from period-over-period balance
-  changes, so ``_derive_cash_flow_facts`` / ``_reconcile_operating_to_cash``
-  populate every period but the first — it rides the pivot only as the
-  delta basis. Rendered, that column is a fully formed statement that
-  foots and is economically wrong (net income and add-backs, no deltas, no
-  cash tie). The close-time stamp already keeps only the close month's
-  facts (``statement_sets``); this applies the same rule on the read paths.
+  Every period renders, except the earliest on a cash flow statement when two
+  or more were pivoted: the indirect method uses it only as the delta basis,
+  so rendered it would foot while missing every working-capital delta.
   """
   indexes = list(range(len(periods)))
   if statement_type != "cash_flow_statement" or len(periods) < 2:
@@ -1120,22 +976,11 @@ def get_live_financial_statement(
   limit: int = 1000,
   reporting_style_id: str | None = None,
 ) -> LiveFinancialStatementResponse:
-  """Generate an OLTP-backed ad-hoc statement and format the response.
+  """Render a current + prior ad-hoc statement from OLTP data.
 
-  Thin wrapper around ``generate_adhoc_private_statement`` that:
-  - builds current+prior periods of matching duration
-  - renders both columns, except on a cash flow statement, which renders
-    the current period only (``rendered_period_indexes``)
-  - runs the guard rails over exactly the rendered columns (``validation``)
-  - filters abstract scaffolding rows and all-zero rows
-  - caps at ``limit`` rows (marking ``truncated=True`` when capped)
-
-  ``reporting_style_id`` resolves the reporting entity's active Style. When
-  omitted it falls back to ``load_primary_reporting_style`` against the same
-  extensions session (the primary entity's Style).
-
-  Raises ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists;
-  the caller translates to a user-facing tip (400/422).
+  Drops abstract and all-zero rows and caps at ``limit`` (``truncated``).
+  ``reporting_style_id`` defaults to the primary entity's Style. Raises
+  ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists.
   """
   if reporting_style_id is None:
     reporting_style_id = load_primary_reporting_style(session)
@@ -1149,9 +994,8 @@ def get_live_financial_statement(
   columns = rendered_period_indexes(statement_type, periods)
   rendered_periods = [periods[i] for i in columns]
 
-  # Validate what the reader sees: the full grid (subtotals foot against
-  # their children, so the all-zero rows filtered below still count), but
-  # only the rendered columns — the cash flow delta basis is not a statement.
+  # Validate the full grid (all-zero children still foot their subtotals),
+  # but only the rendered columns.
   validation = validate_report(
     statement_type,
     [_project_row(row, columns) for row in grid.rows],
@@ -1160,21 +1004,9 @@ def get_live_financial_statement(
 
   facts: list[LiveStatementFactRow] = []
   for row in grid.rows:
-    # Drop XBRL `is_abstract` rows (`*Abstract`, `*Table`, `*LineItems`,
-    # `*RollUp`). They're presentation scaffolding — section headers and
-    # calc-cluster wrappers — that carry the rolled-up value of their
-    # children in the disclosure DAG but aren't themselves reportable
-    # concepts. Their value is duplicated by the concrete subtotal
-    # underneath them (e.g., `fac:CostRevenueRollUp` mirrors
-    # `fac:CostOfRevenue`).
+    # Abstract rows duplicate the concrete subtotal beneath them.
     if row.is_abstract:
       continue
-    # Show every concrete row that carries a value, including subtotals.
-    # FAC anchor rows (fac:GrossProfit, fac:OperatingIncomeLoss, …) are
-    # `is_subtotal=True` because they have child summands in the
-    # Disclosure DAG, but their value is the calc-DAG result the reader
-    # most wants to see. The UI distinguishes them via the `is_subtotal`
-    # flag on the response.
     values = (
       row.values
       if len(rendered_periods) == len(periods)
@@ -1218,7 +1050,6 @@ def get_live_financial_statement(
 
 
 def _project_row(row: FactRow, columns: list[int]) -> FactRow:
-  """Copy ``row`` keeping only the values at ``columns``, in that order."""
   return FactRow(
     element_id=row.element_id,
     element_qname=row.element_qname,

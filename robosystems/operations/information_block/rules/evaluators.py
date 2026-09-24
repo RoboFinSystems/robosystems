@@ -8,16 +8,12 @@ Maps each ``rule_pattern`` value to an evaluation strategy:
 * ``RollUp`` — ``$Parent = Σ children``; the parent subtotal (LHS) must
   be bound, but a missing RHS child is treated as 0 (the renderer sums
   only present children); ``skipped`` only when the parent is unbound.
-* ``Exists`` — ``pass`` when the first variable's bound value is not
-  ``None`` (i.e., a fact exists for that concept in the period).
+* ``Exists`` — ``pass`` when any variable is bound to a non-null value.
 * ``CoExists`` — ``pass`` when *all* variables are bound or *all* are
   ``None``; ``fail`` on a mixed binding (some present, some absent).
 * ``SumEquals`` — the aggregate sum bound for the first variable is
   compared against ``metadata_['expected_total']``.
-* Any other pattern — ``skipped`` with a "not yet implemented" message.
-
-All handlers return an :class:`EvaluationOutcome` dataclass so the
-engine can persist the result without inspecting internal state.
+* Any other pattern — ``skipped``.
 """
 
 from __future__ import annotations
@@ -47,12 +43,7 @@ _EQUALITY_PATTERNS = frozenset({"EqualTo", "RollForward"})
 
 
 def rule_tolerance(rule: Any) -> float:
-  """Resolve the equality tolerance for a rule.
-
-  Uses the per-rule ``metadata_['tolerance']`` override when present, else the
-  default ``EQUALITY_TOLERANCE``. Single source for every evaluator + the
-  engine's arc-derived RollUp path.
-  """
+  """The rule's ``metadata_['tolerance']`` override, else ``EQUALITY_TOLERANCE``."""
   metadata = rule.metadata_
   if isinstance(metadata, dict):
     return float(metadata.get("tolerance", EQUALITY_TOLERANCE))
@@ -60,12 +51,8 @@ def rule_tolerance(rule: Any) -> float:
 
 
 def evaluate_rule(rule: Any, bindings: dict[str, float | None]) -> EvaluationOutcome:
-  """Dispatch rule evaluation based on ``rule.rule_pattern``.
-
-  ``rule`` is a :class:`~robosystems.models.extensions.Rule` ORM row or
-  any object with the same attributes. ``bindings`` maps variable name →
-  float (or ``None`` when the fact was not found for that concept).
-  """
+  """Dispatch rule evaluation based on ``rule.rule_pattern``. ``bindings`` maps
+  variable name → value, ``None`` when no fact was found."""
   pattern = rule.rule_pattern
   if pattern in _EQUALITY_PATTERNS:
     return _evaluate_equality_pattern(rule, bindings)
@@ -121,12 +108,8 @@ def _evaluate_equality_pattern(
 def _evaluate_rollup(rule: Any, bindings: dict[str, float | None]) -> EvaluationOutcome:
   """Evaluate a ``RollUp`` rule (``$Parent = Σ children``).
 
-  Unlike strict :func:`_evaluate_equality_pattern`, a missing RHS child
-  is treated as 0 — the renderer sums only the children that have facts
-  (all-zero rows are dropped), so a report that presents two of a
-  subtotal's six possible children must still satisfy the rollup. The
-  parent subtotal (the LHS) MUST be bound; if it isn't, the subtotal
-  wasn't reported, so there's nothing to verify → ``skipped``.
+  A missing RHS child counts as 0, as in the renderer's sum of present
+  children. An unbound parent (LHS) means ``skipped``.
   """
   variable_names = [v["variable_name"] for v in (rule.rule_variables or [])]
   if not variable_names:
@@ -154,17 +137,10 @@ def _evaluate_rollup(rule: Any, bindings: dict[str, float | None]) -> Evaluation
 
   tolerance = rule_tolerance(rule)
 
-  # RHS children with no fact default to 0 (sum-of-present-children).
   rhs_names = [n for n in variable_names if n not in required]
   defaulted = [n for n in rhs_names if bindings.get(n) is None]
-  # Parent present but NONE of its rollup children reported here: the
-  # rollup is vacuous (nothing to sum), which happens when an
-  # element-scoped rule fires in a statement that lists the subtotal as a
-  # standalone line but doesn't decompose it (e.g. NetIncomeLoss on the
-  # Cash Flow / Equity statements, where it's an input/total, not a
-  # rollup of ContinuingOps + Discontinued). Skip rather than report a
-  # spurious failure — the rule still evaluates in the subtotal's home
-  # statement where the children ARE presented.
+  # No children reported here (e.g. NetIncomeLoss as a standalone line on
+  # the cash-flow statement): vacuous, so skip rather than fail.
   if rhs_names and len(defaulted) == len(rhs_names):
     return EvaluationOutcome(
       status="skipped",

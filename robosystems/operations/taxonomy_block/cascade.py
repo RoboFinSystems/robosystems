@@ -1,15 +1,7 @@
-"""Delete dependency preflight + cascade helpers.
+"""Delete preflight + cascade helpers for the tenant taxonomy handlers.
 
-Shared across the three tenant taxonomy handlers (CoA,
-reporting_extension, custom_ontology). `preflight_delete` counts every
-row that blocks or triggers a cascade; `cascade_delete_taxonomy`
-removes the taxonomy and its atoms in dependency order.
-
-Facts and line_items are not tenant-ontology atoms — they're business
-data that references elements. Facts can be cascade-deleted
-(``cascade_facts=True``); line_items never cascade via this path
-(journal entries are the source of truth — clear them through the
-ledger surface first).
+Facts can be cascade-deleted (``cascade_facts=True``); line_items never
+cascade here (journal entries are the source of truth).
 """
 
 from __future__ import annotations
@@ -236,7 +228,6 @@ def cascade_delete_taxonomy(
       delete(Association).where(Association.structure_id.in_(structure_ids))
     )
 
-  # Element side-tables.
   if element_ids:
     session.execute(
       delete(ElementTrait).where(ElementTrait.element_id.in_(element_ids))
@@ -248,23 +239,18 @@ def cascade_delete_taxonomy(
       delete(ElementReference).where(ElementReference.element_id.in_(element_ids))
     )
 
-  # Elements.
   if element_ids:
     session.execute(delete(Element).where(Element.id.in_(element_ids)))
 
-  # Structures.
   if structure_ids:
     session.execute(delete(Structure).where(Structure.id.in_(structure_ids)))
 
-  # The entity's adoption of this taxonomy (a chart of accounts is linked to
-  # the parent entity at creation; `entity_taxonomies.taxonomy_id` is
-  # RESTRICT) — without this the taxonomy DELETE dies on the constraint and
-  # a CoA can never be deleted through the API.
+  # `entity_taxonomies.taxonomy_id` is RESTRICT, and a CoA is adopted by the
+  # entity at creation.
   session.execute(
     delete(EntityTaxonomy).where(EntityTaxonomy.taxonomy_id == taxonomy_id)
   )
 
-  # Taxonomy row itself.
   session.execute(delete(Taxonomy).where(Taxonomy.id == taxonomy_id))
   session.flush()
 

@@ -1,45 +1,16 @@
-"""Bank-feed event handlers — post a classified bank line.
+"""Bank-feed event handlers: post a classified bank line.
 
-A bank feed (Mercury, Plaid) captures every posted transaction as an event
-with the bank leg on ``resource_element_id`` and a Tier-0 suggestion on
-``metadata.suggested_element_id``. Nothing posts at capture: the inbox is
-where a person, or Claude over MCP, chooses the account. This module is
-the other half — when a classified bank event is committed, it writes the
-entry.
+A feed (Mercury, Plaid) captures each transaction with the bank leg on
+``resource_element_id``; nothing posts until the inbox classifies it via
+metadata (``classified_element_id``, a ``classified_allocations`` split in
+cents, ``accept_suggestion``, or an internal transfer's
+``from_element_id``/``to_element_id``). On commit this writes a local-lane
+draft through ``journal_entry_recorded``: money in is DR bank / CR contra.
 
-The classification lives in the event's metadata, patched through
-``update-event-block``:
-
-- ``classified_element_id`` — the contra account for the whole amount.
-- ``classified_allocations`` — a split: ``[{element_id, amount}]`` in
-  cents, summing to the transaction amount.
-- ``accept_suggestion: true`` — take ``suggested_element_id`` as the
-  classification (the one-click approve).
-- ``from_element_id`` / ``to_element_id`` — an internal transfer's two bank
-  legs; the feed sets both when it pairs the legs.
-
-The bank's record can change after the line posts. A reconciling item's
-accepted payload carries what the bank now says as ``source_amount`` /
-``source_posted_date``, or ``source_removed`` when the bank retracted the
-line. Restate regenerates the entry from that metadata, so the handler
-posts the bank's amount on the bank's date when they are present, and
-refuses a retracted line outright — reversing it is the catch-up
-disposition's job.
-
-Money in (``amount > 0``): DR bank / CR contra. Money out: DR contra / CR
-bank. The entry is a draft on the event's posting date, in the local lane
-(a bank line is never published anywhere), and posts at close like any
-other draft. The GL write itself is ``journal_entry_recorded``'s, so the
-closed-period fence, balance check and the postability guard (a retired
-account takes no new lines) are the ledger's own.
-
-An unclassified event falls back to the tenant's DSL rules — the
-deterministic floor for a counterparty that never varies — and, when no
-rule matches, refuses to commit: a bank event must never land
-``committed`` with no rows behind it. The same test runs when a caller
-marks a line ``classified``: a patch that resolves no account (a split
-that does not add up, ``accept_suggestion`` on a suggestion the chart
-never matched) is refused there, with the reason, not later at commit.
+When the bank's record changed after posting (``source_amount`` /
+``source_posted_date``), the bank's values post; a retracted line
+(``source_removed``) is refused. An unclassified line falls back to the
+tenant's DSL rules and refuses to commit when none matches.
 """
 
 from __future__ import annotations
@@ -101,12 +72,7 @@ class BankAllocation(BaseModel):
 
 
 class BankFeedMetadata(BaseModel):
-  """What the handler reads from a bank event's metadata.
-
-  Everything the feed captured (the Mercury payload keys, the suggestion,
-  the routing ``connection_id``) rides along untouched — the schema is
-  open, and only the classification keys are typed.
-  """
+  """A bank event's metadata; open schema, only classification keys typed."""
 
   model_config = ConfigDict(extra="allow")
 
@@ -120,8 +86,7 @@ class BankFeedMetadata(BaseModel):
   classified_by: str | None = None
   basis: str | None = None
   connection_id: str | None = None
-  # What the bank now says, when it differs from the captured row — set by
-  # the feed when it flags a posted line as a reconciling item.
+  # What the bank now says, when it differs from the captured row.
   source_amount: int | None = None
   source_posted_date: date | None = None
   source_removed: bool = False
@@ -153,13 +118,7 @@ def contra_allocations(
 
 
 def unclassified_reason(metadata: BankFeedMetadata) -> str:
-  """Why this line has no contra account yet, and what would give it one.
-
-  Names the case the caller is actually in: ``accept_suggestion`` on a
-  suggestion the chart never matched is the common one — the feed keeps
-  the suggested *name* on the line, and telling that caller to set
-  ``accept_suggestion`` again helps nobody.
-  """
+  """Why this line has no contra account yet, and what would give it one."""
   suggested_name = metadata.suggested_account_name
   if metadata.accept_suggestion and not metadata.suggested_element_id:
     if suggested_name:
@@ -194,9 +153,7 @@ def plan_lines(
 ) -> list[JournalEntryLineItemInput] | None:
   """The balanced entry for one bank event, or ``None`` when unclassified.
 
-  Pure: reads the event's fields and its metadata, touches no session.
-  Raises on shapes that can never post (no bank leg, no amount, a split
-  that does not add up).
+  Pure. Raises on shapes that can never post.
   """
   if amount is None or amount == 0:
     raise HandlerMetadataValidationError(
@@ -270,14 +227,9 @@ def _journal_metadata(
 
 
 def _pin_to_local_lane(event: Event) -> None:
-  """A bank line is evidence of the bank's own record; it is never published
-  to a source system, whatever the connection's policy.
-
-  Close decides the write-back lane from the *persisted* event's
-  ``metadata.publish_to_source`` (``qb_writeback.writeback_source_clause``),
-  not from anything a handler passes along, so the pin has to land on the
-  row. Today ``source='mercury'`` is outside the write-back sources anyway;
-  the explicit flag keeps that true if the source list ever widens.
+  """A bank line is never published to a source system. Close reads the lane
+  from the persisted event's ``metadata.publish_to_source``, so the pin must
+  land on the row.
   """
   metadata = dict(event.metadata_ or {})
   if metadata.get("publish_to_source") is not False:
@@ -356,10 +308,8 @@ def source_posting_date(
 def source_refusal(metadata: BankFeedMetadata, *, unclassified: bool) -> str | None:
   """Why the bank's current record stops this line posting, or ``None``.
 
-  A retracted line never posts. A line with no classification of its own
-  would post through a tenant rule, and a rule re-posts the captured amount
-  and date rather than the bank's — so when the bank's record differs it is
-  refused too. Both are the catch-up disposition's job.
+  Refuses a retracted line, and an unclassified one whose bank record
+  changed (a tenant rule would re-post the captured values).
   """
   if metadata.source_removed:
     return (
@@ -473,14 +423,7 @@ def dispatch_preview(
 
 
 def validate_classification(event: Event, metadata: BankFeedMetadata) -> None:
-  """Refuse ``captured → classified`` when the commit could not post it.
-
-  Runs the same plan the commit will run. A split that does not add up
-  or a missing bank leg raises as it would at commit; a line with no
-  resolvable contra account is refused with ``unclassified_reason``. An
-  internal transfer always plans (both legs are on the line), so it
-  passes as it is.
-  """
+  """Refuse ``captured → classified`` when the commit could not post it."""
   lines = plan_lines(
     event_type=event.event_type,
     resource_element_id=event.resource_element_id,
@@ -499,7 +442,6 @@ def _handler(event_type: str, display_name: str) -> EventBlockPythonHandler:
     event_type=event_type,
     display_name=display_name,
     metadata_schema=BankFeedMetadata,
-    # A draft that close posts; the same target the journal handler keeps.
     target_status="classified",
     dispatch=dispatch,
     dispatch_preview=dispatch_preview,

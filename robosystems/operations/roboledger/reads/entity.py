@@ -10,11 +10,6 @@ from robosystems.models.extensions import Entity
 
 
 def entity_to_response(entity: Entity) -> LedgerEntityResponse:
-  """Map an `Entity` row to the wire-facing `LedgerEntityResponse`.
-
-  Single source of truth shared by the REST router shim and the GraphQL
-  `entity` resolver so their outputs cannot drift.
-  """
   return LedgerEntityResponse(
     id=entity.id,
     name=entity.name,
@@ -53,14 +48,11 @@ def entity_to_response(entity: Entity) -> LedgerEntityResponse:
 
 
 def resolve_parent_entity(session: Session) -> Entity | None:
-  """The ledger's own entity — the row every writer that says "the entity"
-  must mean.
+  """The ledger's own entity: what every writer means by "the entity".
 
-  A tenant that has received a shared report also holds the sender's
-  entity as a ``source='linked'``, ``is_parent=False`` row, and ``entities``
-  has no ordering guarantee, so an unfiltered ``LIMIT 1`` can hand back the
-  counterparty (heap order after updates). Resolved by predicate, ordered by
-  creation so two parents (which should not exist) still resolve stably.
+  Filtered by predicate because a tenant that received a shared report also
+  holds the sender's entity as a linked row, and an unfiltered ``LIMIT 1`` can
+  return it.
   """
   return (
     session.query(Entity)
@@ -71,11 +63,7 @@ def resolve_parent_entity(session: Session) -> Entity | None:
 
 
 def get_parent_entity(session: Session) -> LedgerEntityResponse | None:
-  """Return the parent (non-linked) entity for this ledger, or None.
-
-  Returns `None` when the ledger is initialized but has no entity yet — the
-  caller decides whether that's a 404.
-  """
+  """The parent (non-linked) entity, or None if there is none yet."""
   entity = resolve_parent_entity(session)
   if entity is None:
     return None

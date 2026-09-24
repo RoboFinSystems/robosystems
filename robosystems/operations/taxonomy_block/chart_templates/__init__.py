@@ -1,23 +1,10 @@
 """Shipped chart-of-accounts templates — read-only stencils, loaded from data.
 
-A template lives at ``frameworks/chart-templates/<key>/v1/``: a
-framework-free ``chart.jsonld`` (the accounts, anchored only to the
-fac-traits substrate) and one ``mappings/<framework>.jsonld`` per framework
-the chart knows how to map into. It is a **stencil, not library content**:
-never seeded into ``public``, never copied into a tenant at provision —
-``initialize-chart-of-accounts`` instantiates it once, as tenant-owned
-``coa:*`` elements, and the tenant owns the result from then on.
-
-The directory sits beside the frameworks but is not one (no manifest, so
-framework discovery never sees it — the ``ontology/`` precedent). A chart
-maps into *many* frameworks — one ledger, many filings — which is why the
-accounts and the mapping sets are separate files and why nothing here is
-anchored to ``rs-gaap``.
-
-Doctrine: ``specs/taxonomy/chart-templates-as-data.md`` (§2 the ruling, §5
-the chart-of-accounts lifecycle) and ``specs/adapters/mercury-adapter.md``
-§8.1 — no chart by default, native and synced ledgers never mix,
-initializing a chart is an explicit, one-time act.
+A template at ``frameworks/chart-templates/<key>/v1/`` is a framework-free
+``chart.jsonld`` plus one ``mappings/<framework>.jsonld`` per framework it
+maps into. It is never seeded or provisioned: ``initialize-chart-of-accounts``
+instantiates it once as tenant-owned ``coa:*`` elements. The directory has no
+manifest, so framework discovery ignores it.
 """
 
 from __future__ import annotations

@@ -1,22 +1,8 @@
-"""Worker task for period close.
+"""Worker task for period close, which can outlast the MCP tool budget.
 
-The close runs ~30 seconds on a real month — most of it one QuickBooks
-round-trip per draft — against a 25-second tool budget on the MCP surface.
-It always *completed*; the operator just stopped hearing about it, and then
-had to know not to retry a write that had already landed.
-
-Running it here decouples the work from the listener. The close itself is
-unchanged: same command, same exclusive period fence, same mid-flow commit
-of the publish markers. What changes is who waits — and, because this is a
-background job, how long: the fence wait is the task's own budget rather
-than the request wait, so a duplicate dispatch queues behind the close it
-duplicates and comes back with that close's receipt instead of a refusal.
-
-**A refused close is a result, not a failure.** The consumer reduces any
-raised exception to a plain string, so a gate rejection that propagated
-would reach the operator as text with its blockers stripped — the one part
-they need. Domain outcomes are therefore returned (shaped by
-``close_outcomes``), and only genuine faults are left to raise.
+The fence wait is the task's budget, so a duplicate dispatch queues behind
+the close it duplicates and returns that close's receipt. Refusals are
+returned as results (see ``close_outcomes``); only faults raise.
 """
 
 from __future__ import annotations
@@ -39,9 +25,8 @@ class PeriodCloseTask(BaseTask):
 
     period = self.params["period"]
 
-    # Nothing else moves a worker operation off PENDING, and the tool's
-    # handback reads very differently for "queued behind a busy worker"
-    # than for "running now, do not retry".
+    # Nothing else moves the operation off PENDING, and the tool tells
+    # "queued" apart from "running, do not retry".
     await self.manager.event_storage.store_event(
       self.task_id,
       EventType.OPERATION_STARTED,
@@ -53,11 +38,9 @@ class PeriodCloseTask(BaseTask):
     )
     await self.report_progress(f"Closing {period}…", percent=5)
 
-    # The close is synchronous and blocks on QuickBooks, so it cannot run on
-    # the event loop the consumer uses to emit progress — and the budget
-    # cannot cancel the thread it runs on, so `run_blocking` waits for the
-    # thread when the budget expires rather than reporting a close that is
-    # about to land as one that failed.
+    # Off the event loop: the close blocks on QuickBooks. The budget can't
+    # cancel the thread, so run_blocking waits it out rather than report a
+    # landing close as failed.
     result = await self.run_blocking(self._run_close)
 
     outcome = result.get("outcome")
@@ -91,9 +74,6 @@ class PeriodCloseTask(BaseTask):
     period = self.params["period"]
     graph_id = self.graph_id
     if graph_id is None:
-      # BaseTask allows a graph-less task; a close is never one. Raising
-      # rather than asserting because `-O` strips asserts, and the failure
-      # this guards would otherwise be a confusing None in a session call.
       raise ValueError("period_close requires a graph_id")
 
     service = FiscalCalendarService()
@@ -116,11 +96,8 @@ class PeriodCloseTask(BaseTask):
           allow_reconciling_items=bool(
             self.params.get("allow_reconciling_items", False)
           ),
-          # Background jobs wait. The request wait (3s) is sized so a
-          # request handler never pins a pooled connection behind a close;
-          # this *is* the close, and what holds the fence against it is
-          # most often another close of the same period — worth waiting
-          # out, since the answer is then "already closed" with a receipt.
+          # Usually what holds the fence is another close of the same
+          # period; waiting it out yields "already closed" with a receipt.
           fence_wait_ms=self.budget_seconds * 1000,
         )
       except CLOSE_DOMAIN_ERRORS as exc:
@@ -129,10 +106,8 @@ class PeriodCloseTask(BaseTask):
           raise
         payload["outcome"] = "rejected"
         payload["operation_id"] = self.task_id
-        # A close that already landed can be re-queued by the stalled-task
-        # reaper, which measures age from enqueue rather than from start.
-        # Reporting only "already closed" would describe a successful close
-        # as a refusal, so hand back the receipt it wrote.
+        # The stalled-task reaper can re-queue a close that already landed;
+        # hand back its receipt rather than report success as a refusal.
         if _is_already_closed(exc, PeriodAlreadyClosedError):
           receipt = (
             session.query(FiscalPeriod.close_receipt)
@@ -144,15 +119,9 @@ class PeriodCloseTask(BaseTask):
           )
           if receipt:
             payload["close_receipt"] = receipt
-        # Domain refusals are results, so this `with` exits cleanly and
-        # `extensions_session` would COMMIT. Stamp/gate failures raise
-        # after the period has been marked closed in the same transaction;
-        # without a rollback the operator is told the close rolled back
-        # while OLTP disagrees. `WritebackFailed` already committed its
-        # publish markers in a prior transaction — rollback only discards
-        # uncommitted work after that. `PeriodAlreadyClosedError` has
-        # nothing dirty; the receipt SELECT above is against committed
-        # rows and survives this.
+        # Returning exits the `with` cleanly, which would COMMIT; a stamp
+        # failure raises after the period was already flipped to closed.
+        # WritebackFailed's markers were committed earlier and survive.
         session.rollback()
         logger.info(
           "period_close refused for %s %s: %s",

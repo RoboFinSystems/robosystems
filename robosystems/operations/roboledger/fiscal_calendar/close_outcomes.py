@@ -1,18 +1,8 @@
-"""What a close says about itself, in one shape.
+"""The one payload shape for a close, shared by the MCP tool and its worker task.
 
-The close has two callers that must describe it identically: the MCP tool,
-and the worker task the tool dispatches to. Their outcomes cannot be shaped
-independently — the tool returns whatever the task produced, so a divergence
-would mean the agent sees a different close depending on how fast the worker
-answered.
-
-It also settles a distinction the worker forces. A gate rejection ("this
-period has pending obligations") is an *outcome*, not a fault: it is the
-close correctly declining, and the operator needs the blockers to act on.
-The worker turns any raised exception into a plain string, so a rejection
-that propagated would arrive as `"CloseGateFailed(...)"` with the blockers
-gone. Everything a caller might reasonably act on is therefore shaped into a
-result here, and only genuine faults are left to raise.
+A refused close (e.g. a gate rejection) is an outcome, not a fault: the
+worker stringifies raised exceptions, which would lose the blockers, so
+refusals are shaped into payloads here and only genuine faults raise.
 """
 
 from __future__ import annotations
@@ -33,9 +23,7 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
 )
 from robosystems.operations.roboledger.reports.statement_sets import StatementStampError
 
-# The exceptions that describe a close rather than a fault. Each maps to a
-# structured payload below; anything outside this tuple is a bug or an
-# infrastructure failure and should keep propagating.
+# Refusals, not faults; anything else should propagate.
 CLOSE_DOMAIN_ERRORS: tuple[type[Exception], ...] = (
   CloseGateFailed,
   PeriodNotFoundError,
@@ -63,12 +51,8 @@ def close_success_payload(
     "entries_posted_locally": result.entries_posted_locally,
     "target_auto_advanced": result.target_auto_advanced,
     "fiscal_calendar": fiscal_calendar,
-    # Rule outcomes from the auto-run on close, pairing with the REST
-    # response so agents and REST consumers see the same surface.
     "rule_summary": result.rule_summary,
     "evaluated_structure_ids": list(result.evaluated_structure_ids),
-    # Canonical statement stamping — without these keys an agent never
-    # learns that the close persisted the month's statements.
     "statements_stamped": result.statements_stamped,
     "statement_stamp_note": result.statement_stamp_note,
     "stamped_statement_sets": dict(result.stamped_statement_sets),
@@ -134,8 +118,6 @@ def _gate_payload(exc: CloseGateFailed, *, period: str) -> dict[str, Any]:
     "message": f"Cannot close period {period!r}.",
     "blockers": exc.blockers,
   }
-  # Each detail block rides only when its blocker fired, so the payload
-  # names what to go and fix rather than making the agent ask again.
   if exc.gate.pending_obligation_count:
     payload["pending_obligation_count"] = exc.gate.pending_obligation_count
     payload["pending_obligation_sample"] = [

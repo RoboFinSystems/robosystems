@@ -1,13 +1,7 @@
 """Read operations for Taxonomy Blocks — envelope lookups + listing.
 
-The two public reads are the source of truth for the GraphQL fields
-(``taxonomyBlock`` / ``taxonomyBlocks``). Shape is defined once;
-agents, SDK callers, and the UI all see the same envelope that the
-create/update handlers emit.
-
-Rows whose ``taxonomy_type`` isn't registered (notably ``'mapping'``)
-surface as ``None`` — mapping taxonomies have no envelope representation;
-they're addressed through the mapping association surface.
+Rows whose ``taxonomy_type`` isn't registered (notably ``'mapping'``) have no
+envelope and surface as ``None``.
 """
 
 from __future__ import annotations
@@ -50,13 +44,9 @@ def list_taxonomy_blocks(
 ) -> list[TaxonomyBlockEnvelope]:
   """List taxonomy blocks with optional filters + pagination.
 
-  When ``library_sentinel=True`` (request routed to the library
-  ``graph_id='library'`` endpoint), results are restricted to entries
-  whose registry declares ``surfaces_in_library=True`` — currently just
-  ``reporting_standard``. On a tenant graph_id no such filter applies.
-
-  Filters compose with AND. ``taxonomy_type`` that isn't registered
-  raises :class:`ValueError` — the caller supplied a bad filter.
+  ``library_sentinel`` (the ``library`` graph) restricts results to types
+  with ``surfaces_in_library``. An unregistered ``taxonomy_type`` raises
+  :class:`ValueError`.
   """
   if taxonomy_type is not None:
     try:
@@ -79,10 +69,7 @@ def list_taxonomy_blocks(
   if not candidate_ids:
     return []
 
-  # Tenant-authored blocks sort before library-seeded ones so a default
-  # call surfaces the tenant's own work first. Without this, library
-  # reporting_standard rows (fac, rs-gaap) would swamp the default
-  # limit=50 and hide tenant CoA / schedule / custom ontology blocks.
+  # Tenant-authored blocks first, so library rows don't swamp the page.
   query = (
     select(Taxonomy)
     .where(Taxonomy.taxonomy_type.in_(candidate_ids))

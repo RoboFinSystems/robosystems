@@ -1,9 +1,4 @@
-"""Write operations for report definitions.
-
-Includes the share path which copies a report + its facts into a target
-graph's tenant schema — that helper (`_share_to_target`) stays internal
-here because it's only used by `share_report`.
-"""
+"""Write operations for report definitions: generate, file, delete, share."""
 
 from __future__ import annotations
 
@@ -59,10 +54,7 @@ from robosystems.operations.roboledger.reports.network_picker import (
   load_entity_reporting_style,
 )
 
-# The statement-set production core lives in ``statement_sets`` so the close
-# path can mint canonical (report_id NULL) sets through the same machinery.
-# Re-exported here because tests and the router import these names from this
-# module.
+# Re-exported: tests and the router import these names from this module.
 from robosystems.operations.roboledger.reports.statement_sets import (  # noqa: F401
   _TAXONOMY_SCOPE_CTE,
   NoEntityError,
@@ -82,9 +74,8 @@ from robosystems.operations.serialization import (
   serialize_to_tavi,
 )
 
-# Extensions that give a graph a tenant schema, and so make it a legitimate
-# recipient of a shared report. Mirrors `_REPORT_EXTENSIONS` on the GraphQL
-# read side — the two ends of the same seam.
+# Extensions that make a graph a legitimate share recipient. Mirrors
+# `_REPORT_EXTENSIONS` on the GraphQL read side.
 _RECEIVING_EXTENSIONS = ("roboledger", "roboinvestor")
 
 
@@ -131,11 +122,9 @@ class TaxonomyNotFoundError(LookupError):
 
 
 class BundleUploadError(RuntimeError):
-  """Raised when the publish-time JSON-LD bundle upload to S3 fails.
+  """The publish-time JSON-LD bundle upload failed; the publish must not commit.
 
-  The publish path is fail-loud: a Report cannot transition to
-  ``published`` without a bundle artifact at ``Report.bundle_url``.
-  Callers (router layer) translate this to HTTP 502.
+  Routers translate this to HTTP 502.
   """
 
 
@@ -149,23 +138,12 @@ def _snapshot_text_block_facts(
 ) -> int:
   """Snapshot standing text-block bindings into this report's FactSets.
 
-  Text-block disclosure structures carry no pivot facts, so the
-  fact-driven picker never sees them. Their render membership comes from
-  the standing ``factset_type='disclosure'`` FactSets that
-  ``bind-text-block`` maintains: for every text-block-CAP disclosure
-  structure in the report's taxonomy closure whose standing binding
-  falls inside the report window, copy the latest standing set's facts
-  into a fresh ``factset_type='report'`` FactSet stamped with this
-  ``report_id`` — carrying the standing set's document provenance
-  verbatim (NOT ``PivotProvenance``; the narrative was asserted from a
-  document, not pivoted from the ledger).
-
-  The copy is the immutability seam: a filed report keeps the text as
-  bound at generation time even if the document — or the standing
-  binding — changes later. Regeneration's DELETE-by-``report_id``
-  clears prior snapshots; the standing sets (``report_id`` NULL)
-  survive. Containment window semantics (binding period inside the
-  report envelope) mirror the rule engine's fact binds.
+  Text-block structures carry no pivot facts, so the fact-driven picker never
+  sees them. For each text-block disclosure whose latest standing
+  ``factset_type='disclosure'`` set falls inside the report window, copy its
+  facts into a ``report`` FactSet for this report, keeping the standing set's
+  document provenance. The copy is what keeps a filed report's text fixed when
+  the document or binding later changes.
 
   Returns the number of structures snapshotted.
   """
@@ -247,17 +225,11 @@ def _snapshot_text_block_facts(
 
 
 def _record_bundle_validation(bundle: StatementBundle, report_def: Report) -> None:
-  """Optionally SHACL-validate the bundle and record the result on the Report.
+  """SHACL-validate the bundle per ``env.REPORT_BUNDLE_SHACL_VALIDATION``.
 
-  Gated by ``env.REPORT_BUNDLE_SHACL_VALIDATION`` (``off`` | ``warn`` |
-  ``strict``) — opt-in, so the publish path stays fast by default. When it
-  runs, the structured outcome is logged onto
-  ``report.metadata['bundle_validation']`` (audit trail), and ``strict``
-  additionally blocks the publish on non-conformance.
-
-  Validation-infrastructure failures (e.g. pyshacl raising) never break a
-  ``warn`` publish: they are logged and skipped. Only ``strict`` re-raises,
-  since strict opted into blocking on a bad/unverifiable bundle.
+  ``off`` | ``warn`` | ``strict``. The outcome is recorded on
+  ``report.metadata['bundle_validation']``; only ``strict`` blocks the publish,
+  on non-conformance or on the validator itself failing.
   """
   mode = (env.REPORT_BUNDLE_SHACL_VALIDATION or "off").strip().lower()
   if mode == "off":
@@ -305,26 +277,13 @@ def _stamp_report_bundle(
   graph_id: str,
   report_def: Report,
 ) -> None:
-  """Produce + stash the JSON-LD bundle for a Report about to publish.
+  """Build, upload and stamp the JSON-LD bundle for a Report about to publish.
 
-  Called from the publish-hook in :func:`create_report` and
-  :func:`regenerate_report` after facts are stamped and rules have run,
-  before the transaction commits. Sequence:
-
-  1. ``session.flush()`` so freshly-stamped FactSet + Fact rows are
-     visible to the bundler's ORM reads (the extensions session is
-     ``autoflush=False``).
-  2. Bump ``report_def.generation_count`` so the S3 key bumps a new
-     version even on regenerate.
-  3. Build the ``StatementBundle`` via :func:`build_report_bundle`.
-  4. Serialize to JSON-LD via :func:`serialize_to_rdf`.
-  5. Upload to S3 under ``report-bundles/{graph_id}/{report_id}/g{n}.jsonld``.
-  6. Stamp ``report_def.bundle_url`` with the full ``s3://`` URI.
-
-  Fail-loud: any S3 failure raises :class:`BundleUploadError` so the
-  caller's transaction never commits. Orphan S3 objects are
-  acceptable; orphan published-Reports without a bundle are not.
+  Runs before the caller commits. Any S3 failure raises
+  :class:`BundleUploadError`: an orphan S3 object is acceptable, a published
+  Report without a bundle is not.
   """
+  # The extensions session is autoflush=False; the bundler reads the new rows.
   session.flush()
   report_def.generation_count = (report_def.generation_count or 0) + 1
   bundle = build_report_bundle(session, graph_id, report_def.id)
@@ -367,11 +326,8 @@ def create_report(
   Raises `TaxonomyNotFoundError`, `NoEntityError` — caller translates
   to HTTP 422.
   """
-  # Resolve taxonomy: accept either an exact ID (tenant-specific UUID) or a
-  # standard name (e.g. 'rs-gaap'). Standard-name resolution prefers the
-  # 'reporting_standard' type so callers don't accidentally pick a linkbase
-  # taxonomy. Per-tenant UUIDs make hardcoding an ID in the request default
-  # unreliable, so the request defaults to the standard name 'rs-gaap'.
+  # Accept a tenant taxonomy id or a standard name ('rs-gaap'); a name
+  # resolves to the reporting_standard taxonomy, never a linkbase one.
   tax_result = session.execute(
     text(
       "SELECT id, standard FROM taxonomies "
@@ -384,8 +340,6 @@ def create_report(
   tax_row = tax_result.fetchone()
   if tax_row is None:
     raise TaxonomyNotFoundError(body.taxonomy_id)
-  # Use the resolved UUID for downstream queries even if caller passed a
-  # standard name.
   resolved_taxonomy_id = tax_row[0]
 
   periods = build_periods(
@@ -407,10 +361,8 @@ def create_report(
   session.add(report_def)
   session.flush()
 
-  # Resolve the reporting entity, then its active Style's earnings home
-  # before generating facts, so derived cumulative earnings close to the
-  # form's capital concept (CORP→RetainedEarnings, PART→PartnersCapital,
-  # LLC→MembersEquity) and the balance sheet foots for non-corporate forms.
+  # The Style's close target decides where derived cumulative earnings land
+  # (RetainedEarnings / PartnersCapital / MembersEquity by entity form).
   entity_id = _get_entity_id(session, graph_id)
   reporting_style_id = load_entity_reporting_style(session, entity_id)
   close_target = load_close_target_concept(session, reporting_style_id)
@@ -429,9 +381,7 @@ def create_report(
     fact_element_ids={f.element_id for f in facts.facts},
     taxonomy_id=resolved_taxonomy_id,
   )
-  # Create fact_sets rows first so the facts we stamp reference a row
-  # that already exists, letting the DB enforce facts.fact_set_id →
-  # fact_sets.id.
+  # FactSets first, so the facts.fact_set_id FK holds.
   _pre_create_report_fact_sets(
     session,
     report_def.id,
@@ -483,14 +433,10 @@ def create_report(
 def _assert_report_mutable_by(
   report_def: Report, acting_user_id: str, verb: str
 ) -> None:
-  """The one rule for who may change a report's content or lifecycle.
+  """Only the author may change a report; a shared-in copy is read-only to all.
 
-  A report is mutable by its author. A copy shared in from another graph
-  (``source_graph_id`` set) is a read-only snapshot in this graph for
-  everyone — including the sender, who may be a member here too and whose
-  ``created_by`` the copy carries; the way to change it is to re-share from
-  the source. Removing a shared-in copy is the recipient graph admin's call
-  and is widened separately in ``delete_report``.
+  That includes the sender, whose ``created_by`` the copy carries. Deleting a
+  shared-in copy is widened to graph admins separately in ``delete_report``.
   """
   if report_def.source_graph_id is not None:
     raise NotAuthorizedError(
@@ -510,31 +456,16 @@ def regenerate_report(
 ) -> ReportResponse:
   """Regenerate a report with new period dates.
 
-  `graph_id` is only used by the internal `_get_entity_id` error
-  message — `Report` rows don't store a graph_id column (the tenant
-  graph is the schema, not a field). Passed through explicitly so
-  the route handler's path parameter flows to the ops layer rather
-  than relying on a non-existent model attribute.
-
-  ``filed`` and ``archived`` Reports are immutable artifacts — they
-  carry stamped facts and a published bundle that downstream consumers
-  may already reference. Regenerating one would silently mutate that
-  state; the only legal path past ``filed`` is a restatement (a new
-  Report row with ``supersedes_id``). ``delete_report`` is already
-  gated this way; this check brings ``regenerate_report`` in line.
+  ``filed`` and ``archived`` reports are immutable; the path past ``filed`` is
+  a restatement (a new Report with ``supersedes_id``).
 
   Raises:
-    ReportNotFoundError: ``body.report_id`` doesn't resolve.
-    NotAuthorizedError: caller doesn't own the report.
-    InvalidFilingTransitionError: report is ``filed`` or ``archived``
-      — restate instead of regenerating.
-    ValueError: if period_end < period_start in the new body.
+    ReportNotFoundError, NotAuthorizedError.
+    InvalidFilingTransitionError: report is ``filed`` or ``archived``.
+    ValueError: period_end < period_start.
   """
-  # Locked: the guard below decides from `filing_status` — filed and archived
-  # reports are immutable — and the regeneration then rewrites the report's
-  # facts. Unlocked, a file landing between that check and the rewrite gets a
-  # report stamped `filed` whose contents were replaced underneath it, which
-  # is the state the immutability check exists to prevent.
+  # Locked so a concurrent file cannot land between the immutability check
+  # and the fact rewrite.
   from robosystems.operations.locking import lock_by_id
 
   report_def = lock_by_id(
@@ -553,7 +484,6 @@ def regenerate_report(
       f"regenerating."
     )
 
-  # Resolve new periods
   if body.periods:
     periods = build_periods(None, None, False, body.periods)
     report_def.periods = periods_to_json(periods)
@@ -595,8 +525,6 @@ def regenerate_report(
     fact_element_ids={f.element_id for f in facts.facts},
     taxonomy_id=report_def.taxonomy_id,
   )
-  # Stale rows from the prior generation must clear before fresh ULIDs
-  # land — facts by cascade, verification results by the sweep.
   delete_report_fact_sets(session, [report_def.id])
   _pre_create_report_fact_sets(
     session,
@@ -653,10 +581,8 @@ class InvalidFilingTransitionError(Exception):
   """Raised when a filing-status transition isn't on the legal lifecycle graph."""
 
 
-# Legal filing-status transitions:
-#   draft ↔ under_review → filed ↔ archived
-# ``filed`` is reached via :func:`file_report` so audit fields land cleanly;
-# this map covers the non-file moves available to the generic transition op.
+# draft ↔ under_review → filed → archived. ``filed`` is reached only through
+# :func:`file_report` (it stamps the audit fields); this map is everything else.
 _LEGAL_NON_FILE_TRANSITIONS: dict[str, set[str]] = {
   "draft": {"under_review"},
   "under_review": {"draft"},
@@ -669,27 +595,18 @@ class ReportNotFiledError(Exception):
 
 
 def file_report(session: Session, report_id: str, filed_by: str) -> ReportResponse:
-  """Transition a Report to ``filed`` — locks the package.
+  """Transition a Report to ``filed``, stamping ``filed_at`` / ``filed_by``.
 
-  Allowed from ``draft`` or ``under_review`` and only when generation
-  has reached ``published``. Stamps ``filed_at`` and ``filed_by`` for
-  audit. Raises :class:`ReportNotFoundError` when the Report doesn't
-  exist, :class:`NotAuthorizedError` when ``filed_by`` is not the report's
-  author (or the report is a shared-in copy), and
-  :class:`InvalidFilingTransitionError` when the current filing or
-  generation status isn't a legal source for filing.
+  Allowed from ``draft`` or ``under_review``, and only once generation has
+  finished (filing an in-progress or failed report would lock a partial
+  snapshot).
 
-  ``filing_status`` and ``generation_status`` are orthogonal axes, but
-  filing an in-progress or failed report would lock an empty / partial
-  snapshot — so the server gates on ``generation_status='published'``.
+  Raises ReportNotFoundError, NotAuthorizedError (not the author, or a
+  shared-in copy), InvalidFilingTransitionError.
   """
   from datetime import UTC, datetime
 
-  # Locked: the two guards below decide from `filing_status` and
-  # `generation_status`, then write the first. Lower stakes than the ledger
-  # transitions — a concurrent double-file overwrites the audit stamp rather
-  # than duplicating anything — but "who filed this, and when" is exactly the
-  # field an auditor reads, so last-writer-wins is not good enough for it.
+  # Locked: last-writer-wins on the filing audit stamp is not acceptable.
   from robosystems.operations.locking import lock_by_id
   from robosystems.operations.roboledger.reads.reports import (
     load_structures,
@@ -712,10 +629,7 @@ def file_report(session: Session, report_id: str, filed_by: str) -> ReportRespon
       f"Report '{report_id}' is in '{report_def.filing_status}'; "
       f"can only file from 'draft' or 'under_review'."
     )
-  # ``complete`` and ``published`` both mean "generation finished
-  # successfully" in this codebase (see closing_book.py:63 which treats
-  # them interchangeably). Filing a ``pending`` / ``generating`` /
-  # ``failed`` report would lock an empty or partial snapshot.
+  # ``complete`` and ``published`` both mean generation finished.
   if report_def.generation_status not in {"complete", "published"}:
     raise InvalidFilingTransitionError(
       f"Report '{report_id}' has generation_status="
@@ -738,14 +652,10 @@ def transition_filing_status(
 ) -> ReportResponse:
   """Move a Report along the non-file legs of the filing lifecycle.
 
-  Use :func:`file_report` to reach ``filed`` (so audit fields land).
-  Other transitions (submit for review, withdraw, archive) are routed
-  through here so the legal-transition graph stays in one place. Same
-  actor rule as filing: the report's author, never a shared-in copy.
+  Use :func:`file_report` to reach ``filed``. Same actor rule as filing.
   """
-  # Locked with the rest of the report lifecycle. Unlocked, this reads a status,
-  # waits behind a concurrent file, and then writes its own over the top —
-  # leaving `filed_at` and `filed_by` populated on a report back in `draft`.
+  # Locked: unlocked, a concurrent file could be overwritten, leaving
+  # `filed_at` / `filed_by` set on a report back in `draft`.
   from robosystems.operations.locking import lock_by_id
   from robosystems.operations.roboledger.reads.reports import (
     load_structures,
@@ -788,34 +698,20 @@ def delete_report(
 ) -> bool:
   """Delete a report and its generated facts.
 
-  Raises `NotAuthorizedError` if the caller doesn't own the report.
-  Raises `ReportNotFiledError` if a report this graph authored is in a locked
-  filing state (``filed`` or ``archived``) — the Report Block lifecycle treats
-  filed/archived as immutable so the audit trail can't be erased.
-  Returns True if a row was deleted, False if the report did not exist.
+  Returns False if the report did not exist.
 
-  A report shared in from another graph (``source_graph_id`` set) is the one
-  exception to the owner rule: its ``created_by`` is the *sender's* user id, so
-  no one in the receiving graph could ever match it. An admin of the receiving
-  graph may delete such a copy — the recipient's exit from a share they did not
-  ask for. Native reports are unaffected; only their owner can delete them. It
-  is also exempt from the filed/archived lock below, which guards an author's
-  audit trail rather than a recipient's inbox.
+  A copy shared in from another graph carries the sender's ``created_by``, so
+  a graph admin here may delete it instead, and the filed/archived lock (which
+  guards an author's audit trail) does not apply to it. The sender's
+  ``ReportShare`` row is theirs and is left alone.
 
-  Deleting the copy deliberately leaves the sender's ``ReportShare`` row alone:
-  the sender's record that they sent it is theirs, not the recipient's to erase.
-
-  Raises `ReportHasActiveSharesError` if the report is still shared out to
-  other graphs. `revoke_report_share` needs this row to find and authorize the
-  withdrawal, so deleting first would strand every delivered copy in its
-  recipient's schema permanently — precisely when withdrawal matters most,
-  since a report deleted after distribution is usually one that was wrong.
-  Revoke each recipient first. Shared *copies* are unaffected: the recipient's
-  schema holds no share rows for a report they did not send.
+  Raises:
+    NotAuthorizedError: not the owner (nor an admin deleting a shared-in copy).
+    ReportHasActiveSharesError: still shared out; revoke first, since
+      `revoke_report_share` needs this row to withdraw the delivered copies.
+    ReportNotFiledError: an authored report that is ``filed`` or ``archived``.
   """
-  # Locked with the rest of the report lifecycle: the filed-report immutability
-  # guard below decides from `filing_status`, so unlocked a delete can pass it
-  # and then remove a report that was filed in between.
+  # Locked so a concurrent file cannot slip past the immutability guard.
   from robosystems.operations.locking import lock_by_id
 
   report_def = lock_by_id(
@@ -842,12 +738,8 @@ def delete_report(
   )
   if active_share_targets:
     raise ReportHasActiveSharesError(report_id, active_share_targets)
-  # Filed/archived immutability protects an *author's* audit trail. A copy
-  # shared in from another graph is not that: it is a delivery, and the
-  # sender's lifecycle status now travels with it, so applying the guard here
-  # would close the recipient's only per-report exit the moment a sender filed
-  # before sharing. The block-and-purge path already deletes such copies in
-  # raw SQL without consulting this guard; the two exits agree.
+  # A shared-in copy carries the sender's filing status; guarding it would
+  # close the recipient's only exit once a sender filed before sharing.
   if report_def.source_graph_id is None and report_def.filing_status in {
     "filed",
     "archived",
@@ -872,23 +764,15 @@ def share_report(
 ) -> ShareReportResponse:
   """Share a published report to every target graph in a publish list.
 
-  Takes `graph_id` instead of a session so it can open multiple
-  sessions (source graph + each target graph + platform DB) as the
-  share workflow requires. Raises `PublishListNotFoundError`,
-  `PublishListEmptyError`, `ReportNotFoundError`,
-  `NotAuthorizedError`, `ReportNotPublishedError`, or `RowLockedError`
-  — caller translates to appropriate HTTP status codes.
+  Takes `graph_id` rather than a session because it opens the source, each
+  target, and the platform DB. Raises `PublishListNotFoundError`,
+  `PublishListEmptyError`, `ReportNotFoundError`, `NotAuthorizedError`,
+  `ReportNotPublishedError`, or `RowLockedError`.
 
-  The source report stays row-locked for the whole share — snapshot,
-  copies into every recipient, and the ``ReportShare`` rows — in one
-  source transaction. That is what keeps the seam consistent: a
-  concurrent ``delete_report`` / ``regenerate_report`` / ``file_report``
-  waits (bounded) instead of removing or rewriting the report between the
-  snapshot and the share rows, a second share of the same report cannot
-  interleave its copies with this one, and the two snapshot reads see one
-  version of the facts. The lock is held across the S3 read and the
-  recipient writes deliberately; a share is seconds, and the alternative was
-  recipients holding copies the sender could no longer revoke.
+  The source report stays row-locked for the whole share (snapshot, recipient
+  copies, ``ReportShare`` rows), including the S3 read, so a concurrent
+  delete/regenerate/file or second share cannot interleave and leave copies
+  the sender can no longer revoke.
   """
   from robosystems.db.extensions import extensions_session
   from robosystems.operations.locking import lock_by_id
@@ -924,16 +808,9 @@ def share_report(
     )
     if report_def is None:
       raise ReportNotFoundError(report_id)
-    # Strict ownership, deliberately — NOT the graph-admin widening that
-    # `delete_report` and `revoke_report_share` carry. Sharing is a publishing
-    # act, and this rule is load-bearing beyond authorization: because only an
-    # author can share, a report that arrived from elsewhere can never acquire
-    # outbound shares of its own. That is what lets `_purge_shared_reports` and
-    # the re-share replace in `_share_to_target` delete copies in raw SQL
-    # without tripping `ReportHasActiveSharesError` — they cannot orphan a share
-    # row, because a shared copy has none. Widen this to admins and both paths
-    # start stranding delivered copies in recipients' schemas with no way to
-    # withdraw them, which is precisely what that guard exists to prevent.
+    # Strict ownership, no admin widening: it guarantees a shared-in copy never
+    # has outbound shares, which is what lets `_purge_shared_reports` and the
+    # re-share replace delete copies in raw SQL without orphaning share rows.
     if report_def.created_by != acting_user_id:
       raise NotAuthorizedError("Not authorized to share this report.")
     if report_def.generation_status != "published":
@@ -951,21 +828,14 @@ def share_report(
       "comparative": report_def.comparative,
       "periods": report_def.periods,
       "generation_count": int(report_def.generation_count or 0),
-      # Where the report stands in the sender's filing lifecycle. A recipient
-      # needs it to tell a draft it was sent from final statements, and
-      # sharing a `draft` is legal — only `generation_status` is gated above.
-      # `filed_by` deliberately stays behind: it is the sender's platform user
-      # id, which means nothing in the recipient's graph and is rendered
-      # verbatim by the viewer.
+      # Lets a recipient tell a shared draft from final statements. `filed_by`
+      # stays behind: a sender user id means nothing in the recipient graph.
       "filing_status": report_def.filing_status,
       "filed_at": report_def.filed_at,
     }
 
-    # The FactSets travel as themselves, not as one flat fact list. Every
-    # read path on the recipient's side resolves a FactSet's Structure —
-    # `get_report_package` joins it, `load_fact_set_by_id_for_structure`
-    # pins on it — so a share that collapses N sets into one structure-less
-    # set delivers facts that nothing downstream can render.
+    # FactSets travel as themselves: every recipient read path resolves a
+    # FactSet's Structure, so a flat fact list would be unrenderable.
     fact_set_rows = source_session.execute(
       text("""
         SELECT fs.id, fs.structure_id, fs.factset_type, fs.period_start,
@@ -992,7 +862,6 @@ def share_report(
     ).fetchall()
     source_facts = [row._asdict() for row in fact_rows]
 
-    # Read once and reused for every target, since each gets the same bytes.
     publication_artifacts = _load_publication_artifacts(
       graph_id, report_id, int(report_snapshot["generation_count"])
     )
@@ -1013,11 +882,8 @@ def share_report(
     if successful:
       now = datetime.now(UTC)
       for result in successful:
-        # One active share row per (report, recipient). A re-share replaces
-        # the recipient's copy rather than adding a second, so the record of
-        # it must not fan out either — a second active row would describe a
-        # delivery that no longer exists, and revocation would have to guess
-        # which one it withdrew.
+        # One active share row per (report, recipient): a re-share replaces
+        # the recipient's copy, so it refreshes the row instead of adding one.
         existing = (
           source_session.execute(
             select(ReportShare).where(
@@ -1059,29 +925,13 @@ def revoke_report_share(
 ) -> RevokeReportShareResponse:
   """Withdraw a shared report from one recipient graph.
 
-  The sender's half of the share controls. Takes `graph_id` rather than a
-  session for the same reason `share_report` does — it spans the source and
-  target tenant schemas.
+  Deletes every copy from the target, then stamps every active share row for
+  the target revoked. A copy the recipient already deleted is not an error
+  (`copy_deleted` comes back False). The linked `Entity` in the target stays:
+  an investor's `Security` may point at it.
 
-  Stamps `ReportShare.revoked_at` in the source and deletes the copied Report
-  (and its fact sets, whose facts cascade) from the target. A recipient who
-  already deleted the copy themselves is not an error: the share is still
-  marked revoked and `copy_deleted` comes back False.
-
-  Revocation is *plural on both sides*: `_delete_shared_copy` removes every
-  copy carrying this provenance pair, so every active share row for the target
-  is stamped to match. Two shares of one report to one recipient are ordinary —
-  two overlapping publish lists, or a resend after a correction — and leaving
-  one row active would claim a delivery that no longer exists.
-
-  The linked `Entity` in the target is deliberately left in place. An investor's
-  `Security` points at it, and the relationship survives one report being
-  pulled — deleting it would break the link over a single withdrawal.
-
-  Normally restricted to the report's author, who is also the only user who
-  could have shared it. A graph admin may also revoke, so an author's departure
-  does not strand delivered copies in recipients' schemas — the same reasoning
-  that widened `delete_report`.
+  The author or a graph admin may revoke, so an author's departure does not
+  strand delivered copies.
 
   Raises `ReportNotFoundError`, `NotAuthorizedError`, or
   `ReportShareNotFoundError`.
@@ -1112,9 +962,8 @@ def revoke_report_share(
     target_graph_id=body.target_graph_id,
   )
 
-  # Stamp only after the copy is gone. If the target write fails, the shares
-  # stay un-revoked and the operation is safe to retry — the alternative
-  # leaves a record claiming the data was withdrawn while it is still there.
+  # Stamp only after the copy is gone, so a failed target write stays
+  # retryable instead of recording a withdrawal that did not happen.
   now = datetime.now(UTC)
   with extensions_session(graph_id) as source_session:
     for share in (
@@ -1131,8 +980,6 @@ def revoke_report_share(
   )
 
 
-# The media type each publication artifact is stored and served under, by the
-# extension of its bundle key.
 PUBLICATION_MEDIA_TYPES: dict[str, str] = {
   ".jsonld": "application/ld+json",
   ".holon.jsonld": "application/ld+json",
@@ -1157,26 +1004,13 @@ def _load_publication_artifacts(
 ) -> dict[str, str]:
   """Read the sender's published artifacts so a share can carry them across.
 
-  The **holon** — the report as ``#scene`` / ``#boundary`` / ``#projection``
-  named graphs — is the intended cross-tenant wire format: one self-contained
-  serialization that renders outside the system entirely, and whose partition
-  omits the ``#lineage`` graph by construction, so the books never cross with
-  the report. The **Tavi** compiled model travels beside it: the same report in
-  the standards form the report-components adapter renders with no RDF step.
-  Carrying the sender's *objects* rather than re-deriving them from the
-  recipient's copied rows is what makes the recipient's view the publication
-  the sender actually made, byte for byte, instead of a reconstruction that
-  can drift from it.
+  Carrying the sender's objects, not re-deriving them from the copied rows,
+  makes the recipient's view the exact publication the sender made. The holon
+  omits the ``#lineage`` graph by construction, so the books never cross.
 
   Returns the artifacts that resolved, keyed by file extension. A miss is
-  logged and omitted rather than raised: the row copy is the load-bearing half
-  of a share — it is what materializes into the recipient's graph and carries
-  the cross-graph traversal — so an object-store fault degrades the
-  recipient's renderers rather than failing the delivery outright.
-
-  Called after the sender's session closes, so none of this object-store I/O
-  holds a database connection open. A derived artifact that has to be built
-  needs a session and opens its own short-lived one, on the cold path only.
+  logged and omitted: the row copy is the load-bearing half of a share, so an
+  object-store fault degrades rendering rather than failing the delivery.
   """
   from robosystems.db.extensions import extensions_session
 
@@ -1196,10 +1030,9 @@ def _load_publication_artifacts(
       report_id,
     )
 
-  # The holon and the Tavi are derived on demand, not stamped at publish, so a
-  # report nobody has downloaded in a flavor yet has no object for it. Build
-  # the missing ones once here off one bundle — each key is immutable per
-  # generation, so this also warms the sender's cache.
+  # Derived flavors exist only once someone downloaded them; build the missing
+  # ones off one bundle (keys are immutable per generation, so this also
+  # warms the sender's cache).
   missing: dict[str, str] = {}
   for extension in DERIVED_ARTIFACT_EXTENSIONS:
     key = get_report_bundle_key(
@@ -1254,11 +1087,8 @@ def _copy_publication_artifacts(
 ) -> None:
   """Write the sender's artifacts under the recipient's own bundle keys.
 
-  Re-keying rather than sharing the sender's object is deliberate: the
-  recipient's copy is a distinct Report with its own id, and presigning is
-  scoped per graph. ``bundle_url`` has to land too — every download flavor is
-  gated on it (``get_report_bundle_download``), so without it the recipient's
-  Holon and download surfaces stay dark even with the objects in place.
+  Re-keyed because presigning is scoped per graph. ``bundle_url`` must be set
+  too: every download flavor is gated on it.
   """
   if not artifacts:
     return
@@ -1293,10 +1123,8 @@ def _copy_publication_artifacts(
 def delete_report_fact_sets(session: Session, report_ids: Sequence[str]) -> None:
   """Delete the statement sets of these reports, and what hangs off them.
 
-  Facts cascade from ``fact_sets`` at the DB level. ``verification_results``
-  only *loosely* references a set (``fact_set_id`` carries no FK), so it has
-  to be swept here or every regenerate, delete, purge and re-share leaves the
-  evaluated rule results of the removed snapshot behind as orphans.
+  Facts cascade from ``fact_sets``; ``verification_results.fact_set_id`` has
+  no FK, so it is swept here.
   """
   ids = list(report_ids)
   if not ids:
@@ -1317,19 +1145,9 @@ def delete_report_fact_sets(session: Session, report_ids: Sequence[str]) -> None
 def delete_report_artifacts(graph_id: str, report_ids: list[str]) -> None:
   """Remove the object-store artifacts of reports whose rows are gone.
 
-  Withdrawal has to reach object storage now that a shared copy carries
-  artifacts of its own. Before the holon travelled with the rows, a recipient's
-  copy had none — `bundle_url` was always NULL — so revoke and block-and-purge
-  were complete by construction. They no longer are, and an exit that leaves
-  the sender's published report sitting in the recipient's prefix is not the
-  exit either control advertises.
-
-  Deletes by prefix, so every generation and every flavor go together.
-
-  **Call this after the row deletion commits, never before.** Deleting an
-  artifact for a transaction that then rolls back destroys a live report's
-  publication; an artifact left behind by a crash is an orphan a later sweep
-  can take. The asymmetry decides the ordering.
+  Deletes by prefix: every generation and flavor. **Call after the row
+  deletion commits**: a rollback after this would destroy a live report's
+  publication, while a crash before it only leaves an orphan.
   """
   if not report_ids:
     return
@@ -1337,8 +1155,7 @@ def delete_report_artifacts(graph_id: str, report_ids: list[str]) -> None:
   try:
     s3 = S3Client()
   except Exception as exc:
-    # Runs after the row deletion committed; a storage client that cannot be
-    # built must not turn a completed withdrawal into a failed request.
+    # The rows are already gone; don't fail a completed withdrawal.
     logger.warning("Object store unavailable; leaving report artifacts: %s", exc)
     return
   for report_id in report_ids:
@@ -1365,11 +1182,9 @@ def _delete_copies_in_session(
 ) -> list[str]:
   """Delete copies of one shared report from an open target session.
 
-  Returns the ids removed, so the caller can drop their object-store artifacts
-  once the transaction commits (see :func:`delete_report_artifacts`). Matches
-  on the provenance pair, so it can only ever reach a report that arrived from
-  this sender — a report the target authored has a null `source_graph_id` and
-  cannot match. Does not commit; the caller owns the transaction.
+  Returns the ids removed, for :func:`delete_report_artifacts` after commit.
+  Matches on the provenance pair, so it can never reach a report the target
+  authored. Does not commit.
   """
   copy_ids = list(
     target_session.execute(
@@ -1397,15 +1212,9 @@ def _delete_shared_copy(
 ) -> bool:
   """Delete the copy of a shared report from the target tenant schema.
 
-  Returns True when a copy was found and removed.
-
-  A recipient whose graph has been deprovisioned has no schema left, and is
-  treated as "the copy is already gone" rather than an error. Raising would
-  strand the share permanently: revocation stamps ``revoked_at`` only after
-  this returns, and ``delete_report`` refuses a report that still has an
-  active share row — so the sender could neither withdraw the report nor
-  delete it, over a recipient that no longer exists. Deleting the schema
-  deleted the copy; that is the outcome revocation was asking for.
+  Returns True when a copy was found and removed. A deprovisioned recipient
+  (no schema) counts as already removed; raising would leave the share
+  unrevocable and the report undeletable.
   """
   from robosystems.db.extensions import extensions_session, tenant_schema_exists
 
@@ -1443,10 +1252,8 @@ def _share_to_target(
 
   try:
     with SessionFactory() as platform_session:
-      # A deprovisioned (or mid-teardown) recipient reads as absent: its
-      # schema is gone or going, and teardown never prunes it from senders'
-      # publish lists, so a re-share to the list would otherwise be attempted
-      # against a schema that does not exist.
+      # Teardown never prunes publish lists, so a deprovisioned recipient
+      # must read as absent.
       target_graph = platform_session.execute(
         select(Graph).where(
           Graph.graph_id == target_graph_id,
@@ -1462,13 +1269,8 @@ def _share_to_target(
           error=f"Graph '{target_graph_id}' not found.",
         )
 
-      # Receiving is not authoring. `provision_tenant_schema` creates every
-      # tenant table regardless of the graph's extensions, so an investor-only
-      # tenant can hold a report perfectly well — and requiring `roboledger`
-      # of a recipient would mean a fund had to provision a ledger it will
-      # never post to just to read what its portfolio companies send it. The
-      # gate stays, narrowed to "has an extensions tenant at all", so a share
-      # still cannot land in a graph that never opted into the OLTP surface.
+      # Receiving is not authoring: any extensions tenant has the report
+      # tables, so an investor-only graph can receive without a ledger.
       extensions = target_graph.schema_extensions or []
       if not any(ext in extensions for ext in _RECEIVING_EXTENSIONS):
         return ShareResultItem(
@@ -1487,10 +1289,8 @@ def _share_to_target(
       error="Failed to validate target graph.",
     )
 
-  # The row can outlive the schema (a torn-down recipient, or one that never
-  # provisioned). The session bind refuses a missing schema, so this only
-  # decides the *message*: a per-target outcome the sender can act on rather
-  # than a generic failure — the same courtesy `_delete_shared_copy` extends.
+  # The Graph row can outlive the schema; report that per target rather than
+  # failing generically when the session bind refuses it.
   if not tenant_schema_exists(target_graph_id):
     return ShareResultItem(
       target_graph_id=target_graph_id,
@@ -1501,12 +1301,8 @@ def _share_to_target(
   try:
     now = datetime.now(UTC)
     with extensions_session(target_graph_id) as target_session:
-      # The recipient's exit, checked before anything is written. Blocked
-      # senders are told rather than silently dropped: they already had a
-      # relationship with the recipient, so a bounce is more honest than a
-      # shadow ban and stops them retrying forever. (If the block table is
-      # somehow missing — code ahead of migration — this raises and the
-      # handler below turns it into an error item, so the share fails closed.)
+      # Blocked senders are told, not silently dropped. Fails closed: if the
+      # block table is missing this raises into the error item below.
       if is_source_blocked(target_session, source_graph_id):
         return ShareResultItem(
           target_graph_id=target_graph_id,
@@ -1514,13 +1310,7 @@ def _share_to_target(
           error="Recipient has blocked shares from this graph.",
         )
 
-      # A re-share replaces rather than accumulates. Sharing one report to one
-      # recipient twice is ordinary — two overlapping publish lists, or a
-      # resend after a correction — and without this the recipient's books
-      # collect duplicate copies of the same statement, each materializing
-      # into their graph. The provenance pair can only ever match a copy from
-      # this sender; a report the recipient authored has a null
-      # `source_graph_id`.
+      # A re-share replaces the previous copy rather than duplicating it.
       replaced_copy_ids = _delete_copies_in_session(
         target_session, source_graph_id, report_snapshot["id"]
       )
@@ -1536,11 +1326,8 @@ def _share_to_target(
         comparative=report_snapshot["comparative"],
         periods=report_snapshot.get("periods"),
         generation_status="published",
-        # The sender's filing status travels with the copy. Without it the
-        # column default applies and every received report reads `draft` —
-        # permanently, since `_assert_report_mutable_by` closes the lifecycle
-        # transitions to a shared-in copy, so the recipient's viewer would
-        # label final statements a draft with no way to correct it.
+        # A shared-in copy can never transition, so it must arrive with the
+        # sender's status rather than the `draft` default.
         filing_status=report_snapshot.get("filing_status") or "draft",
         filed_at=report_snapshot.get("filed_at"),
         created_by=shared_by,
@@ -1551,8 +1338,7 @@ def _share_to_target(
       target_session.add(shared_report)
       target_session.flush()
 
-      # The holon crosses with the rows. Needs the flushed id, since the
-      # recipient's bundle keys are scoped by their own report id.
+      # Needs the flushed id: the recipient's bundle keys use its own report id.
       _copy_publication_artifacts(
         publication_artifacts or {},
         target_graph_id,
@@ -1560,17 +1346,10 @@ def _share_to_target(
         int(report_snapshot.get("generation_count") or 0),
       )
 
-      # A Structure id crosses the graph boundary only if it resolves on the
-      # far side. Library-seeded structures do: `provision_tenant_schema`
-      # copies the canonical library into every tenant schema, and library
-      # ids are deterministic UUID5 over the taxonomy source — so the
-      # sender's "rs-gaap — Balance Sheet — Classified" *is* the recipient's,
-      # same id, same presentation arcs, no copying required. Tenant-local
-      # structures (`struct_*` ULIDs — a custom disclosure, a bespoke
-      # schedule) do not resolve, and their facts fall back to a single
-      # structure-less set below: delivered and queryable, but not
-      # renderable as a statement until the holon import half can recreate
-      # the structure itself in the recipient.
+      # Library structures have deterministic UUID5 ids in every tenant, so
+      # they resolve on the far side; tenant-local `struct_*` ones do not, and
+      # their facts fall back to one structure-less set (queryable, not
+      # renderable as a statement).
       candidate_structure_ids = {
         fs["structure_id"] for fs in source_fact_sets if fs.get("structure_id")
       }
@@ -1640,9 +1419,7 @@ def _share_to_target(
           for fd in unresolved_facts
           if fd.get("period_end") is not None
         ]
-        # `facts.period_end` is NOT NULL on both sides, so `ends` is non-empty
-        # whenever `unresolved_facts` is — no fallback, which would only be
-        # able to supply the NULL that `fact_sets.period_end` rejects.
+        # `facts.period_end` is NOT NULL, so `ends` is non-empty here.
         catch_all_set = create_fact_set(
           target_session,
           structure_id=None,
@@ -1657,11 +1434,7 @@ def _share_to_target(
         target_session.flush()
         catch_all_set_id = str(catch_all_set.id)
 
-      # The concepts have to land before the facts that cite them. A fact
-      # whose element_id resolves nowhere is not a partial delivery — it
-      # takes down the recipient's entire next materialization (see
-      # `_ensure_shared_elements`). The report's own taxonomy is passed
-      # separately because it can be missing when every fact resolves.
+      # Concepts must land before the facts that cite them.
       _ensure_shared_elements(
         target_session,
         source_graph_id,
@@ -1695,9 +1468,8 @@ def _share_to_target(
 
       _ensure_linked_entity(target_session, source_graph_id, shared_by)
 
-      # Checked again at the end of the copy: a block that committed while
-      # this copy was being written must still win, or the recipient's purge
-      # (which ran after their block) leaves this copy behind.
+      # Re-checked: a block committed mid-copy must win, or the recipient's
+      # purge (already run) would miss this copy.
       if is_source_blocked(target_session, source_graph_id):
         target_session.rollback()
         return ShareResultItem(
@@ -1707,9 +1479,6 @@ def _share_to_target(
         )
       target_session.commit()
 
-    # After the commit, and only for the ids the replace actually removed — the
-    # new copy has a fresh report id, so its own artifacts are under a
-    # different prefix and cannot be caught by this.
     delete_report_artifacts(target_graph_id, replaced_copy_ids)
 
     return ShareResultItem(
@@ -1719,10 +1488,8 @@ def _share_to_target(
     )
 
   except Exception as e:
-    # The detail stays in the log, not in the response: this exception was
-    # raised against the *recipient's* schema, and the sender is a different
-    # tenant. A raw driver message would tell them about the recipient's
-    # database — the same reason `enrich_blocks` resolves a name and not an org.
+    # Detail stays in the log: the error is about the recipient's schema, and
+    # the sender is a different tenant.
     logger.error(f"Failed to share report to {target_graph_id}: {e}")
     return ShareResultItem(
       target_graph_id=target_graph_id,
@@ -1740,51 +1507,22 @@ def _ensure_shared_elements(
 ) -> None:
   """Copy the sender's own concepts into the recipient's schema.
 
-  A shared fact carries an ``element_id``, and that column has no foreign
-  key — so a fact citing a concept the recipient has never heard of is
-  written without complaint and only surfaces two steps later, in the
-  graph. **Library concepts are fine**: `copy_library_into_tenant` gives
-  every tenant the same deterministic UUID5 ids, so rs-gaap resolves
-  identically on both sides. The sender's *own* reporting extension does
-  not — those are ``elem_*`` ULIDs minted in the sender's schema alone,
-  and the recipient has no row for them.
+  ``facts.element_id`` has no FK, and one dangling concept makes the
+  recipient's whole next materialization fail. Library concepts resolve by
+  deterministic UUID5 in every tenant; the sender's own reporting-extension
+  ``elem_*`` ids do not, so those taxonomies are copied whole (the self-FK
+  ``parent_id`` points at abstract heads no fact cites).
 
-  The blast radius is why this is not a cosmetic gap. LadybugDB rejects an
-  edge whose endpoint has no primary key, blue/green treats any table
-  error as a partial run and abandons the whole WIP database, so **one**
-  unresolvable concept stops the recipient's entire graph from
-  materializing — their portfolios and positions included, none of which
-  had anything to do with the share. A disclosure note or a custom metric
-  is enough to trigger it, which makes it the ordinary case rather than an
-  edge one.
+  ``report_taxonomy_id`` is ensured independently of the facts: it can be
+  missing even when every fact resolves, and ``reports.taxonomy_id`` has no
+  FK either.
 
-  The unit copied is the *taxonomy*, not the individual element: elements
-  carry a self-referencing ``parent_id``, and the abstract head a note
-  hangs off is typically not itself cited by any fact. Copying element-wise
-  would violate that FK on the first note.
+  Copies are ``source='linked'``, outside ``COA_SOURCES``, so they never show
+  in the recipient's chart of accounts. Only ``reporting_extension``
+  taxonomies travel; a foreign chart of accounts is never copied.
 
-  ``report_taxonomy_id`` is ensured **independently of the facts**, because
-  the two can go missing separately. A report built on a sender-specific
-  reporting extension whose facts all cite standard concepts leaves
-  ``element_ids`` fully resolvable and the taxonomy absent — and
-  ``reports.taxonomy_id`` has no foreign key either, so the copy is written
-  without complaint and ``REPORT_USES_TAXONOMY`` then points at nothing.
-  Keying the taxonomy copy off missing *elements* made delivery of the one
-  depend on the absence of the other.
-
-  Copies are stamped ``source='linked'``, which is deliberately outside
-  ``COA_SOURCES``. The recipient needs the sender's concepts to read the
-  report; they must never appear in the recipient's own chart of accounts.
-  Only ``reporting_extension`` taxonomies travel — a fact citing the
-  sender's CoA would be a different (and wrong) situation, and is left for
-  the materializer's own guard to absorb rather than dragging a foreign
-  chart of accounts across the boundary.
-
-  **Fails closed.** A read failure against the source propagates, and
-  ``_share_to_target``'s handler turns it into a per-recipient error item
-  with the target transaction rolled back. Swallowing it would let the
-  fact-insert loop below write the exact dangling references this function
-  exists to prevent — the original defect, behind a rarer trigger.
+  Fails closed: a source read failure propagates so the caller rolls back the
+  target instead of writing dangling references.
   """
   from robosystems.db.extensions import extensions_session
   from robosystems.models.extensions import Element, Taxonomy
@@ -1811,10 +1549,8 @@ def _ensure_shared_elements(
   if not missing and not report_taxonomy_missing:
     return
 
-  # Copied field-by-field rather than by raw INSERT: half of both tables is
-  # NOT NULL with a Python-side default and no database default, so a
-  # hand-written column list is wrong the day someone adds a column.
-  # Constructing the models lets those defaults apply.
+  # Built through the models, not raw INSERT, so Python-side defaults on
+  # NOT NULL columns apply.
   _TAX_FIELDS = (
     "id",
     "name",
@@ -1873,12 +1609,7 @@ def _ensure_shared_elements(
         )
 
     if report_taxonomy_missing:
-      # Same `reporting_extension` restriction the element path applies, for
-      # the same two reasons: a report built on a library framework resolves
-      # by deterministic id in every tenant and needs no copy, and a report
-      # somehow bound to the sender's chart of accounts must not drag that
-      # chart across the boundary. When neither holds, the edge is dropped by
-      # the materializer's own join rather than copied.
+      # Same reporting_extension restriction as the element path.
       if source_session.execute(
         text(
           "SELECT 1 FROM taxonomies "
@@ -1899,8 +1630,7 @@ def _ensure_shared_elements(
 
     copy_ids = sorted(taxonomy_ids)
 
-    # Detached from the source session before it closes — these become new
-    # rows in a different schema, not attached instances.
+    # Plain dicts: these become new rows in another schema.
     taxonomies = [
       ({f: getattr(t, f) for f in _TAX_FIELDS}, dict(t.metadata_ or {}))
       for t in source_session.execute(select(Taxonomy).where(Taxonomy.id.in_(copy_ids)))
@@ -1924,11 +1654,7 @@ def _ensure_shared_elements(
     ).fetchall()
   }
 
-  # Same two-pass shape as the elements below, and for the same reason:
-  # `parent_taxonomy_id` is a self-FK, so an extension whose parent is
-  # another extension in this batch would depend on insert order. It names a
-  # library taxonomy in every case seen so far — but "every case seen so far"
-  # is what the depth ordering relied on too.
+  # Two passes: `parent_taxonomy_id` is a self-FK, so insert parentless first.
   tax_parents: dict[str, str] = {}
   for fields, metadata in taxonomies:
     if fields["id"] in existing_taxonomies:
@@ -1974,12 +1700,9 @@ def _ensure_shared_elements(
       {"ids": element_ids_in},
     ).fetchall()
   }
-  # `idx_elements_qname` is UNIQUE across the whole tenant, so a second
-  # sender using the same namespace prefix — `acme:` is nobody's reserved
-  # word — would otherwise fail the entire share on a collision neither
-  # party controls. Skip the colliding concept instead; its facts land
-  # without a concept edge, which the materializer's inner join already
-  # absorbs.
+  # qname is UNIQUE per tenant; two senders can share a prefix. Skip the
+  # colliding concept rather than fail the share (the materializer's inner
+  # join drops its edge).
   taken_qnames = {
     row[0]
     for row in target_session.execute(
@@ -1991,14 +1714,8 @@ def _ensure_shared_elements(
     ).fetchall()
   }
 
-  # Two passes, because `parent_id` is a self-FK and **`depth` cannot order
-  # it**: the column defaults to 0 and nothing populates it, so every row in
-  # a tenant carries depth 0 and sorting by it is a no-op. An earlier version
-  # ordered by depth and passed its tests on whatever order the heap happened
-  # to return. Insert parentless, then wire parents that resolve — which also
-  # covers a parent living outside the copied taxonomies (the sender's CoA,
-  # say) without failing the share, matching how `parent_taxonomy_id` is
-  # handled above.
+  # Two passes for the `parent_id` self-FK (`depth` is always 0, so it cannot
+  # order inserts). Parents outside the copied taxonomies stay null.
   parents: dict[str, str] = {}
   skipped_qname = 0
   for fields in elements:
@@ -2035,9 +1752,6 @@ def _ensure_shared_elements(
   target_session.flush()
 
   copied = len(elements) - len(existing_elements) - skipped_qname
-  # Concepts cited by a fact but not carried by any copied extension — a
-  # mixed batch copies what it can and drops the rest, so name them rather
-  # than leaving the omission silent.
   uncovered = missing - {f["id"] for f in elements}
   if uncovered:
     logger.warning(
@@ -2055,13 +1769,9 @@ def _ensure_shared_elements(
 def _ensure_linked_entity(
   target_session: Session, source_graph_id: str, shared_by: str
 ) -> None:
-  """Create or update a linked Entity in the target graph for the source company.
+  """Upsert a linked Entity for the source company in the target graph.
 
-  When a company shares a report to an investor's graph, the investor
-  needs an Entity row representing that company. This function:
-  1. Reads the source graph's parent entity for current metadata
-  2. Creates a linked entity if none exists, or updates metadata if one does
-  3. Auto-links any securities with matching source_graph_id
+  Also links unlinked securities carrying the same ``source_graph_id``.
   """
   from robosystems.db.extensions import extensions_session
   from robosystems.models.extensions.entity import Entity

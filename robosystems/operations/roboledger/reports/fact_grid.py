@@ -1,12 +1,9 @@
 """Report fact generation and structure rendering.
 
-Two-phase design:
-1. generate_report_facts() — reads mapped trial balance, produces structure-agnostic
-   ReportFact objects (one per element x period). These get written to the
-   facts OLTP table for graph materialization.
-2. render_structure_view() — applies a structure's hierarchy to pre-generated facts,
-   computing subtotals and ordering for display. Same facts, different structure =
-   different view.
+1. generate_report_facts() — mapped trial balance -> structure-agnostic
+   ReportFacts (one per element x period), persisted for materialization.
+2. render_structure_view() — applies a structure's hierarchy to those facts,
+   computing subtotals and ordering for display.
 """
 
 from __future__ import annotations
@@ -45,20 +42,14 @@ class ReportFact:
   period_start: date
   period_end: date
   period_type: str  # "duration" or "instant"
-  # Detail fact already absorbed into a synthesized parent (e.g. PP&E
-  # Gross + Accumulated Depreciation, consumed by _synthesize_ppe_net_facts
-  # to produce PropertyPlantAndEquipmentNet). Kept in the list for the CF
-  # derivation, but excluded from structure rendering so it doesn't
-  # double-count when rolled up to an in-structure ancestor.
+  # Detail fact already absorbed into a synthesized parent (e.g. PP&E Gross
+  # + Accumulated Depreciation -> PPE Net). Kept for the CF derivation but
+  # excluded from rendering so it doesn't double-count in an ancestor.
   audit_only: bool = False
-  # The portion of ``value`` the RE/NI close sweeps may count — the close
-  # is over POSTINGS, not mapping fan-out. A CoA account mapped to N
-  # reporting concepts (statement anchor + disclosure disaggregation
-  # concepts, e.g. revenue accounts double-mapped so a revenue-by-stream
-  # note renders fact-driven) produces N pivoted facts; only the
-  # account's PRIMARY target carries the postings' close contribution,
-  # the others carry 0 here so net income counts each posting exactly
-  # once. ``None`` (every non-pivot producer) means "same as value".
+  # The portion of ``value`` the RE/NI close may count. An account mapped to
+  # N concepts yields N facts; only its primary target carries the close
+  # contribution (others 0) so each posting counts once in net income.
+  # ``None`` means "same as value".
   close_value: float | None = None
 
 
@@ -113,13 +104,9 @@ class FactGrid:
 
 
 def _arc_type_for_taxonomy(session: Session, taxonomy_id: str) -> str:
-  """Pick which CoA→target arc-type to walk for fact generation.
+  """CoA->target arc type to walk: always ``mapping`` (CoA -> rs-gaap leaf).
 
-  Returns ``mapping`` unconditionally under the rs-gaap-anchored
-  architecture. Each CoA element carries both ``mapping`` (CoA → rs-gaap
-  leaf) and ``equivalence`` (cross-taxonomy bridge) arcs; the rs-gaap
-  reporting layer follows ``mapping``. Hook kept as a function for
-  per-taxonomy dispatch when custom tenant taxonomies need
+  A hook for per-taxonomy dispatch should a tenant taxonomy need
   ``equivalence``-direct rendering.
   """
   return "mapping"
@@ -132,25 +119,11 @@ def generate_report_facts(
   periods: list[PeriodSpec],
   close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
 ) -> ReportFacts:
-  """Generate facts for all mapped elements across N periods.
+  """Generate structure-agnostic facts for all mapped elements across periods.
 
-  Returns structure-agnostic facts — the raw data points that can be
-  slotted into any structure's hierarchy for rendering.
-
-  Args:
-      session: Extensions database session (search_path set to tenant schema).
-      taxonomy_id: Taxonomy identifier (e.g., "tax_usgaap_reporting").
-      mapping_id: Structure ID for the CoA→GAAP mapping.
-      periods: Ordered list of period specifications.
-      close_target_qname: The equity concept derived cumulative earnings
-          close to — the active Reporting Style's earnings home
-          (``network_picker.load_close_target_concept``). CORP defaults to
-          ``rs-gaap:RetainedEarningsAccumulatedDeficit``; PART/LLC override
-          to ``PartnersCapital`` / ``MembersEquity`` so earnings land in the
-          form's presented capital line and the BS foots.
-
-  Returns:
-      ReportFacts with all generated facts and metadata.
+  ``close_target_qname`` is the equity concept cumulative earnings close to —
+  the Reporting Style's earnings home (``PartnersCapital`` / ``MembersEquity``
+  for PART/LLC) — so earnings land on the form's capital line and the BS foots.
   """
   arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
@@ -171,8 +144,6 @@ def generate_report_facts(
           period_start=period.start,
           period_end=period.end,
           period_type=_infer_period_type(balance.classification),
-          # Close-eligible portion — primary-source contributions only,
-          # so the RE/NI close counts fan-out-mapped postings once.
           close_value=(
             _natural_sign(balance.close_net_balance, balance.balance_type)
             if balance.close_net_balance is not None
@@ -181,14 +152,8 @@ def generate_report_facts(
         )
       )
 
-    # Materialize zero-balance facts for mapped equity targets that
-    # didn't appear in `balances` because their source CoA element has
-    # no GL postings yet. Without this, `_find_close_target` can't see
-    # a RetainedEarnings-shaped target — even though the mapping points
-    # at one — and falls back to dumping net income onto whatever other
-    # equity fact exists (typically APIC), which produces wildly wrong
-    # equity values. Pre-seeding the empty equity facts gives the close
-    # logic a stable target.
+    # Seed zero facts for mapped equity targets with no postings yet, so
+    # the close finds the RE-shaped target instead of falling back to APIC.
     _append_empty_equity_facts(
       session,
       mapping_id,
@@ -199,19 +164,13 @@ def generate_report_facts(
       close_target_qname=close_target_qname,
     )
 
-    # Close the current period's temporary accounts (revenue/expense)
-    # into retained earnings. For periods where real closing entries
-    # have already zeroed the rev/exp accounts, this is a no-op (sum=0).
+    # No-op where real closing entries already zeroed rev/exp.
     _close_to_retained_earnings(
       facts, period.start, period.end, close_target_qname=close_target_qname
     )
 
-    # For balance sheet accuracy: add cumulative prior-period net income
-    # to RE. This always runs from inception — real closing entries
-    # (from QB year-end closes, roboledger close_period, etc.) already
-    # zero out the rev/exp accounts they close, so cumulative rev - exp
-    # returns only the still-unclosed portion. Adding that to whatever
-    # RE balance the ledger already carries is always correct.
+    # Runs from inception: real closing entries already zeroed what they
+    # closed, so cumulative rev - exp is only the still-unclosed portion.
     _close_prior_periods_to_retained_earnings(
       session,
       mapping_id,
@@ -222,29 +181,17 @@ def generate_report_facts(
       close_target_qname=close_target_qname,
     )
 
-  # Emit rs-gaap:NetIncomeLoss facts for each period. The close logic
-  # only rolls net income into RE; for the IS bottom-line row AND for the
-  # CF Operating calc rollup (NetIncomeLoss is its first child), we need
-  # NetIncomeLoss as its own fact. Persistence fan-out (per
-  # commands/reports.py::_persist_report_facts) then stamps the same fact
-  # into each owning structure's FactSet — IS sees it as the bottom line,
-  # CF sees it as a calc input.
+  # NetIncomeLoss as its own fact: the IS bottom line and the first child
+  # of the CF Operating rollup.
   _emit_net_income_facts(session, facts, periods)
 
-  # Synthesize rs-gaap:PropertyPlantAndEquipmentNet = Gross - AccumulatedDepreciation
-  # for each period. Tenants who map PP&E with a gross + contra-asset split
-  # (the standard accounting setup that lets CF Investing read ΔGross as
-  # purchases instead of conflating it with depreciation) won't have a
-  # direct PPE Net fact — synthesize it so BS still renders the net carrying
-  # value. Skipped when a direct PPE Net fact already exists.
+  # PPE Net = Gross - AccumulatedDepreciation for gross + contra mappings;
+  # skipped when a direct PPE Net fact exists.
   _synthesize_ppe_net_facts(session, facts, periods)
 
-  # Emit investing/financing CF facts directly from per-line flow concepts
-  # (LineItem.flow_element_id), routed by the activityType trait. Anchors on
-  # the cash side of each entry so the sign is correct without a flip. Runs
-  # BEFORE _derive_cash_flow_facts so the latter's "direct fact wins" guard
-  # suppresses the fragile ΔBS derivation arcs for these leaves (e.g. capex,
-  # whose ΔGross derivation is defeated by an all-in-Net PP&E mapping).
+  # Investing/financing CF facts from per-line flow concepts. Must run
+  # before _derive_cash_flow_facts so its "direct fact wins" guard skips
+  # the ΔBS derivation for these leaves.
   _emit_flow_facts(session, facts, periods, mapping_id, arc_type)
 
   # Balances the day before each period starts, where that is not the previous
@@ -253,33 +200,18 @@ def generate_report_facts(
   # ``facts`` so they are never rendered.
   opening_facts = _load_opening_facts(session, mapping_id, periods, arc_type)
 
-  # Derive Cash Flow facts from period-over-period BS deltas (indirect
-  # method). Each derivation arc encodes "this CF leaf is the change in
-  # this BS source element" with a sign weight for the
-  # asset-up=cash-use / liability-up=cash-source convention. Runs after
-  # the per-period loop because each derivation reads both the current
-  # and prior period's BS values. Operating flows land here; investing/
-  # financing were already emitted from flow concepts above.
+  # Operating CF from BS deltas (indirect method); needs every period's BS.
   _derive_cash_flow_facts(session, facts, periods, opening_facts)
 
-  # Foot the CF to the actual cash movement. Investing/financing come from
-  # actual cash-paired postings and ΔCash is known from the cash-anchor instant
-  # facts, so the operating non-cash adjustment that reconciles net income to
-  # operating cash is exactly ΔCash - Investing - Financing - (NI + DDA + ΔWC).
-  # Book it on an operating leaf so the statement foots to actual cash. Runs
-  # before the subtotal roll-up so the subtotals foot.
+  # Book ΔCash - Investing - Financing - (NI + DDA + ΔWC) on an operating
+  # leaf so the CF foots to actual cash. Must precede the subtotal roll-up.
   _reconcile_operating_to_cash(session, facts, periods, opening_facts)
 
-  # Persist the calc-DAG subtotals (Assets, Revenues, GrossProfit,
-  # StockholdersEquity, …) as facts. Runs last so every leaf + derived
-  # fact above is in place; the rollup reads them and emits one subtotal
-  # fact per period so verification rules scoped to a subtotal can bind.
+  # Calc-DAG subtotals as facts, so rules scoped to a subtotal can bind.
+  # Runs after every leaf and derived fact is in place.
   _emit_subtotal_facts(session, facts, periods)
 
-  # Reconcile the CF net change in cash against the balance-sheet cash
-  # movement (the acceptance criterion for flow attribution). Warning-only —
-  # the bundle is already generated; a mismatch flags incomplete investing/
-  # financing attribution (dead-branch flow concept or coarse CoA mapping).
+  # Warning-only: a mismatch flags incomplete investing/financing attribution.
   _check_cash_flow_tie_out(facts, periods, opening_facts)
 
   unmapped_count = _count_unmapped(session, mapping_id, arc_type=arc_type)
@@ -303,30 +235,12 @@ def render_structure_view(
   periods: list[PeriodSpec],
   reporting_style_id: str,
 ) -> FactGrid:
-  """Apply a structure's hierarchy to raw facts to produce a rendered view.
+  """Apply the Reporting Style's structure for ``block_type`` to ``facts``.
 
-  This is the "lens" — same facts, different structure = different view.
-
-  Facts whose ``element_id`` isn't in the structure's hierarchy are
-  resolved upward via rs-gaap-type-subtype ``general-special`` arcs to the
-  nearest in-structure ancestor (see ``_resolve_renderable_ancestor``)
-  and aggregated there. Facts with no in-structure ancestor are dropped
-  from the rendered view — they're persisted in ``facts`` for audit
-  but invisible to the standard report.
-
-  Args:
-      session: Extensions database session.
-      facts: Pre-generated ReportFact objects (from generate_report_facts).
-      block_type: Structure type to render (income_statement, balance_sheet, etc.).
-      periods: Ordered list of period specifications for columns.
-      reporting_style_id: The entity's Reporting Style id
-          (``entities.reporting_style_id``). Resolves which Network this
-          statement type renders against via the Reporting Style picker.
-
-  Returns:
-      FactGrid with rows ordered per the structure's hierarchy.
+  Facts outside the hierarchy roll up via ``general-special`` arcs to their
+  nearest in-structure ancestor; facts with none are dropped from the view
+  (still persisted for audit).
   """
-  # Load the Network the Style composes for this statement type
   (
     structure_id,
     structure_name,
@@ -342,25 +256,19 @@ def render_structure_view(
       periods=periods,
     )
 
-  # Resolve out-of-structure facts to their nearest in-structure ancestor.
   in_structure = _collect_hierarchy_element_ids(hierarchy)
   rolled_up = _roll_up_facts_to_structure(session, facts, in_structure)
 
-  # Build balance dicts per period (keyed by element_id, summing across
-  # facts that resolved to the same ancestor).
   period_balances = [_facts_to_balance_dict(rolled_up, p.start, p.end) for p in periods]
 
-  # Load calculation arcs. For ``arithmetic`` Disclosures we compose
-  # calcs across taxonomies (fac-calculations + rs-gaap-calculations +
-  # any others) — load all calcs whose subtotal target appears in the
-  # Disclosure's element set. Other CAPs use single-structure calcs.
+  # ``arithmetic`` Disclosures compose calcs across taxonomies: every calc
+  # whose subtotal is in the element set. Others use the structure's own.
   if concept_arrangement == "arithmetic":
     calculations = _load_calculations(session, element_ids=in_structure)
   else:
     calculations = _load_calculations(session, structure_id=structure_id)
 
-  # Facts from the facts table are already natural-signed, so skip sign
-  # conversion.
+  # Facts are already natural-signed.
   rows = _build_rows(hierarchy, period_balances, calculations, pre_signed=True)
 
   return FactGrid(
@@ -376,11 +284,6 @@ def render_structure_view(
 
 
 def _collect_hierarchy_element_ids(hierarchy: list[_HierarchyNode]) -> set[str]:
-  """Walk a hierarchy tree and return every element_id reachable.
-
-  Used by ``render_structure_view`` to identify in-structure elements
-  so out-of-structure facts can be resolved to a renderable ancestor.
-  """
   ids: set[str] = set()
 
   def _walk(node: _HierarchyNode) -> None:
@@ -399,27 +302,10 @@ def _resolve_renderable_ancestor(
   in_structure: set[str],
   cache: dict[str, str | None],
 ) -> str | None:
-  """Walk anchor arcs upward from ``element_id`` until reaching an
-  element in ``in_structure``. Returns the ancestor's element_id, or
-  ``None`` if no ancestor is reachable.
+  """Nearest ancestor of ``element_id`` in ``in_structure``, or ``None``.
 
-  Three arc types are followed (these are the recognized
-  CoA-to-reporting bridges):
-
-  - ``equivalence`` — explicit owl-style "this concept IS that one";
-    the auto-mapper writes one of these from each tenant CoA element
-    to its rs-gaap leaf equivalent
-  - ``mapping`` — broader category placement; auto-mapper writes one
-    of these from each CoA element to its FAC anchor (e.g.,
-    fac:Revenues, fac:OperatingExpenses)
-  - ``general-special`` — class-subtype hierarchy (rs-gaap-type-subtype,
-    rs-gaap-hierarchy); used to roll a specialized rs-gaap concept up
-    to its in-Disclosure ancestor
-
-  All three are walked together via BFS-by-depth so the nearest ancestor
-  wins when multiple paths exist — deterministic, and mirrors the XBRL
-  renderer convention. The cache memoizes per call so multiple facts on the
-  same out-of-structure element only walk once.
+  Walks ``equivalence``, ``mapping`` and ``general-special`` arcs together
+  breadth-first, so the nearest ancestor wins when several paths exist.
   """
   if element_id in cache:
     return cache[element_id]
@@ -431,15 +317,8 @@ def _resolve_renderable_ancestor(
   frontier: list[str] = [element_id]
 
   while frontier:
-    # Two arc-direction conventions both walk "upward" from a tenant
-    # CoA element / specific concept toward an in-Disclosure anchor:
-    #
-    # - ``general-special``: from = general (parent), to = specific
-    #   (child). Walk: where to = child, return from = parent.
-    # - ``mapping`` / ``equivalence``: from = specific (CoA), to =
-    #   anchor (FAC concept / rs-gaap leaf). Walk: where from = child,
-    #   return to = parent. The auto-mapper writes both kinds with this
-    #   direction.
+    # Arc directions differ: ``general-special`` points parent -> child;
+    # ``mapping`` / ``equivalence`` point child (CoA) -> anchor.
     parent_rows = session.execute(
       text(
         """
@@ -478,36 +357,18 @@ def _roll_up_facts_to_structure(
   facts: list[ReportFact],
   in_structure: set[str],
 ) -> list[ReportFact]:
-  """For each fact whose element isn't in the rendered structure,
-  resolve to the nearest in-structure ancestor and emit a rewritten
-  ReportFact pointing at that ancestor.
+  """Repoint out-of-structure facts at their nearest in-structure ancestor.
 
-  Facts with no in-structure ancestor are dropped (they're audit-only
-  data — invisible to the standard report). Facts whose element is
-  already in-structure pass through unchanged.
-
-  ``_facts_to_balance_dict`` sums multiple facts on the same
-  element_id, so this function doesn't aggregate — it just rewrites
-  the element pointers.
+  Facts with no ancestor are dropped. No aggregation here —
+  ``_facts_to_balance_dict`` sums facts sharing an element_id.
   """
   if not facts:
     return facts
 
-  # An in-structure element that already carries its own fact for a period
-  # (a derived subtotal from ``_emit_subtotal_facts``, or a directly-mapped
-  # balance) is authoritative for that node — exactly as ``_build_rows``
-  # prefers a direct fact over a child rollup. Out-of-structure detail that
-  # resolves *up* to such an ancestor is redundant with that fact and must
-  # NOT be summed on top of it, or the node double-counts. This is the
-  # structure-dependent sibling of ``audit_only``: e.g. in the equity
-  # roll-forward (which lists equity as a StockholdersEquity total + flows,
-  # not by component) the AdditionalPaidInCapital + RetainedEarnings leaves
-  # are out-of-structure and roll up to StockholdersEquity, which already
-  # has its subtotal fact — without this guard the total renders at 2x.
-  # Keyed per-period so a subtotal only suppresses roll-up for the period
-  # it actually covers. (In the balance sheet those same leaves are
-  # in-structure, so they pass through as their own rows and never reach
-  # this path — the BS is unaffected.)
+  # An in-structure element with its own fact for a period is authoritative
+  # (as in ``_build_rows``); detail rolling up onto it would double-count
+  # (e.g. APIC + RE onto StockholdersEquity in the equity roll-forward).
+  # Keyed per period.
   direct_keys = {
     (f.element_id, f.period_start, f.period_end)
     for f in facts
@@ -517,10 +378,6 @@ def _roll_up_facts_to_structure(
   cache: dict[str, str | None] = {}
   rolled: list[ReportFact] = []
   for fact in facts:
-    # Detail facts already absorbed into a synthesized parent (PP&E Gross /
-    # Accumulated Depreciation → PropertyPlantAndEquipmentNet) must not also
-    # roll up into the structure — that double-counts the value already
-    # carried by the synthesized parent. Drop them from rendering.
     if fact.audit_only:
       continue
     if fact.element_id in in_structure:
@@ -532,10 +389,7 @@ def _roll_up_facts_to_structure(
     if ancestor is None:
       continue
     if (ancestor, fact.period_start, fact.period_end) in direct_keys:
-      # Ancestor already carries an authoritative fact for this period;
-      # rolling this detail onto it would double-count (see direct_keys).
       continue
-    # Reuse fact metadata; only the element_id pointer changes.
     rolled.append(
       ReportFact(
         element_id=ancestor,
@@ -567,12 +421,8 @@ class _Balance:
   total_debits: float
   total_credits: float
   net_balance: float
-  # The portion of ``net_balance`` contributed by source accounts for
-  # which THIS target is the close-primary mapping. Multi-mapped sources
-  # (statement anchor + disclosure disaggregation concepts) carry their
-  # postings' close contribution on exactly one target, so the RE/NI
-  # close counts each posting once. Defaults to the full balance —
-  # single-mapped sources, the overwhelmingly common case.
+  # The portion of ``net_balance`` from sources for which this target is
+  # the close-primary mapping (see ``ReportFact.close_value``).
   close_net_balance: float | None = None
 
 
@@ -595,17 +445,10 @@ def _facts_to_balance_dict(
   period_start: date,
   period_end: date,
 ) -> dict[str, _Balance]:
-  """Convert ReportFact list to balance dict for a specific period.
+  """One period's facts as balances, summed per element_id.
 
-  Facts already have natural-sign values, so we store them directly
-  as net_balance. The _build_rows walker reads current_value from
-  _natural_sign(balance.net_balance, node.balance_type), so we set
-  balance_type to "debit" to pass through the value unchanged (since
-  natural sign was already applied during fact generation).
-
-  Multiple facts on the same ``element_id`` for the same period sum —
-  needed for the ancestor-rollup path where many out-of-structure
-  facts can resolve to a single in-structure ancestor.
+  Values are already natural-signed; ``balance_type="debit"`` makes
+  ``_natural_sign`` pass them through unchanged.
   """
   balances: dict[str, _Balance] = {}
   for fact in facts:
@@ -628,13 +471,9 @@ def _facts_to_balance_dict(
   return balances
 
 
-# rs-gaap concepts that represent equity-reducing cash flows. These appear
-# on the Statement of Equity and Cash Flow Statement as separate line items,
-# but their cumulative effect also has to net out of Retained Earnings on
-# the Balance Sheet. They're flow concepts (period_type='duration') that
-# rs-gaap models with balance_type='credit' (XBRL outflow-as-negative
-# convention), so they don't pick up the 'equity' EFS classification trait
-# automatically. Detection by qname is more reliable than trait inference.
+# Equity-reducing flows (dividends, distributions, buybacks): own lines on
+# SE / CF, but cumulatively they net out of RE on the BS. They carry no
+# 'equity' classification trait, so they're detected by qname.
 _EQUITY_FLOW_REDUCER_QNAMES: frozenset[str] = frozenset(
   {
     "rs-gaap:PaymentsOfDividends",
@@ -650,48 +489,27 @@ _EQUITY_FLOW_REDUCER_QNAMES: frozenset[str] = frozenset(
 
 
 def _is_equity_flow_reducer(qname: str | None) -> bool:
-  """True if a fact's concept represents an equity-reducing cash flow.
-
-  Dividends paid, distributions to members, treasury stock buybacks —
-  these reduce retained earnings on the balance sheet even though they
-  render on the SE / CF as their own line items. See the constant
-  above for the curated list of recognized rs-gaap concepts.
-  """
   return qname in _EQUITY_FLOW_REDUCER_QNAMES
 
 
 def _infer_classification(qname: str | None, balance_type: str | None) -> str | None:
-  """Best-effort classification fallback for elements lacking FASB traits.
+  """Classification from qname + balance_type for elements lacking SFAC 6 traits.
 
-  Reference taxonomies (FAC, rs-gaap, rs-gaap-type-subtype) and freshly-loaded
-  custom taxonomies often have no ``element_traits`` rows pointing at
-  ``traits.category='elementsOfFinancialStatements'``. Without
-  classification, ``_close_to_retained_earnings`` can't compute Net
-  Income (revenue/expense facts never match) and the BS doesn't balance.
-
-  This heuristic restores classification from the qname + balance_type
-  pair using conventional naming. It returns one of
-  ``asset/liability/equity/revenue/expense`` or ``None`` when nothing
-  matches confidently. Real ``element_traits`` always win — this only
-  fires when the SQL join returned NULL.
+  Without it the close can't compute net income and the BS doesn't balance.
+  Only used when the trait join returned NULL.
   """
   if not qname:
     return None
   qn = qname.lower()
   bt = (balance_type or "").lower()
 
-  # Revenue: credit balance + revenue/sales/income token (excluding
-  # liability-shaped "income tax payable" — keyed on balance_type).
   if bt == "credit" and any(t in qn for t in ("revenue", "sales")):
     return "revenue"
-  # Expense: debit balance + expense/cost/loss/depreciation token.
   if bt == "debit" and any(
     t in qn for t in ("expense", "cost", "loss", "depreciation", "amortization")
   ):
     return "expense"
-  # Equity must be tested before liability — "stockholdersequity" contains
-  # "equity" and is a credit, but a liability check would also match
-  # "stockholders" tokens in some pathological qnames.
+  # Equity before liability.
   if bt == "credit" and any(
     t in qn for t in ("equity", "capital", "retainedearnings", "stockholder")
   ):
@@ -701,14 +519,8 @@ def _infer_classification(qname: str | None, balance_type: str | None) -> str | 
   if bt == "credit" and "liabilit" in qn:
     return "liability"
 
-  # Weak fallback: abstract / rollup container elements often have a
-  # ``balance_type`` that doesn't match the classification of what they
-  # aggregate (e.g. FAC's ``fac:LiabilitiesRollUp`` has balance_type
-  # ``debit`` even though it rolls up credit-balance liabilities). For
-  # these qname-only is the only signal. Order matters — check equity
-  # before liability so combined "LiabilitiesAndEquity" rollups don't
-  # misclassify as equity (the validator skips combined rollups
-  # explicitly via the qname check).
+  # qname-only fallback for rollup elements whose balance_type doesn't match
+  # what they aggregate (e.g. fac:LiabilitiesRollUp is ``debit``).
   if "liabilit" in qn and ("equity" in qn or "stockholder" in qn or "capital" in qn):
     return None  # combined L+E rollup — not a pure classification
   if any(t in qn for t in ("equity", "capital", "retainedearnings", "stockholder")):
@@ -731,49 +543,16 @@ def _read_mapped_balances(
   period_end: date,
   arc_type: str = "mapping",
 ) -> dict[str, _Balance]:
-  """Read mapped trial balance — same join as the /trial-balance/mapped endpoint.
+  """Mapped trial balance per reporting target (same join as /trial-balance/mapped).
 
-  ``arc_type`` selects which CoA→target arc-type to follow:
-  ``'mapping'`` (CoA→rs-gaap — the canonical arc the MappingOperator
-  writes and the rs-gaap reporting layer follows; see
-  ``_arc_type_for_taxonomy``) or ``'equivalence'`` (an alternate
-  cross-taxonomy CoA arc, used for equivalence-direct rendering).
+  Windowing keys off the target's ``period_type``, not its SFAC 6 trait
+  (which can be NULL or contra-*): instant concepts load cumulatively
+  through ``period_end``; duration concepts load only the period's activity.
 
-  Cumulative-vs-windowed loading keys off the concept's intrinsic
-  ``period_type``: **instant** concepts (every balance-sheet item,
-  including contra accounts like Accumulated Depreciation and Treasury
-  Stock) are stock balances and load cumulatively through ``:end_date``
-  with no lower bound; **duration** concepts (IS / SCF flows) constrain
-  by ``posting_date >= :start_date`` so they report only the period's
-  activity. ``period_type`` is preferred over the SFAC 6 trait
-  ``identifier`` because the trait can be NULL or a contra-* value that
-  isn't ``asset``/``liability``/``equity``; keying off the trait would
-  period-window contra balances and break footing on non-inception
-  periods.
-
-  ``classification`` (asset / liability / equity / …) is still resolved
-  via ``element_traits`` → ``classifications`` with
-  ``category='elementsOfFinancialStatements'`` (the FASB SFAC 6 trait
-  axis) for the rendered row's classification label.
-
-  When the trait join returns ``NULL`` (reference taxonomies whose
-  elements aren't wired to FASB traits), :func:`_infer_classification`
-  fills in best-effort classification from qname + balance_type. Real
-  trait data always wins; the fallback only fires for null rows.
-
-  Belt-and-suspenders ``element_type='concept'`` filter on the target
-  ensures facts never land on abstracts, hypercubes, axes, or members
-  even if a future bad mapping arc points there.
-
-  **Close-primary designation.** Rows come back per (source, target) so
-  mapping fan-out is visible: a source account mapped to several
-  targets (its statement anchor + disclosure disaggregation concepts)
-  contributes its full postings to every target's ``net_balance`` —
-  that's the disaggregation feature — but its CLOSE contribution to
-  exactly one primary target (trait-classified targets outrank
-  inferred ones; deterministic qname tiebreak). ``close_net_balance``
-  carries the primary-only sum so the RE/NI close counts each posting
-  once instead of once per disaggregation target.
+  A source mapped to several targets contributes its full postings to each
+  target's ``net_balance``, but its close contribution
+  (``close_net_balance``) to exactly one primary target — trait-classified
+  over inferred, qname tiebreak — so the RE/NI close counts each posting once.
   """
   result = session.execute(
     text("""
@@ -828,17 +607,13 @@ def _read_mapped_balances(
   for row in rows:
     by_source.setdefault(row.source_id, []).append(row)
 
-  # Pass 2 — per source, pick the close-primary target: trait-classified
-  # targets outrank inferred ones, qname as the deterministic tiebreak.
-  # (For single-mapped sources — the overwhelmingly common case — the
-  # only target is trivially primary.)
+  # Pass 2 — per source, pick the close-primary target.
   primary_pairs: set[tuple[str, str]] = set()
   for source_id, source_rows in by_source.items():
     ranked = sorted(source_rows, key=lambda r: (r.classification is None, r.qname))
     primary_pairs.add((source_id, ranked[0].reporting_element_id))
 
-  # Pass 3 — aggregate per target: full balance from every source,
-  # close balance from primary sources only.
+  # Pass 3 — full balance from every source, close balance from primaries.
   balances: dict[str, _Balance] = {}
   for row in rows:
     debits = cents_to_dollars(row.total_debits)
@@ -881,13 +656,8 @@ def _append_empty_equity_facts(
 ) -> None:
   """Append zero-balance facts for mapped equity targets without postings.
 
-  Equity targets are stock concepts (period_type='instant') — they should
-  appear on the BS even when their source CoA element has no current
-  postings. The close-to-RE flow specifically needs the close-target
-  concept to exist as a fact so `_find_close_target` can route net income
-  to it. ``close_target_qname`` is the active Style's earnings home
-  (CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity); without
-  materializing it the earnings silently disappear from the form's equity.
+  The close needs ``close_target_qname`` (the Style's earnings home) present
+  as a fact to route net income to it.
   """
   result = session.execute(
     text("""
@@ -938,15 +708,9 @@ def _append_empty_equity_facts(
       )
     )
 
-  # Always materialize the close-target concept at $0 even when no source
-  # CoA element maps to it. This is the QuickBooks / Xero pattern: earnings
-  # are a *derived* concept, computed from cumulative (revenue - expense -
-  # distributions) at render time, not a posted GL balance from period-end
-  # closing journal entries. The target is form-aware (CORP→RetainedEarnings,
-  # PART→PartnersCapital, LLC→MembersEquity). Without this, simple CoAs that
-  # omit an explicit earnings concept can't carry net income onto the BS —
-  # `_close_to_retained_earnings` falls back to an anonymous fact whose
-  # element_id isn't in any presentation network and silently disappears.
+  # Materialize the close target even when nothing maps to it: earnings are
+  # derived at render time (the QuickBooks / Xero pattern), and without it
+  # net income would land on a fact no network renders.
   re_row = session.execute(
     text(
       """
@@ -986,22 +750,10 @@ def _emit_net_income_facts(
   facts: list[ReportFact],
   periods: list[PeriodSpec],
 ) -> None:
-  """Synthesize one ``rs-gaap:NetIncomeLoss`` fact per period.
+  """Append one ``rs-gaap:NetIncomeLoss`` fact per non-zero period.
 
-  ``_close_to_retained_earnings`` rolls (revenue - expense) into RE
-  but never emits NetIncomeLoss as its own fact. Two consumers need it
-  as a standalone fact: the Income Statement (where it's the bottom-line
-  row) and the Cash Flow Operating calc rollup (where it's the first
-  calc child of NetCashProvidedByUsedInOperatingActivities). Emit it
-  here once per period; the persistence fan-out then stamps the same
-  fact into every structure that references the element.
-
-  Sums use each fact's close-eligible portion (:func:`_close_value`) so
-  accounts double-mapped to disclosure disaggregation concepts count
-  once in the bottom line.
-
-  Skips zero net income — the renderer treats absent facts as 0 anyway.
-  Mutates the facts list in place.
+  Sums close-eligible values (:func:`_close_value`) so multi-mapped
+  accounts count once. A directly-mapped NetIncomeLoss fact wins.
   """
   ni_row = session.execute(
     text("SELECT id, balance_type FROM elements WHERE qname='rs-gaap:NetIncomeLoss'")
@@ -1011,9 +763,6 @@ def _emit_net_income_facts(
   ni_id, ni_balance_type = ni_row[0], ni_row[1] or "credit"
 
   for period in periods:
-    # Skip if a NetIncomeLoss fact already exists for this period — a
-    # tenant might map a CoA element directly to rs-gaap:NetIncomeLoss
-    # (rare but legal), in which case the direct fact wins.
     already_present = any(
       f.element_id == ni_id
       and f.period_start == period.start
@@ -1054,25 +803,12 @@ def _emit_subtotal_facts(
   facts: list[ReportFact],
   periods: list[PeriodSpec],
 ) -> None:
-  """Emit one fact per rs-gaap calculation subtotal, per period.
+  """Append one fact per non-zero rs-gaap calculation subtotal, per period.
 
-  Subtotals (Assets, Revenues, GrossProfit, StockholdersEquity, …) are
-  otherwise computed only at render time (``_build_rows``) and never
-  persisted, so a verification rule scoped to a subtotal never binds a
-  fact and silently ``skipped``s. This walks the ``rs-gaap-calculations``
-  DAG bottom-up over the already-emitted leaf + derived facts, applying
-  the same ``Σ child·weight`` resolution the renderer uses, and emits a
-  fact for each subtotal not already present.
-
-  Consistency with display is by construction: the persisted value is the
-  same topological calc resolution ``_build_rows`` runs, so the renderer's
-  "prefer direct fact, else sum children" logic reads the persisted
-  subtotal and shows the identical number. A subtotal that already has a
-  direct fact (e.g. ``NetIncomeLoss`` from the close) is left untouched —
-  its authoritative value wins, exactly as in ``_build_rows``.
-
-  Must run LAST in ``generate_report_facts`` so every leaf + derived fact
-  (NetIncomeLoss, PP&E net, CF flows) is in place. Mutates ``facts``.
+  Persisted so verification rules scoped to a subtotal can bind. Uses the
+  same resolution as ``_build_rows`` (direct fact wins, else Σ child·weight),
+  so the rendered number is identical. Must run after every leaf and
+  derived fact is in place.
   """
   calculations = load_rs_gaap_calculations(session)
   if not calculations:
@@ -1100,18 +836,12 @@ def _emit_subtotal_facts(
         balances[f.element_id] = balances.get(f.element_id, 0.0) + f.value
         present.add(f.element_id)
 
-    # Resolve subtotals bottom-up (direct fact wins over Σ child·weight,
-    # keyed on presence) — shared with the rollup validator via calc_dag.
     computed = resolve_calc_dag(balances, present, calculations, order)
 
     for elem_id in target_ids:
-      # Already a fact (leaf-mapped or a prior derived emit like
-      # NetIncomeLoss) → leave it; the direct value is authoritative.
       if elem_id in present:
         continue
       value = computed.get(elem_id, 0.0)
-      # Zero subtotals are dropped by the renderer and have nothing to
-      # verify — skip so the facts table isn't padded with empties.
       if value == 0.0:
         continue
       m = meta.get(elem_id)
@@ -1138,10 +868,7 @@ def _mark_ppe_details_audit_only(
   gross_id: str | None,
   ad_id: str | None,
 ) -> None:
-  """Flag the PP&E Gross + Accumulated-Depreciation facts for ``period`` as
-  ``audit_only`` so the render roll-up excludes them — their value is already
-  carried by the synthesized (or directly-mapped) PropertyPlantAndEquipmentNet.
-  """
+  """Mark ``period``'s PP&E Gross + AD facts audit-only; PPE Net carries them."""
   detail_ids = {i for i in (gross_id, ad_id) if i is not None}
   for f in facts:
     if (
@@ -1157,21 +884,10 @@ def _synthesize_ppe_net_facts(
   facts: list[ReportFact],
   periods: list[PeriodSpec],
 ) -> None:
-  """Synthesize ``rs-gaap:PropertyPlantAndEquipmentNet`` per period as
-  ``PropertyPlantAndEquipmentGross - AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment``.
+  """Append PPE Net = Gross - Accumulated Depreciation per period.
 
-  When a tenant maps PP&E with a gross + contra-asset split (so 1300/1310-type
-  fixed-asset accounts → Gross, 1350-type accumulated-depreciation account →
-  AD), there's no direct PPE Net fact for the BS to render. Computing it as
-  Gross - AD here keeps the BS correct AND lets the CF Investing derivation
-  source from Gross directly (ΔGross = purchases, cleanly isolated from
-  depreciation activity which flows through DDA on the Operating side).
-
-  Skipped when a direct PPE Net fact already exists for the period — tenants
-  using the simpler "all-in PPE Net" mapping (1300 + 1350 both → PPE Net)
-  still work because their direct fact wins.
-
-  Mutates the facts list in place.
+  For gross + contra mappings, which let CF Investing read ΔGross as
+  purchases. Skipped where a direct PPE Net fact exists.
   """
   row = session.execute(
     text(
@@ -1183,7 +899,6 @@ def _synthesize_ppe_net_facts(
     return
   net_id, net_balance_type = row[0], row[1] or "debit"
 
-  # Resolve source element ids once.
   src_rows = session.execute(
     text(
       "SELECT qname, id FROM elements WHERE qname IN ("
@@ -1207,13 +922,7 @@ def _synthesize_ppe_net_facts(
       for f in facts
     )
     if already_present:
-      # Direct PPE Net fact exists — typically an "all-in-Net" mapping
-      # (1300/1310/1350 all → PropertyPlantAndEquipmentNet). The BS renders
-      # correctly from that direct fact, but the CF Investing derivation
-      # sources from PropertyPlantAndEquipmentGross (per
-      # rs-gaap-calculations) and yields 0 for PaymentsToAcquirePPE,
-      # silently omitting capital expenditures. Warn so the operator can
-      # move to the split mapping.
+      # All-in-Net mapping: the BS is right, but CF capex (from ΔGross) is 0.
       if gross_id is not None and not any(
         f.element_id == gross_id
         and f.period_start == period.start
@@ -1231,9 +940,6 @@ def _synthesize_ppe_net_facts(
           period.start,
           period.end,
         )
-      # A direct Net fact already carries the value; if Gross/AD facts also
-      # exist (split mapping + a stray direct Net), keep them out of the
-      # render roll-up so they don't double-count.
       _mark_ppe_details_audit_only(facts, period, gross_id, ad_id)
       continue
     gross_value = 0.0
@@ -1248,9 +954,6 @@ def _synthesize_ppe_net_facts(
     if gross_value == 0.0 and ad_value == 0.0:
       continue
     if gross_value == 0.0:
-      # AD present but no Gross — would synthesize Net = -AD, which is
-      # arithmetically wrong (no asset to depreciate against). Indicates
-      # a misconfigured mapping; warn and skip.
       logger.warning(
         "_synthesize_ppe_net_facts: AD fact present without Gross fact "
         "for period %s..%s — refusing to synthesize negative PPE Net. "
@@ -1273,19 +976,13 @@ def _synthesize_ppe_net_facts(
         period_type="instant",
       )
     )
-    # Gross + AD are now fully represented by the synthesized Net. Mark
-    # them audit-only so the render roll-up doesn't ALSO resolve them into
-    # the noncurrent section and double-count PP&E. They remain in the
-    # list for the CF derivation (PaymentsToAcquirePPE = ΔGross), which
-    # reads by element_id regardless of this flag.
+    # Still read by the CF derivation (capex = ΔGross), which ignores the flag.
     _mark_ppe_details_audit_only(facts, period, gross_id, ad_id)
 
 
-# rs-gaap concepts that represent "cash" for cash-flow attribution. A
-# LineItem whose account resolves to one of these is a cash line; its signed
-# movement (debit - credit) IS the period cash flow for that entry. Curated by
-# qname for the same reason as _EQUITY_FLOW_REDUCER_QNAMES — trait coverage on
-# cash concepts is incomplete, and the set is small and stable.
+# Cash concepts for cash-flow attribution: a line on one of these is a cash
+# line, and its debit - credit is that entry's cash flow. Curated by qname
+# because trait coverage on cash concepts is incomplete.
 _CASH_ANCHOR_QNAMES: frozenset[str] = frozenset(
   {
     "rs-gaap:CashCashEquivalentsAndShortTermInvestments",
@@ -1296,19 +993,14 @@ _CASH_ANCHOR_QNAMES: frozenset[str] = frozenset(
   }
 )
 
-# The CF net-change bottom line (Operating + Investing + Financing) and the
-# operating-section leaf the cash-anchored reconciliation lands on. The leaf
-# is present in both the rs-gaap CF calc DAG and the Indirect presentation, so
-# the adjustment both foots the subtotal and renders as a line.
+# The reconciling leaf is in both the CF calc DAG and the Indirect
+# presentation, so the adjustment foots the subtotal and renders as a line.
 _CF_NET_CHANGE_QNAME = "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
 _CF_RECONCILING_LEAF_QNAME = "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
 _CF_OPERATING_SUBTOTAL_QNAME = "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
 
-# A reconciling plug larger than this fraction of operating cash is the signal
-# that a material non-cash item is un-itemized (gain/loss on disposal, unrealized
-# MTM, …) — or that an investing/financing flow was misclassified and silently
-# absorbed by `_reconcile_operating_to_cash`. Shared with guard_rails so the
-# render-time validator and the fact-bundle log threshold stay in lockstep.
+# A reconciling plug above this fraction of operating cash signals an
+# un-itemized non-cash item or a misclassified flow. Shared with guard_rails.
 _CF_PLUG_WARN_RATIO = 0.25
 
 
@@ -1319,38 +1011,18 @@ def _emit_flow_facts(
   mapping_id: str,
   arc_type: str,
 ) -> None:
-  """Emit **investing/financing** CF facts from per-line economic flows.
+  """Emit investing/financing CF facts from per-line flows, per period.
 
-  Two passes, combined per flow leaf:
-
-  - **Pass 1 (explicit)** — a LineItem's ``flow_element_id`` is set (manual
-    override, or pre-tagged source like Charlie's mini fixture). The cash line
-    carries the tag; its signed ``debit - credit`` is the flow (cash debit =
-    inflow +, cash credit = outflow -). Anchoring on cash avoids the sign flip
-    and the both-sides double-count.
-  - **Pass 2 (element-default fallback)** — the load-bearing path for real
-    QuickBooks data, which carries no ``flow_element_id``. Each NON-cash line
-    of an untagged, cash-affecting entry routes to its mapped rs-gaap element's
-    DEFAULT inv/fin flow (a ``derivation`` arc, to = BS element, from = flow
-    concept; weight SIGN = cash direction), selected against the line's own
-    ``credit - debit``. The two passes agree in sign because in a balanced
-    entry the cash side is the negation of the non-cash side.
-
-  Operating flows are intentionally absent from both passes: indirect-method
-  operating is NI + non-cash addbacks + ΔWC (``_derive_cash_flow_facts``), not
-  a flow-sum. Section routing is by the ``activityType`` trait on the resolved
-  flow concept, which also keeps the inv/fin ``derivation`` arcs out of the
-  operating net-delta path (they're excluded there by the same trait).
-
-  Resolution uses the same ``mapping_id``/``arc_type`` as the balance reader, so
-  source-vocabulary flows (mini) and accounts resolve to rs-gaap consistently.
-  Authoritative for inv/fin flow leaves: replaces any pre-existing fact for the
-  leaf+period. Mutates ``facts`` in place.
+  Pass 1 (explicit): the cash line carries ``flow_element_id``; its
+  ``debit - credit`` is the flow. Pass 2 (fallback, the path for QuickBooks
+  data): each non-cash line of an untagged cash-moving entry routes to its
+  element's default flow via a ``derivation`` arc whose weight sign is the
+  cash direction. The passes agree in sign because a balanced entry's cash
+  side negates its non-cash side. Operating flows are excluded — indirect
+  operating is NI + addbacks + ΔWC. Replaces any existing fact for the leaf.
   """
   cash_qnames = list(_CASH_ANCHOR_QNAMES)
 
-  # Pass 1 — explicit per-line flow tags. The cash line of an entry carries a
-  # ``flow_element_id``; its signed movement (debit - credit) is the flow.
   explicit_sql = text("""
         SELECT
           COALESCE(fmap.to_element_id, li.flow_element_id) AS flow_id,
@@ -1382,18 +1054,8 @@ def _emit_flow_facts(
         GROUP BY flow_id, rf.qname, rf.name, rf.balance_type
       """).bindparams(landed_entry_bindparam())
 
-  # Pass 2 — element-default fallback (the load-bearing path for real
-  # QuickBooks data, which carries no flow_element_id). For an entry with no
-  # explicit tag, each NON-cash line routes to its mapped rs-gaap element's
-  # DEFAULT investing/financing flow: a ``derivation`` arc (to = BS element,
-  # from = flow concept) whose weight SIGN encodes cash direction (+1 inflow,
-  # -1 outflow), selected against the line's own ``credit - debit`` — asset-up
-  # = outflow (-), liability/equity-up = inflow (+). The line's ``credit -
-  # debit`` IS the signed cash flow (consistent with Pass 1's cash-anchored
-  # ``debit - credit``, since in a balanced entry the cash side is the
-  # negation of the non-cash side). Gated on (a) the entry actually moving
-  # cash, so accruals don't leak into investing/financing, and (b) no explicit
-  # tag anywhere in the entry, so Pass 1 / manual overrides own those entries.
+  # Gated on the entry moving cash (so accruals don't leak in) and carrying
+  # no explicit tag anywhere (Pass 1 owns those entries).
   fallback_sql = text("""
         SELECT
           rf.id AS flow_id,
@@ -1448,9 +1110,7 @@ def _emit_flow_facts(
       "end": period.end,
       "cash_qnames": cash_qnames,
     }
-    # Combine explicit + fallback contributions per flow leaf so a leaf that
-    # receives both (mixed tagged/untagged entries) sums rather than one pass
-    # clobbering the other. Value: [qname, name, balance_type, summed_value].
+    # flow_id -> [qname, name, balance_type, summed_value]
     combined: dict[str, list] = {}
     for sql in (explicit_sql, fallback_sql):
       for row in session.execute(sql, params).fetchall():
@@ -1463,9 +1123,6 @@ def _emit_flow_facts(
     for flow_id, (qname, name, balance_type, value) in combined.items():
       if value == 0:
         continue
-      # Authoritative for investing/financing flow leaves: drop any pre-existing
-      # fact for this leaf+period (e.g. a 0/instant placeholder) so the
-      # flow-derived value is what renders.
       facts[:] = [
         f
         for f in facts
@@ -1501,8 +1158,8 @@ def _load_opening_facts(
   periods: list[PeriodSpec],
   arc_type: str,
 ) -> list[ReportFact]:
-  """Instant balances at each later period's opening date, for the periods
-  whose opening is not already another column's end."""
+  """Instant balances at each later period's opening, where that isn't
+  already another column's end."""
   ordered = sorted(periods, key=lambda p: p.end)
   loaded = {p.end for p in ordered}
   opening_facts: list[ReportFact] = []
@@ -1514,8 +1171,6 @@ def _load_opening_facts(
     balances = _read_mapped_balances(
       session, mapping_id, opening, opening, arc_type=arc_type
     )
-    # Every row, tagged as the main loop tags it: a contra account such as
-    # accumulated depreciation is a stock balance whatever its classification.
     for balance in balances.values():
       opening_facts.append(
         ReportFact(
@@ -1539,61 +1194,27 @@ def _derive_cash_flow_facts(
   periods: list[PeriodSpec],
   opening_facts: list[ReportFact] | None = None,
 ) -> None:
-  """Synthesize CF facts from period-over-period BS deltas (indirect method).
+  """Append operating CF facts from BS deltas (indirect method).
 
-  Each ``association_type='derivation'`` arc declares "this CF leaf is
-  the change in this BS source element" with a signed weight:
-
-  - ``IncreaseDecreaseInAccountsReceivable derivationOf ReceivablesNetCurrent (w=-1)``
-    (asset up = cash use)
-  - ``IncreaseDecreaseInAccountsPayableAndAccruedLiabilities derivationOf
-    AccountsPayableAndAccruedLiabilitiesCurrent (w=+1)``
-    (liability up = cash source)
-
-  For each period after the first, compute
-  ``cf_value = sum(weight * (BS_end - BS_opening))`` across all arcs, where
-  the opening is the balance the day before the period starts (the previous
-  column's end when the columns are contiguous; ``opening_facts`` otherwise)
-  that target each CF leaf, and append a synthetic
-  ``ReportFact(period_type='duration')`` covering that period.
-
-  Zero-value derivations are skipped — keeps the rendered CF clean for
-  tenants whose BS hasn't moved on a given line. The renderer's calc
-  DAG (``rs-gaap:NetCashProvidedByUsedInOperatingActivities = Σ
-  derivation outputs + NetIncome + DDA``) does the upward roll-up.
-
-  Mutates the facts list in place.
+  Each ``derivation`` arc says "this CF leaf is the change in this BS
+  element" with a signed weight (asset up = -1, liability up = +1). For each
+  period after the first, ``Σ weight * (BS_end - BS_opening)``, the opening
+  being the day before the period starts. Zero values are skipped.
   """
   if len(periods) < 2:
-    # Indirect-method CF derivation needs a prior period to delta against.
-    # Caller should pass comparative=True (or supply explicit periods) when
-    # they want CF rows; logging at debug so an empty CF block isn't a
-    # mystery in logs.
     logger.debug(
       "_derive_cash_flow_facts: skipped — indirect method needs ≥2 periods (got %d)",
       len(periods),
     )
     return
 
-  # Period lists arrive in presentation order (typically newest-first:
-  # [Current, Prior]). Sort chronologically so periods[i] / periods[i-1]
-  # means "current / prior" in real time, not list-order. Without this
-  # the deltas come out negated AND the synthesized CF facts get tagged
-  # with the wrong period.
+  # Periods arrive in presentation order (often newest-first).
   ordered = sorted(periods, key=lambda p: p.end)
 
-  # Load every derivation arc — intentionally global (no structure_id /
-  # taxonomy_id filter). Derivation arcs are library-seeded into a
-  # dedicated structure per (cf_leaf, source) pair and the library
-  # immutability trigger blocks tenants from inserting their own. If
-  # tenant-authored derivations land later, this query will need a
-  # scope (Reporting Style or taxonomy_id).
-  # Operating-only: investing/financing derivation arcs are intentionally
-  # excluded here. Net-delta can't do gross presentation (a period with only a
-  # debt issuance would still emit a spurious repayment off Δdebt) and silently
-  # omits co-mingled flows (ΔPP&E Net nets capex against depreciation). Those
-  # arcs are the DEFAULT-flow lookup for the line-level fallback in
-  # _emit_flow_facts instead, routed by the flow concept's activityType trait.
+  # Unscoped on purpose: derivation arcs are library-only (tenants can't
+  # insert them). Tenant-authored derivations would need a scope here.
+  # Investing/financing arcs are excluded: net-delta can't present gross
+  # flows; _emit_flow_facts uses them as default-flow lookups instead.
   rows = session.execute(
     text("""
       SELECT a.from_element_id, a.to_element_id, a.weight
@@ -1615,7 +1236,6 @@ def _derive_cash_flow_facts(
   for cf_id, source_id, weight in rows:
     derivations.setdefault(cf_id, []).append((source_id, float(weight or 1.0)))
 
-  # Element metadata for the CF leaves we'll synthesize
   cf_leaf_ids = list(derivations.keys())
   if not cf_leaf_ids:
     return
@@ -1631,11 +1251,7 @@ def _derive_cash_flow_facts(
     row[0]: (row[1], row[2], row[3] or "debit") for row in meta_rows
   }
 
-  # Index existing facts by (element_id, period_end) for delta lookup.
-  # Sum on collision — multiple facts on the same (element, period) is
-  # already tolerated by `_facts_to_balance_dict` (it sums net_balance);
-  # do the same here so no future caller silently overwrites an upstream
-  # baseline and drops half the CF delta.
+  # Sum on collision, as _facts_to_balance_dict does.
   fact_index: dict[tuple[str, date], float] = {}
   for f in facts:
     key = (f.element_id, f.period_end)
@@ -1648,11 +1264,7 @@ def _derive_cash_flow_facts(
   for current in ordered[1:]:
     opening = _opening_date(current)
     for cf_leaf_id, sources in derivations.items():
-      # Skip if a direct fact already exists for this CF leaf at the
-      # current period — direct fact wins, derivation is the fallback.
-      # Avoids double-counting when a tenant maps both source paths
-      # (e.g. Depreciation Expense → DDA fact directly, AND Accumulated
-      # Depreciation → DDA via ΔBS derivation).
+      # A direct fact wins (e.g. DDA mapped from Depreciation Expense).
       if (cf_leaf_id, current.end) in fact_index:
         continue
       cf_value = 0.0
@@ -1671,7 +1283,7 @@ def _derive_cash_flow_facts(
           element_id=cf_leaf_id,
           element_qname=qname,
           element_name=name,
-          classification=None,  # CF leaves don't fit asset/liab/eq/rev/exp axes
+          classification=None,
           balance_type=balance_type,
           value=cf_value,
           period_start=current.start,
@@ -1689,38 +1301,14 @@ def _reconcile_operating_to_cash(
 ) -> None:
   """Foot the indirect CF to the actual cash-balance movement.
 
-  The indirect operating section (``NetIncome + DDA + ΣΔWC``) reverses only
-  depreciation among non-cash items. A non-cash gain/loss embedded in net
-  income — a distribution-in-kind loss, an unrealized mark-to-market gain, a
-  write-off — flows straight through, so the computed CF net change diverges
-  from the real period-over-period cash movement (the residual
-  ``_check_cash_flow_tie_out`` warns about).
+  The indirect operating section reverses only depreciation among non-cash
+  items, so gains/losses in net income leave the CF off from ΔCash. True
+  operating cash is ``ΔCash - Investing - Financing``; the gap is booked as
+  one adjustment on ``IncreaseDecreaseInOtherOperatingCapitalNet``.
 
-  Investing/financing are already attributed from actual cash-paired postings
-  (``_emit_flow_facts``), and ΔCash is known from the cash-anchor instant
-  facts, so true operating cash is ``ΔCash - Investing - Financing``. We emit
-  the gap between that and the computed CF as a single grounded reconciling
-  adjustment on ``IncreaseDecreaseInOtherOperatingCapitalNet`` — an operating
-  leaf present in both the rs-gaap CF calc and the Indirect presentation — so
-  the statement foots to actual cash. The adjustment IS the aggregate non-cash
-  operating reconciliation; itemizing its components (gain/loss on disposal,
-  unrealized MTM, …) into their own lines is a future enrichment. The plugged
-  amount is logged so it stays visible rather than silently absorbed.
-
-  TRADEOFF — this foots the CF *by construction*, which makes the downstream
-  ``_check_cash_flow_tie_out`` residual ~0 and therefore effectively silent.
-  The benefit is a CF that always articulates to actual cash; the cost is that
-  a *future* investing/financing misclassification would be absorbed into this
-  operating reconciling line instead of surfacing as a tie-out warning. Mitigation
-  for later: warn (not just log) when the plugged amount is large relative to
-  operating cash, so a genuine misclassification still trips an alarm. For now
-  the log line is the audit trail.
-
-  Runs AFTER ``_derive_cash_flow_facts`` / ``_emit_flow_facts`` (the CF leaves
-  must exist) and BEFORE ``_emit_subtotal_facts`` (so the subtotals pick up the
-  adjustment). No-op for <2 periods or when the cash-anchor balance is absent
-  for a period (can't reconcile — the tie-out check then warns). Mutates
-  ``facts``.
+  Tradeoff: this foots the CF by construction, silencing
+  ``_check_cash_flow_tie_out``; a large plug relative to operating cash is
+  logged as a warning instead. Skips periods with no cash-anchor balance.
   """
   if len(periods) < 2:
     return
@@ -1741,21 +1329,15 @@ def _reconcile_operating_to_cash(
   operating = by_qname.get(_CF_OPERATING_SUBTOTAL_QNAME)
   operating_id = operating.id if operating is not None else None
   if net_change is None or recon is None:
-    # Framework missing the CF net-change or the reconciling leaf — nothing to
-    # foot against. Leave the CF as derived; the tie-out check surfaces the gap.
     return
   net_change_id = net_change.id
   recon_leaf_id = recon.id
 
-  # rs-gaap-calculations DAG — same source/resolution as _emit_subtotal_facts,
-  # so the net-change we compute here matches what the renderer will show.
   calculations = load_rs_gaap_calculations(session)
   if not calculations:
     return
   order = topo_sort_calculations(calculations)
 
-  # Cash-balance (instant) anchors by date, the same opening basis as the
-  # tie-out: a period's change runs from the day before it starts.
   cash_by_date = _cash_by_date(facts, opening_facts)
 
   ordered = sorted(periods, key=lambda p: p.end)
@@ -1765,8 +1347,6 @@ def _reconcile_operating_to_cash(
       continue
     cash_delta = cash_end - cash_by_date.get(_opening_date(current), 0.0)
 
-    # Resolve the CF net-change the renderer would show: direct fact wins,
-    # else Σ child·weight (identical to _emit_subtotal_facts / _build_rows).
     balances: dict[str, float] = {}
     present: set[str] = set()
     for f in facts:
@@ -1779,11 +1359,8 @@ def _reconcile_operating_to_cash(
     residual = cash_delta - derived_net_change
     if abs(residual) <= 0.005:
       continue
-    # Elevate to a warning when the plug dwarfs operating cash — the signal that
-    # a material non-cash item is un-itemized or a flow was misclassified and
-    # silently absorbed here (see the TRADEOFF note above). Basis is post-plug
-    # operating cash, floored by ΔCash so a near-zero operating section can't
-    # divide-by-zero.
+    # Basis is post-plug operating cash, floored by ΔCash so a near-zero
+    # operating section can't divide by zero.
     derived_operating = computed.get(operating_id, 0.0) if operating_id else 0.0
     true_operating = derived_operating + residual
     denom = max(abs(true_operating), abs(cash_delta))
@@ -1836,20 +1413,9 @@ def _check_cash_flow_tie_out(
   periods: list[PeriodSpec],
   opening_facts: list[ReportFact] | None = None,
 ) -> None:
-  """Reconcile the CF net change in cash against the BS cash movement.
+  """Warn when the CF net change in cash differs from the BS cash movement.
 
-  The CF net-change concept (``CashAndCashEquivalentsPeriodIncreaseDecrease``)
-  is, by the calc DAG, Operating + Investing + Financing — so it always foots
-  to the sections internally (``_check_totals_foot`` covers that). The
-  *meaningful* check is whether that net change equals the actual period-over-
-  period movement in the cash balance (ΔCash). A mismatch means the flow
-  attribution is incomplete or wrong — e.g. an investing line routed to a flow
-  concept that isn't in the render structure, or a coarse "PP&E Net" mapping
-  that the gross-grained default arcs can't resolve.
-
-  Warning-only: the bundle is already generated and the BS/CF still render;
-  this surfaces the residual so it's visible rather than silently wrong. It is
-  the acceptance criterion the enrichment work is validated against.
+  A mismatch means investing/financing attribution is incomplete.
   """
   if len(periods) < 2:
     return
@@ -1861,8 +1427,6 @@ def _check_cash_flow_tie_out(
         net_change_by_end.get(f.period_end, 0.0) + f.value
       )
 
-  # ΔCash for a period runs from the day before it starts to its end — the
-  # same opening basis as _derive_cash_flow_facts.
   ordered = sorted(periods, key=lambda p: p.end)
   for current in ordered[1:]:
     net_change = net_change_by_end.get(current.end)
@@ -1870,11 +1434,7 @@ def _check_cash_flow_tie_out(
       continue
     cash_end = cash_by_date.get(current.end)
     if cash_end is None:
-      # A net-change fact exists but no instant cash balance does — the
-      # reconciliation can't run. Warn rather than skip silently: "couldn't
-      # check" must not look identical to "checked and tied". Causes: the cash
-      # concept isn't in _CASH_ANCHOR_QNAMES, or the balance sheet wasn't
-      # generated for this period.
+      # "Couldn't check" must not look like "checked and tied".
       logger.warning(
         "CF tie-out could not run for period ending %s: net change in cash "
         "(%.2f) is present but no instant cash-balance fact was found (cash "
@@ -1884,9 +1444,7 @@ def _check_cash_flow_tie_out(
         net_change,
       )
       continue
-    # A missing opening balance means $0 cash at that boundary (inception) —
-    # default to 0 rather than skip, so a first-period discrepancy (e.g. a
-    # financing leaf that renders but isn't summed) is flagged, not masked.
+    # No opening balance means $0 at inception — flag, don't skip.
     cash_start = cash_by_date.get(_opening_date(current), 0.0)
     delta_cash = cash_end - cash_start
     residual = net_change - delta_cash
@@ -1955,20 +1513,10 @@ def _whole_month_span(period_start: date, period_end: date) -> int | None:
 
 
 def _compute_prior_period(period_start: date, period_end: date) -> tuple[date, date]:
-  """Compute the comparative prior period ending the day before period_start.
+  """The comparative prior period ending the day before period_start.
 
-  Calendar-aware, because subtracting a day count is not the same thing.
-  Months have different lengths, so equal-length arithmetic walks a monthly
-  period off its own boundaries: March 2026 (31 days) would compare against
-  2026-01-29 → 2026-02-28, and February against 2026-01-04 → 2026-01-31.
-  Neither matches any stored monthly FactSet, so the comparative column
-  queries a window nothing was ever stamped into — it returns empty or wrong
-  rather than failing.
-
-  When the range is exactly N whole calendar months, the prior period is the
-  N calendar months immediately before. Otherwise — an arbitrary range, where
-  "the previous one" has no calendar meaning — it falls back to equal length,
-  which is the only sensible reading and the original behaviour.
+  N whole calendar months -> the N calendar months before (equal-day
+  arithmetic would miss stored monthly FactSets). Otherwise equal length.
   """
   from robosystems.operations.roboledger.fiscal_calendar.periods import (
     add_months,
@@ -1989,17 +1537,11 @@ def _compute_prior_period(period_start: date, period_end: date) -> tuple[date, d
   return prior_end - timedelta(days=duration - 1), prior_end
 
 
-# Anonymous element id used when no rs-gaap RE fact is present in the
-# mapping graph and the close logic has to append a fresh row. Reachable
-# only on unmapped graphs; a configured tenant always has
-# rs-gaap:RetainedEarningsAccumulatedDeficit materialized via
-# _append_empty_equity_facts before the close runs.
+# Used only when the close finds no target fact (unmapped graphs).
 _ANON_RE_ELEMENT_ID = "elem_rsgaap_retained_earnings_anon"
 
-# Display labels for the form-aware close targets, used on the anonymous
-# fallback row so a partnership/LLC graph doesn't render "Retained Earnings"
-# for what is actually Partners' Capital / Members' Equity. Falls back to the
-# qname for any concept not in the map.
+# Labels for the anonymous fallback row, so PART/LLC graphs don't show
+# "Retained Earnings".
 _CLOSE_TARGET_LABELS = {
   "rs-gaap:RetainedEarningsAccumulatedDeficit": "Retained Earnings (Accumulated Deficit)",
   "rs-gaap:PartnersCapital": "Partners' Capital",
@@ -2017,25 +1559,11 @@ def _find_close_target(
   period_end: date,
   close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
 ) -> ReportFact | None:
-  """Find the equity fact to receive the closing entry.
+  """The equity fact that receives the closing entry, or ``None``.
 
-  Matches the active Reporting Style's single earnings-home concept
-  (``close_target_qname`` — CORP→RetainedEarnings, PART→PartnersCapital,
-  LLC→MembersEquity), materialized at $0 by
-  :func:`_append_empty_equity_facts` when the source CoA element has no
-  postings. Exact-qname match — there is exactly one close target per Style,
-  so form-specific routing (PartnersCapital / MembersEquity) is fully
-  deterministic.
-
-  Only when targeting the corporate default
-  (``rs-gaap:RetainedEarningsAccumulatedDeficit``) does it also accept any
-  ``*RetainedEarnings*`` / ``*RetainedDeficit*`` shape, which covers seeded
-  us-gaap / FAC taxonomies whose RE concept carries a different qname.
-  Non-default (form-specific) targets never widen, so they can't match the
-  wrong concept.
-
-  Returns ``None`` if no such fact exists; caller appends a fresh row
-  (defensive fallback for unmapped graphs).
+  Exact qname match, except that the corporate default also accepts any
+  ``*RetainedEarnings*`` / ``*RetainedDeficit*`` qname (seeded taxonomies
+  name RE differently). Form-specific targets never widen.
   """
   re_default = close_target_qname == "rs-gaap:RetainedEarningsAccumulatedDeficit"
   for fact in facts:
@@ -2059,22 +1587,11 @@ def _cumulative_closeable_sums(
   period_end: date,
   arc_type: str = "mapping",
 ) -> tuple[float, float, float]:
-  """Cumulative (revenue, expense, equity_reductions) counted ONCE per source.
+  """Cumulative (revenue, expense, equity_reductions) from inception to period_end.
 
-  The close is over POSTINGS, not over mapping fan-out: a CoA account
-  mapped to N reporting concepts (its statement anchor PLUS disclosure
-  disaggregation concepts — e.g. revenue accounts double-mapped to
-  ``rs-gaap:RevenueFromContract…`` and a tenant ``…:SubscriptionRevenue``
-  so the revenue-by-stream note renders fact-driven) joins its postings
-  into N target rows, and a per-target classification sweep counts the
-  same postings N times — inflating net income by exactly the
-  disaggregated amount and unbalancing the BS through retained earnings.
-  This helper groups by SOURCE element
-  and classifies each source through its targets — reducer targets
-  first (the cumulative close's historical precedence), then P&L
-  targets with a real trait ahead of inferred ones — so every posting
-  contributes exactly once. Window: inception → ``period_end`` (the
-  prior-period close semantics).
+  Counted once per source account, not once per mapped target: each source
+  takes one classification — reducer targets first, then trait-classified
+  P&L targets ahead of inferred ones.
   """
   result = session.execute(
     text("""
@@ -2113,9 +1630,6 @@ def _cumulative_closeable_sums(
     },
   )
 
-  # Per source: every target row carries the SAME source postings (the
-  # join fans line_items across arcs), so pick one classification per
-  # source and count its sums once.
   by_source: dict[str, list] = {}
   for row in result:
     by_source.setdefault(row.source_id, []).append(row)
@@ -2133,7 +1647,6 @@ def _cumulative_closeable_sums(
     for r in rows:
       cls = r.classification or _infer_classification(r.qname, r.balance_type)
       if cls in ("revenue", "expense"):
-        # Trait-carrying targets sort ahead of inferred ones.
         classified.append((r.classification is None, r.qname, cls, r))
     if not classified:
       continue
@@ -2150,13 +1663,7 @@ def _cumulative_closeable_sums(
 
 
 def _close_value(fact: ReportFact) -> float:
-  """The close-eligible portion of a fact's value.
-
-  ``close_value`` is set by the mapped-balance pivot so an account
-  fanned out to several concepts contributes its postings exactly once
-  (the primary target carries them; disaggregation copies carry 0).
-  ``None`` — every non-pivot producer — means the full value counts.
-  """
+  """The close-eligible portion of a fact's value (see ``ReportFact.close_value``)."""
   return fact.value if fact.close_value is None else fact.close_value
 
 
@@ -2166,33 +1673,14 @@ def _close_to_retained_earnings(
   period_end: date,
   close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
 ) -> None:
-  """Close the current period's revenue/expense into the earnings home.
+  """Add the period's revenue - expense + equity reducers to the close target.
 
-  Computes net income = sum(revenue facts) - sum(expense facts) +
-  equity-flow reducers for the given period and adds it to the
-  ``close_target_qname`` fact materialized by
-  :func:`_append_empty_equity_facts` (the active Style's earnings home —
-  CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity). On
-  unmapped graphs where no target fact exists, appends a fresh anonymous
-  row with that qname so downstream rendering still has a bottom line.
-
-  Sums use each fact's close-eligible portion (:func:`_close_value`) so an
-  account double-mapped to disclosure disaggregation concepts counts once.
-  Counting the raw values instead inflates NI by exactly the disaggregated
-  amount.
-
-  Mutates the facts list in place.
+  Uses close-eligible values so multi-mapped accounts count once. With no
+  target fact (unmapped graphs), appends an anonymous row.
   """
   total_revenue = 0.0
   total_expenses = 0.0
-  # Equity-flow concepts (dividends paid, treasury stock buybacks, etc.)
-  # affect retained earnings on the BS but don't appear with classification
-  # 'equity' in element_traits — they're flow-on-equity concepts that
-  # rs-gaap models with balance_type='credit' (per XBRL outflow-as-negative
-  # convention). Detect them by qname pattern. Their stored fact.value is
-  # already natural-signed negative (dividends present as -$2,500), so we
-  # add it directly without a sign flip — without this term the BS
-  # misbalances by exactly the cumulative dividend / buyback amount.
+  # Reducer values are already natural-signed negative; add without a flip.
   total_equity_reductions = 0.0
 
   for fact in facts:
@@ -2216,12 +1704,6 @@ def _close_to_retained_earnings(
     target.value += net_income
     return
 
-  # No rs-gaap RE fact in scope — append a fresh anonymous row so the
-  # close amount is preserved even when the CoA isn't mapped to an
-  # equity target yet. The reachability validator
-  # (operations/roboledger/reads/taxonomies.py::check_mapping_reachability)
-  # surfaces this gap to operators; this warning makes it visible at
-  # render time too.
   logger.warning(
     "close_to_retained_earnings: no %s fact in scope for period "
     "%s..%s; appending anonymous fallback row. CoA is missing a mapping "
@@ -2254,39 +1736,13 @@ def _close_prior_periods_to_retained_earnings(
   arc_type: str = "mapping",
   close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
 ) -> None:
-  """Close un-closed cumulative net income into retained earnings.
+  """Add un-closed net income from before the current period to the close target.
 
-  Balance sheet accounts are loaded cumulatively, but
-  `_close_to_retained_earnings` only closes the current period's
-  revenue/expense. This function computes cumulative net income **from
-  inception** through `period_end`, subtracts the current period's net
-  income (already closed by `_close_to_retained_earnings`), and adds
-  the remainder to retained earnings.
-
-  ## Why "from inception" is always correct
-
-  A real closing entry (QB year-end, roboledger `close_period`, etc.)
-  zeroes out the revenue/expense accounts it closes:
-
-      DR Revenue 100k
-      CR Expense  60k
-      CR RE       40k
-
-  After this entry, the revenue and expense accounts have net_balance=0,
-  so the `cumulative rev - exp` query returns only the **still-unclosed**
-  portion of P&L activity. Adding that to whatever RE the ledger already
-  carries (real closed amount + any manual adjustments) always produces
-  the right total on the balance sheet. There is no double-count risk.
-
-  Falls through three close-target conventions (see :func:`_find_close_target`)
-  so seed.py us-gaap, FAC, rs-gaap, and other equity-element shapes all
-  receive the prior-period closing amount.
+  Cumulative net income from inception through ``period_end``, minus the
+  current period's (already closed). Inception is always safe: a real
+  closing entry zeroes the rev/exp accounts it closes, so the cumulative
+  sum is only the still-unclosed portion — no double count.
   """
-  # Cumulative net income from inception through period_end — counted
-  # once per SOURCE account via ``_cumulative_closeable_sums``
-  # (classification resolved via traits with qname/balance-type
-  # inference fallback; the per-source dedupe keeps
-  # disclosure-disaggregation fan-out from double-counting postings).
   cumulative_revenue, cumulative_expenses, cumulative_equity_reductions = (
     _cumulative_closeable_sums(session, mapping_id, period_end, arc_type)
   )
@@ -2294,13 +1750,6 @@ def _close_prior_periods_to_retained_earnings(
     cumulative_revenue - cumulative_expenses + cumulative_equity_reductions
   )
 
-  # Current period net income was already closed — compute it from facts,
-  # counting each fact's close-eligible portion (the same source-once
-  # semantics the pivot stamped via ``close_value``). The closed amount
-  # is now sitting on whichever element ``_find_close_target`` selected
-  # (seed.py RE, us-gaap-shaped RE, or a single-line equity element like
-  # ``fac:Equity``); we don't need to locate that fact here, only to
-  # compute the prior-period delta.
   current_revenue = 0.0
   current_expenses = 0.0
   current_equity_reductions = 0.0
@@ -2350,11 +1799,6 @@ def _close_prior_periods_to_retained_earnings(
 
 
 def _infer_period_type(classification: str) -> str:
-  """Infer period type from element classification.
-
-  Balance sheet items (asset, liability, equity) are instant (point-in-time).
-  Income statement / cash flow items (revenue, expense) are duration.
-  """
   if classification in ("asset", "liability", "equity"):
     return "instant"
   return "duration"
@@ -2365,26 +1809,12 @@ def _load_reporting_structure(
   report_type: str,
   reporting_style_id: str,
 ) -> tuple[str, str, str | None, list[_HierarchyNode]]:
-  """Load the reporting structure hierarchy for the given report type.
+  """(structure_id, structure_name, concept_arrangement, root_nodes) for a report type.
 
-  Resolves the Network deterministically via the Reporting Style
-  composition layer — the renderer never picks among same-typed
-  Structures by recency / heuristics. The Style's
-  ``reporting_style_networks`` row pins exactly one Network per
-  statement_type.
-
-  Returns (structure_id, structure_name, concept_arrangement, root_nodes).
-  ``concept_arrangement`` is the Concept Arrangement Pattern declared on
-  the Disclosure (``arithmetic`` / ``roll_up`` / ``roll_forward`` /
-  ``set`` / ...); the renderer uses it to pick a compilation strategy.
-
-  When the Reporting Style doesn't compose a Network for this statement
-  type, returns the empty tuple — callers treat that as "no statement
-  to render". This matches the prior behaviour of "no matching structure
-  row" so upstream code paths don't need to grow new error branches.
+  The Network is the one the Reporting Style pins for the statement type.
+  When the Style composes none, returns empty values ("nothing to render").
   """
-  # Lazy import to avoid the picker's `from .. import` chain pulling
-  # commands code into the reads layer at module-import time.
+  # Lazy: the picker's import chain pulls commands code into the reads layer.
   from robosystems.operations.roboledger.reports.network_picker import (
     NoNetworkForStatementTypeError,
     get_render_network,
@@ -2399,9 +1829,6 @@ def _load_reporting_structure(
   structure_name = network.name
   concept_arrangement = network.concept_arrangement
 
-  # Load all elements and associations for this structure.
-  # Classification is resolved via element_traits → classifications
-  # (FASB elementsOfFinancialStatements trait axis).
   assoc_result = session.execute(
     text("""
       SELECT
@@ -2432,7 +1859,6 @@ def _load_reporting_structure(
     {"structure_id": structure_id},
   )
 
-  # Build parent → children map
   children_map: dict[str, list[dict[str, Any]]] = {}
   all_child_ids: set[str] = set()
   element_info: dict[str, dict[str, Any]] = {}
@@ -2452,11 +1878,9 @@ def _load_reporting_structure(
     all_child_ids.add(row.child_id)
     element_info[row.element_id] = child_data
 
-  # Also load the parent elements (SFAC 6 roots) that appear as from_element_id
-  # but not as to_element_id — these are the tree roots
+  # Roots: parents that are never a child.
   root_parent_ids: set[str] = set(children_map.keys()) - all_child_ids
 
-  # Load root element info (classification via element_traits JOIN)
   if root_parent_ids:
     placeholders = ", ".join(f":p{i}" for i in range(len(root_parent_ids)))
     params = {f"p{i}": pid for i, pid in enumerate(root_parent_ids)}
@@ -2487,14 +1911,8 @@ def _load_reporting_structure(
         "depth": row.depth or 0,
       }
 
-  # Render each element at most once globally per structure walk. The
-  # rs-gaap-presentation hierarchy is a DAG (a concept may have
-  # multiple parents — e.g. "Cash" rolls up under both Current Assets
-  # and the Cash Flow reconciliation). Without global dedup the walk
-  # would expand a shared subtree under each parent, producing
-  # exponential row counts and double-counting facts at render time.
-  # The first parent that reaches a node owns it; subsequent parents
-  # treat the node as already-rendered.
+  # The presentation hierarchy is a DAG; render each element once, under
+  # the first parent that reaches it, or shared subtrees double-count.
   emitted: set[str] = set()
 
   def _build_tree(element_id: str, depth: int) -> _HierarchyNode | None:
@@ -2517,18 +1935,6 @@ def _load_reporting_structure(
         node.children.append(child_node)
     return node
 
-  # Build trees from roots, ordered by the root-ordering associations
-  # seeded as (structure → SFAC6 root) presentation associations.
-  # Roots that have an explicit order_value sort by that; others fall
-  # back to accounting convention (debit-balance roots first — Assets
-  # before L+E on the Balance Sheet) and finally qname for determinism.
-  #
-  # ``root_parent_ids`` is a set, so without the secondary keys the sort
-  # would preserve unstable hash-order: e.g. the rs-gaap BS Classified
-  # structure has no root_order rows, and the set happened to emit
-  # ``LiabilitiesAndStockholdersEquity`` before ``Assets``, producing a
-  # BS rendered Liabilities-first. Single-root statements (IS / CF / SE)
-  # are unaffected.
   root_order = _load_root_order(session, structure_id)
   roots: list[_HierarchyNode] = []
   for root_id in sorted(
@@ -2547,23 +1953,8 @@ def _root_sort_key(
   root_order: dict[str, float],
   element_info: dict[str, dict[str, Any]],
 ) -> tuple[float, int, str]:
-  """Sort key for multi-root presentation hierarchies.
-
-  Three-tier precedence:
-
-  1. ``root_order[root_id]`` — explicit ordering seeded as
-     ``(structure → root)`` presentation associations on the structure.
-     Wins when present (tenants can pin a specific layout per structure).
-  2. ``balance_type`` priority — debit-balance roots before credit-balance
-     roots. Produces conventional Assets-then-L+E on the Balance Sheet
-     and any other multi-root statement that follows accounting
-     convention, without requiring explicit root_order rows.
-  3. ``qname`` alphabetical — determinism tiebreak so identical-priority
-     roots always emit in the same order across runs.
-
-  Single-root statements (IS / CF / SE under most reporting styles)
-  never hit this path — there's nothing to sort.
-  """
+  """Explicit root order, then debit-balance roots first (Assets before
+  L+E), then qname — roots come from a set, so the tiebreak keeps it stable."""
   explicit = root_order.get(root_id, float("inf"))
   info = element_info.get(root_id, {})
   bt_priority = 0 if info.get("balance_type") == "debit" else 1
@@ -2574,11 +1965,7 @@ def _load_root_order(
   session: Session,
   structure_id: str,
 ) -> dict[str, float]:
-  """Load root-level ordering for SFAC6 roots within a structure.
-
-  Root ordering is stored as presentation associations where from_element_id
-  equals the structure_id (a convention for root-level ordering).
-  """
+  """Root ordering, stored as presentation arcs from the structure_id itself."""
   result = session.execute(
     text("""
       SELECT to_element_id, order_value
@@ -2598,22 +1985,11 @@ def _load_calculations(
   structure_id: str | None = None,
   element_ids: set[str] | None = None,
 ) -> dict[str, list[tuple[str, float]]]:
-  """Load calculation associations.
+  """Calculation arcs as subtotal element_id -> [(summand element_id, weight)].
 
-  Two modes:
-
-  1. **Single-structure** — pass ``structure_id``. Returns calcs authored
-     INSIDE that structure, for structures that carry presentation and
-     calculation arcs together.
-  2. **Cross-structure** — pass ``element_ids`` (the set of element ids
-     reachable in the Disclosure hierarchy). Returns
-     calcs from ANY structure whose subtotal target (``from_element_id``) is
-     in the hierarchy. This composes ``fac-calculations`` (FAC's 18 canonical
-     equations) + ``rs-gaap-calculations`` (rs-gaap leaf→FAC summations) +
-     any other calc structures into a single calc DAG for the renderer.
-
-  Returns a dict mapping subtotal element_id → list of (summand element_id, weight).
-  For example, Total Assets might map to [(Current Assets, 1.0), (Non-Current Assets, 1.0)].
+  With ``structure_id``: calcs authored inside that structure. With
+  ``element_ids``: calcs from any structure whose subtotal is in the set,
+  composed into one DAG.
   """
   if structure_id is not None:
     result = session.execute(
@@ -2627,10 +2003,6 @@ def _load_calculations(
       {"structure_id": structure_id},
     )
   elif element_ids:
-    # Cross-structure load. Filter to calcs whose subtotal target lives
-    # in the Disclosure — that's the set the renderer can actually
-    # position. Calcs whose target is outside the hierarchy are
-    # irrelevant for this rendering pass.
     placeholders = ", ".join(f":e{i}" for i in range(len(element_ids)))
     params = {f"e{i}": eid for i, eid in enumerate(element_ids)}
     result = session.execute(
@@ -2656,14 +2028,9 @@ def _load_calculations(
       )
     return calculations
 
-  # Cross-structure path: multiple calc structures may target the same
-  # element (e.g. FAC IS2 multistep and IS11 single-step both compute
-  # fac:OperatingIncomeLoss; BS2 and BS3 both compute fac:Assets). They
-  # are alternative arrangements, not summands — merging them double-
-  # counts. Pick exactly one structure per target by requiring every
-  # summand to also live in the disclosure's hierarchy. The arrangement
-  # whose inputs the disclosure actually carries is the one the
-  # disclosure is asking the renderer to apply.
+  # Several calc structures may target the same element as alternative
+  # arrangements (merging them double-counts). Keep only arrangements whose
+  # summands are all in the hierarchy, then pick one per target.
   assert element_ids is not None  # narrowed by the elif above
   by_struct_target: dict[tuple[str, str], list[tuple[str, float]]] = {}
   for row in result:
@@ -2679,17 +2046,8 @@ def _load_calculations(
     candidates_per_target.setdefault(target, []).append((sid, sources))
 
   for target, candidates in candidates_per_target.items():
-    # When multiple calc structures target the same element AND each
-    # one's summands are all carried by the disclosure, pick the
-    # decomposition with the MOST summands. The fewest-summands variant
-    # is almost always an identity check — fac-calculations BS2 says
-    # `Assets = LiabilitiesAndEquity`, which is meant for VALIDATION,
-    # not COMPUTATION (Assets's value comes from summing real
-    # current/noncurrent leaves, not from a tautology pointing at
-    # another rollup). The decomposition (BS3: `Assets = Current +
-    # Noncurrent`) is the calc that walks down to leaf data. For IS the
-    # tie is moot — every variant has the same summand count after the
-    # hierarchy filter — so structure_id breaks it deterministically.
+    # Most summands wins: the smallest variant is usually an identity check
+    # (Assets = LiabilitiesAndEquity), meant for validation, not computation.
     candidates.sort(key=lambda c: (-len(c[1]), c[0]))
     calculations[target] = candidates[0][1]
   return calculations
@@ -2701,13 +2059,8 @@ def _balance_value(
   pre_signed: bool,
   balance_type: str,
 ) -> float | None:
-  """Look up a balance value for an element, applying sign convention if needed.
-
-  Returns ``None`` when no balance/fact is present for the element —
-  distinct from a present fact whose value is ``0.0``. Callers prefer an
-  authoritative zero over a derived rollup, so presence must be
-  observable (mirrors the presence-based ``_emit_subtotal_facts`` fix).
-  """
+  """The element's balance, or ``None`` when absent (distinct from a present 0.0,
+  which callers prefer over a derived rollup)."""
   balance = balances.get(element_id)
   if balance is None:
     return None
@@ -2716,9 +2069,7 @@ def _balance_value(
   return _natural_sign(balance.net_balance, balance_type)
 
 
-# ASC 205-20 redundant-subtotal suppression (see _build_rows). These two
-# concepts appear only in the income statement, so matching on them is
-# inert for the balance sheet / cash flow renders.
+# ASC 205-20 redundant-subtotal suppression (see _build_rows); IS-only concepts.
 _CONTINUING_OPS_QNAME = "rs-gaap:IncomeLossFromContinuingOperations"
 _DISCONTINUED_OPS_QNAME = "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax"
 
@@ -2729,37 +2080,19 @@ def _build_rows(
   calculations: dict[str, list[tuple[str, float]]],
   pre_signed: bool = False,
 ) -> list[FactRow]:
-  """Walk the hierarchy depth-first, building FactRows with N period columns.
+  """Build FactRows (one value per period) in presentation order.
 
-  Two-pass approach:
-  1. Walk all nodes to collect leaf balances and abstract rollups per period.
-  2. Resolve calculation elements using the fully-populated computed dicts,
-     then build the final row list in presentation order.
-
-  Abstract/parent nodes render with the rollup sum of their children (not
-  zero). Leaf nodes get values from the balance dict, or from calculation
-  associations for computed elements (Total Assets, Net Income, etc.).
+  Pass 1 collects leaf balances and parent rollups, then calc subtotals are
+  resolved; pass 2 emits rows post-order.
   """
   n_periods = len(period_balances)
 
-  # Pass 1: collect all values per period (leaf balances + abstract rollups)
-  # computed_per_period[period_idx][element_id] = value
-  # present_per_period[period_idx] = element_ids that carry an authoritative
-  # value (a direct fact, or a parent whose children are present) — keyed on
-  # PRESENCE, not non-zero, so a legitimate 0 wins over a derived rollup.
+  # Keyed on presence, not non-zero, so a legitimate 0 wins over a rollup.
   computed_per_period: list[dict[str, float]] = [{} for _ in range(n_periods)]
   present_per_period: list[set[str]] = [set() for _ in range(n_periods)]
 
   def _collect(node: _HierarchyNode) -> tuple[list[float], list[bool]]:
-    """Walk a node, return (values, presence-flags) per period for rollup.
-
-    A parent node can receive a value via two distinct reporting paths:
-    (a) directly — a fact mapped at the parent's element_id, or (b)
-    computed — sum of child values when the breakdown is reported at the
-    leaves. Whichever path is *present* in a given period wins (a direct
-    fact, even valued 0, beats a derived rollup); we never sum a real
-    direct fact under empty leaves.
-    """
+    """(values, presence) per period; a direct fact, even 0, beats a child rollup."""
     if node.children:
       child_totals = [0.0] * n_periods
       child_present = [False] * n_periods
@@ -2775,10 +2108,8 @@ def _build_rows(
           period_balances[i], node.element_id, pre_signed, node.balance_type
         )
         if direct is not None:
-          # Direct fact landed at this anchor — authoritative, even at 0.
           chosen, is_present = direct, True
         elif child_present[i]:
-          # No direct fact; roll up the reported leaves.
           chosen, is_present = child_totals[i], True
         else:
           chosen, is_present = 0.0, False
@@ -2809,24 +2140,11 @@ def _build_rows(
   for root in hierarchy:
     _collect(root)
 
-  # Resolve calculations (may chain: Gross Profit → Operating Income → Net Income).
-  # Topologically sort by dependency so each subtotal is computed AFTER
-  # the subtotals it depends on. Without this, a calc whose summand is
-  # itself a calc target gets a stale value (or zero) when iterated in
-  # dict insertion order.
-  #
-  # If a direct fact has already populated computed_per_period[i][elem_id]
-  # in pass 1 (mapping arc landed at this anchor), prefer it over the
-  # calc result — calc is the fallback path for subtotals not directly
-  # reported, not an override of authoritative direct facts.
+  # Calcs chain, so resolve in dependency order.
   for elem_id in topo_sort_calculations(calculations):
     sources = calculations[elem_id]
     for i in range(n_periods):
-      # Keep an authoritative pass-1 value (direct fact or reported-leaf
-      # rollup) when present — keyed on presence, not non-zero, so a
-      # legitimate 0 isn't overwritten by the calc-DAG sum. Otherwise
-      # fall back to the calc result and mark it present (derived from
-      # present sources) so dependent subtotals up the chain see it.
+      # A pass-1 value is authoritative; the calc is only the fallback.
       if elem_id in present_per_period[i]:
         continue
       computed = sum(
@@ -2836,13 +2154,7 @@ def _build_rows(
       if any(src_id in present_per_period[i] for src_id, _ in sources):
         present_per_period[i].add(elem_id)
 
-  # Pass 2: build rows in financial-statement order — children first,
-  # then their parent subtotal (post-order). This matches the convention
-  # readers expect: revenues / expenses listed before Gross Profit;
-  # current / non-current sections before Total Assets; everything
-  # before Net Income (which lands at the bottom of the IS). Pre-order
-  # would put rollups at the top with details below, which reads as
-  # an outline rather than a financial statement.
+  # Pass 2: post-order, so each subtotal follows its details.
   rows: list[FactRow] = []
 
   calc_targets = set(calculations.keys())
@@ -2850,17 +2162,8 @@ def _build_rows(
   def _emit(node: _HierarchyNode) -> None:
     for child in node.children or []:
       _emit(child)
-    # Both subtotal (has children) and leaf rows read the precomputed
-    # value from `computed_per_period`. Pass 1 populated it with the
-    # rolled-up sum of all descendants for parent nodes, so subtotal
-    # rows get the correct aggregate instead of zeros.
-    # An abstract presentation concept (e.g. "Income Statement [Abstract]")
-    # that groups MULTIPLE subtotals is a structural header over a calc
-    # cascade — its children (Revenues, GrossProfit, OperatingIncome, …)
-    # already aggregate overlapping sets, so summing them double-counts and
-    # the abstract has no meaningful value. Render it value-less and let the
-    # all-null drop below hide it. A single clean rollup (a section abstract
-    # over its leaves, e.g. "Operating Expenses" → R&D + SG&A) keeps its sum.
+    # An abstract over several subtotals heads a calc cascade whose children
+    # overlap; summing them double-counts, so it renders value-less.
     subtotal_children = sum(
       1
       for child in (node.children or [])
@@ -2869,19 +2172,11 @@ def _build_rows(
     if node.is_abstract and subtotal_children > 1:
       vals: list[float | None] = [None] * n_periods
     else:
-      # Both subtotal (has children) and leaf rows read the precomputed
-      # value from `computed_per_period`. Pass 1 populated it with the
-      # rolled-up sum of all descendants for parent nodes, so subtotal
-      # rows get the correct aggregate instead of zeros.
       vals = [
         _unsigned_zero(computed_per_period[i].get(node.element_id, 0.0))
         for i in range(n_periods)
       ]
-    # A row is a subtotal if it aggregates other rows by either path:
-    # (a) it has child summands in the disclosure DAG, or (b) it is a
-    # calc-DAG target whose summands live elsewhere in the disclosure
-    # (e.g., fac:GrossProfit's summands fac:Revenues / fac:CostOfRevenue
-    # are siblings, not children). The UI treats both the same way.
+    # Calc targets count too: their summands may be siblings, not children.
     is_subtotal = bool(node.children) or node.element_id in calc_targets
     rows.append(
       FactRow(
@@ -2900,22 +2195,11 @@ def _build_rows(
   for root in hierarchy:
     _emit(root)
 
-  # Drop rows whose every period value is zero / null. The full
-  # rs-gaap presentation tree includes every concept the seed knows
-  # about; for any given filer only a fraction carry data. Suppressing
-  # the empty rows turns ~600-row trees into the dozen or two lines
-  # that actually populate the statement, which is what readers expect
-  # to see.
+  # The full presentation tree is hundreds of concepts; keep only populated rows.
   rows = [r for r in rows if any(v not in (None, 0, 0.0) for v in r.values)]
 
-  # ASC 205-20: the "Income from Continuing Operations" subtotal is only
-  # presented when discontinued operations are reported. With no
-  # discontinued-ops row (the norm — it was dropped above as all-zero, or
-  # never reported) the subtotal is value-identical to Net Income, so it
-  # renders as a redundant duplicate line. Drop it in that case. Keyed on
-  # qname — both concepts appear only in the income statement, so this is
-  # inert for BS/CF. (Curated convention; a future trait/structure-driven
-  # rule could subsume it.)
+  # ASC 205-20: without discontinued ops, the continuing-operations subtotal
+  # duplicates net income.
   if not any(r.element_qname == _DISCONTINUED_OPS_QNAME for r in rows):
     rows = [r for r in rows if r.element_qname != _CONTINUING_OPS_QNAME]
 
@@ -2923,15 +2207,7 @@ def _build_rows(
 
 
 def _natural_sign(net_balance: float, balance_type: str) -> float:
-  """Convert net balance (debits - credits) to natural sign for display.
-
-  - Debit-normal accounts (assets, expenses): positive when net_balance > 0
-  - Credit-normal accounts (liabilities, equity, revenue): positive when net_balance < 0
-    (i.e., when credits exceed debits)
-
-  This means Revenue shows as positive, Expenses show as positive,
-  and Net Income = Revenue - Expenses works correctly.
-  """
+  """Debits - credits to natural sign: credit-normal balances flip."""
   if balance_type == "credit":
     # A zero balance has no sign: ``-(0.0)`` is ``-0.0``, which compares
     # equal to zero but formats as "-$0.00" on a statement.
@@ -2940,7 +2216,5 @@ def _natural_sign(net_balance: float, balance_type: str) -> float:
 
 
 def _unsigned_zero(value: float | None) -> float | None:
-  """Normalize ``-0.0`` to ``0.0`` at the point rows leave the renderer, so
-  no sign-flipping path upstream (natural sign, cash-flow deltas, equity
-  reducers) can put "-$0.00" on a statement."""
+  """Normalize ``-0.0`` so no upstream sign flip renders "-$0.00"."""
   return 0.0 if value == 0.0 else value

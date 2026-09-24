@@ -1,23 +1,10 @@
 """Write operations for mapping associations and entity↔taxonomy links.
 
-These commands are pure functions: take an open extensions `Session`
-and validated Pydantic request bodies, return Pydantic response models.
-Callers own session lifetime and translate domain exceptions into
-transport errors.
-
-**Blocks, not atoms.** Row-level writers for taxonomies and structures
-(`create_taxonomy`, `update_structure`, `delete_taxonomy`, …) are
-deliberately absent: tenant taxonomy writes go through the taxonomy
-*block* surface — `create-taxonomy-block` / `update-taxonomy-block` /
-`delete-taxonomy-block` in `operations/taxonomy_block/` — which mutates
-a whole envelope (taxonomy + structures + elements + associations +
-rules) in one transaction and runs the block validators. An atomic
-row writer bypasses those validators, so don't reintroduce one; extend
-the block handlers instead.
-
-Removed 2026-08-20: seven such atoms existed here, unreferenced by any
-route, tool, or test, while their docstrings claimed the block surface
-invoked them indirectly. It never did.
+There are deliberately no row-level writers for taxonomies or structures:
+tenant taxonomy writes go through the taxonomy block operations
+(`operations/taxonomy_block/`), which apply a whole envelope in one
+transaction and run the block validators. Extend those rather than adding a
+row writer that bypasses them.
 """
 
 from __future__ import annotations
@@ -71,32 +58,24 @@ __all__ = [
 
 
 class MappingStructureNotFoundError(LookupError):
-  """Raised when a referenced mapping structure does not exist."""
-
   def __init__(self, mapping_id: str) -> None:
     super().__init__(f"Mapping structure not found: {mapping_id}")
     self.mapping_id = mapping_id
 
 
 class TaxonomyNotFoundError(LookupError):
-  """Raised when a taxonomy is not found by id."""
-
   def __init__(self, taxonomy_id: str) -> None:
     super().__init__(f"Taxonomy not found: {taxonomy_id}")
     self.taxonomy_id = taxonomy_id
 
 
 class AssociationNotFoundError(LookupError):
-  """Raised when an association is not found by id."""
-
   def __init__(self, association_id: str) -> None:
     super().__init__(f"Association not found: {association_id}")
     self.association_id = association_id
 
 
 class ElementNotFoundError(LookupError):
-  """Raised when the from/to element in an association does not exist."""
-
   def __init__(self, side: str, element_id: str) -> None:
     super().__init__(f"{side} element not found: {element_id}")
     self.side = side  # "source" or "target"
@@ -108,14 +87,8 @@ class EntityTaxonomyConflictError(ValueError):
 
 
 class MappingAssociationExistsError(ValueError):
-  """Raised when the association already exists on the mapping structure.
-
-  `uq_association_structure_elements_type` makes the pair unique per structure
-  and type. Without this check the insert reached the database and surfaced the
-  IntegrityError as an opaque 500, which a caller cannot tell apart from a real
-  fault — so re-running a seeding script had no safe way to skip what it had
-  already created.
-  """
+  """The pair is already mapped on this structure (a clean 409, so a re-run
+  can skip what exists)."""
 
   def __init__(self, mapping_id: str, from_element_id: str, to_element_id: str) -> None:
     super().__init__(
@@ -134,20 +107,15 @@ def create_mapping_association(
 ) -> AssociationResponse:
   """Add a mapping association (CoA element → reporting concept).
 
-  Raises `MappingStructureNotFoundError` if the mapping structure is
-  missing, `ElementNotFoundError` with `side="source"` / `"target"` if
-  either element is missing, or `MappingAssociationExistsError` if the pair
-  is already mapped. The caller translates these to HTTP status codes.
+  Raises `MappingStructureNotFoundError`, `ElementNotFoundError` (with
+  ``side``), or `MappingAssociationExistsError`.
   """
   structure = session.execute(
     select(Structure).where(Structure.id == body.mapping_id)
   ).scalar_one_or_none()
   if structure is None:
     raise MappingStructureNotFoundError(body.mapping_id)
-  # Block arc insertion into library-seeded structures (fac-presentation,
-  # fac-to-rs-gaap, rs-gaap-hierarchy, etc). The DB-level trigger
-  # catches the same case as defense-in-depth; this path gives a clean
-  # 403 instead of a ProgrammingError.
+  # A DB trigger also refuses library structures; this gives a clean 403.
   assert_not_library_origin(structure)
 
   from_elem = session.execute(
@@ -155,13 +123,10 @@ def create_mapping_association(
   ).scalar_one_or_none()
   if from_elem is None:
     raise ElementNotFoundError("source", body.from_element_id)
-  # The from-element must be tenant-authored (CoA side); the target is
-  # allowed to be a library row — that's the whole point of mapping.
+  # The source must be tenant-authored; the target may be a library row.
   assert_not_library_origin(from_elem)
-  # A closed month's statements were stamped through the arcs as they
-  # stood. A new arc for an account with landed history in one would
-  # restate it at read time while the stamp kept the old answer; map
-  # before close, or reopen latest-first and then map.
+  # A closed month's stamped statements went through the arcs as they stood;
+  # a new arc on an account with history there would restate it.
   assert_history_undisturbed(session, account_ids=[body.from_element_id])
 
   to_elem = session.execute(
@@ -170,8 +135,6 @@ def create_mapping_association(
   if to_elem is None:
     raise ElementNotFoundError("target", body.to_element_id)
 
-  # Pre-check the uniqueness the DB enforces, so a repeat gets a clean 409
-  # instead of an IntegrityError escaping as a 500.
   existing = session.execute(
     select(Association).where(
       Association.structure_id == body.mapping_id,
@@ -201,9 +164,7 @@ def create_mapping_association(
   try:
     session.flush()
   except IntegrityError as exc:
-    # The pre-check above lost a race with a concurrent identical insert; the
-    # unique key is the truth. Same answer as the check. Any other constraint
-    # is a real fault and keeps its identity.
+    # Lost a race with a concurrent identical insert.
     if not violates(exc, "uq_association_structure_elements_type"):
       raise
     raise MappingAssociationExistsError(
@@ -231,14 +192,11 @@ def create_mapping_association(
 def delete_mapping_association(
   session: Session, body: DeleteMappingAssociationOperation
 ) -> DeleteResult:
-  """Delete a mapping association edge (the inverse of create).
+  """Delete a mapping association edge.
 
-  Raises ``AssociationNotFoundError`` (→ 404) when no edge matches,
-  ``LibraryImmutableError`` (→ 403) for library-seeded rows, or
-  ``ProtectedFactsError`` (→ 422) when the account has landed history in
-  a closed month — the stamped statements were computed through this arc.
-  Used to correct a wrong mapping: delete the bad edge, then re-create the
-  right one with ``create_mapping_association``.
+  Raises ``AssociationNotFoundError``, ``LibraryImmutableError``, or
+  ``ProtectedFactsError`` when the account has landed history in a closed
+  month.
   """
   assoc = session.execute(
     select(Association).where(
@@ -248,9 +206,6 @@ def delete_mapping_association(
   ).scalar_one_or_none()
   if assoc is None:
     raise AssociationNotFoundError(body.association_id)
-  # Match update_association / delete_association — reject library-seeded
-  # rows at the service layer so the caller sees LibraryImmutableError
-  # (→ 403) instead of a bare DB trigger ProgrammingError (→ 500).
   assert_not_library_origin(assoc)
   assert_history_undisturbed(session, account_ids=[str(assoc.from_element_id)])
   _delete_association_dependents(session, [body.association_id])
@@ -286,26 +241,11 @@ def _delete_association_dependents(
   ).delete(synchronize_session=False)
 
 
-# ─── Taxonomy update / delete ─────────────────────────────────────────────
-
-
-# ─── Structure update / delete ────────────────────────────────────────────
-
-
 # ─── Association bulk create / update / delete ───────────────────────────
 
 
 def delete_association(session: Session, body: DeleteAssociationRequest) -> dict:
-  """Hard delete an association.
-
-  Associations are cheap edges; we don't soft-delete them. If you need
-  to remove many at once, use `update-taxonomy-block` with
-  `associations_to_remove`.
-
-  Raises `AssociationNotFoundError` if the association does not exist.
-  Returns `{"deleted": True}` on success so the route layer has a
-  consistent response shape with other delete ops.
-  """
+  """Hard delete an association. Raises `AssociationNotFoundError`."""
   assoc = session.execute(
     select(Association).where(Association.id == body.association_id)
   ).scalar_one_or_none()
@@ -328,19 +268,16 @@ def delete_association(session: Session, body: DeleteAssociationRequest) -> dict
 
 
 class EntityNotFoundError(LookupError):
-  """Raised when no entity exists in the graph."""
+  """No entity exists in the graph."""
 
 
 def link_entity_taxonomy(
   session: Session, body: LinkEntityTaxonomyRequest
 ) -> EntityTaxonomyResponse:
-  """Link the graph's entity to a taxonomy (creates ENTITY_HAS_TAXONOMY edge).
+  """Link the graph's entity to a taxonomy; idempotent per (entity, taxonomy,
+  basis).
 
-  Idempotent: if the exact (entity, taxonomy, basis) combination already
-  exists, returns the existing row without error.
-
-  Raises `EntityNotFoundError` if no entity exists in the graph, or
-  `TaxonomyNotFoundError` if the taxonomy doesn't exist.
+  Raises `EntityNotFoundError` or `TaxonomyNotFoundError`.
   """
   entity = resolve_parent_entity(session)
   if entity is None:
@@ -352,7 +289,6 @@ def link_entity_taxonomy(
   if taxonomy is None:
     raise TaxonomyNotFoundError(body.taxonomy_id)
 
-  # Check for existing adoption at this (entity, taxonomy, basis) combo
   existing = session.execute(
     select(EntityTaxonomy).where(
       EntityTaxonomy.entity_id == entity.id,
@@ -370,9 +306,7 @@ def link_entity_taxonomy(
       adoption_context=existing.adoption_context,
     )
 
-  # If requesting is_primary=true, clear any existing primary for this
-  # (entity, basis) pair. The partial unique index
-  # idx_entity_taxonomies_primary enforces at most one primary per basis.
+  # At most one primary per basis (idx_entity_taxonomies_primary).
   if body.is_primary:
     session.query(EntityTaxonomy).filter(
       EntityTaxonomy.entity_id == entity.id,
@@ -392,9 +326,7 @@ def link_entity_taxonomy(
   try:
     session.flush()
   except IntegrityError as exc:
-    # Concurrent identical adoption, or a concurrent primary for the same
-    # basis (`idx_entity_taxonomies_primary`) landing between the clear above
-    # and this insert. Both are "already linked", not a fault.
+    # A concurrent identical adoption or primary for the same basis.
     if not violates(exc, "uq_entity_taxonomy_combo", "idx_entity_taxonomies_primary"):
       raise
     raise EntityTaxonomyConflictError(

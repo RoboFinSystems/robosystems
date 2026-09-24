@@ -25,10 +25,8 @@ class LedgerCounts(NamedTuple):
 def get_ledger_counts(session: Session) -> LedgerCounts:
   """Return element/transaction/entry/line-item counts plus date range.
 
-  Does not touch the platform DB — the caller merges in connection
-  metadata separately. Separating the two reads keeps the test surface
-  simple and lets a platform-DB failure be logged without aborting the
-  summary response.
+  Extensions DB only; the caller merges platform connection metadata, so a
+  platform failure cannot abort the summary.
   """
   account_count = (
     session.execute(select(func.count()).select_from(Element)).scalar() or 0

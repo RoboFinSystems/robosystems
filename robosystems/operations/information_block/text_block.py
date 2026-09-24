@@ -1,16 +1,7 @@
 """Envelope builder for text-block disclosure structures.
 
-A text-block note (``concept_arrangement`` in ``TEXT_BLOCK_CAPS``) holds
-narrative — ``Nonnumeric`` facts bound from a platform Document via
-``bind-text-block`` — not a numeric grid, so the statement family's
-CAP-agnostic rendering (rows + footed subtotals) doesn't apply. This
-builder shares every envelope atom with the statement path
-(:func:`load_base_envelope_atoms`) and swaps only the ``view.rendering``
-projection: one row per bound narrative fact carrying ``text_value``.
-
-Dispatch happens in :mod:`disclosure` — ``build_envelope`` routes
-text-block CAPs here and every other disclosure CAP through the
-statement builder.
+A text-block note holds narrative facts bound via ``bind-text-block``, so
+``view.rendering`` is one row per narrative fact rather than a numeric grid.
 """
 
 from __future__ import annotations
@@ -51,16 +42,9 @@ def build_text_block_envelope(
 ) -> InformationBlockEnvelope | None:
   """Pack the envelope for a text-block disclosure structure.
 
-  Facts resolve the way statements do: pinned by ``fact_set_id`` when
-  given (the report package/bundle path passes the report's snapshot
-  set), else the structure's latest FactSet — which for a bound note is
-  the standing ``'disclosure'`` set or the newest report snapshot,
-  either of which carries the narrative.
-
-  Returns ``None`` when the structure doesn't exist or isn't a
-  ``regulatory_disclosure``. An arc-bearing but not-yet-bound note
-  yields an envelope with an empty rendering (consistent with an
-  unpicked numeric note).
+  Facts come from ``fact_set_id`` when pinned, else the latest FactSet.
+  ``None`` when the structure is missing, isn't a ``regulatory_disclosure``,
+  or has neither content nor arcs; an unbound note renders empty.
   """
   atoms = load_base_envelope_atoms(
     session,
@@ -81,8 +65,6 @@ def build_text_block_envelope(
     )
 
   if not facts and not atoms.associations:
-    # Neither content nor arcs — a bare registry row, not a renderable
-    # block (mirrors the roll_up path's arc-presence filter).
     return None
 
   elements_by_id = {e.id: e for e in atoms.elements}

@@ -1,9 +1,4 @@
-"""Fiscal calendar read operations.
-
-Pure readers and response assemblers over `FiscalCalendarService`, shared by
-the REST router and the GraphQL resolvers so the response shape is defined
-once.
-"""
+"""Fiscal calendar reads and response assembly, shared by REST and GraphQL."""
 
 from __future__ import annotations
 
@@ -22,14 +17,7 @@ from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 
 
 def get_fiscal_year_start_month(session: Session) -> int:
-  """Return the graph's configured fiscal year start month, defaulting to 1.
-
-  Pure helper used by report-window resolvers (e.g. the MCP financial
-  statement tool) when the caller wants to align an annual reporting
-  window to the tenant's fiscal year. Reads the first FiscalCalendar row
-  in the extensions session — there is at most one per graph because
-  the calendar is graph-singleton.
-  """
+  """The graph's fiscal year start month, defaulting to 1."""
   cal = session.query(FiscalCalendar).first()
   if cal and cal.fiscal_year_start_month:
     return int(cal.fiscal_year_start_month)
@@ -37,20 +25,11 @@ def get_fiscal_year_start_month(session: Session) -> int:
 
 
 def qb_sync_state(platform_db: Session, graph_id: str) -> tuple[bool, datetime | None]:
-  """Look up the QB connection state for a graph.
+  """`(has_connection, last_sync_at)` for the graph's live QB connection.
 
-  Returns `(has_connection, last_sync_at)` so the close gate can distinguish:
-
-  - **No connection**: `(False, None)` — gate passes unconditionally
-  - **Connection exists, never synced**: `(True, None)` — gate blocks as stale
-  - **Connection exists, has synced**: `(True, timestamp)` — gate compares
-    timestamp against period_end
-
-  A graph can have multiple QB connection rows (disconnected/old/new).
-  Disconnected and severed rows no longer feed the ledger, so they don't
-  count. Prefer a currently-connected one; fall back to the most recently
-  updated. `.first()` (not `.one_or_none()`) avoids a `MultipleResultsFound`
-  crash.
+  `(True, None)` means connected but never synced, which the close gate
+  treats as stale. Disconnected and severed rows don't count; among the
+  rest a connected one wins, then the most recently updated.
   """
   connection = (
     platform_db.query(Connection)
@@ -81,12 +60,7 @@ def build_fiscal_calendar_response(
   last_sync_at: datetime | None,
   service,
 ) -> FiscalCalendarResponse:
-  """Assemble the FiscalCalendarResponse from a calendar + derived state.
-
-  `service` is a `FiscalCalendarService` instance — passed explicitly
-  so tests can patch the router-level `_svc` and the patched value
-  flows in unchanged.
-  """
+  """`service` is passed in so a patched `FiscalCalendarService` flows through."""
   periods = (
     session.query(FiscalPeriod)
     .filter(FiscalPeriod.graph_id == graph_id)
@@ -94,10 +68,6 @@ def build_fiscal_calendar_response(
     .all()
   )
 
-  # Closeable check for the next period in the catch-up sequence.
-  # Pass session+graph_id so fresh-tenant catch-up (no closed_through yet)
-  # walks from the earliest open FiscalPeriod up to the target instead of
-  # returning just `[close_target]`.
   catch_up = service.catch_up_sequence(calendar, session=session, graph_id=graph_id)
   next_period_to_close = catch_up[0] if catch_up else None
   gate = None

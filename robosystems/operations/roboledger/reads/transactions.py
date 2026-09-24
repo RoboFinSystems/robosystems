@@ -80,11 +80,7 @@ def list_transactions(
 def get_transaction(
   session: Session, transaction_id: str
 ) -> LedgerTransactionDetailResponse | None:
-  """Return the full transaction detail (entries + line items), or None.
-
-  Returns None when no transaction row exists with the given id. The
-  caller translates None into a 404.
-  """
+  """The transaction with entries and line items, or None."""
   txn = session.execute(
     select(Transaction).where(Transaction.id == transaction_id)
   ).scalar_one_or_none()

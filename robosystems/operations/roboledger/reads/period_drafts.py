@@ -1,14 +1,6 @@
-"""Period drafts read operation.
-
-Returns every draft entry whose `posting_date` falls within a period,
-fully expanded with line items, element names/codes, source schedule
-name, and per-entry balance check. Pure read — no side effects.
-
-The entry projection and row→entry grouping live in `journal_entries`,
-shared with the journal read. This module is the close-review *outbox*
-on top of it: the QB write-back disposition and the period aggregates.
-Amounts stay in cents here — that is this response's contract, and the
-shared fetch is unit-neutral.
+"""Period drafts: the close-review outbox. Every draft entry in a period with
+line items, plus the QB write-back disposition and period aggregates. Amounts
+are cents (this response's contract).
 """
 
 from __future__ import annotations
@@ -38,21 +30,12 @@ def list_period_drafts(
 ) -> PeriodDraftsResponse:
   """Return all draft entries for review within a given YYYY-MM period.
 
-  This is the close-review *outbox*: every queued draft entry, plus —
-  when ``writeback`` is supplied (the qb_authoritative/hybrid QB
-  connection the caller resolved against the platform DB) — a
-  ``will_publish_to_qb`` flag per draft and a publish summary on the
-  response. The publish predicate is shared with the actual close write
-  (``qb_writeback.py``), so the preview cannot drift from what
-  ``close-period`` does. When ``writeback`` is None (no write-back
-  connection), every draft is local-only.
+  With a ``writeback`` connection, each draft carries ``will_publish_to_qb``
+  from the same predicate close uses (``qb_writeback.py``); without one, every
+  draft is local-only.
   """
   period_start, period_end = period_date_range(period)
 
-  # Drafts that close would publish to QB — but only actually publish if
-  # a write-back connection exists. Skip the eligibility query entirely
-  # when there's no connection (the common native/no-connection case),
-  # since the result would be discarded.
   has_writeback = writeback is not None
   eligible_ids = (
     writeback_eligible_entry_ids(session, period_start, period_end)
@@ -93,8 +76,6 @@ def list_period_drafts(
       all_balanced = False
     total_debit += entry_debit
     total_credit += entry_credit
-    # Publishes on close only if both halves of the predicate hold:
-    # a write-back connection exists AND this draft is eligible.
     will_publish = has_writeback and entry.entry_id in eligible_ids
     if will_publish:
       qb_publish_count += 1

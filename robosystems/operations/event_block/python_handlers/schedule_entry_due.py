@@ -1,15 +1,5 @@
-"""Schedule entry due event handler.
-
-Fires when create-event-block runs with event_type='schedule_entry_due' and
-apply_handlers=True. Drafts (or refreshes) a closing entry derived from a
-schedule's facts for the given period, then links the entry to the event.
-
-The idempotent five-outcome reconcile lives in
-`ScheduleService.create_closing_entry`; this handler sequences that call
-inside the event-block unit of work.
-
-Event status after success: 'classified' (the draft still has to go
-through close-period to become posted).
+"""schedule_entry_due handler: drafts or refreshes a schedule's closing entry
+for a period via the idempotent `ScheduleService.create_closing_entry`.
 """
 
 from __future__ import annotations
@@ -102,11 +92,9 @@ def dispatch_preview(
   body: CreateEventBlockRequest,
   metadata: ScheduleEntryDueMetadata,
 ) -> HandlerPreview:
-  """Read-only: inspect the schedule + target period fact and describe the plan.
+  """Describe the draft from the schedule's in-scope period fact.
 
-  Does not call `create_closing_entry` — that writes rows. Mirrors only the
-  subset of its logic needed to describe the draft: load the schedule, find
-  the in-scope fact for the period, report the resulting entry.
+  Re-implements the read side of `create_closing_entry`, which writes.
   """
   from sqlalchemy import text
 

@@ -19,10 +19,8 @@ def find_linked_entity(
 ) -> tuple[str | None, str | None]:
   """Find an existing linked entity for a source graph.
 
-  Returns `(entity_id, entity_name)` — both `None` when no linked
-  entity has been auto-created yet (report sharing is what creates
-  them). This function only looks up existing entities; it never
-  reaches into the source graph.
+  Returns `(None, None)` until report sharing has created one; never reads
+  the source graph.
   """
   existing = session.execute(
     text(
@@ -87,7 +85,6 @@ def list_securities(
     .all()
   )
 
-  # Batch-load entity names
   entity_ids = {r.entity_id for r in rows if r.entity_id}
   entity_map: dict[str, str] = {}
   if entity_ids:

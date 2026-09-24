@@ -35,12 +35,7 @@ class EngineValidationError(Exception):
 
 
 def resolve_agent_type(session: Session, agent_id: str | None) -> str | None:
-  """The counterparty's ``agent_type`` for DSL handler matching, or ``None``.
-
-  Shared by the capture path (``commands``) and the handlers that consult
-  the rule floor at commit (``python_handlers.bank_feed``): both sit above
-  this module, so the lookup lives here rather than in either.
-  """
+  """The counterparty's ``agent_type`` for DSL handler matching, or ``None``."""
   if agent_id is None:
     return None
   agent = session.get(Agent, agent_id)
@@ -97,11 +92,9 @@ def apply_handler(
 ) -> list[Transaction]:
   """Evaluate handler.transaction_template against event and persist GL rows.
 
-  ``session`` must be tenant-scoped (search_path already set) and ``event``
-  already flushed, so its id is available for the ``triggered_by_event_id``
-  links. Rows are flushed but not committed — ``create_event_block`` commits
-  after this returns so the event row and its GL rows land atomically.
-  Returns one Transaction per template entry.
+  ``session`` must be tenant-scoped and ``event`` already flushed (its id
+  is linked). Rows are flushed, not committed. Returns one Transaction per
+  template entry.
 
   Raises ``EngineValidationError`` on an unbalanced entry, a missing element,
   or a negative amount, and ``TemplateInterpolationError`` on a bad template
@@ -126,8 +119,7 @@ def apply_handler(
   # mint a draft while close is publishing, or after statements are stamped.
   assert_period_not_closed(session, posting_date)
 
-  # One timestamp per handler invocation keeps the audit trail coherent —
-  # Transaction, Entry, and every LineItem share the same created_at/updated_at.
+  # One timestamp shared by every row this invocation writes.
   now = datetime.now(UTC)
 
   created_transactions: list[Transaction] = []
@@ -168,7 +160,6 @@ def apply_handler(
         "Every entry must have equal debit and credit amounts."
       )
 
-    # Create Transaction shell (the real-world event wrapper)
     txn = Transaction(
       type=event.event_type,
       amount=debit_cents,
@@ -185,7 +176,6 @@ def apply_handler(
     session.add(txn)
     session.flush()
 
-    # Create Entry (accounting interpretation)
     entry = Entry(
       transaction_id=txn.id,
       type="standard",

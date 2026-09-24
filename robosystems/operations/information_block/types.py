@@ -1,16 +1,4 @@
-"""Registry types for Information Block construction.
-
-Defines :class:`BlockTypeRegistryEntry` — the code-owned descriptor for
-each block type the system knows about. One entry binds the block type's
-display metadata, default Information Model values, typed mechanics and
-create-request schemas, and the two dispatch handlers (``create`` and
-``build_envelope``) that make the generic construction machinery work.
-
-The registry itself (``registry.py``) is a ``dict[str, BlockTypeRegistryEntry]``
-populated at module import. Adding a block type is a code change — a new
-``BlockTypeRegistryEntry`` literal plus the module that holds its
-handlers. No DB rows, no runtime registration.
-"""
+"""Registry entry type for Information Block types."""
 
 from __future__ import annotations
 
@@ -31,12 +19,7 @@ ConstructionMode = Literal["declarative", "compositional", "derivative"]
 
 @dataclass(frozen=True)
 class BlockTypeRegistryEntry:
-  """Declarative description of a single Information Block type.
-
-  One entry per block type. Instantiated at module scope in
-  ``registry.py`` and looked up by ``id`` when the generic construction
-  or read paths dispatch.
-  """
+  """Declarative description of a single Information Block type."""
 
   id: str
   """Stable discriminator — e.g. 'schedule'. Matches the block_type

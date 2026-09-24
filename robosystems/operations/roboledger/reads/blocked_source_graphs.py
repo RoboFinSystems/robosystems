@@ -31,9 +31,8 @@ def enrich_blocks(
 ) -> list[BlockedSourceGraphResponse]:
   """Attach graph display names from the platform DB.
 
-  Name only, deliberately — unlike publish-list members this does not resolve
-  the owning org. A block is a record the recipient keeps about a sender they
-  already know; there is no reason for it to widen what they can learn.
+  Name only, deliberately: unlike publish-list members, a block does not
+  reveal the sender's owning org.
   """
   if not rows:
     return []
@@ -79,8 +78,8 @@ def list_blocked_source_graphs(
 def is_source_blocked(session: Session, source_graph_id: str) -> bool:
   """Whether this graph has blocked ``source_graph_id`` from sharing in.
 
-  The enforcement predicate — called from ``share_report``'s per-target copy
-  against the *target* tenant's session, before anything is written.
+  Enforced in ``share_report`` against the target tenant's session before
+  anything is written.
   """
   return (
     session.execute(

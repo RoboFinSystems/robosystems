@@ -1,15 +1,4 @@
-"""Registry types for Taxonomy Block construction.
-
-Defines :class:`TaxonomyBlockRegistryEntry` — the code-owned descriptor
-for each taxonomy block type the system knows about. One entry binds
-the block type's display metadata, request/response schemas, and the
-four dispatch handlers (create, update, delete, build_envelope) that
-make the generic construction and read machinery work.
-
-The registry is a ``dict[str, TaxonomyBlockRegistryEntry]`` populated
-at module import. Adding a block type is a code change — a new
-registry literal plus the module that holds its handlers.
-"""
+"""Registry entry type for Taxonomy Block types."""
 
 from __future__ import annotations
 

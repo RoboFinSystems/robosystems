@@ -1,23 +1,7 @@
-"""Write commands for Taxonomy Blocks — the generic construction entry.
+"""Create/update/delete Taxonomy Block commands, routed by ``taxonomy_type``.
 
-Three public commands dispatch by ``taxonomy_type`` to the registered
-handler: :func:`create_taxonomy_block`, :func:`update_taxonomy_block`,
-:func:`delete_taxonomy_block`. No business logic lives here — the
-commands are pure routing. Domain-specific mutation lives in the
-block-type handler modules: ``chart_of_accounts.py``,
-``reporting_extension.py``, ``custom_ontology.py``,
-``reporting_standard.py``.
-
-These are mounted as the ``create-taxonomy-block`` /
-``update-taxonomy-block`` / ``delete-taxonomy-block`` CQRS operations
-in ``routers/extensions/roboledger/operations.py``. The REST registrar's
-error_map routes ``ValueError → 422``, ``NotImplementedError → 501``,
-and ``TaxonomyAuthoringDisabledError → 403``.
-
-The one policy check that lives here (rather than in a handler) is the
-``TAXONOMY_AUTHORING_ENABLED`` environment gate: it must sit at the
-dispatch chokepoint so a single check covers both the REST operations
-and the auto-generated MCP tools, which call these same functions.
+The ``TAXONOMY_AUTHORING_ENABLED`` gate lives here, at the dispatch
+chokepoint, so it covers both the REST operations and the MCP tools.
 """
 
 from __future__ import annotations
@@ -73,10 +57,7 @@ def create_taxonomy_block(
 ) -> TaxonomyBlockEnvelope:
   """Create a taxonomy block and return its full envelope.
 
-  Dispatches on ``body.taxonomy_type``. Unknown types raise
-  :class:`ValueError` → 422. The Pydantic-level validation on
-  :class:`CreateTaxonomyBlockRequest` (e.g. parent_taxonomy_id required
-  for reporting_extension) has already run by the time we get here.
+  Unknown types raise :class:`ValueError`.
   """
   entry = _get_entry_or_422(body.taxonomy_type)
   _check_authoring_enabled(body.taxonomy_type)
@@ -98,19 +79,14 @@ def update_taxonomy_block(
 ) -> TaxonomyBlockEnvelope:
   """Mutate a taxonomy block and return the refreshed envelope.
 
-  Dispatch uses the existing taxonomy row's ``taxonomy_type`` to pick
-  the handler, not a wire-level discriminator. Block types that can't
-  be mutated (``reporting_standard``) raise :class:`NotImplementedError`
-  → HTTP 501.
+  Dispatches on the stored row's ``taxonomy_type``; immutable types raise
+  :class:`NotImplementedError`.
   """
   from robosystems.models.extensions import Taxonomy
   from robosystems.operations.locking import lock_by_id
 
-  # One envelope update per taxonomy at a time. The apply steps are
-  # delete-then-recreate over the taxonomy's rows (auto rules, associations)
-  # and check-then-insert over unique keys (element qnames); two concurrent
-  # updates under READ COMMITTED each miss the other's rows and leave
-  # duplicated rules or die on the qname index.
+  # One update per taxonomy at a time: the apply steps delete-then-recreate
+  # and check-then-insert, which race under READ COMMITTED.
   taxonomy = lock_by_id(
     session,
     Taxonomy,

@@ -1,18 +1,5 @@
-"""Journal entry reversed event handler.
-
-Fires when create-event-block runs with event_type='journal_entry_reversed'
-and apply_handlers=True. Posts a reversing entry against an existing posted
-journal entry, flipping debits and credits and marking the original as
-reversed. Both Entry rows (the original and the new reversing entry) carry
-a `triggered_by_event_id` link to this event.
-
-Entry-status validation, the line-item flip, and the closed-period gate all
-come from `reverse_journal_entry`
-(`operations/roboledger/commands/journal_entries.py`); this handler sequences
-that call inside the event-block unit of work.
-
-Event status after success: 'fulfilled' (the reversal is terminal — the
-original is now closed by an offsetting posted entry).
+"""journal_entry_reversed handler: posts a reversing entry via
+`reverse_journal_entry` and links it to the event, which ends ``fulfilled``.
 """
 
 from __future__ import annotations
@@ -81,7 +68,7 @@ def dispatch(
   metadata: JournalEntryReversedMetadata,
   created_by: str,
 ) -> HandlerResult:
-  """Reverse the original entry; link both rows to the event."""
+  """Reverse the original entry; link the reversing entry to the event."""
   body = ReverseJournalEntryRequest(
     entry_id=metadata.entry_id,
     posting_date=metadata.posting_date,
@@ -89,28 +76,13 @@ def dispatch(
   )
   reversing = reverse_journal_entry(session, body, created_by)
 
-  # Link the reversing Entry to the event.
   session.execute(
     update(Entry).where(Entry.id == reversing.id).values(triggered_by_event_id=event.id)
   )
 
-  # The original is deliberately NOT re-pointed at this event. It used to be,
-  # to "complete the audit chain from either side" — but `Entry` has a single
-  # `triggered_by_event_id`, so that was an overwrite, not a second link: it
-  # discarded the provenance of the event that *created* the entry.
-  #
-  # Three consumers read this column as creation provenance and were wrong
-  # afterwards. `_assert_retractable` counts landed entries by it, so the
-  # creating event became retractable while its posted entry stood. The QB
-  # full-rebuild wipe (`extensions/loader.py`) deletes entries whose creating
-  # event is in the wipe set, so a re-pointed original survives its own wipe as
-  # an orphan while a reversal-event wipe takes it instead. And the projection
-  # then asserts an entry posted in March was caused by an event that occurred
-  # in September.
-  #
-  # The backward link already exists and needs no column: the reversing entry
-  # carries `reversal_of = <original>` and its own `triggered_by_event_id`, so
-  # "which event reversed this entry" is one join from the original.
+  # Never re-point the original: `triggered_by_event_id` is creation
+  # provenance (retraction guard, QB rebuild wipe). The reversal is reachable
+  # from the original through the reversing entry's `reversal_of`.
 
   logger.info(
     "journal_entry_reversed event %s fired: original=%s reversing=%s",
@@ -149,10 +121,8 @@ def dispatch_preview(
       "posted entries can be reversed."
     )
 
-  # Same check the command makes. A schedule with `auto_reverse` creates the
-  # reversal at generation time and leaves the original `posted`, so status
-  # alone would let preview promise a reversal the command then refuses — and a
-  # preview that disagrees with execution is worse than no preview.
+  # Same check as the command: an `auto_reverse` schedule leaves the original
+  # `posted` with a reversal already in place.
   existing_reversal = session.execute(
     select(Entry.id).where(Entry.reversal_of == original.id)
   ).scalar_one_or_none()
@@ -176,7 +146,6 @@ def dispatch_preview(
       validation_errors=errors,
     )
 
-  # Build the planned reversal preview by flipping the original's line items.
   original_lines = list(
     session.execute(select(LineItem).where(LineItem.entry_id == original.id))
     .scalars()

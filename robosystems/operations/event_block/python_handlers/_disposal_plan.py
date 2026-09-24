@@ -1,10 +1,5 @@
-"""Pure compute helper for asset disposal.
-
-Shared by the event-driven disposal handler (`asset_disposed.py`) and its
-preview path so both run identical read-and-compute logic.
-
-Read-only — does not flush, commit, or write any rows.
-"""
+"""Read-only disposal plan computation, shared by the asset_disposed handler
+and its preview."""
 
 from __future__ import annotations
 
@@ -49,13 +44,10 @@ def compute_disposal_plan(
   proceeds_element_id: str | None,
   gain_loss_element_id: str | None,
 ) -> DisposalPlan:
-  """Read schedule + accumulated depreciation, compute NBV/gain/loss, build line items.
+  """Compute NBV, gain/loss and the balanced line items (cents).
 
-  All amounts are integer cents. Does not write, so it is safe from a
-  preview path. Raises ``ScheduleNotFoundError`` when ``structure_id`` isn't
-  a schedule, and ``ValueError`` when required schedule metadata is missing
-  or the disposal is internally inconsistent (proceeds > 0 without a
-  ``proceeds_element_id``, and so on).
+  Raises ``ScheduleNotFoundError`` when ``structure_id`` isn't a schedule,
+  and ``ValueError`` on missing schedule metadata or inconsistent inputs.
   """
   structure = session.execute(
     select(Structure).where(
@@ -84,18 +76,11 @@ def compute_disposal_plan(
   if not credit_element_id:
     raise ValueError("Disposal requires entry_template.credit_element_id.")
 
-  # Most recent cumulative in-scope instant fact up to disposal_date on the
-  # credited element. fact_scope='in_scope' parity with schedule_entry_due:
-  # post-truncation / amendment chains can leave out-of-scope instant facts
-  # behind, and picking one would produce a wrong NBV silently.
-  #
-  # What that fact MEANS depends on the schedule shape:
-  # - Depreciation-style (credit element is a contra account, e.g.
-  #   Accumulated Depreciation): the instant fact is the RISING cumulative
-  #   accumulated balance.
-  # - Prepaid-style ("self-carried": the credited element IS the asset,
-  #   e.g. Prepaid Expenses): the instant fact is the DECLINING remaining
-  #   balance — reading it as "accumulated" inverts NBV.
+  # Latest in-scope instant fact on the credited element (out-of-scope facts
+  # left by truncation would give a wrong NBV). For a contra account it is
+  # the rising accumulated balance; for a self-carried (prepaid-style)
+  # schedule, where the credited element is the asset, it is the declining
+  # remaining balance.
   acc_row = session.execute(
     text(
       "SELECT value FROM facts "
@@ -133,9 +118,7 @@ def compute_disposal_plan(
         "Nothing to dispose: the schedule's remaining balance is zero "
         "and no proceeds were supplied."
       )
-    # One credit derecognizes the asset at its remaining balance — a
-    # DR-accumulated/CR-cost pair on the SAME element would net to the
-    # same amount while doubling the gross line traffic.
+    # One credit at the remaining balance, not a DR/CR pair on one element.
     line_items: list[dict] = []
     if nbv > 0:
       line_items.append(
@@ -148,14 +131,12 @@ def compute_disposal_plan(
       )
   else:
     line_items = [
-      # DR accumulated depreciation (remove the contra account)
       {
         "element_id": credit_element_id,
         "debit_amount": accumulated_depreciation,
         "credit_amount": 0,
         "description": "Remove accumulated depreciation",
       },
-      # CR asset at cost
       {
         "element_id": asset_element_id,
         "debit_amount": 0,

@@ -9,30 +9,18 @@ the rest of the model per forward month:
   balancing roll** — with every other line known,
   ``cash = LiabilitiesAndStockholdersEquity - Σ other assets``, so
   A = L + E holds *by construction*.
-- **Schedule projection**: schedules emit future ``in_scope`` facts (duration
-  movements + running-balance instants) in their ``factset_type='schedule'``
-  sets. Duration contributions delta-adjust the IS carry so an ending
-  schedule's expense stops instead of carrying forever; instant movements
-  roll the BS (accumulated depreciation keeps growing, a prepaid keeps
-  drawing down). Contributions route through the CoA→rs-gaap mapping's
-  primary target into the elements the base sets actually carry — the PP&E
-  gross/contra pair routes onto ``PropertyPlantAndEquipmentNet`` the way
-  ``fact_grid._synthesize_ppe_net_facts`` nets it for actuals.
-- **Derived cash flow**: operating CF leaves derive from period-over-period
-  BS deltas via the library's ``association_type='derivation'`` arcs (a leaf
-  with a direct IS value, e.g. DDA, wins over derivation); the residual
-  against the balancing ΔCash books to
-  ``IncreaseDecreaseInOtherOperatingCapitalNet``, so the CF foots to ΔCash
-  exactly.
+- **Schedule projection**: schedule facts delta-adjust the IS carry (an
+  ended schedule's expense stops) and roll BS instants, routed through the
+  CoA→rs-gaap mapping's primary target into elements the base sets carry.
+- **Derived cash flow**: operating CF leaves derive from BS deltas via
+  ``derivation`` arcs (a direct IS value, e.g. DDA, wins); the residual
+  against ΔCash books to the reconciling leaf, so the CF foots exactly.
 
-Instant movements are computed **per schedule FactSet**, not per
-element: two depreciation schedules feeding one anchor must each
-contribute their own month-over-month movement — an element-level
-aggregate would reverse an ended schedule's entire balance the month
-its instants stop.
+Instant movements are computed per schedule FactSet, not per element: an
+element-level aggregate would reverse an ended schedule's whole balance the
+month its instants stop.
 
-Everything here is pure given a loaded :class:`ArticulationContext`;
-:mod:`.forecast_compute` owns session orchestration and emission.
+Everything here except loading is pure given an :class:`ArticulationContext`.
 """
 
 from __future__ import annotations
@@ -80,27 +68,17 @@ _PPE_ROUTES: dict[str, float] = {
   "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment": -1.0,
 }
 
-# Contra polarity for direct-routed instants. Unlike PP&E, a Net-only
-# presentation (intangibles) maps its contra CoA account straight onto
-# the Net anchor — the trial-balance path nets naturally there (the
-# contra carries a credit balance), but a schedule's running balance is
-# stored positive, so applying it at +1 marches the Net line UP by the
-# monthly amortization instead of down. balance_type can't catch this —
-# QB files contra-asset accounts under an asset AccountType, so the
-# loader's contra EFS trait is the only signal. Flip the sign whenever
-# source and target disagree on contra-ness; congruent pairs
-# (contra→contra concept, plain→plain) keep +1.
+# A schedule's running balance is stored positive, so a contra account
+# mapped straight onto a Net anchor (intangibles) must flip sign. The EFS
+# contra trait is the only signal (QB files contra-assets as assets). Flip
+# whenever source and target disagree on contra-ness.
 _CONTRA_TRAIT_IDENTIFIERS = frozenset(
   {"contraAsset", "contraLiability", "contraEquity"}
 )
 
-# Back-compat alias for tenants whose library predates the split-anchor AP
-# derivation arc (deriv-cf-ap-arc-2), which only reaches them at their next
-# resync. Without it, AP movement mapped to the sibling
-# AccountsPayableCurrent (the DPO rule's target) rather than the combined
-# AccountsPayableAndAccruedLiabilitiesCurrent anchor lands in the
-# reconciling plug instead of the named CF line. The guard below makes the
-# alias a no-op once the real arc is present.
+# Back-compat for libraries that predate the AccountsPayableCurrent → AP CF
+# derivation arc (until their next resync); otherwise that movement lands in
+# the reconciling plug. A no-op once the arc is present.
 _AP_CF_LEAF_QNAME = "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
 _AP_ALIAS_SOURCE_QNAME = "rs-gaap:AccountsPayableCurrent"
 
@@ -111,14 +89,10 @@ _RECONCILE_TOLERANCE = 0.005
 class ScheduleProjection:
   """Schedule contributions routed into base-set element space.
 
-  ``duration_total``: IS element → month key (``YYYY-MM``) → Σ weighted
-  contribution (element-level aggregate is correct for durations — an
-  ended schedule's expense should stop).
+  ``duration_total``: IS element → ``YYYY-MM`` → Σ contribution.
   ``instant_by_set``: (schedule FactSet id, BS element) → period_end →
-  weighted running balance (per-set so movements freeze, never reverse,
-  when a schedule ends).
-  ``unrouted``: qnames whose contributions had no base-set landing spot
-  — surfaced as compute diagnostics, never silently dropped.
+  weighted running balance.
+  ``unrouted``: target qnames with no base-set landing spot (diagnostics).
   """
 
   duration_total: dict[str, dict[str, float]] = field(default_factory=dict)
@@ -160,13 +134,9 @@ def _resolve_qnames(session: Session, qnames: list[str]) -> dict[str, str]:
 def _load_operating_derivations(
   session: Session,
 ) -> dict[str, list[tuple[str, float]]]:
-  """Operating derivation arcs (CF leaf ← BS source, signed weight).
-
-  Same query + investing/financing exclusion as
-  ``fact_grid._derive_cash_flow_facts`` — net-delta derivation is an
-  operating-only doctrine (gross investing/financing presentation can't
-  come from balance deltas).
-  """
+  """Operating derivation arcs (CF leaf ← BS source, signed weight), as in
+  ``fact_grid._derive_cash_flow_facts``: investing/financing lines can't come
+  from balance deltas."""
   rows = session.execute(
     text("""
       SELECT a.from_element_id, a.to_element_id, a.weight
@@ -200,20 +170,14 @@ def _load_schedule_projection(
 ) -> ScheduleProjection:
   """Load schedule facts in the window, mapped + routed into base space.
 
-  Each schedule CoA element routes through its **primary** mapping
-  target (trait-classified targets outrank inferred, qname tiebreak —
-  the ``_read_mapped_balances`` close-primary designation), then into
-  the element the base set carries: direct when present (with the
-  contra sign flip when source and target disagree on contra-ness —
-  see ``_CONTRA_TRAIT_IDENTIFIERS``), the PP&E gross/contra pair onto
-  Net, anything else → ``unrouted``.
+  Each schedule CoA element routes through its primary mapping target
+  (classified before unclassified, qname tiebreak, as in
+  ``_read_mapped_balances``), then onto the base-set element directly or,
+  for the PP&E gross/contra pair, onto Net; anything else is ``unrouted``.
 
-  Deliberately NOT filtered on ``fact_scope``: the base month sits left
-  of ``closed_through``, so its schedule facts are ``historical`` — and
-  they are exactly the delta/movement basis. Without them every forward
-  month re-adds the base month's expense (DDA compounding by one
-  month's depreciation per month) and the first month's instant
-  movement re-adds entire running balances.
+  Not filtered on ``fact_scope``: the base month's facts are ``historical``
+  but are the delta basis; without them every forward month re-adds the
+  base month's expense.
   """
   projection = ScheduleProjection()
   if mapping_id is None:
@@ -266,9 +230,8 @@ def _load_schedule_projection(
   if not rows:
     return projection
 
-  # Primary target per SOURCE element (a schedule account mapped to a
-  # statement anchor + disclosure concepts contributes once, to the
-  # anchor) — the close-primary ranking from _read_mapped_balances.
+  # One primary target per source element, so a fan-out mapping contributes
+  # once.
   by_source: dict[str, list] = {}
   for row in rows:
     by_source.setdefault(row.source_id, []).append(row)
@@ -290,12 +253,8 @@ def _load_schedule_projection(
       weight = 1.0
       if target_id in base_bs_element_ids:
         routed_id = target_id
-        # Contra netting on the direct route: a contra CoA account
-        # mapped straight onto a Net anchor (intangibles' Accumulated
-        # Amortization → IntangibleAssetsNetExcludingGoodwill) must
-        # reduce it — its schedule running balance is stored positive.
-        # The _PPE_ROUTES arm below encodes its own netting sign, so the
-        # flip applies only here.
+        # Contra flip (see _CONTRA_TRAIT_IDENTIFIERS); _PPE_ROUTES carries
+        # its own sign.
         source_contra = row.source_classification in _CONTRA_TRAIT_IDENTIFIERS
         target_contra = row.classification in _CONTRA_TRAIT_IDENTIFIERS
         if source_contra != target_contra:
@@ -423,16 +382,11 @@ def load_articulation_context(
 def schedule_is_delta(
   ctx: ArticulationContext, element_id: str, month: str, reference_month: str
 ) -> float:
-  """IS carry adjustment: this month's schedule expense minus the
-  reference month's. Element-level on purpose — an ended schedule's
-  expense must STOP, not carry.
+  """IS carry adjustment: this month's schedule expense minus the reference
+  month's. Element-level so an ended schedule's expense stops.
 
-  The walk passes the PREVIOUS walk month as the reference (the carried
-  value contains that month's schedule contribution, since prior values
-  roll), so successive deltas telescope to ``sched[m] - sched[base]``.
-  Anchoring every month at the base instead re-subtracts the gap
-  cumulatively, compounding an expense line negative even on coherent
-  books. Mirrors ``schedule_instant_movement``'s ``prev_end`` reference."""
+  Pass the previous walk month as the reference, so deltas telescope to
+  ``sched[m] - sched[base]``; a fixed base reference would compound."""
   per_month = ctx.schedules.duration_total.get(element_id)
   if not per_month:
     return 0.0
@@ -523,10 +477,9 @@ def derive_cash_flow(
 ) -> tuple[dict[str, float], float]:
   """One month's CF values (leaves + emission subtotals) and the plug.
 
-  Leaves: a derivation leaf with a direct IS value (DDA) takes it
-  (direct-fact-wins); everything else derives ``Σ weight · ΔBS``.
-  The residual against the balancing ΔCash books to the reconciling
-  leaf — the CF foots to ΔCash exactly, by the actuals plug doctrine.
+  A leaf with a direct IS value (DDA) takes it; others derive
+  ``Σ weight · ΔBS``. The residual against ΔCash books to the reconciling
+  leaf.
   """
   cf: dict[str, float] = {}
   for leaf_id, sources in ctx.derivations.items():

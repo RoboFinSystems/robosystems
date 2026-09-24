@@ -1,8 +1,6 @@
-"""Write operations for the fiscal calendar and period close workflow.
-
-Thin wrappers over `FiscalCalendarService` and `PeriodCloseService`. They
-take an extensions session (calendar / period tables), a platform DB session
-(QB sync state), and a service instance so tests can swap it out.
+"""Fiscal calendar and period-close commands over `FiscalCalendarService` and
+`PeriodCloseService`. Each takes an extensions session plus a platform
+session (for QB sync state).
 """
 
 from __future__ import annotations
@@ -54,13 +52,7 @@ from robosystems.operations.roboledger.reads.fiscal_calendar import (
 
 @dataclass
 class ReopenPeriodResult:
-  """Return value for `reopen_period` — wraps the refreshed calendar.
-
-  ``statement_sets_retracted`` counts the reopened month's canonical
-  statement FactSets deleted by the reopen — 0 when the close soft-skipped
-  stamping. The REST router returns only ``fiscal_calendar``; the MCP tool
-  surfaces the count.
-  """
+  """``statement_sets_retracted`` is 0 when the close skipped stamping."""
 
   fiscal_calendar: FiscalCalendarResponse
   statement_sets_retracted: int = 0
@@ -80,13 +72,10 @@ class PeriodNotClosedError(Exception):
 
 
 class ReopenOrderError(Exception):
-  """Raised when reopening a closed period that is not the latest one.
+  """Only the latest closed period can be reopened.
 
-  Every later closed month carries statements stamped from this month's
-  numbers. A reopen makes those numbers mutable without touching the later
-  stamps, so the only reopen that leaves the closed series consistent is
-  the latest. ``reopen_order`` lists the months to reopen, latest first,
-  down to the one requested.
+  ``reopen_order`` lists the months to reopen, latest first, down to the
+  one requested.
   """
 
   def __init__(self, period: str, closed_through: str | None) -> None:
@@ -114,12 +103,9 @@ class ReopenOrderError(Exception):
 
 
 class BackfillPreconditionError(Exception):
-  """Raised when a plan-history backfill can't start.
+  """A plan-history backfill can't start.
 
-  ``code`` is machine-readable: ``nothing_closed`` (no close boundary to
-  backfill behind — run close-period first), ``no_ledger_data`` (the
-  graph has no entries to compile), or ``start_after_boundary`` (the
-  requested start is past `closed_through`).
+  ``code``: ``nothing_closed``, ``no_ledger_data``, or ``start_after_boundary``.
   """
 
   def __init__(self, code: str, message: str) -> None:
@@ -137,12 +123,7 @@ def initialize_ledger(
 ) -> tuple[InitializeLedgerResponse, list[str]]:
   """Initialize a fiscal calendar and seed fiscal periods.
 
-  Returns the response plus a list of warnings (e.g., from
-  `auto_seed_schedules=True` which is not implemented in v1). The
-  caller has already validated the request body via Pydantic.
-
-  Raises `CalendarAlreadyInitializedError` / `InvalidCloseTargetError`
-  from the service layer — the caller translates to HTTP 409 / 422.
+  Raises `CalendarAlreadyInitializedError` / `InvalidCloseTargetError`.
   """
   warnings: list[str] = []
   if body.auto_seed_schedules:
@@ -162,7 +143,6 @@ def initialize_ledger(
     note=body.note,
   )
 
-  # Seed FiscalPeriod rows.
   current = current_month_period()
   default_start = add_months(current, -23)
   start_period = body.earliest_data_period or default_start
@@ -200,7 +180,6 @@ def set_close_target(
   note: str | None,
   service: FiscalCalendarService,
 ) -> FiscalCalendarResponse:
-  """Set the close target for a graph. Raises service-level exceptions."""
   calendar = service.set_close_target(
     session,
     graph_id,
@@ -231,26 +210,18 @@ def close_period(
   allow_reconciling_items: bool = False,
   fence_wait_ms: int | None = None,
 ) -> ClosePeriodResponse:
-  """Close a fiscal period — the final commit action.
+  """Close a fiscal period and commit.
 
-  `actor_type` defaults to `"user"` for REST callers; MCP tools pass
-  `"agent"` so the audit log distinguishes Claude-driven closes from
-  human-driven ones.
-
-  `fence_wait_ms` is how long to wait for the period fence. `None` is the
-  request wait (request handlers do not wait); the worker close passes its
-  own budget, because a background job waits.
+  `fence_wait_ms=None` uses the request default (no wait); the worker
+  passes its own budget.
 
   Raises `CloseGateFailed`, `PeriodNotFoundError`,
-  `PeriodAlreadyClosedError`, `RowLockedError`,
-  `UnbalancedLedgerError`, `FiscalCalendarError` — caller translates
-  to appropriate HTTP status codes.
+  `PeriodAlreadyClosedError`, `RowLockedError`, `UnbalancedLedgerError`,
+  `WritebackFailed`, `StatementStampError`, `FiscalCalendarError`.
   """
   has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
-  # Exclusive fence spans the QB publish commit *and* this commit. A
-  # lock taken only inside `close()` would be released before the
-  # caller's commit, and a writer could sneak a draft into the month
-  # whose statements we just stamped.
+  # The fence spans the QB publish commit and this commit, so no writer can
+  # slip a draft into the month between stamping and commit.
   with exclusive_period_fence(
     graph_id,
     period,
@@ -275,11 +246,7 @@ def close_period(
     )
     session.commit()
 
-  # The close's writes (entries posted, statement sets stamped) change
-  # graph-materialized state, so the blue/green pipeline must rebuild —
-  # without this marker the graph keeps serving pre-close data while
-  # reporting fresh. Placed here (not the routers) so the REST and MCP
-  # surfaces both get it. Non-fatal by design.
+  # Posted entries and stamped statements change materialized graph state.
   from robosystems.operations.extensions.staleness import mark_graph_stale
 
   mark_graph_stale(graph_id, "period_closed")
@@ -314,27 +281,14 @@ def reopen_period(
   service: FiscalCalendarService,
   actor_type: str = "user",
 ) -> ReopenPeriodResult:
-  """Reopen a closed fiscal period.
+  """Reopen the latest closed period, retracting its canonical statements.
 
-  Retracts the month's canonical statement FactSets (close-time
-  stamping's inverse): a reopened month is no longer a closed assertion,
-  so its persisted statements — and their verification results — go
-  with it. The re-close restamps fresh sets.
-
-  Only the latest closed period — ``closed_through`` — can be reopened.
-  To reach an earlier month, reopen latest-first down to it, then close
-  forward; each reopen carries its own reason.
-
-  Raises `PeriodNotFoundInLedgerError` if the `FiscalPeriod` row
-  doesn't exist, `PeriodNotClosedError` if it's not actually closed,
-  `ReopenOrderError` if a later month is still closed, or service-level
-  `FiscalCalendarError` for calendar issues.
+  Raises `PeriodNotFoundInLedgerError`, `PeriodNotClosedError`,
+  `ReopenOrderError` (a later month is still closed), or
+  `FiscalCalendarError`.
   """
-  # Exclusive fence first — the same one `close_period` holds across its
-  # mid-flow QuickBooks commit — then the FiscalPeriod row lock. Two
-  # concurrent reopens cannot both retract the same month's statements,
-  # and a reopen cannot interleave with a close (that used to leave a
-  # period marked closed whose statements had been retracted).
+  # Same fence as close_period, so a reopen can't interleave with a close
+  # or another reopen. Lock order: fence, then the FiscalPeriod row.
   with exclusive_period_fence(graph_id, period, detail=_fence_detail(period)):
     calendar, retracted = _reopen_under_fence(
       session,
@@ -348,8 +302,6 @@ def reopen_period(
     )
     session.commit()
 
-  # The reopen retracts the month's canonical statement sets — graph
-  # state changed; mirror close_period's marker.
   from robosystems.operations.extensions.staleness import mark_graph_stale
 
   mark_graph_stale(graph_id, "period_reopened")
@@ -384,18 +336,13 @@ def _reopen_under_fence(
 ):
   """The reopen's writes, flushed but not committed.
 
-  Caller holds the exclusive period fence and owns the commit. Split out so
-  the backfill can run a reopen and the re-close as one transaction: on
-  its own, a committed reopen followed by a failing close left closed
-  history open with its statements retracted.
+  Caller holds the exclusive period fence and owns the commit, so the
+  backfill can reopen and re-close in one transaction.
 
-  ``enforce_latest`` refuses any period other than ``closed_through``.
-  Every later closed month carries statements stamped from this month's
-  numbers, and the reopen makes those numbers mutable without touching
-  the later stamps — so the only reopen that leaves the closed series
-  consistent is the latest one. The backfill's restamp opts out: it
-  recloses the month in the same transaction and walks forward to
-  ``closed_through``.
+  ``enforce_latest`` refuses any period but ``closed_through``: later closed
+  months carry statements stamped from this month's numbers. The backfill
+  restamp opts out because it recloses in the same transaction and walks
+  forward.
   """
   session.flush()
   with bounded_lock_wait(session, _fence_detail(period)):
@@ -429,22 +376,14 @@ def _reopen_under_fence(
     actor_type=actor_type,
     note=note,
   )
-  # Re-stamp schedule facts the retreated boundary has re-opened: the
-  # reopened window's facts were tagged 'historical' at generation and
-  # must return to 'in_scope' so the roll-forward carry-in and the
-  # re-close see the movement. Function-level import — commands.schedules
-  # ↔ information_block.schedule form a module-load cycle that a
-  # top-level import here would trip.
+  # The reopened window's schedule facts go back from 'historical' to
+  # 'in_scope' so the re-close sees the movement. Local import: module cycle.
   from robosystems.operations.roboledger.commands.schedules import (
     reinstate_reopened_schedule_scopes,
   )
 
   reinstate_reopened_schedule_scopes(session)
 
-  # Retract the reopened month's canonical statement sets.
-  # Function-level import — statement_sets pulls in information-block
-  # machinery this module otherwise never loads (same posture as the
-  # schedules import above).
   from robosystems.operations.roboledger.reports.statement_sets import (
     retract_canonical_statement_sets,
   )
@@ -466,28 +405,14 @@ def backfill_plan_history(
 ) -> BackfillPlanHistoryResponse:
   """Compile monthly statement history behind the close boundary.
 
-  Seeds missing `FiscalPeriod` rows (baseline-closed) back to the
-  clamped start, then walks every month in the range that lacks
-  canonical statement FactSets oldest-first (``body.restamp`` widens
-  the walk to every month in range — the healing pass after an engine
-  improvement changes what a stamp produces), running the real
-  `reopen_period` → `close_period` cycle on each — identical semantics
-  to a manual restamp, so balance validation, statement rules, QB
-  writeback guards, and audit events all apply per month.
+  Walks months lacking canonical statements (every month with
+  ``body.restamp``) oldest-first through a real reopen → close, so every
+  close check applies. Resumable: at most ``body.max_periods`` per call,
+  each month committing on its own. Months with drafts are skipped, never
+  posted. The first failure halts the walk, since continuing would hole
+  the series.
 
-  Chunked and resumable: at most ``body.max_periods`` months are
-  attempted per call; each month commits individually (via the reused
-  commands), so an interrupted run resumes where it left off — a month
-  left in status='closing' by a failed reclose skips straight to the
-  close on retry. Months with draft entries are skipped, never posted:
-  the backfill refuses to commit ledger changes nobody reviewed.
-
-  A failed reclose halts processing (continuing would hole the series);
-  the failure rides the month's outcome and everything untried lands in
-  ``remaining_periods``.
-
-  Raises `FiscalCalendarError` when the calendar isn't initialized and
-  `BackfillPreconditionError` for nothing-closed / no-data / bad-range.
+  Raises `FiscalCalendarError` or `BackfillPreconditionError`.
   """
   calendar = service.require(session, graph_id)
   closed_through = calendar.closed_through_period
@@ -527,8 +452,6 @@ def backfill_plan_history(
   if rows_created:
     session.commit()
 
-  # Function-level import — statement_sets pulls in information-block
-  # machinery (same posture as reopen_period's imports above).
   from robosystems.operations.roboledger.reports.statement_sets import (
     StatementStampError,
     has_canonical_statement_sets,
@@ -576,15 +499,8 @@ def backfill_plan_history(
     )
     try:
       if fp.status == "closed":
-        # Reopen and re-close as ONE transaction under ONE exclusive fence.
-        # `reopen_period` commits inside its own fence; if the close that
-        # followed then failed, closed history was left open with its
-        # statements retracted, and the rollback below could not undo it.
-        # The window has no drafts (checked above), so the close's only
-        # mid-flow commit — the QuickBooks marker commit inside
-        # `_publish_drafts_to_qb` — has nothing to publish and never runs;
-        # the reopen's writes and the re-close therefore commit together or
-        # roll back together.
+        # No drafts in the window, so the close's QB marker commit has
+        # nothing to publish: reopen and re-close commit or roll back as one.
         close_result = _restamp_closed_period(
           session,
           platform_db,
@@ -673,18 +589,12 @@ def _restamp_closed_period(
   allow_stranded_obligations: bool,
   allow_reconciling_items: bool,
 ) -> ClosePeriodResponse:
-  """Reopen a closed period and close it again in one transaction.
+  """Reopen and re-close a period in one transaction under one fence.
 
-  Used by the backfill to re-stamp a month's canonical statements. Holds the
-  exclusive period fence across both halves and commits once, so a failure
-  anywhere — close gate, unbalanced ledger, statement stamp — rolls the
-  reopen back with it and the period stays exactly as it was.
+  Any failure rolls the reopen back with it.
   """
   has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
   with exclusive_period_fence(graph_id, period, detail=_fence_detail(period)):
-    # An interior month is fine here: the restamp recloses it below in the
-    # same transaction and the backfill walks forward to closed_through,
-    # so no later stamp is left behind.
     _reopen_under_fence(
       session,
       graph_id,

@@ -1,9 +1,4 @@
-"""Write operations for schedules and closing entries.
-
-Thin wrappers over `ScheduleService`. The service does the heavy lifting
-(fact generation, entry creation, balance validation) — these functions
-translate request bodies to service calls and assemble responses.
-"""
+"""Schedule write operations: request bodies to ScheduleService calls."""
 
 from __future__ import annotations
 
@@ -52,22 +47,14 @@ from robosystems.operations.roboledger.schedules.service import (
 
 
 class ScheduleNotFoundError(LookupError):
-  """Raised when a schedule structure is not found by id."""
-
   def __init__(self, structure_id: str) -> None:
     super().__init__(f"Schedule not found: {structure_id}")
     self.structure_id = structure_id
 
 
 def _calendar_closed_through_date(session: Session):
-  """Return the active fiscal calendar's `closed_through_period` as a date.
-
-  Used by `create_schedule` to default the historical-voiding boundary
-  when the caller doesn't supply `closed_through` in the request body.
-  Returns None when no calendar is initialized or its
-  `closed_through_period` is null, which leaves every period pending for a
-  graph that hasn't called initialize-ledger yet.
-  """
+  """End date of the calendar's `closed_through_period`; None when there is
+  no calendar or nothing is closed."""
   from robosystems.models.extensions.roboledger.fiscal_calendar import (
     FiscalCalendar,
   )
@@ -83,17 +70,12 @@ def _calendar_closed_through_date(session: Session):
 
 
 def reinstate_reopened_schedule_scopes(session: Session) -> int:
-  """Promote schedule facts the retreated close boundary has re-opened.
+  """Re-stamp ``historical`` schedule facts after ``closed_through`` back to
+  ``in_scope`` once reopen-period has moved the boundary back.
 
-  Schedule fact scope (``historical`` vs ``in_scope``) is stamped at
-  generation from ``closed_through`` (``period_end <= closed_through`` →
-  historical). ``reopen-period`` moves ``closed_through`` backward but does not
-  re-stamp existing facts, so a reopened month's facts stay ``historical``: its
-  movement drops out of the roll-forward (the carry-in then renders that
-  month's ending balance as the opening balance) and the re-close skips it.
-  Flip the now-open window back to ``in_scope`` so every reader agrees with the
-  calendar. Returns the number of facts re-stamped. Idempotent — a no-op when
-  the boundary didn't move (the backfill's restamp of an interior month).
+  Scope is stamped only at generation, so without this a reopened month drops
+  out of the roll-forward and the re-close skips it. Idempotent; returns the
+  number of facts re-stamped.
   """
   from sqlalchemy import text
 
@@ -116,14 +98,8 @@ def reinstate_reopened_schedule_scopes(session: Session) -> int:
 
 
 def _validate_element_references(session: Session, body: CreateScheduleRequest) -> None:
-  """Check that every element id on the request actually exists.
-
-  Without this, a typo in ``entry_template.debit_element_id`` silently
-  succeeds and writes facts pointing at a phantom Element row — the
-  auto-rule generator then skips (qname lookup fails) leaving a
-  corrupted schedule with no rules and no error surfaced. Validate
-  up-front and fail with a clear 422 instead.
-  """
+  """Fail fast on element ids that don't exist or template accounts missing
+  from ``element_ids``; otherwise facts land on phantom elements."""
   referenced: set[str] = set(body.element_ids)
   referenced.add(body.entry_template.debit_element_id)
   referenced.add(body.entry_template.credit_element_id)
@@ -157,10 +133,7 @@ def create_schedule(
   body: CreateScheduleRequest,
   created_by: str,
 ) -> ScheduleCreatedResponse:
-  """Create a schedule with pre-generated facts for each period.
-
-  Raises `ValueError` for validation failures — caller maps to 422.
-  """
+  """Raises `ValueError` for validation failures (mapped to 422)."""
   _validate_element_references(session, body)
   service = ScheduleService()
   et = EntryTemplate(
@@ -182,14 +155,8 @@ def create_schedule(
       periodic_amounts=body.schedule_metadata.periodic_amounts,
     )
 
-  # `closed_through` controls which schedule-generated periods become
-  # `pending` obligations vs `voided` (historical). When the caller
-  # doesn't supply one, fall back to the active fiscal calendar's
-  # `closed_through_period`. Without this default, callers who don't know
-  # to thread the field end up creating schedules that emit pending
-  # obligations for periods that are *already closed* — those obligations
-  # then block close-period forever because they're sealed inside a closed
-  # range yet still `pending`.
+  # Default to the calendar's boundary: pending obligations inside an
+  # already-closed range would block close-period forever.
   effective_closed_through = body.closed_through
   if effective_closed_through is None:
     effective_closed_through = _calendar_closed_through_date(session)
@@ -209,7 +176,6 @@ def create_schedule(
     source_transaction_id=body.source_transaction_id,
   )
 
-  # Count generated facts and distinct periods for the response.
   count_row = session.execute(
     text("SELECT COUNT(*) AS cnt FROM facts WHERE structure_id = :sid"),
     {"sid": structure.id},
@@ -230,11 +196,8 @@ def create_schedule(
     created_by=created_by,
   )
 
-  # Read every attribute the response needs before the commit expires the
-  # instance. A post-commit access issues a refresh SELECT on a connection the
-  # commit already returned to the pool, whose search_path may have been reset
-  # to `public` — so the row resolves to the wrong schema and a schedule that
-  # committed comes back to the caller as a 500.
+  # Read before commit: a post-commit refresh can run on a pooled connection
+  # whose search_path was reset to `public`, resolving the wrong schema.
   metadata = structure.metadata_ or {}
   structure_id = structure.id
   structure_name = structure.name
@@ -259,29 +222,17 @@ def promote_obligations(
   body: PromoteObligationsRequest,
   created_by: str,
 ) -> PromoteObligationsResponse:
-  """On-demand obligation-promotion sweep (the `scheduled_obligation_promoter`
-  Dagster sensor's function, exposed for interactive use).
+  """Run the `scheduled_obligation_promoter` sensor's sweep on demand.
 
-  Flips matured `pending` `schedule_entry_due` events to `classified` and,
-  when ``dispatch_handlers`` is set, drafts their closing entries — so a
-  schedule-driven close can be completed in one session without waiting for
-  the background sensor. Stranded obligations (already `classified` but
-  never drafted, e.g. by an earlier flip-only sweep) are dispatched too.
-  The data scope is the session's search_path (the tenant graph); the
-  sweep is idempotent (re-running skips already-classified rows and
-  reconciles to existing drafts).
+  Classifies matured pending obligations and, with ``dispatch_handlers``,
+  drafts their closing entries, including stranded classified-but-undrafted
+  ones. Idempotent.
   """
   from robosystems.operations.event_block.promotion import promote_pending_obligations
   from robosystems.operations.locking import bounded_lock_wait
 
-  # Request-facing, so the wait is bounded: the sweep locks its whole candidate
-  # set, and the Dagster sensor runs the same function every few minutes. An
-  # unbounded wait here would hold this request and its pooled connection until
-  # a background tick finished.
-  # The wrap covers the whole sweep, not just its locked candidate load — the
-  # lock is taken inside. Autopilot dispatch also writes GL rows, so a wait
-  # here is *usually* the background sweep holding the obligations but need not
-  # be; the message says what is true rather than naming a cause it cannot know.
+  # Bounded: request-facing, and the sensor runs the same sweep every few
+  # minutes. Wraps the whole sweep because the lock is taken inside it.
   with bounded_lock_wait(
     session,
     "Obligations for this graph are being written by another process. "
@@ -306,33 +257,16 @@ def promote_obligations(
   )
 
 
-# ─── Schedule update / delete ─────────────────────────────────────────────
-
-
 def _load_schedule_or_404(session: Session, structure_id: str) -> Structure:
-  """Load a schedule Structure row by id, locked, raising ScheduleNotFoundError.
+  """Load and lock a schedule Structure, raising ScheduleNotFoundError.
 
-  Locked because every caller — update, terminate, delete, rebuild — reads the
-  template and the originator event id out of this row and writes back a
-  decision derived from them. Unlocked, two operators both read the same
-  `schedule_created_event_id`, both supersede obligations under it, and the
-  schedule ends up with two live obligation registers for the same months and a
-  template from one writer beside an originator from the other.
-
-  Bounded, via `lock_by_id` rather than a bare `with_for_update()`. All four
-  callers are request-path operations that declare `RowLockedError: 409` in
-  their `error_map` precisely for contention here; an unbounded lock never
-  raises it, blocking instead until the interactive statement-timeout ceiling
-  and surfacing as a generic 504 — while pinning a pooled connection for the
-  whole wait, which is the failure `operations/locking.py` exists to prevent.
+  Every caller reads the template and originator id and writes back a decision
+  from them; unlocked, two writers could create two live obligation registers.
+  Bounded (``lock_by_id``) so contention raises the RowLockedError the callers
+  map to 409, rather than blocking a pooled connection.
   """
   from robosystems.operations.locking import lock_by_id
 
-  # `lock_by_id` rather than a hand-rolled `bounded_lock_wait` + query: the
-  # siblings that lock a `Structure` for this same read-decide-write shape
-  # (`information_block/forecast.py`, `rollforward.py`, and
-  # `ScheduleService.create_closing_entry`) all use it, and a fourth spelling of
-  # one discipline is how these invariants drift apart in the first place.
   structure = lock_by_id(
     session,
     Structure,
@@ -349,23 +283,11 @@ def update_schedule(
   body: UpdateScheduleRequest,
   updated_by: str = "system",
 ) -> ScheduleCreatedResponse:
-  """Update mutable fields on a schedule.
+  """Update `name`, `entry_template`, or `schedule_metadata`.
 
-  Editable: `name`, `entry_template`, `schedule_metadata`. These live
-  on the Structure row and its `metadata_` JSONB column.
-
-  Period range and monthly amount are NOT editable — they define the
-  fact grid. Fire an event block that terminates the schedule (e.g.,
-  `asset_disposed`) and create a fresh schedule via
-  `create-information-block` (`block_type='schedule'`).
-
-  When the entry template changes, all remaining `pending`
-  schedule_entry_due obligations are voided and replaced with a fresh
-  set linked via `replaces_event_id` / `replaced_by_event_id`.
-  Already-classified / fulfilled obligations are untouched — the new
-  template applies prospectively.
-
-  Raises `ScheduleNotFoundError` if the schedule does not exist.
+  Period range and monthly amount define the fact grid and are not editable.
+  A template change supersedes the pending obligations (prospective only).
+  Raises `ScheduleNotFoundError`.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
 
@@ -402,29 +324,20 @@ def update_schedule(
     }
 
   structure.metadata_ = metadata
-  # Dual-column write: envelope reads prefer artifact_mechanics; writes
-  # stamp both columns so older rows that pre-date artifact_mechanics
-  # remain readable through metadata_.
-  # periods_with_entries is transient (queried from facts at read time) —
-  # intentionally excluded rather than using ScheduleMechanics.model_dump().
+  # Both columns are written; see ScheduleService._build_schedule_definition_blobs.
   structure.artifact_mechanics = {
     "kind": "closing_entry_generator",
     "entry_template": metadata.get("entry_template", {}),
     "schedule_metadata": metadata.get("schedule_metadata"),
   }
 
-  # When the entry template changed, void and re-materialize the pending
-  # obligation chain in the same transaction so partial state is
-  # impossible: either the new template + new pending events both land,
-  # or neither does.
+  # Same transaction as the template write, so both land or neither does.
   if template_changed:
     from robosystems.operations.locking import (
       bounded_lock_wait as _bounded_lock_wait,
     )
 
-    # Request-facing, and it contends with the promotion sweep over the same
-    # pending obligations — bound the wait rather than hold this request for
-    # the length of a background tick.
+    # Bounded: contends with the promotion sweep over the same rows.
     with _bounded_lock_wait(
       session,
       "This schedule's pending obligations are being written by another "
@@ -436,9 +349,6 @@ def update_schedule(
         created_by=updated_by,
       )
 
-  # Re-run rule engine when the template changes, since the underlying
-  # fact shape may have moved. No-op when the template was unchanged
-  # (existing verification_results stay authoritative).
   rule_summary: dict[str, int] | None = None
   if template_changed:
     rule_results = evaluate_rules_for_structure(
@@ -448,16 +358,13 @@ def update_schedule(
     )
     rule_summary = _rule_summary(rule_results)
 
-  # Captured before the commit expires the instance — these are not only the
-  # response's values, they are the parameter the recounts below bind, so a
-  # refresh that resolves to the wrong schema would break the counts too.
+  # Read before commit (see create_schedule); the recounts below bind these.
   structure_id = structure.id
   structure_name = structure.name
   structure_taxonomy_id = structure.taxonomy_id
 
   session.commit()
 
-  # Recount for response (same as create_schedule response shape)
   count_row = session.execute(
     text("SELECT COUNT(*) AS cnt FROM facts WHERE structure_id = :sid"),
     {"sid": structure_id},
@@ -481,24 +388,12 @@ def update_schedule(
 
 
 def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
-  """Delete a schedule — cascades through facts and associations.
-
-  Deletion order respects FK constraints:
-  1. Pending obligation events (voided before the parent disappears)
-  2. Verification results (referencing rules / structure_id)
-  3. Facts and FactSets (referencing structure_id)
-  4. Rules and association classifications (referencing associations)
-  5. Associations (referencing structure_id)
-  6. Structure row itself
-
-  Raises `ScheduleNotFoundError` if the schedule does not exist.
+  """Delete a schedule and everything under it, in FK order. Pending
+  obligations are voided first so they can't outlive their originator and
+  trip the close gate. Raises `ScheduleNotFoundError`.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
-  # Void any pending obligations first so they can't outlive their
-  # `schedule_created` originator and trip the close-period gate
-  # after the schedule is gone. Request-facing, and the void locks the
-  # same pending rows the promotion sweep holds — bound the wait rather
-  # than hold this request for the length of a background tick.
+  # Bounded: the void locks rows the promotion sweep holds.
   from robosystems.operations.locking import bounded_lock_wait
 
   with bounded_lock_wait(
@@ -552,16 +447,9 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
 
 
 def _rewrite_sum_equals_rule(session: Session, structure: Structure) -> bool:
-  """Re-anchor the schedule's native SumEquals rule to the truncated curve.
-
-  The rule proves sum(periodic facts) == the schedule's original amount;
-  truncation deletes forward facts, so the old total can never be
-  satisfied again. The remaining curve is still worth proving — the
-  expression is rewritten to its current sum, and verification results
-  proved against the old expression are cleared for re-evaluation.
-
-  Returns False (no-op) when the schedule has no native SumEquals rule
-  or its entry template carries no debit element to sum.
+  """Re-anchor the native SumEquals rule to the truncated curve's sum and
+  clear its verification results. False when there is no rule or no debit
+  element to sum.
   """
   rule = (
     session.execute(
@@ -592,22 +480,17 @@ def _rewrite_sum_equals_rule(session: Session, structure: Structure) -> bool:
   ).scalar()
   new_total = round(float(remaining or 0), 2)
 
-  # `expected_total` is the value the evaluator actually compares against
-  # (`rules/evaluators.py::_evaluate_sum_equals`); `rule_expression` is the
-  # human-readable form. Rewriting only the expression leaves the rule
-  # failing against the pre-truncation total while reading as re-anchored —
-  # which is exactly what shipped and was caught on live books.
+  # The evaluator compares against metadata expected_total; rule_expression
+  # is display only. Both must change.
   rule.rule_expression = f"sum($periodic_amount) = {new_total}"
   rule_metadata = dict(rule.metadata_ or {})
   rule_metadata["expected_total"] = new_total
   rule.metadata_ = rule_metadata
   flag_modified(rule, "metadata_")
 
-  # The stored definition has to describe the truncated curve too. Generation
-  # derives `expected_total` from `schedule_metadata.original_amount`, so
-  # leaving the original basis behind makes `rebuild-schedule` redistribute it
-  # across only the surviving months — silently rewriting closed, posted
-  # history. The pre-truncation basis stays in the `truncations` audit log.
+  # The stored basis must match too, or rebuild-schedule would spread the
+  # original amount over the surviving months. The old basis stays in the
+  # `truncations` audit log.
   mechanics_metadata = dict(structure.metadata_ or {})
   schedule_meta = dict(mechanics_metadata.get("schedule_metadata") or {})
   if schedule_meta.get("original_amount"):
@@ -636,33 +519,16 @@ def terminate_schedule(
   body: TerminateScheduleRequest,
   created_by: str = "system",
 ) -> TerminateScheduleResponse:
-  """End a schedule early at a month-end cutoff — no entry is booked.
+  """End a schedule at a month-end cutoff without booking an entry.
 
-  The no-entry half of schedule retirement, for terminations whose GL
-  effect is already booked (an asset transferred via a manual journal
-  entry, a prepaid refunded in the source system) or where none is
-  wanted. In one transaction:
+  For terminations whose GL effect is already booked or unwanted; when a
+  derecognition entry is needed, the asset_disposed handler posts it with
+  the same void. In one transaction: truncate facts and drafts past the
+  cutoff, void obligations past it (``pending`` and ``classified`` — a
+  classified one there can only be an undrafted stray), and re-anchor the
+  SumEquals rule.
 
-  1. ``truncate_schedule`` deletes facts with period_start past the
-     cutoff (guards: month-end cutoff only; refuses when posted entries
-     exist past it; deletes stale draft entries past it).
-  2. The remaining obligation chain past the cutoff is voided —
-     ``pending`` and ``classified`` rows both. A ``classified`` row here
-     can only be an undrafted stray: drafted entries past the cutoff
-     were deleted in step 1 and posted ones blocked it.
-  3. The schedule's SumEquals rule is rewritten to prove the truncated
-     curve.
-
-  Obligations and facts at or before the cutoff are untouched, so open
-  months the schedule still covers close normally.
-
-  When the derecognition entry still needs to be booked, use
-  ``create-event-block(event_type='asset_disposed')`` instead — the
-  disposal handler posts it atomically with the same obligation void.
-
-  Raises ``ScheduleNotFoundError`` if the schedule does not exist, and
-  ``ValueError`` on the truncation guards (mid-month cutoff, posted
-  entries past the cutoff, cutoff before the schedule's first fact).
+  Raises ``ScheduleNotFoundError``, or ``ValueError`` on the truncation guards.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
   service = ScheduleService()
@@ -675,9 +541,7 @@ def terminate_schedule(
     updated_by=created_by,
   )
 
-  # The void locks the same pending rows the promotion sweep holds —
-  # bound the wait rather than hold this request for the length of a
-  # background tick (mirrors delete_schedule).
+  # Bounded: the void locks rows the promotion sweep holds.
   from robosystems.operations.locking import bounded_lock_wait
 
   with bounded_lock_wait(
@@ -710,15 +574,9 @@ def terminate_schedule(
 def _reconstruct_schedule_definition(
   session: Session, structure: Structure
 ) -> tuple[EntryTemplate, ScheduleMetadata | None, int, date, date, str | None]:
-  """Recover the generation inputs for a rebuild from a Structure row.
-
-  Prefers the stored definition on ``metadata_`` (entry_template,
-  schedule_metadata, monthly_amount, period_start, period_end — persisted at
-  create time so the rebuild is unambiguous). A row missing those scalar keys
-  falls back to deriving the period bounds from the schedule's FactSet and
-  ``monthly_amount`` from a non-final duration debit Fact.
-
-  Raises ``ValueError`` when the definition can't be reconstructed.
+  """Recover generation inputs from ``metadata_``; for rows missing the
+  scalar keys, derive period bounds from the FactSet and ``monthly_amount``
+  from the first duration debit fact. Raises ``ValueError`` if neither works.
   """
   metadata = structure.metadata_ or {}
   raw_template = metadata.get("entry_template")
@@ -748,14 +606,10 @@ def _reconstruct_schedule_definition(
     else None
   )
 
-  # Audit back-ref to the source transaction — stored in artifact_mechanics
-  # at create time, with metadata_ as the fallback location. Recovering it
-  # keeps the rebuilt schedule pointing at its originating transaction.
   source_transaction_id = (structure.artifact_mechanics or {}).get(
     "source_transaction_id"
   ) or (structure.metadata_ or {}).get("source_transaction_id")
 
-  # Reproducible scalar inputs — stored at create time on new rows.
   monthly_amount = metadata.get("monthly_amount")
   period_start_iso = metadata.get("period_start")
   period_end_iso = metadata.get("period_end")
@@ -767,7 +621,6 @@ def _reconstruct_schedule_definition(
     date.fromisoformat(period_end_iso) if period_end_iso else None
   )
 
-  # Fallback: derive period bounds from the schedule's FactSet rows.
   if period_start is None or period_end is None:
     bounds = session.execute(
       select(
@@ -788,8 +641,6 @@ def _reconstruct_schedule_definition(
     period_start = period_start or min(starts)
     period_end = period_end or max(ends)
 
-  # Fallback: derive monthly_amount from a non-final duration debit fact
-  # (the per-period straight-line amount, in cents).
   if monthly_amount is None:
     debit_fact = session.execute(
       select(Fact.value)
@@ -823,21 +674,13 @@ def rebuild_schedule(
   body: RebuildScheduleRequest,
   created_by: str = "system",
 ) -> ScheduleCreatedResponse:
-  """Re-run the schedule generator in place on an existing schedule.
+  """Regenerate a schedule in place from its stored definition.
 
-  Atomic alternative to delete-then-recreate (which orphans the
-  obligation chain). Preserves the structure id, its element
-  associations, and its taxonomy; voids the old pending obligation
-  chain; deletes the old facts, FactSets, and SumEquals rules; then
-  regenerates the forward facts + a fresh obligation chain from the
-  schedule's stored definition.
-
-  The historical-vs-in-scope split is re-derived from the CURRENT fiscal
-  calendar `closed_through`, re-scoping the schedule to today's close state.
-
-  Raises:
-      ScheduleNotFoundError: if the schedule does not exist.
-      ValueError: if the schedule's definition can't be reconstructed.
+  Keeps the structure id, associations and taxonomy; replaces facts, rules,
+  drafts and the obligation chain. Scope is re-derived from the current
+  calendar's ``closed_through``. Raises ``ScheduleNotFoundError``, or
+  ``ValueError`` when the definition can't be reconstructed or landed
+  entries exist.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
 
@@ -850,9 +693,7 @@ def rebuild_schedule(
     source_transaction_id,
   ) = _reconstruct_schedule_definition(session, structure)
 
-  # Refuse to rebuild underneath posted closing entries — a rebuild
-  # regenerates the facts those entries depend on, which would orphan the
-  # audit trail. Reopen the affected periods first (mirrors truncate_schedule).
+  # Landed entries depend on the facts a rebuild regenerates.
   posted_row = session.execute(
     text(
       "SELECT COUNT(*) AS c FROM entries "
@@ -868,24 +709,16 @@ def rebuild_schedule(
       "not clear this guard."
     )
 
-  # Capture the old originator event id so we can supersede it after the
-  # rebuild stamps a fresh one (avoids two unlinked committed originators).
   old_schedule_created_event_id = (structure.metadata_ or {}).get(
     "schedule_created_event_id"
   )
 
-  # Re-derive the close watermark from the CURRENT fiscal calendar — a
-  # rebuild re-scopes the schedule to today's close state.
   closed_through = _calendar_closed_through_date(session)
 
   service = ScheduleService()
 
-  # Fence first, then rows — the order every other ledger writer keeps. The
-  # rebuild deletes this schedule's draft closing entries below and re-drafts
-  # them through `create_closing_entry`, whose own fence would otherwise be
-  # the first, taken *after* the deletes had already locked the rows.
-  # A closer holding the exclusive side (or a closed month with a stale
-  # draft still in it) is refused here, before anything is touched.
+  # Fence before the draft deletes lock rows: fence, then rows, as every
+  # ledger writer does.
   from robosystems.operations.roboledger.commands._guards import (
     assert_period_not_closed,
   )
@@ -903,10 +736,7 @@ def rebuild_schedule(
   )
   assert_period_not_closed(session, *draft_dates)
 
-  # Void the old pending obligation chain so the regenerated chain doesn't
-  # double-count and the old pending events can't trip the close gate.
-  # Bounded for the same reason as `delete_schedule`: request-facing, and
-  # it contends with the promotion sweep over these rows.
+  # Bounded: contends with the promotion sweep over these rows.
   from robosystems.operations.locking import bounded_lock_wait, lock_by_id
 
   with bounded_lock_wait(
@@ -920,10 +750,7 @@ def rebuild_schedule(
       void_reason="schedule_rebuilt",
     )
 
-  # Cascade-delete the old facts, FactSets, and SumEquals rule(s) — mirror
-  # delete_schedule's cascade, but NOT the Structure, Associations, or
-  # taxonomy (those are preserved). Verification results referencing the
-  # structure or its rules are cleared too so stale rows don't linger.
+  # delete_schedule's cascade, minus the Structure and Associations.
   rule_ids = (
     session.execute(select(Rule.id).where(Rule.target_structure_id == structure.id))
     .scalars()
@@ -944,9 +771,7 @@ def rebuild_schedule(
   if rule_ids:
     session.query(Rule).filter(Rule.id.in_(rule_ids)).delete(synchronize_session=False)
 
-  # Sweep stale DRAFT closing entries for this structure — the rebuilt
-  # obligation chain re-drafts them on the next promote. Line items first
-  # for the FK. Posted entries are guarded above, so this only hits drafts.
+  # The rebuilt obligation chain re-drafts these on the next promote.
   session.execute(
     text(
       "DELETE FROM line_items WHERE entry_id IN ("
@@ -961,7 +786,6 @@ def rebuild_schedule(
   )
   session.flush()
 
-  # Regenerate in place — preserves structure id + associations + arcs.
   structure = service.create_schedule(
     session,
     name=structure.name,
@@ -978,9 +802,7 @@ def rebuild_schedule(
     source_transaction_id=source_transaction_id,
   )
 
-  # Supersede the old originator event: the rebuild stamps a fresh
-  # `schedule_created` event, leaving the old one orphaned. Mark it voided
-  # and back-link it to its replacement so the audit chain stays connected.
+  # Void the old originator and link it to the new one.
   new_schedule_created_event_id = (structure.metadata_ or {}).get(
     "schedule_created_event_id"
   )
@@ -989,10 +811,6 @@ def rebuild_schedule(
     and new_schedule_created_event_id
     and old_schedule_created_event_id != new_schedule_created_event_id
   ):
-    # Locked: this is a status write off a read, like every other event
-    # transition. An inbox transition on the originator is the only thing
-    # that could race it, and it should lose cleanly rather than be
-    # overwritten.
     old_evt = lock_by_id(
       session,
       Event,
@@ -1025,11 +843,7 @@ def rebuild_schedule(
     created_by=created_by,
   )
 
-  # Read every attribute the response needs before the commit expires the
-  # instance. A post-commit access issues a refresh SELECT on a connection the
-  # commit already returned to the pool, whose search_path may have been reset
-  # to `public` — so the row resolves to the wrong schema and a schedule that
-  # committed comes back to the caller as a 500.
+  # Read before commit (see create_schedule).
   metadata = structure.metadata_ or {}
   structure_id = structure.id
   structure_name = structure.name

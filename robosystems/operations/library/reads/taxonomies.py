@@ -61,10 +61,9 @@ def list_taxonomies(
 
   counts: dict[str, int] = {}
   if include_element_count and taxonomies:
-    # Count active elements only, matching what the element browser shows by
-    # default — deactivated source-system elements (QuickBooks "(deleted)"
-    # accounts) are imported so transactions referencing them resolve, but are
-    # hidden from the library, so the chip must not count them.
+    # Active only, matching the element browser: deactivated source-system
+    # elements (QuickBooks "(deleted)" accounts) exist only so old
+    # transactions resolve.
     count_query = (
       select(Element.taxonomy_id, func.count(Element.id))
       .where(
@@ -130,18 +129,8 @@ def list_taxonomy_arcs(
   limit: int = 200,
   offset: int = 0,
 ) -> list[LibraryAssociationResponse]:
-  """Return every arc contributed by a taxonomy (via its structures).
-
-  For mapping taxonomies (fac-to-rs-gaap, rs-gaap-type-subtype) this
-  is the whole point — the taxonomy's value is in its arcs, not in any
-  concepts it owns. Joins from → element and to → element so the response
-  carries qnames + names for UI display without a second round-trip.
-
-  Pass ``structure_id`` to scope the result to a single structure (one
-  presentation/calculation hierarchy). The Structures view in /library uses
-  this to render arcs for one role at a time without paging through every
-  arc the taxonomy contributes.
-  """
+  """Every arc a taxonomy contributes through its structures, with both
+  endpoints' qnames and names joined in. ``structure_id`` scopes to one."""
   from_elem = aliased(Element, name="from_elem")
   to_elem = aliased(Element, name="to_elem")
 
@@ -176,9 +165,6 @@ def list_taxonomy_arcs(
 
   rows = session.execute(query).all()
 
-  # Batch-load the primary EFS trait for every element on either end of an
-  # arc so the hierarchy view can colour nodes (and badge abstracts) without a
-  # round-trip per node. One query for the whole page.
   element_ids = {row.Association.from_element_id for row in rows} | {
     row.Association.to_element_id for row in rows
   }

@@ -1,36 +1,10 @@
-"""Journal entry recorded event handler.
+"""journal_entry_recorded handler: records balanced journal entries via
+`create_journal_entry` and links them to the event.
 
-Fires when create-event-block runs with event_type='journal_entry_recorded'
-and apply_handlers=True. Creates a balanced journal entry (plus a synthetic
-Transaction when none is supplied) and links both rows to the event.
-
-Balance validation, the closed-period gate, and auto-Transaction creation all
-come from `create_journal_entry`
-(`operations/roboledger/commands/journal_entries.py`); this handler sequences
-that call inside the event-block unit of work.
-
-Two metadata shapes are accepted:
-
-- **Flat** (native writes, manual entries, scheduled accruals): one entry
-  per event — ``posting_date`` + ``memo`` + ``line_items`` at the top
-  level.
-- **Nested** (QuickBooks ingest, multi-entry imports): a wrapping
-  ``entries`` array — each item is its own ``posting_date`` + ``memo``
-  + ``line_items`` block. Used when a single business event produces
-  multiple journal entries (e.g., a QB Invoice with both a revenue
-  entry and a tax entry). Line items in the nested shape may carry
-  ``element_external_id`` instead of ``element_id``; the dispatch path
-  resolves these against the Element table for the event's connection.
-
-The schema validator enforces exactly-one-shape: requests with both
-flat fields and ``entries`` populated are rejected, as are requests
-with neither.
-
-Event status after success:
-- 'classified' when metadata.status == 'draft' (default) — the draft still
-  has to go through close-period to be posted.
-- 'fulfilled' when metadata.status == 'posted' (historical data import) —
-  the entry is terminal.
+Metadata is either flat (one entry: top-level ``posting_date``/``memo``/
+``line_items``) or nested (an ``entries`` array, e.g. QB ingest, whose lines
+may carry ``element_external_id`` resolved at dispatch). The event ends
+``classified`` for drafts and ``fulfilled`` when ``metadata.status='posted'``.
 """
 
 from __future__ import annotations
@@ -71,17 +45,9 @@ from .types import (
 
 
 class NestedJournalEntryLineItem(BaseModel):
-  """One line in a nested-shape entry.
-
-  Accepts either ``element_id`` (already resolved) or
-  ``element_external_id`` (resolved at dispatch time against the
-  Element table). Exactly one must be present.
-
-  ``metadata`` is an optional pass-through dict stamped on the resulting
-  ``LineItem.metadata_``. It carries source-system fields the standard
-  columns don't cover (e.g. a transaction description code used for
-  rollforward attribution); the renderer and filter engine read the keys
-  they know about and ignore the rest.
+  """One line in a nested-shape entry: exactly one of ``element_id`` or
+  ``element_external_id``. ``metadata`` passes through to
+  ``LineItem.metadata_``.
   """
 
   element_id: str | None = None
@@ -101,11 +67,7 @@ class NestedJournalEntryLineItem(BaseModel):
 
 
 class NestedJournalEntrySpec(BaseModel):
-  """One entry inside the nested-shape ``entries`` array.
-
-  Mirrors ``CreateJournalEntryRequest`` minus the top-level fields that
-  the wrapping metadata blob carries (``status``, ``transaction_id``).
-  """
+  """One entry inside the nested-shape ``entries`` array."""
 
   posting_date: date
   memo: str
@@ -115,13 +77,9 @@ class NestedJournalEntrySpec(BaseModel):
 
 
 class JournalEntryRecordedMetadata(BaseModel):
-  """Metadata for a journal_entry_recorded event.
+  """Metadata for a journal_entry_recorded event: flat or nested, never both."""
 
-  Two accepted shapes, validated mutually exclusive (see module docstring):
-  flat (single entry, top-level fields) and nested (``entries`` array).
-  """
-
-  # Flat shape (single-entry path — manual entries, schedules, native writes)
+  # Flat shape
   posting_date: date | None = None
   memo: str | None = None
   line_items: list[JournalEntryLineItemInput] | None = None
@@ -131,22 +89,16 @@ class JournalEntryRecordedMetadata(BaseModel):
   # Shared
   status: Literal["draft", "posted"] = "draft"
 
-  # Explicit override of the source-based write-back default. Left unset,
-  # publication follows ``Event.source`` (``schedule``/``manual`` publish;
-  # everything else posts locally). ``False`` pins the entry to the local
-  # lane whatever its source — the lane an alignment entry needs when it
-  # mirrors a change already made upstream, since publishing it would
-  # apply that change twice. ``True`` publishes a source that otherwise
-  # would not. StrictBool because this metadata is persisted as the raw
-  # request dict: a lax bool would store ``"yes"`` and match neither
-  # branch of the SQL predicate, silently choosing the local lane.
+  # Overrides the source-based write-back default (unset: follow
+  # ``Event.source``). ``False`` keeps an entry that mirrors an upstream
+  # change local. StrictBool because the raw dict is persisted and matched
+  # in SQL; a lax ``"yes"`` would match neither branch.
   publish_to_source: StrictBool | None = None
 
-  # Nested shape (multi-entry path — QB ingest, future bulk imports)
+  # Nested shape
   entries: list[NestedJournalEntrySpec] | None = None
 
-  # Optional context for nested shape — used to scope element lookups.
-  # Populated by the QB loader; ignored for flat shape.
+  # Scopes nested-shape element lookups.
   connection_id: str | None = None
 
   @model_validator(mode="after")
@@ -189,14 +141,10 @@ def resolve_external_ids(
   source: str,
   connection_id: str | None,
 ) -> dict[str, str]:
-  """Bulk-resolve a set of element_external_ids → element.id.
+  """Bulk-resolve element_external_ids → element.id within ``source``.
 
-  Scopes the lookup to ``Element.external_source = source`` and, if
-  given, ``Element.connection_id = connection_id``. Multi-connection
-  graphs without a connection_id would otherwise risk cross-connection
-  CoA collisions (two QB books in one graph with overlapping account
-  external_ids); the loader always populates connection_id, so the
-  scoped lookup is the safe default.
+  Pass ``connection_id`` whenever known: two books on one graph can share
+  account external_ids.
   """
   if not external_ids:
     return {}
@@ -217,14 +165,9 @@ def _resolve_nested_line_items(
   event: Event,
   connection_id: str | None,
 ) -> list[list[JournalEntryLineItemInput]]:
-  """Bulk-resolve element refs across all entries in one query.
-
-  Returns a parallel list (entry-index aligned) of resolved
-  JournalEntryLineItemInput lists. If any external_ids fail to resolve,
-  collects the full set across all entries and raises a single
-  ``ElementResolutionError`` listing them — a QB event with five
-  unmapped accounts errors once with five IDs, not five times in
-  sequence as the user maps them one at a time.
+  """Resolve element refs across all entries in one query; returns line lists
+  aligned with ``entries``. Raises one ``ElementResolutionError`` naming
+  every unresolved id.
   """
   unresolved_external_ids: set[str] = set()
   for entry in entries:
@@ -239,9 +182,6 @@ def _resolve_nested_line_items(
     connection_id=connection_id,
   )
 
-  # First pass: collect every unresolved (external_id, entry_idx) pair so
-  # the error message lists everything that needs mapping. Skip translation
-  # if any are missing — partial resolution is more confusing than failing.
   missing: list[tuple[int, str]] = []
   for entry_idx, entry in enumerate(entries):
     for line in entry.line_items:
@@ -252,8 +192,6 @@ def _resolve_nested_line_items(
         missing.append((entry_idx, external_id))
 
   if missing:
-    # Deduplicate by external_id, keeping the first-seen entry index — one
-    # "X (entry 0)" per unmapped account reads better than every occurrence.
     seen: dict[str, int] = {}
     for idx, ext_id in missing:
       seen.setdefault(ext_id, idx)
@@ -266,8 +204,6 @@ def _resolve_nested_line_items(
       f"then approve again."
     )
 
-  # Second pass: translate. Every line either has element_id or a
-  # resolvable external_id at this point.
   out: list[list[JournalEntryLineItemInput]] = []
   for entry in entries:
     line_items: list[JournalEntryLineItemInput] = []
@@ -325,9 +261,7 @@ def _dispatch_flat(
     transaction_id=metadata.transaction_id,
     source=event.source,
     connection_id=metadata.connection_id,
-    # Propagate the business-event type so the Transaction row carries
-    # the originating kind (bill_paid, cash_expense_recorded, etc.)
-    # rather than collapsing to the generic ``journal_entry``.
+    # Keep the originating kind (bill_paid, ...) rather than ``journal_entry``.
     transaction_type=event.event_type,
   )
   response = create_journal_entry(session, body, created_by)
@@ -359,13 +293,7 @@ def _dispatch_nested(
   metadata: JournalEntryRecordedMetadata,
   created_by: str,
 ) -> HandlerResult:
-  """Multi-entry path: one journal entry per item in metadata.entries.
-
-  All entries from one event share a single Transaction (group-by-event)
-  so the originating business event maps to one Transaction in the GL.
-  Resolution of element_external_id → element_id happens once across
-  all lines to avoid N round-trips.
-  """
+  """One journal entry per item in metadata.entries, all on one Transaction."""
   assert metadata.entries is not None  # guaranteed by validator
   resolved_lines = _resolve_nested_line_items(
     session,
@@ -386,11 +314,9 @@ def _dispatch_nested(
       type=entry_spec.type,
       status=metadata.status,
       transaction_id=shared_txn_id,
-      # Stamp the originating system on the Transaction so re-syncs
-      # can scope deletes and reports can attribute provenance.
+      # Lets re-syncs scope deletes by origin.
       source=event.source,
       connection_id=metadata.connection_id,
-      # Carry the business-event type through to the Transaction row.
       transaction_type=event.event_type,
     )
     response = create_journal_entry(session, body, created_by)
@@ -421,18 +347,13 @@ def dispatch(
   metadata: JournalEntryRecordedMetadata,
   created_by: str,
 ) -> HandlerResult:
-  """Create the journal entry/entries; link Entry + Transaction to the event.
-
-  Mutates ``event.status`` to ``'fulfilled'`` when ``metadata.status ==
-  'posted'``. The row is flushed-but-not-committed so the mutation is
-  caught by the caller's commit.
-  """
+  """Create the journal entries and link them to the event; sets the event
+  ``fulfilled`` when ``metadata.status == 'posted'``."""
   if metadata.is_nested:
     result = _dispatch_nested(session, event, metadata, created_by)
   else:
     result = _dispatch_flat(session, event, metadata, created_by)
 
-  # Dynamic status override: posted entries are terminal.
   if metadata.status == "posted":
     event.status = "fulfilled"
 
@@ -442,11 +363,7 @@ def dispatch(
 def _preview_planned_entries(
   metadata: JournalEntryRecordedMetadata,
 ) -> tuple[list[dict[str, Any]], int, int, list[str]]:
-  """Build the planned-entries list + cumulative balance for preview.
-
-  Returns ``(planned_entries, total_debit, total_credit, errors)``.
-  Each planned-entry dict echoes the user-supplied shape for the UI.
-  """
+  """Returns ``(planned_entries, total_debit, total_credit, errors)``."""
   errors: list[str] = []
   planned: list[dict[str, Any]] = []
   total_debit = 0
@@ -455,9 +372,7 @@ def _preview_planned_entries(
   if metadata.is_nested:
     for entry_idx, entry in enumerate(metadata.entries or []):
       try:
-        # Convert to JournalEntryLineItemInput shape for the balance
-        # checker; resolution errors aren't fatal here — preview just
-        # checks the math, not whether elements exist.
+        # Preview checks the math only, not whether elements exist.
         as_journal_lines = [
           JournalEntryLineItemInput(
             element_id=li.element_id or li.element_external_id or "preview",
@@ -484,7 +399,6 @@ def _preview_planned_entries(
       )
     return planned, total_debit, total_credit, errors
 
-  # Flat shape
   try:
     _normalized, total_debit, total_credit = validate_and_normalize_lines(
       metadata.line_items or []
@@ -513,7 +427,6 @@ def dispatch_preview(
   """Validate balance + closed-period + line items without persisting."""
   errors: list[str] = []
 
-  # Period gate: in nested shape, check each entry's posting_date.
   posting_dates: list[date] = []
   if metadata.is_nested:
     posting_dates = [e.posting_date for e in metadata.entries or []]
@@ -558,8 +471,6 @@ JOURNAL_ENTRY_RECORDED_HANDLER = EventBlockPythonHandler(
   event_type="journal_entry_recorded",
   display_name="Journal Entry Recorded",
   metadata_schema=JournalEntryRecordedMetadata,
-  # Initial status — the handler overrides to 'fulfilled' when
-  # metadata.status == 'posted'.
   target_status="classified",
   dispatch=dispatch,
   dispatch_preview=dispatch_preview,

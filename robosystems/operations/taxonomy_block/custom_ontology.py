@@ -1,17 +1,8 @@
 """Handlers for ``taxonomy_type='custom_ontology'`` — tenant free-form ontology.
 
-Custom ontologies are declarative tenant taxonomies with **no**
-classification or balance-type discipline. Tenants use them for
-climate-disclosure concepts, internal KPI definitions, or any domain
-vocabulary that doesn't need accounting semantics. The handler is CoA
-stripped down: same two-pass element insert for parent resolution,
-but no EFS classification junction writes and no instant-period
-forcing.
-
-Validation below the Pydantic layer is minimal — ``ValueError`` for
-unresolved ``parent_ref`` / ``structure_ref`` / ``from_ref`` /
-``to_ref`` only. Structural rules (cycles, orphans, unique qnames) are
-enforced by the shared create-envelope validator.
+The CoA handler without accounting discipline: no EFS classification and no
+instant-period forcing. Structural rules are enforced by the shared
+create-envelope validator.
 """
 
 from __future__ import annotations
@@ -84,9 +75,8 @@ def create(
 ) -> str:
   """Create a custom_ontology taxonomy + its elements/structures/associations.
 
-  Returns the new taxonomy_id. Two-pass element insert resolves
-  ``parent_ref`` against envelope-local qnames only — custom ontologies
-  don't extend any library so there is no fallback.
+  Returns the new taxonomy_id. ``parent_ref`` resolves against
+  envelope-local qnames only (no library fallback).
   """
   if payload.taxonomy_type != CUSTOM_ONTOLOGY_BLOCK_TYPE:
     raise ValueError(
@@ -319,9 +309,7 @@ def delete(
 def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope | None:
   """Project a custom_ontology taxonomy as an envelope.
 
-  Skips the EFS trait sidecar — custom ontologies don't carry
-  FASB classifications by design. Every element projects with
-  ``trait=None`` and ``origin='tenant'``.
+  Every element projects with ``trait=None`` and ``origin='tenant'``.
   """
   taxonomy = session.get(Taxonomy, taxonomy_id)
   if taxonomy is None or taxonomy.taxonomy_type != CUSTOM_ONTOLOGY_BLOCK_TYPE:

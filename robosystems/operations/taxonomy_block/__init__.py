@@ -1,6 +1,2 @@
-"""Taxonomy Block operations package.
-
-Curates ontology atomically — elements + structures + associations +
-rules — in one transactional envelope. Mirrors the Information Block
-pattern that curates business-logic artifacts.
-"""
+"""Taxonomy Block operations: curate elements, structures, associations and
+rules in one transactional envelope."""

@@ -1,16 +1,5 @@
-"""Information Block operations — registry, construction, and reads.
-
-Public surface:
-
-- :class:`BlockTypeRegistryEntry` — the registry entry descriptor.
-- :data:`REGISTRY` — the ``dict[str, BlockTypeRegistryEntry]`` of all
-  registered block types.
-- :func:`create_information_block` — the generic write command.
-- :func:`get_information_block` / :func:`list_information_blocks` —
-  the reads.
-
-See ``README.md`` in this package for the code-level orientation.
-"""
+"""Information Block operations: registry, construction, and reads. See this
+package's README.md."""
 
 from __future__ import annotations
 

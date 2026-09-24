@@ -1,30 +1,16 @@
-"""Canonical statement FactSet production — shared by close and publication.
+"""Statement FactSet production, shared by close and publication.
 
-Statement FactSets (``factset_type='report'``) have two producers with
-different ownership semantics:
+Statement FactSets (``factset_type='report'``) have two producers:
 
-- **Close (canonical).** Closing a fiscal period pivots the posted ledger
-  through the active CoA mapping and stamps the month's statement sets
-  with ``report_id NULL`` — the canonical, replaceable record of the
-  closed month. Reclose replaces them (:func:`stamp_canonical_statement_sets`
-  deletes-then-mints by period window); reopen retracts them
-  (:func:`retract_canonical_statement_sets`). The statement-envelope,
-  series, forecast, and metric readers bind these by
-  ``(structure_id, factset_type, period)`` and never touch ``report_id``.
-- **Publication (snapshot).** ``create_report`` mints its own
-  ``report_id``-owned sets, frozen at filing time: a published Report keeps
-  the numbers as generated even if the ledger is later reopened and
-  restamped. ``delete_report`` / ``regenerate_report`` delete only by
-  ``report_id`` and can never destroy canonical closed-month history.
+- **Close (canonical).** Closing a period stamps the month's sets with
+  ``report_id NULL``; reclose replaces them by period window and reopen
+  retracts them. Readers bind these by ``(structure_id, factset_type,
+  period)``.
+- **Publication (snapshot).** ``create_report`` mints ``report_id``-owned
+  sets frozen at generation time; report deletes touch only those.
 
-The pivot/persist helpers live here so both producers share one
-implementation; ``commands/reports.py`` re-exports them.
-
-Import-cycle rule: this module must not import from
-``operations/roboledger/commands/*`` other than the leaf ``_guards``
-module (which imports nothing back). The close service and the fiscal
-calendar commands import THIS module function-level, preserving their
-lazy-import posture toward information-block machinery.
+Import-cycle rule: import nothing from ``operations/roboledger/commands/*``
+except the leaf ``_guards`` module.
 """
 
 from __future__ import annotations
@@ -75,10 +61,8 @@ class NoEntityError(Exception):
 class StatementStampError(Exception):
   """Raised when a reporting-configured tenant's close-time stamp fails.
 
-  Distinct from the soft-skip path (tenant hasn't set up reporting —
-  close proceeds without sets): this means the mapping/style resolved
-  but the pivot or persist raised, so the close must roll back and the
-  operator can fix the cause and re-run the close.
+  Unlike the soft-skip for a tenant without reporting set up, the close must
+  roll back.
   """
 
 
@@ -92,14 +76,12 @@ class StatementStampResult:
   note: str | None = None
   # structure_id -> fact_set_id for every minted canonical set.
   fact_set_ids: dict[str, str] = field(default_factory=dict)
-  # Aggregated statement-rule outcome across the stamped structures
-  # (pass/fail/error/skipped); None when no statement rules exist or
-  # the evaluation itself errored (non-fatal, logged).
+  # None when no statement rules exist or evaluation errored (non-fatal).
   rule_summary: dict[str, int] | None = None
 
 
 def _get_entity_id(session: Session, graph_id: str) -> str:
-  """Get the earliest-created entity ID — the primary entity for single-entity graphs."""
+  """The earliest-created entity: the primary entity of a single-entity graph."""
   result = session.execute(
     text("SELECT id FROM entities ORDER BY created_at ASC LIMIT 1")
   )
@@ -118,18 +100,15 @@ def _evaluate_report_structures(
   period_end,
   created_by: str,
 ) -> dict[str, int] | None:
-  """Run rule evaluation for every structure that received report facts.
+  """Evaluate rules for every structure that received facts.
 
-  Returns an aggregated rule_summary across all structures, or None if
-  no structures have rules.
+  Returns the aggregated rule_summary, or None if no structure has rules.
   """
   structures_with_facts: set[str] = set()
   for f in facts.facts:
     for sid in element_to_structures.get(f.element_id, ()):
       structures_with_facts.add(sid)
-  # The rs-gaap-calculations DAG is invariant across structures within this
-  # report run — load it once and share it (each structure still gets its own
-  # local-arc overlay from a copy) rather than re-querying per structure.
+  # Invariant across structures; loaded once.
   global_calculations = load_rs_gaap_calculations(session)
   all_results = []
   for structure_id in structures_with_facts:
@@ -154,10 +133,8 @@ _RENDER_TARGET_STATEMENT_TYPES: tuple[str, ...] = (
 )
 
 
-# Downward-recursive taxonomy closure: the report's taxonomy plus every
-# extension descending from it (extension taxonomies point at their parent
-# via ``parent_taxonomy_id``). Scopes disclosure picking so one report
-# never pulls in another framework's (or an abandoned extension's) notes.
+# The report's taxonomy plus every extension descending from it, so a report
+# never pulls in another framework's notes.
 _TAXONOMY_SCOPE_CTE = """
       WITH RECURSIVE scoped AS (
         SELECT id FROM taxonomies WHERE id = :taxonomy_id
@@ -175,24 +152,11 @@ def _pick_disclosure_structures(
 ) -> list[str]:
   """Disclosure structures whose MEMBER concepts actually received facts.
 
-  Disclosures are not composed by the Reporting Style — styles pin
-  statement layouts only. A disclosure renders because the mapped
-  ledger produced values for its concepts (the forward/Reportability
-  direction): pick every active ``regulatory_disclosure`` structure
-  owning at least one presentation arc whose MEMBER (``to``) endpoint
-  is among the generated facts' elements. The member-only condition is
-  deliberate: a note's total is typically a common library leaf that
-  almost always has a fact, so an endpoint-OR would pick the note with
-  an empty (structurally unfailable) member breakdown.
-
-  Scoped to the report's taxonomy closure (the resolved taxonomy plus
-  its descendant extensions) so a foreign framework's notes — or an
-  abandoned extension taxonomy's — never join this report's render set.
-
-  The library's disclosure-identity envelopes (``disclosures:*`` rows
-  with no arcs) never match the presentation-arc requirement, and a
-  tenant with no arc-bearing disclosure structures gets an empty list —
-  the picker is inert until a disclosure structure with content exists.
+  Reporting Styles compose statements only; a disclosure renders because the
+  ledger produced values for its concepts. Only the member (``to``) end of a
+  presentation arc counts: a note's total is usually a common leaf that
+  almost always has a fact, which would pick notes with empty breakdowns.
+  Scoped to the report's taxonomy closure.
   """
   if not fact_element_ids:
     return []
@@ -225,29 +189,12 @@ def _build_structure_mapping(
   fact_element_ids: set[str] | None = None,
   taxonomy_id: str | None = None,
 ) -> tuple[dict[str, list[str]], dict[str, str]]:
-  """Return (element_id→[structure_ids], structure_id→fact_set_id) for the
-  Reporting Style composed for this graph, plus fact-picked disclosures.
+  """Return (element_id→[structure_ids], structure_id→new fact_set_id).
 
-  Walks ``reporting_style_networks`` to pick one Network per statement
-  type, then enumerates each Network's association rows to map elements →
-  structure ids. An element can appear in multiple structures (e.g.
-  ``NetIncomeLoss`` is the bottom line of the Income Statement AND the
-  first calc-child of the Cash Flow Operating rollup), and the fact must
-  be stamped onto every owning structure's FactSet so each block's
-  renderer can resolve its calc rollups locally. Pre-generates a
-  fact_set_id ULID per picked structure.
-
-  ``fact_element_ids`` (the elements the just-generated report facts
-  touch) drives the disclosure half: disclosure structures are NOT
-  style-composed — they join the render set when their concepts
-  received facts (:func:`_pick_disclosure_structures`).
-
-  Networks for statement types the Style doesn't compose are skipped
-  silently — a Style is free to omit, say, the comprehensive_income
-  Network. Statement types the renderer asks for that the Style
-  *does* try to render but lacks a composition row for surface as
-  ``NoNetworkForStatementTypeError`` at picker time (the caller wraps
-  the loop and decides whether to fail closed).
+  Covers one Network per statement type the Reporting Style composes, plus
+  the disclosures picked from ``fact_element_ids`` when ``taxonomy_id`` is
+  given. An element in several structures (``NetIncomeLoss`` in IS and CF)
+  maps to all of them, so each block resolves its calc rollups locally.
   """
   element_to_structures: dict[str, list[str]] = {}
   structure_to_factset: dict[str, str] = {}
@@ -257,14 +204,7 @@ def _build_structure_mapping(
     try:
       network = get_render_network(session, reporting_style_id, statement_type)
     except NoNetworkForStatementTypeError:
-      # Style doesn't compose this statement type — skip silently so a
-      # Style that ships without (say) an equity Network still renders.
-      # Safety net: the ``change-reporting-style`` command validates that
-      # every required statement_type has a composition row before setting
-      # ``entities.reporting_style_id``, so by the time this loop runs the
-      # only `NoNetworkForStatementTypeError` we should see is for
-      # genuinely optional types (e.g. a Style that deliberately omits
-      # ``comprehensive_income``).
+      # Optional for this Style; change-reporting-style validates required ones.
       continue
     picked_structure_ids.append(network.structure_id)
 
@@ -278,14 +218,8 @@ def _build_structure_mapping(
   if not picked_structure_ids:
     return {}, {}
 
-  # Map BOTH endpoints of every arc to the structure, not just
-  # ``to_element_id``. A subtotal that sits at the top of its tree
-  # (e.g. ``rs-gaap:Assets``, ``rs-gaap:LiabilitiesAndStockholdersEquity``)
-  # appears only as a ``from_element_id`` (parent), so a to-only mapping
-  # never stamps its persisted subtotal fact into the structure's FactSet
-  # — and the balance-identity rule scoped to it can't bind. Abstract
-  # parents carry no facts, so including ``from_element_id`` is harmless
-  # for them and load-bearing for top-level subtotals.
+  # Both arc endpoints: a top-of-tree subtotal (``rs-gaap:Assets``) appears
+  # only as a parent, and the balance-identity rule needs its fact.
   rows = session.execute(
     text(
       """
@@ -318,24 +252,11 @@ def _pre_create_report_fact_sets(
   structure_to_factset: dict[str, str],
   mapping_id: str,
 ) -> None:
-  """Insert one FactSet row per picked Network — before facts are stamped.
+  """Insert one FactSet per picked structure, before facts are stamped.
 
-  ``create_report`` creates the ``fact_sets`` row first, then stamps
-  facts referencing its id. The period envelope comes from the report's
-  ``periods`` (min start, max end) rather than being derived post-hoc
-  from filtered facts. That keeps the dataflow forward and lets the FK
-  ``facts.fact_set_id`` → ``fact_sets.id`` hold without orphan risk.
-
-  ``report_id=None`` mints CANONICAL sets — the close-time record owned
-  only by ``(structure_id, period)``; a non-None id mints a Report's
-  publication snapshot.
-
-  Every picked Network gets a FactSet row, even one whose Network the
-  CoA hasn't reached yet (e.g., the demo's CF Network with no
-  cash-flow CoA mappings). The envelope read
-  (``ORDER BY period_end DESC LIMIT 1``) still resolves cleanly per
-  structure; consumers can detect "no facts in this period" by the
-  zero fact_count on the resulting envelope.
+  The period envelope is the span of ``periods``. ``report_id=None`` mints
+  canonical close-time sets. Every structure gets a set even if no fact will
+  land in it; consumers see a zero fact_count.
   """
   if not periods:
     return
@@ -344,10 +265,7 @@ def _pre_create_report_fact_sets(
   envelope_start = min(starts) if starts else None
   envelope_end = max(p.end for p in periods)
 
-  # Report facts are pivoted from the posted ledger via the CoA→framework
-  # mapping; one provenance descriptor per Network's FactSet. Duration
-  # envelopes use ``start/end``; an instant-only envelope (no start) carries
-  # the single end date rather than a leading-slash ``/end``.
+  # An instant envelope carries the end date alone, not ``/end``.
   period_key = (
     f"{envelope_start}/{envelope_end}" if envelope_start else str(envelope_end)
   )
@@ -364,9 +282,7 @@ def _pre_create_report_fact_sets(
       created_by=created_by,
       provenance=PivotProvenance(mapping_id=mapping_id, period=period_key),
     )
-  # Explicit flush so the new fact_sets rows hit the DB before the fact
-  # INSERTs that reference them. SQLAlchemy's session-flush ordering is
-  # by INSERT statement type, not by FK dependency.
+  # The fact INSERTs reference these rows; flush order is not FK-aware here.
   session.flush()
 
 
@@ -384,27 +300,10 @@ def _stamp_facts_into_sets(
 ) -> None:
   """Persist generated report facts into their pre-created FactSets.
 
-  Every persisted Fact is stamped with ``structure_id`` and
-  ``fact_set_id`` — the FactSet is the sole parent pointer. Facts whose
-  element isn't reached by any Network in the picked Reporting Style are
-  skipped: there's no Network to render them through, so they can't be
-  stamped with a structure_id, and the fact_set_id NOT NULL constraint
-  would reject them.
-
-  An element that appears in N structures (e.g. ``NetIncomeLoss`` =
-  bottom-line of the IS AND first calc-child of CF Operating) gets one
-  Fact row per owning structure, each pinned to that structure's
-  FactSet. This is what lets the CF block's calc walker resolve
-  NetIncome locally without cross-structure fact lookup.
-
-  Every value through here is dollars (the row is stamped ``unit="USD"``)
-  derived from the ledger's integer cents, so it is rounded to cents
-  before it is written. The pivot and the subtotal derivations add in
-  float, and a sum such as ``52585 + 5400.02`` lands on
-  ``57985.020000000004``; ``facts.value`` is ``double precision`` and
-  would keep that tail, and every published flavor prints the stored
-  double faithfully. Rounding here removes float noise, never real
-  precision — the ledger has none below a cent.
+  One Fact row per owning structure; facts no picked structure reaches are
+  skipped. Values are dollars rounded to cents: the pivot adds in float and
+  ``facts.value`` is a double, so this strips float noise the ledger (integer
+  cents) never had.
   """
   for fact in facts.facts:
     for structure_id in element_to_structures.get(fact.element_id, ()):
@@ -424,13 +323,8 @@ def _stamp_facts_into_sets(
       )
       session.add(rf)
 
-  # Flush so every fact is visible to the rule-evaluation binds that
-  # follow. The session runs ``autoflush=False``, and
-  # ``_evaluate_report_structures`` iterates structures in
-  # non-deterministic set order; without an explicit flush here the
-  # FIRST structure evaluated would bind against unflushed facts and
-  # spuriously ``skip`` every rule (the terminal flush inside the first
-  # ``evaluate_rules_for_structure`` would only rescue the later ones).
+  # autoflush=False: without this the first structure evaluated binds
+  # against unflushed facts and skips every rule.
   session.flush()
 
 
@@ -442,13 +336,7 @@ def _persist_report_facts(
   element_to_structures: dict[str, list[str]],
   structure_to_factset: dict[str, str],
 ) -> None:
-  """Clear any existing facts for this report and persist the new set.
-
-  The publication path: DELETE by ``report_id`` (regeneration clears
-  prior snapshots; canonical ``report_id NULL`` sets are untouchable
-  through this path by construction), then stamp via
-  :func:`_stamp_facts_into_sets`.
-  """
+  """Replace this report's facts; canonical (report_id NULL) sets are untouched."""
   session.execute(
     text(
       "DELETE FROM facts WHERE fact_set_id IN "
@@ -466,12 +354,9 @@ def _canonical_set_ids_in_window(
 ) -> list[str]:
   """Canonical statement set ids for exactly this period window.
 
-  Window-scoped on purpose (not per-structure): a reclose after a
-  reporting-style change must retire the OLD style's sets too, and
-  reopen retraction can't know which structures a past close picked.
-  The predicates exclude every other producer: publication snapshots
-  (``report_id NOT NULL``), scenario months (``scenario_id NOT NULL``),
-  and non-'report' factset types (schedule/metric/disclosure/custom).
+  Window-scoped, not per-structure: a reclose after a reporting-style change
+  must retire the old style's sets too. Excludes publication snapshots and
+  scenario months.
   """
   return list(
     session.execute(
@@ -491,11 +376,7 @@ def _canonical_set_ids_in_window(
 def has_canonical_statement_sets(
   session: Session, *, period_start: date, period_end: date
 ) -> bool:
-  """Whether the window already carries close-stamped canonical sets.
-
-  The plan-history backfill's idempotency check: months that answer True
-  are already part of the statement series and are never touched again.
-  """
+  """Whether the window already carries close-stamped canonical sets."""
   return bool(_canonical_set_ids_in_window(session, period_start, period_end))
 
 
@@ -504,13 +385,8 @@ def retract_canonical_statement_sets(
 ) -> list[str]:
   """Delete the window's canonical statement sets (reopen / replace path).
 
-  Sweeps the sets' VerificationResults first: no DB-level FK ties results
-  to fact_sets, so without the sweep they'd orphan invisibly and bleed into
-  later reads. Facts cascade at the DB level
-  (``facts.fact_set_id ON DELETE CASCADE``).
-
-  Returns the retracted fact_set ids — empty when the window carries none,
-  as after a soft-skipped close.
+  VerificationResults have no FK to fact_sets, so they are swept first; facts
+  cascade. Returns the retracted fact_set ids.
   """
   set_ids = _canonical_set_ids_in_window(session, period_start, period_end)
   if not set_ids:
@@ -533,39 +409,17 @@ def stamp_canonical_statement_sets(
 ) -> StatementStampResult:
   """Pivot the posted ledger and stamp the period's canonical statement sets.
 
-  The close-time producer: statements only (``taxonomy_id=None`` keeps
-  the disclosure picker out — text-block snapshots and disclosure
-  membership are publication concerns that stay in ``create_report``).
+  Statements only; disclosures and text blocks are publication concerns.
+  Idempotent: the window's existing canonical sets are replaced.
 
-  The pivot runs over TWO periods — the prior calendar month plus the
-  close month — so the indirect cash flow articulates: operating CF
-  leaves derive from month-over-month BS deltas and the statement foots
-  to the actual ΔCash via the reconciling plug, exactly the
-  ``create_report`` / forecast doctrine. Only the close month's facts
-  are stamped. A close month with no prior ledger activity deltas
-  against zero balances — correct for a book's genuinely first month —
-  and a backfill's clamped seed month deltas against the ledger's true
-  prior-month balances even when that month was never itself stamped.
+  - **Soft-skip** (``stamped=False`` with a note): reporting isn't set up.
+    The close proceeds.
+  - **Hard fail** (:class:`StatementStampError`): reporting is configured
+    but the stamp raised. The close must roll back rather than leave a hole
+    in the statement series.
 
-  Two-zone failure semantics:
-
-  - **Soft-skip** (returns ``stamped=False`` with a note): the tenant
-    hasn't set up reporting — no CoA mapping, no entity, no composed
-    statement structures, or no rs-gaap taxonomy. The close proceeds;
-    a later close (after mapping) stamps normally.
-  - **Hard fail** (:class:`StatementStampError`): reporting IS
-    configured but the pivot or persist raised. The close must roll
-    back — a closed month without its canonical sets would silently
-    hole the statement series — and the operator fixes and re-closes.
-
-  Replace semantics: any canonical sets already in this window are
-  retracted first (results swept, facts cascaded), making the stamp
-  idempotent across reclose and retry-after-failure.
-
-  Statement-rule verification runs after the stamp, pinned per minted
-  set, and is NON-fatal (mirrors the close's schedule-rule pass): a
-  failed identity check is a finding on the month, not a reason to
-  refuse the close. Its outcome rides ``rule_summary``.
+  Statement-rule verification afterwards is non-fatal; a failed check is a
+  finding on the month (``rule_summary``), not a reason to refuse the close.
   """
   mapping = (
     session.query(Structure)
@@ -599,13 +453,8 @@ def stamp_canonical_statement_sets(
     return StatementStampResult(stamped=False, note="no_taxonomy")
 
   period_label = period_end.strftime("%Y-%m")
-  # The prior month rides the pivot as the indirect-CF delta basis: the
-  # working-capital derivation (``_derive_cash_flow_facts``) and the cash
-  # foot (``_reconcile_operating_to_cash``) both no-op below two periods, so
-  # a single-period stamp would mint a CF of NetIncome + DDA that never ties
-  # to the actual cash movement. Only the close month's facts are stamped —
-  # the prior month's are dropped after derivation, and its own canonical
-  # sets, if any, are untouched.
+  # The prior month rides the pivot only as the indirect cash flow's delta
+  # basis (the derivation no-ops below two periods); its facts are dropped.
   prior_end = period_start - timedelta(days=1)
   prior_start = prior_end.replace(day=1)
   try:
@@ -644,9 +493,7 @@ def stamp_canonical_statement_sets(
 
   rule_summary: dict[str, int] | None = None
   try:
-    # Under a savepoint: the evaluation writes VerificationResult rows, and a
-    # database-level failure there must not abort the close's transaction
-    # (the stamp above is already flushed; the close still has to commit).
+    # Savepoint: a DB failure here must not abort the close's transaction.
     with session.begin_nested():
       rule_summary = _evaluate_report_structures(
         session,

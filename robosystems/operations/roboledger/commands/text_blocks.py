@@ -1,20 +1,11 @@
-"""Document → text-block-fact binding (the bind-text-block operation).
+"""Bind a platform Document (or one section) to a disclosure Element as a
+text-block Fact (the bind-text-block operation).
 
-Binds a platform Document (markdown) — or one of its sections — to a
-disclosure Element as a ``Nonnumeric`` text-block Fact. The document
-stays the editable source of truth; the fact snapshots its text into a
-standing ``factset_type='disclosure'`` FactSet owned by the disclosure
-Structure, stamped with ``DocumentProvenance`` (document_id + section +
-content_hash — the drift signal). Report builds copy the standing set
-into a per-report FactSet (``reports._snapshot_text_block_facts``), so a
-filed report is immutable even if the document is later edited; a
-re-bind refreshes the standing fact and its hash.
-
-Cross-database by design: Documents live in the PLATFORM database, facts
-in the extensions (tenant) database — the linkage is the provenance
-reference, never an FK. The Document lookup is graph-scoped
-(``get_by_id_and_graph``), so another graph's document id is a plain
-miss, not an existence oracle.
+The document stays the editable source; the fact snapshots its text into the
+standing disclosure FactSet with ``DocumentProvenance`` (content hash as the
+drift signal), and report builds copy that set, so a filed report is immutable.
+The link is a provenance reference across databases, never an FK; the
+graph-scoped Document lookup keeps another graph's id a plain miss.
 """
 
 from __future__ import annotations
@@ -143,9 +134,7 @@ def bind_text_block(
 
   element = _resolve_element(session, body)
   if element.item_type is None:
-    # The bind is the sprint's only text authoring surface — enrich the
-    # element's value domain here rather than widening the taxonomy-block
-    # request schema.
+    # Set here rather than widening the taxonomy-block request schema.
     element.item_type = "text_block"
 
   if body.entity_id is not None:

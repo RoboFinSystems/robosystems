@@ -1,29 +1,8 @@
-"""Asset disposal event handler.
+"""asset_disposed handler: atomically voids the schedule's pending
+obligations, drops its SumEquals rule, and posts the disposal entry.
 
-Fires when create-event-block runs with event_type='asset_disposed' and
-apply_handlers=True. Atomically:
-
-1. Computes the disposal plan (NBV, gain/loss, line items) from the schedule's
-   existing facts.
-2. Voids all `pending` `schedule_entry_due` obligations linked to the
-   schedule via its originating `schedule_created` event. The voided rows
-   carry `replaced_by_event_id` pointing at the disposal event so the audit
-   chain stays queryable. Facts stay in place as a historical record (the
-   GL has the disposal entry that nets the asset gone).
-3. Deletes the schedule's SumEquals rule (it's no longer satisfiable after
-   the obligations are voided) plus any verification_results rows that
-   reference it.
-4. Posts a balanced disposal entry via ScheduleService.create_manual_closing_entry.
-5. Links the resulting Entry to the event via triggered_by_event_id.
-
-Event status after success: 'fulfilled' (disposal is terminal — no further work).
-
-All writes happen in one session. If any step raises, the outer transaction
-rolls back — nothing persists, no half-disposed state.
-
-The obligation register is the single source of truth for what is still due,
-which is why disposal terminates a schedule's remaining lifespan by voiding
-its pending obligations rather than by deleting facts.
+The obligation register is the source of truth for what is still due, so
+disposal voids pending obligations rather than deleting facts.
 """
 
 from __future__ import annotations
@@ -84,18 +63,8 @@ def _void_pending_obligations_for_schedule(
   structure_id: str,
   disposal_event_id: str,
 ) -> int:
-  """Void all `pending` schedule_entry_due events for a disposed schedule.
-
-  Thin wrapper that loads the structure and delegates to the shared
-  ``ScheduleService.void_pending_obligations``. Each voided row
-  carries ``replaced_by_event_id=disposal_event_id`` so the audit
-  chain answers "what voided this obligation?". Facts stay in place
-  — the GL's disposal entry is the authoritative end-state.
-
-  Returns 0 (no-op) when the structure is missing or has no
-  ``schedule_created_event_id`` — covers schedules without an originating
-  event row (e.g. test fixtures that build Structure rows directly).
-  """
+  """Void a disposed schedule's `pending` obligations; 0 if the structure is
+  missing."""
   structure = session.get(Structure, structure_id)
   if structure is None:
     return 0
@@ -108,15 +77,8 @@ def _void_pending_obligations_for_schedule(
 
 
 def _delete_sum_equals_rule(session: Session, structure_id: str) -> None:
-  """Delete the schedule's SumEquals rule + its verification_results rows.
-
-  The auto-generated SumEquals rule (sum of periodic amounts == original cost)
-  stops being satisfiable once the schedule's remaining obligations are
-  voided, so it must be removed atomically with the disposal.
-
-  Raw SQL for the verification_results DELETE because FactSet/VerificationResult
-  FK chains don't cascade through rules.id by default.
-  """
+  """Delete the schedule's SumEquals rule (unsatisfiable once obligations are
+  voided) and its verification_results rows, which don't cascade."""
   session.execute(
     text(
       "DELETE FROM verification_results WHERE rule_id IN ("
@@ -143,16 +105,11 @@ def dispatch(
   metadata: AssetDisposedMetadata,
   created_by: str,
 ) -> HandlerResult:
-  """Execute the disposal atomically.
-
-  The event row has already been inserted by the caller with
-  status=target_status (='fulfilled'). We flush GL rows; the caller commits.
-  """
+  """Execute the disposal; the caller commits."""
   if event.occurred_at is None:
     raise ValueError("asset_disposed event requires occurred_at")
   disposal_date = event.occurred_at.date()
 
-  # 1. Compute the disposal plan (read-only — no writes yet)
   plan = compute_disposal_plan(
     session,
     structure_id=metadata.schedule_id,
@@ -162,17 +119,14 @@ def dispatch(
     gain_loss_element_id=metadata.gain_loss_element_id,
   )
 
-  # 2. Void any remaining `pending` obligations on this schedule.
   voided_count = _void_pending_obligations_for_schedule(
     session,
     structure_id=metadata.schedule_id,
     disposal_event_id=event.id,
   )
 
-  # 3. Delete the now-invalid SumEquals rule
   _delete_sum_equals_rule(session, metadata.schedule_id)
 
-  # 4. Post the disposal entry
   service = ScheduleService()
   memo = metadata.memo or f"Asset disposal for schedule {metadata.schedule_id}"
   entry_result = service.create_manual_closing_entry(
@@ -185,7 +139,6 @@ def dispatch(
     provenance="event_handler",
   )
 
-  # 5. Link the entry to the event (audit chain)
   session.execute(
     update(Entry)
     .where(Entry.id == entry_result.entry_id)
@@ -211,12 +164,7 @@ def dispatch_preview(
   body: CreateEventBlockRequest,
   metadata: AssetDisposedMetadata,
 ) -> HandlerPreview:
-  """Read + compute without writing. Returns the plan the handler would execute.
-
-  Mirrors every validation gate ``dispatch`` runs, so a preview reporting
-  ``would_succeed=True`` cannot still 422 at dispatch time on a
-  closed-period or balance violation.
-  """
+  """The plan ``dispatch`` would execute, behind the same validation gates."""
   from robosystems.operations.locking import RowLockedError
   from robosystems.operations.roboledger.commands._guards import (
     ClosedPeriodError,
@@ -232,9 +180,7 @@ def dispatch_preview(
       proceeds_element_id=metadata.proceeds_element_id,
       gain_loss_element_id=metadata.gain_loss_element_id,
     )
-    # The disposal posts a manual closing entry whose `posting_date` is
-    # the disposal date. ``dispatch`` will refuse the post if that period
-    # is closed; surface the same blocker here.
+    # dispatch posts on the disposal date and refuses a closed period.
     assert_period_not_closed(session, body.occurred_at.date())
   except (ValueError, ClosedPeriodError, RowLockedError, ScheduleNotFoundError) as e:
     return HandlerPreview(

@@ -5,13 +5,10 @@ assertions, line assertions, growth rates); this module derives everything
 downstream, one forward month at a time from the walk's **anchor**.
 
 The anchor is not the block's ``base_period``. ``base_period`` is the origin
-of the authored window — every lever is keyed to a month inside it, so moving
-it would mean restating all of them. The anchor is derived instead: with
-``base_anchor='seam'`` (the default) it advances to the newest closed month
-inside the horizon, so a scenario survives a period close untouched and its
-first forward month opens on real balances rather than on a base several
-closes old. ``base_anchor='fixed'`` pins the walk to ``base_period`` for the
-deliberate counterfactual. Per month, in order:
+of the authored window (every lever is keyed to a month inside it). With
+``base_anchor='seam'`` (the default) the anchor advances to the newest closed
+month inside the horizon, so the first forward month opens on real balances;
+``base_anchor='fixed'`` pins it to ``base_period``. Per month, in order:
 
 1. **Carry-forward** — every income-statement leaf that carried a fact in the
    base month's actual report and isn't rule-driven repeats its prior value.
@@ -30,21 +27,15 @@ deliberate counterfactual. Per month, in order:
    rs-gaap-calculations + local income-statement arcs derives GrossProfit →
    OperatingIncome → NetIncome the same way the report pivot does.
 
-Each month upserts one scenario income-statement FactSet
-(``factset_type='report'``, congruent with the actual monthly sets so
-statement envelopes render scenario columns unchanged), a balance-sheet set,
-and — when an actual cash-flow statement exists — a derived cash-flow set.
-All are keyed by ``fact_sets.scenario_id`` = the forecast block, and
-re-running a month replaces its values. Without an actual balance sheet at
-the base period there is no articulation context, and the balance-sheet set
-degrades to the rule-driven working-capital instants alone.
+Each month upserts a scenario income-statement set
+(``factset_type='report'``, congruent with the actual monthly sets), a
+balance-sheet set, and a derived cash-flow set when an actual one exists, all
+keyed by ``fact_sets.scenario_id``; re-running a month replaces its values.
+Without an actual balance sheet at the base period, the balance-sheet set is
+only the rule-driven working-capital instants.
 
 Soft-fail per rule per month: a missing lever month or unbound operand skips
-that rule with a reason and its target falls back to carry-forward — one
-broken rule never aborts the walk.
-
-Deterministic and non-AI, so free under the credit model; the Operator that
-*proposes* lever values is the credit-consuming layer on top.
+that rule with a reason and its target falls back to carry-forward.
 """
 
 from __future__ import annotations
@@ -145,26 +136,15 @@ def _actual_set_at(
 ) -> FactSet | None:
   """The newest actual report set for a structure at exactly one month.
 
-  The ``period_start >= period_start`` bound is load-bearing: the final
-  monthly period_end coincides with the FY end, and without the window
-  guard the ANNUAL comparative set (created later) would win and seed
-  ``Revenues[t-1]`` with the FY column instead of the month.
+  The ``period_start`` bound is load-bearing: the final monthly period_end
+  coincides with the FY end, and without it the ANNUAL comparative set
+  would win.
 
-  Canonical sets (report_id IS NULL — the close-time stamp) beat
-  publication snapshots, same contract as the envelope loaders: a Report
-  published later for the base month must not seed the forecast off a
-  frozen snapshot that may have been regenerated with a different style.
-
-  ``canonical_only`` drops the publication fallback entirely, which is a
-  different question from "which set is better": **the existence of a
-  canonical set is what makes a month closed.** ``create_report`` consults
-  no fiscal calendar — it takes whatever window the caller passes — so a
-  report generated for an open or future month leaves a perfectly valid
-  publication snapshot behind it. And reopening retracts only canonical
-  sets (`statement_sets._canonical_set_ids_in_window`), deliberately
-  leaving snapshots in place. Preferring canonical is right when seeding
-  from a month already known to be closed; it is not enough when the
-  question *is* whether the month is closed.
+  Canonical sets (report_id IS NULL, the close-time stamp) beat publication
+  snapshots. ``canonical_only`` drops snapshots entirely: a canonical set is
+  what makes a month closed, while a snapshot can exist for an open, future
+  or reopened month (``create_report`` never consults the fiscal calendar,
+  and reopen retracts only canonical sets).
   """
   stmt = select(FactSet).where(
     FactSet.structure_id == structure_id,
@@ -189,14 +169,8 @@ def _newest_actual_month(
 ) -> str | None:
   """Newest month carrying a canonical (close-stamped) set for a structure.
 
-  An upper bound for the anchor scan, kept separate from
-  :func:`_actual_set_at` because it deliberately does *not* apply that
-  function's monthly-window guard — it may well land on the annual
-  comparative set. Bounding is all it is for.
-
-  Canonical-only for the same reason the scan is: a publication snapshot
-  can exist for a month that is open or has been reopened, so it says
-  nothing about where the books are closed through.
+  Only an upper bound for the anchor scan: it skips the monthly-window
+  guard, so it may land on the annual comparative set.
   """
   newest = session.execute(
     select(FactSet.period_end)
@@ -224,47 +198,17 @@ def _resolve_anchor_period(
 ) -> str:
   """The newest month inside the horizon that can seed the walk.
 
-  A scenario is authored against a base month and then the books move on.
-  Left pinned to that base, the walk keeps opening every recompute from
-  balances that are now many closes old: the forward months carry a
-  balance sheet that never saw what actually happened, so the plan grid
-  shows a cash line stepping from the last actual straight into a figure
-  the scenario's own cash-flow statement cannot explain. The transition
-  isn't wrong arithmetic — the walk foots to the penny against its own
-  base — it is anchored to a month nobody is looking at any more.
+  Candidates are the months after ``base_period`` inside the horizon,
+  newest first (so a gap in the closed history can't strand the anchor);
+  the first with a monthly **canonical** income statement (and balance
+  sheet, when required) wins. Canonical is required, not preferred: the
+  walk seeds from the anchor and :func:`_invalidate_superseded_head`
+  deletes every scenario month at or before it, and only close-stamping
+  means closed.
 
-  So the anchor advances with the close. Candidates are the months
-  strictly after ``base_period`` and inside the authored horizon, newest
-  first; the first one carrying a **monthly, canonical** income statement
-  (and balance sheet, when the graph has one) wins. Scanning back from the
-  horizon end rather than forward from the base means a gap in the middle
-  of the closed history can't strand the anchor behind it.
-
-  **Canonical is the whole point of the predicate, not a preference.** The
-  anchor is a claim that the books are closed through a month, and it has
-  teeth: the walk seeds its opening balances there and
-  :func:`_invalidate_superseded_head` deletes every scenario month at or
-  before it. A publication snapshot proves nothing about closure —
-  ``create_report`` never consults the fiscal calendar, so one can exist
-  for an open or even future month, and reopening a month retracts only
-  the canonical set and deliberately leaves the snapshot. Anchoring on a
-  snapshot would seed the walk from an incomplete month and discard real
-  forecast months to do it. Close-stamping is the only thing that means
-  closed, and it tracks reopen for free.
-
-  One query establishes where that scan can start, because otherwise its
-  cheapest case is also its most expensive one: a scenario whose base is
-  still the seam — every scenario at creation, and most of them most of
-  the time — finds nothing, and finding nothing means having walked the
-  entire horizon to prove it. The newest actual ``period_end`` on the
-  income-statement structure bounds any month that could qualify. It is a
-  bound, not an answer: the newest set may be the ANNUAL comparative one,
-  whose ``period_end`` coincides with a monthly one at the fiscal year
-  end and which :func:`_actual_set_at` deliberately refuses. Too high is
-  harmless (the scan walks down); too low would skip a valid anchor, and
-  it cannot be, since every monthly set is included in the maximum.
-
-  Returns ``base_period`` when nothing later qualifies.
+  The newest actual month bounds the scan so the common case (nothing
+  closed past the base) doesn't walk the whole horizon. Returns
+  ``base_period`` when nothing later qualifies.
   """
   newest_actual_month = _newest_actual_month(session, is_structure_id, entity_id)
   if newest_actual_month is None:
@@ -368,19 +312,17 @@ def cmd_compute_forecast(
     )
   entity_id = body.entity_id or lever_set.entity_id or _default_entity_id(session)
 
-  # Lever + line-assertion VALUES bind from the scenario's authored
-  # facts (facts are the values; the mechanics copy is the legible
-  # round-trip shape). Levers key by qname (rule operands name qnames);
-  # assertions key by element id (the walk works in element-id space).
+  # Lever and line-assertion values bind from the authored facts, not the
+  # mechanics copy. Levers key by qname (rule operands name qnames);
+  # assertions key by element id.
   element_qname_by_id: dict[str, str] = {
     lv.element_id: lv.qname for lv in mechanics.levers
   }
   assertion_period_type: dict[str, str] = {
     la.element_id: la.period_type for la in mechanics.line_assertions
   }
-  # Line-growth rates bind from the mechanics directly — rates aren't
-  # facts (a rate on a monetary statement element would lie about its
-  # unit), so the mechanics copy is their single authored store.
+  # Growth rates live only in the mechanics: a rate stored as a fact on a
+  # monetary element would lie about its unit.
   growth_rates: dict[str, dict[str, float]] = {
     lg.element_id: lg.values_by_period for lg in mechanics.line_growth
   }
@@ -410,20 +352,11 @@ def cmd_compute_forecast(
     )
   bs_structure_id = newest_actual_structure_id(session, "balance_sheet")
 
-  # The authored window never moves — every lever is keyed to a month in
-  # `base_period + 1 … base_period + horizon`, so advancing the base would
-  # force the author to restate all of them (which is exactly why advancing
-  # it by hand meant deleting and rebuilding the scenario). The *anchor*
-  # moves instead: it is derived, it needs nothing restated, and it is what
-  # the opening balances come from.
   anchor_period = mechanics.base_period
   if mechanics.base_anchor == "seam":
-    # Whether the anchor must also carry a balance sheet is decided by what
-    # the BASE month carries, not by whether the graph has a balance-sheet
-    # structure at all. A scenario that rolls a balance sheet must not
-    # re-anchor onto a month that would silently drop the roll; one that
-    # never had a base balance sheet was already running IS-only and
-    # shouldn't be held back by a requirement it never met.
+    # Require a balance sheet at the anchor only if the base month has one:
+    # re-anchoring must not silently drop the BS roll, but an IS-only
+    # scenario shouldn't be held to it.
     base_window = period_date_range(mechanics.base_period)
     rolls_balance_sheet = bs_structure_id is not None and (
       _actual_set_at(session, bs_structure_id, entity_id, *base_window) is not None
@@ -618,11 +551,8 @@ def cmd_compute_forecast(
 
   diagnostics: list[str] = []
 
-  # The months to walk. The authored window's END is fixed — a scenario
-  # doesn't silently grow a longer horizon because months closed under it —
-  # so a re-anchored walk computes fewer months, not later ones. The months
-  # between the base and the anchor are actuals now; the moving seam already
-  # preferred actuals over them on every read.
+  # The window's end is fixed, so a re-anchored walk computes fewer months,
+  # not later ones.
   window_end = add_months(mechanics.base_period, mechanics.horizon_months)
   months = []
   for offset in range(1, months_n + 1):
@@ -632,22 +562,10 @@ def cmd_compute_forecast(
     months.append(month)
 
   if not months:
-    # Fully overtaken: the close has passed the end of the authored window,
-    # so every month this scenario ever computed is now a closed month.
-    #
-    # This used to raise, which read as the loud answer and was the quiet
-    # one. The exception rolls the session back, so the superseded months
-    # survived it — the precise stale state `_invalidate_superseded_head`
-    # exists to remove, left behind by the one case where *all* of them
-    # qualify. A partially-overtaken scenario cleaned up after itself while
-    # a fully-overtaken one did not, which is the limit case behaving
-    # opposite to the trend.
-    #
-    # So it cleans up and returns instead, with no computed months and a
-    # diagnostic that leads with the condition. Only DERIVED months go; the
-    # authored lever set is excluded from the sweep exactly as it is
-    # everywhere else, so the scenario keeps its identity and can be
-    # forecast again the moment its horizon is extended.
+    # Fully overtaken: the close has passed the window's end. Clear the
+    # superseded months and return rather than raise (a raise would roll the
+    # cleanup back). The lever set survives, so extending the horizon
+    # revives the scenario.
     cleared = _invalidate_superseded_head(
       session,
       scenario_id=scenario_id,
@@ -759,15 +677,8 @@ def cmd_compute_forecast(
       if element_id in prior_values:
         current[element_id] = prior_values[element_id]
 
-    # (a2) Schedule deltas — a schedule's own projection overrides the
-    # carry for its expense lines (an ended schedule's expense stops).
-    # The reference month is the PREVIOUS walk month, not the base: the
-    # carried value already contains the previous month's schedule
-    # contribution (prior_values rolls at (e)), so a base-anchored delta
-    # re-subtracts the base-vs-current gap every month — cumulative
-    # run-off that marches a line negative even on coherent books.
-    # Mirrors schedule_instant_movement's prev_end reference on the BS
-    # side; deltas telescope to base + sched[m] - sched[base].
+    # (a2) Schedule deltas override the carry for schedule expense lines,
+    # referenced to the previous walk month (see schedule_is_delta).
     if ctx is not None:
       for element_id in list(current):
         delta = schedule_is_delta(ctx, element_id, month, prev_month)
@@ -775,13 +686,10 @@ def cmd_compute_forecast(
           continue
         before = current[element_id]
         after = before + delta
-        # Schedule run-off can't take a line below zero. When the base
-        # month's actuals carry less than its schedule facts claim
-        # (stale overlapping vintages; prior-period corrections that
-        # can only land in the GL, never in schedule facts), the full
-        # run-off overshoots the base. Verification can't catch it —
-        # the incoherence is economic, not arithmetic — so clamp at
-        # zero and say so legibly.
+        # Clamp run-off at zero: when base actuals carry less than the
+        # schedule facts claim (stale vintages, GL-only corrections), the
+        # run-off overshoots, and verification can't catch an economic
+        # incoherence.
         if delta < 0 and before >= 0 and after < 0:
           after = 0.0
           clamped_el = _element(element_id)
@@ -798,13 +706,10 @@ def cmd_compute_forecast(
           )
         current[element_id] = after
 
-    # (a2b) Line growth — the generic per-line trajectory:
-    # line[t] = line[t-1] * (1 + rate[t]), compounding through the
-    # prior-values roll. Overrides the carry and schedule projection
-    # for the months it names; rate-less months keep the carry (a).
-    # Authoring rejects overlap with assertions and active catalog
-    # rules, but a stale overlap (catalog rule activated after the
-    # growth entry was stored) yields to the rule, legibly.
+    # (a2b) Line growth: line[t] = line[t-1] * (1 + rate[t]), overriding
+    # carry and schedule for the months it names. A stale overlap with a
+    # catalog rule (activated after the growth entry was stored) yields to
+    # the rule.
     grown_this_month: set[str] = set()
     for element_id, rate_by_month in growth_rates.items():
       rate = rate_by_month.get(month)
@@ -823,10 +728,8 @@ def cmd_compute_forecast(
       current[element_id] = prior_values.get(element_id, 0.0) * (1.0 + rate)
       grown_this_month.add(element_id)
 
-    # (a3) Line assertions — the manual overrides win over carry and
-    # schedule projection for the months they name; a displaced driver
-    # rule is skipped legibly in (b), and dependent rules bind the
-    # asserted value through the same-month operand path.
+    # (a3) Line assertions win over carry and schedule for the months they
+    # name; a displaced driver rule is skipped in (b).
     asserted_this_month: set[str] = set()
     for element_id, by_month in assertion_values.items():
       if month in by_month:
@@ -835,9 +738,8 @@ def cmd_compute_forecast(
     month_asserted_instants = {
       el for el in asserted_this_month if assertion_period_type.get(el) == "instant"
     }
-    # One owner per line: a grown value is as authored as an asserted one,
-    # so the push-down must not rescale it away — the driven parent's
-    # remainder distributes over the un-owned siblings instead.
+    # Grown values are as authored as asserted ones; push-down must not
+    # rescale either.
     pinned_this_month = asserted_this_month | grown_this_month
 
     # (b) Driver rules in same-month dependency order.
@@ -857,11 +759,8 @@ def cmd_compute_forecast(
           )
         )
         continue
-      # A rule driving a calc PARENT whose entire valued subtree is
-      # pinned by assertions this month has nothing to drive — the
-      # push-down would have no unpinned child for the remainder, and
-      # the final subtotal derivation would contradict the driven value.
-      # Displace it as legibly as a direct-target assertion.
+      # A rule driving a calc parent whose valued subtree is entirely
+      # pinned has nothing to drive; displace it.
       if ar.target.id in asserted_ancestors and _subtree_all_pinned(
         ar.target.id, calculations, current, pinned_this_month
       ):
@@ -924,12 +823,8 @@ def cmd_compute_forecast(
         if operand_element is None:
           missing.append(qname)
           continue
-        # Same-month value first (carried or rule-computed earlier in
-        # the topo order), then same-month DERIVED from valued children
-        # (a calc parent like Revenues whose only value this month is an
-        # asserted leaf), prior month last — a subtotal base still binds
-        # when its rule is inactive, and a stale prior never beats a
-        # derivable same-month value.
+        # Same-month value, then same-month derived from children, then
+        # prior month: a stale prior never beats a derivable current value.
         if operand_element.id in current:
           values[name] = current[operand_element.id]
           continue
@@ -953,8 +848,7 @@ def cmd_compute_forecast(
           missing.append(f"{qname}[t-1] (no prior value)")
 
       for synth_name in avg_operands:
-        # No driver rule uses avg() today; binding it would need a
-        # begin/end pair the walk doesn't track. Honest skip.
+        # avg() would need a begin/end pair the walk doesn't track.
         missing.append(f"{synth_name} (avg() unsupported in compute-forecast)")
 
       if missing:
@@ -983,12 +877,9 @@ def cmd_compute_forecast(
         continue
       current[ar.target.id] = value
 
-    # A skipped rule's target falls back to carry-forward for the month —
-    # the honest default, and it keeps the cascade fed for dependents.
-    # Displaced targets never fall back: the assertion path owns their
-    # value (a carried stale parent would beat the freshly derived
-    # child sum at the subtotal step, breaking the very rollup the
-    # displacement protects).
+    # A skipped rule's target falls back to carry-forward. Displaced targets
+    # don't: a carried parent would beat the derived child sum at the
+    # subtotal step.
     for element_id in active_target_ids:
       if (
         element_id not in current
@@ -997,13 +888,8 @@ def cmd_compute_forecast(
       ):
         current[element_id] = prior_values[element_id]
 
-    # (b2) Push rule deltas down the composition — a Derive rule that
-    # targets a calc PARENT (Revenues, CostOfRevenue) scales the
-    # parent's carried children proportionally, the workbook's implicit
-    # semantics (every revenue stream grows at g). Without this the
-    # statement's own RollUp verification fails: driven parent, stale
-    # children. Asserted and grown leaves are pinned — the remainder
-    # distributes over the unpinned children only.
+    # (b2) A rule targeting a calc parent scales its children
+    # proportionally, so the statement's RollUp verification holds.
     _scale_rule_target_children(
       current, active_target_ids, calculations, pinned=pinned_this_month
     )
@@ -1011,10 +897,8 @@ def cmd_compute_forecast(
     # (c) Calc-DAG subtotals — derive, never carry (present = direct wins).
     resolved = resolve_calc_dag(current, set(current), calculations, calc_order)
 
-    # (d) Upsert the month's scenario sets.
-    # `base_period` on the provenance is the month this walk actually
-    # seeded from and `month_index` counts forward from it — both describe
-    # the run, not the authoring, so a re-anchored run stamps the anchor.
+    # (d) Upsert the month's scenario sets. Provenance `base_period` is the
+    # anchor this run seeded from, not the authored base.
     provenance = ForecastProvenance(
       scenario_structure_id=scenario_id,
       base_period=anchor_period,
@@ -1030,12 +914,8 @@ def cmd_compute_forecast(
         continue
       is_facts.append((element, resolved[element_id]))
       emitted_is.add(element_id)
-    # Duration lines living OUTSIDE the base month's report still emit:
-    # the asserted (or assertion-carried) line itself AND its derived
-    # calc ancestors — without the ancestors the emitted set can't roll
-    # up (Revenues missing over an asserted revenue leaf), the month
-    # fails verification with a residual equal to the assertion, and
-    # the next month's [t-1] operands never see the derived parent.
+    # Duration lines outside the base month's report still emit, with their
+    # calc ancestors, or the set can't roll up and fails verification.
     extra_is: set[str] = set()
     for element_id in current:
       if element_id in emitted_is:
@@ -1153,11 +1033,8 @@ def cmd_compute_forecast(
         facts=cf_facts,
       )
 
-    # (f) Verify the month — the same rule corpus that gates actuals,
-    # pinned to each scenario set (the fact_set_id pin scopes balances
-    # and binds; no scenario threading inside the engine). Prior runs
-    # for a set are replaced, mirroring the fact upsert's drift
-    # semantics — results are per-month state, not append-only history.
+    # (f) Verify each scenario set with the rule corpus that gates actuals,
+    # pinned by fact_set_id.
     verification_passed, verification_failures = _verify_month_sets(
       session,
       sets=(
@@ -1184,24 +1061,9 @@ def cmd_compute_forecast(
       )
     )
 
-    # (f.1) Stop the walk on a failed month.
-    #
-    # Step (e) below rolls this month's closing balances into the next
-    # month's opening context, so continuing past a failure does not
-    # produce N-1 unverified months — it produces N-1 months *derived from
-    # a known-wrong one*, each reporting its own verification status as
-    # though it stood alone. Truncating is the honest answer: the caller
-    # gets the months that verified plus the one that broke, and
-    # ``halted_at`` names where to look.
-    #
-    # The failed month's facts are deliberately kept. They are already
-    # written by the time verification runs, and they are what you need in
-    # order to see *why* it failed.
-    #
-    # `None` does not halt. It means no rules produced results — an
-    # absence, not a failure — and halting on it would break any graph
-    # whose scenario structures carry no bound rules. But it must not read
-    # as a pass either, so it is collected and surfaced once below.
+    # (f.1) Halt on a failed month: every later month would chain off it.
+    # The failed month's facts are kept for diagnosis. `None` (no rules
+    # produced results) doesn't halt but is surfaced below as unverified.
     if verification_passed is False:
       halted_at = month
       diagnostics.append(
@@ -1228,10 +1090,6 @@ def cmd_compute_forecast(
     prev_period_end = month_end
     prev_month = month
 
-  # An unverified month is not a verified one. Reported once rather than
-  # per-month so a rule corpus that never binds reads as one loud fact
-  # instead of N quiet ones — the failure mode being that `None` has always
-  # been indistinguishable from a pass to every consumer.
   if unverified_months:
     diagnostics.append(
       f"{len(unverified_months)} month(s) ran no verification rules and are "
@@ -1240,10 +1098,7 @@ def cmd_compute_forecast(
       f"A scenario whose structures carry no bound rules cannot be gated."
     )
 
-  # The scenario must hold exactly the months this run produced. Anything past
-  # the last one belongs to a longer previous run, and the month it chained
-  # from has just been rewritten underneath it — halting without this leaves
-  # the tail of the old forecast readable, and reading as verified.
+  # The scenario must hold exactly the months this run produced.
   if months_computed:
     dropped = _invalidate_stale_tail(
       session,
@@ -1257,11 +1112,6 @@ def cmd_compute_forecast(
         f"left over from a longer previous run."
       )
 
-    # And the other end of the window: months a previous run computed that
-    # the anchor has since moved past. They are closed months now, so every
-    # read prefers the actuals over them — which is exactly why they would
-    # sit there indefinitely, invisible on the plan grid and still present
-    # to anything reading the scenario directly.
     if anchor_period != mechanics.base_period:
       superseded = _invalidate_superseded_head(
         session,
@@ -1322,16 +1172,8 @@ def _subtree_all_pinned(
   current: dict[str, float],
   asserted: set[str],
 ) -> bool:
-  """Whether every valued element under ``target_id`` is line-asserted.
-
-  The displacement test for rules that drive a calc PARENT (the growth
-  rule targets Revenues): when the target's entire contribution basis
-  this month is pinned by assertions, the rule has nothing left to
-  drive — push-down has no unpinned child to absorb the remainder — so
-  it must be displaced rather than fight the assertion. A partially
-  pinned subtree keeps the rule active (the existing pinned push-down
-  distributes the remainder over the unpinned children).
-  """
+  """Whether every valued element under ``target_id`` is pinned (and at
+  least one is valued)."""
   has_value = False
   seen: set[str] = set()
   stack = [child for child, _w in calculations.get(target_id, ())]
@@ -1356,11 +1198,8 @@ def _derive_from_children(
 ) -> float | None:
   """Σ child·weight over ``current``, recursing through subtotal children.
 
-  Same-month operand fallback: a rule operand naming a calc parent that
-  has no direct value yet (Revenues when only an asserted revenue leaf
-  exists) binds its derived value instead of falling to a stale prior.
-  Returns None when no descendant carries a value — an absent subtree
-  must stay a skip, never a fabricated zero.
+  None when no descendant carries a value: an absent subtree must stay a
+  skip, never a fabricated zero.
   """
   seen = _seen or set()
   if element_id in seen:
@@ -1389,18 +1228,11 @@ def _scale_rule_target_children(
   calculations: dict[str, list[tuple[str, float]]],
   pinned: set[str] | None = None,
 ) -> None:
-  """Scale a rule-driven calc parent's present children so the composition
-  articulates with the driven value.
+  """Scale a rule-driven calc parent's children (and their subtrees) so they
+  sum to the driven value, less the ``pinned`` children's contribution.
 
-  Proportional: each child (and its own subtree, recursively) multiplies by
-  ``driven / Σ child·weight``. ``pinned`` elements (line-asserted or
-  line-grown leaves) are never scaled — the driven parent's remainder after
-  the pinned contributions distributes over the unpinned children instead.
-
-  A zero unpinned children-sum leaves the parent untouched: proportional
-  scaling has no basis, and the visible RollUp failure beats inventing a
-  split. A skipped rule that fell back to carry scales by exactly 1.0, so
-  this is a no-op for inactive months.
+  A zero unpinned sum leaves the parent untouched: a visible RollUp failure
+  beats inventing a split.
   """
   pinned = pinned or set()
 
@@ -1445,13 +1277,10 @@ def _verify_month_sets(
   created_by: str,
   global_calculations: dict[str, list[tuple[str, float]]],
 ) -> tuple[bool | None, list[str]]:
-  """Run the rule corpus against each emitted scenario set, pinned.
+  """Run the rule corpus against each emitted scenario set, replacing prior
+  results.
 
-  Prior results for a set are deleted first — a recompute replaces the
-  month's verification state the same way the fact upsert replaces its
-  values. Returns ``(passed, failures)``: ``passed`` is ``None`` when
-  no rules produced results, else whether nothing failed/errored;
-  ``failures`` carries the first few failed/errored messages.
+  ``passed`` is ``None`` when no rules produced results.
   """
   from robosystems.models.extensions import VerificationResult
   from robosystems.operations.information_block.rules.engine import (
@@ -1497,31 +1326,8 @@ def _invalidate_stale_tail(
   entity_id: str,
   through_period_end: date,
 ) -> int:
-  """Delete scenario sets beyond the last month this run produced.
-
-  The walk upserts month by month, so a run that halts at month 3 — or one
-  asked for a shorter horizon than the run before it — leaves the previous
-  run's months 4..N sitting in the scenario, fully queryable, each carrying
-  its own passing verification result. They do not merely go stale: every one
-  of them was chained off a month that has since been replaced, so they
-  describe a forecast that no longer exists while reading as current.
-
-  Scoping by ``scenario_id`` alone would be wrong, because not every set
-  carrying it is produced here: the **lever set** is authored by
-  ``_write_lever_fact_set`` at create time and carries the same
-  ``scenario_id``. Its envelope spans the full horizon, so any run asked
-  for fewer months than the horizon — the ``months=horizon-1`` probe, or
-  simply a shorter re-run — would sweep away the very assertions the next
-  ``compute-forecast`` reads, and the block would answer every later
-  request with "has no lever FactSet — the block is corrupt". It is
-  excluded by the pair that identifies it in ``_load_lever_fact_set``:
-  ``structure_id`` equal to the scenario, ``factset_type='custom'``.
-  Computed month sets point at statement structures instead.
-
-  Facts cascade with their FactSet at the DB level;
-  ``VerificationResult.fact_set_id`` carries no FK, so those rows go
-  explicitly — the same sweep ``delete_scenario`` does.
-  """
+  """Delete scenario sets past the last month this run produced (left by a
+  longer or unhalted previous run, and chained off months since replaced)."""
   return _sweep_scenario_sets(
     session,
     scenario_id=scenario_id,
@@ -1537,25 +1343,8 @@ def _invalidate_superseded_head(
   entity_id: str,
   through_period_end: date,
 ) -> int:
-  """Delete scenario sets at or before the month the walk re-anchored to.
-
-  The head counterpart of :func:`_invalidate_stale_tail`, and it exists for
-  the same reason. When the anchor advances past months a previous run
-  computed, those months are now closed: actuals exist for them, and every
-  read prefers actuals at an overlap, so they are invisible on the plan
-  grid. Invisible is not gone. They are scenario facts describing months
-  the scenario no longer forecasts, chained off an anchor the walk has
-  abandoned, and they still carry their own passing verification results —
-  the same "reads as current" failure the tail sweep was written for, at
-  the other end of the window. Anything reading the scenario directly
-  (a graph query, a fact grid) sees them as forecast.
-
-  Same lever-set exclusion, and for the same reason: the authored lever
-  FactSet carries this ``scenario_id`` with a period envelope spanning the
-  full horizon, so its ``period_end`` sits past the anchor and is safe here
-  — but only by accident of the envelope, and a sweep that relied on that
-  would break the first time the envelope shape changed.
-  """
+  """Delete scenario sets at or before the re-anchored month. Reads prefer
+  actuals there, but the sets are still visible to direct graph queries."""
   return _sweep_scenario_sets(
     session,
     scenario_id=scenario_id,
@@ -1573,9 +1362,10 @@ def _sweep_scenario_sets(
 ) -> int:
   """Delete the scenario's computed sets matching ``period_bound``.
 
-  One implementation for both sweeps so the lever-set exclusion — the
-  sharp edge of making the scenario id the forecast Structure's own id —
-  is written once and cannot drift between them.
+  The authored lever set carries the same ``scenario_id`` and must survive:
+  it is excluded by the pair ``_load_lever_fact_set`` identifies it by
+  (``structure_id`` = scenario, ``factset_type='custom'``).
+  ``VerificationResult.fact_set_id`` has no FK, so those rows go explicitly.
   """
   stale = (
     session.execute(
@@ -1627,14 +1417,11 @@ def _upsert_month_set(
   created_by: str,
   facts: list[tuple[Element, float]],
 ) -> str | None:
-  """Upsert one scenario standing set — the metrics full-replace pattern,
-  keyed by (structure, entity, factset_type, period_end, **scenario**).
+  """Full-replace upsert of one scenario set, keyed by (structure, entity,
+  factset_type, period_end, scenario).
 
-  Every emitted fact is stamped with the scenario Dimension via
-  ``fact_dimensions`` — the explicit-member half of the default-member
-  rule (actuals carry no dimension rows and stay in consolidated
-  totals; scenario facts carry one and drop out for any reader
-  honoring the ``has_dimensions`` contract)."""
+  Every fact is stamped with the scenario Dimension so it drops out of
+  consolidated (``has_dimensions: false``) reads."""
   if not facts:
     return None
   standing = session.execute(

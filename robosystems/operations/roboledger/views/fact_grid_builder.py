@@ -1,12 +1,8 @@
 """Assemble queried facts into a `FactGrid`.
 
-Scoping and aspect extraction only — **no pivoting**. Collapsing facts into
-cells is a rendering decision that depends on the full aspect signature
-(element · period · entity · unit), and getting it wrong is silent: summing
-across entities or across two taxonomies whose elements share a local name
-produces a number that looks authoritative and is meaningless. That
-arrangement belongs to the consumer — `@robosystems/report-components` keys
-cells on the whole signature — so this layer hands back the facts as queried.
+Scoping and aspect extraction only, no pivoting: collapsing facts into cells
+depends on the full aspect signature (element, period, entity, unit) and is
+the consumer's job.
 """
 
 import time
@@ -31,20 +27,10 @@ _AXIS_COLUMNS = {
 def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
   """Per-element aggregates over the returned facts.
 
-  Shared by the REST and MCP surfaces so both report the same numbers.
-  `total` and `average` span every returned period, so they are emitted for
-  duration facts only. A balance is a point-in-time measure: summed or
-  averaged across periods it yields a figure that looks authoritative and
-  means nothing, and a model reading the field quotes it. Instants (no
-  `period_start`, or an explicit `period_type` of `instant`) carry
-  `count` / `min` / `max` only.
-
-  Overlapping duration windows that share a `period_end` (a 10-Q reports the
-  same element for both the quarter and the year-to-date window ending the
-  same day) contribute only their narrowest window per (entity, period_end):
-  summing a quarter and the YTD window that contains it double-counts the
-  quarter. The window survives in the `facts` list either way — this is an
-  aggregation rule, not a filter.
+  `total` and `average` are emitted for duration elements only; a balance
+  summed across periods is meaningless. Duration windows sharing a
+  `period_end` (quarter and YTD) contribute only the narrowest one, so the
+  quarter is not double-counted; the facts list itself is unchanged.
   """
   summary: dict[str, dict[str, float]] = {}
 
@@ -91,11 +77,7 @@ class FactGridBuilder:
     view_config: ViewConfig,
     source: str,
   ) -> FactGrid:
-    """Scope `query_fact_grid` records per `view_config` into a FactGrid.
-
-    The grid carries the scoped facts plus the aspects they span; `source`
-    is recorded on the metadata.
-    """
+    """Scope `query_fact_grid` records per `view_config` into a FactGrid."""
     start_time = time.time()
 
     if not fact_data:
@@ -176,8 +158,7 @@ class FactGridBuilder:
         )
       )
 
-    # entity_ticker/entity_name are only returned when an entity filter was
-    # applied; a ticker can be null for CIK- or name-matched entities.
+    # A ticker can be null (entities without one), so fall back to the name.
     entities = self._unique(facts, "entity_ticker") or self._unique(
       facts, "entity_name"
     )
@@ -203,7 +184,6 @@ class FactGridBuilder:
     return list(seen)
 
   def _build_empty_grid(self, source: str) -> FactGrid:
-    """Build empty FactGrid when no facts found."""
     return FactGrid(
       dimensions=[],
       facts=[],

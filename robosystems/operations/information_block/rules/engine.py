@@ -1,35 +1,6 @@
-"""Rule evaluation engine entry point.
-
-``evaluate_rules_for_structure`` is the single public function. It:
-
-1. Loads all rules scoped to the structure (via ``load_rules_for_structure``
-   so element/association-scoped rules are included alongside
-   structure-scoped ones).
-2. For each rule: resolves ``$Variable`` → fact value bindings by
-   qname lookup, dispatches to the per-pattern evaluator, and writes
-   a :class:`~robosystems.models.extensions.VerificationResult` row.
-3. Returns the written rows (ids assigned after ``session.flush()``).
-
-The engine is side-effect-free from the caller's perspective — it
-``session.add()``s rows and calls ``session.flush()`` to assign ids,
-but leaves ``session.commit()`` to the OperationSpec wrapper, which
-commits on success.
-
-Binding semantics
------------------
-For each ``{variable_name, variable_qname}`` entry in
-``rule.rule_variables``:
-
-1. Resolve ``variable_qname`` → ``element_id`` via elements table.
-2. If the element is missing → bind ``variable_name`` to ``None``
-   (the pattern evaluator surfaces this as ``skipped`` or ``fail``).
-3. Resolve ``element_id`` + period window → fact value via the facts
-   table (``fact_scope = 'in_scope'``, most recent ``period_end`` first).
-   Facts are filtered by ``structure_id`` (or ``fact_set_id`` when the
-   caller pins one); every fact carries both, stamped at write time.
-   None on miss.
-
-One query per variable (N+1 is fine for 3-5 variables per rule).
+"""Rule evaluation engine: ``evaluate_rules_for_structure`` binds each rule's
+``$Variable``s to fact values (``None`` on a miss), dispatches to the
+per-pattern evaluator, and writes one ``VerificationResult`` per rule.
 """
 
 from __future__ import annotations
@@ -62,18 +33,11 @@ from robosystems.operations.information_block.rules.expressions import (
 
 
 def _actual_set_ids(structure_id: str):
-  """The structure's FactSets that are actuals — the undimensioned scenario.
+  """The structure's actual (``scenario_id IS NULL``) FactSets.
 
-  Every unpinned fact read in this module goes through here. Scoping by
-  ``structure_id`` alone reads as "this statement" and means "this
-  statement, in every scenario": scenario month sets are deliberately
-  stamped with the *statement* structure's id, because that is how a
-  scenario column renders through the same structure as its actuals.
-
-  So the scenario pin is required, not merely tightening: the unpinned
-  binder takes the newest fact per element, and on a graph carrying a
-  forecast the newest fact is a month that has not happened. Rules
-  evaluate the books, which means actuals only — ``scenario_id IS NULL``.
+  Every unpinned fact read here goes through this: scenario month sets are
+  stamped with the statement structure's id, so ``structure_id`` alone
+  would bind forecast months. Rules evaluate the books, actuals only.
   """
   return select(FactSet.id).where(
     FactSet.structure_id == structure_id,
@@ -97,14 +61,12 @@ def _bind_variables(
     if not name:
       continue
     if name in bindings:
-      # Bindings are name-keyed: a repeated name would silently merge two
-      # elements (one double-counted, one dropped). Raise so the per-rule
-      # handler records status='error' instead of a wrong verdict.
+      # A repeated name would silently merge two elements; raise so the rule
+      # records status='error' instead of a wrong verdict.
       raise ValueError(f"duplicate variable_name {name!r} in rule variables")
 
-    # Prefer an explicit element id when the rule carries one. Tenant CoA
-    # elements have a null qname (they key on `code`), so qname resolution
-    # can't bind them — schedule rules pass `variable_element_id` directly.
+    # Tenant CoA elements have a null qname, so schedule rules pass
+    # `variable_element_id` directly.
     element_id: str | None = (
       var.get("variable_element_id")
       or session.execute(
@@ -156,10 +118,7 @@ def _bind_sum_variables(
     if not name:
       continue
     if name in bindings:
-      # Same guard as _bind_variables — name-keyed bindings must be unique.
       raise ValueError(f"duplicate variable_name {name!r} in rule variables")
-    # Prefer an explicit element id (CoA elements have null qname — see
-    # _bind_variables); schedule SumEquals rules carry variable_element_id.
     element_id: str | None = (
       var.get("variable_element_id")
       or session.execute(
@@ -169,20 +128,11 @@ def _bind_sum_variables(
     if element_id is None:
       bindings[name] = None
       continue
-    # SumEquals checks a structural invariant — Σ(periodic facts) ==
-    # contracted total — so it must sum every periodic fact on the
-    # structure regardless of `fact_scope`. Filtering to `in_scope`
-    # would silently break schedules that bisect `closed_through`:
-    # only the post-close tail would be summed, but `expected_total`
-    # still encodes the full contract amount, producing spurious
-    # failures. Schedule facts aren't replicated into GL line items,
-    # so summing historical periods here doesn't double-count
-    # anything that landed in opening balances.
-    # Scenario months are excluded for the same reason as every other
-    # unpinned read here (see `_actual_set_ids`). A schedule structure
-    # carries no scenario sets today, so this is inert — and it is the
-    # third unpinned read in this module, which is exactly how many
-    # places the invariant has to hold in for it to be one.
+    # SumEquals checks Σ(periodic facts) == contracted total, so it sums
+    # every periodic fact regardless of `fact_scope`: filtering to
+    # `in_scope` would sum only the post-close tail of a schedule that
+    # straddles `closed_through`. Scenario sets are excluded as in
+    # `_actual_set_ids`.
     row = session.execute(
       text(
         "SELECT ROUND(SUM(f.value)::numeric, 2) AS total "
@@ -205,18 +155,12 @@ def _load_period_balances(
   period_start: date | None,
   period_end: date | None,
 ) -> dict[tuple[date | None, date | None], tuple[dict[str, float], set[str]]]:
-  """Group in-scope facts into per-period ``(balances, present)`` — SUMMING
-  every fact for an element+period, the way the fact producer does (a single
-  element can carry multiple facts in one period, e.g. a derived flow plus a
-  reconciling plug), within the period window.
+  """Group in-scope facts into per-period ``(balances, present)``, summing
+  multiple facts per element+period (e.g. a derived flow plus a plug).
 
-  Scoped to a single FactSet: pinned when ``fact_set_id`` is given, else the
-  LATEST **actual** FactSet for the structure (``scenario_id IS NULL``;
-  without the pin a computed forecast month would silently become the
-  summing unit for every rule run). The FactSet is the summing unit — two
-  coexisting
-  reports over the same period both stamp this structure, so a bare
-  ``structure_id`` scope would sum across reports and double every balance.
+  Scoped to one FactSet (``fact_set_id``, else the latest actual set): two
+  reports over the same period both stamp this structure, so a
+  ``structure_id`` scope would double every balance.
   """
   if fact_set_id is None:
     fact_set_id = session.execute(
@@ -229,9 +173,8 @@ def _load_period_balances(
       .limit(1)
     ).scalar()
 
-  # Numeric facts only — a Nonnumeric (text-block) fact must neither
-  # contribute a 0.0 balance nor mark its element "present" for the
-  # rollup skip guard.
+  # A text-block fact must not mark its element "present" for the rollup
+  # skip guard.
   stmt = select(Fact.element_id, Fact.value, Fact.period_start, Fact.period_end).where(
     Fact.fact_scope == "in_scope",
     Fact.fact_type == "Numeric",
@@ -239,14 +182,8 @@ def _load_period_balances(
   if fact_set_id is not None:
     stmt = stmt.where(Fact.fact_set_id == fact_set_id)
   else:
-    # No ACTUAL FactSet exists for this structure (never reported) — no
-    # balances. The comment here used to say exactly that while the code
-    # scoped by `structure_id`, which is not the same thing the moment a
-    # scenario exists: the walk stamps its balance-sheet sets on the
-    # statement structure even when no actual balance sheet does (the
-    # degraded, rule-driven branch), so "never reported" and "carries only
-    # forecast months" are the same state to this query. Summing those
-    # would foot the plan and stamp the verdict on the books.
+    # No actual FactSet exists, so this yields no balances. The actuals pin
+    # still matters: the structure may carry forecast-only sets.
     stmt = stmt.where(
       Fact.structure_id == structure_id,
       Fact.fact_set_id.in_(_actual_set_ids(structure_id)),
@@ -271,12 +208,9 @@ def _load_period_balances(
 def _rollup_parent_variable(rule: Rule) -> dict | None:
   """Pick the ``rule_variables`` entry naming the RollUp's parent subtotal.
 
-  The parent is whichever variable the expression's LHS names — the same
-  derivation the frozen evaluator uses (``lhs_variable_names``), so both
-  paths agree even when a tenant-authored rule lists children first.
-  Falls back to ``variables[0]`` (both machine producers' parent-first
-  convention) when the expression can't be parsed, has no single-LHS
-  shape, or names a variable that isn't declared.
+  The parent is the expression's LHS variable (as the frozen evaluator
+  derives it), falling back to ``variables[0]`` (the machine producers'
+  parent-first convention) when that can't be determined.
   """
   variables = rule.rule_variables or []
   if not variables:
@@ -296,11 +230,8 @@ def _rollup_parent_variable(rule: Rule) -> dict | None:
 def _rollup_parent_element_id(
   session: Session, rule: Rule, cache: dict[str, str | None]
 ) -> tuple[str | None, str]:
-  """Resolve a RollUp rule's parent (the expression LHS) to an element_id.
-
-  Prefers an explicit ``variable_element_id`` (tenant CoA elements have a null
-  qname); otherwise resolves the qname, cached across rules in one run.
-  """
+  """Resolve a RollUp rule's parent (the expression LHS) to an element_id,
+  preferring an explicit ``variable_element_id``; qname lookups are cached."""
   parent = _rollup_parent_variable(rule)
   if parent is None:
     return None, ""
@@ -324,28 +255,17 @@ def _evaluate_rollup_arc_derived(
   calculations: dict[str, list[tuple[str, float]]],
   cache: dict[str, str | None],
 ) -> EvaluationOutcome | None:
-  """Evaluate a RollUp against the parent's DIRECT rs-gaap-calculations children.
+  """Evaluate a RollUp against the parent's DIRECT children in the live calc DAG.
 
-  Standard XBRL calculation semantics: a summation parent is checked against the
-  weighted sum of its *direct* calc children (each parent validated on its own
-  rule; the tree holds by induction). Children come from the live calc arcs —
-  not the rule's frozen enumeration — so a subtotal footing over a sibling
-  concept (``...ExcludingGoodwill`` where the frozen rule named
-  ``...IncludingGoodwill``) passes, and multi-fact-per-period elements sum
-  (``_load_period_balances`` already summed them). Compares against the parent's
-  own reported value, so a genuine mismatch still fails.
+  XBRL calculation semantics: each parent is checked against the weighted sum
+  of its direct children's reported balances, not a global DAG resolution, so
+  an element on another statement's calc path can't contaminate the sum.
+  Using live arcs rather than the rule's frozen enumeration lets a subtotal
+  foot over a sibling concept. Periods where no direct child is reported here
+  are skipped.
 
-  Crucially it uses only the parent's *direct* children and each element's own
-  reported balance — NOT a global DAG resolution — so an element that appears in
-  a different statement's calc path (e.g. DDA as both a CF add-back and an IS
-  expense) can't contaminate the sum. A rollup whose direct children aren't
-  reported on this structure (e.g. an IS decomposition rule landing on the CF)
-  is skipped.
-
-  Returns ``None`` when the parent has no calc children in the merged DAG
-  (global rs-gaap-calculations overlaid with the structure's own calc arcs),
-  so the caller falls back to the frozen-expression evaluator (custom / fac
-  rollups).
+  Returns ``None`` when the parent has no calc children, so the caller falls
+  back to the frozen-expression evaluator.
   """
   parent_id, parent_qname = _rollup_parent_element_id(session, rule, cache)
   if parent_id is None or parent_id not in calculations:
@@ -366,9 +286,6 @@ def _evaluate_rollup_arc_derived(
   per_period: list[dict[str, Any]] = []
   for key in sorted(periods, key=lambda k: (k[1] is None, k[1] or date.min)):
     balances, present = by_period[key]
-    # Skip a period where the subtotal is reported but none of its direct calc
-    # children are present here — nothing to foot against (e.g. an IS
-    # decomposition rule evaluated on the CF statement).
     if not any(cid in present for cid, _ in children):
       continue
     children_sum = sum(balances.get(cid, 0.0) * w for cid, w in children)
@@ -419,18 +336,11 @@ def evaluate_rules_for_structure(
   created_by: str = "engine",
   global_calculations: dict[str, list[tuple[str, float]]] | None = None,
 ) -> list[VerificationResult]:
-  """Evaluate every rule scoped to ``structure_id`` and persist results.
+  """Evaluate every rule scoped to ``structure_id`` (including element- and
+  association-scoped ones) and persist one result per rule.
 
-  Loads rules via :func:`~robosystems.operations.information_block.envelope.load_rules_for_structure`
-  (which includes element and association-scoped rules for the structure's
-  atoms). For each rule: binds variables → dispatches to the pattern
-  evaluator → writes one :class:`VerificationResult` row.
-
-  A binding or dispatch failure writes ``status='error'`` rather than
-  propagating — one broken rule can't abort the whole evaluation run.
-
-  ``session.flush()`` is called before returning so that row ids are
-  assigned; the caller (OperationSpec wrapper) owns the commit.
+  A per-rule failure writes ``status='error'`` rather than propagating.
+  Flushes; the caller owns the commit.
   """
   structure = session.get(Structure, structure_id)
   if structure is None:
@@ -464,13 +374,8 @@ def evaluate_rules_for_structure(
   rules = session.execute(select(Rule).where(Rule.id.in_(rule_ids))).scalars().all()
   rule_map = {r.id: r for r in rules}
 
-  # Arc-derived RollUp prep. RollUp rules are re-derived from the live
-  # rs-gaap-calculations DAG (mirroring the fact producer) rather than the
-  # rule's frozen child enumeration bound one-fact-per-qname, which reports
-  # false failures when a subtotal foots over a sibling concept or over two
-  # facts in one period. The global DAG is reused from ``global_calculations``
-  # when the caller precomputed it (a report run evaluates many structures),
-  # else loaded here — only when a RollUp rule exists.
+  # RollUp rules evaluate against the live calc DAG; ``global_calculations``
+  # lets a caller evaluating many structures load it once.
   calculations: dict[str, list[tuple[str, float]]] = {}
   by_period: dict[
     tuple[date | None, date | None], tuple[dict[str, float], set[str]]
@@ -486,15 +391,9 @@ def evaluate_rules_for_structure(
       calculations = load_rs_gaap_calculations(session)
     else:
       calculations = dict(global_calculations)
-    # Tenant-authored roll_up structures (disclosure notes) foot against
-    # their OWN calculation arcs. Merge with LOCAL-WINS precedence: a note
-    # that decomposes a global calc parent (Revenues, OperatingExpenses,
-    # ...) foots against its own members, not the statement-level children
-    # absent from its FactSet; the global DAG is the fallback for every
-    # parent the structure doesn't re-arc. Same live-arc doctrine as the
-    # global path: children come from arcs, never from a frozen
-    # enumeration. merge_calculations is pure, so the caller's shared
-    # global dict can't be polluted across structures.
+    # Local arcs win: a disclosure note that decomposes a global calc parent
+    # foots against its own members. merge_calculations is pure, so the
+    # shared global dict isn't polluted.
     local_calcs: dict[str, list[tuple[str, float]]] = {}
     for assoc in sorted(
       associations,
@@ -517,11 +416,7 @@ def evaluate_rules_for_structure(
     rule = rule_map.get(rule_lite.id)
     if rule is None:
       continue
-    # Derive rules COMPUTE values (compute-metrics / compute-forecast) —
-    # they are not checks and must not emit VerificationResults. Without
-    # this, the rs-driver catalog's rules (whose targets are rs-gaap
-    # statement elements) would add a "skipped" row to every statement
-    # verification run.
+    # Derive rules compute values; they are not checks.
     if rule.rule_pattern == "Derive":
       continue
     try:

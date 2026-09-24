@@ -1,13 +1,8 @@
 """Handlers for ``taxonomy_type='schedule'`` — container for Schedule info blocks.
 
-Schedule taxonomies are thin grouping containers: they carry a ``name``
-and a ``description``, nothing else. The actual Schedule artifacts live
-as ``Information Blocks`` of type ``schedule``, each linked to a parent
-taxonomy row via ``structures.taxonomy_id``.
-
-This handler is deliberately minimal — no elements, no structures, no
-associations. The envelope validation caps still apply, but the handler
-ignores any atoms that slip through.
+A name-and-description grouping container; the Schedule Information Blocks
+link to it via ``structures.taxonomy_id``. Any atoms in the envelope are
+ignored.
 """
 
 from __future__ import annotations
@@ -70,7 +65,7 @@ def update(
   payload: UpdateTaxonomyBlockRequest,
   updated_by: str,
 ) -> str:
-  """Intentionally not exposed; admin-only via library_creator."""
+  """Intentionally not exposed."""
   raise NotImplementedError(_ADMIN_ONLY_MESSAGE)
 
 
@@ -79,7 +74,7 @@ def delete(
   payload: DeleteTaxonomyBlockRequest,
   deleted_by: str,
 ) -> str:
-  """Intentionally not exposed; admin-only via library_creator."""
+  """Intentionally not exposed."""
   raise NotImplementedError(_ADMIN_ONLY_MESSAGE)
 
 

@@ -1,19 +1,6 @@
-"""Handlers for ``block_type='schedule'`` — the declarative construction
-mode reference.
-
-Two public handlers bind the generic construction machinery to the Schedule
-commands in :mod:`robosystems.operations.roboledger.commands.schedules`:
-
-- :func:`create` delegates to ``cmd_create_schedule`` and returns the
-  new structure's id.
-- :func:`build_envelope` reloads the Structure + its bundled atoms and
-  packs them into the typed :class:`InformationBlockEnvelope`.
-
-Schedule is the reference implementation of the **declarative**
-construction mode — the user declares the mechanics + seed params and
-the system generates atoms. The statement family covers the
-**compositional** mode and the metric block covers the **derivative**
-mode.
+"""Handlers for ``block_type='schedule'``: bind the Information Block
+dispatch to the Schedule commands in
+:mod:`robosystems.operations.roboledger.commands.schedules`.
 """
 
 from __future__ import annotations
@@ -45,17 +32,8 @@ from robosystems.operations.information_block.envelope import (
   load_base_envelope_atoms,
 )
 
-# `roboledger.commands.schedules` is imported inside the three handlers below
-# rather than here. That module imports this package's rule engine, so a
-# module-level import closes a cycle: schedules → information_block →
-# commands → registry → schedule → schedules, with the last hop landing on a
-# half-initialized module. Deferring to call time is the same idiom
-# `commands/schedules.py` already uses for its own back-references.
-
-# Shared display identity — values mirrored in the registry entry. Kept
-# here as constants so the envelope builder can fill the wire shape
-# without a registry re-import (avoids a circular dependency —
-# registry.py imports these handlers).
+# `roboledger.commands.schedules` is imported inside the handlers below: a
+# module-level import closes an import cycle through the registry.
 SCHEDULE_BLOCK_TYPE = "schedule"
 SCHEDULE_DISPLAY_NAME = "Schedule"
 SCHEDULE_CATEGORY = "Close"
@@ -66,13 +44,7 @@ def create(
   payload: CreateScheduleRequest,
   created_by: str,
 ) -> str:
-  """Create a schedule via the existing command, return its structure_id.
-
-  The generic ``cmd_create_information_block`` dispatcher validates the
-  incoming opaque payload against this block type's registered
-  ``create_request_model`` (:class:`CreateScheduleRequest`) before
-  invoking this handler, so the argument is already shape-correct.
-  """
+  """Create a schedule via the existing command, return its structure_id."""
   from robosystems.operations.roboledger.commands.schedules import (
     create_schedule as cmd_create_schedule,
   )
@@ -86,12 +58,7 @@ def update(
   payload: UpdateScheduleRequest,
   updated_by: str,
 ) -> str:
-  """Update a schedule via the existing command, return its structure_id.
-
-  ``updated_by`` is forwarded so any side effects of the update — such as
-  superseding pending obligations when the entry template changes —
-  record the right actor on the freshly emitted event rows.
-  """
+  """Update a schedule via the existing command, return its structure_id."""
   from robosystems.operations.roboledger.commands.schedules import (
     update_schedule as cmd_update_schedule,
   )
@@ -105,12 +72,7 @@ def delete(
   payload: DeleteScheduleRequest,
   deleted_by: str,
 ) -> str:
-  """Delete a schedule via the existing command, return the deleted id.
-
-  The underlying ``cmd_delete_schedule`` returns ``{"deleted": True}``;
-  we surface the structure_id from the input payload for the unified
-  response envelope.
-  """
+  """Delete a schedule via the existing command, return the deleted id."""
   from robosystems.operations.roboledger.commands.schedules import (
     delete_schedule as cmd_delete_schedule,
   )
@@ -122,12 +84,8 @@ def delete(
 def _load_schedule_mechanics(
   structure: Structure, periods_with_entries: int
 ) -> ScheduleMechanics:
-  """Build the typed Schedule mechanics from a Structure row.
-
-  Reads the typed ``artifact_mechanics`` column when populated, falling
-  back to the ``metadata_`` JSONB shape that older Schedule rows still
-  carry — both paths produce the same :class:`ScheduleMechanics` arm.
-  """
+  """Build the typed Schedule mechanics from ``artifact_mechanics``, falling
+  back to the ``metadata_`` shape older rows carry."""
   mechanics_blob = structure.artifact_mechanics
   if mechanics_blob:
     return ScheduleMechanics.model_validate(
@@ -157,13 +115,7 @@ def _load_schedule_mechanics(
 
 
 def _latest_instant_per_element(facts: Sequence[Fact]) -> list[Fact]:
-  """Keep only the most recent instant fact per element (max ``period_end``).
-
-  Used to pick a roll-forward's carry-in opening balances: among the prior
-  closed periods' ending running-balance instants, only the latest per
-  element is the current window's beginning balance — earlier ones are
-  superseded interior balances and would double up the series.
-  """
+  """Keep only the most recent instant fact per element (max ``period_end``)."""
   latest: dict[str, Fact] = {}
   for fact in facts:
     current = latest.get(fact.element_id)
@@ -183,21 +135,9 @@ def build_envelope(
 ) -> InformationBlockEnvelope | None:
   """Reload a schedule Structure and pack its Information Block envelope.
 
-  Returns ``None`` when the structure doesn't exist or isn't a schedule,
-  so the generic reader can cleanly distinguish misses from errors.
-  Mechanics are read from the typed ``artifact_mechanics`` column with
-  fallback to ``metadata_`` JSONB.
-
-  ``scenario_id`` is accepted for dispatch-signature parity and ignored
-  — schedules are physical-ledger projections with no scenario slices.
-
-  ``fact_set_id`` pins the envelope to a specific FactSet snapshot —
-  the Report-Block rehydration path uses this to surface the frozen
-  fact slice that was reviewed at file time. When provided, facts are
-  filtered by ``fact_set_id`` so that viewing a filed Report shows the
-  exact snapshot rather than today's facts. The default (no pin)
-  publishes every in-scope fact for the Structure, which is what the
-  live closing-book mode expects.
+  ``None`` when the structure doesn't exist or isn't a schedule.
+  ``scenario_id`` is ignored (schedules have no scenarios). ``fact_set_id``
+  pins facts to a filed snapshot; unpinned, every in-scope fact publishes.
   """
   atoms = load_base_envelope_atoms(
     session,
@@ -210,9 +150,6 @@ def build_envelope(
 
   structure = atoms.structure
 
-  # Runtime state: how many closing entries (draft OR posted) trace back
-  # to this schedule. Kept on the mechanics arm until typed FactSets
-  # make this derivable.
   periods_with_entries = (
     session.execute(
       select(func.count(Entry.id)).where(
@@ -225,12 +162,8 @@ def build_envelope(
 
   mechanics = _load_schedule_mechanics(structure, periods_with_entries)
 
-  # Schedules publish only in-scope facts — historical facts were
-  # already reflected in opening balances and shouldn't surface as
-  # envelope data (they'd confuse agents into re-drafting closed work).
-  # When a FactSet pin is supplied (Report-Block rehydration), facts
-  # are also scoped to that pinned snapshot so a filed Report renders
-  # the exact slice reviewed at file time, not today's drafts.
+  # Only in-scope facts: historical ones are already in opening balances and
+  # would invite re-drafting closed work.
   fact_filters = [
     Fact.structure_id == structure_id,
     Fact.fact_scope == "in_scope",
@@ -239,16 +172,10 @@ def build_envelope(
     fact_filters.append(Fact.fact_set_id == fact_set_id)
   facts = list(session.execute(select(Fact).where(*fact_filters)).scalars().all())
 
-  # Roll-forward carry-in opening balance. A roll_forward series must open
-  # with a valid Beginning Balance, but the first in-scope period's opening
-  # balance *is* the immediately prior (now-closed) period's ending running
-  # balance — an `instant` fact tagged `historical` and thus dropped by the
-  # in_scope filter above. Without it the series arrives as movements + an
-  # ending balance with no beginning. Re-include just the latest historical
-  # `instant` per in-scope balance element (the carry-in balance); historical
-  # `duration` movements stay excluded, so agents still can't re-draft closed
-  # work. Skipped on the FactSet-pinned path (the frozen snapshot is already
-  # self-contained) and when there are no in-scope facts to open.
+  # The series' beginning balance is the last closed period's ending instant,
+  # which the in_scope filter dropped: re-include the latest historical
+  # instant per balance element (not historical movements). A pinned
+  # snapshot is already self-contained.
   if facts and fact_set_id is None:
     balance_element_ids = {f.element_id for f in facts if f.period_type == "instant"}
     if balance_element_ids:
@@ -266,9 +193,7 @@ def build_envelope(
       )
       facts.extend(_latest_instant_per_element(historical_instants))
 
-  # Schedules are tenant-authored; they never have a disclosure mapping.
-  # Short-circuit the DB roundtrip — saves a query per envelope on a
-  # call path that's invoked once per item in the list view.
+  # Tenant-authored schedules never have a disclosure mapping.
   disclosure_id: str | None = None
   _elements_by_id = {e.id: e for e in atoms.elements}
   return InformationBlockEnvelope(

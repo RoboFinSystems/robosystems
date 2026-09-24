@@ -1,11 +1,5 @@
-"""Cross-type assembly helpers for building Information Block envelopes.
-
-Block-type handlers (``schedule.py``, ``statement.py``, ``metric.py``)
-each own the logic that's specific to their shape. The helpers here are
-the generic atom -> Lite conversions shared by every handler — one
-place to maintain the ORM -> wire-shape mapping so handlers don't
-diverge.
-"""
+"""Shared loaders and ORM → wire-shape projections for Information Block
+envelope builders."""
 
 from __future__ import annotations
 
@@ -40,9 +34,7 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger import Fact, FactSet
 
-# The disclosure-note block_type string. Defined here — the lowest module in
-# the statement/disclosure import cluster — so envelope.py, disclosure.py
-# (re-export), and the serialization/report paths share one canonical value.
+# Defined here, the lowest module in the statement/disclosure import cluster.
 DISCLOSURE_BLOCK_TYPE = "regulatory_disclosure"
 
 
@@ -66,14 +58,8 @@ def element_to_lite(element: Element, documentation: str | None = None) -> Eleme
 def load_documentation_for_elements(
   session: Session, element_ids: list[str]
 ) -> dict[str, str]:
-  """Documentation-role label text keyed by element id, one batched query.
-
-  The taxonomy loader lands each catalog element's ``documentation``
-  field as an :class:`ElementLabel` row with ``role='documentation'`` —
-  the authoritative value semantics for driver/metric concepts. Elements
-  without one (CoA entries, most tenant-native elements) simply have no
-  entry in the returned map.
-  """
+  """Documentation-role label text keyed by element id; elements without one
+  are absent."""
   if not element_ids:
     return {}
   rows = session.execute(
@@ -86,11 +72,7 @@ def load_documentation_for_elements(
 
 
 def elements_to_lites(session: Session, elements: list[Element]) -> list[ElementLite]:
-  """Project elements with their documentation labels attached.
-
-  The shared path every envelope builder uses — one batched label query
-  per envelope, never per element.
-  """
+  """Project elements with their documentation labels (one batched query)."""
   docs = load_documentation_for_elements(session, [e.id for e in elements])
   return [element_to_lite(e, documentation=docs.get(e.id)) for e in elements]
 
@@ -101,12 +83,8 @@ def association_to_connection(
 ) -> ConnectionLite:
   """Project an :class:`Association` ORM row onto :class:`ConnectionLite`.
 
-  ``classifications`` is an optional pre-resolved list; when omitted the
-  connection surfaces with an empty classification list. Envelope builders
-  that want the classifications populated call
-  :func:`load_classifications_for_associations` once per envelope and
-  hand the lookup into this projector — O(1) junction lookup per
-  association, no N+1.
+  Pass ``classifications`` from :func:`load_classifications_for_associations`
+  (loaded once per envelope); omitted means an empty list.
   """
   return ConnectionLite(
     id=association.id,
@@ -123,13 +101,7 @@ def association_to_connection(
 def load_classifications_for_associations(
   session: Session, association_ids: list[str]
 ) -> dict[str, list[ClassificationLite]]:
-  """Fetch association classifications keyed by association id.
-
-  Single query over the `association_classifications` junction joined to
-  the `classifications` vocabulary; grouped in-memory. Returns an empty
-  dict when ``association_ids`` is empty so callers can unconditionally
-  call this without a length check.
-  """
+  """Fetch association classifications keyed by association id, primary first."""
   if not association_ids:
     return {}
 
@@ -167,13 +139,8 @@ def fact_to_lite(
   fact: Fact,
   elements_by_id: dict[str, Element] | None = None,
 ) -> FactLite:
-  """Project a :class:`Fact` ORM row onto :class:`FactLite`.
-
-  When ``elements_by_id`` is supplied, the related Element's ``name``
-  and ``qname`` are denormalized into the projection so consumers can
-  render fact rows without joining back through ``envelope.elements``.
-  When omitted, ``element_name`` and ``element_qname`` are left ``None``.
-  """
+  """Project a :class:`Fact` ORM row onto :class:`FactLite`, denormalizing the
+  element's name and qname when ``elements_by_id`` is supplied."""
   element = elements_by_id.get(fact.element_id) if elements_by_id else None
   return FactLite(
     id=fact.id,
@@ -227,19 +194,11 @@ def verification_result_to_lite(row: VerificationResult) -> VerificationResultLi
 def load_verification_results_for_structure(
   session: Session, structure_id: str, scenario_id: str | None = None
 ) -> list[VerificationResultLite]:
-  """Fetch verification results scoped to a Structure and scenario slice.
+  """Verification results for a Structure, newest first, scoped to a slice.
 
-  Returns the full history ordered by ``evaluated_at`` descending so
-  the envelope exposes the most recent run first. Empty list when no
-  rows — the common case until the rule engine writes results.
-
-  ``scenario_id`` scopes results the same way FactSet reads are scoped:
-  compute-forecast verifies every scenario month against the statement
-  structures, so without the filter those runs would pollute the
-  actuals envelope's verification list (the verification-bleed analog
-  of the FactSet-read hijack). ``None`` keeps structure-level results
-  (``fact_set_id IS NULL``) plus results pinned to actuals sets; a
-  scenario id swaps the pinned half for that scenario's sets.
+  compute-forecast verifies scenario months against the statement
+  structures, so results pinned to a set are filtered by that set's
+  scenario (``None`` = actuals). Unpinned results always appear.
   """
   scenario_predicate = (
     FactSet.scenario_id.is_(None)
@@ -275,13 +234,8 @@ def build_verification_summary(
   verification_results: list[VerificationResultLite],
   rules: list[RuleLite],
 ) -> VerificationSummary | None:
-  """Aggregate verification results into overall + per-category counts.
-
-  Each result's ``rule_category`` is resolved by joining to the block's
-  ``rules`` on ``rule_id`` (results carry only ``rule_id``; the category
-  lives on the Rule). Returns ``None`` when there are no results so the
-  viewer can hide the panel rather than render an all-zero summary.
-  """
+  """Aggregate verification results into overall + per-category counts
+  (category via the result's rule). ``None`` when there are no results."""
   if not verification_results:
     return None
 
@@ -292,7 +246,6 @@ def build_verification_summary(
   for vr in verification_results:
     field = _STATUS_TO_FIELD.get(vr.status)
     if field is None:
-      # Status outside the CHECK closure — shouldn't occur; skip defensively.
       continue
     overall[field] += 1
     category = category_by_rule.get(vr.rule_id) or "Uncategorized"
@@ -325,27 +278,12 @@ def build_verification_summary(
 def load_latest_fact_set_for_structure(
   session: Session, structure_id: str, scenario_id: str | None = None
 ) -> FactSetLite | None:
-  """Fetch the most recent FactSet for a Structure, if any.
+  """Fetch the latest FactSet (by ``period_end``) for a Structure, if any.
 
-  Ordered by ``period_end`` descending then ``created_at`` descending so
-  a Structure with multiple FactSets (e.g. a Schedule accumulating
-  period runs) surfaces the latest slice. Returns ``None`` when no
-  FactSet row exists — typically library-seeded Structures whose
-  tenant has not yet generated facts.
-
-  ``scenario_id`` selects the slice: ``None`` (the default) pins
-  **actuals** (``scenario_id IS NULL``) — load-bearing, not cosmetic:
-  scenario sets live at FUTURE period_ends, so without the pin one
-  computed forecast month would win this period_end-descending read and
-  hijack every default envelope. A non-None value pins that scenario
-  exactly — statement + scenario binds the latest forecast month.
-
-  At equal ``period_end``, canonical sets (``report_id IS NULL`` — the
-  close-time stamp) beat publication snapshots: a Report published
-  later for the same month must not flip the default envelope off the
-  canonical record. Boolean-expression tiebreak, not a raw
-  ``report_id`` ordering — the latter would order publication sets by
-  id and invert the created_at preference among them.
+  ``scenario_id=None`` pins actuals; this is load-bearing, since scenario
+  sets sit at future period_ends and would otherwise win. At equal
+  ``period_end``, canonical sets (``report_id IS NULL``) beat publication
+  snapshots, then newest first.
   """
   row = session.execute(
     select(FactSet)
@@ -368,36 +306,14 @@ def load_latest_fact_set_for_structure(
 def load_statement_fact_set_series(
   session: Session, structure_id: str, scenario_id: str | None = None
 ) -> list[FactSetLite]:
-  """The full report-set series for a statement structure, one per period.
+  """The report-set series for a statement structure, one per period_end,
+  ascending.
 
-  The statement analog of the metric series loader
-  (:func:`metric._load_metric_fact_sets` is hard-scoped to
-  ``factset_type='metric'``): every ``'report'`` set for the structure,
-  ascending ``period_end`` — the monthly columns of the Plan grid.
-
-  Scenario semantics mirror the metric series: ``scenario_id=None``
-  loads actuals only; a scenario id loads actuals **plus** that
-  scenario's sets, and at an overlapping ``period_end`` the actual wins
-  (the moving seam — a closed month's draft supersedes its forecast).
-
-  A set whose period window strictly CONTAINS another loaded set's
-  window is dropped first (:func:`_drop_covering_windows`): an annual
-  report set is a coarser aggregate of months the series already shows,
-  and without the drop the FY-end column would render 12-month totals
-  inside a monthly grid — or, in scenario mode, shadow that month's
-  forecast column (the actual-beats-forecast rule would prefer it). A
-  tenant whose ONLY sets are annual reports keeps them: nothing narrower
-  exists inside their windows.
-
-  Three collisions then collapse per ``period_end``, in order:
-
-  1. ``scenario_id ASC NULLS FIRST`` — the actual beats the forecast.
-  2. canonical before publication (``report_id IS NULL`` first) — the
-     close-time stamp is the series source; a Report published later
-     for the same month must not flip the column onto its snapshot.
-  3. ``period_start DESC NULLS LAST`` — the NARROWER window wins, so at
-     the FY-end month the monthly set beats the annual report set
-     created later (``created_at DESC`` alone would pick the annual).
+  ``scenario_id=None`` loads actuals; a scenario id adds that scenario's
+  sets. Sets whose window strictly contains another's (an annual over its
+  months) are dropped first. Then per ``period_end``: actual beats
+  forecast, canonical beats publication snapshot, narrower window beats
+  wider, newest wins.
   """
   scenario_predicate = (
     FactSet.scenario_id.is_(None)
@@ -437,16 +353,9 @@ def window_series_sets(
 ) -> list[FactSetLite]:
   """Trim a collapsed statement series to its seam-adjacent window.
 
-  ``history`` keeps the LAST N actual columns (``scenario_id`` None —
-  the months nearest the close boundary); ``forecast`` keeps the FIRST
-  N forecast columns (the months nearest the seam). ``None`` leaves
-  that side unbounded, so ``(None, None)`` is the identity. Column order
-  (ascending ``period_end``, the
-  :func:`load_statement_fact_set_series` contract) is preserved.
-
-  Counts are COLUMNS, not calendar months: a monthly actual series makes
-  the two coincide, but an annual-only tenant's ``history=12`` keeps
-  twelve annual columns rather than one year.
+  ``history`` keeps the last N actual columns, ``forecast`` the first N
+  forecast columns; ``None`` leaves that side unbounded. Counts are
+  columns, not calendar months.
   """
   if history is None and forecast is None:
     return series_sets
@@ -468,18 +377,7 @@ def window_month_axis(
   history: int | None,
   forecast: int | None,
 ) -> list[str]:
-  """Trim a chronological ``YYYY-MM`` axis to its seam-adjacent window.
-
-  The month-keyed counterpart of :func:`window_series_sets` for
-  envelopes whose column axis is a month list rather than FactSet
-  columns (the forecast block's assumptions grid). Same semantics:
-  ``history`` keeps the LAST N non-forecast months, ``forecast`` keeps
-  the FIRST N forecast months, ``None`` leaves that side unbounded.
-  Keeping the two in register matters — the Plan grid unions the
-  assumptions axis with the windowed statement series, and any month
-  this axis carries beyond the statements' window surfaces as a
-  phantom column with no statement values behind it.
-  """
+  """:func:`window_series_sets` for a chronological ``YYYY-MM`` axis."""
   if history is None and forecast is None:
     return months
   if (history is not None and history < 0) or (forecast is not None and forecast < 0):
@@ -497,13 +395,8 @@ def window_month_axis(
 def _drop_covering_windows(rows: list) -> list:
   """Drop sets whose window strictly contains another loaded set's window.
 
-  The series is a per-period grid; a covering window (an annual set over
-  monthly sets, an annual over its own FY-end forecast month) duplicates
-  months already present as narrower columns — and its duration facts
-  are multi-month totals that read as one giant month. Strict
-  containment only: identical windows are left to the per-period_end
-  collapse, and sets without a ``period_start`` (instant-only envelopes)
-  neither cover nor get covered. O(n²) over a series-sized list.
+  Identical windows are left to the per-period_end collapse; sets without a
+  ``period_start`` neither cover nor get covered.
   """
   windowed = [r for r in rows if r.period_start is not None]
   kept = []
@@ -527,14 +420,8 @@ def _drop_covering_windows(rows: list) -> list:
 def load_fact_set_by_id_for_structure(
   session: Session, structure_id: str, fact_set_id: str
 ) -> FactSetLite | None:
-  """Fetch a specific FactSet pinned to a Structure.
-
-  Used by the Report Block rehydration path to load the exact FactSet
-  snapshot that a ``ReportBlockItem`` pins, instead of the latest one.
-  Returns ``None`` when the FactSet doesn't exist or doesn't belong to
-  the named Structure — callers surface that as a clean miss to the
-  envelope reader.
-  """
+  """Fetch a specific FactSet, or ``None`` if it doesn't belong to the
+  Structure."""
   row = session.execute(
     select(FactSet).where(
       FactSet.id == fact_set_id, FactSet.structure_id == structure_id
@@ -544,12 +431,7 @@ def load_fact_set_by_id_for_structure(
 
 
 def rule_to_lite(rule: Rule) -> RuleLite:
-  """Project a :class:`Rule` ORM row onto :class:`RuleLite`.
-
-  Unpacks the polymorphic target columns into a single typed
-  :class:`RuleTargetLite` and the JSONB variable blob into typed
-  :class:`RuleVariableLite` entries.
-  """
+  """Project a :class:`Rule` ORM row onto :class:`RuleLite`."""
   target: RuleTargetLite | None = None
   if rule.target_kind == "structure" and rule.target_structure_id is not None:
     target = RuleTargetLite(
@@ -596,21 +478,8 @@ def load_rules_for_structure(
   element_ids: list[str] | None = None,
   association_ids: list[str] | None = None,
 ) -> list[RuleLite]:
-  """Fetch every rule scoped to a Structure (plus its inner atoms).
-
-  Pulls three buckets in one query:
-
-  * ``target_structure_id = structure_id`` — rules whose target *is* the
-    Structure (the common case for library-seeded Seattle Method rules).
-  * ``target_element_id IN element_ids`` — element-scoped rules for
-    elements belonging to the Structure.
-  * ``target_association_id IN association_ids`` — association-scoped
-    rules.
-
-  Results are ordered by ``rule_category`` then ``id`` so the envelope is
-  deterministic across calls; UIs that group by category get the order
-  for free.
-  """
+  """Fetch every rule targeting the Structure or one of the given elements or
+  associations, ordered by category then id."""
   conditions = [Rule.target_structure_id == structure_id]
   if element_ids:
     conditions.append(Rule.target_element_id.in_(element_ids))
@@ -629,13 +498,7 @@ def load_rules_for_structure(
 
 @dataclass(frozen=True)
 class BaseEnvelopeAtoms:
-  """Shared atoms loaded by every block-type ``build_envelope``.
-
-  The block-specific handlers add mechanics + the per-block fact filter
-  on top; everything else (Structure, taxonomy_name, associations,
-  elements, rules, classifications, fact_set, verification_results) is
-  identical across the registered block types.
-  """
+  """Atoms shared by every block-type ``build_envelope``."""
 
   structure: Structure
   taxonomy_name: str | None
@@ -659,19 +522,10 @@ def load_base_envelope_atoms(
 ) -> BaseEnvelopeAtoms | None:
   """Load every atom shared by Information Block envelope builders.
 
-  Returns ``None`` when the Structure doesn't exist or its
-  ``block_type`` doesn't match ``expected_block_type`` — handlers
-  surface that as a clean miss to :func:`get_information_block`. Loading
-  order: Structure -> taxonomy name -> associations -> elements -> rules
-  -> classifications -> fact_set -> verification_results.
-
-  When ``fact_set_id`` is provided the atoms are pinned to that specific
-  FactSet (used by Report Block rehydration) and ``scenario_id`` is
-  ignored — an explicit pin bypasses scenario selection. Returns
-  ``None`` if the named FactSet doesn't belong to this Structure —
-  callers treat the pin mismatch as a clean miss. Without a pin,
-  ``scenario_id`` selects the FactSet slice (``None`` = actuals; see
-  :func:`load_latest_fact_set_for_structure`).
+  ``None`` when the Structure is missing, isn't ``expected_block_type``, or
+  a ``fact_set_id`` pin doesn't belong to it. A pin overrides
+  ``scenario_id``; without one, ``scenario_id`` selects the slice (``None``
+  = actuals).
   """
   from robosystems.models.extensions import Taxonomy
 
@@ -679,9 +533,6 @@ def load_base_envelope_atoms(
   if structure is None or structure.block_type != expected_block_type:
     return None
 
-  # Validate the FactSet pin (when provided) before doing the heavy
-  # association / element / rule loads — a mismatched pin is a clean
-  # miss and shouldn't pay for atoms that won't be returned.
   if fact_set_id is not None:
     fact_set = load_fact_set_by_id_for_structure(session, structure_id, fact_set_id)
     if fact_set is None:
@@ -723,8 +574,7 @@ def load_base_envelope_atoms(
     session, [a.id for a in associations]
   )
 
-  # Results scope to the slice being read: a pinned set filters by ITS
-  # scenario (a snapshot of a scenario month shows that month's runs).
+  # A pinned set scopes results by its own scenario.
   verification_results = load_verification_results_for_structure(
     session,
     structure_id,
@@ -747,25 +597,14 @@ def load_base_envelope_atoms(
 
 _DISCLOSURE_ROLE_PREFIX = "https://robosystems.ai/seattle/cm-roles/roles/disclosures/"
 
-# Module-level cache keyed by block_type. The rs-gaap-disclosures
-# package is library-seeded and immutable, so the mapping from
-# block_type (e.g. 'balance_sheet') to disclosure qname
-# (e.g. 'disclosures:BalanceSheet') is global for the process lifetime.
-# A miss caches None so we don't re-query for types that have no
-# corresponding disclosure (validation_rules, taxonomy_mapping, schedules).
-# Eliminates the N+1 round-trip pattern when ``list_information_blocks``
-# builds dozens of statement envelopes in a single call.
+# block_type → disclosure qname, cached for the process (disclosure rows are
+# library-seeded and immutable). Misses cache None.
 _DISCLOSURE_QNAME_BY_TYPE: dict[str, str | None] = {}
 _MISSING: object = object()
 
 
 def _structure_role_uri(structure: Structure) -> str | None:
-  """Read ``role_uri`` from the metadata JSONB blob.
-
-  ``role_uri`` isn't a top-level column on the structures table — the
-  library_creator persists it inside ``metadata_['role_uri']``. Returns
-  ``None`` when the field is absent or the metadata blob is malformed.
-  """
+  """Read ``role_uri`` from ``metadata_`` (it isn't a column)."""
   metadata = structure.metadata_ or {}
   value = metadata.get("role_uri")
   return value if isinstance(value, str) else None
@@ -774,15 +613,8 @@ def _structure_role_uri(structure: Structure) -> str | None:
 def _disclosure_qname_for_type(session: Session, block_type: str) -> str | None:
   """Memoized lookup: block_type -> disclosures:<Name> qname.
 
-  Uses ``metadata->>'role_uri'`` JSONB access and the matching expression
-  index (``idx_structures_role_uri``) for a single fast lookup.
-
-  Only meaningful for the statement family, where block_type →
-  disclosure is 1:1. ``regulatory_disclosure`` is many-to-many (every
-  Note shares the type), so a type-level lookup would return an
-  arbitrary library note — those structures resolve their identity from
-  their own role_uri (case 1 in
-  :func:`load_disclosure_id_for_structure`) or not at all.
+  Only meaningful for the statement family, where the mapping is 1:1;
+  every note shares ``regulatory_disclosure``, so it returns None there.
   """
   if block_type == DISCLOSURE_BLOCK_TYPE:
     return None
@@ -811,27 +643,9 @@ def _disclosure_qname_for_type(session: Session, block_type: str) -> str | None:
 
 
 def load_disclosure_id_for_structure(session: Session, structure_id: str) -> str | None:
-  """Return the ``disclosures:<Name>`` qname this structure corresponds to.
-
-  Two cases:
-
-  1. The structure IS a disclosure-namespace structure (role_uri prefixed
-     by ``.../disclosures/``). Return ``disclosures:<Name>`` derived from
-     its own role_uri — covers Note disclosures and the disclosure-typed
-     statement entries themselves.
-
-  2. The structure is a renderable presentation (e.g. ``BS-classified``)
-     with a statement-level block_type. Look up the
-     disclosure-namespace structure that shares the same block_type
-     — for statement types (balance_sheet, income_statement,
-     cash_flow_statement, equity_statement, comprehensive_income) this
-     is a 1:1 match. Returns ``None`` for block_types that have no
-     corresponding disclosure (validation_rules, taxonomy_mapping, etc.).
-
-  The block_type -> disclosure qname mapping is memoized at module
-  level via :data:`_DISCLOSURE_QNAME_BY_TYPE`; library-seeded disclosure
-  rows are immutable so the cache is safe for the process lifetime.
-  """
+  """Return the ``disclosures:<Name>`` qname this structure corresponds to:
+  from its own role_uri when it is a disclosure-namespace structure, else
+  by its statement block_type."""
   target = session.get(Structure, structure_id)
   if target is None:
     return None

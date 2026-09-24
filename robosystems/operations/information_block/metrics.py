@@ -1,40 +1,18 @@
-"""compute-metrics / assert-metrics — write a standing metric FactSet.
+"""compute-metrics / assert-metrics: write a standing metric FactSet.
 
-The metric block's two write paths. ``compute-metrics`` evaluates ``Derive``
-rules: the same ``$Var`` expression grammar as verification rules, but
-evaluated for a VALUE — the LHS names the metric element being computed, the
-RHS operands bind to the entity's persisted facts at the requested
-``period_end``, and the result is written as a Numeric fact in a standing
-``factset_type='metric'`` FactSet — one per (structure, entity, period_end),
-so successive runs accumulate the time series and re-running a period
-replaces its values. ``assert-metrics`` is the observation sibling:
-externally-observed values arrive in the request and land on the same
-standing-set shape with ``AssertedProvenance``; structures carrying Derive
-rules are compute-owned and rejected, so asserted and derived series keep
-disjoint structures.
+Both write one ``factset_type='metric'`` set per (structure, entity,
+period_end), replacing it on re-run. ``compute-metrics`` evaluates ``Derive``
+rules for a value (LHS = the metric, RHS operands bound to persisted facts);
+``assert-metrics`` writes externally observed values and refuses structures
+that carry Derive rules, so the two never share a structure.
 
-Two grammar extensions beyond plain arithmetic:
+Beyond plain arithmetic, ``avg($X)`` averages an instant operand's begin and
+end values (begin at ``period_start - 1 day``, a bound duration operand's
+start - 1 day, or the newest earlier report period end), and an operand
+naming another rule's target is an in-run dependency evaluated first.
 
-- ``avg($X)`` — the period average of an instant operand,
-  (begin + end) / 2. Desugared pre-parse to a synthesized ``$__avg_X``
-  operand (:func:`.rules.expressions.desugar_aggregates`); the begin fact
-  binds at a resolved prior period end — ``body.period_start - 1 day`` when
-  the request carries a window, else a bound duration operand's start - 1
-  day, else the entity's newest report ``period_end`` strictly before the
-  requested one (run-cached; never the fiscal calendar, which
-  annual-comparative tenants don't populate at month ends).
-- **Composition** (DuPont) — an operand naming another rule's target is an
-  in-run metric dependency: rules evaluate in Kahn topological order
-  (``calc_dag.topo_sort_calculations``), in-run values resolve first, and
-  persisted-fact binding is widened to ``('report', 'metric')`` so
-  cross-structure metrics resolve when already computed for the period. A
-  cyclic or skipped dependency leaves the operand unbound → the dependent
-  metric soft-skips.
-
-Soft-fail per metric: a missing operand fact (InterestExpense for a
-debt-free entity), an unresolvable qname, a missing prior period for
-``avg()``, or an undefined ratio (division by zero) skips that metric with a
-reason — one broken metric never aborts the run.
+Soft-fail per metric: a missing operand, unresolvable qname, missing prior
+period or division by zero skips that metric with a reason.
 """
 
 from __future__ import annotations
@@ -68,9 +46,8 @@ from robosystems.models.extensions import (
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
 
-# From the envelope module (which owns the constant), NOT the registry —
-# the registry imports every handler module, so a registry import from a
-# module the handlers reach (forecast → metrics) would be circular.
+# Not from the registry: it imports every handler module, so importing it
+# here would be circular.
 from robosystems.operations.information_block.metric import METRIC_BLOCK_TYPE
 from robosystems.operations.information_block.rules.expressions import (
   InvalidRuleExpression,
@@ -91,10 +68,7 @@ class _BoundOperand:
 
 
 def _default_entity_id(session: Session) -> str:
-  """Earliest-created entity — the primary entity for single-entity graphs.
-
-  Same convention as ``reports._get_entity_id`` / the text-block bind.
-  """
+  """Earliest-created entity, the primary entity for single-entity graphs."""
   row = session.execute(
     text("SELECT id FROM entities ORDER BY created_at ASC LIMIT 1")
   ).fetchone()
@@ -112,24 +86,13 @@ def _bind_operand(
   period_start: date | None,
   scenario_id: str | None = None,
 ) -> _BoundOperand | None:
-  """Most recent persisted fact for one operand at ``period_end``.
+  """Most recent persisted fact for one operand ending exactly at ``period_end``.
 
-  Joins Fact → FactSet on ``factset_type IN ('report', 'metric')`` —
-  the persisted statement facts (including calc-DAG subtotals) plus
-  standing metric facts, so a metric operand resolves across structures
-  once its own compute has run for the period. Scoped to the entity;
-  ``period_end`` must match exactly — instant balances as of that date,
-  durations ending on it. Newest set wins when several cover the
-  period; among same-set candidates the longest window wins (FY over Q4
-  when both end on the date). No qname can collide across the two set
-  types: metric facts land only on metric-namespace elements.
-
-  ``scenario_id=None`` binds actuals only (``scenario_id IS NULL`` —
-  the pin that keeps forward scenario facts out of every actual
-  compute). Non-None binds the scenario's facts WITH actuals as the
-  fallback, scenario preferred — the moving seam: a forward month's
-  operands resolve from the scenario slice while an ``avg()`` begin
-  bind at the seam still reaches the actual base month.
+  Binds report and metric sets, so a metric computed on another structure
+  resolves. Newest set wins, then the longest window (FY over Q4).
+  ``scenario_id=None`` binds actuals only; otherwise scenario facts are
+  preferred with actuals as fallback, so an ``avg()`` begin at the seam
+  still reaches the actual base month.
   """
   stmt = (
     select(Fact.value, Fact.period_start)
@@ -170,13 +133,8 @@ def _latest_report_period_end_before(
 ) -> date | None:
   """The entity's newest report-fact ``period_end`` strictly before a date.
 
-  The data-driven prior-period fallback for ``avg()`` when neither the
-  request nor a bound duration operand supplies a window: annual
-  comparatives resolve to the prior FY end, monthly series to the prior
-  month end. Report facts only — the canonical period spine.
-  ``scenario_id`` widens the spine to include the scenario's forward
-  months (a forward month's prior is usually the previous forward
-  month); ``None`` pins actuals.
+  ``scenario_id`` also admits that scenario's forward months; ``None`` pins
+  actuals.
   """
   return session.execute(
     select(func.max(Fact.period_end))
@@ -226,14 +184,9 @@ def cmd_compute_metrics(
   body: ComputeMetricsRequest,
   created_by: str,
 ) -> ComputeMetricsResponse:
-  """Compute every Derive rule on a metric block for one period.
-
-  Upserts the period's standing metric FactSet: found → all its facts are
-  deleted and provenance is re-stamped (re-bind drift semantics); absent →
-  created via the blessed ``create_fact_set`` path with
-  ``DerivedProvenance``. ``session.flush()`` before returning; the
-  OperationSpec wrapper owns the commit.
-  """
+  """Compute every Derive rule on a metric block for one period, fully
+  replacing the period's standing metric FactSet. Flushes; the caller owns
+  the commit."""
   structure = session.get(Structure, body.structure_id)
   if structure is None:
     raise ValueError(f"Structure not found: {body.structure_id}")
@@ -260,8 +213,6 @@ def cmd_compute_metrics(
     )
     if x is not None
   }
-  # Presentation order of the catalog — computed facts and response rows
-  # follow it so the envelope renders in arc order.
   order_by_element: dict[str, float] = {}
   for a in associations:
     if a.to_element_id is not None and a.order_value is not None:
@@ -272,14 +223,9 @@ def cmd_compute_metrics(
     key=lambda r: order_by_element.get(r.target_element_id or "", float("inf"))
   )
 
-  # Dependency-ordered evaluation: an operand qname naming another
-  # rule's target is an in-run metric dependency, so the
-  # run evaluates dependencies first. Rules sort by dependency DEPTH
-  # (longest in-run chain below the target), arc order as the tiebreak —
-  # depth is deterministic where Kahn's emission order among independents
-  # is not, so independent metrics keep presentation order. Cycle
-  # remnants get a finite depth and soft-skip when their operands stay
-  # unbound.
+  # Evaluate dependencies first. Sort by dependency depth rather than Kahn
+  # emission order, which isn't deterministic among independents; arc order
+  # breaks ties. Cycle members soft-skip on unbound operands.
   targets_by_rule = {
     rule.id: (
       session.get(Element, rule.target_element_id) if rule.target_element_id else None
@@ -331,8 +277,7 @@ def cmd_compute_metrics(
       ).scalar_one_or_none()
     return qname_cache[qname]
 
-  # Data-driven prior period for avg() — resolved at most once per run
-  # so every parameterless avg in the run shares one begin date.
+  # Resolved once so every avg() in the run shares one begin date.
   _prior_cache: list[date | None] = []
 
   def _data_driven_prior() -> date | None:
@@ -422,9 +367,6 @@ def cmd_compute_metrics(
       if bound.period_start is not None and duration_start is None:
         duration_start = bound.period_start
 
-    # Second pass — avg() operands. The end value is the base operand's
-    # bound value (declared operands always bind above); the begin fact
-    # binds at the resolved prior period end.
     for synth_name, base_name in avg_operands.items():
       if base_name not in values:
         if base_name not in names:
@@ -507,8 +449,6 @@ def cmd_compute_metrics(
       FactSet.factset_type == "metric",
       FactSet.entity_id == entity_id,
       FactSet.period_end == body.period_end,
-      # Scenario slices keep their own standing sets — an actual compute
-      # never replaces a scenario month and vice versa.
       FactSet.scenario_id.is_(None)
       if body.scenario_id is None
       else FactSet.scenario_id == body.scenario_id,
@@ -569,9 +509,8 @@ def cmd_compute_metrics(
   )
 
 
-# Mirrors forecast.py's _ASSERTION_BLOCKED_SOURCES — duplicated rather than
-# imported because forecast imports this module, so the reverse import would
-# be circular. Library-computed and lever concepts are never asserted here.
+# Mirrors forecast._ASSERTION_BLOCKED_SOURCES (importing it would be
+# circular).
 _ASSERTION_BLOCKED_ELEMENT_SOURCES = {
   "rs-metric": "rs-metric concepts are computed by compute-metrics, never asserted",
   "rs-driver": "rs-driver concepts are forecast levers — assert them via `levers`",
@@ -583,17 +522,11 @@ def cmd_assert_metrics(
   body: AssertMetricsRequest,
   created_by: str,
 ) -> AssertMetricsResponse:
-  """Write externally-observed metric values for one period.
+  """Write externally observed metric values for one period, with the same
+  full-replace upsert as ``cmd_compute_metrics``.
 
-  The observation sibling of ``cmd_compute_metrics``: same standing
-  FactSet upsert (found → all its facts are deleted and provenance is
-  re-stamped; absent → created via the blessed ``create_fact_set``
-  path), but the values arrive in the request and the set is stamped
-  with ``AssertedProvenance``. Structures carrying Derive rules are
-  compute-owned and rejected — asserted and derived metric series keep
-  disjoint structures, which is also what keeps the two writers' full-
-  replace semantics from clobbering each other. ``session.flush()``
-  before returning; the OperationSpec wrapper owns the commit.
+  Structures carrying Derive rules are rejected, so the two writers never
+  clobber each other. Flushes; the caller owns the commit.
   """
   structure = session.get(Structure, body.structure_id)
   if structure is None:
@@ -673,8 +606,7 @@ def cmd_assert_metrics(
       blocked.append(f"{obs.qname} ({doctrine})")
       continue
     if element_ids and element.id not in element_ids:
-      # Facts for concepts outside the presentation catalog would persist
-      # but never render in the envelope — reject rather than no-op.
+      # Would persist but never render.
       outside.append(obs.qname)
       continue
     resolved.append((obs, element))

@@ -1,15 +1,8 @@
 """Handlers for ``taxonomy_type='reporting_standard'`` — library taxonomies.
 
-Library reporting taxonomies (FAC, us-gaap, rs-gaap) are seeded through
-the admin-only ``library_creator.py`` operations path
-(JSON-LD → ``create_library_taxonomy_elements`` / ``create_library_arcs`` /
-``create_library_rules`` → ORM session inserts into the ``public`` schema).
-The public Taxonomy Block surface does NOT author library rows —
-``create``/``update``/``delete`` raise :class:`NotImplementedError`.
-
-``build_envelope`` mirrors the ``chart_of_accounts`` projection; the
-only observable difference is ``origin='library'`` (derived from
-``taxonomy.is_locked``) on every element.
+Library taxonomies are seeded by ``library_creator``; the write handlers here
+raise :class:`NotImplementedError`. The envelope mirrors the CoA projection
+with ``origin='library'``.
 """
 
 from __future__ import annotations
@@ -79,12 +72,8 @@ def delete(
 
 
 def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope | None:
-  """Project a library ``reporting_standard`` taxonomy as an envelope.
-
-  Returns None when the taxonomy row doesn't exist or isn't of type
-  ``reporting_standard``. The projection shape mirrors CoA with
-  ``origin='library'`` derived from ``taxonomy.is_locked``.
-  """
+  """Project a library ``reporting_standard`` taxonomy as an envelope, or
+  ``None`` when missing or of another type."""
   taxonomy = session.get(Taxonomy, taxonomy_id)
   if taxonomy is None or taxonomy.taxonomy_type != REPORTING_STANDARD_BLOCK_TYPE:
     return None

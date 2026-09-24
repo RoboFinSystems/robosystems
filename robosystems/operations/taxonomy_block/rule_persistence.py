@@ -1,15 +1,7 @@
 """Tenant rule persistence — envelope ``rules[]`` → ``rules`` table rows.
 
-Shared across CoA / reporting_extension / custom_ontology handlers.
-Callers pass the envelope's symbol tables (``elements_by_qname``,
-``structures_by_name``) after those atoms have flushed, so FK
-resolution is immediate.
-
-The validator has already run by this point — all target refs are
-known to resolve. This helper is the pure mapping step; it raises
-:class:`ValueError` defensively if a ref somehow didn't make it
-through the validator (kept as a safety net, not as a primary error
-path).
+Callers pass the flushed envelope's symbol tables. The validator has already
+resolved every ref; the ``ValueError`` here is only a safety net.
 """
 
 from __future__ import annotations
