@@ -61,7 +61,13 @@ def test_envelope_is_a_compiled_model_scoped_on_the_report() -> None:
 @pytest.mark.unit
 def test_entity_is_named_under_its_scheme_and_labelled() -> None:
   document = _document()
-  assert document["xbrlModel"]["entities"] == [{"name": "entity:ent_01"}]
+  # The legal name differs from the name, so it rides as a property.
+  assert document["xbrlModel"]["entities"] == [
+    {
+      "name": "entity:ent_01",
+      "properties": [{"property": "rs:legalName", "value": "Test Co LLC"}],
+    }
+  ]
   assert _labels_of(document, "entity:ent_01") == {"xbrl:label": "Test Co"}
   assert _fact(document, "rs-gaap:Assets")["factDimensions"]["xbrl:entity"] == (
     "entity:ent_01"
@@ -161,6 +167,32 @@ def test_serialization_is_compact_deterministic_and_dispatched() -> None:
 
 
 @pytest.mark.unit
+def test_the_reporting_style_and_fact_set_partition_ride_as_rs_properties() -> None:
+  """What `omitted_content` no longer names has to be in the file."""
+  bundle = _bundle()
+  document = json.loads(serialize_to_tavi(bundle))
+  model = document["xbrlModel"]
+  assert document["documentInfo"]["namespaces"]["rs"] == "https://robosystems.ai/vocab/"
+  assert {"property": "rs:reportingStyle", "value": bundle.reporting_style} in model[
+    "properties"
+  ]
+  network_properties = {
+    p["property"]: p["value"]
+    for n in model["networks"]
+    for p in n.get("properties", [])
+  }
+  assert network_properties["rs:structureId"] in {"struct_bs", "struct_note1"}
+  assert "rs:blockType" in network_properties
+  pins = [
+    p["value"]
+    for f in model["facts"]
+    for p in f.get("properties", [])
+    if p["property"] == "rs:structureId"
+  ]
+  assert len(pins) == sum(1 for f in bundle.facts if f.structure_id)
+
+
+@pytest.mark.unit
 def test_description_and_omitted_content_name_what_the_file_lacks() -> None:
   assert tavi_description(
     _bundle(
@@ -169,3 +201,6 @@ def test_description_and_omitted_content_name_what_the_file_lacks() -> None:
   ).startswith("RoboLedger live snapshot (Test Co)")
   assert "ib_envelopes" in TAVI_OMITTED_CONTENT
   assert "definition_links" in TAVI_OMITTED_CONTENT
+  # Carried as `rs:` properties since xbrlkit 0.18.1.
+  assert "reporting_style" not in TAVI_OMITTED_CONTENT
+  assert "fact_sets" not in TAVI_OMITTED_CONTENT

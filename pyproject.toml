@@ -68,7 +68,7 @@ dependencies = [
     "pandas>=2.3.0,<3.0",
     "pyarrow>=24.0.0,<25",  # hold: 25 is a fresh major feeding the duckdb/ladybug arrow seams; bump deliberately, paired with icebug 13
     "rdflib>=7.0.0,<8.0",
-    "xbrlkit>=0.18.0,<0.19.0",
+    "xbrlkit>=0.18.1,<0.19.0",
     # External API Integrations
     "intuit-oauth>=1.2.0,<2.0",
     "python-quickbooks>=0.9.0,<1.0",
