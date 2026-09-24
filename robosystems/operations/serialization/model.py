@@ -1,17 +1,8 @@
-"""``StatementBundle`` → xbrlkit ``XbrlModel`` — the waist the projections share.
+"""``StatementBundle`` → xbrlkit ``XbrlModel``, so a RoboLedger report and an
+SEC filing go through the same xbrlkit emitters.
 
-The platform owns the producer (``bundle.py``: rows → ``StatementBundle``) and
-the storage; xbrlkit owns the encoders. This module is the seam between them:
-one function that re-expresses a bundle as the model every xbrlkit projection
-reads, so a RoboLedger report and an SEC filing go through the same emitter
-and come out byte-comparable. The Tavi flavor is the first projection routed
-through it; the holon, JSON-LD and XBRL 2.1 flavors follow, each behind a
-parity gate, as the platform's own encoders retire.
-
-What the model cannot carry — the Information Block envelopes, the reporting
-style and framework pins, the definition linkbase, the fact-set partition, the
-filing lifecycle — is named by the flavor that omits it (``xbrl/tavi.py``),
-never dropped silently.
+What the model cannot carry is named by the flavor that omits it
+(``xbrl/tavi.py``), never dropped silently.
 """
 
 from __future__ import annotations
@@ -45,19 +36,14 @@ from robosystems.operations.serialization.bundle import (
 )
 
 STANDARD_LABEL_ROLE = "http://www.xbrl.org/2003/role/label"
-# The report's own IRI — the root the JSON-LD encoder scopes the report on.
 REPORT_URI_BASE = "https://robosystems.ai/report"
-# ``role_uri`` is optional on a tenant-authored Structure (it is copied into
-# ``metadata_`` only when the request carried one); a network needs a role, so
-# one is minted from the structure id, which is stable across generations.
+# For structures with no role_uri; the structure id is stable across generations.
 MINTED_ROLE_BASE = "https://robosystems.ai/role"
 MARKDOWN_MEDIA_TYPE = "text/markdown"
 TEXT_LANGUAGE = "en"
 
-# Section titles for the four statements, in the order the statements render.
-# Mirrors ``BLOCK_TITLES`` in report-components (and ``_STATEMENT_BLOCK_TYPES``
-# in ``bundle.py`` for the order), so a Tavi section reads exactly as the
-# holon renderer titles the same block.
+# In render order. Keep in sync with ``BLOCK_TITLES`` in report-components and
+# ``_STATEMENT_BLOCK_TYPES`` in ``bundle.py``.
 STATEMENT_TITLES: dict[str, str] = {
   "balance_sheet": "Balance Sheet",
   "income_statement": "Income Statement",
@@ -65,12 +51,8 @@ STATEMENT_TITLES: dict[str, str] = {
   "equity_statement": "Statement of Changes in Equity",
 }
 
-# Wire item type (camelCase, ``BundleElement.item_type``) → XBRL item-type
-# local name, which is what xbrlkit's ``ITEM_TYPE_DATATYPES`` keys on.
-# ``ratio`` and ``multiple`` are dimensionless numbers, so ``pureItemType``;
-# ``days`` is a count, so ``decimalItemType`` — Tavi's ``xbrlr:duration`` is
-# an ``xs:duration`` lexical, not a day count, and the loss is a recorded gap
-# rather than a wrong type.
+# Wire item type → XBRL item-type local name. ``days`` maps to decimal, not
+# Tavi's ``xbrlr:duration`` (an ``xs:duration`` lexical, not a day count).
 ITEM_TYPE_TO_XBRL: dict[str, str] = {
   "monetary": "monetaryItemType",
   "shares": "sharesItemType",
@@ -91,10 +73,8 @@ _NON_NUMERIC_ITEM_TYPES = frozenset(
 # Concepts whose facts carry a language dimension (Tavi section 8.3).
 _TEXT_ITEM_TYPES = frozenset({"stringItemType", "textBlockItemType"})
 
-# Tenant-authored notes are markdown (``Fact.content_type = text/markdown``);
-# an XBRL text block is XHTML by convention, and every Tavi reader renders it
-# as HTML. Raw HTML inside the markdown is escaped, not passed through — the
-# narrative is untrusted tenant input on its way into other people's browsers.
+# Tenant notes are markdown but XBRL text blocks are rendered as HTML. Raw HTML
+# is escaped: the narrative is untrusted input bound for other people's browsers.
 _MARKDOWN = MarkdownIt("commonmark", {"html": False})
 
 
@@ -143,12 +123,8 @@ def markdown_to_html(text: str) -> str:
 
 
 def network_role(link: BundleLinkbaseLink) -> str:
-  """The role a link's network lives in — minted from the structure when unset.
-
-  A structure's presentation and calculation links share its role by
-  construction (the producer binds calc arcs to the rendered network), so the
-  minted role is the same for both and xbrlkit puts them in one group.
-  """
+  """The link's role, minted from the structure id when unset (so a structure's
+  presentation and calculation links still share one)."""
   return link.role_uri or f"{MINTED_ROLE_BASE}/{link.structure_id}"
 
 
@@ -157,11 +133,9 @@ def network_definition(
 ) -> tuple[str, str | None]:
   """The role's definition and, when it displaces the structure's name, that name.
 
-  Statements and disclosures take the SEC role-definition shape — a sort code,
-  a type word, a title — because that is the shape every consumer already
-  parses to title, kind and order a section: the four statements in block-type
-  order, the notes after them in the bundle's ``structure_display_order``. A
-  structure that is neither keeps its own name verbatim.
+  Statements and disclosures use the SEC role-definition shape (``0001 -
+  Statement - Title``), which consumers parse for title, kind and order. Any
+  other structure keeps its own name verbatim.
   """
   name = link.structure_name or link.structure_id
   block_type = link.block_type or ""
@@ -176,18 +150,11 @@ def network_definition(
 
 
 def _filing(bundle: StatementBundle, concepts: dict[str, Concept]) -> FilingMeta:
-  """The model's filing header, with xbrlkit's SEC-shaped fields repurposed.
+  """The filing header, with xbrlkit's SEC-shaped fields repurposed.
 
-  ``accession`` carries the report id and ``cik`` the entity's own id: the
-  model names its identity fields after EDGAR's, and the scheme on the entity
-  (``_entity``) is what says they are not a CIK. Neutral names are xbrlkit's
-  to add (spec §11.3); the wire output already resolves under the platform's
-  scheme, so nothing downstream reads them as SEC identifiers.
-
-  ``reporting_style`` must be passed rather than left to default. xbrlkit's
-  graph writer falls back to ``"sec-as-filed"`` when the field is unset, which
-  is a true statement about a filing and a false one about a tenant report —
-  so an unset field does not omit the claim, it publishes the wrong one.
+  ``accession`` carries the report id and ``cik`` the entity id; the entity
+  scheme is what marks them as not SEC identifiers. ``reporting_style`` must
+  be set: xbrlkit defaults it to ``"sec-as-filed"``, which is false here.
   """
   meta = bundle.report_meta
   report_id = report_identifier(bundle)
@@ -205,8 +172,6 @@ def _filing(bundle: StatementBundle, concepts: dict[str, Concept]) -> FilingMeta
 def _entity(bundle: StatementBundle) -> EntityIdentity:
   entity = bundle.entity
   return EntityIdentity(
-    # The entity's ULID in the field the model names ``cik``; ``scheme`` is
-    # what the emitters bind it under, so it never becomes ``cik:``.
     cik=entity.id,
     scheme=ENTITY_SCHEME,
     name=entity.name,
@@ -221,10 +186,6 @@ def _concept(element: BundleElement) -> Concept:
   prefix = element.namespace or (
     element.qname.split(":", 1)[0] if ":" in element.qname else None
   )
-  # ``concept_label``, not ``element.label``: a tenant-authored concept keeps
-  # its wording on ``name``, and ``name`` below is the QName local part, so
-  # nothing downstream could recover the label if it did not come through
-  # here. This bridge feeds the holon and the Tavi flavor both.
   label = concept_label(element)
   labels = (
     [Label(value=label, role=STANDARD_LABEL_ROLE, language=TEXT_LANGUAGE)]
@@ -244,11 +205,8 @@ def _concept(element: BundleElement) -> Concept:
     is_integer=item_type == "integerItemType",
     is_text_fact=item_type in _TEXT_ITEM_TYPES,
     item_type=item_type,
-    # Every concept accepts a nil fact — the bundle carries no per-element
-    # declaration, and a text block with no narrative yet is a nil.
+    # The bundle carries no nillable flag; an empty text block is a nil.
     nillable=True,
-    # The standard label is the preferred one, as the parse sets it: the block
-    # and statement tools read a row's label from it.
     pref_label=label,
     labels=labels,
   )
@@ -297,12 +255,10 @@ def _fact(fact: BundleFact, concepts: dict[str, Concept]) -> XbrlFact:
 
 
 def _networks(bundle: StatementBundle) -> list[Network]:
-  """One network per linkbase link, statements first, then the notes in order.
+  """One network per link, statements first, then notes in order.
 
-  Definition links are not bridged: Tavi's definition input is dimensional
-  (hypercubes, axes, members) and the bundle's definition arcs are
-  equivalence / general-special / essence-alias / mapping — recorded as
-  omitted by the flavor.
+  Definition links are not bridged: Tavi's definition input is dimensional and
+  the bundle's definition arcs are not.
   """
   order = bundle.structure_display_order
   keyed: list[tuple[str, int, Network]] = []
@@ -310,9 +266,8 @@ def _networks(bundle: StatementBundle) -> list[Network]:
     *(("presentation", link) for link in bundle.linkbases.presentation_links),
     *(("calculation", link) for link in bundle.linkbases.calculation_links),
   ]
-  # A fact's own fact set is its structure's. The structure's id and its fact
-  # set's travel on the network so the holon names them the way the flat
-  # bundle does — one structure, one IRI, in every projection of the report.
+  # Carried on the network so the holon names each structure with the same IRI
+  # as the flat bundle.
   fact_set_by_structure: dict[str, str] = {
     fact.structure_id: fact.fact_set_id
     for fact in bundle.facts
@@ -338,14 +293,11 @@ def _networks(bundle: StatementBundle) -> list[Network]:
       documentation=documentation,
       kind=kind,
       arcs=arcs,
-      # The producer knows its block's type as a column; the model has the
-      # slot for it, and the block tools and the holon carry it through.
       block_type=link.block_type,
       structure_id=link.structure_id,
       fact_set_id=fact_set_by_structure.get(link.structure_id),
     )
     keyed.append((definition, position, network))
-  # The composed definitions sort by their code; a verbatim name sorts after
-  # them. Presentation precedes calculation within a role by construction.
+  # Coded definitions sort first; presentation precedes calculation per role.
   keyed.sort(key=lambda entry: (entry[0], entry[1]))
   return [network for _, _, network in keyed]

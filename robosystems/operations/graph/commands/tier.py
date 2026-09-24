@@ -21,13 +21,10 @@ async def change_graph_tier_cmd(
   current_user: User,
   db: Session,
 ) -> str:
-  """Change infrastructure tier on a graph subscription (async).
-
-  Validates authorization, updates billing in PostgreSQL, syncs Stripe,
-  and enqueues an EBS volume migration worker task.
+  """Change a graph's tier: bill in PostgreSQL, then Stripe, then enqueue the
+  volume migration. Each later failure rolls back the earlier writes.
 
   Returns the ``operation_id`` for SSE tracking.
-  Raises ``HTTPException`` on validation or payment failures.
   """
   from datetime import UTC, datetime
 
@@ -45,7 +42,6 @@ async def change_graph_tier_cmd(
   from robosystems.operations.providers.payment_provider import get_payment_provider
   from robosystems.worker.client import enqueue_task
 
-  # Verify user is an org owner
   user_orgs = OrgUser.get_user_orgs(current_user.id, db)
   if not user_orgs:
     raise HTTPException(
@@ -57,7 +53,6 @@ async def change_graph_tier_cmd(
       detail="Only organization owners can change subscription plans",
     )
 
-  # Look up graph and subscription
   graph = Graph.get_by_id(graph_id, db)
   if not graph:
     raise HTTPException(status_code=404, detail=f"Graph {graph_id} not found")
@@ -68,7 +63,6 @@ async def change_graph_tier_cmd(
   if not subscription:
     raise HTTPException(status_code=404, detail=f"No subscription found for {graph_id}")
 
-  # Verify subscription belongs to user's org
   org_id = user_orgs[0].org_id
   if subscription.org_id != org_id:
     raise HTTPException(
@@ -82,7 +76,6 @@ async def change_graph_tier_cmd(
       detail=f"Cannot change tier on a {subscription.status} subscription",
     )
 
-  # Validate new tier exists in billing plans
   plan_config = BillingConfig.get_subscription_plan(new_tier)
   if not plan_config:
     raise HTTPException(
@@ -94,11 +87,9 @@ async def change_graph_tier_cmd(
   if new_tier == old_tier:
     raise HTTPException(status_code=400, detail="Already on this tier")
 
-  # Refuse-the-sale rule, the same one checkout applies: the migration needs
-  # a healthy writer on the target tier with a free slot *now*. The worker
-  # can raise the ASG's desired capacity itself, but a cold boot does not fit
-  # its reattach window, and the high tiers are provisioned on request by
-  # policy — so refuse here, before Stripe has moved the customer's price.
+  # Refuse the sale, as checkout does, unless the target tier has a free slot
+  # now: a cold boot does not fit the worker's reattach window. Checked before
+  # Stripe moves the price.
   if await tier_capacity_status(new_tier) != "ready":
     raise HTTPException(
       status_code=409,
@@ -112,7 +103,6 @@ async def change_graph_tier_cmd(
   old_price_cents = subscription.base_price_cents
   is_upgrade = new_price_cents > old_price_cents
 
-  # Downgrade validation
   if not is_upgrade:
     validate_subgraph_count(graph_id, new_tier, db)
     await validate_storage_capacity(graph_id, old_tier, new_tier, db)
@@ -169,7 +159,6 @@ async def change_graph_tier_cmd(
         detail="Failed to update payment. Tier change has been rolled back.",
       )
 
-  # Enqueue async worker task for infrastructure migration
   try:
     result = await enqueue_task(
       task_type="graph_tier_upgrade",
@@ -218,7 +207,6 @@ async def change_graph_tier_cmd(
 
   operation_id: str = result["operation_id"]
 
-  # Audit log
   BillingAuditLog.log_event(
     session=db,
     event_type=(

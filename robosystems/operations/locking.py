@@ -1,27 +1,12 @@
-"""Row-lock policy for state transitions.
+"""Row-lock policy for read-decide-write state transitions.
 
-**The shape this exists for**: load a row, branch on a state column, write that
-column back. Approving an event, reversing a journal entry, closing or reopening
-a fiscal period, filing a report — all of them. Unlocked, two callers read the
-same state, both pass the guard, and both act: one event with two sets of GL
-rows, one entry reversed twice, one period closed twice. Each of those leaves
-books that still foot, which is why none of them announce themselves.
+The read that feeds a state decision (approve an event, reverse an entry, close
+a period) takes `FOR UPDATE`; unlocked, two callers both pass the guard and
+both act, and the books still foot, so nothing announces it.
 
-So the read that feeds the decision takes `FOR UPDATE`, and `lock_by_id` is the
-one-call version of doing that correctly. This module also holds the half of the
-policy about *waiting*: how long a request-facing caller waits for a conflicting
-writer before giving up, and what the failure is called.
-
-It lives at `operations/` root deliberately: the same read-decide-write shape
-recurs across subsystems, and a shared discipline filed inside one of its
-consumers is a discipline the next consumer will not find.
-
-The split that matters: **background jobs wait, request handlers do not.** A
-sync or a Dagster sweep should block behind a conflicting approval rather than
-fail its batch, so it takes the lock unbounded. An HTTP request that waits out a
-multi-minute sync pins a pooled connection for that whole time, and enough of
-them exhaust the extensions pool — so request-facing callers wrap their locking
-work in `bounded_lock_wait`.
+Background jobs wait; request handlers do not. A sync or sweep locks unbounded;
+request-facing callers wrap their locking in `bounded_lock_wait` so they cannot
+pin a pooled connection behind a multi-minute sync.
 """
 
 from __future__ import annotations
@@ -32,77 +17,41 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-# How long a request-facing caller waits for a conflicting writer before giving
-# up. Long enough to absorb another approval or a short write — those resolve in
-# milliseconds, and failing them would be a spurious error — and short enough
-# that a multi-minute sync returns an answer instead of holding the connection.
-# Postgres raises SQLSTATE 55P03 on expiry, the same code `NOWAIT` raises, so
-# this handler covers both if the zero-wait variant is ever wanted.
+# Long enough to absorb a competing approval, short enough that a request
+# blocked behind a sync returns instead of holding the connection. Expiry
+# raises 55P03, the same code as `NOWAIT`.
 _LOCK_TIMEOUT_MS = 3000
 _LOCK_NOT_AVAILABLE = "55P03"
 
-# Deadlock. Postgres has already aborted this transaction and rolled it back, so
-# there is nothing to salvage — but it is retryable in exactly the sense 55P03
-# is, and it must not reach the caller as an unhandled 500. It should be
-# unreachable between the batch-locking reads, which all order by `id` so their
-# acquisition sequence cannot diverge (see `ordered_lock_column`), and the
-# supersede pair in `update_event_block` now locks both of its rows in that
-# same order. So no path in this module is known to reach it.
-#
-# It stays translated as defense, and the honest limit is worth stating: a
-# deadlock materializes when the conflicting writes are **flushed**, which for
-# operations whose commit belongs to `extensions_session` happens outside any
-# wrapper here. Covering those needs the translation at the transaction
-# boundary, not at lock acquisition.
+# Deadlock: retryable like 55P03. Not known to be reachable (batch locks share
+# one order, see `ordered_lock_column`), translated as defense. A deadlock
+# raised at flush/commit inside `extensions_session` bypasses these wrappers.
 _DEADLOCK_DETECTED = "40P01"
 
 _RETRYABLE_LOCK_STATES = frozenset({_LOCK_NOT_AVAILABLE, _DEADLOCK_DETECTED})
 
 
-# Every batch-locking read over `events` must order by this column, and they
-# must all use the *same* one.
-#
-# Two transactions that lock overlapping row sets in different orders deadlock:
-# each ends up holding a row the other is waiting for. The sets do overlap — a
-# pending `schedule_entry_due` obligation is matched by both the promotion
-# sweep's predicate and `supersede_pending_obligations`' — and without an
-# ORDER BY the acquisition sequence is whatever each query's plan happens to
-# produce, which is not a property either query controls or a test would notice.
-#
-# `id` because it is the primary key: unique (so the order is total, never
-# ambiguous), immutable (so a concurrent status write cannot reorder anything
-# mid-scan), and present on every one of these reads. Ordering by `occurred_at`
-# would satisfy none of those.
-#
-# Exported as the column itself, not its name, so the call sites `order_by` it
-# rather than each hardcoding `Event.id` beside a comment pointing here — a
-# constant nothing reads cannot keep anything in step with it.
 def ordered_lock_column():
-  """The column every batch-locking read over `events` must order by."""
+  """The column every batch-locking read over `events` must order by.
+
+  Overlapping batch locks (the promotion sweep and
+  `supersede_pending_obligations` match the same pending obligations) deadlock
+  unless they acquire in one order. The primary key is total and immutable.
+  """
   from robosystems.models.extensions.roboledger.event import Event
 
   return Event.id
 
 
 class RowLockedError(Exception):
-  """Raised when rows this operation must write are held by another writer.
-
-  In practice that writer is a running sync or the obligation-promotion sweep,
-  both of which lock their whole batch for the life of their transaction.
-  Retryable — it is the one error on these operations the caller should try
-  again rather than fix.
-  """
+  """Rows this operation must write are held by another writer (usually a sync
+  or the promotion sweep). Retryable."""
 
 
 @contextmanager
 def bounded_lock_wait(session: Session, detail: str):
-  """Bound this transaction's wait for a row lock and give the failure a name.
-
-  `SET LOCAL` reverts at transaction end, so the bound applies to this
-  operation only. Only the two retryable lock states are translated — a
-  connection fault keeps its own identity rather than reaching the caller as
-  "retry in a moment".
-  """
+  """Bound this transaction's lock wait; translate lock timeout and deadlock
+  (only those) to `RowLockedError`. `SET LOCAL` reverts at transaction end."""
   session.execute(text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT_MS}ms'"))
   try:
     yield
@@ -113,27 +62,12 @@ def bounded_lock_wait(session: Session, detail: str):
 
 
 def lock_by_id(session: Session, entity, ident, detail: str):
-  """Load one row by primary key, locked and refreshed, with a bounded wait.
+  """Load one row by primary key, `FOR UPDATE` and refreshed, with a bounded wait.
 
-  The correct form of the read that feeds a state transition, in one call, so
-  each site does not have to remember all four parts:
-
-  - `FOR UPDATE`, so a concurrent writer cannot move the row between the read
-    and the write that follows it;
-  - `populate_existing`, so a caller reusing a session gets the row as the
-    database has it rather than as its identity map remembers it;
-  - `session.flush()` first, because these sessions are `autoflush=False`
-    (`db/extensions.py`) and the refresh would otherwise discard an in-flight
-    change without a word;
-  - a bounded wait, so a request blocked behind a long background writer
-    returns a retryable error instead of pinning a pooled connection.
-
-  Returns `None` when the row does not exist — callers raise their own typed
-  not-found error, since that message is theirs to phrase.
-
-  Not for multi-row locks: those must order by `ordered_lock_column()` in a
-  single statement, or two callers acquiring the same rows in opposite orders
-  deadlock.
+  Flushes first: extensions sessions are `autoflush=False`, and
+  `populate_existing` would otherwise silently discard an in-flight change.
+  Returns `None` when the row does not exist. Not for multi-row locks, which
+  must order by `ordered_lock_column()` in one statement.
   """
   session.flush()
   with bounded_lock_wait(session, detail):
@@ -142,27 +76,13 @@ def lock_by_id(session: Session, entity, ident, detail: str):
 
 # ── Period write fence ───────────────────────────────────────────────────
 #
-# Close publishes to QuickBooks and commits those markers mid-flow, so a
-# transaction-scoped lock (FOR UPDATE, pg_advisory_xact_lock) cannot span
-# the whole operation. Writers and close still have to share one barrier:
-# otherwise a writer observes `open`, pauses, and commits after statements
-# are stamped.
-#
-# The barrier is a PostgreSQL advisory lock keyed on (graph, period):
-#
-# - Close and reopen take it **exclusive** and **session-scoped**, on a
-#   dedicated connection that outlives the mid-close commit.
-# - Period-affecting writers take it **shared** and **transaction-scoped**
-#   on their own session; commit/rollback releases it.
-#
-# Shared lockers do not block each other. Exclusive waits for them and
-# blocks new ones. Lock order is always the fence first, then any row
-# locks, so a writer that already holds an entry row cannot deadlock
-# with a close that holds the fence and is about to update that entry.
+# Close commits mid-flow (QuickBooks markers), so no transaction-scoped lock
+# can span it. An advisory lock on (graph, period) is the barrier: close and
+# reopen hold it exclusive and session-scoped on a dedicated connection;
+# period-affecting writers hold it shared and transaction-scoped. Lock order is
+# always the fence first, then row locks, so writer and close cannot deadlock.
 
-# Two-key advisory-lock class for the period fence. Arbitrary but stable —
-# changing it would let in-flight lockers on the old class miss lockers
-# on the new one.
+# Arbitrary but must stay stable: changing it splits in-flight lockers.
 _PERIOD_FENCE_CLASS = 872401
 
 
@@ -176,9 +96,8 @@ def acquire_shared_period_fence(
 ) -> None:
   """Take a transaction-scoped shared fence on ``(graph_id, period)``.
 
-  Released automatically when this session commits or rolls back. Does
-  not block other shared lockers. Waits up to the request lock timeout
-  for an exclusive closer, then raises :class:`RowLockedError`.
+  Waits up to the request lock timeout for an exclusive closer, then raises
+  :class:`RowLockedError`.
   """
   with bounded_lock_wait(session, detail):
     session.execute(
@@ -196,23 +115,11 @@ def exclusive_period_fence(
 ):
   """Hold a session-scoped exclusive fence on ``(graph_id, period)``.
 
-  Uses a dedicated connection, not the caller's ``Session``. The close
-  commits mid-flow to persist QuickBooks dedupe markers; that commit
-  would return the session's connection to the pool and drop any lock
-  taken on it. A session-scoped advisory lock on a connection we hold
-  ourselves survives that commit.
-
-  ``wait_ms`` bounds the wait for whoever holds the fence. The default is
-  the request wait, per the module rule: a request handler that sat out a
-  whole close would pin a pooled connection for it. A background closer —
-  the worker close — passes its own budget instead. What it is most likely
-  waiting on is another close of the same period, and waiting turns a
-  duplicate dispatch into "already closed, here is the receipt" rather
-  than a refusal the operator is told to retry.
-
-  Unlock (or invalidate the connection, so the pool discards it) before
-  returning the connection — a pooled connection still holding this
-  lock would block every later closer of the same period.
+  Uses a dedicated connection so the lock survives the close's mid-flow
+  commit. ``wait_ms`` defaults to the request wait; the background close passes
+  a longer budget so a duplicate dispatch waits and sees "already closed".
+  The connection is unlocked or invalidated before release: a pooled
+  connection still holding the lock would block every later closer.
   """
   from robosystems.db.extensions import get_extensions_engine
 
@@ -230,9 +137,8 @@ def exclusive_period_fence(
       )
       acquired = True
     except OperationalError as exc:
-      # The failed statement aborted the transaction; roll it back and clear
-      # the session-level timeout before the connection goes back to the
-      # pool, or the next borrower inherits a lock_timeout it never set.
+      # Clear the session-level timeout before the connection returns to the
+      # pool, or the next borrower inherits it.
       try:
         conn.rollback()
         conn.execute(text("RESET lock_timeout"))
@@ -242,8 +148,7 @@ def exclusive_period_fence(
       if getattr(exc.orig, "pgcode", None) in _RETRYABLE_LOCK_STATES:
         raise RowLockedError(detail) from exc
       raise
-    # RESET, not `SET ... = 0`: restore whatever the connection's default is
-    # (an engine-level setting, say) rather than pin it to "wait forever".
+    # RESET restores the connection default rather than pinning "wait forever".
     conn.execute(text("RESET lock_timeout"))
     conn.commit()
     yield

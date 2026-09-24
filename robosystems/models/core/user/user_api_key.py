@@ -22,35 +22,26 @@ class UserAPIKey(Model):
 
   __tablename__ = "user_api_keys"
 
-  # bcrypt cost for hashing API keys (~250ms at cost 12). A class constant so
-  # the test suite can patch it down, the way it patches PasswordSecurity.
+  # bcrypt cost (~250ms at 12); a class constant so tests can patch it down.
   BCRYPT_ROUNDS = 12
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("uak"))
   user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-  name = Column(String, nullable=False)  # User-friendly name for the key
-  key_hash = Column(
-    String, nullable=False, unique=True, index=True
-  )  # bcrypt hashed API key
-  # Deterministic SHA-256 of the plaintext key, used as the cache key in
-  # validate_api_key so deactivate/delete can invalidate the same entry.
-  # Nullable: a row whose key has never been validated may not have one yet
-  # (it is backfilled on validation, the only place plaintext is available).
-  # A key revoked while this is NULL cannot be cache-invalidated by
-  # fingerprint — ``invalidate_cache`` warns and the entry lapses on TTL.
+  name = Column(String, nullable=False)
+  key_hash = Column(String, nullable=False, unique=True, index=True)  # bcrypt
+  # SHA-256 of the plaintext: the validation cache key, stored so the entry
+  # can be invalidated without the plaintext. NULL until the key is first
+  # validated (the only place plaintext is available to backfill it).
   key_fingerprint = Column(String(64), nullable=True, unique=True, index=True)
-  prefix = Column(
-    String, nullable=False, index=True
-  )  # First few chars for identification
-  # Scope restriction: NULL = account-wide; a value restricts the key to that
-  # graph and its subgraphs. Scoped keys are the only kind accepted via the
-  # MCP endpoint's URL query parameter, and are rejected on endpoints that
-  # carry no graph context.
+  prefix = Column(String, nullable=False, index=True)  # first 8 chars
+  # NULL = account-wide; otherwise restricted to this graph and its
+  # subgraphs. Only scoped keys are accepted via the MCP URL query parameter,
+  # and they are rejected on endpoints with no graph context.
   graph_id = Column(String, nullable=True, index=True)
   is_active = Column(Boolean, default=True, nullable=False)
-  description = Column(Text, nullable=True)  # Optional description
+  description = Column(Text, nullable=True)
   last_used_at = Column(DateTime, nullable=True)
-  expires_at = Column(DateTime, nullable=True)  # Optional expiration date
+  expires_at = Column(DateTime, nullable=True)
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
@@ -59,10 +50,8 @@ class UserAPIKey(Model):
     nullable=False,
   )
 
-  # Relationships
   user = relationship("User", back_populates="user_api_keys")
 
-  # Performance indexes
   __table_args__ = (
     Index("idx_user_api_keys_hash_active", "key_hash", "is_active"),
     Index("idx_user_api_keys_last_used", "last_used_at"),
@@ -82,14 +71,10 @@ class UserAPIKey(Model):
     session: Session | None = None,
     graph_id: str | None = None,
   ) -> tuple["UserAPIKey", str]:
-    """Mint an API key, returning ``(row, plaintext)``.
-
-    The plaintext is returned once and never stored — only its bcrypt hash and
-    its SHA-256 cache fingerprint persist.
-    """
-    # Graph-scoped keys get a distinguishable prefix for human/incident
-    # legibility; the authoritative scope check is always the row's graph_id,
-    # never the prefix.
+    """Mint an API key, returning ``(row, plaintext)``; the plaintext is
+    never stored."""
+    # The scoped prefix is for human legibility only; scope checks read the
+    # row's graph_id.
     plain_key = (
       f"rfsc{secrets.token_hex(32)}" if graph_id else f"rfs{secrets.token_hex(32)}"
     )
@@ -146,11 +131,9 @@ class UserAPIKey(Model):
 
   @classmethod
   def get_by_key(cls, plain_key: str, session: Session) -> Optional["UserAPIKey"]:
-    """Resolve a plaintext API key to its row via bcrypt verification.
+    """Resolve a plaintext API key to its active, unexpired row.
 
-    Bcrypt hashes are not searchable, so the lookup narrows on the indexed
-    ``prefix`` and then verifies each candidate. Expired keys are skipped, not
-    returned.
+    Narrows on the indexed ``prefix``, then bcrypt-verifies each candidate.
     """
     if not plain_key or not isinstance(plain_key, str):
       SecurityAuditLogger.log_input_validation_failure(
@@ -168,8 +151,7 @@ class UserAPIKey(Model):
     for api_key in potential_keys:
       try:
         if cls._verify_api_key(plain_key, str(api_key.key_hash)):
-          # The only point in the system holding plaintext, so the only place
-          # a missing cache fingerprint can be filled in.
+          # The only place plaintext is available to backfill the fingerprint.
           if not api_key.key_fingerprint:
             api_key.key_fingerprint = cls._fingerprint_api_key(plain_key)
 
@@ -185,7 +167,7 @@ class UserAPIKey(Model):
               },
               risk_level="low",
             )
-            continue  # Try next potential key
+            continue
 
           api_key.update_last_used(session, auto_commit=False)
           session.commit()
@@ -266,13 +248,8 @@ class UserAPIKey(Model):
         raise
 
   def deactivate(self, session: Session) -> bool:
-    """Deactivate the API key, returning whether its cache entry was cleared.
-
-    The DB flip either commits or this raises; the cache invalidation is
-    best-effort, and a caller acting as a kill switch must know whether it
-    took — a cached validation entry keeps the key usable until its TTL even
-    though the row is inactive.
-    """
+    """Deactivate the key; returns whether its cache entry was cleared (a
+    surviving entry keeps the key usable until TTL)."""
     self.is_active = False
     self.updated_at = datetime.now(UTC)
     try:
@@ -311,18 +288,10 @@ class UserAPIKey(Model):
 
   @staticmethod
   def _fingerprint_api_key(plain_key: str) -> str:
-    """Deterministic SHA-256 fingerprint of a plaintext API key.
+    """Deterministic SHA-256 fingerprint used as the validation cache key.
 
-    Used as the cache key in `validate_api_key`. Stored on the row so
-    `invalidate_cache` can clear the same entry without needing the plaintext.
-
-    NOT credential storage: the API key itself is stored as bcrypt in
-    ``key_hash`` (see ``_hash_api_key`` below). This SHA-256 is solely a
-    deterministic lookup fingerprint so the cache key derived from the
-    plaintext (``sha256(plain_key)``) matches what ``invalidate_cache``
-    reads off the row. A KDF would be the wrong tool: those exist to make
-    low-entropy human secrets expensive to guess, and an API key is
-    generated at full entropy.
+    Not credential storage (that is bcrypt in ``key_hash``); a KDF is
+    unnecessary because API keys are generated at full entropy.
     """
     return hashlib.sha256(plain_key.encode("utf-8")).hexdigest()
 
@@ -347,16 +316,14 @@ class UserAPIKey(Model):
       return False
 
   def invalidate_cache(self) -> bool:
-    """Drop this key's cached validation result, True when it took.
+    """Drop this key's cached validation result; True when it took.
 
-    Keyed on ``key_fingerprint``, matching what ``validate_api_key`` caches
-    under. A row with a NULL fingerprint (never validated) cannot be targeted
-    but also has no addressable entry to leave stale — reported as success.
-    A False return means an entry may survive until its TTL, so callers
-    enforcing revocation must treat it as incomplete and retry.
+    A NULL fingerprint (never validated) means nothing is cached, so it
+    reports success. False means an entry may survive until TTL; revocation
+    callers should retry.
     """
     try:
-      # Imported lazily to avoid a circular dependency on the auth middleware.
+      # Lazy import: circular dependency on the auth middleware.
       import importlib
 
       cache_module = importlib.import_module("robosystems.middleware.auth.cache")

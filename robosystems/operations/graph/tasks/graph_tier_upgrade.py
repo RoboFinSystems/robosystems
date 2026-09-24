@@ -96,8 +96,7 @@ class GraphTierUpgradeTask(BaseTask):
     asg_client = _get_autoscaling_client()
     volume_manager_arn = get_volume_manager_function_arn()
 
-    # Volume manager is required in staging/prod — without it we can't
-    # snapshot, detach, or reattach the EBS volume
+    # Without the volume manager nothing can snapshot, detach, or reattach.
     if not volume_manager_arn and not env.is_development():
       raise ValueError(
         "Volume Manager Lambda ARN not found. Cannot perform tier upgrade "
@@ -112,7 +111,6 @@ class GraphTierUpgradeTask(BaseTask):
     volume_detached = False
 
     try:
-      # Step 1: Look up current instance info from DynamoDB
       await self.report_progress("Looking up graph instance...", percent=5)
       graph_item = graph_table.get_item(Key={"graph_id": graph_id}).get("Item")
       if not graph_item:
@@ -121,7 +119,6 @@ class GraphTierUpgradeTask(BaseTask):
       old_instance_id = graph_item["instance_id"]
       old_private_ip = graph_item.get("private_ip", "")
 
-      # Find volume for this instance (query GSI instead of full table scan)
       volume_response = volume_table.query(
         IndexName="instance-index",
         KeyConditionExpression="instance_id = :iid",
@@ -134,7 +131,6 @@ class GraphTierUpgradeTask(BaseTask):
         raise ValueError(f"No attached volume found for instance {old_instance_id}")
       volume_id = volumes[0]["volume_id"]
 
-      # Step 2: Update DynamoDB registries
       await self.report_progress("Updating registries...", percent=10)
 
       graph_table.update_item(
@@ -161,7 +157,6 @@ class GraphTierUpgradeTask(BaseTask):
         },
       )
 
-      # Step 3: Create EBS snapshot (safety net)
       await self.report_progress("Creating EBS snapshot...", percent=15)
 
       if volume_manager_arn:
@@ -188,11 +183,9 @@ class GraphTierUpgradeTask(BaseTask):
       else:
         logger.warning("VOLUME_MANAGER_FUNCTION_ARN not set, skipping snapshot")
 
-      # Step 4: Drain connections on old instance
       await self.report_progress("Draining connections...", percent=35)
       await self._drain_instance(old_private_ip)
 
-      # Step 5: Detach volume
       await self.report_progress("Detaching volume...", percent=50)
 
       if volume_manager_arn:
@@ -218,17 +211,14 @@ class GraphTierUpgradeTask(BaseTask):
         logger.warning("VOLUME_MANAGER_FUNCTION_ARN not set, skipping detach")
         volume_detached = True
 
-      # Step 6: Ensure target tier ASG has capacity
       await self.report_progress("Provisioning new instance...", percent=60)
       await self._ensure_asg_capacity(asg_client, new_tier)
 
-      # Step 7: Poll for volume reattachment
       await self.report_progress("Waiting for volume reattachment...", percent=70)
       new_instance_id = await self._wait_for_reattachment(
         volume_table, volume_id, old_instance_id
       )
 
-      # Step 8: Verify graph is accessible on new instance
       await self.report_progress("Verifying graph...", percent=90)
       new_graph_item = graph_table.get_item(Key={"graph_id": graph_id}).get("Item")
       new_private_ip = new_graph_item.get("private_ip", "") if new_graph_item else ""
@@ -236,11 +226,9 @@ class GraphTierUpgradeTask(BaseTask):
       if new_private_ip:
         await self._verify_graph_health(new_private_ip)
 
-      # Step 9: Finalize — update PostgreSQL subscription status
       await self.report_progress("Finalizing upgrade...", percent=95)
       self._finalize_subscription(subscription_id)
 
-      # Step 10: Update DynamoDB graph registry to active
       graph_table.update_item(
         Key={"graph_id": graph_id},
         UpdateExpression=(
@@ -323,15 +311,10 @@ class GraphTierUpgradeTask(BaseTask):
   async def _drain_instance(self, private_ip: str) -> None:
     """Confirm the old instance has stopped serving before the detach.
 
-    Two outcomes count as drained: the instance reports zero active
-    connections, or its graph API is not listening at all, confirmed across
-    several attempts so a network blip does not pass for a stopped container
-    — the maintenance-window procedure stops the container before a tier
-    change precisely so nothing can be writing when the volume detaches, and
-    every write reaches the volume through that API. Everything else refuses:
-    no private IP to ask, a graph API that is up but has no drain endpoint, an
-    error response, or a drain that times out with connections still open.
-    Detaching under live writes is the one thing this step exists to prevent.
+    Drained means zero active connections, or a graph API that is not
+    listening across several attempts (every write goes through it, and the
+    maintenance procedure stops the container first). Anything else raises:
+    the volume must never detach under live writes.
     """
     if not private_ip:
       raise DrainRefusedError(

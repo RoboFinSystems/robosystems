@@ -1,16 +1,7 @@
-"""Element model — unified taxonomy element.
+"""Element model: chart-of-accounts entries and reporting concepts alike.
 
-Holds Chart of Accounts entries (from QuickBooks, Xero, native), US GAAP
-reporting concepts (SFAC 6, rs-gaap), and any future taxonomy elements.
-All materialize to Element nodes in the graph via the postgres_scanner →
-DuckDB → LadybugDB pipeline.
-
-Only XBRL-intrinsic attributes live on this table (name, qname,
-namespace, balance_type, period_type, abstract, monetary, element_type,
-substitution_group). Classifications — including SFAC 6 primitive type
-(elementsOfFinancialStatements), liquidity, activityType,
-operatingNonoperating, flowClassification, and the other 20 FASB
-metamodel trait axes — live in ``classifications`` +
+Only XBRL-intrinsic attributes live here. Classifications (SFAC 6 type,
+liquidity, the FASB trait axes) live in ``classifications`` +
 ``element_traits``, mirroring XBRL's traitConcept linkbase model.
 """
 
@@ -32,24 +23,16 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
-# The `elements.source` vocabulary — the single source for the model CHECK and
-# for the tenant-provisioning widen step (`db.extensions._widen_library_checks`).
-# Both read this; neither may keep its own copy.
+# `elements.source` vocabulary: the single source for the CHECK and for the
+# tenant-provisioning widen step (`db.extensions._widen_library_checks`).
 #
-# 'system' is reserved for internal FK-anchor elements created by the taxonomy
-# seed (e.g., struct_balance_sheet) and is intentionally NOT in COA_SOURCES so
-# those rows never appear in the Chart of Accounts.
-# 'disclosures' / 'checklist' / 'styles' — rs-gaap framework extension packages
-# anchored to sibling namespaces of rs-gaap.
-# 'cm' — Conceptual Model posting-role concepts (cm:Debit/cm:Credit),
-# tenant-copied with the default pin so schedule has-part arcs resolve.
-# 'rs-metric' — the metric catalog package (seeded at 0002 on fresh databases,
-# backfilled by 0022 on existing ones).
-# 'rs-driver' — the forecast lever catalog package (seeded at 0024).
-# 'linked' — a concept that arrived with a report shared from another graph.
-# Deliberately NOT in COA_SOURCES: the sender's reporting extension has to
-# exist here for their facts to mean anything, but their revenue accounts are
-# not the recipient's chart of accounts. Mirrors Entity.source='linked'.
+# 'system': internal FK-anchor elements from the taxonomy seed; not in
+#   COA_SOURCES, so they never appear in the chart of accounts.
+# 'disclosures' / 'checklist' / 'styles': rs-gaap extension packages.
+# 'cm': Conceptual Model posting-role concepts (cm:Debit/cm:Credit).
+# 'rs-metric' / 'rs-driver': the metric and forecast-lever catalogs.
+# 'linked': arrived with a report shared from another graph; not in
+#   COA_SOURCES, since the sender's accounts are not the recipient's chart.
 ELEMENT_SOURCE_VALUES: tuple[str, ...] = (
   "fac",
   "rs-gaap",
@@ -76,18 +59,15 @@ class Element(ExtensionsBase):
   __table_args__ = (
     Index("idx_elements_parent", "parent_id"),
     Index("idx_elements_external", "external_id", "external_source"),
-    # Scopes the OLTPLoader's per-connection delete during re-sync — without
-    # this the DELETE is a seq scan over the elements table.
+    # Scopes the OLTPLoader's per-connection delete during re-sync.
     Index(
       "idx_elements_external_source_connection",
       "external_source",
       "connection_id",
       postgresql_where="connection_id IS NOT NULL",
     ),
-    # UPSERT key for the OLTPLoader: lookup-then-update on re-sync keeps
-    # `elem_*` ULIDs stable across syncs (downstream Associations point at
-    # these IDs). Partial — library-origin elements have connection_id NULL
-    # and aren't subject to this constraint.
+    # OLTPLoader UPSERT key: keeps `elem_*` ids stable across re-syncs, since
+    # associations point at them. Library elements (no connection) are exempt.
     Index(
       "idx_elements_upsert_key",
       "external_source",
@@ -142,13 +122,11 @@ class Element(ExtensionsBase):
     ),
   )
 
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("elem"))
   code = Column(String, nullable=True)
   name = Column(String, nullable=False)
   description = Column(String, nullable=True)
 
-  # XBRL Alignment — intrinsic concept declaration attributes only.
   qname = Column(String, nullable=True)
   namespace = Column(String, nullable=True)
   uri = Column(String, nullable=True)
@@ -156,61 +134,44 @@ class Element(ExtensionsBase):
   period_type = Column(String, nullable=False, default="duration")
   substitution_group = Column(String, nullable=True)
 
-  # Element Type (XBRL substitution-group derived)
   is_abstract = Column(Boolean, nullable=False, default=False)
   is_monetary = Column(Boolean, nullable=False, default=True)
   element_type = Column(String, nullable=False, default="concept")
-  # Value domain (orthogonal to element_type, which is the structural role).
-  # Open XBRL item-type vocabulary — intended values: monetary | string |
-  # date | boolean | shares | decimal | integer | text_block, plus the
-  # metric format families ratio | percent | multiple | days. NULL means
-  # untyped; consumers fall back to is_monetary.
+  # Value domain, orthogonal to element_type (the structural role). Open
+  # vocabulary: monetary | string | date | boolean | shares | decimal |
+  # integer | text_block | ratio | percent | multiple | days. NULL falls back
+  # to is_monetary.
   item_type = Column(String, nullable=True)
 
-  # Hierarchy (parent element — separate from class-subclass classification
-  # hierarchy, which lives in associations)
+  # Parent element; classification hierarchy lives in associations instead.
   parent_id = Column(String, ForeignKey("elements.id"), nullable=True)
   depth = Column(Integer, nullable=False, default=0)
   path = Column(String, nullable=False, default="")
 
-  # Taxonomy Membership
   taxonomy_id = Column(String, ForeignKey("taxonomies.id"), nullable=True)
   source = Column(String, nullable=False, default="native")
 
-  # Currency
   currency = Column(String, nullable=False, default="USD")
 
-  # State
   is_active = Column(Boolean, nullable=False, default=True)
   is_placeholder = Column(Boolean, nullable=False, default=False)
 
-  # External mapping (QB, Xero, etc.)
   external_id = Column(String, nullable=True)
   external_source = Column(String, nullable=True)
-  # Connection scope. Multi-connection graphs (two QB books in one
-  # roboledger graph, e.g. parent + sub) need elements segregated per
-  # connection — without this, a re-sync of one connection's CoA would
-  # delete or stomp the other connection's elements. Library-origin
-  # elements (rs-gaap, us-gaap, FAC) and tenant-native elements have
-  # connection_id NULL.
+  # Segregates elements per connection so re-syncing one QB book cannot stomp
+  # another's in the same graph. NULL for library and native elements.
   connection_id = Column(String, nullable=True)
 
-  # Cross-tenant canonical concept linkage via ``agent_id``: elements
-  # pointing at the same canonical concept share the value. ``aliases``
-  # carries alternate spellings and qname variants (e.g. us-gaap-2024 vs
-  # us-gaap-2020) that agents should treat as the same concept.
-  # ``embedding`` holds a 1024-dimensional sentence embedding the
-  # MappingOperator + classifier use for similarity lookups; nullable
-  # because the seed content lands incrementally.
+  # agent_id: shared by elements denoting the same canonical concept across
+  # tenants. aliases: alternate spellings and qname variants of that concept.
+  # embedding: 1024-dim sentence embedding for mapping similarity lookups.
   agent_id = Column(String, nullable=True)
   aliases = Column(ARRAY(String), nullable=False, default=list)
   embedding = Column(ARRAY(Float), nullable=True)
 
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
   version = Column(Integer, nullable=False, default=1)
 
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

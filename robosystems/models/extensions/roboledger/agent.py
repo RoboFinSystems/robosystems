@@ -67,14 +67,10 @@ class Agent(ExtensionsBase):
   # Scopes agents to a connection so two QB connections on one graph don't share agents.
   # Nullable for native / library-origin agents that don't come from a connector.
   connection_id = Column(String, nullable=True)
-
-  # State
   is_active = Column(Boolean, nullable=False, default=True)
   is_1099_recipient = Column(Boolean, nullable=False, default=False)
 
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

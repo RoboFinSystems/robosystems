@@ -1,9 +1,7 @@
 """Bootstrap a dedicated tenant's SCIM provisioning.
 
-Stands up the one ``ENTERPRISE`` org SCIM users land in, and mints the bearer
-token the customer's IdP presents. A step in the dedicated-tenant lifecycle,
-run once per tenant from the admin CLI. The raw token is returned exactly once
-— it is never recoverable after this call.
+Creates the ``ENTERPRISE`` org SCIM users land in and mints the IdP's bearer
+token, returned once and never recoverable.
 """
 
 from dataclasses import dataclass
@@ -52,13 +50,10 @@ def bootstrap_scim(
   Pass ``org_id`` to attach a token to an existing org, or ``org_name`` to
   create a fresh ``ENTERPRISE`` org (with default limits) first.
 
-  Every token expires — there is deliberately no "never" option (RFC 7644
-  expects limited-lifetime bearers). Rotation is overlap-based: mint the
-  replacement, swap it into the IdP, then revoke the old token; two live
-  tokens are legal during the swap.
+  Every token expires (no "never" option). Rotate by overlap: mint, swap into
+  the IdP, then revoke the old one.
   """
-  # Once the deployment pins its enterprise org, bootstrap can only mint
-  # tokens for that org — no new-org creation, no other-org targeting.
+  # A pinned deployment mints only for its own org.
   if env.ENTERPRISE_ORG_ID:
     if org_id != env.ENTERPRISE_ORG_ID:
       raise OrgBoundaryError(

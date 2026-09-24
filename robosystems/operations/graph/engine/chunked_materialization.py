@@ -1,8 +1,7 @@
 """Chunked materialization for user-graph staging tables.
 
-Splits large DuckDB-to-LadybugDB COPY operations into hash-based batches
-to avoid OOM on large tables. Uses the same batch_num/num_batches pattern
-as the SEC adapter (see adapters/sec/processors/ingestion/materialization.py).
+Splits large DuckDB-to-LadybugDB COPYs into hash-based batches to avoid OOM,
+with the same batch_num/num_batches pattern as the SEC adapter.
 """
 
 from __future__ import annotations
@@ -19,10 +18,8 @@ if TYPE_CHECKING:
 # Per-chunk timeout (seconds) — matches materialize_table default
 CHUNK_TIMEOUT = 600.0
 
-# Fallback chunk size when tier config is unavailable. Must never exceed the
-# smallest tier's chunk_size_rows (ladybug-standard: 250k on m7g.medium) — a
-# larger fallback applies a bigger tier's chunk to a smaller box, the OOM the
-# guardrail exists to prevent. Pinned by test_graph_tier_config.
+# Fallback when tier config is unavailable. Must not exceed the smallest tier's
+# chunk_size_rows, or it OOMs the smallest box; pinned by test_graph_tier_config.
 DEFAULT_CHUNK_SIZE_ROWS = 250_000
 
 
@@ -34,16 +31,11 @@ async def materialize_table_chunked(
   materialize_embeddings: bool = False,
   file_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-  """Materialize a staging table, chunking large ones into hash-based batches.
+  """Materialize a staging table, in hash-based batches above the tier's
+  chunk_size_rows.
 
-  For tables smaller than the tier's chunk_size_rows, delegates directly to
-  client.materialize_table (single pass). For larger tables, iterates through
-  hash-based batches using batch_num/num_batches parameters.
-
-  ``materialize_embeddings`` additionally builds the HNSW vector indexes.
-  ``file_ids`` narrows the source rows and does not disable chunking.
-
-  Returns ``{rows_ingested, chunked, batches}``.
+  ``materialize_embeddings`` also builds the HNSW vector indexes. ``file_ids``
+  narrows the source rows and does not disable chunking.
   """
   chunk_size = _get_chunk_size(tier)
 
@@ -60,7 +52,6 @@ async def materialize_table_chunked(
       file_ids=file_ids,
     )
 
-  # Single-pass materialization
   result = await client.materialize_table(
     graph_id=graph_id,
     table_name=table_name,
@@ -158,9 +149,7 @@ async def _materialize_batched(
     f"{total_rows:,} rows across {num_batches} batches"
   )
 
-  # Rebuild HNSW vector index after all batches complete.
-  # Per-batch index creation is skipped (would only cover partial data),
-  # so we rebuild once over the full table.
+  # Batches skip index creation (each covers partial data); build once here.
   if materialize_embeddings and total_rows > 0:
     try:
       logger.info(

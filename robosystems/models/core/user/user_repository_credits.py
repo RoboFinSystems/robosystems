@@ -103,13 +103,9 @@ class UserRepositoryCredits(Base):
   allows_rollover = Column(Boolean, nullable=False, default=False)
   max_rollover_credits = Column(Numeric(10, 2), nullable=True)  # None = unlimited
   rollover_credits = Column(Numeric(10, 2), nullable=False, default=0)
-
-  # Status
   is_active = Column(Boolean, nullable=False, default=True)
   suspended_at = Column(DateTime(timezone=True), nullable=True)
   suspension_reason = Column(String, nullable=True)
-
-  # Metadata
   created_at = Column(
     DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
@@ -119,14 +115,10 @@ class UserRepositoryCredits(Base):
     default=lambda: datetime.now(UTC),
     onupdate=lambda: datetime.now(UTC),
   )
-
-  # Relationships
   user_repository = relationship("UserRepository", back_populates="user_credits")
   transactions = relationship(
     "UserRepositoryCreditTransaction", back_populates="credit_pool"
   )
-
-  # Indexes
   __table_args__ = (
     Index("idx_user_repo_credits_access", "user_repository_id"),
     Index("idx_user_repo_credits_allocation", "next_allocation_date", "is_active"),
@@ -158,9 +150,7 @@ class UserRepositoryCredits(Base):
       allows_rollover=allows_rollover,
       max_rollover_credits=max_rollover,
       last_allocation_date=now,
-      # Aligned with the 1st-of-month allocation cron — a +30d seed lands
-      # mid-month, where the cron never fires, and the first refill silently
-      # skips a month.
+      # The allocation cron only runs on the 1st.
       next_allocation_date=_first_of_next_month(now),
     )
 
@@ -337,11 +327,7 @@ class UserRepositoryCredits(Base):
     drained = Decimal(str(drained_row.drained))
     shortfall = amount - drained
 
-    # Built-ins win on collision: these are the audit-critical fields the drain
-    # exists to record, so a caller-supplied `metadata` key must not overwrite
-    # them. Matches GraphCredits._drain_for_shortfall (the success path above
-    # spreads caller-last, but that record is not audit-critical the way this
-    # one is).
+    # Built-in keys win over caller metadata: they are the audit record.
     transaction_metadata = {
       **(metadata or {}),
       "repository": repository_name,
@@ -373,12 +359,8 @@ class UserRepositoryCredits(Base):
     """
     now = datetime.now(UTC)
 
-    # One allocation per calendar month, matching the 1st-of-month cron that
-    # drives it (GraphCredits carries the same gate). The previous day-count
-    # gate (now < next_allocation_date, re-armed at +30 days) drifted off the
-    # 1st: a mid-month purchase re-armed to a mid-month date the cron never
-    # runs on, silently skipping that month's refill — and a 1-Feb allocation
-    # re-armed to 3-Mar, skipping March for every active pool, every year.
+    # One allocation per calendar month, matching the 1st-of-month cron. A
+    # day-count gate drifts off the 1st and silently skips months.
     if self.last_allocation_date is not None:
       last = self.last_allocation_date
       if (last.year, last.month) == (now.year, now.month):
@@ -400,8 +382,7 @@ class UserRepositoryCredits(Base):
     self.current_balance = new_balance
     self.rollover_credits = Decimal("0")
     self.last_allocation_date = now
-    # Kept for the Dagster op's due-pool filter and its index; pinned to the
-    # 1st so the date can never drift away from the cron again.
+    # Read by the Dagster op's due-pool filter.
     self.next_allocation_date = _first_of_next_month(now)
     self.updated_at = now
 
@@ -424,30 +405,16 @@ class UserRepositoryCredits(Base):
   ) -> None:
     """Update the monthly allocation, as on a plan change.
 
-    With ``immediate_credit`` the balance moves by the change in allocation
-    right away, rather than waiting for the next monthly allocation, so a
-    same-day plan change takes effect the day it is bought.
-
-    The adjustment is **symmetric**: a downgrade takes back what an upgrade
-    would have granted. Granting on the way up without deducting on the way
-    down does not merely under-charge — it compounds, because the next
-    upgrade's delta is computed against the new, lower allocation and grants
-    the difference a second time for the same net position.
-
-    Two properties bound it. The deduction never drives the balance below
-    zero, so a downgrade cannot manufacture an overage out of credits already
-    spent; and the operation is idempotent for a given target, since a repeat
-    call finds ``monthly_allocation`` already at ``new_allocation`` and
-    computes a zero delta. That makes a retried plan change a no-op without
-    needing a separate idempotency record.
+    With ``immediate_credit`` the balance moves by the delta now. The
+    adjustment is symmetric (a downgrade takes back what an upgrade granted,
+    or plan cycling would compound grants), never drives the balance below
+    zero, and is idempotent for a given target.
     """
     old_allocation = self.monthly_allocation
     difference = new_allocation - old_allocation
 
-    # A downgrade cannot reclaim credits already spent, so an upgrade grants
-    # only what this period has not already credited: cycling plans can
-    # never credit more than the highest allocation held since the last
-    # monthly allocation.
+    # A downgrade cannot reclaim spent credits, so an upgrade grants only what
+    # this period has not already credited.
     grant = difference
     if immediate_credit and difference > 0:
       headroom = new_allocation - self._credited_this_period(session)
@@ -486,9 +453,7 @@ class UserRepositoryCredits(Base):
       )
 
     elif immediate_credit and difference < 0:
-      # Clamped to what is actually there. A balance already drawn down (or
-      # negative from an overage) must not be pushed further down by a plan
-      # change — the user keeps what they have already used.
+      # Clamped at zero: a plan change never claws back credits already used.
       available = max(Decimal("0"), cast(Decimal, self.current_balance))
       deduction = min(-difference, available)
 
@@ -657,10 +622,8 @@ class UserRepositoryCredits(Base):
         session=session,
       )
 
-      # The atomic UPDATE already persisted the reservation debit. Writing the
-      # RETURNING value back through the ORM would emit an absolute SET on
-      # commit and revert any concurrent movement (lost update) — expire so
-      # the next access reloads instead.
+      # Expire rather than assign: an ORM write of the absolute balance would
+      # revert concurrent movement on commit (lost update).
       if self in session:
         session.expire(self, ["current_balance", "updated_at"])
 
@@ -916,17 +879,11 @@ class UserRepositoryCreditTransaction(Base):
     Numeric(10, 2), nullable=False
   )  # Positive for credits, negative for consumption
   description = Column(String(500), nullable=False)
-
-  # Metadata
   transaction_metadata = Column("metadata", Text, nullable=True)  # JSON
   created_at = Column(
     DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
-
-  # Relationships
   credit_pool = relationship("UserRepositoryCredits", back_populates="transactions")
-
-  # Indexes
   __table_args__ = (
     Index("idx_user_repo_credit_trans_pool", "credit_pool_id"),
     Index("idx_user_repo_credit_trans_type", "transaction_type"),

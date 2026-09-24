@@ -1,26 +1,10 @@
-"""RDF-graph encoder for ``StatementBundle`` — v1.0 graph-native shape.
+"""RDF encoder for ``StatementBundle``: an rdflib graph serialized as JSON-LD
+under ``CANONICAL_CONTEXT``, the same vocabulary as the framework seeds.
 
-Builds an :class:`rdflib.Graph` from the bundle and serializes it as JSON-LD
-using the canonical ``CANONICAL_CONTEXT`` (``robosystems/arelle/context.py``),
-so the export bundle speaks the *same* vocabulary as the framework seeds.
-
-Shape:
-* Concepts are ``rs:Element`` nodes carrying XBRL item attributes
-  (``xbrli:balance`` / ``xbrli:periodType``).
-* Taxonomy arcs are reified ``rs:Association`` nodes (``xlink:from``/``to`` +
-  ``xlink:arcrole`` + ``link:weight``/``order``) grouped under ``rs:Structure``.
-* Facts are ``rs:Fact`` nodes that reference their aspects **directly** —
-  ``rs:element`` / ``rs:entity`` / ``rs:period`` / ``rs:unit`` — mirroring the
-  graph's ``FACT_HAS_*`` edges. There is **no** XBRL ``context``; ``rs:Period``
-  / ``rs:Unit`` are first-class nodes. The XBRL encoder re-derives contexts.
-* IB envelopes embed under ``rs:informationBlocks`` (top-level fields as
-  triples; deep mechanics as a JSON literal — the pragmatic v1 boundary).
-
-Validation is decoupled from serialization: ``shacl_report`` (non-raising,
-structured) / ``validate_graph`` (raising) run SHACL over the built graph
-against ``frameworks/ontology/v1/shapes.ttl`` — the same shapes that gate the
-seeds. The publish hook runs it opt-in per ``REPORT_BUNDLE_SHACL_VALIDATION``
-and records the outcome on the Report; serialization itself never blocks.
+Facts reference ``rs:Period`` / ``rs:Unit`` nodes directly (no XBRL context);
+IB envelopes embed as top-level triples plus a JSON literal. SHACL validation
+(``shacl_report`` / ``validate_graph``, against ``frameworks/ontology/v1/
+shapes.ttl``) is separate from serialization and never blocks it.
 """
 
 from __future__ import annotations
@@ -43,7 +27,6 @@ from robosystems.operations.serialization.bundle import (
   concept_label,
 )
 
-# Bundle ontology version emitted on the root node.
 SERIALIZATION_VERSION = "1.0"
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -58,7 +41,6 @@ LINK = Namespace("http://www.xbrl.org/2003/linkbase#")
 SKOS = Namespace("http://www.w3.org/2004/02/skos/core#")
 ISO4217 = Namespace("http://www.xbrl.org/2003/iso4217#")
 
-# Framework taxonomy namespaces — bind so concept qnames compact.
 _PREFIX_NS: dict[str, Namespace] = {
   "rs-gaap": Namespace("https://robosystems.ai/taxonomy/rs-gaap/v1/"),
   "fac": Namespace("http://www.xbrlsite.com/fac#"),
@@ -70,7 +52,6 @@ _PREFIX_NS: dict[str, Namespace] = {
   "xbrli": XBRLI,
 }
 
-# Standard XBRL arcrole compact tokens accepted on arcs.
 _ARCROLE_URIS: dict[str, str] = {
   "parent-child": "http://www.xbrl.org/2003/arcrole/parent-child",
   "summation-item": "http://www.xbrl.org/2003/arcrole/summation-item",
@@ -115,14 +96,7 @@ _BUNDLE_CONTEXT_EXTRA: dict[str, Any] = {
 
 
 def serialize_to_jsonld(bundle: StatementBundle) -> str:
-  """Serialize a ``StatementBundle`` to a v1.0 JSON-LD string.
-
-  Serialization does not validate — that's a separate, caller-controlled
-  concern (``shacl_report`` / ``validate_graph``). The publish hook decides
-  whether to validate per the ``REPORT_BUNDLE_SHACL_VALIDATION`` mode; the
-  standalone ``examples/_common/validate.py`` and the SHACL regression test
-  validate the on-disk artifact; downloads just serialize.
-  """
+  """Serialize to a v1.0 JSON-LD string. Does not validate."""
   graph = build_graph(bundle)
   return graph.serialize(
     format="json-ld",
@@ -134,7 +108,6 @@ def serialize_to_jsonld(bundle: StatementBundle) -> str:
 
 
 def serialize_to_turtle(bundle: StatementBundle) -> str:
-  """Serialize the bundle to Turtle. Free given the rdflib graph."""
   graph = build_graph(bundle)
   return graph.serialize(format="turtle")
 
@@ -156,7 +129,6 @@ def build_graph(bundle: StatementBundle) -> Graph:
 
 
 def _build_context() -> dict[str, Any]:
-  """The bundle @context = canonical vocabulary + bundle-header terms."""
   return {**CANONICAL_CONTEXT, **_BUNDLE_CONTEXT_EXTRA}
 
 
@@ -273,12 +245,7 @@ def _add_schema_concepts(g: Graph, bundle: StatementBundle, root: URIRef) -> Non
     g.add((uri, RS.abstract, Literal(concept.is_abstract, datatype=XSD.boolean)))
     g.add((uri, RS.elementType, Literal(concept.element_type)))
     if concept.item_type:
-      # Wire value domain ('textBlock', 'monetary', ...) — 'textBlock'
-      # gates the narrative rendering arm in report-components.
       g.add((uri, RS.itemType, Literal(concept.item_type)))
-    # Not ``concept.label`` — a tenant-authored concept carries its wording
-    # on ``name``, and reading the raw field here left the holon unlabelled
-    # where the XBRL export of the same report was labelled.
     label = concept_label(concept)
     if label:
       g.add((uri, SKOS.prefLabel, Literal(label)))
@@ -297,10 +264,8 @@ def _add_structures(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
     *bundle.linkbases.calculation_links,
     *bundle.linkbases.definition_links,
   )
-  # A Structure's *logical* type is the concept-arrangement pattern, derived
-  # from its arcs + block_type across all its link groups (a structure_id can
-  # span a presentation + a calculation link). Precompute once so the type is
-  # consistent no matter which link group we're emitting.
+  # A structure_id can span several link groups; derive its arrangement type
+  # once so every group emits the same one.
   calc_structures: set[str] = {
     link.structure_id for link in bundle.linkbases.calculation_links if link.arcs
   }
@@ -313,10 +278,6 @@ def _add_structures(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
     s_uri = _scoped(root, "structure", link.structure_id)
     g.add((root, RS.structure, s_uri))
     g.add((s_uri, RDF.type, RS.Structure))
-    # Logical structure type (additive, alongside rs:Structure + rs:blockType):
-    # a roll-up network — or a roll-forward for the equity statement — when it
-    # carries calculation arcs, else a presentation hierarchy. Lets consumers
-    # query `?s a rs:RollUp` instead of string-matching blockType/associationType.
     g.add(
       (
         s_uri,
@@ -329,12 +290,7 @@ def _add_structures(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
     )
     g.add((s_uri, RS.internalId, Literal(link.structure_id)))
     g.add((s_uri, RS.structureName, Literal(link.structure_name)))
-    # Promote the legible name to the predicate consumers render; the UUID
-    # stays on rs:internalId.
     g.add((s_uri, SKOS.prefLabel, Literal(link.structure_name)))
-    # Published section order (disclosure notes) — the holon viewer sorts
-    # sections by rs:structureOrder when present, so the bundle's note
-    # ordering survives serialization round-trips.
     display_order = bundle.structure_display_order.get(link.structure_id)
     if display_order is not None:
       g.add((s_uri, RS.structureOrder, Literal(display_order, datatype=XSD.integer)))
@@ -342,20 +298,15 @@ def _add_structures(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
       g.add((s_uri, RS.roleUri, Literal(link.role_uri)))
     if link.block_type:
       g.add((s_uri, RS.blockType, Literal(link.block_type)))
-    # The same Structure (ELR) can host more than one linkbase group —
-    # e.g. a presentation network whose calculation arcs were sourced onto
-    # it shares the structure_id across a presentationLink and a
-    # calculationLink. Scope the Association IRI by link group so arcs at the
-    # same index in different groups don't collapse onto one node (which would
-    # give it multiple xlink:from and fail AssociationShape).
+    # One structure can host several link groups; scope the Association IRI
+    # by group so same-index arcs don't collapse into one node (which fails
+    # AssociationShape).
     group = link.link_type.removesuffix("Link")
     for idx, arc in enumerate(link.arcs):
       a_uri = _scoped(root, f"association/{link.structure_id}/{group}", str(idx))
       g.add((s_uri, RS.hasAssociation, a_uri))
       g.add((a_uri, RDF.type, RS.Association))
       assoc_type = _assoc_type_for_arc(arc.arc_type)
-      # A calculation summation-item arc IS a roll-up relationship — type it
-      # first-class so the rule is queryable without dereferencing the arcrole.
       if assoc_type == "calculation":
         g.add((a_uri, RDF.type, RS.RollUpRelationship))
       g.add((a_uri, XLINK["from"], _concept_uri(arc.from_qname)))
@@ -388,15 +339,7 @@ def _assoc_type_for_arc(arc_type: str) -> str:
 
 
 def _structure_arrangement(has_calc: bool, block_type: str | None) -> URIRef:
-  """The Structure's logical concept-arrangement type.
-
-  A network that carries calculation (summation) arcs is a **roll-up** — the
-  children sum to the parent — except the equity statement, whose calculation
-  is a **roll-forward** (opening balance + period changes = closing balance). A
-  network with no calculation arcs is a presentation **hierarchy**. This is the
-  first-class type consumers query (`?s a rs:RollUp`) instead of inferring the
-  pattern from blockType + associationType.
-  """
+  """Roll-up if it carries calc arcs (roll-forward for equity), else hierarchy."""
   if not has_calc:
     return RS.Hierarchy
   if block_type == "equity_statement":
@@ -450,13 +393,10 @@ def _add_facts(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
     g.add((uri, RS.element, _concept_uri(fact.element_qname)))
     g.add((uri, RS.entity, _scoped(root, "entity", fact.entity_ref)))
     g.add((uri, RS.period, _scoped(root, "period", fact.period_ref)))
-    # Wire casing is lowercase ('numeric' / 'nonnumeric') — matching the
-    # xbrl-holon converter, the other producer of this vocabulary. The
-    # OLTP/graph columns keep their capitalized values; this is a
-    # boundary translation like item_type's snake->camel.
+    # Lowercase on the wire, matching the xbrl-holon converter; the OLTP
+    # columns stay capitalized.
     g.add((uri, RS.factType, Literal(fact.fact_type.lower())))
     if fact.value is not None:
-      # Numeric arm — value + unit + decimals.
       if fact.unit_ref is not None:
         g.add((uri, RS.unit, _scoped(root, "unit", fact.unit_ref)))
       g.add(
@@ -464,9 +404,7 @@ def _add_facts(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
       )
       g.add((uri, RS.decimals, Literal(fact.decimals)))
     if fact.text_value is not None:
-      # Nonnumeric (text-block) arm — string value, no unit/decimals
-      # (XBRL nonNumeric facts carry neither). rs:stringValue is the
-      # predicate @robosystems/report-components reads for narrative.
+      # rs:stringValue is what report-components reads for narrative.
       g.add((uri, RS.stringValue, Literal(fact.text_value, datatype=XSD.string)))
       if fact.content_type:
         g.add((uri, RS.contentType, Literal(fact.content_type)))
@@ -492,12 +430,8 @@ def _add_information_blocks(g: Graph, bundle: StatementBundle, root: URIRef) -> 
     g.add((ib_uri, RS.internalId, Literal(ib_id)))
     if "block_type" in body:
       g.add((ib_uri, RS.blockType, Literal(body["block_type"])))
-    # Bind disclosure IBs to their Structure by identity — the envelope id IS
-    # the structure id — so the viewer resolves each note's own presentation
-    # tree and its rs:structureOrder. Deliberately NOT emitted for statement
-    # IBs: with a structure identity the viewer titles a section by
-    # structureName ("rs-gaap — Balance Sheet — Classified"), and statements
-    # should keep their friendly block-type titles ("Balance Sheet").
+    # Disclosure IBs only (their envelope id is the structure id). Statements
+    # skip it so the viewer keeps block-type titles instead of structureName.
     if ib_id in bundle.structure_display_order:
       g.add((ib_uri, RS.structure, _scoped(root, "structure", ib_id)))
     if "name" in body:
@@ -545,11 +479,10 @@ class BundleValidationError(ValueError):
 
 @dataclass(frozen=True)
 class ShaclResult:
-  """Structured outcome of a SHACL run — capturable / loggable.
+  """Outcome of a SHACL run.
 
-  ``ran`` is False when the shapes file is unavailable (validation skipped);
-  callers treat that as "not validated", not "conformant". ``report`` is the
-  pyshacl text report (empty when conforming).
+  ``ran=False`` means the shapes file was missing: "not validated", not
+  "conformant". ``report`` is empty when conforming.
   """
 
   ran: bool
@@ -559,13 +492,12 @@ class ShaclResult:
   report: str
 
   def as_dict(self) -> dict[str, Any]:
-    """A compact, JSON-storable summary (for ``Report.metadata``)."""
+    """A bounded, JSON-storable summary for ``Report.metadata``."""
     return {
       "ran": self.ran,
       "conforms": self.conforms,
       "violations": self.violations,
       "shapes_checked": self.shapes_checked,
-      # Keep the stored excerpt bounded — the full report can be large.
       "report_excerpt": self.report[:4000] if self.report else "",
       "shapes_version": str(_SHAPES_PATH.relative_to(_REPO_ROOT)),
     }
@@ -580,7 +512,6 @@ def _shapes_graph() -> Graph | None:
   global _SHAPES_CACHE
   if _SHAPES_CACHE is None:
     with _SHAPES_LOCK:
-      # Re-check inside the lock: another thread may have parsed it already.
       if _SHAPES_CACHE is None:
         if not _SHAPES_PATH.exists():
           logger.warning(
@@ -592,15 +523,7 @@ def _shapes_graph() -> Graph | None:
 
 
 def shacl_report(g: Graph) -> ShaclResult:
-  """Run SHACL over the bundle graph and return a structured result.
-
-  Non-raising — produces an outcome the caller can log (e.g. onto
-  ``Report.metadata``) or escalate. Checks the positive instance shapes
-  (a Fact has element/period; an Association has from/to/associationType)
-  and the negative shapes that ban the dialects this vocabulary excludes
-  (``xbrli:contextRef``, ``arcFrom``, direct ``summationOf``) — the same
-  shapes that gate the seeds.
-  """
+  """Run SHACL over the bundle graph without raising."""
   shapes = _shapes_graph()
   if shapes is None:
     return ShaclResult(
@@ -623,12 +546,7 @@ def shacl_report(g: Graph) -> ShaclResult:
 
 
 def validate_graph(g: Graph, bundle: StatementBundle) -> None:
-  """Strict SHACL check — raises on non-conformance.
-
-  Thin wrapper over :func:`shacl_report` for callers that want fail-loud
-  behavior (tests; the ``strict`` publish mode). Skips silently when the
-  shapes file is unavailable.
-  """
+  """Raise on SHACL non-conformance; skips silently if the shapes file is missing."""
   result = shacl_report(g)
   if result.ran and not result.conforms:
     raise BundleValidationError(

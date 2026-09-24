@@ -143,10 +143,8 @@ async def create_file_upload_cmd(
         detail="File name contains invalid characters",
       )
 
-    # Fail before the upload rather than after it. `ingest-file` measures the
-    # real object and is the authoritative check; this only spares the caller a
-    # push to S3 that is already known to be rejected. Advisory by nature — a
-    # client can under-declare, which is why the post-upload check stays.
+    # Advisory: spares an upload already known to be rejected. `ingest-file`
+    # measures the real object and is authoritative.
     if (
       request.file_size_bytes is not None
       and request.file_size_bytes > MAX_FILE_SIZE_MB * 1024 * 1024
@@ -174,11 +172,8 @@ async def create_file_upload_cmd(
       "Key": s3_key,
       "ContentType": request.content_type,
     }
-    # A declared size is signed into the URL: SigV4 puts Content-Length in the
-    # signed headers, so a PUT of any other length fails the signature at S3
-    # (`content-length-range` is a POST-policy feature and does not apply to a
-    # presigned PUT). Optional because clients that never declare a size still
-    # get a working URL; `ingest-file` measures the real object regardless.
+    # A declared size is signed in (Content-Length is a SigV4 signed header), so
+    # a PUT of any other length fails at S3. Optional for undeclared clients.
     if request.file_size_bytes is not None:
       presign_params["ContentLength"] = request.file_size_bytes
 

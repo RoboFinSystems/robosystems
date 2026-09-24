@@ -1,14 +1,8 @@
 """Lifecycle operations for subgraphs.
 
-A subgraph is a separate LadybugDB database living on the *parent's* instance,
-so it shares the parent's hardware, memory pool, and credit pool while keeping
-its data isolated. Its id is ``{parent_graph_id}_{subgraph_name}``, and how
-many a parent may have is a function of its tier
-(``GraphTierConfig.get_max_subgraphs``).
-
-Creation writes in two places — the database on the instance, then the
-PostgreSQL ``Graph`` metadata — so :meth:`SubgraphService.create_subgraph`
-rolls the database back if the metadata write fails.
+A subgraph is a separate LadybugDB database ``{parent_graph_id}_{name}`` on the
+parent's instance, sharing its hardware and credit pool. The per-parent limit
+comes from the tier (``GraphTierConfig.get_max_subgraphs``).
 """
 
 from datetime import UTC, datetime
@@ -46,20 +40,11 @@ class SubgraphService:
     include_base: bool = True,
     platform_managed: bool = False,
   ) -> dict[str, Any]:
-    """Create the subgraph's database on the parent's instance.
+    """Create only the subgraph's database; :meth:`create_subgraph` also writes metadata.
 
-    Creates only the database — no PostgreSQL metadata. Use
-    :meth:`create_subgraph` for the full operation.
-
-    ``subgraph_name`` must be alphanumeric, 1-20 characters. Creation is capped
-    by the parent tier's subgraph limit. ``platform_managed`` is what allows a
-    subgraph on a *shared repository*; the user-facing API never sets it, so
-    shared-repo subgraphs stay platform-only.
-
-    Returns ``{status: "created"|"exists", graph_id, database_name,
-    parent_graph_id, instance_id, instance_ip}``. Raises
-    ``GraphAllocationError`` when the parent is missing or the tier limit is
-    hit, ValueError on malformed input.
+    ``platform_managed`` permits a subgraph on a shared repository; the
+    user-facing API never sets it. Raises ``GraphAllocationError`` when the
+    parent is missing or the tier limit is hit, ValueError on malformed input.
     """
     if not validate_parent_graph_id(parent_graph_id):
       raise ValueError(f"Invalid parent graph ID: {parent_graph_id}")
@@ -268,17 +253,10 @@ class SubgraphService:
   ) -> dict[str, Any]:
     """Create a subgraph end to end: database, schema, and metadata.
 
-    Access needs no row of its own — a subgraph is reachable by whoever holds
-    a grant on the parent, at the parent's role.
-
-    ``subgraph_type`` selects the schema: "knowledge" installs the knowledge
-    extension without the base schema, "empty" installs nothing at all, and
-    anything else inherits the parent's extensions on top of the base schema.
-
-    If the PostgreSQL metadata write fails, the database created on the
-    instance is deleted before re-raising — otherwise the instance accumulates
-    databases no registry knows about. A failed ``fork_parent`` does *not*
-    unwind the subgraph; it is reported in the returned ``fork_status``.
+    ``subgraph_type``: "knowledge" installs the knowledge extension without
+    base, "empty" installs nothing, anything else inherits the parent's
+    extensions on base. A failed metadata write deletes the new database; a
+    failed ``fork_parent`` does not, and is reported in ``fork_status``.
     """
     from ...database import SessionFactory
     from ...models.core.graph import Graph
@@ -358,11 +336,8 @@ class SubgraphService:
       )
       db.add(subgraph)
 
-      # No GraphUser row for the subgraph: access to a subgraph is the
-      # parent's grant (GraphUser.get_effective_role resolves subgraphs to
-      # the parent), so a subgraph-scoped row would never be read for
-      # authorization and would outlive the parent grant when a member is
-      # removed.
+      # No GraphUser row: access is the parent's grant, and a subgraph row
+      # would never be read and would outlive a removed member's grant.
 
       db.commit()
       db.refresh(subgraph)
@@ -452,10 +427,8 @@ class SubgraphService:
     try:
       from ...graph_api.client import GraphClient
 
-      # Locally there is one Graph API; in production the parent's instance
-      # has to be resolved from DynamoDB first.
-      # GRAPH_API_URL is unset in production and falls back to a localhost
-      # default, so the environment decides, never the URL.
+      # The environment decides, never GRAPH_API_URL: it is unset in
+      # production and falls back to localhost.
       is_local = env.is_development() and bool(env.GRAPH_API_URL)
 
       parent_location = None
@@ -546,15 +519,9 @@ class SubgraphService:
   ) -> dict[str, Any]:
     """Take a full backup of the subgraph and register it on the parent.
 
-    The subgraph's own row is hard-deleted right after this, so a backup row
-    keyed on the subgraph id would be unreachable through the listing and
-    download surfaces. Registering it under the parent — with the archive's
-    ``database_name`` recorded — keeps it on the backup list the customer
-    still has. Retention follows the parent tier's hosting window, the same
-    rule a graph's final backup uses at teardown.
-
-    Raises ``GraphAllocationError`` if the backup or its registration fails,
-    so the delete never proceeds on a promise it cannot keep.
+    Registered under the parent because the subgraph's row is hard-deleted
+    next. Raises ``GraphAllocationError`` on any failure, so the delete does
+    not proceed.
     """
     from ...config.deprovisioning import get_deprovisioning_config
     from ...database import SessionFactory
@@ -621,14 +588,8 @@ class SubgraphService:
   async def _purge_subgraph_search_index(self, subgraph_id: str) -> bool:
     """Drop a subgraph's documents from the shared OpenSearch index.
 
-    Documents are indexed under the subgraph id, and the index is shared
-    across tenants with only an application-level graph_id filter as the
-    boundary — so a subgraph deleted ahead of its parent's teardown would
-    otherwise leave its content indexed indefinitely, and a recreated subgraph
-    of the same (user-chosen, reusable) name would surface it. The parent's
-    teardown cannot catch it: it purges by iterating subgraph rows that this
-    path has already removed. Best-effort, guarded on the search flag, and
-    run off the event loop because the OpenSearch client is synchronous.
+    Otherwise a recreated subgraph of the same name would surface them, and
+    the parent's teardown cannot, since this path removes the row it iterates.
     """
     if not env.SEMANTIC_SEARCH_ENABLED:
       return False
@@ -915,10 +876,8 @@ class SubgraphService:
       if progress_callback:
         progress_callback("Connecting to Graph API", 20)
 
-      # Locally there is one Graph API; in production the parent's instance
-      # has to be resolved from DynamoDB first.
-      # GRAPH_API_URL is unset in production and falls back to a localhost
-      # default, so the environment decides, never the URL.
+      # The environment decides, never GRAPH_API_URL: it is unset in
+      # production and falls back to localhost.
       is_local = env.is_development() and bool(env.GRAPH_API_URL)
 
       if is_local:

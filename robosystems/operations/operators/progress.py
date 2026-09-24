@@ -1,11 +1,4 @@
-"""Progress reporters — one per execution context.
-
-`ProgressReporter` is a protocol defined in `operator_context.py`.
-
-- `CallbackProgress`: API context (wraps a callback function)
-- `OperationManagerProgress`: worker context (wraps the SSE OperationManager)
-- `NoOpProgress`: tests and contexts with nowhere to report
-"""
+"""`ProgressReporter` implementations, one per execution context."""
 
 from __future__ import annotations
 
@@ -18,11 +11,8 @@ if TYPE_CHECKING:
 
 
 class CallbackProgress:
-  """API context. Invokes the caller's `callback(stage, percent, message)`.
-
-  Cannot report cancellation — a sync request has no channel for it, so
-  `is_cancelled` is always False.
-  """
+  """API context: calls `callback(message, percent, message)`. Never reports
+  cancellation; the in-process path has no channel for it."""
 
   def __init__(self, callback: Callable | None = None) -> None:
     self._callback = callback
@@ -41,11 +31,8 @@ class CallbackProgress:
 
 
 class OperationManagerProgress:
-  """Worker context. Emits SSE progress events via the OperationManager.
-
-  `is_cancelled` reads the operation's live status, so a long-running operator
-  that polls between steps can stop when the client cancels.
-  """
+  """Worker context: SSE progress via the OperationManager; `is_cancelled`
+  reads the operation's live status."""
 
   def __init__(self, task_id: str, manager: OperationManager) -> None:
     self._task_id = task_id
@@ -57,9 +44,8 @@ class OperationManagerProgress:
     percent: float | None = None,
     details: dict[str, Any] | None = None,
   ) -> None:
-    # The SDK facades read `progress_percentage` off progress events (the
-    # name the old in-process operator stream used); the manager writes
-    # `progress_percent`. Carry both so a console progress bar moves.
+    # The SDK facades read `progress_percentage`; the manager writes
+    # `progress_percent`. Carry both.
     await self._manager.emit_progress(
       self._task_id,
       message=message,

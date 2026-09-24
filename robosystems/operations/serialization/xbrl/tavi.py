@@ -1,17 +1,8 @@
-"""The Tavi flavor: a ``StatementBundle`` as a Project Tavi compiled model.
+"""The Tavi flavor: a ``StatementBundle`` as a Project Tavi compiled model,
+emitted by the same xbrlkit writer the SEC pipeline uses.
 
-Tavi (PWD-2026-09-01) is the OIM-family compiled model the SEC pipeline already
-writes beside each filing's holon. RoboLedger reports get the same file through
-the same emitter — xbrlkit's ``to_tavi_report`` — fed by the bundle → model
-bridge in ``operations/serialization/model.py``, so a report and a filing are
-byte-comparable and both track the draft through one implementation. The
-report-components adapter that renders the SEC files renders these unchanged,
-with no RDF step.
-
-Derived on first download and cached per generation, like the holon; carried
-across a share beside it. What the bundle holds that the model has no home for
-is listed in :data:`TAVI_OMITTED_CONTENT` and surfaced on the download
-response, never dropped silently.
+Bundle content the model has no home for is listed in
+:data:`TAVI_OMITTED_CONTENT` and surfaced on the download response.
 """
 
 from __future__ import annotations
@@ -29,8 +20,7 @@ from robosystems.operations.serialization.model import (
 
 TAVI_MEDIA_TYPE = "application/json"
 
-# Bundle content the Tavi carries nothing for, by the names the response
-# documents. The holon and the flat JSON-LD keep all of it.
+# The holon and the flat JSON-LD keep all of it.
 TAVI_OMITTED_CONTENT: tuple[str, ...] = (
   "ib_envelopes",
   "definition_links",

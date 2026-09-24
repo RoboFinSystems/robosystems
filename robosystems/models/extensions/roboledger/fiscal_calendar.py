@@ -1,21 +1,10 @@
 """Fiscal calendar models — the rolling state of a graph's close cadence.
 
-`FiscalCalendar` holds two pointers per graph:
-
-- `closed_through_period` — system-maintained, the latest period actually closed
-- `close_target_period` — user-settable, the period the user wants closed through
-
-The close workflow processes `closed_through + 1` through `close_target` in
-sequence. When `closed_through` reaches `close_target`, the target auto-advances
-by one month.
-
-`FiscalCalendarEvent` is an append-only audit log of every mutation to the
-calendar state — target changes, period closes, reopens. Every mutation through
-`FiscalCalendarService` emits an event.
-
-Both tables are **tenant-scoped**: they live in each `kg*` schema alongside
-the per-tenant OLTP data. The `graph_id` column on both is retained as a
-defensive discriminator but tenant isolation comes from the schema boundary.
+`FiscalCalendar` holds `closed_through_period` (system-maintained) and
+`close_target_period` (user-set). Close processes the periods between them in
+order; when they meet, the target advances one month. `FiscalCalendarEvent`
+is the append-only audit log of every mutation. Isolation comes from the
+tenant schema; `graph_id` is only a defensive discriminator.
 """
 
 from datetime import UTC, datetime
@@ -58,18 +47,15 @@ class FiscalCalendar(ExtensionsBase):
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("fcal"))
   graph_id = Column(String, nullable=False)
 
-  # Fiscal year config (for future fiscal-year reporting; period naming stays YYYY-MM)
+  # Period naming stays YYYY-MM regardless.
   fiscal_year_start_month = Column(Integer, nullable=False, default=1)
 
-  # Rolling pointers (YYYY-MM strings)
+  # YYYY-MM
   closed_through_period = Column(String, nullable=True)
   close_target_period = Column(String, nullable=True)
 
-  # Lifecycle timestamps
   initialized_at = Column(DateTime, nullable=True)
   last_close_at = Column(DateTime, nullable=True)
-
-  # Provenance
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

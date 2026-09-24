@@ -1,9 +1,5 @@
-"""Connection model for managing data source connections.
-
-Connections represent links between a user's graph and external data sources
-(QuickBooks, SEC). All connection metadata is stored in PostgreSQL.
-Encrypted credentials are stored separately in ConnectionCredentials.
-"""
+"""Links between a graph and external data sources. Encrypted credentials live
+separately in ConnectionCredentials."""
 
 import secrets
 from collections.abc import Sequence
@@ -22,16 +18,10 @@ from robosystems.database import Model
 class ConnectionStatus(str, Enum):
   """Connection lifecycle status.
 
-  `NEEDS_REAUTH` is distinct from `ERROR`: the credential bundle is no
-  longer valid (Intuit revoked / rotated past grace / scope insufficient)
-  and the operator must re-OAuth. UI surfaces this as a "Reconnect" CTA
-  rather than a generic "sync failed" message.
-
-  `SEVERED` is the native-accounting cutover: the tenant kept the chart the
-  synced provider created and went native. A severed row is soft-deleted
-  like any disconnect but is never revived by a later re-OAuth — the
-  provider cannot resume over books kept natively since
-  (``specs/ledger/native-accounting-cutover.md`` §3).
+  `NEEDS_REAUTH`: the credentials are no longer valid and the user must
+  re-OAuth (distinct from a failed sync, `ERROR`).
+  `SEVERED`: the tenant kept the provider-created chart and went native. The
+  row is soft-deleted and never revived by a later re-OAuth.
   """
 
   PENDING_OAUTH = "pending_oauth"
@@ -43,23 +33,14 @@ class ConnectionStatus(str, Enum):
 
 
 class WritePolicy(str, Enum):
-  """Connection source-of-truth (write) policy.
+  """Whether RoboSystems-originated entries write back to an external GL.
 
-  Governs whether RoboSystems-originated entries (manual JE, schedule
-  drafts) flow into the source-of-truth system on the way to posted GL.
-
-  - ``NATIVE``: RoboSystems IS the source of truth. RL-originated events
-    write GL rows locally on dispatch; no outbound publish. The
-    connection's inbound sync (if any) captures-to-inbox.
-  - ``QB_AUTHORITATIVE``: QuickBooks IS the source of truth. RL-originated
-    events publish to QB via ``execute-event-block``; local GL holds as
-    DRAFT until QB accepts. Inbound QB sync auto-commits. The
-    cross-source matcher recognises round-tripped entries by
-    ``metadata.qb_external_id`` and skips re-creation.
-  - ``HYBRID``: QB authoritative with exception-flagging heuristics
-    (low-confidence mapping, manual JE source class, amount-over-
-    threshold). Currently only NATIVE + QB_AUTHORITATIVE are wired;
-    HYBRID is reserved and not yet implemented.
+  - ``NATIVE``: RoboSystems is the source of truth; GL rows are written
+    locally, nothing is published.
+  - ``QB_AUTHORITATIVE``: entries publish to QuickBooks via
+    ``execute-event-block`` and stay DRAFT locally until QB accepts.
+    Round-tripped entries are matched by ``metadata.qb_external_id``.
+  - ``HYBRID``: reserved, not implemented.
   """
 
   NATIVE = "native"
@@ -67,26 +48,15 @@ class WritePolicy(str, Enum):
   HYBRID = "hybrid"
 
 
-# Per-provider default for the OUTBOUND write-back policy. An active
-# QuickBooks connection is authoritative by nature — QB is the general
-# ledger, so RoboLedger-originated entries (manual JEs, schedule drafts)
-# write back to it. There is no steady state where you keep QB connected
-# but deliberately diverge the two ledgers. Other providers have no
-# external GL to write to (SEC repos; the future Plaid/native-accounting
-# world), so they stay NATIVE. `native` therefore describes a graph with no
-# active authoritative external connection — pre-connect, post-disconnect
-# (the connection's events lose their connection_id and `execute_event_block`
-# no-ops), or native-accounting — NOT a "connected-but-don't-write" choice.
-# Inbound sync-down is decoupled from this and mirrors QB regardless.
+# Per-provider default outbound write policy. A connected QuickBooks is the
+# general ledger, so it is authoritative; providers with no external GL stay
+# native. Inbound sync is independent of this.
 _PROVIDER_WRITE_POLICY_DEFAULTS: dict[str, str] = {
   "quickbooks": WritePolicy.QB_AUTHORITATIVE.value,
 }
 
 
 def default_write_policy_for_provider(provider: str) -> str:
-  """Resolve the default outbound write policy for a newly-created
-  connection of ``provider``. QuickBooks → ``qb_authoritative``; everything
-  else → ``native`` (the column's server_default)."""
   return _PROVIDER_WRITE_POLICY_DEFAULTS.get(provider, WritePolicy.NATIVE.value)
 
 
@@ -99,9 +69,7 @@ class Connection(Model):
     Index("idx_connections_user", "user_id"),
     Index("idx_connections_provider", "provider"),
     Index("idx_connections_graph_provider", "graph_id", "provider"),
-    # The re-OAuth reuse path queries this index to find a
-    # soft-deleted connection for a freshly-OAuthed realm. Partial because
-    # only soft-deleted rows are interesting to that query.
+    # Serves the re-OAuth reuse lookup (find_soft_deleted_for_realm).
     Index(
       "idx_connections_soft_deleted_realm",
       "graph_id",
@@ -134,49 +102,32 @@ class Connection(Model):
   cik = Column(String, nullable=True)  # SEC Central Index Key
   entity_name = Column(String, nullable=True)
   institution_name = Column(String, nullable=True)
-  # External-provider registered source slug — the value the integration
-  # stamps on everything it writes (Event.source). The registration IS the
-  # allow-list entry the event-source validation reads; the platform runs
-  # nothing and holds no credentials for external sources.
+  # External provider's registered Event.source slug; the registration is the
+  # event-source allow-list entry. No credentials are held for these.
   source_name = Column(String, nullable=True)
 
   # Sync tracking
   auto_sync_enabled = Column(Boolean, default=True, nullable=False)
   last_sync = Column(DateTime, nullable=True)
-  # Outcome summary of the most recent sync ATTEMPT (success or failure):
-  # status, window, per-category counts (captured / updated / drift /
-  # dispatch_failed / …), truncated errors. This is what lets the surface
-  # that triggered the sync — MCP operator, frontend — answer "did it
-  # finish, and what did it do?" without CloudWatch. Written on success
-  # alongside `last_sync`; on failure alone (`last_sync` only ever advances
-  # on success — the close gate's sync-current check reads it).
+  # Outcome of the most recent sync attempt, success or failure (status,
+  # window, per-category counts, truncated errors). `last_sync` advances only
+  # on success because the close gate's sync-current check reads it.
   last_sync_result = Column(JSONB, nullable=True)
 
-  # Source-of-truth policy. Default `'native'` means no outbound writes
-  # without explicit operator opt-in via UI / API. The loader's
-  # auto-commit branch reads this column.
+  # Outbound write-back policy (see WritePolicy). `create` applies the
+  # per-provider default; inbound auto-commit does not read this column.
   write_policy = Column(
     String, default=WritePolicy.NATIVE.value, server_default="native", nullable=False
   )
 
-  # CDC watermark. The loader advances this ONLY after a
-  # successful batch commit; a mid-batch failure replays from the prior
-  # value on the next run (combined with SyncToken-gated UPSERT, replay
-  # of already-ingested rows is a no-op). NULL means "no CDC sync has
-  # succeeded yet for this connection" — extract layer falls back to
-  # full-window lookback or `full_rebuild=True` semantics until the
-  # first successful CDC batch advances it. Separate from `last_sync`,
-  # which is a display-facing "when did we last try" timestamp.
+  # Advanced only after a successful batch commit, so a failure replays from
+  # the prior value (SyncToken-gated UPSERT makes replay a no-op). NULL means
+  # no CDC sync has succeeded yet; extraction falls back to a full window.
   last_cdc_watermark = Column(DateTime, nullable=True)
 
-  # Soft-delete marker. When non-null the row is invisible to the
-  # default lookup helpers below. Re-OAuth to the same realm revives the
-  # row in place (preserves connection_id; downstream events/agents/
-  # elements scoped to it stay live) rather than minting a new row and
-  # orphaning the prior tenant data.
+  # Soft-delete marker, hidden from the default lookups. Re-OAuth to the same
+  # realm revives the row so tenant data keyed on connection_id stays attached.
   deleted_at = Column(DateTime, nullable=True)
-
-  # Timestamps
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
@@ -245,12 +196,7 @@ class Connection(Model):
     *,
     include_deleted: bool = False,
   ) -> Optional["Connection"]:
-    """Get connection by ID.
-
-    Soft-deleted rows (`deleted_at IS NOT NULL`) are filtered out by
-    default — the only callers that need to see them are the OAuth
-    re-OAuth reuse path and admin tooling.
-    """
+    """Get a connection by ID, excluding soft-deleted rows by default."""
     query = session.query(cls).filter(cls.id == connection_id)
     if not include_deleted:
       query = query.filter(cls.deleted_at.is_(None))
@@ -317,14 +263,8 @@ class Connection(Model):
     realm_id: str,
     session: Session,
   ) -> Optional["Connection"]:
-    """Find a soft-deleted connection for re-OAuth reuse.
-
-    Returns the most-recently-deleted soft-deleted connection matching
-    the (graph_id, provider, realm_id) triple. Used by the OAuth
-    callback to revive a prior connection rather than mint a new one
-    when the user reconnects to the same QB realm. A ``severed`` row is
-    never a candidate: the tenant went native on that chart.
-    """
+    """Most recently soft-deleted connection for this realm, for re-OAuth
+    revival. A ``severed`` row is never a candidate."""
     return (
       session.query(cls)
       .filter(
@@ -363,12 +303,7 @@ class Connection(Model):
       raise
 
   def record_sync_result(self, session: Session, result: dict) -> None:
-    """Persist a sync outcome WITHOUT advancing `last_sync`.
-
-    The failure path: `last_sync` feeds the close gate's sync-current
-    check, so it only ever advances on success — but the failed
-    attempt's outcome must still be legible to the operator surface.
-    """
+    """Persist a failed sync's outcome without advancing `last_sync`."""
     self.last_sync_result = result
     self.updated_at = datetime.now(UTC)
     try:
@@ -379,14 +314,9 @@ class Connection(Model):
       raise
 
   def advance_cdc_watermark(self, watermark: datetime, session: Session) -> None:
-    """Advance the CDC watermark after a successful batch
-    commit. Callers MUST only invoke this once load has succeeded; a
-    mid-batch failure should leave the prior watermark in place so the
-    next sync replays from there (combined with SyncToken-gated UPSERT,
-    replay of already-ingested rows is a no-op).
+    """Advance the CDC watermark. Call only after the batch load committed.
 
-    The watermark stores naive UTC (matches the other DateTime columns on
-    this table). Callers passing a tz-aware datetime get it stripped.
+    Stored as naive UTC; a tz-aware value is converted.
     """
     if watermark.tzinfo is not None:
       watermark = watermark.astimezone(UTC).replace(tzinfo=None)
@@ -434,13 +364,7 @@ class Connection(Model):
       raise
 
   def set_write_policy(self, session: Session, write_policy: str) -> None:
-    """Set the source-of-truth write policy (operator opt-in surface).
-
-    This is the explicit operator opt-in `connection_service` references:
-    flipping a connection to ``qb_authoritative`` is what enables outbound
-    write-back via ``execute-event-block``. ``HYBRID`` is rejected until its
-    code path ships (see `WritePolicy`).
-    """
+    """Set the outbound write policy. ``HYBRID`` is rejected (not implemented)."""
     allowed = {WritePolicy.NATIVE.value, WritePolicy.QB_AUTHORITATIVE.value}
     if write_policy not in allowed:
       raise ValueError(
@@ -456,12 +380,8 @@ class Connection(Model):
       raise
 
   def delete(self, session: Session) -> None:
-    """Hard-delete the connection row (admin purge only).
-
-    Almost always the wrong choice — prefer ``soft_delete`` so the
-    tenant-side events/agents/elements scoped to this connection_id
-    don't orphan.
-    """
+    """Hard-delete (admin purge only). Prefer ``soft_delete``, which keeps
+    tenant data keyed on connection_id attached."""
     try:
       session.delete(self)
       session.commit()
@@ -470,12 +390,7 @@ class Connection(Model):
       raise
 
   def soft_delete(self, session: Session) -> None:
-    """Soft-delete — mark the row deleted without removing it.
-
-    Default lookup helpers skip soft-deleted rows. Re-OAuth to the
-    same realm can revive the row in place via ``restore``, preserving
-    connection_id so tenant-side events/agents/elements stay attached.
-    """
+    """Mark the row deleted; ``restore`` revives it in place."""
     self.deleted_at = datetime.now(UTC)
     self.updated_at = self.deleted_at
     try:
@@ -486,12 +401,8 @@ class Connection(Model):
       raise
 
   def restore(self, session: Session) -> None:
-    """Revive a soft-deleted connection (re-OAuth reuse path).
-
-    Disconnect resets ``write_policy`` to ``native`` (no active
-    authoritative external GL); revival re-applies the provider default so
-    a reconnected QuickBooks is authoritative again from the first sync.
-    """
+    """Revive a soft-deleted connection, re-applying the provider's default
+    write policy (disconnect resets it to ``native``)."""
     self.deleted_at = None
     self.updated_at = datetime.now(UTC)
     self.write_policy = default_write_policy_for_provider(self.provider)

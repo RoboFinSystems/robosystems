@@ -1,19 +1,9 @@
 """AssociationClassification — junction between associations and classifications.
 
-An association can carry multiple classifications across categories —
-``concept_arrangement`` (RollUp / RollForward / Adjustment / Variance / Set
-/ MemberAggregation / Textblock / …), ``member_arrangement``
-(aggregation / nonaggregation), and ``named_disclosure`` (SEC disclosure
-mechanics catalog entries like ``AssetsRollUp``).
-
-Mirrors the shape of :class:`ElementTrait`: composite PK on
-``(association_id, classification_id)``, ``is_primary`` picks the
-canonical row per category, ``confidence`` + ``source`` track AI/adapter
-provenance. Structures carry an aggregate ``concept_arrangement`` column
-as an optimized junction for the common case where every association in
-the structure shares the same classifications; the per-row junction
-enables the disaggregated view when they differ (e.g. a statement with a
-RollUp trunk and RollForward branches).
+Mirrors :class:`ElementTrait`; ``is_primary`` picks the canonical row per
+category. ``structures.concept_arrangement`` covers the common case where a
+whole structure shares one pattern; this junction handles mixed ones (a
+RollUp trunk with RollForward branches).
 """
 
 from datetime import UTC, datetime
@@ -56,8 +46,6 @@ class AssociationClassification(ExtensionsBase):
   # Confidence (for AI-suggested rows) and provenance.
   confidence = Column(Float, nullable=True)
   source = Column(String, nullable=True)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

@@ -36,17 +36,12 @@ class Portfolio(ExtensionsBase):
       name="check_portfolio_ownership_type",
     ),
   )
-
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("port"))
   name = Column(String, nullable=False)
   description = Column(String, nullable=True)
 
-  # Entity linkage (ENTITY_HAS_PORTFOLIO in graph) — the investing entity
-  # that owns or manages this portfolio. Nullable: a portfolio can exist
-  # before its entity is identified. ondelete='RESTRICT' blocks entity
-  # deletion while portfolios reference it, so a portfolio never disappears
-  # as a side effect of removing an entity.
+  # The investing entity (ENTITY_HAS_PORTFOLIO); may be unknown at first.
+  # RESTRICT so deleting an entity never silently removes portfolios.
   entity_id = Column(
     String, ForeignKey("entities.id", ondelete="RESTRICT"), nullable=True
   )
@@ -58,12 +53,8 @@ class Portfolio(ExtensionsBase):
   )  # growth, income, balanced, pe_fund, venture, family_office
   inception_date = Column(Date, nullable=True)
   base_currency = Column(String, nullable=False, default="USD")
-
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
   version = Column(Integer, nullable=False, default=1)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

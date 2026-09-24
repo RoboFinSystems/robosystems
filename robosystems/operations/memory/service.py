@@ -1,12 +1,8 @@
-"""MemoryService — the transport-independent semantic-memory kernel.
+"""Per-graph semantic memory kernel (LanceDB on the graph_api instance).
 
-Session-in style adapted for LanceDB: methods take a graph_id + a Pydantic
-request, return Pydantic models (or None), and raise ValueError as the domain
-error. Storage lives on the graph_api instance; this kernel computes embeddings
-(local fastembed) and delegates persistence to a writer-routed GraphClient.
-
-Recall predicates are built HERE from allowlisted typed fields only (memory_type,
-source) with single-quote escaping — callers never pass raw WHERE strings.
+Embeds locally and persists through a writer-routed GraphClient. Recall
+predicates are built here from allowlisted fields only; callers never pass raw
+WHERE strings.
 """
 
 from __future__ import annotations
@@ -43,7 +39,7 @@ class MemoryService:
 
   @property
   def embedding_service(self) -> EmbeddingService:
-    """Lazy-load the platform embedding service (shared with search)."""
+    """Shared with search; loaded lazily."""
     if self._embedding_service is None:
       from robosystems.operations.search.embeddings import get_embedding_service
 
@@ -241,7 +237,6 @@ def _to_record(row: dict[str, Any]) -> MemoryRecord:
 
 
 def _to_hit(row: dict[str, Any]) -> SearchHit:
-  # cosine distance → similarity score
   distance = row.get("distance")
   score = 1.0 - float(distance) if distance is not None else 0.0
   return SearchHit(

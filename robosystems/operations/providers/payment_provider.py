@@ -20,12 +20,9 @@ logger = get_logger(__name__)
 class PaymentIncompleteError(ValueError):
   """The provider created no live subscription — its first invoice was not paid.
 
-  Raised instead of returning a subscription whose status is ``incomplete`` (a
-  declined card, or a card that needs authentication the off-session path
-  cannot perform), so a caller that activates on return can never activate
-  locally against a subscription the provider never collected for. A
-  ``ValueError`` so the callers that already translate provider failures into
-  a failed row keep doing so.
+  Raised instead of returning an ``incomplete`` subscription, so a caller that
+  activates on return never activates against one that was never paid. A
+  ``ValueError`` so existing provider-failure handling applies.
   """
 
 
@@ -48,10 +45,8 @@ class PaymentProvider(ABC):
   def expire_checkout_session(self, session_id: str) -> str:
     """Retire a hosted checkout so its URL can no longer be paid.
 
-    Returns the session's resulting status: ``"expired"`` when this call (or an
-    earlier one) retired it, ``"complete"`` when the customer had already paid
-    it — in which case nothing was changed, and the caller must not discard the
-    subscription row that session was opened for.
+    Returns ``"expired"``, or ``"complete"`` when the customer already paid it;
+    then nothing changed and the caller must keep the subscription row.
     """
     pass
 
@@ -90,8 +85,7 @@ class PaymentProvider(ABC):
   ) -> dict[str, Any] | None:
     """Preview the next invoice, or None when there is nothing to bill.
 
-    ``subscription_id`` is required: an upcoming invoice is a property of a
-    subscription, not of a customer.
+    ``subscription_id`` is required: previews are per subscription.
     """
     pass
 
@@ -119,12 +113,11 @@ class PaymentProvider(ABC):
 class StripePaymentProvider(PaymentProvider):
   """Stripe implementation of payment provider."""
 
-  # In-memory price cache: key -> (price_id, expires_at)
+  # key -> (price_id, expires_at)
   _price_cache: dict[str, tuple[str, float]] = {}
   _price_lock = threading.Lock()
 
   def __init__(self):
-    """Initialize Stripe with API key from environment."""
     import stripe
 
     stripe.api_key = env.STRIPE_SECRET_KEY
@@ -133,7 +126,6 @@ class StripePaymentProvider(PaymentProvider):
     logger.info("Initialized Stripe payment provider")
 
   def create_customer(self, user_id: str, email: str) -> str:
-    """Create Stripe customer."""
     customer = self.stripe.Customer.create(
       email=email, metadata={"robosystems_user_id": user_id}
     )
@@ -146,7 +138,6 @@ class StripePaymentProvider(PaymentProvider):
   def create_checkout_session(
     self, customer_id: str, price_id: str, metadata: dict[str, Any]
   ) -> dict[str, Any]:
-    """Create Stripe Checkout session."""
     session = self.stripe.checkout.Session.create(
       customer=customer_id,
       mode="subscription",
@@ -154,9 +145,8 @@ class StripePaymentProvider(PaymentProvider):
       success_url=f"{env.ROBOSYSTEMS_URL}/checkout/{{CHECKOUT_SESSION_ID}}",
       cancel_url=f"{env.ROBOSYSTEMS_URL}/organization?tab=billing",
       metadata=metadata,
-      # Stripe does not copy session metadata onto the subscription it
-      # creates; stamp it there too so webhook resolution can match the
-      # subscription by our own identifiers.
+      # Stripe does not copy session metadata onto the subscription; webhook
+      # resolution needs it there.
       subscription_data={"metadata": metadata},
       payment_method_types=["card"],
       billing_address_collection="auto",
@@ -184,9 +174,8 @@ class StripePaymentProvider(PaymentProvider):
       )
       return session.status
     except self.stripe.error.InvalidRequestError:
-      # Only an `open` session can be expired. Re-read rather than parse the
-      # error text: a completed session must be left alone — the customer
-      # paid it — and an already-expired one is the outcome we wanted.
+      # Only an `open` session can be expired; re-read rather than parse the
+      # error text.
       session = self.stripe.checkout.Session.retrieve(session_id)
       if session.status in ("complete", "expired"):
         logger.info(
@@ -203,7 +192,6 @@ class StripePaymentProvider(PaymentProvider):
     metadata: dict[str, Any],
     payment_method_id: str | None = None,
   ) -> str:
-    """Create Stripe subscription (customer has payment method)."""
     if not payment_method_id:
       payment_methods = self.list_payment_methods(customer_id)
       if not payment_methods:
@@ -217,10 +205,8 @@ class StripePaymentProvider(PaymentProvider):
         extra={"customer_id": customer_id, "payment_method_id": payment_method_id},
       )
 
-    # Fail at the provider rather than create an `incomplete` subscription:
-    # with a card already on file there is no customer in front of a browser
-    # to complete authentication, and an `incomplete` object would be
-    # returned to callers that activate on return.
+    # Off-session: nobody is present to complete authentication, so fail
+    # rather than create an `incomplete` subscription.
     subscription = self.stripe.Subscription.create(
       customer=customer_id,
       items=[{"price": price_id}],
@@ -230,10 +216,8 @@ class StripePaymentProvider(PaymentProvider):
     )
 
     if subscription.status not in ("active", "trialing"):
-      # `error_if_incomplete` should already have raised; this is the backstop
-      # that keeps local state from activating against a subscription Stripe
-      # never collected for. Cancel it so it cannot be paid later against a
-      # row the caller is about to mark failed.
+      # Backstop for `error_if_incomplete`: cancel so it cannot be paid later
+      # against a row the caller marks failed.
       try:
         self.stripe.Subscription.cancel(subscription.id)
       except Exception as cancel_error:
@@ -260,7 +244,6 @@ class StripePaymentProvider(PaymentProvider):
     return subscription.id
 
   def verify_webhook(self, payload: bytes, signature: str) -> dict[str, Any]:
-    """Verify Stripe webhook signature and parse event."""
     try:
       event = self.stripe.Webhook.construct_event(
         payload, signature, env.STRIPE_WEBHOOK_SECRET
@@ -286,10 +269,8 @@ class StripePaymentProvider(PaymentProvider):
     """Resolve the Stripe price ID for a plan, creating it if absent.
 
     Graph plans get one Stripe product per plan; repository plans share one
-    product per repository (looked up by the manifest's display name, e.g.
-    "SEC EDGAR Filings") with one price per tier. Results are cached in-process
-    for 24 hours behind a lock, so a config price change is not picked up until
-    the entry expires or the process restarts.
+    product per repository with one price per tier. Cached in-process for 24
+    hours, so a config price change lags until expiry or restart.
 
     Raises ValueError when the plan is missing from the billing config, or when
     ``resource_type`` is "repository" without a ``repository_id``.
@@ -350,8 +331,7 @@ class StripePaymentProvider(PaymentProvider):
   ) -> str:
     """Find or create a price under a repository's single Stripe product.
 
-    Keeping every tier on one product is what lets an upgrade or downgrade be a
-    subscription-item swap rather than a cancel-and-resubscribe.
+    One product lets a tier change be an item swap, not a resubscribe.
     """
     from ...config.shared_repositories import get_manifest
 
@@ -359,7 +339,7 @@ class StripePaymentProvider(PaymentProvider):
     if not manifest:
       raise ValueError(f"No manifest found for repository '{repository_id}'")
 
-    product_name = manifest.name  # e.g., "SEC EDGAR Filings"
+    product_name = manifest.name
 
     search_query = (
       f'name:"{product_name}" AND metadata["environment"]:"{env.ENVIRONMENT}"'
@@ -416,10 +396,8 @@ class StripePaymentProvider(PaymentProvider):
   ) -> str:
     """Find or create a price for a graph plan (one product per plan).
 
-    Match is on ``unit_amount``, not "first active price": Stripe prices are
-    immutable, so a change to ``base_price_cents`` can only be honoured by
-    finding the price at the new amount or creating one. Returning any active
-    price would quote the config amount and bill the old one.
+    Matches on ``unit_amount``: prices are immutable, so a changed
+    ``base_price_cents`` needs the price at the new amount, not any active one.
     """
     search_query = f'metadata["plan_name"]:"{plan_name}" AND metadata["environment"]:"{env.ENVIRONMENT}"'
     products = self.stripe.Product.search(query=search_query, limit=1)
@@ -527,7 +505,6 @@ class StripePaymentProvider(PaymentProvider):
     return {"subscription_id": updated.id, "status": updated.status}
 
   def list_payment_methods(self, customer_id: str) -> list[dict[str, Any]]:
-    """List payment methods for a Stripe customer."""
     try:
       payment_methods = self.stripe.PaymentMethod.list(
         customer=customer_id, type="card"
@@ -557,7 +534,6 @@ class StripePaymentProvider(PaymentProvider):
       raise
 
   def list_invoices(self, customer_id: str, limit: int = 10) -> dict[str, Any]:
-    """List invoices for a Stripe customer."""
     try:
       invoices = self.stripe.Invoice.list(customer=customer_id, limit=limit)
 
@@ -606,13 +582,6 @@ class StripePaymentProvider(PaymentProvider):
   def get_upcoming_invoice(
     self, customer_id: str, subscription_id: str
   ) -> dict[str, Any] | None:
-    """Preview the next invoice for a Stripe subscription.
-
-    ``Invoice.create_preview`` previews a *subscription*, not a customer:
-    called with only ``customer`` it 400s every time, because Stripe requires
-    one of subscription / schedule / subscription_details.items /
-    schedule_details.phases / invoice_items.
-    """
     try:
       invoice = self.stripe.Invoice.create_preview(
         customer=customer_id, subscription=subscription_id
@@ -640,9 +609,7 @@ class StripePaymentProvider(PaymentProvider):
       }
 
     except self.stripe.error.InvalidRequestError as e:
-      # Reachable when the subscription has nothing to bill (already canceled,
-      # fully credited). Warning, not debug: with a subscription supplied this
-      # should be rare, and a quietly permanent 400 is easy to miss.
+      # Nothing to bill (canceled, fully credited). Rare, so warn.
       logger.warning(
         f"No upcoming invoice for subscription {subscription_id}: {e}",
         extra={"customer_id": customer_id, "subscription_id": subscription_id},
@@ -658,9 +625,8 @@ class StripePaymentProvider(PaymentProvider):
   def cancel_subscription(self, subscription_id: str) -> None:
     """Cancel a Stripe subscription immediately.
 
-    Idempotent: an already-canceled or missing subscription counts as success,
-    so callers can gate local cancellation on this raising — a raise always
-    means Stripe still has a live subscription that will keep billing.
+    Already-canceled or missing counts as success, so a raise always means
+    Stripe is still billing.
     """
     try:
       self.stripe.Subscription.cancel(subscription_id)
@@ -691,8 +657,7 @@ class StripePaymentProvider(PaymentProvider):
   def cancel_subscription_at_period_end(self, subscription_id: str) -> None:
     """Flag a Stripe subscription to cancel when the current period ends.
 
-    Idempotent with the same contract as `cancel_subscription`: an
-    already-canceled or missing subscription counts as success.
+    Same idempotency contract as `cancel_subscription`.
     """
     try:
       self.stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
@@ -725,9 +690,7 @@ class StripePaymentProvider(PaymentProvider):
   def _subscription_already_terminal(self, subscription_id: str) -> bool:
     """True when Stripe has no live subscription left to cancel.
 
-    Re-retrieving is the reliable check: Stripe's InvalidRequestError covers
-    both "no such subscription" and "already canceled", and matching on its
-    message text breaks across API versions.
+    Re-retrieves rather than matching InvalidRequestError message text.
     """
     try:
       subscription = self.stripe.Subscription.retrieve(subscription_id)
@@ -738,7 +701,6 @@ class StripePaymentProvider(PaymentProvider):
       return False
 
   def create_portal_session(self, customer_id: str, return_url: str) -> str:
-    """Create a Stripe Customer Portal session for payment management."""
     try:
       session = self.stripe.billing_portal.Session.create(
         customer=customer_id,

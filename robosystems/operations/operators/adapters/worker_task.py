@@ -1,11 +1,5 @@
-"""Bridge task — runs operators inside the worker consumer loop.
-
-Registered as task_type="operator". When the consumer picks up such a task it
-looks the operator up by ``params["operator_type"]`` and delegates to
-`run_operator_worker`, so an operator inherits the worker infrastructure
-(consumer loop, Valkey queue, OTel tracing, Dagster reporting) without the
-worker knowing anything about operators.
-"""
+"""Worker task ``operator``: runs the operator named by
+``params["operator_type"]`` through `run_operator_worker`."""
 
 from __future__ import annotations
 
@@ -18,8 +12,6 @@ from robosystems.worker.tasks.base import BaseTask
 
 @register_task("operator")
 class OperatorWorkerTask(BaseTask):
-  """Runs the operator named by ``params["operator_type"]``."""
-
   async def execute(self) -> dict[str, Any]:
     from robosystems.operations.operators.operator_registry import get_operator
 

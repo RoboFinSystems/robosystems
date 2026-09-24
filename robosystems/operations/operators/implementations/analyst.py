@@ -1,18 +1,7 @@
-"""AnalystOperator — natural-language questions answered from the graph.
-
-Registered as ``analyst``; ``cypher`` is kept as an alias, the name it
-shipped under when Cypher was its only tool. Drives a bounded tool-use loop
-(`run_tool_loop`) over the graph's read-only surface: curated financial
-reads (live statements, fact grids, close status, mapping state), document
-search, semantic memory, GraphQL, and read-only Cypher as the general
-fallback. The schema and example queries are fetched up front into the
-(cached) system prompt and the memories most similar to the question into
-the user turn; the model then calls tools, sees its own errors and retries,
-and answers in natural language. Seeing its own errors is the point — a
-single-shot pipeline that generates one query and formats whatever comes
-back fails on questions this handles. The last non-empty Cypher result set
-is returned as structured ``rows`` so the console renders a real table
-instead of scraping the prose.
+"""AnalystOperator — answers natural-language questions with a bounded tool
+loop over the graph's read-only surface (curated reads, documents, memory,
+GraphQL, read-only Cypher). Schema and examples are prefetched into the cached
+system prompt; the last non-empty Cypher result comes back as ``rows``.
 """
 
 from __future__ import annotations
@@ -39,18 +28,13 @@ from robosystems.operations.operators.tool_loop import (
   run_tool_loop,
 )
 
-# Orientation payloads are fetched up front and rendered into the system
-# prompt rather than left as tools for the model to call: schema and
-# examples are static per graph, so this removes two model calls per
-# question and puts both under the system cache breakpoint. The cap mirrors
-# the tool loop's orientation cap — only a pathological graph truncates.
+# Static per graph, so prefetched into the cached system prompt instead of
+# costing two tool turns per question.
 _ORIENTATION_TOOLS = ("get-graph-schema", "get-example-queries")
 _MAX_ORIENTATION_CHARS = 48000
 
-# Semantic memory is the other prefetch, with the opposite placement: what is
-# relevant depends on the question, so the hits go in the user turn rather
-# than the cached prefix. Small caps — a memory is a fact or a decision, and
-# five of them is context, not a document dump.
+# Memory hits depend on the question, so they go in the user turn, not the
+# cached prefix.
 _RECALL_K = 5
 _MAX_MEMORY_CHARS = 800
 
@@ -59,12 +43,8 @@ _MAX_MEMORY_CHARS = 800
 class AnalystOperator(Operator):
   """Answers a question from the graph's read-only tool surface."""
 
-  # Read-only tool allowlist. The loop intersects this with the tools the
-  # graph actually exposes (generic graphs get only schema + cypher; SEC and
-  # roboledger graphs also get the curated and OLTP reads below). Write tools
-  # are never included. The two orientation tools are normally prefetched
-  # into the system prompt and withheld from the loop; they stay listed for
-  # the fallback when that prefetch fails.
+  # Intersected with what the graph exposes. Never add a write tool. The
+  # orientation tools stay listed for when the prefetch fails.
   READ_ONLY_TOOLS = [
     "get-graph-schema",
     "read-graph-cypher",
@@ -74,8 +54,7 @@ class AnalystOperator(Operator):
     "resolve-element",
     "search-documents",
     "get-document-section",
-    # Curated financial reads — routed ahead of raw Cypher for statement,
-    # balance, and pivot questions (see CURATED TOOLS in the system prompt).
+    # Curated financial reads
     "live-financial-statement",
     "financial-statement-analysis",
     "build-fact-grid",
@@ -106,8 +85,7 @@ class AnalystOperator(Operator):
     "recall",
   ]
 
-  # The subset worth calling out in the system prompt as preferred over raw
-  # Cypher, with the one-line routing hint for each.
+  # Advertised in the system prompt as preferred over raw Cypher.
   CURATED_TOOL_HINTS: dict[str, str] = {
     "live-financial-statement": (
       "current income statement / balance sheet / trial balance straight "
@@ -136,13 +114,8 @@ class AnalystOperator(Operator):
       OperatorCapability.ENTITY_ANALYSIS,
       OperatorCapability.CUSTOM,
     ],
-    # A graph `viewer` may run this operator because the flag is enforced in
-    # two places downstream: HttpToolAccess builds the tool surface with
-    # read_only=True (write tools are never wired), and run_tool_loop
-    # refuses tool names outside the advertised READ_ONLY_TOOLS set. The
-    # flag alone guarantees nothing — the adapters skip the write-role gate
-    # because of it, so those two enforcement points are what make that
-    # skip safe.
+    # Lets a graph viewer run it. Safe only because HttpToolAccess wires no
+    # write tools when read_only and run_tool_loop refuses unadvertised names.
     read_only=True,
     version="2.0.0",
     requires_credits=True,
@@ -182,20 +155,14 @@ class AnalystOperator(Operator):
   async def run(self, ctx: OperatorContext) -> OperatorResult:
     limits = OperatorConfig.get_mode_limits(ctx.mode.value)
     max_results = self._get_max_results(ctx.mode)
-    # `max_tools + 1` tool-calling turns. The ceiling has been this since the
-    # loop's first version (every mode's budget was tuned against it); the
-    # natural final answer is not a tool turn and costs nothing, and a turn
-    # whose tool calls all fail is uncharged — see run_tool_loop.
+    # Mode budgets were tuned against `max_tools + 1` tool-calling turns.
     max_iterations = int(limits.get("max_tools", 5)) + 1
     max_tokens = int(limits.get("max_output_tokens", 4000))
     output_mode = "answer" if ctx.extra.get("output_mode") == "answer" else "narrative"
     is_shared = is_shared_repository_or_subgraph(ctx.graph_id)
 
-    # Document search is gated by the SEMANTIC_SEARCH_ENABLED feature flag
-    # (not a schema extension), so it can be exposed on any graph. Only
-    # advertise it in the prompt when get_tool_schemas confirms this graph
-    # exposes it; otherwise the prompt stays schema + Cypher only.
-    # get_tool_schemas caches after initialize(), so the loop's later call is free.
+    # Advertise optional tools only when this graph exposes them. Cached, so
+    # the loop's later call is free.
     available_tools = {
       t["name"] for t in await ctx.tools.get_tool_schemas(self.READ_ONLY_TOOLS)
     }
@@ -240,7 +207,6 @@ class AnalystOperator(Operator):
     return OperatorResult(
       content=result.text,
       metadata={
-        # Structured outputs the console renders directly — no prose scraping.
         "cypher": result.cypher,
         "rows": rows,
         "result_count": len(rows),
@@ -249,7 +215,6 @@ class AnalystOperator(Operator):
         "cancelled": result.cancelled,
         "loop_iterations": result.iterations,
       },
-      # De-dupe preserving order (a tool may be called several times).
       tools_called=list(dict.fromkeys(result.tools_called)),
       confidence_score=self._calculate_confidence(result),
     )
@@ -257,14 +222,7 @@ class AnalystOperator(Operator):
   async def _fetch_orientation(
     self, ctx: OperatorContext, available_tools: set[str]
   ) -> dict[str, str] | None:
-    """Fetch the schema (and examples, where the graph has them) up front.
-
-    Both payloads are deterministic per graph, so they belong in the cached
-    system prefix rather than in the transcript as tool results — the model
-    gets a complete schema instead of a truncated tool result, and skips the
-    orientation calls entirely. Returns None on any failure so the loop
-    falls back to tool-driven orientation.
-    """
+    """None on any failure, so the loop falls back to orientation tools."""
     if "get-graph-schema" not in available_tools:
       return None
     try:
@@ -287,16 +245,8 @@ class AnalystOperator(Operator):
       return None
 
   async def _fetch_memories(self, ctx: OperatorContext) -> list[dict[str, Any]] | None:
-    """Recall the memories most similar to the question, up front.
-
-    Left to the model, `recall` competed with the query for the step budget
-    under a prompt that says "act on your first turn" — so in practice it
-    was never called. Fetching it here costs no tool turn, and the hits are
-    relevant by construction (the query is the question). An empty store,
-    a disabled feature, or any failure returns None and the question goes in
-    bare; `recall` stays offered to the loop for a follow-up lookup on a
-    term that surfaces mid-investigation.
-    """
+    """Prefetched because the model, told to act on its first turn, never
+    spent a step on `recall`. None when empty, disabled or failed."""
     try:
       result = await ctx.tools.call_tool(
         "recall", {"query": ctx.query, "k": _RECALL_K}, return_raw=True
@@ -358,8 +308,6 @@ class AnalystOperator(Operator):
     has_memory: bool = False,
   ) -> str:
     if is_shared:
-      # Shared repository (e.g. SEC): thousands of filers, so the selective
-      # anchors are the cross-filer identifiers (ticker/CIK/Report).
       anchor_rule = (
         "- Anchor every query on a selective, indexed starting point and expand "
         "from there — this is a shared repository with thousands of filers. Good "
@@ -369,8 +317,6 @@ class AnalystOperator(Operator):
         "the whole graph and times out."
       )
     else:
-      # Tenant graph (roboledger / custom): a single company's ledger, not a
-      # multi-filer repository. Ticker/CIK are SEC identifiers and usually null.
       anchor_rule = (
         "- Anchor every query on a selective, indexed starting point and expand "
         "from there; never lead a MATCH with an unfiltered global pattern like "
@@ -441,8 +387,6 @@ Reach for `read-graph-cypher` when no curated tool fits, or to drill into specif
 """
     if has_document_search:
       if is_shared:
-        # Shared repository (SEC): documents are filing sections, so the
-        # vocabulary is filing-specific (risk factors, MD&A, item_1a/item_7).
         prompt += f"""
 NARRATIVE DISCLOSURES (qualitative filing text — NOT in the Cypher fact graph):
 - Questions about risk factors, MD&A, business description, legal proceedings, competition, or other management commentary are answered from filing TEXT, not the XBRL facts. Cypher can't surface this — use `search-documents` over filing sections{schema_skip_note}. It is keyword (BM25) search by default; pass `semantic=true` when the question is about meaning rather than a specific term, or when a keyword pass returns nothing useful.
@@ -450,8 +394,6 @@ NARRATIVE DISCLOSURES (qualitative filing text — NOT in the Cypher fact graph)
 - A section may carry `xbrl_elements`; use `resolve-element` or `read-graph-cypher` to tie the narrative back to the reported numbers when the question needs both text and figures.
 """
       else:
-        # Tenant graph (roboledger / custom): documents are the company's own
-        # uploaded policies, procedures, and notes — not SEC filing sections.
         prompt += f"""
 DOCUMENTS (qualitative written context — accounting policies, procedures, memos, notes — NOT in the Cypher fact graph):
 - Questions about this company's accounting policies, close procedures, memos, or other written context are answered from its uploaded DOCUMENTS, not the ledger facts. Cypher can't surface this — use `search-documents` over this graph's documents{schema_skip_note}. It is keyword (BM25) search by default; pass `semantic=true` when the question is about meaning rather than a specific term (a policy, a treatment, "how do we handle X"), or when a keyword pass returns nothing useful.
@@ -497,11 +439,7 @@ EXAMPLE QUERIES (working patterns for this graph — copy and adapt rather than 
 
   @staticmethod
   def _get_max_credits(ctx: OperatorContext) -> float | None:
-    """Caller-chosen per-question credit ceiling, from the request context.
-
-    Tenant-supplied, so anything non-numeric or non-positive is ignored
-    rather than trusted to shape the loop.
-    """
+    """Tenant-supplied ceiling: non-numeric or non-positive means none."""
     raw = ctx.extra.get("max_credits")
     if raw is None:
       return None

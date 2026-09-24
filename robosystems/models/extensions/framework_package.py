@@ -1,14 +1,9 @@
 """FrameworkPackage — junction pinning a package version into a framework.
 
-A Framework declares which taxonomy packages it composes (and at which
-version) via FrameworkPackage rows. ``ordinal`` encodes load order;
-``is_required`` lets a manifest declare optional/aspirational packages
-without blocking the framework's load when those packages haven't been
-authored yet.
-
-Public-schema only — same as :class:`Framework`. No FK to ``taxonomies``
-because packages and frameworks may load in either order; resolution
-happens at provision time via the ``(standard, version)`` tuple.
+``ordinal`` is load order; ``is_required=False`` lets a manifest name a
+package not yet authored. Public schema only. No FK to ``taxonomies``
+because packages and frameworks load in either order; resolution is by
+``(standard, version)`` at provision time.
 """
 
 from datetime import UTC, datetime

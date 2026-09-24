@@ -28,9 +28,9 @@ async def stage_file_directly(
 ) -> dict[str, Any]:
   """Stage one uploaded file into its DuckDB table, in this process.
 
-  The staging call covers *every* uploaded file for the table, not just this
-  one — the DuckDB table is rebuilt from the full set each time. Errors are
-  returned as ``{"status": "error", ...}`` rather than raised.
+  An existing table gets just this file (deduplicated INSERT); a missing one
+  is created from every uploaded file. Errors are returned as
+  ``{"status": "error", ...}`` rather than raised.
   """
   from robosystems.graph_api.client.factory import GraphClientFactory
   from robosystems.models.core import GraphFile, GraphTable
@@ -68,7 +68,6 @@ async def stage_file_directly(
         "file_id": file_id,
       }
 
-    # Build file list with S3 URIs
     bucket = env.USER_DATA_BUCKET
     s3_files = [f"s3://{bucket}/{f.s3_key}" for f in uploaded_files]
     file_id_map = {f"s3://{bucket}/{f.s3_key}": f.id for f in uploaded_files}
@@ -77,18 +76,15 @@ async def stage_file_directly(
       f"Direct staging {len(s3_files)} files to DuckDB table {table.table_name}"
     )
 
-    # Stage via Graph API
     client = await GraphClientFactory.create_client(
       graph_id=graph_id, operation_type="write"
     )
 
     try:
-      # Check if the DuckDB table already exists to use incremental INSERT INTO
       existing_tables = await client.list_tables(graph_id)
       existing_table_names = [t["table_name"] for t in existing_tables]
 
       if table.table_name in existing_table_names:
-        # Table exists - use INSERT INTO for just the new file (incremental)
         new_file_s3 = f"s3://{bucket}/{s3_key}"
         logger.info(
           f"Table {table.table_name} exists, using INSERT INTO for file {s3_key}"
@@ -101,7 +97,6 @@ async def stage_file_directly(
           file_id_map={new_file_s3: file_id},
         )
       else:
-        # Table does not exist - create with all files (first-file path)
         staging_result = await client.create_table(
           graph_id=graph_id,
           table_name=table.table_name,
@@ -115,14 +110,12 @@ async def stage_file_directly(
     if staging_result.get("status") != "completed":
       raise RuntimeError(f"DuckDB staging failed: {staging_result.get('error')}")
 
-    # Mark file as staged
     graph_file.mark_duckdb_staged(session=db, row_count=row_count or 0)
 
     duration_ms = (time.time() - start_time) * 1000
 
     logger.info(f"Direct staging completed for file {file_id} in {duration_ms:.2f}ms")
 
-    # Report AssetMaterialization to Dagster for observability (fire-and-forget with timeout)
     from robosystems.dagster.reporting import report_asset_materialization
 
     await report_asset_materialization(

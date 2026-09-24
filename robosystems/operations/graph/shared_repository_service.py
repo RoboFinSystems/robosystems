@@ -197,11 +197,8 @@ async def ensure_shared_subgraph_exists(
 ) -> dict[str, Any]:
   """Idempotently create a platform-managed subgraph of a shared repository.
 
-  Data pipelines call this before loading. Ensures the parent repository
-  exists, then reconciles both halves of the subgraph — the PostgreSQL record
-  and the database on the instance — creating whichever is missing. The
-  PostgreSQL record is what makes the subgraph visible in MCP workspace
-  listings, so a database without it is invisible to users.
+  Reconciles both halves, creating whichever is missing: the database, and
+  the PostgreSQL record without which users cannot see the subgraph.
   """
   from ...config.shared_repositories import get_manifest, is_shared_repository
   from ...middleware.graph.utils import construct_subgraph_id
@@ -260,8 +257,7 @@ async def ensure_shared_subgraph_exists(
   except Exception as e:
     logger.info(f"Subgraph {subgraph_id} not found in LadybugDB: {e}")
 
-  # Ensure schema record exists (may be missing if subgraph was created
-  # before schema propagation was added, or if a previous run failed)
+  # Backfill a missing schema record from the parent.
   if postgres_exists:
     try:
       from ...database import get_db_session
@@ -291,7 +287,6 @@ async def ensure_shared_subgraph_exists(
     except Exception as e:
       logger.warning(f"Could not check/create schema for {subgraph_id}: {e}")
 
-  # If both exist, we're done
   if postgres_exists and ladybug_exists:
     logger.info(f"Subgraph {subgraph_id} fully exists (LadybugDB + PostgreSQL)")
     return {
@@ -333,7 +328,6 @@ async def ensure_shared_subgraph_exists(
     db_gen = get_db_session()
     db = next(db_gen)
     try:
-      # Get parent graph record for inheriting properties
       parent_graph = (
         db.query(Graph).filter(Graph.graph_id == parent_repository_name).first()
       )
@@ -343,7 +337,6 @@ async def ensure_shared_subgraph_exists(
           "Run ensure_shared_repository_exists() first."
         )
 
-      # Determine next subgraph index
       existing_subgraphs = (
         db.query(Graph)
         .filter(Graph.parent_graph_id == parent_repository_name)
@@ -475,7 +468,6 @@ async def ensure_shared_repository_exists(
   except Exception as e:
     logger.info(f"Repository {repository_name} not found in LadybugDB: {e}")
 
-  # If both exist, we're done
   if postgres_exists and ladybug_exists:
     logger.info(f"Repository {repository_name} fully exists (LadybugDB + PostgreSQL)")
     return {
@@ -484,7 +476,6 @@ async def ensure_shared_repository_exists(
       "graph_id": repository_name,
     }
 
-  # Otherwise, create/ensure everything exists
   logger.info(
     f"Repository {repository_name} needs setup "
     f"(postgres={postgres_exists}, ladybug={ladybug_exists})"

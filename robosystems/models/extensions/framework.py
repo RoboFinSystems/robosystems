@@ -1,20 +1,9 @@
-"""Framework — named composition of taxonomy packages and bridges.
+"""Framework: a versioned bundle pinning ``(package, version)`` and
+``(bridge, version)`` tuples in load order.
 
-A Framework is the addressable, versioned bundle that pins specific
-``(package, version)`` and ``(bridge, version)`` tuples together. The
-deliverable that says "rs-gaap v1 = these N packages + these M
-bridges at these versions, in this load order."
-
-Frameworks live in the **public schema only** — they're library
-metadata, not per-tenant content. Tenants reference them by name
-through ``Graph.taxonomy_pin = {"framework": "rs-gaap@v1"}``;
-the resolver expands the framework into a flat ``{standard: version}``
-pin which drives the existing tenant-copy machinery.
-
-The architecture maps 1:1 to Charlie Hoffman's Seattle Method: his
-"Reporting Scheme" (e.g. ``us-gaap-theory.xsd``) is a framework
-manifest; his individual XSDs are packages; his
-``disclosure-equivalentTextblock`` arcs are bridges.
+Public schema only. Tenants reference one through
+``Graph.taxonomy_pin = {"framework": "rs-gaap@v1"}``, which the resolver
+expands into a flat ``{standard: version}`` pin.
 """
 
 from datetime import UTC, datetime
@@ -47,8 +36,7 @@ class Framework(ExtensionsBase):
     {"schema": "public"},
   )
 
-  # Identity — UUID5 derived from (framework, version) by the migration
-  # so the same manifest always produces the same row id.
+  # UUID5 of (framework, version), so a manifest always yields the same id.
   id = Column(String, primary_key=True)
 
   framework = Column(String, nullable=False)

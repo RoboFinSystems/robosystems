@@ -57,32 +57,20 @@ class GraphCredits(Base):
   graph_id = Column(String, ForeignKey("graphs.graph_id"), nullable=False, unique=True)
   user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
-  # Current credit balance
   current_balance = Column(Numeric(10, 2), nullable=False, default=0)
-
-  # Monthly allocation based on subscription tier
   monthly_allocation = Column(Numeric(10, 2), nullable=False, default=0)
 
-  # Storage limits and management
-  storage_limit_gb = Column(
-    Numeric(10, 2), nullable=False, default=500
-  )  # Default storage limit
-  storage_override_gb = Column(Numeric(10, 2), nullable=True)  # Admin override limit
-  auto_expand_enabled = Column(
-    Boolean, nullable=False, default=False
-  )  # Future: auto-expansion
+  storage_limit_gb = Column(Numeric(10, 2), nullable=False, default=500)
+  storage_override_gb = Column(Numeric(10, 2), nullable=True)  # Admin override
+  auto_expand_enabled = Column(Boolean, nullable=False, default=False)
   last_storage_warning_at = Column(DateTime(timezone=True), nullable=True)
   storage_warning_threshold = Column(
     Numeric(3, 2), nullable=False, default=0.8
   )  # 80% warning
 
-  # Billing admin (who pays for this graph)
   billing_admin_id = Column(String, ForeignKey("users.id"), nullable=False)
 
-  # Last allocation date
   last_allocation_date = Column(DateTime(timezone=True), nullable=True)
-
-  # Tracking
   created_at = Column(
     DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
@@ -92,14 +80,10 @@ class GraphCredits(Base):
     default=lambda: datetime.now(UTC),
     onupdate=lambda: datetime.now(UTC),
   )
-
-  # Relationships
   user = relationship("User", foreign_keys=[user_id])
   billing_admin = relationship("User", foreign_keys=[billing_admin_id])
   transactions = relationship("GraphCreditTransaction", back_populates="graph_credits")
   graph = relationship("Graph", foreign_keys=[graph_id])
-
-  # Indexes
   __table_args__ = (
     Index("idx_graph_credits_user_id", user_id),
     Index("idx_graph_credits_billing_admin", billing_admin_id),
@@ -159,7 +143,6 @@ class GraphCredits(Base):
     session.add(credits)
     session.commit()
 
-    # Record initial allocation transaction with idempotency
     idempotency_key = f"initial_allocation_{graph_id}"
 
     GraphCreditTransaction.create_transaction(
@@ -192,24 +175,14 @@ class GraphCredits(Base):
   ) -> dict[str, Any]:
     """Atomically deduct credits for a completed operation.
 
-    The deduction and its balance check happen in one conditional UPDATE, so
-    concurrent callers cannot drive the pool negative. Returns
-    ``{"success": False, "error": "Insufficient credits", ...}`` rather than
-    raising when the pool cannot cover ``amount``.
+    The balance check is inside one conditional UPDATE, so concurrent callers
+    cannot drive the pool negative. Returns ``success: False`` rather than
+    raising when the pool is short. By default a short pool is left untouched.
+    ``drain_on_shortfall`` is for post-hoc charges only (the AI call already
+    ran): the pool is drained to zero and the shortfall recorded, so the next
+    pre-flight denies; draining on a pre-check would destroy held credits.
 
-    ``drain_on_shortfall`` selects what happens when the pool is short. By
-    default the balance is **left untouched** — the operation is simply
-    refused, and any remainder stays available for a cheaper one. Set it only
-    on a **post-hoc** charge (an AI call already paid for by the time this
-    runs), where instead the pool is **drained to zero**: what is there is
-    debited, the shortfall is recorded, and the result still reports
-    ``success: False`` so the caller stops. Draining there stops the same
-    request re-entering the band above the pre-flight estimate and below one
-    call's true cost, billed nothing; draining a *pre*-check would wrongly
-    destroy credits the user holds.
-
-    ``metadata`` (token counts and the like) is merged into the transaction
-    record; the built-in keys win on collision.
+    ``metadata`` is merged into the transaction; built-in keys win.
     """
     from sqlalchemy import text
 
@@ -283,13 +256,9 @@ class GraphCredits(Base):
         user_id=user_id or self.user_id,
       )
 
-      # The conditional UPDATE above already persisted the debit. Never write
-      # the RETURNING value back through the ORM: create_transaction commits
-      # internally (releasing the row lock), so a concurrent debit can land
-      # before this method's final commit — an absolute
-      # `SET current_balance = <this session's view>` would then revert it
-      # (lost update: balance inflates while the ledger stays correct).
-      # Expire instead, so the next attribute access reloads from the DB.
+      # Expire rather than assign the RETURNING value: create_transaction
+      # commits (releasing the row lock), so an ORM write of the absolute
+      # balance could revert a concurrent debit (lost update).
       if self in session:
         session.expire(self, ["current_balance", "updated_at"])
 
@@ -324,13 +293,10 @@ class GraphCredits(Base):
     metadata: dict[str, Any] | None,
     transaction_id: str,
   ) -> dict[str, Any]:
-    """The insufficient-balance branch of :meth:`consume_credits_atomic`.
+    """Debit what the pool still holds, to zero, and record the shortfall.
 
-    Debits whatever the pool still holds (to exactly zero) and records the
-    shortfall, so a completed call is never billed nothing and the next
-    pre-flight — which reads the now-empty balance — denies. A pool already
-    at zero records nothing. The ``FOR UPDATE`` read and the conditional
-    ``UPDATE`` run as one statement so a concurrent drain cannot double-take.
+    A pool already at zero records nothing. The ``FOR UPDATE`` read and the
+    UPDATE are one statement so concurrent drains cannot double-take.
     """
     from sqlalchemy import text
 
@@ -402,10 +368,7 @@ class GraphCredits(Base):
       user_id=user_id or self.user_id,
     )
 
-    # The CTE UPDATE above already zeroed the row; an ORM write-back of the
-    # absolute value would clobber a concurrent allocation/bonus landing after
-    # create_transaction's internal commit (same lost-update as the consume
-    # path). Expire so the next access reloads.
+    # Expire, never assign (same lost-update hazard as the consume path).
     if self in session:
       session.expire(self, ["current_balance", "updated_at"])
 
@@ -436,12 +399,8 @@ class GraphCredits(Base):
     metadata: dict[str, Any],
     idempotency_key: str | None,
   ) -> Decimal:
-    """Record the forfeiture of the current balance before a reset.
-
-    A reset discards whatever is left in the pool; without this row the
-    ledger stops footing against the balance (`SUM(transactions)` drifts by
-    every discarded remainder, permanently). Returns the forfeited amount.
-    """
+    """Record the balance forfeited by a reset, so the transaction ledger keeps
+    footing against the balance. Returns the forfeited amount."""
     remainder = Decimal(str(self.current_balance or 0))
     if remainder <= 0:
       return Decimal("0")
@@ -462,23 +421,14 @@ class GraphCredits(Base):
   def allocate_monthly_credits(self, session: Session) -> bool:
     """Allocate monthly credits if due. Credits do not roll over.
 
-    The balance is *replaced* by ``monthly_allocation``, never added to — the
-    offering page promises no rollover (``routers/offering.py``) and this table
-    has no ``rollover_credits`` column. Accumulating instead would let
-    ``current_balance`` drift away from the ``monthly_allocation -
-    consumed_this_month`` figure the read paths report, so the same pool would
-    answer differently depending on which side you asked.
-
-    The discarded remainder — unspent allocation and unspent bonus credits
-    alike — is recorded as an EXPIRATION transaction so the ledger keeps
-    footing against the balance through every reset.
+    The balance is replaced by ``monthly_allocation`` (the offering promises
+    no rollover); the discarded remainder, bonus credits included, is
+    recorded as an EXPIRATION.
     """
     now = datetime.now(UTC)
 
-    # One allocation per calendar month, matching both the monthly cron that
-    # drives bulk allocation and the transaction idempotency key below. A
-    # day-count gate here would refuse the 1-Mar run for anything allocated on
-    # 1-Feb (28 days elapsed), silently skipping March fleet-wide.
+    # One allocation per calendar month, matching the monthly cron and the
+    # idempotency key below. A day-count gate would skip months.
     if self.last_allocation_date is not None:
       last = self.last_allocation_date
       if (last.year, last.month) == (now.year, now.month):
@@ -524,11 +474,9 @@ class GraphCredits(Base):
     initiated_by: str,
     reason: str | None = None,
   ) -> Decimal:
-    """Admin-initiated mid-month reset: forfeit the remainder, refill to the
-    monthly allocation, both recorded in the ledger.
+    """Admin mid-month reset: forfeit the remainder and refill, both recorded.
 
-    Does not touch `last_allocation_date` — this is not a scheduled monthly
-    allocation, and the calendar-month refill gate must still fire normally
+    Leaves `last_allocation_date` alone so the monthly refill still fires
     when the month turns. Returns the forfeited amount.
     """
     description = reason or "Credit pool reset by administrator"
@@ -560,7 +508,6 @@ class GraphCredits(Base):
     """Get usage summary for this graph."""
     from sqlalchemy import func
 
-    # Get usage for current month
     now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -584,10 +531,7 @@ class GraphCredits(Base):
       else Decimal("0")
     )
 
-    # Report `current_balance` verbatim: it is the column the atomic consume
-    # path decrements and gates on, so it is the only balance a caller can
-    # actually spend. Recomputing it from allocation minus consumption would
-    # disagree with the real column.
+    # `current_balance` verbatim: it is what the consume path gates on.
     return {
       "graph_id": self.graph_id,
       "graph_tier": self.graph_tier,
@@ -685,33 +629,25 @@ class GraphCreditTransaction(Base):
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("txn"))
   graph_credits_id = Column(String, ForeignKey("graph_credits.id"), nullable=False)
 
-  # Direct graph_id reference for easier querying
   graph_id = Column(String, nullable=False)
 
-  # Transaction details
   transaction_type = Column(String, nullable=False)
   amount = Column(
     Numeric(10, 2), nullable=False
   )  # Positive for additions, negative for consumption
   description = Column(String(500), nullable=False)
 
-  # Idempotency support
   idempotency_key = Column(String(255), nullable=True)
   request_id = Column(String(255), nullable=True)
 
-  # Operation tracking
-  operation_id = Column(String(255), nullable=True)  # Links related operations
-  user_id = Column(String, nullable=True)  # Direct user reference
+  operation_id = Column(String(255), nullable=True)
+  user_id = Column(String, nullable=True)
 
-  # Optional metadata (JSON)
-  transaction_metadata = Column("metadata", Text, nullable=True)
+  transaction_metadata = Column("metadata", Text, nullable=True)  # JSON
 
-  # Tracking
   created_at = Column(
     DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
-
-  # Relationships
   graph_credits = relationship("GraphCredits", back_populates="transactions")
 
   # Indexes and constraints
@@ -722,9 +658,7 @@ class GraphCreditTransaction(Base):
     Index("idx_credit_transactions_graph_id", graph_id),
     Index("idx_credit_transactions_user_id", user_id),
     Index("idx_credit_transactions_operation_id", operation_id),
-    # Unique constraint on idempotency key to prevent duplicates
     Index("idx_credit_transactions_idempotency", idempotency_key, unique=True),
-    # Composite index for efficient duplicate checking
     Index(
       "idx_credit_transactions_dedup",
       graph_credits_id,

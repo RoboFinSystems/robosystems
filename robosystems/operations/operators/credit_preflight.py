@@ -1,17 +1,8 @@
 """Credit pre-flight for operator execution.
 
-Credits are consumed *after* a Bedrock call returns, so this check is the only
-thing standing between an under-funded graph and real spend. It belongs in the
-execution adapters rather than the orchestrator: two of the three API execution
-strategies (SSE streaming and background queue) call the adapters directly and
-never construct an orchestrator, so a check at that layer would cover one path
-in three.
-
-Fail-closed on purpose: an error resolving the balance denies the run. The
-ordinary "no credit pool" and "no shared-repository access" cases already come
-back as a well-formed negative answer from `CreditService.check_credit_balance`,
-so reaching the exception path means the balance genuinely could not be
-established — and allowing the run there would hand out free AI.
+Credits are debited only after each model call returns, so this check is what
+keeps an under-funded graph from spending. Fail-closed: an error resolving the
+balance denies the run.
 """
 
 from __future__ import annotations
@@ -26,12 +17,7 @@ if TYPE_CHECKING:
 
 
 class InsufficientOperatorCreditsError(Exception):
-  """Raised before execution when a graph cannot fund an operator run.
-
-  Carries the numbers so callers can render them — the orchestrator turns this
-  back into a graceful `INSUFFICIENT_CREDITS` response for the sync path, while
-  the streaming and queued paths surface it as an error to the client.
-  """
+  """Raised before execution when a graph cannot fund an operator run."""
 
   def __init__(
     self,
@@ -60,11 +46,7 @@ _MODE_ESTIMATES: dict[str, dict[str, int]] = {
 
 
 def estimate_operator_tokens(operator: Operator, mode: OperatorMode) -> dict[str, int]:
-  """Rough per-run token estimate, used only to size the pre-flight check.
-
-  Actual billing comes from the token counts Bedrock reports, so an inaccurate
-  estimate only shifts where the balance floor sits.
-  """
+  """Rough estimate that only sizes the pre-flight; billing uses real counts."""
   estimate = dict(_MODE_ESTIMATES.get(mode.value, {"input": 5000, "output": 1500}))
 
   if "financial" in operator.spec.name.lower():
@@ -75,7 +57,6 @@ def estimate_operator_tokens(operator: Operator, mode: OperatorMode) -> dict[str
 
 
 def estimate_operator_credits(operator: Operator, mode: OperatorMode) -> Decimal:
-  """Estimated credit cost of one operator run."""
   from robosystems.config.billing.ai import AIBillingConfig
 
   tokens = estimate_operator_tokens(operator, mode)
@@ -96,12 +77,8 @@ def check_operator_credits(
   session: Any,
   mode: OperatorMode,
 ) -> dict[str, Any]:
-  """Resolve whether `graph_id` can fund one run of `operator`.
-
-  Returns the `CreditService.check_credit_balance` result augmented with
-  `estimated_credits`. On an unexpected failure the result denies rather than
-  allows — see the module docstring.
-  """
+  """`CreditService.check_credit_balance` plus `estimated_credits`; denies on
+  an unexpected failure."""
   from robosystems.operations.graph.credit_service import CreditService
 
   estimated_cost = estimate_operator_credits(operator, mode)
@@ -137,15 +114,9 @@ def enforce_operator_credits(
   session: Any,
   mode: OperatorMode,
 ) -> None:
-  """Deny an operator run the graph cannot fund.
+  """Raise `InsufficientOperatorCreditsError` if the graph cannot fund the run.
 
-  No-ops for operators whose spec sets `requires_credits=False`, and when no
-  session is available to resolve a balance (tests and any context without the
-  platform DB) — the adapter logs that case separately, since it also means
-  consumption cannot be recorded.
-
-  Raises:
-      InsufficientOperatorCreditsError: if the graph cannot fund the run.
+  No-op when `requires_credits=False` or without a session (tests).
   """
   if not operator.spec.requires_credits or session is None:
     return

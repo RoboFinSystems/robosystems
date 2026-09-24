@@ -1,12 +1,5 @@
-"""StructureTemplate model — reusable layout/configuration for a Structure.
-
-Reusable templates for Structure rows. A template defines the canonical
-shape (axes, mechanics, slot ordering, subtotal labels) that one or more
-Structures instantiate via ``structures.template_id``. Library-seeded
-templates (the four statement types + common Schedule variants) share
-the vocabulary with tenant-authored templates so the same column powers
-both cases.
-"""
+"""Reusable Structure shapes (axes, mechanics, ordering, subtotal labels),
+library-seeded or tenant-authored, referenced by ``structures.template_id``."""
 
 from datetime import UTC, datetime
 
@@ -38,9 +31,7 @@ class StructureTemplate(ExtensionsBase):
   name = Column(String, nullable=False)
   description = Column(String, nullable=True)
 
-  # Which block_type this template applies to ('balance_sheet',
-  # 'schedule', 'metric', …). Stored as a string rather than a CHECK
-  # to avoid recompiling when new block types register.
+  # Deliberately unconstrained so new block types need no migration.
   target_block_type = Column(String, nullable=False)
 
   # Kind of template:
@@ -52,9 +43,7 @@ class StructureTemplate(ExtensionsBase):
   #   metric_preset    — canned MetricMechanics for ratios / covenants
   template_type = Column(String, nullable=False)
 
-  # Opaque body — renderer config, mechanics preset, whatever the
-  # matching block_type consumes. JSON-LD style so future typed readers
-  # can validate sub-shapes without a schema change.
+  # Opaque config consumed by the matching block_type.
   body = Column(JSONB, nullable=False, default=dict)
 
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))

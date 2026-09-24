@@ -1,20 +1,8 @@
-"""Reconcile the graph fleet's DynamoDB registries against live AWS state.
+"""Reconcile the graph fleet's DynamoDB registries (instances, graphs, volumes)
+against EC2/EBS, and publish the capacity metrics the scaling policies read.
 
-Three registries — instances, graphs, volumes — record what the platform
-believes exists. EC2 and EBS are the truth. These operations walk the
-registries, correct or drop entries whose backing resource is gone, and publish
-capacity metrics to CloudWatch (which the fleet's scaling policies read).
-
-Every method is a full table scan and is meant to run on a schedule, not per
-request. All failures are collected into the returned result rather than
-raised, so one bad row cannot abort a sweep.
-
-Usage::
-
-    from robosystems.operations.graph.infrastructure import InstanceMonitor
-
-    monitor = InstanceMonitor()
-    results = monitor.check_instance_health()
+Every method is a scheduled full-table sweep; failures are collected into the
+returned result rather than raised, so one bad row cannot abort a sweep.
 """
 
 from __future__ import annotations
@@ -42,8 +30,6 @@ if TYPE_CHECKING:
   from mypy_boto3_ec2 import EC2Client  # type: ignore[import-not-found]
 
 
-# Metrics are namespaced RoboSystems/Graph/{environment} rather than carrying an
-# Environment dimension, so staging and prod never share a metric stream.
 STALE_GRAPH_DAYS = 7
 STALE_VOLUME_DAYS = 30
 
@@ -55,17 +41,11 @@ TIER_CAPACITY_MAP = {
   "ladybug-shared": 10,
 }
 
-# Tiers a customer graph can actually be allocated to. `ladybug-shared` is
-# deliberately absent: those instances host platform-managed shared repositories
-# (SEC and its subgraphs) at 10 slots each, and no tenant is ever placed on one.
-# Counting them as capacity is what made the fleet-wide utilisation percentages
-# useless — on 2026-08-31 the Standard tier was 100% full and refusing signups
-# while ClusterUsedCapacityPercent read 30.77%, because 20 of its 26 "slots" were
-# shared-repository slots. TenantSlotsFree is reported per tier for these three
-# only, so a tier with headroom can never mask a tier that is full.
+# Tiers a tenant can be placed on; `ladybug-shared` hosts only shared
+# repositories, and counting its slots hides a full tenant tier. TenantSlotsFree
+# is reported per tier so one tier's headroom cannot mask another being full.
 TENANT_TIERS = ("ladybug-standard", "ladybug-large", "ladybug-xlarge")
 
-# EC2 instance ID pattern
 EC2_INSTANCE_ID_PATTERN = re.compile(r"^i-[0-9a-f]{8,17}$")
 
 
@@ -127,11 +107,7 @@ def _is_valid_ec2_instance_id(instance_id: str) -> bool:
 
 
 class InstanceMonitor:
-  """Registry maintenance and metrics for the graph EC2 fleet.
-
-  Table names default to ``robosystems-graph-{environment}-*-registry``; AWS
-  clients are built on first use.
-  """
+  """Registry maintenance and metrics for the graph EC2 fleet."""
 
   def __init__(
     self,
@@ -140,7 +116,6 @@ class InstanceMonitor:
     volume_registry_table: str | None = None,
     environment: str | None = None,
   ):
-    """Table names default to the per-environment naming convention."""
     self.environment = environment or env.ENVIRONMENT
 
     self.instance_registry_table = (
@@ -160,21 +135,18 @@ class InstanceMonitor:
 
   @property
   def ec2(self) -> EC2Client:
-    """EC2 client, built on first access."""
     if self._ec2 is None:
       self._ec2 = boto3.client("ec2")
     return self._ec2
 
   @property
   def dynamodb(self) -> DynamoDBServiceResource:
-    """DynamoDB resource, built on first access."""
     if self._dynamodb is None:
       self._dynamodb = boto3.resource("dynamodb")
     return self._dynamodb
 
   @property
   def cloudwatch(self) -> CloudWatchClient:
-    """CloudWatch client, built on first access."""
     if self._cloudwatch is None:
       self._cloudwatch = boto3.client("cloudwatch")
     return self._cloudwatch
@@ -215,7 +187,6 @@ class InstanceMonitor:
         logger.info("No instances found in registry")
         return result
 
-      # Validate instance IDs
       valid_instance_ids = []
       invalid_instance_ids = []
 
@@ -230,14 +201,11 @@ class InstanceMonitor:
 
       result.invalid_ids = len(invalid_instance_ids)
 
-      # Query EC2 for instance states
       ec2_instances: dict[str, str] = {}
 
-      # Mark invalid IDs for cleanup
       for invalid_id in invalid_instance_ids:
         ec2_instances[invalid_id] = "invalid_id"
 
-      # Query EC2 in batches of 1000
       for i in range(0, len(valid_instance_ids), 1000):
         batch_ids = valid_instance_ids[i : i + 1000]
         if not batch_ids:
@@ -250,7 +218,7 @@ class InstanceMonitor:
               ec2_instances[instance["InstanceId"]] = instance["State"]["Name"]
         except ClientError as e:
           if "InvalidInstanceID.NotFound" in str(e):
-            # Check instances one by one
+            # One missing id fails the whole batch; retry individually.
             for instance_id in batch_ids:
               try:
                 resp = self.ec2.describe_instances(InstanceIds=[instance_id])
@@ -262,7 +230,6 @@ class InstanceMonitor:
           else:
             raise
 
-      # Update each instance in registry
       current_time = datetime.now(UTC).isoformat()
 
       for item in items:
@@ -305,10 +272,7 @@ class InstanceMonitor:
           ]:
             result.terminated += 1
 
-            # Update volume registry for attached volumes
             self._update_volumes_for_terminated_instance(instance_id, current_time)
-
-            # Remove from registry
             table.delete_item(Key={"instance_id": instance_id})
             result.removed += 1
 
@@ -408,25 +372,11 @@ class InstanceMonitor:
   def cleanup_stale_graphs(self) -> CleanupResult:
     """Drop long-deleted graph-registry rows; mark, never delete, orphaned ones.
 
-    Removes entries deleted more than ``STALE_GRAPH_DAYS`` ago. An entry whose
-    ``instance_id`` is absent from the instance registry is **not** removed:
-    the row is a live graph's routing, and the instance registry drifts on
-    ASG cycling (a slow volume re-attach, a terminated writer awaiting
-    replacement). Deleting the row turned a transient drift into a permanent
-    orphan — user graphs have no boot-time re-registration and the repair
-    path can only ``UPDATE`` a row that still exists. Instead the row is
-    stamped ``instance_missing_since`` (once), the count is published as
-    ``OrphanedGraphRegistrations`` so it can alarm, and the stamp is cleared
-    when the instance reappears. Reconciling from on-disk truth is the
-    follow-up, not this sweep.
-
-    Shared repositories and rows already marked ``deleted`` are exempt from
-    the orphan check — neither is routing. A shared repository's master is
-    deliberately parked to zero between ingestion runs; a deleted graph's
-    instance is recycled long before the row ages out, so counting it means
-    every fleet replacement pages for ``STALE_GRAPH_DAYS`` and then heals
-    itself. An exempt row that still carries a stamp from before these rules
-    is cleared on the next sweep.
+    A row whose instance is missing from the instance registry is still a live
+    graph's routing, and that registry drifts during ASG cycling; user graphs
+    have no boot-time re-registration, so deleting the row would be permanent.
+    It is stamped ``instance_missing_since`` instead, counted in
+    ``OrphanedGraphRegistrations``, and unstamped when the instance returns.
     """
     logger.info("Starting graph registry cleanup")
 
@@ -445,10 +395,8 @@ class InstanceMonitor:
         response = graph_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
         items.extend(response.get("Items", []))
 
-      # Paginate the instance scan too: a truncated first page would make every
-      # instance on a later page look missing, and every graph on those
-      # instances would be stamped orphaned and page — the sweep would create
-      # the condition it alarms on.
+      # Paginated: a truncated page would make later instances look missing
+      # and stamp their graphs orphaned.
       instance_response = instance_table.scan(ProjectionExpression="instance_id")
       instance_items = instance_response.get("Items", [])
       while "LastEvaluatedKey" in instance_response:
@@ -488,21 +436,11 @@ class InstanceMonitor:
             result.errors += 1
           continue
 
-        # A shared repository is exempt: its row is not a routing pointer.
-        # ``GraphClientFactory._create_shared_repository_client`` branches
-        # before any graph-registry lookup — reads go to the replica ALB,
-        # writes resolve the master from the *instance* registry by
-        # ``node_type=shared_master``. The shared master is also parked to
-        # zero between ingestion runs, so the instance its row names is
-        # legitimately absent most of the day; counting that as drift pages
-        # every night for a healthy fleet. Same predicate the router uses, so
-        # the two can never disagree about which graphs this applies to.
-        # A row already marked deleted is not routing either: it is waiting
-        # out ``STALE_GRAPH_DAYS`` above, and the instance it names was
-        # released with the graph and recycled by the ASG well inside that
-        # window. Counting it turns every fleet replacement into a page that
-        # clears itself a week later, on an alarm whose whole meaning is
-        # "a live graph's routing is stale".
+        # Exempt rows that are not routing: shared repositories (the router
+        # resolves them without this registry, and their master is parked
+        # between ingestion runs) and rows already marked deleted (their
+        # instance is recycled long before the row ages out). A previously
+        # stamped exempt row is unstamped below.
         instance_missing = (
           bool(instance_id)
           and instance_id not in valid_instances
@@ -603,10 +541,8 @@ class InstanceMonitor:
         response = volume_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
         items.extend(response.get("Items", []))
 
-      # Paginate the instance scan too: a truncated first page would make every
-      # instance on a later page look missing, and every graph on those
-      # instances would be stamped orphaned and page — the sweep would create
-      # the condition it alarms on.
+      # Paginated: a truncated page would make later instances look missing
+      # and mark volumes attaching to them failed.
       instance_response = instance_table.scan(ProjectionExpression="instance_id")
       instance_items = instance_response.get("Items", [])
       while "LastEvaluatedKey" in instance_response:
@@ -637,18 +573,13 @@ class InstanceMonitor:
             )
 
         if instance_id == "unattached" and status == "available":
-          # A row that still lists databases is the only link between those
-          # graphs and their data; dropping it makes the next launch mint an
-          # empty replacement volume. Mirror the orphan sweep in the volume
-          # manager, which refuses to delete a volume that carries databases.
+          # The row is the only link between those graphs and their data;
+          # dropping it makes the next launch mint an empty volume.
           if item.get("databases"):
             continue
 
-          # Age from the last detach, not the creation date: a volume that
-          # parks nightly is "unattached" for most of every day and would
-          # otherwise be dropped by the first sweep it sleeps through after
-          # turning STALE_VOLUME_DAYS old. Rows that have never been through
-          # a detach fall back to last_attached, then created_at.
+          # Age from the last detach: a volume that parks nightly would
+          # otherwise be dropped once it turned STALE_VOLUME_DAYS old.
           age_anchor = (
             item.get("last_detached") or item.get("last_attached") or created_at
           )
@@ -725,7 +656,6 @@ class InstanceMonitor:
       graph_table = self.dynamodb.Table(self.graph_registry_table)
       instance_table = self.dynamodb.Table(self.instance_registry_table)
 
-      # Get all healthy instances
       instances_response = instance_table.scan(
         FilterExpression="#s = :status",
         ExpressionAttributeNames={"#s": "status"},
@@ -742,7 +672,6 @@ class InstanceMonitor:
         )
         instances.extend(instances_response.get("Items", []))
 
-      # Calculate metrics
       total_capacity = 0
       total_used = 0
       total_available = 0
@@ -763,11 +692,9 @@ class InstanceMonitor:
         available_dbs = int(instance.get("available_capacity", max_dbs - used_dbs))
         created_at = instance.get("created_at", "")
 
-        # Track tier distribution
         if tier in tier_counts:
           tier_counts[tier] += 1
 
-        # Calculate instance age
         age_hours = 0
         if created_at:
           try:
@@ -777,7 +704,6 @@ class InstanceMonitor:
           except Exception:
             pass
 
-        # Categorize by age
         if age_hours < 0.25:
           instance_age_buckets["new"] += 1
         elif age_hours < 1:
@@ -785,15 +711,12 @@ class InstanceMonitor:
         else:
           instance_age_buckets["stable"] += 1
 
-        # Calculate utilization
         utilization = (used_dbs / max_dbs * 100) if max_dbs > 0 else 0
 
-        # Accumulate totals
         total_capacity += max_dbs
         total_used += used_dbs
         total_available += available_dbs
 
-        # Per-instance metrics (environment is in namespace, not dimension)
         metrics.extend(
           [
             {
@@ -826,12 +749,8 @@ class InstanceMonitor:
           ]
         )
 
-      # One pass over the graph registry serves two purposes: the active-database
-      # count, and the per-instance occupancy that TenantSlotsFree is computed
-      # from. It projects instead of using Select="COUNT" because the occupancy
-      # map needs the rows, and it paginates — the previous COUNT form read
-      # `Count` off the first page only, which silently undercounts as soon as a
-      # scan exceeds 1 MB.
+      # One paginated pass yields both the active count and the per-instance
+      # occupancy TenantSlotsFree needs.
       occupied_by_instance: dict[str, int] = {}
       try:
         total_active = 0
@@ -875,20 +794,16 @@ class InstanceMonitor:
           if tier not in tenant_slots_free:
             continue
           instance_id = instance.get("instance_id")
-          # `max_databases` and the graph registry, deliberately — the same two
-          # inputs `_find_best_instance` places against. Not `total_capacity`,
-          # and not the instance registry's `database_count`, both of which can
-          # disagree with where graphs actually are.
+          # The same two inputs `_find_best_instance` places against; the
+          # instance registry's counts can disagree with where graphs are.
           slot_total = int(instance.get("max_databases") or _get_tier_capacity(tier))
           occupied = occupied_by_instance.get(instance_id, 0)
           tenant_slots_free[tier] += max(0, slot_total - occupied)
 
-      # Overall cluster metrics
       if total_capacity > 0:
         available_percent = (total_available / total_capacity) * 100
         used_percent = (total_used / total_capacity) * 100
 
-        # Cluster-wide metrics (no Environment dimension - it's in the namespace)
         metrics.extend(
           [
             {
@@ -924,7 +839,6 @@ class InstanceMonitor:
           ]
         )
 
-        # Instance age distribution (no Environment dimension - it's in the namespace)
         for age_type, count in instance_age_buckets.items():
           metrics.append(
             {
@@ -937,7 +851,6 @@ class InstanceMonitor:
             }
           )
 
-        # Tier distribution (no Environment dimension - it's in the namespace)
         for tier, count in tier_counts.items():
           if count > 0:
             metrics.append(
@@ -951,10 +864,8 @@ class InstanceMonitor:
               }
             )
 
-      # Per-tier free tenant slots. Published outside the `total_capacity > 0`
-      # branch above on purpose: an empty fleet has zero free slots, and that is
-      # precisely the reading worth alarming on. The cluster percentages above
-      # cannot say it — 0/0 publishes nothing at all.
+      # Outside the `total_capacity > 0` branch: an empty fleet's zero free
+      # slots is exactly the reading worth alarming on.
       if tenant_slots_free is not None:
         metrics.extend(
           {
@@ -966,10 +877,10 @@ class InstanceMonitor:
           for tier, free in tenant_slots_free.items()
         )
 
-      # Use environment-specific namespace
+      # The environment is in the namespace, not a dimension, so staging and
+      # prod never share a metric stream.
       cloudwatch_namespace = f"RoboSystems/Graph/{self.environment}"
 
-      # Publish metrics in batches of 20
       for i in range(0, len(metrics), 20):
         batch = metrics[i : i + 20]
         self.cloudwatch.put_metric_data(

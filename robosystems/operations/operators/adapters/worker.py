@@ -1,11 +1,5 @@
-"""Worker execution adapter — runs operators in worker context.
-
-Builds an OperatorContext from `HttpToolAccess` (the full GraphMCPTools
-surface, gated by the operator's `read_only` flag), `FactoryCreditConsumer`
-(a session per call), and `OperationManagerProgress` (SSE progress +
-cancellation). Reached through the `OperatorWorkerTask` bridge in
-`worker_task.py`.
-"""
+"""Worker execution adapter: `HttpToolAccess`, `FactoryCreditConsumer` and
+`OperationManagerProgress`, reached through `OperatorWorkerTask`."""
 
 from __future__ import annotations
 
@@ -42,16 +36,9 @@ async def run_operator_worker(
 ) -> dict[str, Any]:
   """Run an operator in worker context.
 
-  `params` carries the operator-specific arguments: `query`, an optional
-  `mode` (an unrecognized value falls back to STANDARD), the conversation
-  `history`, and a `context` dict that lands in `ctx.extra` beside the
-  params themselves (so `mapping_id` and `max_credits` both resolve).
-
-  Returns the response envelope the operator endpoint and the SSE
-  `operation_completed` event hand to callers — content, operator_used,
-  mode_used, metadata, tokens_used, confidence_score, execution_time — with
-  the operator's own metadata keys also merged flat, which is what the
-  mapping operation's consumers read.
+  An unrecognized `params["mode"]` falls back to STANDARD; `params` and its
+  `context` dict both land in `ctx.extra`. The operator's metadata is also
+  merged flat into the result, which the mapping operation's consumers read.
   """
   mode_str = params.get("mode", "standard")
   try:
@@ -62,10 +49,8 @@ async def run_operator_worker(
   if not isinstance(context, dict):
     context = {}
 
-  # Both gates are re-checked here rather than trusted from the enqueuing
-  # request: a task can sit in the queue, and the role that authorized it may
-  # have been revoked — or the balance spent — in between. Same reasoning as
-  # `GraphCreationService._validate_org`.
+  # Re-checked, not trusted from the enqueuing request: the role or balance
+  # may have changed while the task was queued.
   enforce_operator_write_role(operator, graph_id, user_id)
   enforce_operator_graph_scope(operator, graph_id)
 
@@ -75,11 +60,7 @@ async def run_operator_worker(
   finally:
     preflight_session.close()
 
-  # The full GraphMCPTools surface, gated by the operator's read_only flag —
-  # the same tool access the API path used. DirectToolAccess only reports
-  # tool classes registered by hand, so a model-driven loop on it sees no
-  # tools at all: on the first worker deploy the analyst operator narrated
-  # "Tool: get-graph-schema" as text and stopped.
+  # Not DirectToolAccess: a model-driven loop on it would see no tools.
   tools = HttpToolAccess(graph_id, read_only=operator.spec.read_only, user_id=user_id)
   ai_client = get_ai_client()
   credit_consumer = FactoryCreditConsumer()

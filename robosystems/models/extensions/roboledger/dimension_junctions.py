@@ -1,33 +1,16 @@
-"""Dimension junction tables — roboledger-specific bindings.
+"""Junctions binding the base `Dimension` model to ledger rows and facts.
 
-These many-to-many junction tables bind the base `Dimension` model (in
-`models/extensions/dimension.py`) to roboledger-specific tables
-(transactions, entries, line_items). They live under roboledger/ because
-they reference ledger-side tables; the Dimension class itself is a base
-ontology concept and lives at the extensions top level.
-
-Each level in the three-level ledger model can carry its own dimensional
-qualifiers:
-- Transaction: source system, provenance dimensions
-- Entry: fund, trust account, product channel dimensions
-- LineItem: department, class, location, project dimensions
-- Fact: report-layer aspects — scenario first (which world a number
-  belongs to); segment/geography/product members as the dimensional
-  spine grows
+Each level carries its own qualifiers: transactions (source, provenance),
+entries (fund, channel), line items (department, class, location, project),
+facts (report-layer aspects such as scenario).
 """
 
 from sqlalchemy import Column, ForeignKey, String, Table
 
 from robosystems.db.extensions import ExtensionsBase
 
-# Junction FK delete semantics (same in all three tables):
-# - Parent side (transaction_id / entry_id / line_item_id): CASCADE — when
-#   the owning ledger row is deleted, its dimensional tags are discarded
-#   with it (the tag is meaningless without its parent).
-# - Dimension side: RESTRICT — dimensions are shared reference data and
-#   deleting one that is still tagged on ledger rows should be an explicit
-#   operator decision, not a silent cascade that leaves orphaned ledger
-#   rows without their tags.
+# Parent side CASCADEs (a tag is meaningless without its row); dimension side
+# RESTRICTs (dimensions are shared, so deleting a used one must be deliberate).
 
 transaction_dimensions = Table(
   "transaction_dimensions",
@@ -97,11 +80,8 @@ event_dimensions = Table(
   ),
 )
 
-# Fact-level aspects. Actuals stay undimensioned (the default member, in
-# XBRL terms) — a row here marks a fact as belonging to an explicit member
-# on some axis. Scenario is the first: forecast facts carry a `scenario`
-# Dimension, so every reader honoring the documented consolidated-totals
-# contract (`has_dimensions = false`) excludes them by construction.
+# Actuals stay undimensioned (the XBRL default member). Forecast facts carry a
+# `scenario` dimension, so `has_dimensions = false` readers exclude them.
 fact_dimensions = Table(
   "fact_dimensions",
   ExtensionsBase.metadata,

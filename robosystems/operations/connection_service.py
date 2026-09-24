@@ -1,12 +1,7 @@
-"""Connection service for managing data source connections.
+"""Data source connections (platform DB metadata + encrypted credentials).
 
-All connection metadata is stored in PostgreSQL (Connection model).
-Encrypted credentials are stored in ConnectionCredentials.
-No graph database operations — connections are platform metadata.
-
-Module-level functions at the bottom form the connection-sync dispatch
-kernel shared by the REST sync endpoint and the `sync-connection` MCP
-tool, so both surfaces validate, lock, and dispatch identically.
+The module-level functions are the sync dispatch kernel shared by the REST
+sync endpoint and the `sync-connection` MCP tool.
 """
 
 from collections.abc import Callable
@@ -28,7 +23,7 @@ from robosystems.models.core.connection.connection_credentials import (
 )
 from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 
-# System user ID for internal operations (Dagster, background tasks)
+# Internal callers (Dagster, background tasks); bypasses the creator check.
 SYSTEM_USER_ID = "system"
 
 
@@ -49,14 +44,8 @@ class ConnectionService:
     """Create a connection row and, if given, its encrypted credentials.
 
     `graph_id` defaults to `entity_id`. `metadata` carries the
-    provider-specific fields (realm_id, item_id, cik, ...).
-
-    `write_policy` governs the OUTBOUND (write-back) direction only and is
-    defaulted per provider by `Connection.create`: QuickBooks connections are
-    `qb_authoritative` (QB is the GL, so RoboLedger-originated entries write
-    back), everything else is `native`. Inbound sync-down is decoupled — QB
-    rows auto-commit to the GL via the loader's source-keyed rule whatever the
-    policy says. Use `set_write_policy` to pause write-back.
+    provider-specific fields (realm_id, item_id, cik, ...). `write_policy` is
+    defaulted per provider by `Connection.create`.
     """
     metadata = metadata or {}
     target_graph_id = graph_id or entity_id
@@ -115,15 +104,10 @@ class ConnectionService:
   ) -> dict[str, Any] | None:
     """Fetch a connection with decrypted credentials, or None.
 
-    Pass `graph_id` (the URL scope the caller already authorized) whenever it
-    is known: `connection_id` is caller-supplied, so without the scope check a
-    guessed id reaches another graph's connection.
-
-    Connections are graph assets that record their creator, not the
-    creator's property: with `graph_id` given, the graph scope is the
-    authorization and every member of the graph resolves the same
-    connection (role is enforced by the caller). Without a graph scope the
-    legacy creator check applies; `SYSTEM_USER_ID` bypasses it.
+    Pass `graph_id` (the authorized URL scope) whenever it is known: without
+    it a guessed `connection_id` reaches another graph's connection. With it,
+    any graph member resolves the connection (the caller enforces role);
+    without it the legacy creator check applies, bypassed by `SYSTEM_USER_ID`.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -176,11 +160,8 @@ class ConnectionService:
   ) -> list[dict[str, Any]]:
     """List connections, without decrypting credentials.
 
-    `graph_id` takes precedence over `entity_id`. A graph scope lists the
-    graph's connections for every member (they are graph assets — see
-    `get_connection`); only the legacy scope-less call filters by creator, and
-    `SYSTEM_USER_ID` sees every user's connections. Each dict carries
-    `has_credentials` and `is_expired`.
+    `graph_id` takes precedence over `entity_id`. Only the scope-less call
+    filters by creator (`SYSTEM_USER_ID` sees all).
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -283,20 +264,11 @@ class ConnectionService:
   ) -> bool:
     """Soft-delete a connection and deactivate its credentials.
 
-    The connection row is preserved with ``deleted_at`` stamped — the
-    tenant-side events/agents/elements scoped to its ``connection_id``
-    stay attached. Re-OAuthing to the same QB realm later revives this
-    row in place via the OAuth callback's reuse path
-    (`routers/graphs/connections/oauth.py`) — unless it was severed
-    (`sever_connection`), which is the one-way cutover to native books.
-
-    ``write_policy`` falls back to ``native`` on the way out: it describes
-    a graph with an *active* authoritative external GL, and after this
-    call there is none. `Connection.restore` re-applies the provider
-    default on revival.
-
-    Pass `graph_id` (the authorized URL scope) so a guessed `connection_id`
-    can't delete another graph's connection.
+    The row is kept so tenant-side rows keyed by its ``connection_id`` stay
+    attached; re-OAuthing the same QB realm revives it (unless severed).
+    ``write_policy`` drops to ``native`` since no external GL is active;
+    `Connection.restore` re-applies the provider default. Pass `graph_id` so a
+    guessed `connection_id` can't delete another graph's connection.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -338,12 +310,10 @@ class ConnectionService:
   ) -> dict[str, Any]:
     """The native-accounting cutover for a synced-ledger connection.
 
-    Stamps the chart the provider created as native-owned on the graph
-    (`sever_synced_chart`), drops ``write_policy`` to ``native`` and marks
-    the row ``severed`` so a later re-OAuth never revives it. Does NOT
-    delete the row: the caller runs provider cleanup and
-    `delete_connection` afterwards, so a failed stamp leaves the
-    connection exactly as it was.
+    Stamps the provider's chart native-owned, drops ``write_policy`` to
+    ``native`` and marks the row ``severed`` so a re-OAuth never revives it.
+    Does not delete the row: the caller runs provider cleanup and
+    `delete_connection` afterwards, so a failed stamp changes nothing.
 
     Raises `ConnectionNotFoundError` (also for a wrong graph scope) and
     `SeverNotSupportedError` for providers that are not a synced GL.
@@ -393,7 +363,6 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> bool:
-    """Mark connection as having an error."""
     session = db_session or SessionFactory()
     session_created = db_session is None
 
@@ -420,14 +389,9 @@ class ConnectionService:
   ) -> bool:
     """Mark connection as needing operator re-authorization (sync path).
 
-    Distinct from `mark_connection_error`: surfaces a "reconnect" CTA in
-    the UI rather than a generic failure message. Called from the QB
-    auth-refresh wrapper (`adapters/quickbooks/client/api.py`) which
-    runs inside a sync Dagster asset and can't await the async
-    `mark_connection_error` counterpart.
-
-    Idempotent: a second call on an already-needs_reauth connection is
-    a no-op.
+    Surfaces a "reconnect" CTA rather than a generic error. Sync because its
+    caller (the QB auth-refresh wrapper) runs inside a sync Dagster asset.
+    Idempotent.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -457,7 +421,6 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> bool:
-    """Mark connection as connected."""
     session = db_session or SessionFactory()
     session_created = db_session is None
 
@@ -554,15 +517,11 @@ class ConnectionService:
   ) -> dict[str, Any] | None:
     """Set a connection's source-of-truth `write_policy`.
 
-    Graph-scoped on purpose: the connection must belong to `graph_id` (the
-    URL scope the caller already authorized) — this prevents flipping
-    another graph's connection into write-back via a guessed connection_id.
-    Any write-role member of the graph may set the policy, not only the
-    member who created the connection (the router enforces the role).
-    Returns the updated connection dict, or None when the connection is
-    missing or belongs to a different graph. Raises ValueError for an
-    unsupported policy value (the model validates); valid values are
-    'native' and 'qb_authoritative'.
+    The connection must belong to `graph_id` (the authorized URL scope), so a
+    guessed id can't flip another graph into write-back; any write-role member
+    may set it (the router enforces role). Returns None when missing or out of
+    scope; raises ValueError for a value other than 'native' or
+    'qb_authoritative'.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -587,18 +546,14 @@ class ConnectionService:
 
 
 # ---------------------------------------------------------------------------
-# Provider compatibility — native and synced ledgers never mix
-# (specs/ledger/native-accounting-cutover.md §2).
+# Provider compatibility — native and synced ledgers never mix.
 # ---------------------------------------------------------------------------
 
-# Providers that ARE the general ledger while connected: their chart is the
-# chart and their sync writes posted rows. A bank feed cannot sit beside one.
-# The same set is what `sever_synced_chart` can stamp — a synced ledger is by
-# definition the thing a cutover severs — so there is one definition.
+# Providers that ARE the general ledger while connected; a bank feed cannot sit
+# beside one. Also exactly what a cutover can sever.
 SYNCED_LEDGER_PROVIDERS: frozenset[str] = SEVERABLE_SOURCES
 
-# Providers that capture bank activity into the inbox of natively-kept
-# books. They need a chart to resolve against and no synced GL in the way.
+# Bank activity into the inbox of native books: needs a chart, no synced GL.
 BANK_FEED_PROVIDERS: frozenset[str] = frozenset({"mercury", "plaid"})
 
 
@@ -677,12 +632,8 @@ def _graph_has_native_books(graph_id: str, *, synced_source: str) -> bool:
 def _probe_books(graph_id: str, predicate: Callable[[Session], bool]) -> bool:
   """Run a books predicate on the graph's extensions schema.
 
-  A graph with no tenant schema — never provisioned (subgraphs get theirs
-  lazily from the loader's first sync), or already torn down — has no chart
-  and no books, and reads as ``False``. `extensions_session` fails closed on
-  that case with ``invalid_schema_name`` (SQLSTATE 3F000), which SQLAlchemy
-  raises as `ProgrammingError`; every other programming error is a fault and
-  surfaces.
+  A graph with no tenant schema yet (subgraphs get theirs on first sync) or
+  already torn down reads as ``False``; any other `ProgrammingError` raises.
   """
   from robosystems.db.extensions import extensions_session
   from robosystems.middleware.extensions import is_schema_missing
@@ -761,15 +712,10 @@ async def resolve_sync_connection(
 ) -> dict[str, Any]:
   """Resolve a graph's single syncable connection.
 
-  Considers only connections whose provider is registered (feature-flag
-  enabled). When several rows exist, currently-connected ones win — the
-  same preference `qb_sync_state` applies for the close gate. Refuses to
-  guess between multiple live candidates.
-
-  Raises:
-      NoSyncConnectionError: no syncable connection for the graph.
-      AmbiguousSyncConnectionError: more than one candidate; carries
-          `candidates` so callers can present the choice.
+  Only providers enabled in the registry count; connected rows win over
+  others (the same preference the close gate applies). Raises
+  `NoSyncConnectionError`, or `AmbiguousSyncConnectionError` (with
+  `candidates`) rather than guess.
   """
   from robosystems.operations.providers.registry import provider_registry
 
@@ -801,11 +747,7 @@ async def resolve_sync_connection(
 
 
 def _release_sync_lock(connection_id: str, sync_lock_id: str) -> None:
-  """Best-effort release of the per-connection sync lock.
-
-  Never raises: the lock's TTL is the fallback, and a release failure must not
-  turn a successful dispatch into an error.
-  """
+  """Best-effort release; never raises (the lock's TTL is the fallback)."""
   try:
     from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
     from robosystems.middleware.auth.distributed_lock import release_lock_by_id
@@ -828,12 +770,9 @@ async def dispatch_first_sync(
 ) -> str | None:
   """The sync a connect flow starts, under the per-connection lock.
 
-  The same path the sync endpoint takes, so a callback can never run a
-  second sync beside one the operator started while the consent screen was
-  open. A sync already in progress is left to finish and the connect
-  succeeds with no run of its own. Anything else propagates: the row is
-  connected by now, and the caller decides what a failed dispatch means.
-  Returns the run id, or ``None`` when no run was started.
+  Goes through the sync lock so a callback never runs beside a sync the
+  operator already started; that case returns ``None`` and the connect
+  succeeds. Any other failure propagates. Returns the run id or ``None``.
   """
   try:
     result = await dispatch_connection_sync(
@@ -865,22 +804,11 @@ async def dispatch_connection_sync(
 ) -> dict[str, Any]:
   """Validate, lock, and dispatch a connection sync.
 
-  The shared kernel behind `POST .../connections/{id}/sync` and the
-  `sync-connection` MCP tool: graph- and user-scoped connection lookup,
-  provider validation, the per-connection sync lock, and provider
-  dispatch.
-
-  `dispatched` in the returned dict says whether a run actually started.
-  When true, `task_id` is that run and completion is observed via
-  `Connection.last_sync` (the load asset updates it), surfaced through
-  `get-fiscal-calendar` and the connections read surface. When false the
-  provider had nothing to pull, `task_id` is None, `message` says why, and
-  there is nothing to poll for.
-
-  Raises:
-      ConnectionNotFoundError, ProviderUnavailableError,
-      SyncInProgressError. `TimeoutError` propagates when
-      `dispatch_timeout` elapses before the dispatch call returns.
+  `dispatched` in the result says whether a run started. If so, completion
+  shows as `Connection.last_sync` advancing; if not, `task_id` is None and
+  `message` says why. Raises `ConnectionNotFoundError`,
+  `ProviderUnavailableError`, `SyncInProgressError`, or `TimeoutError` when
+  `dispatch_timeout` elapses.
   """
   import asyncio
 
@@ -900,16 +828,9 @@ async def dispatch_connection_sync(
   except ValueError as e:
     raise ProviderUnavailableError(str(e)) from e
 
-  # Per-connection sync lock. Two concurrent qb_sync runs against the
-  # same connection_id race on the UPSERT path; the lock serializes
-  # them. 30-min TTL bounds a *stuck* job (Dagster crash mid-sync); the
-  # normal completion path releases the lock explicitly from `qb_load`
-  # via the `sync_lock_id` plumbed through `QBSyncConfig`. The 30-min
-  # number is a safety-net for failed syncs, not an "intentional
-  # cooldown."
-  #
-  # If the same operator mashes "Sync Now" or the OAuth callback races
-  # a scheduler, the second attempt surfaces the holder's lock_id.
+  # Concurrent syncs of one connection race on the UPSERT path. `qb_load`
+  # releases the lock on completion via `sync_lock_id`; the 30-min TTL only
+  # bounds a crashed run.
   sync_lock_id: str = ""
   try:
     redis_client = create_redis_client(ValkeyDatabase.LOCKS)
@@ -918,11 +839,8 @@ async def dispatch_connection_sync(
     )
     lock_result = sync_lock.acquire(blocking=False)
     if not lock_result.acquired:
-      # `acquire` swallows Redis failures into `acquired=False` — only a
-      # genuinely-held lock is a sync-in-progress. A degraded Valkey
-      # takes the same fail-open posture as the client-creation failure
-      # below (proceed unlocked), instead of 409ing every sync attempt
-      # for as long as Valkey stays unreachable.
+      # `acquire` reports Redis failures as `acquired=False`. A degraded
+      # Valkey fails open (proceed unlocked) rather than 409 every sync.
       if isinstance(
         lock_result.error_message, str
       ) and lock_result.error_message.startswith("Redis error"):
@@ -930,15 +848,11 @@ async def dispatch_connection_sync(
       raise SyncInProgressError(
         connection_id, lock_result.holder_id, lock_result.ttl_remaining
       )
-    # The Dagster job releases the lock on completion via this id;
-    # `release_lock_by_id` compare-and-deletes against it.
     sync_lock_id = lock_result.lock_id or ""
   except SyncInProgressError:
     raise
   except Exception as e:
-    # Dashboards watch for `lock_skipped=true` to detect Valkey-
-    # degraded sync runs (we proceed unlocked rather than fail closed,
-    # so the silent race risk is real and worth surfacing).
+    # Fails open; dashboards watch `lock_skipped=true` for the race risk.
     logger.warning(
       "Could not acquire sync lock for connection %s: %s; "
       "proceeding without lock (concurrent-sync race still possible)",
@@ -968,17 +882,12 @@ async def dispatch_connection_sync(
       timeout=dispatch_timeout,
     )
   except BaseException:
-    # The Dagster job releases the lock on run completion — but a failed
-    # DISPATCH never starts a run, so without this release the leaked
-    # lock 409s every sync attempt on this connection for its full
-    # 30-minute TTL. Best-effort, mirroring qb_load's release.
+    # A failed dispatch starts no run to release the lock.
     if sync_lock_id:
       _release_sync_lock(connection_id, sync_lock_id)
     raise
 
-  # A provider that did not dispatch a run has already done whatever it does —
-  # there is no run coming that will release the lock, so holding it until the
-  # TTL would 409 every later attempt on this connection for 30 minutes.
+  # No run is coming to release the lock.
   if sync_lock_id and not outcome.dispatched:
     _release_sync_lock(connection_id, sync_lock_id)
 
@@ -996,8 +905,6 @@ async def dispatch_connection_sync(
     "connection_id": connection_id,
     "provider": provider,
     "dispatched": outcome.dispatched,
-    # Only a dispatched run has something to poll; a provider with nothing to
-    # pull must not be handed back an id that resolves to no work.
     "task_id": outcome.task_id,
     "message": outcome.message,
     "full_rebuild": bool(full_rebuild),

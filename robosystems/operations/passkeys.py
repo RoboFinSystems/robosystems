@@ -1,21 +1,13 @@
 """Passkey (WebAuthn) kernel: ceremonies, challenge state, recovery codes.
 
-The browser's authenticator signs; the platform verifies and mints. These
-functions cover everything between — generating registration/authentication
-options, holding the single-use challenge, verifying attestations and
-assertions (user verification always required, so one gesture is two
-factors), and the recovery-code backstop.
+User verification is always required, so one gesture is two factors.
+Session-in, dataclass-out, domain exceptions; routers own flags, rate limits
+and audit.
 
-Contract: session-in, dataclass-out, domain exceptions — never HTTP. Routers
-own their gates (feature flag, rate limits, progressive delay) and side
-channels (audit events, metrics), same as ``operations/oidc.py`` and
-``operations/user_provisioning.py``.
-
-Challenge flows are namespaced so a challenge minted for one ceremony can
-never complete another: ``reg`` (enrollment), ``mfa`` (second factor, bound
-to the login's mfa_token jti), ``pwl`` (passwordless login — no user known
-until the assertion resolves), ``mgmt`` (re-auth for destructive lifecycle
-actions).
+Challenge flows are namespaced so one ceremony's challenge can never complete
+another: ``reg`` (enrollment), ``mfa`` (second factor, bound to the login's
+mfa_token jti), ``pwl`` (passwordless; no user known until verify), ``mgmt``
+(re-auth for destructive lifecycle actions).
 """
 
 import hashlib
@@ -57,8 +49,7 @@ from robosystems.security.password import PasswordSecurity
 _CHALLENGE_TTL_SECONDS = 300
 _CHALLENGE_KEY_PREFIX = "passkey:challenge:"
 
-# Flows an MFA-required role can satisfy; also the display name shown by
-# authenticator prompts.
+# Relying-party display name shown by authenticator prompts.
 _RP_NAME = "RoboSystems"
 
 VALID_CHALLENGE_FLOWS = ("reg", "mfa", "pwl", "mgmt")
@@ -149,13 +140,10 @@ def _expected_origin() -> str:
 class PasskeyChallenge:
   """Single-use, 5-minute WebAuthn challenge state.
 
-  Same shape as ``operations/oidc.OIDCState`` and for the same reasons:
-  Valkey because verify lands on an arbitrary task, SHA-256 keys so a store
-  read can't replay a ceremony, ``GETDEL`` so consumption is atomically
-  single-use, and fail-closed validation. Keyed by the challenge itself
-  (extracted from the response's clientDataJSON at verify time), which works
-  uniformly across flows — including passwordless, where no user is known
-  until the assertion resolves.
+  Same design as ``oidc.OIDCState``: Valkey (verify lands on any task),
+  SHA-256 keys (a store read can't replay a ceremony), ``GETDEL`` (atomic
+  single use), fail-closed. Keyed by the challenge itself, so it works for
+  passwordless where no user is known until verify.
   """
 
   @staticmethod
@@ -541,9 +529,7 @@ def remove_passkey(
 def user_requires_mfa(session: Session, user: User) -> bool:
   """Whether the user holds a role the enforcement gate applies to.
 
-  Org OWNER/ADMIN only in P1 — org privilege already implies graph admin,
-  and the residual explicit graph-admin population isn't worth a second
-  per-login query yet.
+  Org OWNER/ADMIN only; explicit graph admins are not yet covered.
   """
   return (
     session.query(OrgUser.org_id)

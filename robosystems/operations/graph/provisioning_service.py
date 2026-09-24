@@ -26,12 +26,9 @@ def _finalize_graph_provisioning(
 ) -> None:
   """Link the graph to the subscription and activate it, in a fresh session.
 
-  Split out of run_graph_provisioning because the long async graph build
-  detaches any subscription instance / session opened before it: the link commit
-  then persists nothing and activate()'s session.refresh() raises "Instance is
-  not persistent within this Session", stranding the subscription at
-  'provisioning' while the graph is live and paid. Runs synchronously with no
-  awaits so the re-fetched instance stays persistent through both commits.
+  The long async graph build detaches any instance loaded before it, so the
+  link commit would persist nothing. Synchronous, with no awaits, so the
+  re-fetched instance stays persistent through both commits.
   """
   from robosystems.config.billing import BillingConfig
   from robosystems.database import get_db_session
@@ -58,12 +55,9 @@ def _finalize_graph_provisioning(
         f"Subscription {subscription_id} not found during provisioning completion"
       )
 
-    # Link the graph before anything else can fail. The lifecycle sensors join
-    # subscriptions to graphs on resource_id, so a graph created here and
-    # orphaned by a later failure would otherwise be unreachable by the
-    # machinery whose whole job is reclaiming it — running, unbilled, and
-    # invisible. Committing the link also makes the claim's terminal condition
-    # true, so no redelivery can create a second graph.
+    # Link first: the lifecycle sensors find graphs through resource_id, so an
+    # unlinked graph orphaned by a later failure could never be reclaimed.
+    # The committed link also stops a redelivery from creating a second graph.
     subscription.resource_id = graph_id
     db.commit()
 
@@ -154,7 +148,6 @@ async def run_graph_provisioning(
           f"expected 'provisioning'"
         )
 
-      # Extract graph config from subscription metadata
       graph_config = subscription.subscription_metadata or {}
       graph_type = graph_config.get("graph_type", "generic")
       graph_name = graph_config.get("graph_name")
@@ -199,13 +192,6 @@ async def run_graph_provisioning(
       if operation_id:
         await manager.emit_progress(operation_id, "Activating subscription...", 70)
 
-      # Complete in a fresh session. The long async graph build above can
-      # invalidate the session opened before it and detach `subscription`, so
-      # the link commit persists nothing and activate()'s session.refresh()
-      # raises "Instance is not persistent within this Session" — which stranded
-      # the subscription at 'provisioning' with resource_id unset even though the
-      # graph was live and paid. Re-fetch and run the completion writes with no
-      # awaits interleaved so the instance stays persistent through both commits.
       _finalize_graph_provisioning(subscription_id, graph_id, user_id)
 
       duration_ms = (time.time() - start_time) * 1000

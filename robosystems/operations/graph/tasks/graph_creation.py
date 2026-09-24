@@ -45,8 +45,7 @@ class GraphCreationTask(BaseTask):
     service = GraphCreationService()
     result = await service.create(config)
 
-    # Billing subscription — must succeed for the graph to be accessible.
-    # If this fails, clean up the provisioned graph to avoid leaked resources.
+    # Without a billing subscription the graph is inaccessible; tear it down.
     try:
       self._create_billing_subscription(result.graph_id, config)
     except Exception as billing_error:
@@ -74,16 +73,13 @@ class GraphCreationTask(BaseTask):
             f"{deprovision_result.status}"
           )
       except Exception as cleanup_error:
-        # Swallowed so it cannot replace the billing error the caller needs to
-        # see. What stops this path silently rotting again is the test that
-        # drives it, not this handler — it was an ImportError for four months.
+        # Swallowed so it cannot replace the billing error.
         logger.error(
           f"Failed to clean up graph {result.graph_id}: {cleanup_error}",
           exc_info=True,
         )
       raise
 
-    # Report to Dagster observable asset
     from robosystems.dagster.reporting import report_asset_materialization
 
     await report_asset_materialization(
@@ -102,11 +98,8 @@ class GraphCreationTask(BaseTask):
     return result.to_dict()
 
   def _progress_adapter(self, message: str, percent: float) -> None:
-    """Adapt the sync progress callback to the async BaseTask interface.
-
-    GraphCreationService calls config.progress(message, percent) synchronously.
-    We can't await here, so we fire-and-forget via create_task.
-    """
+    """Adapt the sync progress callback to async ``report_progress`` via a
+    fire-and-forget task."""
     import asyncio
 
     try:

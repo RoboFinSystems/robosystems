@@ -10,16 +10,13 @@ import hashlib
 import re
 from typing import Any
 
-# Heading pattern: # through ###### at start of line
 _HEADING_PATTERN = re.compile(r"^(#{1,6}) (\S.*)$", re.MULTILINE)
 
-# Non-alphanumeric characters to strip from section IDs
 _SECTION_ID_STRIP = re.compile(r"[^a-z0-9-]")
 
-# Minimum words for a section to stand on its own (otherwise merged into next)
+# Smaller sections merge into the previous one (a small first one merges forward).
 MIN_SECTION_WORDS = 20
 
-# Maximum characters per section
 MAX_SECTION_CHARS = 50_000
 
 
@@ -67,7 +64,6 @@ def _make_section_id(heading_text: str) -> str:
   slug = heading_text.lower().strip()
   slug = slug.replace(" ", "-")
   slug = _SECTION_ID_STRIP.sub("", slug)
-  # Collapse multiple hyphens
   slug = re.sub(r"-+", "-", slug).strip("-")
   return slug or "section"
 
@@ -89,7 +85,6 @@ def section_markdown(
   headings = list(_HEADING_PATTERN.finditer(content))
 
   if not headings:
-    # No headings — single section
     text = content.strip()
     if not text:
       return []
@@ -104,7 +99,6 @@ def section_markdown(
 
   raw_sections: list[dict[str, Any]] = []
 
-  # Content before the first heading (preamble)
   preamble = content[: headings[0].start()].strip()
   if preamble and len(preamble.split()) >= MIN_SECTION_WORDS:
     raw_sections.append(
@@ -116,18 +110,15 @@ def section_markdown(
       }
     )
 
-  # Each heading defines a section
   for i, match in enumerate(headings):
     depth = len(match.group(1))
     label = match.group(2).strip()
     section_id = _make_section_id(label)
 
-    # Content runs from after this heading to the start of the next heading
     start = match.end()
     end = headings[i + 1].start() if i + 1 < len(headings) else len(content)
     section_content = content[start:end].strip()
 
-    # Include the heading itself in the content for context
     full_content = (
       f"{'#' * depth} {label}\n\n{section_content}"
       if section_content
@@ -143,25 +134,20 @@ def section_markdown(
       }
     )
 
-  # Merge small sections into the next section
   merged: list[dict[str, Any]] = []
   for section in raw_sections:
     word_count = len(section["content"].split())
     if word_count < MIN_SECTION_WORDS and merged:
-      # Merge into previous section
       merged[-1]["content"] += "\n\n" + section["content"]
     elif word_count < MIN_SECTION_WORDS and not merged:
-      # First section is small — keep it, it will be merged with next if possible
       merged.append(section)
     else:
-      # Check if previous section was small and should merge forward
       if merged and len(merged[-1]["content"].split()) < MIN_SECTION_WORDS:
         section["content"] = merged[-1]["content"] + "\n\n" + section["content"]
         merged[-1] = section
       else:
         merged.append(section)
 
-  # Truncate oversized sections
   for section in merged:
     if len(section["content"]) > MAX_SECTION_CHARS:
       section["content"] = section["content"][:MAX_SECTION_CHARS]

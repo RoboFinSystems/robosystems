@@ -1,12 +1,8 @@
-"""GraphUser model for graph access control.
+"""Per-graph access grants for members of the owning org.
 
-Access Control Model:
-- Graphs are owned by organizations (Graph.org_id)
-- Only users within the organization can be granted access
-- This model tracks which specific users have access to which graphs
-- Roles: admin (full control), member (read/write), viewer (read-only)
-- Org OWNER/ADMIN implicitly hold graph admin on all org-owned graphs;
-  explicit GraphUser rows grant access to everyone else
+Roles: admin, member (read/write), viewer (read-only). Org OWNER/ADMIN hold
+implicit graph admin on every org-owned graph; GraphUser rows grant everyone
+else.
 """
 
 from collections.abc import Sequence
@@ -72,11 +68,9 @@ class GraphUser(Model):
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("gu"))
   user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-  graph_id = Column(
-    String, ForeignKey("graphs.graph_id"), nullable=False, index=True
-  )  # References graphs table
+  graph_id = Column(String, ForeignKey("graphs.graph_id"), nullable=False, index=True)
   role = Column(String, nullable=False, default=GraphRole.MEMBER.value)
-  is_selected = Column(Boolean, default=False, nullable=False)  # Currently active graph
+  is_selected = Column(Boolean, default=False, nullable=False)  # user's current graph
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
@@ -85,12 +79,10 @@ class GraphUser(Model):
     nullable=False,
   )
 
-  # Relationships
   user = relationship("User", back_populates="graph_users")
   graph = relationship("Graph", back_populates="graph_users")
 
   def __repr__(self) -> str:
-    """String representation of the graph-user relationship."""
     return f"<GraphUser {self.id} graph={self.graph_id} user={self.user_id} role={self.role}>"
 
   @classmethod
@@ -151,7 +143,6 @@ class GraphUser(Model):
   @classmethod
   def set_selected_graph(cls, user_id: str, graph_id: str, session: Session) -> bool:
     """Set a graph as the selected one for a user."""
-    # Find the target graph first
     graph_user = (
       session.query(cls)
       .filter(cls.user_id == user_id, cls.graph_id == graph_id)
@@ -162,11 +153,9 @@ class GraphUser(Model):
       return False
 
     try:
-      # Perform both operations in a single transaction to avoid race conditions
-      # First, deselect all graphs for this user
+      # Deselect-all and select in one transaction.
       session.query(cls).filter(cls.user_id == user_id).update({"is_selected": False})
 
-      # Then select the specific graph
       graph_user.is_selected = True
       graph_user.updated_at = datetime.now(UTC)
 
@@ -191,25 +180,16 @@ class GraphUser(Model):
     ``role`` is None when the user has no access; ``implicit`` is True when the
     role comes from the owning org rather than an explicit GraphUser row.
 
-    Subgraphs resolve to their parent graph — subgraphs inherit permissions.
-    Org OWNER/ADMIN hold implicit graph admin on graphs their org owns (paying
-    for a graph carries the right to manage it), so the effective role is the
-    stronger of the explicit row and that implicit grant.
+    Subgraphs resolve to their parent. The effective role is the stronger of
+    the explicit row and the org OWNER/ADMIN implicit admin grant.
 
-    Nobody holds a role on a graph that is gone. A missing, deprovisioned, or
-    ``deleted_at``-stamped graph (teardown stamps first and flips status last)
-    resolves to no role for everyone — including org OWNER/ADMIN, whose
-    implicit grant would otherwise outlive the graph via ``Graph.org_id`` —
-    so every surface that authorizes through this resolver (REST, GraphQL,
-    MCP, the extensions registrar) denies in one place. A subgraph row that
-    exists is held to the same standard as its parent.
+    A missing, deprovisioned, or ``deleted_at``-stamped graph (or subgraph)
+    resolves to no role for everyone, org owners included; every authorizer
+    relies on this denial for tenant isolation.
 
-    ``allow_deprovisioned`` is the one sanctioned exception, passed only from
-    the backup-list and backup-download paths so a departing customer's org
-    OWNER/ADMIN can still export during the published grace period. It relaxes
-    the gone-graph denial *only*; a missing graph still resolves to no role,
-    and every other authorizer keeps the default. Do not widen its use — the
-    gone-graph denial is a tenant-isolation control.
+    ``allow_deprovisioned`` is passed only by the backup list/download paths,
+    so owners can export during the grace period. It never admits a missing
+    graph. Do not widen its use.
     """
     from robosystems.middleware.graph.types import parse_graph_id
     from robosystems.models.core.graph.graph import Graph, GraphStatus
@@ -265,12 +245,7 @@ class GraphUser(Model):
     *,
     allow_deprovisioned: bool = False,
   ) -> bool:
-    """
-    Check if a user has access to a specific graph.
-
-    Access comes from an explicit GraphUser row (on the parent graph for
-    subgraphs) or implicitly from OWNER/ADMIN role in the owning org.
-    """
+    """Whether the user has any role on the graph (see ``get_effective_role``)."""
     role, _ = cls.get_effective_role(
       user_id, graph_id, session, allow_deprovisioned=allow_deprovisioned
     )
@@ -278,11 +253,7 @@ class GraphUser(Model):
 
   @classmethod
   def user_has_write_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
-    """
-    Check if a user has write access to a specific graph.
-
-    Write access requires the 'admin' or 'member' role; 'viewer' is read-only.
-    """
+    """Whether the user's role is member or admin."""
     role, _ = cls.get_effective_role(user_id, graph_id, session)
     return role is not None and role.at_least(GraphRole.MEMBER)
 

@@ -35,12 +35,9 @@ class BackupStatus(str, Enum):
 
 
 class BackupType(str, Enum):
-  """What shape the backup is.
+  """What shape the backup is; who started it is :class:`BackupInitiator`.
 
-  This axis is shape only — "is this a full dump?". Who started a backup is a
-  separate axis on :class:`BackupInitiator`; new rows record shape here and
-  initiator there. ``SYSTEM`` is retained for historical rows and is not a
-  shape; do not use it for new rows.
+  ``SYSTEM`` survives on historical rows only; do not use it for new rows.
   """
 
   FULL = "full"
@@ -49,13 +46,8 @@ class BackupType(str, Enum):
 
 
 class BackupInitiator(str, Enum):
-  """Who started the backup.
-
-  Separate from :class:`BackupType` because the two answer different questions
-  and were previously conflated. Initiator drives three things: whether the
-  backup counts against the tier's daily quota, whether it appears in the
-  customer-facing listing, and how it is labelled there.
-  """
+  """Who started the backup. Decides daily-quota counting, whether the backup
+  is listed to the customer, and its label there."""
 
   USER = "user"
   """Requested through the API. Counts against ``max_backups_per_day``."""
@@ -81,19 +73,15 @@ class BackupInitiator(str, Enum):
 
 
 class GraphBackup(Model):
-  """Model for tracking graph database backups."""
-
   __tablename__ = "graph_backups"
 
   id = Column(
     String, primary_key=True, default=lambda: generate_prefixed_ulid("backup")
   )
 
-  # Graph identification
   graph_id = Column(String, nullable=False, index=True)
   database_name = Column(String, nullable=False, index=True)
 
-  # Backup metadata
   backup_type = Column(String, nullable=False, default=BackupType.FULL.value)
   initiated_by = Column(
     String,
@@ -108,8 +96,8 @@ class GraphBackup(Model):
 
   # S3 storage information
   s3_bucket = Column(String, nullable=False)
-  s3_key = Column(String, nullable=False)  # S3 object key
-  s3_metadata_key = Column(String, nullable=True)  # S3 metadata object key
+  s3_key = Column(String, nullable=False)
+  s3_metadata_key = Column(String, nullable=True)
 
   # Size and compression metrics
   original_size_bytes = Column(BigInteger, nullable=False, default=0)
@@ -125,11 +113,8 @@ class GraphBackup(Model):
   backup_duration_seconds = Column(Float, nullable=False, default=0.0)
 
   # Security and integrity
-  checksum = Column(
-    String, nullable=True
-  )  # SHA-256 checksum (calculated after backup completion)
-  # Retained for historical rows only. Backups are not encrypted at the
-  # application layer; S3 SSE-AES256 protects the objects at rest.
+  checksum = Column(String, nullable=True)  # SHA-256
+  # Historical rows only: backups rely on S3 SSE-AES256, not app encryption.
   encryption_enabled = Column(Boolean, nullable=False, default=False)
   compression_enabled = Column(Boolean, nullable=False, default=True)
 
@@ -137,13 +122,10 @@ class GraphBackup(Model):
   error_message = Column(Text, nullable=True)
   retry_count = Column(Integer, nullable=False, default=0)
 
-  # Additional metadata as JSON
   backup_metadata = Column(JSON, nullable=True)
-
-  # Timestamps
   started_at = Column(DateTime, nullable=True)
   completed_at = Column(DateTime, nullable=True)
-  expires_at = Column(DateTime, nullable=True, index=True)  # For retention management
+  expires_at = Column(DateTime, nullable=True, index=True)
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
@@ -152,14 +134,10 @@ class GraphBackup(Model):
     nullable=False,
   )
 
-  # User tracking (optional)
   created_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
-
-  # Relationships
   created_by_user = relationship("User", foreign_keys=[created_by_user_id])
 
   def __repr__(self) -> str:
-    """String representation of the graph backup."""
     return (
       f"<GraphBackup {self.id} graph={self.graph_id} "
       f"type={self.backup_type} status={self.status}>"
@@ -203,18 +181,11 @@ class GraphBackup(Model):
     initiated_by: str,
     now: datetime | None = None,
   ) -> "GraphBackup":
-    """Build — but do not persist — a COMPLETED row from a BackupManager export.
+    """Build, without persisting, a COMPLETED row from a BackupManager export.
 
-    The manager's metadata describes the archive; this maps it onto the row the
-    listing and download surfaces resolve through. The caller owns ``add`` and
-    the transaction: a graph's final backup at teardown is added under a
-    SAVEPOINT inside a batch that must not commit early, while a subgraph's
-    pre-delete backup commits at once. Neither can use ``create`` /
-    ``complete_backup``, which commit.
-
-    ``database_name`` is the LadybugDB database the archive holds. It differs
-    from ``graph_id`` when a subgraph's backup is registered on its parent —
-    the row the customer still has once the subgraph itself is gone.
+    The caller owns ``add`` and the transaction (teardown adds it under a
+    SAVEPOINT that must not commit early). ``database_name`` differs from
+    ``graph_id`` when a subgraph's backup is registered on its parent.
     """
     now = now or datetime.now(UTC)
     backup_metadata: dict[str, Any] = {
@@ -261,12 +232,8 @@ class GraphBackup(Model):
   def get_by_id_and_graph(
     cls, backup_id: str, graph_id: str, session: Session
   ) -> Optional["GraphBackup"]:
-    """Get a backup by ID, scoped to its owning graph.
-
-    Use this for any caller that already authorized ``graph_id`` (e.g. a
-    URL path scope) — it prevents reaching another graph's backup with a
-    guessed backup_id, since the lookup never matches across graphs.
-    """
+    """Get a backup by ID within an already-authorized ``graph_id``, so a
+    guessed backup_id cannot reach another graph's backup."""
     return (
       session.query(cls).filter(cls.id == backup_id, cls.graph_id == graph_id).first()
     )
@@ -284,7 +251,6 @@ class GraphBackup(Model):
     """Get backups for a specific graph."""
     query = session.query(cls).filter(cls.graph_id == graph_id)
 
-    # Exclude expired backups by default
     if not include_expired:
       query = query.filter(cls.status != BackupStatus.EXPIRED)
 
@@ -329,17 +295,10 @@ class GraphBackup(Model):
 
   @classmethod
   def count_user_initiated_today(cls, graph_id: str, session: Session) -> int:
-    """User-requested backups for this graph since the start of the UTC day.
+    """User-requested, non-failed backups for this graph since UTC midnight.
 
-    Scoped to ``initiated_by = 'user'`` so the nightly platform backup never
-    consumes the customer's allowance — on the entry tier that allowance is two
-    per day, and a scheduled backup would otherwise take half of it for
-    something they did not ask for.
-
-    Failed attempts are excluded. The quota bounds sustained usage, and burning
-    a customer's daily allowance on a backup that errored — quite possibly on
-    our side — would turn our fault into their limit. Burst abuse is already
-    bounded separately by the endpoint's rate-limit category.
+    Scheduled backups and failed attempts do not spend the customer's quota;
+    burst abuse is bounded by the endpoint's rate limit.
     """
     from sqlalchemy import func
 
@@ -376,7 +335,6 @@ class GraphBackup(Model):
     """Get backup statistics for a graph."""
     from sqlalchemy import func
 
-    # Basic counts (exclude expired backups)
     total_backups = (
       session.query(func.count(cls.id))
       .filter(cls.graph_id == graph_id, cls.status != BackupStatus.EXPIRED)
@@ -395,7 +353,6 @@ class GraphBackup(Model):
       .scalar()
     )
 
-    # Size statistics
     total_original_size = (
       session.query(func.sum(cls.original_size_bytes))
       .filter(cls.graph_id == graph_id, cls.status == BackupStatus.COMPLETED)
@@ -417,7 +374,6 @@ class GraphBackup(Model):
       or 0
     )
 
-    # Latest backup info
     latest_backup = (
       session.query(cls)
       .filter(cls.graph_id == graph_id, cls.status == BackupStatus.COMPLETED)
@@ -503,7 +459,6 @@ class GraphBackup(Model):
 
     if self.backup_metadata is not None:
       self.backup_metadata.update(metadata)
-      # Flag the JSON column as modified so SQLAlchemy detects the change
       flag_modified(self, "backup_metadata")
     else:
       self.backup_metadata = metadata
@@ -536,9 +491,7 @@ class GraphBackup(Model):
       "relationship_count": self.relationship_count,
       "database_version": self.database_version,
       "backup_duration_seconds": self.backup_duration_seconds,
-      "checksum": self.checksum[:16] + "..."
-      if self.checksum is not None
-      else None,  # Truncate for display
+      "checksum": self.checksum[:16] + "..." if self.checksum is not None else None,
       "encryption_enabled": self.encryption_enabled,
       "compression_enabled": self.compression_enabled,
       "error_message": self.error_message,

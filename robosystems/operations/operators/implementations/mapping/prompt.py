@@ -1,18 +1,5 @@
-"""System prompt for the MappingOperator (CoA → rs-gaap mapping).
-
-rs-gaap is the canonical reporting vocabulary and the direct mapping target:
-the LLM matches each Chart-of-Accounts element to the closest rs-gaap concept
-the renderer consumes. (The FAC view is derived downstream from each CoA →
-rs-gaap arc via the fac-to-rs-gaap bridge — it is never picked here.)
-
-Candidates are narrowed by the backend before they reach the model: by the
-element's FASB elementsOfFinancialStatements (EFS) trait
-(asset/liability/equity/revenue/expense/gain/loss), by liquidity
-(current/noncurrent) for assets and liabilities, and restricted to the
-concepts that actually render under the active Reporting Style. So the model
-chooses among a tight, section-correct set rather than the full ~2,000 rs-gaap
-variants. Typical candidate set: a few dozen concepts.
-"""
+"""Prompts for the MappingOperator (CoA → rs-gaap). Candidates arrive already
+narrowed by EFS trait, liquidity and the active Reporting Style."""
 
 MAPPING_SYSTEM_PROMPT = """You are a financial mapping specialist. Your task is to map \
 Chart of Accounts (CoA) elements from a private company to the closest concept in \

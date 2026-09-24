@@ -57,20 +57,15 @@ class SourceFile(Base):
   # Source identification (flexible for different source types)
   source_id = Column(String, nullable=True)  # accession_number, ticker, etc.
 
-  # Processing status
-  status = Column(String, nullable=False, default="pending")
-  # pending: downloaded, awaiting processing
-  # processing: currently being processed
-  # success: processing completed successfully
-  # error: processing failed
+  status = Column(
+    String, nullable=False, default="pending"
+  )  # pending, processing, success, error
 
   error_reason = Column(Text, nullable=True)
   attempts = Column(Integer, nullable=False, default=0)
 
   # Dagster partition alignment (e.g., 2025_0001373715_0001373715-25-000309)
   partition_key = Column(String, nullable=True)
-
-  # Timestamps
   discovered_at = Column(
     DateTime(timezone=True),
     default=lambda: datetime.now(UTC),
@@ -78,8 +73,6 @@ class SourceFile(Base):
   )
   processed_at = Column(DateTime(timezone=True), nullable=True)
   last_attempt_at = Column(DateTime(timezone=True), nullable=True)
-
-  # Relationships
   graph = relationship("Graph", backref="source_files")
 
   def __repr__(self) -> str:

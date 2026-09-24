@@ -1,19 +1,9 @@
-"""Model access via AWS Bedrock Converse.
+"""Model access via AWS Bedrock Converse, plus an optional self-hosted
+OpenAI-compatible model (`openai_compat.py`) that speaks the same blocks.
 
-Bedrock is the platform's path, deliberately: it puts model spend in AWS Cost
-Explorer alongside everything else, emits CloudWatch token metrics, and lets
-IAM rather than a shared API key control who can call a model. Converse is
-the one request shape Bedrock serves every model through — Claude, GPT-5.6,
-the open-weight families — with a single tool protocol and usage block, so
-which model runs is a registry row (`config/operators.py`), not a code path.
-
-The one other path is a deployment's self-hosted model behind an
-OpenAI-compatible endpoint (`openai_compat.py`), registered only when the
-deployment turns it on. It speaks the same Converse blocks to its callers.
-
-Messages carry Converse content blocks: `{"text": ...}`, `{"toolUse": ...}`,
-`{"toolResult": ...}`, and whatever the model returned (a reasoning block
-must be replayed verbatim or the transcript is rejected).
+Which model runs is a registry row in `config/operators.py`, not a code path.
+Messages carry Converse content blocks; a reasoning block the model returned
+must be replayed verbatim or the transcript is rejected.
 """
 
 import asyncio
@@ -38,13 +28,9 @@ if TYPE_CHECKING:
 
 
 class AIProviderError(Exception):
-  """The provider refused or could not serve the call.
-
-  Auth, entitlement, or request-shape failures — not a model answer. Callers
-  must surface it as a failed operation, never count it as an empty result:
-  a per-batch swallow turned a total Bedrock outage into a "successful" run
-  that mapped nothing.
-  """
+  """The provider refused or could not serve the call (auth, entitlement,
+  request shape). Callers must fail the operation, never treat it as an empty
+  result."""
 
 
 _PROVIDER_ERROR_CODES = frozenset(
@@ -62,8 +48,7 @@ _PROVIDER_ERROR_CODES = frozenset(
 @dataclass
 class AIMessage:
   role: str
-  # A turn is either plain text or a list of Converse content blocks.
-  # Tool-use loops append block lists; single-shot callers pass a string.
+  # Plain text, or a list of Converse content blocks.
   content: str | list[dict[str, Any]]
 
 
@@ -80,17 +65,14 @@ class ToolCall:
 class AIResponse:
   content: str
   model: str
-  # With prompt caching in play, `input_tokens` is the UNCACHED input only;
-  # the true input is input + cache_read + cache_creation. All three must
-  # reach the meter or cached tokens go unbilled.
+  # UNCACHED input only; all three input counts must be billed.
   input_tokens: int
   output_tokens: int
   stop_reason: str | None = None
   cache_read_input_tokens: int = 0
   cache_creation_input_tokens: int = 0
-  # The model's full output content, as Converse returned it. A tool loop
-  # replays it verbatim as the assistant turn; `content` above is the
-  # concatenated text for simple callers.
+  # Full output as returned, replayed verbatim by tool loops; `content` is
+  # just the joined text.
   content_blocks: list[dict[str, Any]] = field(default_factory=list)
 
   @property
@@ -113,8 +95,6 @@ def text_block(text: str) -> dict[str, Any]:
 def tool_result_block(
   tool_use_id: str, content: str, is_error: bool = False
 ) -> dict[str, Any]:
-  """A tool result the model can read back, flagged when the tool failed so
-  it can correct itself."""
   return {
     "toolResult": {
       "toolUseId": tool_use_id,
@@ -128,11 +108,7 @@ _CACHE_POINT: dict[str, Any] = {"cachePoint": {"type": "default"}}
 
 
 class AIClient:
-  """Untracked model access: Bedrock, plus the self-hosted model when enabled.
-
-  Callers on a billable path use `TrackedAIClient`, which wraps this and
-  consumes credits per call.
-  """
+  """Untracked model access; billable paths wrap it in `TrackedAIClient`."""
 
   def __init__(self):
     self.backend = "bedrock"
@@ -143,17 +119,15 @@ class AIClient:
   def _initialize_bedrock_client(self):
     import boto3
 
-    # Build real AWS endpoint URL (bypass LocalStack's AWS_ENDPOINT_URL env var)
+    # Explicit endpoint so LocalStack's AWS_ENDPOINT_URL is bypassed.
     bedrock_endpoint = f"https://bedrock-runtime.{env.AWS_BEDROCK_REGION}.amazonaws.com"
 
     kwargs = {
       "service_name": "bedrock-runtime",
       "region_name": env.AWS_BEDROCK_REGION,
-      "endpoint_url": bedrock_endpoint,  # IMPORTANT: Bypass LocalStack, go directly to AWS
+      "endpoint_url": bedrock_endpoint,
     }
 
-    # In dev: use explicit credentials (AWS_BEDROCK_ACCESS_KEY_ID)
-    # In prod/staging: use IAM role credentials (ECS task role / EC2 instance profile)
     if env.ENVIRONMENT == "dev" and env.AWS_BEDROCK_ACCESS_KEY_ID:
       kwargs["aws_access_key_id"] = env.AWS_BEDROCK_ACCESS_KEY_ID
       kwargs["aws_secret_access_key"] = env.AWS_BEDROCK_SECRET_ACCESS_KEY
@@ -217,26 +191,14 @@ class AIClient:
   ) -> AIResponse:
     """Send one Converse request.
 
-    `model` is a profile, a registered short name, or a wire id; unset, the
-    operator class's override or the platform default applies. An
-    unregistered name raises rather than silently running something else.
-
-    `tools` takes MCP-shaped definitions (name / description / inputSchema);
-    with them the model may stop with reason "tool_use" and the calls are on
-    `AIResponse.tool_calls`. Tool choice is always the model's: Converse has
-    no "forbid tools" option, and the transcript must keep `toolConfig` while
-    it carries tool blocks, so a loop that wants a final answer says so in
-    the prompt and treats a stray tool call as terminal.
-
-    `cache_conversation` adds a cache breakpoint on the trailing user turn.
-    Only worth it for multi-call loops over a growing transcript, where the
-    next call re-reads everything up to that turn; a single-shot caller would
-    pay the 1.25x cache-write premium with nothing ever reading the entry.
+    `model` is a profile, registered short name, or wire id; an unregistered
+    name raises. `tools` takes MCP-shaped definitions. Converse cannot forbid
+    tool use, so a loop wanting a final answer asks in the prompt and treats a
+    stray tool call as terminal. `cache_conversation` caches the trailing turn;
+    only worth the cache-write premium for multi-call loops.
     """
     spec = OperatorConfig.resolve_model(model, operator_type)
     if spec.provider is ModelProvider.OPENAI_COMPAT:
-      # The row is registered only when enabled, which is also when the
-      # client is built; reaching here without one is a wiring fault.
       if self._self_hosted is None:
         raise AIProviderError(
           f"{spec.model_id} is a self-hosted model but OPENAI_COMPAT_ENABLED is off"
@@ -251,11 +213,8 @@ class AIClient:
       spec, messages, system, max_tokens, temperature, tools, cache_conversation
     )
 
-    # botocore is synchronous and a model call can take minutes; run it on a
-    # worker thread so the event loop — shared by every tenant on this task —
-    # is not held for the duration. The default executor, not `run_off_loop`:
-    # that limiter fronts short OLTP work and must not be exhausted by
-    # minutes-long calls.
+    # Minutes-long sync call: off the event loop, on the default executor
+    # rather than `run_off_loop`, whose limiter is sized for short OLTP work.
     try:
       response = await asyncio.to_thread(self._converse_sync, request)
     except ClientError as e:
@@ -299,11 +258,8 @@ class AIClient:
     ]
 
     if cache_conversation and spec.cache_points and message_dicts:
-      # Cache breakpoint on the trailing turn. Applied here at request build,
-      # never persisted into the caller's transcript — a marker left on every
-      # past turn would exceed the 4-breakpoint limit. The moved breakpoint
-      # still hits: the lookup resolves the longest previously cached prefix,
-      # so each call reads the entry the previous one wrote and extends it.
+      # Added per request, never persisted to the transcript: markers on
+      # every past turn would exceed the 4-breakpoint limit.
       message_dicts[-1]["content"].append(dict(_CACHE_POINT))
 
     max_out = max_tokens
@@ -322,11 +278,8 @@ class AIClient:
       request["additionalModelRequestFields"] = dict(spec.additional_request_fields)
 
     if system:
-      # One cache breakpoint at the end of `system` caches the tool
-      # definitions and the system prompt together (Converse evaluates
-      # tools -> system -> messages, cumulatively). Below the model's
-      # minimum cacheable prefix the marker is accepted and silently caches
-      # nothing, which costs nothing extra.
+      # Caches tools and system together (Converse orders tools -> system ->
+      # messages).
       system_blocks: list[dict[str, Any]] = [text_block(system)]
       if spec.cache_points:
         system_blocks.append(dict(_CACHE_POINT))
@@ -349,10 +302,7 @@ class AIClient:
 
   @staticmethod
   def _parse_response(response: dict[str, Any], spec: ModelSpec) -> AIResponse:
-    # A response may interleave text, tool-use, and reasoning blocks; the
-    # first block is not guaranteed to be text (a pure tool-use turn has
-    # none). Join every text block for the back-compat `content` string and
-    # hand back the full block list for tool loops to replay.
+    # The first block need not be text; join every text block.
     blocks = response.get("output", {}).get("message", {}).get("content", [])
     text = "".join(
       b.get("text", "") for b in blocks if isinstance(b, dict) and "text" in b
@@ -365,8 +315,6 @@ class AIClient:
       input_tokens=usage["inputTokens"],
       output_tokens=usage["outputTokens"],
       stop_reason=response.get("stopReason"),
-      # Present on every response for caching models (zeros when nothing
-      # cached); .get keeps models that omit them reading as zero.
       cache_read_input_tokens=usage.get("cacheReadInputTokens", 0),
       cache_creation_input_tokens=usage.get("cacheWriteInputTokens", 0),
       content_blocks=blocks,
@@ -378,13 +326,7 @@ _shared_client_lock = threading.Lock()
 
 
 def get_ai_client() -> AIClient:
-  """Process-wide `AIClient`.
-
-  boto3 clients are thread-safe, and constructing one per request put a
-  synchronous client build plus an STS round-trip on the event loop every
-  time an operator ran. A failed construction is not cached, so the next
-  call retries.
-  """
+  """Process-wide `AIClient`; a failed construction is not cached."""
   global _shared_client
   if _shared_client is None:
     with _shared_client_lock:

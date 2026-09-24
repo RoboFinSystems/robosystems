@@ -1,9 +1,6 @@
-"""API execution adapter — runs operators in API request context.
-
-Builds an OperatorContext from `HttpToolAccess` (MCP over HTTP),
-`SessionCreditConsumer` (the request's own db session), and `CallbackProgress`.
-Used by the orchestrator and by router handlers for sync/SSE execution.
-"""
+"""In-process operator execution: an OperatorContext built from
+`HttpToolAccess`, `SessionCreditConsumer` and `CallbackProgress`. Reached only
+through `OperatorOrchestrator.route_query`; no endpoint calls it."""
 
 from __future__ import annotations
 
@@ -42,29 +39,18 @@ async def run_operator_api(
   context: dict[str, Any] | None = None,
   callback: Callable | None = None,
 ) -> OperatorResult:
-  """Run an operator in API request context.
-
-  Gates the run, wires up tools and credit tracking, and tears the tool
-  connection down afterwards. Returns the operator's `OperatorResult` with
-  credit and token metadata attached. Without `db_session` the run proceeds
-  unbilled and un-pre-flighted — that path is logged loudly and should only
-  ever be reached by tests.
-  """
-  # Before any tool access is constructed: the tool layer carries no user
-  # identity, so this is the only point at which the caller's graph role can
-  # be checked on this path.
+  """Without `db_session` the run is unbilled and skips the credit pre-flight;
+  only tests should reach that path."""
+  # Must precede tool construction: the tool layer carries no user identity,
+  # so this is the only place the caller's graph role is checked.
   enforce_operator_write_role(operator, graph_id, str(user.id))
   enforce_operator_graph_scope(operator, graph_id)
 
-  # Credits are consumed after each Bedrock call returns, so this pre-flight is
-  # what bounds spend. The SSE and background-queue strategies reach this
-  # function without an orchestrator, so checking here rather than there is
-  # what makes the gate cover every execution path.
+  # Credits are debited after each model call, so this pre-flight is what
+  # bounds spend.
   enforce_operator_credits(operator, graph_id, str(user.id), db_session, mode)
 
-  # The tool surface must not exceed what the role gate above checked for:
-  # a read-only operator skips the write-role gate, so it must also get a
-  # read-only tool surface.
+  # A read-only operator skipped the write-role gate, so it gets read-only tools.
   tools = HttpToolAccess(
     graph_id, read_only=operator.spec.read_only, user_id=str(user.id)
   )

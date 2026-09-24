@@ -1,4 +1,4 @@
-"""MappingOperator — autonomous CoA → US GAAP mapping."""
+"""MappingOperator — autonomous CoA → rs-gaap mapping."""
 
 from robosystems.operations.operators.implementations.mapping.operator import (
   MappingOperator,

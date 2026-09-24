@@ -1,17 +1,9 @@
 """Base classes for AI Operators.
 
-Two protocols coexist:
-
-- ``Operator`` / ``OperatorSpec`` / ``OperatorResult`` — the unified protocol.
-  Write new operators against this one.
-- ``BaseOperator`` / ``OperatorMetadata`` / ``OperatorResponse`` — the older
-  protocol. No shipped operator extends ``BaseOperator`` any more
-  (``AnalystOperator`` and ``MappingOperator`` are both ``Operator``); it stays
-  exported for its own tests, and the orchestrator still answers in
-  ``OperatorResponse``.
-
-"Operator" is the AI-executor concept (Claude/MCP), distinct from the REA
-``Agent`` (counterparty) modeled in ``models/extensions/roboledger/agent.py``.
+Write new operators against ``Operator`` / ``OperatorSpec`` / ``OperatorResult``.
+``BaseOperator`` / ``OperatorMetadata`` / ``OperatorResponse`` are the older
+protocol; no shipped operator extends ``BaseOperator``, but the orchestrator
+still answers in ``OperatorResponse``.
 """
 
 from __future__ import annotations
@@ -65,11 +57,8 @@ class ExecutionProfile:
 
 @dataclass
 class GraphScope:
-  """Declares which graphs an operator is allowed to run on.
-
-  None fields mean no restriction on that axis.
-  If both fields are set, both conditions must be satisfied.
-  """
+  """Graphs an operator may run on. None means no restriction on that axis;
+  set fields must all match."""
 
   shared_repo: str | None = None
   schema_extension: str | None = None
@@ -99,7 +88,7 @@ def matches_graph_scope(
   return True
 
 
-# ── New unified Operator protocol ────────────────────────────────────────────
+# ── Operator protocol ────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -152,11 +141,8 @@ class OperatorSpec:
 
 @dataclass
 class OperatorResult:
-  """What an operator returns. Contains domain results only — no runtime metadata.
-
-  Runtime metadata (tokens used, credits consumed, execution time) is tracked
-  by the OperatorContext and attached by the execution adapter.
-  """
+  """Domain results only; the execution adapter attaches token and credit
+  metadata."""
 
   content: str
   metadata: dict[str, Any] = field(default_factory=dict)
@@ -166,55 +152,27 @@ class OperatorResult:
 
 
 class Operator(ABC):
-  """Base class for all operators in the unified AI Operator system.
+  """Stateless operator: declares `spec` as a class attribute and implements
+  `run()` against the services in `OperatorContext`."""
 
-  Operators are stateless domain logic containers. They declare their
-  capabilities via `spec` (a class attribute) and implement `run()` which
-  receives an `OperatorContext` providing AI, tools, credits, and progress
-  reporting.
-
-  Example::
-
-      class MyCoolOperator(Operator):
-          spec = OperatorSpec(
-              name="Cool Operator",
-              description="Does cool things",
-              capabilities=[OperatorCapability.CUSTOM],
-          )
-
-          async def run(self, ctx: OperatorContext) -> OperatorResult:
-              response = await ctx.ai.create_message(...)
-              return OperatorResult(content=response.content)
-  """
-
-  spec: OperatorSpec  # Must be set by subclass as a class attribute
+  spec: OperatorSpec
 
   @abstractmethod
   async def run(self, ctx: OperatorContext) -> OperatorResult:
-    """Execute the operator's logic.
-
-    All services (AI, tools, progress, credits) come from ``ctx``. Credit
-    consumption is automatic — every ``ctx.ai.create_message()`` call tracks
-    tokens and deducts credits.
-    """
+    """Every ``ctx.ai.create_message()`` call bills itself; don't consume
+    credits here."""
 
   def can_handle(self, query: str, context: dict[str, Any] | None = None) -> float:
-    """Return confidence score (0-1) for handling this query.
-
-    Used by the orchestrator for routing. Override for custom logic.
-    Default returns 0.5 (neutral confidence).
-    """
+    """Routing confidence, 0-1."""
     return 0.5
 
 
-# ── Legacy classes (used by orchestrator/routers during migration) ───────────
+# ── Legacy protocol ──────────────────────────────────────────────────────────
 
 
 @dataclass
 class OperatorMetadata:
-  """Capability metadata for a ``BaseOperator``. New operators use
-  :class:`OperatorSpec`.
-  """
+  """Capability metadata for a ``BaseOperator``."""
 
   name: str
   description: str
@@ -250,9 +208,7 @@ class OperatorMetadata:
 
 @dataclass
 class OperatorResponse:
-  """Response from a ``BaseOperator``. New operators return
-  :class:`OperatorResult`.
-  """
+  """Response from a ``BaseOperator``, and the orchestrator's answer shape."""
 
   content: str
   operator_name: str
@@ -268,11 +224,7 @@ class OperatorResponse:
 
 
 class BaseOperator(ABC):
-  """Base class for the older operator protocol. No shipped operator extends
-  it — ``AnalystOperator`` and ``MappingOperator`` are both :class:`Operator`,
-  which is what new operators inherit from; this stays for its own tests and
-  the orchestrator's ``OperatorResponse``.
-  """
+  """Older operator protocol; no shipped operator extends it."""
 
   def __init__(
     self,
@@ -292,7 +244,6 @@ class BaseOperator(ABC):
   @property
   @abstractmethod
   def metadata(self) -> OperatorMetadata:
-    """Return operator metadata."""
     pass
 
   @abstractmethod
@@ -313,11 +264,9 @@ class BaseOperator(ABC):
     pass
 
   def supports_mode(self, mode: OperatorMode) -> bool:
-    """Check if operator supports the given mode."""
     return mode in self.metadata.supported_modes
 
   def has_capability(self, capability: OperatorCapability) -> bool:
-    """Check if operator has the given capability."""
     return capability in self.metadata.capabilities
 
   async def initialize_tools(self):
@@ -353,7 +302,6 @@ class BaseOperator(ABC):
         self.logger.error(f"Error closing Graph client: {e!s}")
 
   def track_tokens(self, input_tokens: int, output_tokens: int):
-    """Track token usage for the operator."""
     self.total_tokens_used["input"] += input_tokens
     self.total_tokens_used["output"] += output_tokens
 
@@ -457,45 +405,26 @@ class BaseOperator(ABC):
 def enforce_operator_write_role(
   operator: Operator, graph_id: str, user_id: str
 ) -> None:
-  """Gate a write-capable operator on the caller's graph write role.
+  """Gate a write-capable operator on the caller's graph write role (403).
 
-  Operators drive MCP tools through a tool-access layer that carries no user
-  identity, so the per-tool write classification the MCP router applies
-  (`validate_mcp_access(..., "write")`) never runs on this path. The role has
-  to be checked once, before the operator starts its tool-use loop.
-
-  Called from the execution adapters rather than the routers so that every
-  entry point inherits it — sync, SSE, queued background, and worker — since
-  two of those bypass the orchestrator and call the adapter directly.
-
-  No-ops for operators whose spec sets `read_only=True`; see
-  :attr:`OperatorSpec.read_only` for why the default is fail-closed.
-
-  Raises:
-      HTTPException: 403 if the user's role on the graph is read-only.
+  The tool-access layer carries no user identity, so the MCP router's per-tool
+  write check never runs on this path; this must run before the tool loop.
+  No-op when ``spec.read_only``.
   """
   if operator.spec.read_only:
     return
 
-  # Local import: this module is imported by the operator implementations, and
-  # the auth dependencies pull in the platform DB stack.
+  # Local import: auth dependencies pull in the platform DB stack.
   from robosystems.middleware.auth.dependencies import require_graph_write_role
 
   require_graph_write_role(user_id, graph_id)
 
 
 def enforce_operator_graph_scope(operator: Operator, graph_id: str) -> None:
-  """Refuse to run an operator on a graph outside its declared ``graph_scope``.
+  """403 when the graph is outside the operator's declared ``graph_scope``.
 
-  The orchestrator applies ``matches_graph_scope`` when it routes, but the
-  SSE, background-queue and worker paths call the execution adapters directly
-  and skipped it: a mapping operator scoped to ``roboledger`` could be started
-  on a graph with no ledger tenant, and its tools would then fail one by one
-  against a missing schema. Checked in the adapters, next to the write-role
-  gate, so every entry point inherits it. No-op for operators without a scope.
-
-  Raises:
-      HTTPException: 403 when the graph does not match the operator's scope.
+  Paths that bypass orchestrator routing would otherwise start an operator on
+  a graph it can't serve (e.g. a ledger operator with no ledger tenant).
   """
   scope = operator.spec.graph_scope
   if scope is None:

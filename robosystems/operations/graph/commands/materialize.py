@@ -19,19 +19,10 @@ async def materialize_cmd(
   current_user: User,
   db: Session,
 ) -> dict:
-  """Run graph materialization (or dry-run) and return a result dict.
+  """Run graph materialization (or a dry run) and return a result dict.
 
-  Handles:
-  - Billing enforcement / write-access check
-  - Source auto-detection based on graph type
-  - Dry-run limit validation (returns immediately, no lock acquired)
-  - Distributed lock to prevent concurrent materialization (fail-closed:
-    409 when held, 503 + Retry-After when the lock service is unavailable)
-  - Content-limit gate (413 if tier limits exceeded)
-  - Source routing: extensions (OLTP) vs staged (DuckDB) x direct vs Dagster
-
-  Returns a dict with at least ``operation_id`` and ``status``.
-  For dry-run returns ``{"status": "dry_run", "operation_id": "dry_run", ...}``.
+  The per-graph lock fails closed: 409 when held, 503 + Retry-After when the
+  lock service is down. A dry run checks limits and takes no lock.
   """
   from robosystems.config.constants import INGESTION_LOCK_TTL
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
@@ -44,10 +35,8 @@ async def materialize_cmd(
 
   circuit_breaker = CircuitBreakerManager()
 
-  # Enforce subscription / write-access
   graph = require_graph_access(graph_id, db, require_write=True)
 
-  # Auto-detect source from graph type when not specified
   source = _resolve_source(body.source, graph.graph_type)
 
   circuit_breaker.check_circuit(graph_id, "graph_materialization")
@@ -61,7 +50,6 @@ async def materialize_cmd(
       detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
     )
 
-  # Dry run: validate limits and return without executing
   if body.dry_run:
     from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
 
@@ -90,11 +78,8 @@ async def materialize_cmd(
       "limit_check": limit_check,
     }
 
-  # Acquire distributed lock to prevent concurrent materialization. This
-  # fails closed: a materialization is a retryable background job (the
-  # staleness sensor re-fires within minutes, and the client can retry), but
-  # an unlocked double-writer silently duplicates relationship-table edges.
-  # A Valkey outage is therefore a 503 with Retry-After, never a lockless run.
+  # Fails closed: a retry is cheap, while an unlocked double-writer silently
+  # duplicates relationship edges.
   lock_unavailable = HTTPException(
     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
     detail=(
@@ -124,13 +109,9 @@ async def materialize_cmd(
       detail="Materialization already in progress for this graph",
     )
 
-  # The worker releases the lock when the task finishes; lock_id makes that a
-  # compare-and-delete, so a task that outlives the TTL cannot strip a
-  # successor's lock. The lock is not extended from the worker: the
-  # extensions task's own timeout (TASK_TIMEOUTS, 1800s) is half of
-  # INGESTION_LOCK_TTL, so it cannot lapse under a running task, and the
-  # per-graph MaterializationLock inside the run is the one that is extended
-  # at each table checkpoint.
+  # The worker releases the lock by lock_id (compare-and-delete), so a task
+  # that outlives the TTL cannot strip a successor's lock. It is never
+  # extended: the task timeout is half of INGESTION_LOCK_TTL.
   lock_key = f"graph_materialize:{graph_id}"
   lock_id = lock.lock_id
 
@@ -145,8 +126,7 @@ async def materialize_cmd(
     )
 
     if not limit_check["allowed"]:
-      # Unverifiable storage (Graph API unreachable) is transient — 503 so
-      # clients retry, not 413 which reads as "you are over your cap".
+      # Unverifiable storage is transient: 503 to retry, not 413 ("over cap").
       if limit_check.get("retryable"):
         raise HTTPException(
           status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -293,13 +273,9 @@ def _require_rebuild_for_populated_graph(
 ) -> None:
   """Reject a non-rebuild materialize that would re-copy ingested rows.
 
-  DuckDB staging tables rebuild from *all* uploaded files, so once any file
-  has been materialized into the graph, a later non-rebuild materialize
-  replays the whole table — duplicate node keys fail the COPY and duplicate
-  relationships load silently. Only the combination that actually re-copies
-  is rejected: prior ingested files AND new pending files. A repeat call
-  with nothing new keeps its existing not-stale skip behavior, and a first
-  materialize (nothing ingested yet) is unaffected.
+  Staging tables rebuild from every uploaded file, so a non-rebuild run after
+  a prior ingest replays them: duplicate nodes fail and duplicate edges load
+  silently. Rejected only when there are both ingested and pending files.
   """
   if rebuild:
     return

@@ -1,15 +1,6 @@
-"""Model access via a self-hosted OpenAI-compatible endpoint.
-
-The open-source runtime's alternative to Bedrock: any server that speaks Chat
-Completions (vLLM, Ollama, LM Studio, NVIDIA NIM). It is off unless a
-deployment turns it on (``OPENAI_COMPAT_ENABLED``), and hosted prod leaves it
-off — a new model vendor is added per deployment, on demand.
-
-Converse stays the canonical transcript. Operators and the tool loop build and
-replay Converse content blocks; this module translates at the edge, out to
-Chat Completions messages and back to Converse blocks, so nothing above
-`AIClient` knows which provider answered.
-"""
+"""Model access via a self-hosted Chat Completions endpoint (vLLM, Ollama, NIM,
+...), off unless ``OPENAI_COMPAT_ENABLED``. Converse stays the canonical
+transcript; this module translates at the edge in both directions."""
 
 import json
 import re
@@ -47,8 +38,6 @@ _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 
 class OpenAICompatClient:
-  """Chat Completions access to one self-hosted endpoint."""
-
   def __init__(
     self,
     base_url: str,

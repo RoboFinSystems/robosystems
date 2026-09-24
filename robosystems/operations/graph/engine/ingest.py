@@ -21,7 +21,6 @@ from ....config import env
 from ....logger import logger
 from ....security import SecurityAuditLogger
 
-# Cache schema adapters to avoid recompilation
 _schema_adapter_cache: dict[str, XBRLSchemaConfigGenerator] = {}
 
 
@@ -466,7 +465,6 @@ def _create_relationship_table_from_schema(
     return False
 
 
-# Valid identifier pattern for table/column names
 VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
@@ -771,6 +769,5 @@ def _map_arrow_to_lbug_type(arrow_type: str) -> str:
   elif "decimal" in arrow_type_lower:
     return "DOUBLE"  # Map decimal to double for simplicity
   else:
-    # Default to STRING for unknown types
     logger.debug(f"Unknown Arrow type '{arrow_type}', defaulting to STRING")
     return "STRING"

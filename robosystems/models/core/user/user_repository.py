@@ -76,13 +76,11 @@ class UserRepository(Model):
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("usra"))
 
-  # User reference
   user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
-  # Repository identification (plain String — new repos added via manifests, no migration needed)
+  # Plain String so manifests can add repositories without a migration.
   repository_type = Column(String, nullable=False)
-  # Holds the graph_id slug (e.g. "sec"), not a display name — it is the FK
-  # target in graphs.graph_id.
+  # The graph_id slug (e.g. "sec"), not a display name.
   repository_name = Column(
     String, ForeignKey("graphs.graph_id", ondelete="RESTRICT"), nullable=False
   )
@@ -91,39 +89,28 @@ class UserRepository(Model):
     SQLEnum(RepositoryAccessLevel), nullable=False, default=RepositoryAccessLevel.NONE
   )
 
-  # Repository plan management (plain String — plans defined in adapter manifests)
+  # Plain String: plans are defined in manifests.
   repository_plan = Column(String, nullable=False, default="starter")
 
-  # Status and lifecycle
   is_active = Column(Boolean, nullable=False, default=True)
   activated_at = Column(
     DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
   expires_at = Column(DateTime(timezone=True), nullable=True)  # None = no expiration
 
-  # Billing management
   monthly_price_cents = Column(Integer, nullable=False, default=0)
-  billing_cycle_day = Column(Integer, nullable=True)  # Day of month for billing
+  billing_cycle_day = Column(Integer, nullable=True)
   last_billed_at = Column(DateTime(timezone=True), nullable=True)
   next_billing_at = Column(DateTime(timezone=True), nullable=True)
 
-  # Credit allocation
   monthly_credit_allocation = Column(Integer, nullable=False, default=0)
 
-  # Administrative tracking
   granted_by = Column(String, ForeignKey("users.id"), nullable=True)
   granted_at = Column(DateTime(timezone=True), nullable=True)
 
-  # Configuration
-  access_scope = Column(
-    String, nullable=True
-  )  # JSON string for repository-specific access rules
-  quota_limits = Column(
-    String, nullable=True
-  )  # JSON string for usage quotas/rate limits
-  extra_metadata = Column(Text, nullable=True)  # JSON metadata for extensibility
-
-  # Timestamps
+  access_scope = Column(String, nullable=True)  # JSON
+  quota_limits = Column(String, nullable=True)  # JSON
+  extra_metadata = Column(Text, nullable=True)  # JSON
   created_at = Column(
     DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
@@ -133,8 +120,6 @@ class UserRepository(Model):
     default=lambda: datetime.now(UTC),
     onupdate=lambda: datetime.now(UTC),
   )
-
-  # Relationships
   user = relationship("User", foreign_keys=[user_id])
   granter = relationship("User", foreign_keys=[granted_by], post_update=True)
   user_credits = relationship(
@@ -351,13 +336,8 @@ class UserRepository(Model):
     )
 
   def revoke_access(self, session: Session, reason: str | None = None) -> None:
-    """Revoke repository access and deactivate the paired credit pool.
-
-    Stamps ``suspended_at``/``suspension_reason`` on the pool alongside
-    ``is_active``. Without them the pool records *that* it was suspended and
-    never *why* or *when*, which is the state an operator actually needs when
-    a customer asks why their credits stopped working.
-    """
+    """Revoke repository access and suspend the paired credit pool, recording
+    when and why."""
     now = datetime.now(UTC)
     self.is_active = False
     self.expires_at = now
@@ -377,16 +357,11 @@ class UserRepository(Model):
     self.invalidate_access_cache()
 
   def invalidate_access_cache(self) -> None:
-    """Drop the user's cached access decisions after this grant changes.
+    """Drop the user's cached allow/deny decisions after this grant changes.
 
-    Both auth paths cache the allow/deny answer per graph for the TTL, so the
-    grant row is only authoritative once those entries are gone: a denial
-    recorded before the subscription existed would keep refusing a paying
-    subscriber, and an allow recorded before a revocation would keep admitting
-    a former one — the endpoint's ``immediate=true`` promise is only as good
-    as this call. Sweeps every entry the user owns rather than the one
-    repository, because a subgraph of the repository is cached under its own
-    id. Best-effort: the row has committed and the entries lapse on TTL.
+    Sweeps all of the user's entries, not just this repository, because
+    subgraphs are cached under their own ids. Best-effort: entries lapse on
+    TTL.
     """
     try:
       import importlib
@@ -408,9 +383,7 @@ class UserRepository(Model):
   ) -> None:
     """Move the subscription to another plan, in either direction.
 
-    ``new_price_cents`` and ``new_credits`` override the plan's own defaults —
-    which is also how a price or allocation is adjusted without changing plan.
-    A credit change propagates to the paired ``UserRepositoryCredits`` pool.
+    A ``new_credits`` change propagates to the paired credit pool.
     """
     old_plan = self.repository_plan
     self.repository_plan = new_plan

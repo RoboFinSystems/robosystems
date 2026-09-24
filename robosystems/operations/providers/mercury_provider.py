@@ -1,22 +1,16 @@
 """Mercury connection provider — the bank as a first-class source.
 
-The first bank-feed provider (``BANK_FEED_PROVIDERS``): native accounting,
-so the provider guard requires a chart of accounts and no live QuickBooks
-before a connection is created. Two credential modes, one provider:
+Two credential modes:
 
-- ``oauth`` — the hosted default. Mercury's partner OAuth client, one
-  consent per customer organization, ``read offline_access``, a one-hour
-  access token and a 30-day single-use refresh token. Consent is recorded to
-  the security audit log (the partnership's DAA §4.4).
-- ``api_key`` — a personal read-only token pasted at connect time. Gated by
-  ``MERCURY_API_KEY_CONNECTIONS_ENABLED``, which hosted production never
-  turns on: Mercury's terms bar third-party automated access without written
-  permission, and the OAuth approval is that permission. Self-hosted and
-  local deployments turn it on — your token, your graph.
+- ``oauth`` — the hosted default: partner OAuth, one-hour access token,
+  30-day single-use refresh token. Consent is recorded to the audit log.
+- ``api_key`` — a pasted read-only token, gated by
+  ``MERCURY_API_KEY_CONNECTIONS_ENABLED``. Never on in hosted production:
+  Mercury's terms bar third-party automated access without the written
+  permission the OAuth approval grants. Self-hosted deployments may enable it.
 
-Disconnect revokes the grant and runs the DAA §5.2 deletion protocol on the
-graph (``purge_bank_feed``): captured feed rows hard-deleted, Mercury payload
-keys scrubbed from accepted ones, the credential bundle emptied.
+Disconnect revokes the grant and purges the feed (``purge_bank_feed``), as the
+partnership agreement requires.
 """
 
 from __future__ import annotations
@@ -285,10 +279,8 @@ async def sync_mercury_connection(
 async def cleanup_mercury_connection(connection: dict[str, Any], graph_id: str) -> None:
   """Disconnect: revoke the grant, purge the feed, empty the credentials.
 
-  Runs before the connection row is soft-deleted. Revocation is best-effort
-  (a dead endpoint must not block the disconnect); the purge is not — it is
-  the deletion the partnership agreement promises, so a failure surfaces
-  and the disconnect is retried rather than leaving feed data behind.
+  Revocation is best-effort; a purge failure surfaces so the disconnect is
+  retried rather than leaving feed data behind.
   """
   from ...database import platform_session
   from ...models.core import ConnectionCredentials

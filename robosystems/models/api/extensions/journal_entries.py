@@ -109,20 +109,12 @@ class CreateJournalEntryRequest(BaseModel):
   type: Literal["standard", "adjusting", "closing", "reversing"] = "standard"
   status: Literal["draft", "posted"] = "draft"
   transaction_id: str | None = None
-  # Source-system provenance for the resulting Transaction row. Defaults
-  # to `native` (manually-created entries). Source-of-truth adapters
-  # (QuickBooks, Xero, ...) propagate their own source + connection_id
-  # so re-syncs can scope deletes correctly and reports can attribute
-  # entries to their originating system.
+  # Transaction provenance; adapters pass their own source + connection_id
+  # so re-syncs scope their deletes. Defaults to `native`.
   source: str | None = None
   connection_id: str | None = None
-  # Type of business event the Transaction represents (e.g. `bill_paid`,
-  # `cash_expense_recorded`, `invoice_issued`). Defaults to
-  # `"journal_entry"` for native manual entries. Adapter handlers
-  # (bill_paid, payment_received, ...) pass the source event_type through
-  # so reporting can filter / group by business-event kind. Distinct from
-  # the entry-level `type` field, which captures accounting role
-  # (standard / adjusting / closing / reversing).
+  # Business-event kind (e.g. `bill_paid`); distinct from the entry-level
+  # `type`, which is the accounting role (standard / adjusting / ...).
   transaction_type: str = "journal_entry"
 
 

@@ -7,13 +7,10 @@ because a native client (Claude Code, an IDE) binds an ephemeral port per
 run. Everything else — including ``http`` to any non-loopback host — is
 refused at registration, and a registered URI is checked again at use.
 
-A redirect URI is also required to be canonical enough that every parser
-reads the same authority from it: RFC 3986 ASCII only, no userinfo, a
-numeric port. Python's ``urlsplit`` treats a backslash as an ordinary host
-character and takes the host from after an ``@``; the WHATWG parser a
-browser runs ends the authority at the backslash. Without this rule the
-host we validate and show on the consent page is not the host the browser
-delivers the authorization code to.
+A redirect URI must also be canonical enough that every parser reads the
+same authority (RFC 3986 ASCII, no userinfo, numeric port): ``urlsplit`` and
+a browser's WHATWG parser disagree on backslashes and ``@``, so otherwise the
+host we validate is not the host the browser sends the code to.
 """
 
 import ipaddress
@@ -30,8 +27,7 @@ from robosystems.models.core.user.oauth_client import (
   OAuthClient,
 )
 
-# RFC 7591 hardening caps (spec §6). Tuned after Phase 0 shows how often
-# the IDE-family clients re-register.
+# RFC 7591 hardening caps.
 DCR_MAX_REDIRECT_URIS = 10
 DCR_MAX_CLIENT_NAME_LENGTH = 100
 DCR_MAX_URI_LENGTH = 2048

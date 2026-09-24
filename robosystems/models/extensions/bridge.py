@@ -1,18 +1,8 @@
 """Bridge — cross-namespace equivalence taxonomy.
 
-A Bridge is a taxonomy whose job is to relate qnames in one sovereign
-namespace to qnames in another. It ships through the same loader and
-sits in the same ``taxonomies`` / ``associations`` tables as any
-package; the Bridge model is a metadata overlay so admin tools can
-query "what bridges does this framework pin?" without scanning every
-taxonomy.
-
-Bridges typically have ``taxonomy_type='mapping'`` and their content
-is dominated by ``association_type='equivalence'`` arcs. The
-``source_namespace`` / ``target_namespace`` columns name the two ends
-of the bridge for human review and for routing decisions in mappers.
-
-Public-schema only — same as :class:`Framework`.
+A Bridge is an ordinary taxonomy (mostly ``equivalence`` arcs) relating
+qnames across namespaces; this public-schema row is a metadata overlay so
+tools can list a framework's bridges without scanning taxonomies.
 """
 
 from datetime import UTC, datetime
@@ -41,7 +31,7 @@ class Bridge(ExtensionsBase):
     {"schema": "public"},
   )
 
-  # Identity — UUID5(bridge, version).
+  # UUID5(bridge, version).
   id = Column(String, primary_key=True)
 
   bridge = Column(String, nullable=False)

@@ -1,9 +1,4 @@
-"""RDF-family encoder dispatch.
-
-JSON-LD is implemented; additional flavors slot in by adding a module
-and an ``elif`` arm here. The public ``serialize_to_rdf`` entry point
-keeps a stable signature regardless of which flavor is requested.
-"""
+"""RDF-family encoder dispatch."""
 
 from __future__ import annotations
 
@@ -15,11 +10,6 @@ def serialize_to_rdf(
   bundle: StatementBundle,
   flavor: RdfFlavor = RdfFlavor.JSONLD,
 ) -> str:
-  """Serialize a ``StatementBundle`` to an RDF-family format.
-
-  Returns a string for textual flavors (JSON-LD, Turtle, RDF/XML);
-  binary flavors (none today) would return bytes via a future overload.
-  """
   if flavor is RdfFlavor.JSONLD:
     from robosystems.operations.serialization.rdf.jsonld import (
       serialize_to_jsonld,

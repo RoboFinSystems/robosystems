@@ -1,13 +1,5 @@
-"""Tier capacity as the sale paths see it.
-
-Both places the platform commits money against a writer slot — checkout and
-``change-tier`` — ask the same question first: is there a healthy writer on
-the target tier with a free slot *right now*? Nothing on either path raises
-desired capacity on purpose (the high tiers are provisioned on request), so
-``scalable`` is not good enough, and any failure to determine capacity reads
-as none: refuse the sale rather than collect against a slot that may not
-exist.
-"""
+"""Tier capacity as the sale paths (checkout and ``change-tier``) see it: refuse
+the sale unless a healthy writer has a free slot right now."""
 
 from __future__ import annotations
 

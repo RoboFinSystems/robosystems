@@ -37,13 +37,9 @@ class Security(ExtensionsBase):
       postgresql_where="is_active = true",
     ),
   )
-
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("sec"))
   entity_id = Column(String, ForeignKey("entities.id"), nullable=True)
   source_graph_id = Column(String, nullable=True)  # Pre-association to a company graph
-
-  # Description
   name = Column(String, nullable=False)  # "Common Stock Class A", "Preferred Series A"
   security_type = Column(
     String, nullable=False
@@ -52,17 +48,11 @@ class Security(ExtensionsBase):
 
   # Terms (structured for future waterfall modeling)
   terms = Column(JSONB, nullable=False, default=dict)
-
-  # State
   is_active = Column(Boolean, nullable=False, default=True)
   authorized_shares = Column(BigInteger, nullable=True)
   outstanding_shares = Column(BigInteger, nullable=True)
-
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
   version = Column(Integer, nullable=False, default=1)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

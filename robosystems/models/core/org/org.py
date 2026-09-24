@@ -89,13 +89,9 @@ class Org(Model):
   def create_personal_org_for_user(
     cls, user_id: str, user_name: str, session: Session, auto_commit: bool = True
   ) -> "Org":
-    """Create a personal org with the user as OWNER.
-
-    Every resource — graphs, subscriptions, billing — hangs off an org rather
-    than a user, so registration has to mint one. A personal org becomes a team
-    or enterprise org by inviting members and changing ``org_type``; no new org
-    is created.
-    """
+    """Create a personal org with the user as OWNER. Registration needs one
+    because every resource hangs off an org; it later grows into a team org
+    in place."""
     org = cls.create(
       name="My Organization",
       org_type=OrgType.PERSONAL,

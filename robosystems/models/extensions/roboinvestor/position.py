@@ -40,8 +40,6 @@ class Position(ExtensionsBase):
       postgresql_where=text("status = 'active'"),
     ),
   )
-
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("pos"))
   portfolio_id = Column(String, ForeignKey("portfolios.id"), nullable=False)
   security_id = Column(String, ForeignKey("securities.id"), nullable=False)
@@ -60,20 +58,12 @@ class Position(ExtensionsBase):
   valuation_source = Column(
     String, nullable=True
   )  # manual, report_derived, market, formula
-
-  # Dates
   acquisition_date = Column(Date, nullable=True)
   disposition_date = Column(Date, nullable=True)
-
-  # State
   status = Column(String, nullable=False, default="active")  # active, disposed, pending
-
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
   notes = Column(String, nullable=True)
   version = Column(Integer, nullable=False, default=1)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

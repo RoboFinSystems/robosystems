@@ -38,14 +38,12 @@ _FALLBACK_BYTES_PER_ROW = {
   "json": FALLBACK_BYTES_PER_ROW_JSON,
 }
 
-# Parquet locates its metadata from the end of the file: a 4-byte footer length
-# followed by the "PAR1" magic. pyarrow reads the last 64 KiB first, same as
-# here, and only goes back for more when the footer is bigger.
+# Parquet ends with a 4-byte footer length and the "PAR1" magic. Like pyarrow,
+# read the last 64 KiB first and go back only for a bigger footer.
 _PARQUET_TRAILER_BYTES = 8
 _PARQUET_TAIL_READ_BYTES = 64 * 1024
-# A footer is Thrift metadata (schema + row-group index); a legitimate file under
-# the 100 MB cap is nowhere near this. Anything larger is refused as malformed
-# rather than decoded into memory.
+# No legitimate file under the 100 MB cap has a footer near this; refuse
+# rather than decode it into memory.
 _PARQUET_MAX_FOOTER_BYTES = 16 * 1024 * 1024
 _STREAM_BUFFER_BYTES = 1024 * 1024
 _JSON_WHITESPACE = re.compile(r"[ \t\n\r]*")
@@ -60,9 +58,8 @@ class _PayloadTooLarge(Exception):
   """The object yielded more bytes than the size gate admitted."""
 
 
-# Column names become SQL identifiers in the staging layer; the graph API
-# refuses anything outside this class and so does the edge, where the tenant
-# gets the 400 directly instead of a staging warning in a log.
+# Column names become staging SQL identifiers. The graph API enforces the same
+# class; checking here gives the tenant a 400 instead of a logged warning.
 _COLUMN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 
 
@@ -133,11 +130,8 @@ def _parquet_row_count(
     tail_len = min(file_size, _PARQUET_TAIL_READ_BYTES)
     tail = _read_range(s3, bucket, key, file_size - tail_len, file_size - 1)
   except FlexibleChecksumError:
-    # LocalStack (and some S3-compatible stores) answer a ranged GET with the
-    # whole object's checksum, which botocore then fails to verify — same
-    # quirk `dagster/resources/storage.py` sidesteps. Real S3 omits the header
-    # for a range. Fall back to one bounded full read; the parse below is
-    # still footer-only, so this costs transfer, not memory.
+    # LocalStack returns the whole object's checksum on a ranged GET, which
+    # botocore rejects. Fall back to one bounded full read.
     tail = io.BufferedReader(
       _BoundedS3Body(s3.get_object(Bucket=bucket, Key=key)["Body"], byte_limit),
       _STREAM_BUFFER_BYTES,
@@ -308,19 +302,14 @@ async def ingest_file_cmd(
 
   graph = Graph.get_by_id(graph_id, db)
   if graph is None:
-    # A graph the registry cannot resolve is refused, not exempted — skipping
-    # the cap on a lookup miss is the fail-open shape this subsystem
-    # eliminated everywhere else.
+    # Fail closed: an unresolvable graph must not skip the storage cap.
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail=f"Graph {graph_id} not found",
     )
 
-  # Gate on the measured instance footprint, not the logical staging sum:
-  # `GraphTable.total_size_bytes` counts staging rows only and runs far under
-  # the bytes on disk, so it would admit an upload to an instance already at
-  # its cap. Instance scope for the same reason as materialization — a subgraph
-  # shares its parent's box.
+  # Gate on the measured instance footprint (a subgraph shares its parent's),
+  # not the staging-row sum, which runs far under the bytes on disk.
   from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
 
   scope_graph_id = str(graph.parent_graph_id) if graph.parent_graph_id else graph_id
@@ -337,9 +326,8 @@ async def ingest_file_cmd(
     )
 
   storage_limit_bytes = storage_check["limit_gb"] * 1024**3
-  # Headroom is judged on the enforced figure, which excludes blue-green
-  # `-wip`/`-prev` build artifacts — same basis as the cap check itself, so an
-  # in-flight rebuild doesn't reject uploads the durable footprint can absorb.
+  # The enforced figure excludes blue-green `-wip`/`-prev` artifacts, so an
+  # in-flight rebuild doesn't reject uploads.
   current_storage_bytes = (storage_check["enforced_storage_gb"] or 0) * 1024**3
   if (
     not storage_check["allowed"]
@@ -352,11 +340,8 @@ async def ingest_file_cmd(
       f"Attempted upload: {actual_file_size / (1024**3):.2f} GB",
     )
 
-  # The per-file row cap is the tier's per-table materialization cap, bounded
-  # by the platform ceiling: a single file above `max_single_table_rows` can
-  # never materialize on this tier, so it is refused here instead of after it
-  # has been stored and staged. Fallback tracks ladybug-standard, as in
-  # IngestionLimitChecker — a fallback wider than the box defeats the guard.
+  # A file above the tier's per-table cap could never materialize, so refuse
+  # it now. The fallback is ladybug-standard's cap, as in IngestionLimitChecker.
   tier_row_cap = GraphTierConfig.get_graph_limits(graph_tier).get(
     "max_single_table_rows", 2_500_000
   )
@@ -430,11 +415,10 @@ async def ingest_file_cmd(
     )
 
     if new_file_count > 0:
-      # Size-based routing: small files use direct staging, large files use Dagster
+      # Small files stage inline; large ones go to a Dagster job.
       small_file_threshold_bytes = SMALL_FILE_STAGING_THRESHOLD_MB * 1024 * 1024
 
       if actual_file_size < small_file_threshold_bytes:
-        # Fast path: Direct staging for small files
         from robosystems.operations.graph.engine.direct_staging import (
           stage_file_directly,
         )
@@ -464,7 +448,6 @@ async def ingest_file_cmd(
               f"Direct staging completed for file {file_id} in {staging_result.get('duration_ms', 0):.2f}ms"
             )
 
-            # If ingest_to_graph requested, trigger Dagster job for that (still async)
             if ingest_to_graph:
               from robosystems.middleware.sse import (
                 build_graph_job_config,
@@ -516,7 +499,6 @@ async def ingest_file_cmd(
           )
 
       else:
-        # Standard path: Dagster job for large files
         from robosystems.middleware.sse import (
           build_graph_job_config,
           run_and_monitor_dagster_job,
@@ -531,7 +513,6 @@ async def ingest_file_cmd(
         )
 
         try:
-          # Register operation with SSE
           event_storage = get_event_storage()
           await event_storage.create_operation(
             operation_type="duckdb_staging",
@@ -540,7 +521,6 @@ async def ingest_file_cmd(
             operation_id=operation_id,
           )
 
-          # Build Dagster job config
           run_config = build_graph_job_config(
             "stage_file_job",
             file_id=file_id,
@@ -549,7 +529,6 @@ async def ingest_file_cmd(
             ingest_to_graph=ingest_to_graph,
           )
 
-          # Run Dagster job with SSE monitoring in background
           background_tasks.add_task(
             run_and_monitor_dagster_job,
             job_name="stage_file_job",
@@ -592,13 +571,11 @@ async def ingest_file_cmd(
     "message": "File validated and ready for ingestion",
   }
 
-  # Check if file was staged directly (small file fast path)
   if graph_file.duckdb_status == "staged":
     response["duckdb_status"] = "staged"
     response["staged"] = True
 
     if graph_file.operation_id:
-      # Operation_id means graph ingestion is in progress
       response["operation_id"] = graph_file.operation_id
       response["monitor_url"] = f"/v1/operations/{graph_file.operation_id}/stream"
       response["message"] = (
@@ -610,7 +587,6 @@ async def ingest_file_cmd(
       response["message"] = "File validated and staged to DuckDB (fast path)"
       response["ingest_to_graph"] = False
   elif graph_file.operation_id:
-    # Large file: Dagster job handling staging (and possibly ingestion)
     response["operation_id"] = graph_file.operation_id
     response["monitor_url"] = f"/v1/operations/{graph_file.operation_id}/stream"
     response["staged"] = False
