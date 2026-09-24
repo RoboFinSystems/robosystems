@@ -17,9 +17,6 @@ from cryptography.fernet import InvalidToken
 from robosystems.middleware.auth.cache import APIKeyCache
 from robosystems.security import SecurityEventType
 
-# Mark entire test module as slow due to encryption operations
-pytestmark = pytest.mark.slow
-
 
 class TestAPIKeyCacheInitialization:
   """Test APIKeyCache initialization and configuration."""
@@ -112,7 +109,7 @@ class TestEncryptionDecryption:
       # Ensure validation failures counter is properly initialized
       if not hasattr(cache, "_validation_failures"):
         cache._validation_failures = 0
-      return cache
+      yield cache
 
   def test_encrypt_decrypt_success(self, cache):
     """Test successful encryption and decryption."""

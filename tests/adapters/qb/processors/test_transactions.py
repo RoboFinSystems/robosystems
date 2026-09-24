@@ -67,7 +67,6 @@ class TestDbtProject:
     assert (tests_dir / "assert_unique_identifiers.sql").exists()
 
 
-@pytest.mark.slow
 class TestDbtBuild:
   """Test that dbt build succeeds with seed data.
 

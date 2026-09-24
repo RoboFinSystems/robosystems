@@ -1,7 +1,5 @@
 """Tests for XBRL semantic enrichment module."""
 
-import pytest
-
 from robosystems.adapters.sec.enrichment import (
   camel_case_to_words,
   compose_element_text,
@@ -66,7 +64,6 @@ class TestComposeStructureText:
 
 
 class TestSemanticEnricher:
-  @pytest.mark.slow
   def test_embed_batch(self):
     from robosystems.adapters.sec.enrichment import SemanticEnricher
 
@@ -76,7 +73,6 @@ class TestSemanticEnricher:
     assert len(embeddings[0]) == 384
     assert len(embeddings[1]) == 384
 
-  @pytest.mark.slow
   def test_match_canonical_known_element(self):
     """Known elements should match with high confidence."""
     from robosystems.adapters.sec.enrichment import SemanticEnricher
@@ -89,7 +85,6 @@ class TestSemanticEnricher:
     assert concept_id == "revenue"
     assert confidence >= 0.95  # Known-element override
 
-  @pytest.mark.slow
   def test_match_canonical_below_threshold(self):
     """Unrelated text should not match."""
     from robosystems.adapters.sec.enrichment import SemanticEnricher
@@ -105,7 +100,6 @@ class TestSemanticEnricher:
     if concept_id is not None:
       assert confidence < 0.85
 
-  @pytest.mark.slow
   def test_match_canonical_from_query(self):
     from robosystems.adapters.sec.enrichment import SemanticEnricher
 
