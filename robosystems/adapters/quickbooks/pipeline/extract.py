@@ -1,9 +1,11 @@
 """QuickBooks extract asset: QB API → raw parquet for dbt."""
 
+import requests
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
 from .utils import (
+  JournalReportTruncatedError,
   flatten_bill_headers,
   flatten_bill_payment_headers,
   flatten_company_info,
@@ -15,9 +17,62 @@ from .utils import (
   flatten_sales_receipt_headers,
   flatten_vendors,
   get_pipeline_work_dir,
+  journal_report_truncated,
   parse_journal_report,
   write_extract_parquet,
 )
+
+_FIRST_WINDOW_DAYS = 366
+_MIN_WINDOW_DAYS = 7
+
+
+def fetch_journal_report(client, start_date: str, end_date: str, log=None) -> dict:
+  """The JournalReport for ``[start_date, end_date]``, fetched in windows.
+
+  Starts from year-long windows and halves any window Intuit truncates. The
+  rows of every window are concatenated in date order. Transaction groups
+  never span a window, since each group is one transaction on one date.
+
+  Raises JournalReportTruncatedError when even a one-week window is cut.
+  """
+  from datetime import date, timedelta
+
+  first = date.fromisoformat(start_date)
+  last = date.fromisoformat(end_date)
+  pending: list[tuple[date, date]] = []
+  cursor = first
+  while cursor <= last:
+    window_end = min(cursor + timedelta(days=_FIRST_WINDOW_DAYS - 1), last)
+    pending.append((cursor, window_end))
+    cursor = window_end + timedelta(days=1)
+
+  rows: list[dict] = []
+  while pending:
+    lo, hi = pending.pop(0)
+    span = (hi - lo).days + 1
+    try:
+      report = client.get_transactions(
+        start_date=lo.isoformat(), end_date=hi.isoformat()
+      )
+      cut = journal_report_truncated(report)
+    except requests.exceptions.ReadTimeout:
+      # Too large to generate in time; the same answer as a truncated one.
+      if span <= _MIN_WINDOW_DAYS:
+        raise
+      report, cut = None, True
+    if cut:
+      if span <= _MIN_WINDOW_DAYS:
+        raise JournalReportTruncatedError(
+          f"QuickBooks truncated the JournalReport for {lo} to {hi} even at "
+          f"{span} days; the sync cannot import this period completely."
+        )
+      mid = lo + timedelta(days=span // 2 - 1)
+      if log is not None:
+        log.warning(f"JournalReport {lo}..{hi} too large for one call; splitting")
+      pending[:0] = [(lo, mid), (mid + timedelta(days=1), hi)]
+      continue
+    rows.extend(((report or {}).get("Rows") or {}).get("Row") or [])
+  return {"Rows": {"Row": rows}}
 
 
 class MultiCurrencyNotSupportedError(Exception):
@@ -112,7 +167,7 @@ def qb_extract(
     )
     context.log.info(f"Incremental: fetching transactions from {start_date}")
 
-  report = client.get_transactions(start_date=start_date, end_date=end_date)
+  report = fetch_journal_report(client, start_date, end_date, log=context.log)
   journal_entries, journal_lines = parse_journal_report(report)
 
   context.log.info(

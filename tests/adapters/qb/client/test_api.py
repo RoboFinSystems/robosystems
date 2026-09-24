@@ -720,15 +720,20 @@ class TestTokenPersistence:
 
   @patch("robosystems.adapters.quickbooks.client.api.QuickBooks")
   @patch("robosystems.adapters.quickbooks.client.api.AuthClient")
-  @patch("robosystems.database.SessionFactory")
+  @patch.object(QBClient, "_persist_rotated_tokens")
+  @patch.object(QBClient, "_read_stored_credentials", return_value=None)
+  @patch.object(QBClient, "_acquire_token_lock", return_value=None)
   def test_no_persistence_when_tokens_unchanged(
     self,
-    mock_session_factory,
+    _mock_lock,
+    _mock_read,
+    mock_persist,
     mock_auth_client_class,
     mock_qb_class,
   ):
-    """If AuthClient returned the SAME tokens (no rotation this cycle),
-    skip the persistence write entirely — no point burning a DB roundtrip."""
+    """If AuthClient returned the SAME tokens (no rotation this cycle), skip
+    the persistence write. The stored bundle is still re-read under the
+    refresh lock, so only the write is asserted absent."""
     mock_auth = Mock(spec=AuthClient)
     mock_auth.refresh_token = "SAME_REFRESH"
     mock_auth.access_token = "SAME_ACCESS"
@@ -745,13 +750,12 @@ class TestTokenPersistence:
         connection_id="conn_test_a1",
       )
 
-    mock_session_factory.assert_not_called()
+    mock_persist.assert_not_called()
 
 
 class TestAuthFailureHandling:
-  """AuthClientError + transient network errors get clean
-  QBAuthFailedError surfaces. AuthClientError additionally flips the
-  connection to needs_reauth."""
+  """Token-refresh failures surface as QBAuthFailedError. Only
+  ``invalid_grant`` flips the connection to needs_reauth."""
 
   @patch(
     "robosystems.operations.connection_service.ConnectionService."
@@ -765,9 +769,10 @@ class TestAuthFailureHandling:
     mock_qb_class,
     mock_mark_needs_reauth,
   ):
-    """An AuthClientError from Intuit (revoked / scope-insufficient)
-    flips the connection to needs_reauth and raises QBAuthFailedError
-    with recoverable=False."""
+    """Intuit's ``invalid_grant`` (a revoked or superseded refresh token)
+    flips the connection to needs_reauth and raises QBAuthFailedError with
+    recoverable=False. Other token-endpoint answers do not; see
+    test_api_transport.py."""
     from intuitlib.exceptions import AuthClientError
 
     from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
@@ -775,8 +780,8 @@ class TestAuthFailureHandling:
     mock_auth = Mock(spec=AuthClient)
     # Construct the error with the response shape intuitlib expects.
     fake_response = Mock()
-    fake_response.status_code = 401
-    fake_response.text = "Unauthorized"
+    fake_response.status_code = 400
+    fake_response.content = b'{"error": "invalid_grant"}'
     fake_response.headers = {"intuit_tid": "tid_x"}
     mock_auth.refresh.side_effect = AuthClientError(fake_response)
     mock_auth_client_class.return_value = mock_auth

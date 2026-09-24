@@ -53,6 +53,47 @@ def _normalize_tx_type(raw_tx_type: str) -> str:
 DBT_PROJECT_DIR = Path(__file__).resolve().parents[1] / "dbt"
 
 
+class JournalReportTruncatedError(Exception):
+  """Intuit cut the JournalReport short; the window must be narrowed."""
+
+
+# Intuit caps a report at 400,000 cells and ends it early with this notice
+# instead of an error. The Reports API does not paginate.
+_TRUNCATION_NOTICE = "unable to display more data"
+# An unclosed final group only means truncation this close to the cap; below
+# it, it is some final row the parser has never seen, not a cut.
+_NEAR_CAP_CELLS = 300_000
+
+
+def journal_report_truncated(report: dict[str, Any] | None) -> bool:
+  """True when the report shows a sign of Intuit's cell cap.
+
+  The notice text anywhere outside a transaction line is truncation (a
+  line's memo is user text, and could contain it). So is a final
+  transaction group that never reaches its ``Summary`` row, but only in a
+  report near the cap: every group of a complete report closes with one,
+  and a false positive here would fail every sync.
+  """
+  if not report:
+    return False
+  rows = (report.get("Rows") or {}).get("Row") or []
+  outside_rows = {k: v for k, v in report.items() if k != "Rows"}
+  if _TRUNCATION_NOTICE in json.dumps(outside_rows).lower():
+    return True
+  # Intuit's cap counts every row at the report's full width.
+  width = max(8, len((report.get("Columns") or {}).get("Column") or []))
+  open_group = False
+  for row in rows:
+    is_line = "Summary" not in row and len(row.get("ColData") or []) >= 8
+    if not is_line and _TRUNCATION_NOTICE in json.dumps(row).lower():
+      return True
+    if "Summary" in row:
+      open_group = False
+    elif is_line:
+      open_group = True
+  return open_group and len(rows) * width >= _NEAR_CAP_CELLS
+
+
 def parse_journal_report(
   report: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

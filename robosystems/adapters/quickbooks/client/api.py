@@ -1,8 +1,11 @@
+import json
+import random
+import time
 from datetime import UTC, datetime
 from typing import Any
 
 import requests
-from intuitlib.client import AuthClient
+from intuitlib.client import AuthClient as _IntuitAuthClient
 from intuitlib.exceptions import AuthClientError
 from quickbooks import QuickBooks
 from quickbooks.exceptions import AuthorizationException, QuickbooksException
@@ -11,18 +14,73 @@ from retrying import retry
 from robosystems.config import env
 from robosystems.logger import logger
 
+# Neither library sets a timeout, so a stalled socket would block forever,
+# on the close path while it holds the ledger transaction.
+QB_TIMEOUT = (10, 120)  # (connect, read) seconds
+# Discovery and the token endpoint answer in well under a second; a short
+# read timeout bounds a whole refresh, which the token lock must outlast.
+QB_TOKEN_TIMEOUT = (10, 30)
+
+_REFRESH_ATTEMPTS = 3
+_REFRESH_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+# Worst case: 3 x (10 + 30)s plus ~3s of backoff.
+_TOKEN_LOCK_TTL_SECONDS = 180
+_TOKEN_LOCK_WAIT_SECONDS = 30
+
+
+def _with_default_timeout(session: requests.Session) -> None:
+  """Give every request on ``session`` ``QB_TIMEOUT`` unless the call sets one."""
+  send = session.request
+
+  def request(method, url, **kwargs):
+    kwargs.setdefault("timeout", QB_TIMEOUT)
+    return send(method, url, **kwargs)
+
+  session.request = request  # type: ignore[method-assign]
+
+
+class AuthClient(_IntuitAuthClient):
+  """intuitlib's client (a ``requests.Session``) with ``QB_TOKEN_TIMEOUT`` on
+  every call, including the discovery fetch its constructor makes."""
+
+  def request(self, method, url, *args, **kwargs):  # type: ignore[override]
+    kwargs.setdefault("timeout", QB_TOKEN_TIMEOUT)
+    return super().request(method, url, *args, **kwargs)
+
+
+def _is_invalid_grant(error: AuthClientError) -> bool:
+  """Intuit's answer for a revoked, expired or superseded refresh token.
+
+  The only token-endpoint failure a reconnect fixes.
+  """
+  try:
+    body = json.loads(error.content or b"{}")
+  except (ValueError, TypeError):
+    return False
+  return isinstance(body, dict) and body.get("error") == "invalid_grant"
+
 
 class QBAuthFailedError(Exception):
   """QB token refresh failed.
 
-  ``recoverable=True``: transient network error; connection state untouched,
-  the next sync retries. ``False``: Intuit rejected the credential and the
-  connection has been marked ``needs_reauth``.
+  ``recoverable=True``: the connection state is untouched and the next sync
+  retries (a network error, a timeout, 429/5xx, or any other refusal a
+  reconnect would not fix). ``False``: Intuit answered ``invalid_grant`` and
+  the connection has been marked ``needs_reauth``.
   """
 
   def __init__(self, message: str, *, recoverable: bool) -> None:
     super().__init__(message)
     self.recoverable = recoverable
+
+
+class QBAuthUnavailableError(QBAuthFailedError):
+  """The recoverable case: Intuit was unreachable, slow, or asked us to wait,
+  or another process holds the refresh. Maps to 503, not the 401 that tells
+  the operator to reconnect."""
+
+  def __init__(self, message: str) -> None:
+    super().__init__(message, recoverable=True)
 
 
 def _is_retryable_qb_error(exc: BaseException) -> bool:
@@ -58,6 +116,23 @@ _QB_RETRY = retry(
 )
 
 
+def _is_retryable_report_error(exc: BaseException) -> bool:
+  """As `_is_retryable_qb_error`, except a read timeout: a report too slow to
+  generate is answered by a narrower window, not by asking again."""
+  if isinstance(exc, requests.exceptions.ReadTimeout):
+    return False
+  return _is_retryable_qb_error(exc)
+
+
+_QB_REPORT_RETRY = retry(
+  retry_on_exception=_is_retryable_report_error,
+  stop_max_attempt_number=5,
+  wait_exponential_multiplier=1000,
+  wait_exponential_max=60_000,
+  wait_jitter_max=1000,
+)
+
+
 class QBClient:
   def __init__(
     self,
@@ -84,58 +159,27 @@ class QBClient:
     self.refresh_token = refresh_token
     self.access_token = access_token
 
-    self.auth_client = AuthClient(
-      client_id=env.INTUIT_CLIENT_ID,
-      client_secret=env.INTUIT_CLIENT_SECRET,
-      environment=env.INTUIT_ENVIRONMENT,
-      redirect_uri=env.INTUIT_REDIRECT_URI,
-      refresh_token=refresh_token,
-      realm_id=self.realm_id,
-    )
+    try:
+      # The constructor fetches Intuit's discovery document.
+      self.auth_client = AuthClient(
+        client_id=env.INTUIT_CLIENT_ID,
+        client_secret=env.INTUIT_CLIENT_SECRET,
+        environment=env.INTUIT_ENVIRONMENT,
+        redirect_uri=env.INTUIT_REDIRECT_URI,
+        refresh_token=refresh_token,
+        realm_id=self.realm_id,
+      )
+    except (AuthClientError, requests.exceptions.RequestException) as e:
+      raise self._transient(e) from e
 
     if self.access_token:
       self.auth_client.access_token = self.access_token
 
     if not refresh_token.startswith("mock_"):
-      logger.info(f"Refreshing QuickBooks token for realm {self.realm_id}")
-      try:
-        self.auth_client.refresh(refresh_token=refresh_token)
-      except AuthClientError as e:
-        logger.warning(
-          f"QB AuthClient.refresh raised AuthClientError for realm "
-          f"{self.realm_id} (status={getattr(e, 'status_code', '?')}): {e}"
-        )
-        self._mark_needs_reauth()
-        raise QBAuthFailedError(
-          f"QuickBooks rejected the credential refresh for realm "
-          f"{self.realm_id}. Reconnect the account from the connections "
-          f"page to re-issue tokens.",
-          recoverable=False,
-        ) from e
-      except requests.exceptions.RequestException as e:
-        logger.warning(
-          f"Transient network error during QB token refresh for realm "
-          f"{self.realm_id}: {e}"
-        )
-        raise QBAuthFailedError(
-          f"Transient network error reaching Intuit for realm "
-          f"{self.realm_id}; the next sync will retry.",
-          recoverable=True,
-        ) from e
-
-    self.refresh_token = self.auth_client.refresh_token
-    self.access_token = self.auth_client.access_token
-    logger.info(
-      f"Token refresh complete: access_token={'yes' if self.access_token else 'no'}, "
-      f"refresh_token={'yes' if self.refresh_token else 'no'}"
-    )
-
-    # Intuit rotates the refresh_token on every refresh; an unpersisted
-    # rotation locks the connection out once the grace window expires.
-    if connection_id and (
-      self.refresh_token != refresh_token or self.access_token != access_token
-    ):
-      self._persist_rotated_tokens(qb_credentials)
+      self._refresh_serialized(qb_credentials)
+    else:
+      self.refresh_token = self.auth_client.refresh_token
+      self.access_token = self.auth_client.access_token
 
     self.client = QuickBooks(
       auth_client=self.auth_client,
@@ -143,6 +187,174 @@ class QBClient:
       company_id=self.realm_id,
       minorversion=75,
     )
+    if isinstance(self.client.session, requests.Session):
+      _with_default_timeout(self.client.session)
+
+  def _refresh_serialized(self, qb_credentials: dict[str, Any]) -> None:
+    """Refresh under a per-connection lock, from the stored token.
+
+    Intuit invalidates a refresh token once it issues the next one, so two
+    processes refreshing the same stale token would leave the loser with
+    ``invalid_grant`` on a healthy connection. The lock orders them, and
+    re-reading the stored credentials under it hands the second one the
+    token the first just persisted.
+    """
+    lock = self._acquire_token_lock()
+    try:
+      stored = self._read_stored_credentials()
+      presented_refresh = qb_credentials["refresh_token"]
+      presented_access = qb_credentials.get("access_token")
+      if stored and stored.get("refresh_token"):
+        # A peer may have rotated the token since the caller read it.
+        presented_refresh = stored["refresh_token"]
+        presented_access = stored.get("access_token") or presented_access
+        self.auth_client.refresh_token = presented_refresh
+        if presented_access:
+          self.auth_client.access_token = presented_access
+
+      logger.info(f"Refreshing QuickBooks token for realm {self.realm_id}")
+      self._refresh_with_retry(presented_refresh)
+
+      self.refresh_token = self.auth_client.refresh_token
+      self.access_token = self.auth_client.access_token
+      logger.info(
+        f"Token refresh complete: access_token={'yes' if self.access_token else 'no'}, "
+        f"refresh_token={'yes' if self.refresh_token else 'no'}"
+      )
+
+      # Intuit rotates the refresh_token on every refresh; an unpersisted
+      # rotation locks the connection out once the grace window expires.
+      if self.connection_id and (
+        self.refresh_token != presented_refresh or self.access_token != presented_access
+      ):
+        self._persist_rotated_tokens(stored or qb_credentials)
+    finally:
+      if lock is not None:
+        lock.release()
+
+  def _refresh_with_retry(self, refresh_token: str) -> None:
+    """One refresh, retried only where Intuit cannot have issued a token.
+
+    429 and 5xx answers, and connect timeouts, are retried with backoff.
+    Anything that can fail after the request was sent (a read timeout, a
+    dropped connection) is not: Intuit may already have rotated the token,
+    and a second call would present a dead one.
+    """
+    for attempt in range(1, _REFRESH_ATTEMPTS + 1):
+      try:
+        self.auth_client.refresh(refresh_token=refresh_token)
+        return
+      except AuthClientError as e:
+        status = getattr(e, "status_code", None)
+        if _is_invalid_grant(e):
+          logger.warning(
+            f"Intuit rejected the refresh token for realm {self.realm_id} "
+            f"(invalid_grant); marking the connection needs_reauth"
+          )
+          self._mark_needs_reauth()
+          raise QBAuthFailedError(
+            f"QuickBooks rejected the credential refresh for realm "
+            f"{self.realm_id}. Reconnect the account from the connections "
+            f"page to re-issue tokens.",
+            recoverable=False,
+          ) from e
+        if status in _REFRESH_RETRY_STATUSES and attempt < _REFRESH_ATTEMPTS:
+          self._backoff(attempt, f"HTTP {status}")
+          continue
+        logger.error(
+          f"QB token refresh for realm {self.realm_id} failed with HTTP "
+          f"{status} (intuit_tid={getattr(e, 'intuit_tid', None)}); "
+          f"connection left as is"
+        )
+        raise QBAuthUnavailableError(
+          f"Intuit's token endpoint answered HTTP {status} for realm "
+          f"{self.realm_id}; the next sync will retry."
+        ) from e
+      except requests.exceptions.ConnectTimeout as e:
+        if attempt < _REFRESH_ATTEMPTS:
+          self._backoff(attempt, "connect timeout")
+          continue
+        raise self._transient(e) from e
+      except requests.exceptions.RequestException as e:
+        raise self._transient(e) from e
+
+  def _backoff(self, attempt: int, reason: str) -> None:
+    delay = 2 ** (attempt - 1) + random.random()
+    logger.warning(
+      f"QB token refresh for realm {self.realm_id}: {reason}; retrying in "
+      f"{delay:.1f}s (attempt {attempt}/{_REFRESH_ATTEMPTS})"
+    )
+    time.sleep(delay)
+
+  def _transient(self, e: Exception) -> QBAuthUnavailableError:
+    logger.warning(
+      f"Transient network error during QB token refresh for realm {self.realm_id}: {e}"
+    )
+    return QBAuthUnavailableError(
+      f"Transient network error reaching Intuit for realm "
+      f"{self.realm_id}; the next sync will retry."
+    )
+
+  def _acquire_token_lock(self) -> Any:
+    """The per-connection refresh lock, or None to proceed unlocked.
+
+    Only an unavailable Valkey proceeds unlocked (the behaviour before the
+    lock existed). A holder that outlasts the wait is mid-refresh, and
+    refreshing past it would present the token it is about to supersede, so
+    that raises a recoverable error instead.
+    """
+    if not self.connection_id:
+      return None
+    try:
+      from robosystems.config.valkey_registry import (
+        ValkeyDatabase,
+        create_redis_client,
+      )
+      from robosystems.middleware.auth.distributed_lock import DistributedLock
+
+      lock = DistributedLock(
+        create_redis_client(ValkeyDatabase.LOCKS),
+        f"qb_token:{self.connection_id}",
+        ttl_seconds=_TOKEN_LOCK_TTL_SECONDS,
+      )
+      result = lock.acquire(blocking=True, timeout=_TOKEN_LOCK_WAIT_SECONDS)
+    except Exception as e:
+      logger.warning(
+        f"QB token lock unavailable for connection {self.connection_id}; "
+        f"refreshing unlocked: {e}"
+      )
+      return None
+    if not result.acquired:
+      if result.backend_error:
+        logger.warning(
+          f"QB token lock unavailable for connection {self.connection_id} "
+          f"({result.error_message}); refreshing unlocked"
+        )
+        return None
+      raise QBAuthUnavailableError(
+        f"Another process is refreshing the QuickBooks token for connection "
+        f"{self.connection_id}; retry shortly."
+      )
+    return lock
+
+  def _read_stored_credentials(self) -> dict[str, Any] | None:
+    if not self.connection_id:
+      return None
+    try:
+      from robosystems.database import SessionFactory
+      from robosystems.models.core.connection.connection_credentials import (
+        ConnectionCredentials,
+      )
+
+      with SessionFactory() as session:
+        cred = ConnectionCredentials.get_by_connection_id(self.connection_id, session)
+        return cred.get_credentials() if cred is not None else None
+    except Exception as e:
+      logger.warning(
+        f"Could not re-read QB credentials for connection {self.connection_id}; "
+        f"using the ones passed in: {e}"
+      )
+      return None
 
   def _mark_needs_reauth(self) -> None:
     """Best-effort: the caller's QBAuthFailedError is the real signal."""
@@ -350,7 +562,7 @@ class QBClient:
       return self._paginate(JournalEntry, where_clause=where)
     return self._paginate(JournalEntry)
 
-  @_QB_RETRY
+  @_QB_REPORT_RETRY
   def get_transactions(self, start_date=None, end_date=None):
     """Fetch JournalReport, the live GL posting source."""
     params = {}

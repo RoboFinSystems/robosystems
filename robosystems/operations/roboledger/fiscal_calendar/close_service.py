@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
@@ -454,8 +454,10 @@ class PeriodCloseService:
         f"windows)."
       )
 
-    # Collect every failure rather than failing fast.
+    # Collect every failure rather than failing fast. One QB client for the
+    # run, so the token refreshes once rather than once per entry.
     failed_events: list[dict] = []
+    qb_clients: dict[str, Any] = {}
     for entry, event in drafts_to_publish:
       try:
         # Savepoint: a database error (e.g. a lock-wait timeout) would
@@ -472,6 +474,7 @@ class PeriodCloseService:
             graph_id=graph_id,
             acquire_period_fence=False,
             entry_ids=[str(entry.id)],
+            qb_clients=qb_clients,
           )
         if result.qb_error is not None:
           failed_events.append(

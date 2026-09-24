@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
+from robosystems.adapters.quickbooks.client.api import (
+  QBAuthFailedError,
+  QBAuthUnavailableError,
+)
 from robosystems.middleware.extensions import OperationSpec
 from robosystems.models.api.common import DeleteResult
 from robosystems.models.api.event_block import (
@@ -285,6 +288,8 @@ execute_event_block_op = _registrar.register(
     result_type=ExecuteEventBlockResponse,
     error_map={
       EventNotFoundError: 404,
+      # Intuit unreachable or busy; the connection is fine. Before the base.
+      QBAuthUnavailableError: 503,
       # The QBClient has already flipped the connection to needs_reauth; 401
       # tells the UI the operator must reconnect.
       QBAuthFailedError: 401,
