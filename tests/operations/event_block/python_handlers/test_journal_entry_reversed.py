@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from robosystems.models.api.event_block import CreateEventBlockRequest
 from robosystems.models.api.extensions.journal_entries import JournalEntryResponse
 from robosystems.operations.event_block.python_handlers.journal_entry_reversed import (
@@ -12,6 +14,16 @@ from robosystems.operations.event_block.python_handlers.journal_entry_reversed i
   dispatch,
   dispatch_preview,
 )
+
+
+@pytest.fixture(autouse=True)
+def _period_gate_open():
+  """Mock sessions cannot answer the period gate; it runs against a real
+  database in test_guards_db.py and test_state_transition_locks_db.py."""
+  with patch(
+    "robosystems.operations.event_block.python_handlers.journal_entry_reversed.assert_period_not_closed"
+  ):
+    yield
 
 
 def _make_event():

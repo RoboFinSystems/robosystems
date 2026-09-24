@@ -358,7 +358,9 @@ def _reopen_under_fence(
   if fp.status != "closed":
     raise PeriodNotClosedError(period, fp.status)
   if enforce_latest:
-    closed_through = service.require(session, graph_id).closed_through_period
+    # Under the calendar lock (period row first, then calendar, as close's
+    # advance takes them): an unlocked read races the next month's close.
+    closed_through = service.require_locked(session, graph_id).closed_through_period
     if closed_through != period:
       raise ReopenOrderError(period, closed_through)
 

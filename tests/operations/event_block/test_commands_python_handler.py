@@ -20,6 +20,14 @@ from robosystems.operations.event_block.python_handlers.types import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _period_gate_open():
+  """Mock sessions cannot answer the period gate; it runs against a real
+  database in test_guards_db.py and test_state_transition_locks_db.py."""
+  with patch("robosystems.operations.event_block.commands.assert_period_not_closed"):
+    yield
+
+
 def _make_body(**overrides) -> CreateEventBlockRequest:
   defaults = {
     "event_type": "asset_disposed",

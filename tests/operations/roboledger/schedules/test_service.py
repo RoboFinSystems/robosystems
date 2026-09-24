@@ -16,6 +16,17 @@ from robosystems.operations.roboledger.schedules.service import (
   _generate_monthly_periods,
 )
 
+
+@pytest.fixture(autouse=True)
+def _period_gate_open():
+  """Mock sessions cannot answer the period gate; it runs against a real
+  database in test_guards_db.py and test_state_transition_locks_db.py."""
+  with patch(
+    "robosystems.operations.roboledger.schedules.service.assert_period_not_closed"
+  ):
+    yield
+
+
 # ── Utility tests ────────────────────────────────────────────────────────
 
 
@@ -1831,15 +1842,17 @@ class TestCreateManualClosingEntry:
     closed fiscal period — the draft would be orphaned because close-period
     won't re-close a closed month.
     """
-    session = _mock_session()
-    # Simulate a closed fiscal period row covering the posting_date
-    closed_row = MagicMock(name="2026-03", status="closed")
-    closed_row.name = "2026-03"
-    closed_row.status = "closed"
-    session.execute.return_value.fetchone.return_value = closed_row
+    from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
 
+    session = _mock_session()
     svc = ScheduleService()
-    with pytest.raises(ValueError, match="closed period"):
+    with (
+      patch(
+        "robosystems.operations.roboledger.schedules.service.assert_period_not_closed",
+        side_effect=ClosedPeriodError("2026-03", date(2026, 3, 15)),
+      ),
+      pytest.raises(ValueError, match="closed period"),
+    ):
       svc.create_manual_closing_entry(
         session,
         posting_date=date(2026, 3, 15),

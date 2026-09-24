@@ -522,6 +522,44 @@ def _validate_classification(event: Event) -> None:
   python_handler.validate_classification(event, typed_metadata)
 
 
+def _refuse_system_metadata(patch: dict | None) -> None:
+  """Written by write-back and the sync; a caller-supplied value would misstate
+  what reached QuickBooks (a fake `qb_external_id` stops write-back)."""
+  from .qb_writeback import QB_ENTRY_IDS_KEY
+
+  system_keys = {
+    QB_ENTRY_IDS_KEY,
+    "qb_external_id",
+    "routed_via",
+    "last_outbound_error",
+    "qb_sync_token",
+    "drift_detected_at",
+    "drift_payload",
+    "reconciliation_history",
+  }
+  reserved = sorted(
+    key for key in (patch or {}) if key in system_keys or key.startswith("dispatch_")
+  )
+  if reserved:
+    raise InvalidEventTransitionError(
+      f"metadata_patch cannot set system-maintained keys: {', '.join(reserved)}."
+    )
+
+
+def _has_field_corrections(body: UpdateEventBlockRequest) -> bool:
+  return any(
+    value is not None
+    for value in (
+      body.description,
+      body.effective_at,
+      body.metadata_patch or None,
+      body.obligated_by_event_id,
+      body.discharges_event_id,
+      body.event_action,
+    )
+  )
+
+
 def update_event_block(
   session: Session,
   body: UpdateEventBlockRequest,
@@ -542,22 +580,28 @@ def update_event_block(
   peek = session.get(Event, body.event_id)
   if peek is None:
     raise EventNotFoundError(f"Event not found: {body.event_id}")
-  # Period fence before the event row lock, matching close's order. Covers
-  # both the current posting date and the one ``body.effective_at`` moves to.
+  _refuse_system_metadata(body.metadata_patch)
+  # Period fence before the event row lock, matching close's order. A commit
+  # fences its current date; a re-date fences the date it moves to and the
+  # rows it already wrote, but not the date it leaves, so an event with no rows
+  # captured in a closed month stays movable out of it.
+  fence_dates: set[date] = set()
   if body.transition_to == "committed":
-    fence_dates = {
+    fence_dates.add(
       posting_date_for_event(
         effective_at=peek.effective_at,
         occurred_at=peek.occurred_at,
       )
-    }
-    if body.effective_at is not None:
-      fence_dates.add(
-        posting_date_for_event(
-          effective_at=body.effective_at,
-          occurred_at=peek.occurred_at,
-        )
+    )
+  if body.effective_at is not None:
+    fence_dates.add(
+      posting_date_for_event(
+        effective_at=body.effective_at,
+        occurred_at=peek.occurred_at,
       )
+    )
+    fence_dates.update(_retraction_fence_dates(session, peek.id))
+  if fence_dates:
     assert_period_not_closed(session, *sorted(fence_dates))
   # Retraction fence (see `_assert_retractable`), on the rows' own posting
   # dates: an event with no ledger rows stays retractable in a closed period.
@@ -589,6 +633,11 @@ def update_event_block(
   event = locked.get(body.event_id)
   if event is None:
     raise EventNotFoundError(f"Event not found: {body.event_id}")
+
+  if event.status in _RETRACTED_STATUSES and _has_field_corrections(body):
+    raise InvalidEventTransitionError(
+      f"Event is {event.status}; its fields can no longer be corrected."
+    )
 
   fire_handler = False
   if body.transition_to is not None:

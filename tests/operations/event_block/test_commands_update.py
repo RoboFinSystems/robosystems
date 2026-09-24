@@ -20,6 +20,14 @@ from robosystems.operations.event_block.commands import (
 from robosystems.operations.locking import RowLockedError
 
 
+@pytest.fixture(autouse=True)
+def _period_gate_open():
+  """Mock sessions cannot answer the period gate; it runs against a real
+  database in test_guards_db.py and test_state_transition_locks_db.py."""
+  with patch("robosystems.operations.event_block.commands.assert_period_not_closed"):
+    yield
+
+
 def _event(event_id: str, status: str = "classified") -> SimpleNamespace:
   """Build a minimal stand-in for an Event row that satisfies _to_envelope."""
   return SimpleNamespace(
@@ -860,3 +868,91 @@ class TestClassifyTransition:
     body = UpdateEventBlockRequest(event_id="evt_bank", transition_to="classified")
     with pytest.raises(InvalidEventTransitionError):
       update_event_block(session, body, "usr_1", graph_id="kg_test")
+
+
+class TestFieldCorrections:
+  def test_a_redate_fences_the_rows_already_written(self) -> None:
+    event = _event("evt_a", status="fulfilled")
+    session = _session_with_events(event)
+    fenced: list[date] = []
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands._retraction_fence_dates",
+        return_value=[date(2026, 3, 31)],
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed",
+        side_effect=lambda _s, *dates: fenced.extend(dates),
+      ),
+    ):
+      body = UpdateEventBlockRequest(
+        event_id="evt_a", effective_at=datetime(2026, 9, 1, tzinfo=UTC)
+      )
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    assert date(2026, 3, 31) in fenced
+    assert date(2026, 9, 1) in fenced
+
+  @pytest.mark.parametrize(
+    "key",
+    [
+      "qb_external_id",
+      "qb_entry_ids",
+      "qb_sync_token",
+      "routed_via",
+      "last_outbound_error",
+      "drift_detected_at",
+      "drift_payload",
+      "reconciliation_history",
+      "dispatch_attempts",
+    ],
+  )
+  def test_system_metadata_cannot_be_patched(self, key) -> None:
+    event = _event("evt_a", status="committed")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_a", metadata_patch={key: "x"})
+    with pytest.raises(InvalidEventTransitionError, match=key):
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+    session.commit.assert_not_called()
+
+  @pytest.mark.parametrize("status", ["voided", "superseded"])
+  def test_a_retracted_event_takes_no_corrections(self, status) -> None:
+    event = _event("evt_a", status=status)
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_a", description="late fix")
+    with pytest.raises(InvalidEventTransitionError, match=status):
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+    session.commit.assert_not_called()
+
+  def test_a_rowless_event_can_move_out_of_a_closed_month(self) -> None:
+    event = _event("evt_a", status="captured")
+    session = _session_with_events(event)
+    fenced: list[date] = []
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands._retraction_fence_dates",
+        return_value=[],
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed",
+        side_effect=lambda _s, *dates: fenced.extend(dates),
+      ),
+    ):
+      body = UpdateEventBlockRequest(
+        event_id="evt_a", effective_at=datetime(2026, 8, 15, tzinfo=UTC)
+      )
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    assert fenced == [date(2026, 8, 15)]
