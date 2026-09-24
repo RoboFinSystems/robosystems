@@ -49,8 +49,8 @@ from robosystems.operations.event_block.commands import (
 )
 from robosystems.operations.locking import RowLockedError, bounded_lock_wait
 from robosystems.operations.roboledger.commands._guards import (
-  _period_covering,
   assert_period_not_closed,
+  closed_periods,
 )
 from robosystems.operations.roboledger.fiscal_calendar.periods import period_date_range
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
@@ -382,12 +382,7 @@ def _has_dimension_links(
 
 
 def _closed_period_names(session: Session, posting_dates: list[date]) -> list[str]:
-  names: list[str] = []
-  for posting_date in {d for d in posting_dates if d is not None}:
-    row = _period_covering(session, posting_date)
-    if row is not None and row.status == "closed" and row.name not in names:
-      names.append(row.name)
-  return sorted(names)
+  return [month for month, _ in closed_periods(session, posting_dates)]
 
 
 def _default_catch_up_date(session: Session, graph_id: str) -> date | None:

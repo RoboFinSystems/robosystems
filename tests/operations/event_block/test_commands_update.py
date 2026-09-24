@@ -897,7 +897,18 @@ class TestFieldCorrections:
     assert date(2026, 9, 1) in fenced
 
   @pytest.mark.parametrize(
-    "key", ["qb_external_id", "qb_entry_ids", "routed_via", "last_outbound_error"]
+    "key",
+    [
+      "qb_external_id",
+      "qb_entry_ids",
+      "qb_sync_token",
+      "routed_via",
+      "last_outbound_error",
+      "drift_detected_at",
+      "drift_payload",
+      "reconciliation_history",
+      "dispatch_attempts",
+    ],
   )
   def test_system_metadata_cannot_be_patched(self, key) -> None:
     event = _event("evt_a", status="committed")
@@ -921,3 +932,27 @@ class TestFieldCorrections:
         session, body, created_by="usr_test", graph_id="kg00000000000000aa"
       )
     session.commit.assert_not_called()
+
+  def test_a_rowless_event_can_move_out_of_a_closed_month(self) -> None:
+    event = _event("evt_a", status="captured")
+    session = _session_with_events(event)
+    fenced: list[date] = []
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands._retraction_fence_dates",
+        return_value=[],
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed",
+        side_effect=lambda _s, *dates: fenced.extend(dates),
+      ),
+    ):
+      body = UpdateEventBlockRequest(
+        event_id="evt_a", effective_at=datetime(2026, 8, 15, tzinfo=UTC)
+      )
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    assert fenced == [date(2026, 8, 15)]

@@ -23,6 +23,9 @@ from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   assert_period_not_closed,
 )
+from robosystems.operations.roboledger.commands.reconciling_items import (
+  _closed_period_names,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -112,3 +115,10 @@ def test_one_closed_date_among_open_ones_refuses():
   with extensions_session(GRAPH) as session:
     with pytest.raises(ClosedPeriodError):
       assert_period_not_closed(session, date(2026, 8, 1), date(2024, 12, 31))
+
+
+def test_the_reconciling_item_plan_uses_the_same_rule():
+  with extensions_session(GRAPH) as session:
+    assert _closed_period_names(
+      session, [date(2019, 5, 1), date(2026, 7, 3), date(2026, 8, 20)]
+    ) == ["2019-05", "2026-07"]

@@ -120,16 +120,36 @@ def assert_period_not_closed(session: Session, *posting_dates: date) -> None:
       ),
     )
 
+  closed = closed_periods(session, dates)
+  if closed:
+    month, posting_date = closed[0]
+    raise ClosedPeriodError(month, posting_date)
+
+
+def closed_periods(session: Session, dates: Iterable[date]) -> list[tuple[str, date]]:
+  """The closed months among ``dates``, each with its first date, sorted.
+
+  The one statement of the rule: a month on or before ``closed_through``, or
+  one whose ``FiscalPeriod`` row is ``closed``. Takes no lock; writers go
+  through `assert_period_not_closed`, which fences first.
+  """
+  first_date_by_month: dict[str, date] = {}
+  for posting_date in sorted(d for d in dates if d is not None):
+    first_date_by_month.setdefault(f"{posting_date:%Y-%m}", posting_date)
+  if not first_date_by_month:
+    return []
   closed_through = session.execute(
     text("SELECT closed_through_period FROM fiscal_calendar LIMIT 1")
   ).scalar()
+  closed: list[tuple[str, date]] = []
   for month, posting_date in sorted(first_date_by_month.items()):
     if closed_through and month <= closed_through:
-      raise ClosedPeriodError(month, posting_date)
-  for posting_date in dates:
+      closed.append((month, posting_date))
+      continue
     row = _period_covering(session, posting_date)
     if row is not None and row.status == "closed":
-      raise ClosedPeriodError(row.name, posting_date)
+      closed.append((month, posting_date))
+  return closed
 
 
 class InactiveAccountError(ValueError):

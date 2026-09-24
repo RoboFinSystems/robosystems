@@ -532,8 +532,14 @@ def _refuse_system_metadata(patch: dict | None) -> None:
     "qb_external_id",
     "routed_via",
     "last_outbound_error",
+    "qb_sync_token",
+    "drift_detected_at",
+    "drift_payload",
+    "reconciliation_history",
   }
-  reserved = sorted(system_keys & set(patch or {}))
+  reserved = sorted(
+    key for key in (patch or {}) if key in system_keys or key.startswith("dispatch_")
+  )
   if reserved:
     raise InvalidEventTransitionError(
       f"metadata_patch cannot set system-maintained keys: {', '.join(reserved)}."
@@ -575,11 +581,12 @@ def update_event_block(
   if peek is None:
     raise EventNotFoundError(f"Event not found: {body.event_id}")
   _refuse_system_metadata(body.metadata_patch)
-  # Period fence before the event row lock, matching close's order. Covers
-  # the current posting date, the one ``body.effective_at`` moves to, and a
-  # re-date's already-written rows.
+  # Period fence before the event row lock, matching close's order. A commit
+  # fences its current date; a re-date fences the date it moves to and the
+  # rows it already wrote, but not the date it leaves, so an event with no rows
+  # captured in a closed month stays movable out of it.
   fence_dates: set[date] = set()
-  if body.transition_to == "committed" or body.effective_at is not None:
+  if body.transition_to == "committed":
     fence_dates.add(
       posting_date_for_event(
         effective_at=peek.effective_at,
