@@ -574,9 +574,7 @@ class TestLadybugServiceExecuteQuery:
 
         with pytest.raises(HTTPException) as exc_info:
           service.execute_query(request)
-        # The 408 is raised but caught by the outer handler,
-        # resulting in the exception propagating
-        assert exc_info.value.status_code in (408, 500)
+        assert exc_info.value.status_code == 408
         assert "timeout" in exc_info.value.detail.lower()
 
   def test_binder_exception_raises_400(self, service):
@@ -980,6 +978,93 @@ class TestLadybugServiceStreamingQuery:
     assert len(chunks) == 1
     assert chunks[0]["error_type"] == "QueryTimeout"
     assert chunks[0]["is_last_chunk"] is True
+
+
+class _BlockingConnection:
+  """Stands in for a LadybugDB connection running a query that never ends."""
+
+  def __init__(self):
+    import threading
+
+    self._interrupted = threading.Event()
+    self.interrupt_calls = 0
+
+  def execute(self, *_args):
+    # Released by interrupt(); the 5s ceiling only keeps a regression from hanging.
+    if not self._interrupted.wait(timeout=5):
+      return MagicMock()
+    raise RuntimeError("Interrupted.")
+
+  def interrupt(self):
+    self.interrupt_calls += 1
+    self._interrupted.set()
+
+
+@pytest.mark.unit
+class TestQueryTimeoutInterruptsEngine:
+  """The timeout must stop the query, not just stop waiting for it."""
+
+  @pytest.fixture
+  def service(self):
+    with (
+      patch(f"{SERVICE_MODULE}.LadybugDatabaseManager") as mock_db_mgr,
+      patch(f"{SERVICE_MODULE}.LadybugMetricsCollector"),
+    ):
+      mock_db_mgr.return_value = MagicMock()
+      svc = LadybugService(
+        base_path="/tmp/lbug",
+        node_type=NodeType.WRITER,
+        repository_type=RepositoryType.ENTITY,
+      )
+      svc.db_manager.list_databases.return_value = ["test_db"]
+      yield svc
+
+  def _wire(self, service):
+    conn = _BlockingConnection()
+    service.db_manager.get_connection.return_value.__enter__ = MagicMock(
+      return_value=conn
+    )
+    service.db_manager.get_connection.return_value.__exit__ = MagicMock(
+      return_value=False
+    )
+    return conn
+
+  def test_execute_query_interrupts_and_returns_promptly(self, service):
+    import time
+
+    from robosystems.graph_api.models.database import QueryRequest
+
+    conn = self._wire(service)
+    request = QueryRequest(database="test_db", cypher="MATCH (n) RETURN n")
+
+    with patch(f"{SERVICE_MODULE}.TuningConfig") as mock_tuning:
+      mock_tuning.get_graph_query_timeout.return_value = 0.2
+      start = time.monotonic()
+      with pytest.raises(HTTPException) as exc_info:
+        service.execute_query(request)
+      elapsed = time.monotonic() - start
+
+    assert conn.interrupt_calls == 1
+    assert elapsed < 2
+    assert exc_info.value.status_code == 408
+
+  def test_streaming_interrupts_and_returns_promptly(self, service):
+    import time
+
+    from robosystems.graph_api.models.database import QueryRequest
+
+    conn = self._wire(service)
+    request = QueryRequest(database="test_db", cypher="MATCH (n) RETURN n")
+
+    with patch(f"{SERVICE_MODULE}.TuningConfig") as mock_tuning:
+      mock_tuning.get_graph_query_timeout.return_value = 0.2
+      start = time.monotonic()
+      chunks = list(service.execute_query_streaming(request))
+      elapsed = time.monotonic() - start
+
+    assert conn.interrupt_calls == 1
+    assert elapsed < 2
+    assert chunks[-1]["error_type"] == "QueryTimeout"
 
 
 # ---------------------------------------------------------------------------
