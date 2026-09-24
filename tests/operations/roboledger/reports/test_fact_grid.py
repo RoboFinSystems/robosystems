@@ -958,6 +958,22 @@ class TestClosePriorPeriodsToRetainedEarnings:
     assert re.period_type == "instant"
     assert re.classification == "equity"
 
+  def test_anonymous_fallback_row_uses_the_close_target_label(self):
+    facts: list[ReportFact] = []
+    session = self._mock_session(revenue_cents=1_000_000, expense_cents=600_000)
+    _close_prior_periods_to_retained_earnings(
+      session,
+      self.MAPPING_ID,
+      facts,
+      self.PERIOD_START,
+      self.PERIOD_END,
+      close_target_qname="rs-gaap:PartnersCapital",
+    )
+
+    (row,) = facts
+    assert row.element_qname == "rs-gaap:PartnersCapital"
+    assert row.element_name == "Partners' Capital"
+
   def test_loss_position_reduces_re(self):
     """Cumulative expenses exceed revenue — prior-period NI is negative
     and reduces RE. Verifies sign handling.
@@ -1611,6 +1627,27 @@ class TestAppendEmptyEquityFactsAutoRE:
     assert "rs-gaap:AdditionalPaidInCapital" in qnames
     assert "rs-gaap:RetainedEarningsAccumulatedDeficit" in qnames
     assert len(facts) == 2
+
+  def test_unnamed_close_target_row_uses_the_close_target_label(self):
+    pc_row = SimpleNamespace(
+      id="elem_pc", qname="rs-gaap:PartnersCapital", name=None, balance_type=None
+    )
+    pc_lookup = MagicMock()
+    pc_lookup.fetchone.return_value = pc_row
+    session = MagicMock()
+    session.execute.side_effect = [iter([]), pc_lookup]
+    facts: list[ReportFact] = []
+
+    _append_empty_equity_facts(
+      session,
+      self.MAPPING_ID,
+      facts,
+      self.PERIOD_START,
+      self.PERIOD_END,
+      close_target_qname="rs-gaap:PartnersCapital",
+    )
+
+    assert facts[0].element_name == "Partners' Capital"
 
   def test_no_re_when_element_missing_from_taxonomy(self):
     """Defensive: if the rs-gaap taxonomy isn't loaded

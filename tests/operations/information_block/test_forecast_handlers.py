@@ -765,6 +765,29 @@ class TestUpdate:
     session.delete.assert_called_once_with(existing_set)
     write_set.assert_called_once()
 
+  def test_line_growth_only_update_rewrites_the_authored_set(self) -> None:
+    structure = self._structure()
+    session = MagicMock()
+    session.get.return_value = structure
+    existing_set = MagicMock()
+    existing_set.entity_id = "ent_1"
+
+    with (
+      patch.object(
+        forecast_handlers, "_load_lever_fact_set", return_value=existing_set
+      ),
+      patch.object(forecast_handlers, "_check_line_growth_conflicts"),
+      patch.object(forecast_handlers, "_write_lever_fact_set") as write_set,
+    ):
+      forecast_handlers.update(
+        session,
+        UpdateForecastRequest(structure_id="struct_budget_01", line_growth=[]),
+        "usr_test",
+      )
+
+    session.delete.assert_called_once_with(existing_set)
+    write_set.assert_called_once()
+
   def test_missing_or_wrong_type_raises(self) -> None:
     session = MagicMock()
     session.get.return_value = None

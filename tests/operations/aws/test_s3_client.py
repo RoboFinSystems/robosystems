@@ -1175,6 +1175,30 @@ class TestS3BackupAdapterCompression:
     assert adapter._should_compress(".cypher") is True
     assert adapter._should_compress(None) is True
 
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("file_extension", "expected"), [(".lbug.zip", "False"), (".cypher", "True")]
+  )
+  async def test_upload_backup_metadata_records_actual_compression(
+    self, file_extension, expected
+  ):
+    from datetime import UTC, datetime
+
+    adapter = self._make_adapter()
+    adapter.enable_compression = True
+
+    await adapter.upload_backup(
+      "kg_1",
+      b"payload",
+      "full",
+      {},
+      timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+      file_extension=file_extension,
+    )
+
+    backup_put = adapter.s3_client.put_object.call_args_list[0].kwargs
+    assert backup_put["Metadata"]["compressed"] == expected
+
   def test_should_compress_respects_disabled_adapter(self):
     adapter = self._make_adapter()
     adapter.enable_compression = False

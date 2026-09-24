@@ -192,6 +192,29 @@ class TestRateLimitDependency:
         rate_limit_dependency(request)
       assert exc_info.value.status_code == 429
 
+  @pytest.mark.parametrize(
+    ("identifier", "expected_user_id"),
+    [
+      ("jwt:usr_1", "usr_1"),
+      ("apikey:user:usr_2", "usr_2"),
+      ("apikey:abc123", None),
+      ("ip:10.0.0.1", None),
+    ],
+  )
+  def test_exceeded_audits_the_user_id(self, identifier, expected_user_id):
+    request = _make_request()
+    with (
+      patch(f"{MODULE}.get_user_identifier", return_value=identifier),
+      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
+      patch(f"{MODULE}.SecurityAuditLogger") as audit,
+    ):
+      mock_cache.check_rate_limit.return_value = (False, 0)
+      with pytest.raises(HTTPException):
+        rate_limit_dependency(request)
+    assert audit.log_rate_limit_exceeded.call_args.kwargs["user_id"] == (
+      expected_user_id
+    )
+
 
 @pytest.mark.unit
 class TestCreateCustomRateLimitDependency:

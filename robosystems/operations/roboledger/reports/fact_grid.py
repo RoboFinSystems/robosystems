@@ -734,7 +734,7 @@ def _append_empty_equity_facts(
         ReportFact(
           element_id=re_row.id,
           element_qname=re_row.qname,
-          element_name=re_row.name or "Retained Earnings (Accumulated Deficit)",
+          element_name=re_row.name or _close_target_label(close_target_qname),
           classification="equity",
           balance_type=re_row.balance_type or "credit",
           value=0.0,
@@ -1787,7 +1787,7 @@ def _close_prior_periods_to_retained_earnings(
       ReportFact(
         element_id=_ANON_RE_ELEMENT_ID,
         element_qname=close_target_qname,
-        element_name="Retained Earnings (Accumulated Deficit)",
+        element_name=_close_target_label(close_target_qname),
         classification="equity",
         balance_type="credit",
         value=prior_periods_net_income,

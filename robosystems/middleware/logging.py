@@ -100,6 +100,10 @@ def get_safe_url_for_logging(request: Request) -> str:
   return path
 
 
+# `/v1/graphs/<segment>` routes whose segment is not a graph id.
+_GRAPH_COLLECTION_SEGMENTS = frozenset({"capacity", "extensions", "schema", "tiers"})
+
+
 class StructuredLoggingMiddleware(BaseHTTPMiddleware):
   """Logs every API request with timing, caller and a request id."""
 
@@ -127,16 +131,13 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
     entity_id = getattr(request.state, "entity_id", None)
 
     path_parts = request.url.path.strip("/").split("/")
-    if len(path_parts) >= 2 and path_parts[0] == "v1":
-      potential_entity = path_parts[1]
-      if potential_entity and potential_entity not in [
-        "auth",
-        "user",
-        "status",
-        "tasks",
-        "create",
-      ]:
-        entity_id = entity_id or potential_entity
+    if (
+      len(path_parts) >= 3
+      and path_parts[:2] == ["v1", "graphs"]
+      and path_parts[2]
+      and path_parts[2] not in _GRAPH_COLLECTION_SEGMENTS
+    ):
+      entity_id = entity_id or path_parts[2]
 
     start_time = time.time()
 

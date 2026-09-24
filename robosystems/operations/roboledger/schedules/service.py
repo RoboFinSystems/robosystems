@@ -715,6 +715,28 @@ class ScheduleService:
 
     return schedule_created_event_id, pending_count
 
+  @staticmethod
+  def _schedule_originator_id(session: Session, structure: Structure) -> str | None:
+    """The schedule's ``schedule_created`` event id, stamped or recovered.
+
+    An unstamped structure falls back to its obligations' own link; otherwise
+    its pending obligations are orphaned on delete/supersede and double-post
+    at close.
+    """
+    metadata = structure.metadata_ or {}
+    stamped = metadata.get("schedule_created_event_id")
+    if stamped:
+      return stamped
+    return session.execute(
+      select(Event.obligated_by_event_id)
+      .where(
+        Event.event_type == "schedule_entry_due",
+        Event.metadata_["schedule_id"].astext == structure.id,
+        Event.obligated_by_event_id.isnot(None),
+      )
+      .limit(1)
+    ).scalar()
+
   def void_pending_obligations(
     self,
     session: Session,
@@ -739,21 +761,7 @@ class ScheduleService:
     """
     from sqlalchemy.orm.attributes import flag_modified
 
-    metadata = structure.metadata_ or {}
-    schedule_created_event_id = metadata.get("schedule_created_event_id")
-    if not schedule_created_event_id:
-      # Recover the originator from the obligations' own link; otherwise an
-      # unstamped structure orphans its pending obligations on delete and
-      # they double-post at close.
-      schedule_created_event_id = session.execute(
-        select(Event.obligated_by_event_id)
-        .where(
-          Event.event_type == "schedule_entry_due",
-          Event.metadata_["schedule_id"].astext == structure.id,
-          Event.obligated_by_event_id.isnot(None),
-        )
-        .limit(1)
-      ).scalar()
+    schedule_created_event_id = self._schedule_originator_id(session, structure)
     if not schedule_created_event_id:
       return 0
 
@@ -830,8 +838,7 @@ class ScheduleService:
     untouched (the template applies prospectively). Returns the number of
     replacements.
     """
-    metadata = structure.metadata_ or {}
-    schedule_created_event_id = metadata.get("schedule_created_event_id")
+    schedule_created_event_id = self._schedule_originator_id(session, structure)
     if not schedule_created_event_id:
       return 0
 
@@ -1549,6 +1556,7 @@ class ScheduleService:
     metadata["truncations"] = truncation_log
     structure.metadata_ = metadata
     structure.artifact_mechanics = {
+      **(structure.artifact_mechanics or {}),
       "kind": "closing_entry_generator",
       "entry_template": metadata.get("entry_template", {}),
       "schedule_metadata": metadata.get("schedule_metadata"),

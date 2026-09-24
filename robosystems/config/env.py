@@ -626,15 +626,6 @@ class EnvConfig:
     get_parameter_value("CONNECTION_PLAID_ENABLED", "false").lower() == "true",
   )
 
-  # Sends `testing_migration` on QB Reports API calls to select Intuit's v2
-  # reporting service. TODO: retire with the get_transactions param; Intuit
-  # serves v2 unconditionally since 2026-08-31, so the param is a no-op.
-  # https://medium.com/intuitdev/upcoming-changes-to-reports-apis-5083ec9aadce
-  INTUIT_REPORTS_TESTING_MIGRATION = get_bool_env(
-    "INTUIT_REPORTS_TESTING_MIGRATION",
-    get_parameter_value("INTUIT_REPORTS_TESTING_MIGRATION", "true").lower() == "true",
-  )
-
   # When False the nightly SEC pipeline still wakes and health-gates the shared
   # master but never parks it back to 0 (keeps a reserved-instance master busy).
   SHARED_MASTER_PARKING_ENABLED = get_bool_env(

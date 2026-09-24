@@ -34,6 +34,7 @@ def _make_mechanics(
   bs_element_id: str = "elem_cash",
   bs_qname: str = "mini:CashAndCashEquivalents",
   default_tag_element_id: str | None = None,
+  default_tag_qname: str | None = None,
   filters: list[AttributionFilter] | None = None,
   validation_mode: str = "residual_as_default",
 ) -> RollforwardMechanics:
@@ -41,6 +42,7 @@ def _make_mechanics(
     bs_source_element_id=bs_element_id,
     bs_source_qname=bs_qname,
     default_change_tag_element_id=default_tag_element_id,
+    default_change_tag_qname=default_tag_qname,
     attribution_filters=filters or [],
     validation_mode=validation_mode,  # type: ignore[arg-type]
   )
@@ -244,6 +246,25 @@ class TestResidualResidualAsDefault:
     assert residual.value_cents == 2000
     assert residual.is_residual is True
     assert residual.target_element_id == "elem_default_cf"
+
+  def test_default_tag_residual_carries_the_default_tag_qname(self) -> None:
+    mechanics = _make_mechanics(
+      default_tag_element_id="elem_default_cf",
+      default_tag_qname="mini:IncreaseDecreaseInCash",
+      filters=[
+        _filter("mini:ProceedsFromInvestmentsByOwner", "elem_a", "mini:A"),
+      ],
+    )
+    session = _session(
+      bs_delta_cents=12000,
+      filter_results=[(10000, 1, ["evt_201"])],
+    )
+
+    facts = evaluate_attribution_filters(session, mechanics, PERIOD_START, PERIOD_END)
+
+    residual = facts[1]
+    assert residual.target_element_id == "elem_default_cf"
+    assert residual.target_qname == "mini:IncreaseDecreaseInCash"
 
   def test_emits_unattributed_residual_when_no_default_tag(self) -> None:
     """Residual with no default_tag → still emits a residual fact;

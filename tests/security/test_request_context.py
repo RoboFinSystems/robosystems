@@ -170,6 +170,30 @@ class TestAccessLogAttribution:
     assert kwargs["request_id"] == response.headers["X-Request-ID"]
     assert response.json()["request_id_in_route"] == response.headers["X-Request-ID"]
 
+  @pytest.mark.parametrize(
+    ("path", "expected_entity_id"),
+    [
+      ("/v1/graphs/kg123/query", "kg123"),
+      ("/v1/graphs/tiers", None),
+      ("/v1/things", None),
+    ],
+  )
+  def test_entity_id_is_the_graph_id_segment(self, path, expected_entity_id):
+    from robosystems.middleware.logging import StructuredLoggingMiddleware
+
+    app = FastAPI()
+    app.add_middleware(StructuredLoggingMiddleware)
+
+    @app.get("/v1/graphs/{graph_id}/query")
+    @app.get("/v1/graphs/tiers")
+    @app.get("/v1/things")
+    async def route():
+      return {}
+
+    with patch("robosystems.middleware.logging.log_api") as mock_log_api:
+      TestClient(app).get(path)
+    assert mock_log_api.call_args.kwargs["entity_id"] == expected_entity_id
+
   def test_request_id_binding_is_reset_after_the_request(self):
     with patch("robosystems.middleware.logging.log_api"):
       TestClient(self._app()).get("/v1/things")

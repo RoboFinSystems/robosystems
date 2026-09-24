@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from datetime import date
 from unittest.mock import MagicMock, patch
 
@@ -922,3 +923,39 @@ def test_snapshot_text_block_facts_empty_when_no_bindings() -> None:
   assert (
     _snapshot_text_block_facts(session, "rpt_1", "ent_1", "usr", "tax_1", periods) == 0
   )
+
+
+def test_create_report_loads_structures_for_the_resolved_taxonomy() -> None:
+  """A standard name ('rs-gaap') resolves to a taxonomy id; the response's
+  structures must be loaded for that id, not the name the caller sent."""
+  from robosystems.operations.roboledger.commands import reports as mod
+
+  session = MagicMock()
+  session.execute.return_value.fetchone.return_value = ("tax_resolved", "rs-gaap")
+  body = MagicMock(taxonomy_id="rs-gaap", periods=None)
+  names = [
+    "build_periods",
+    "periods_to_json",
+    "_get_entity_id",
+    "load_entity_reporting_style",
+    "load_close_target_concept",
+    "generate_report_facts",
+    "_pre_create_report_fact_sets",
+    "_persist_report_facts",
+    "_snapshot_text_block_facts",
+    "_evaluate_report_structures",
+    "_stamp_report_bundle",
+    "resolve_entity_name",
+    "report_to_response",
+  ]
+  with ExitStack() as stack:
+    for n in names:
+      stack.enter_context(patch.object(mod, n))
+    stack.enter_context(patch.object(mod, "Report"))
+    stack.enter_context(
+      patch.object(mod, "_build_structure_mapping", return_value=({}, {}))
+    )
+    load_structures = stack.enter_context(patch.object(mod, "load_structures"))
+    mod.create_report(session, body, graph_id="kg_demo", created_by="usr_test")
+
+  load_structures.assert_called_once_with(session, "tax_resolved")

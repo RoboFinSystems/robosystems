@@ -682,7 +682,11 @@ def update(
   structure.artifact_mechanics = next_mechanics.model_dump(mode="json")
   structure.updated_by = updated_by
 
-  if payload.levers is not None or payload.line_assertions is not None:
+  if (
+    payload.levers is not None
+    or payload.line_assertions is not None
+    or payload.line_growth is not None
+  ):
     existing = _load_lever_fact_set(session, structure.id)
     entity_id = existing.entity_id if existing is not None else None
     if existing is not None:

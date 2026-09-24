@@ -425,23 +425,13 @@ class QBClient:
     return self._paginate(JournalEntry)
 
   @_QB_RETRY
-  def get_transactions(self, start_date=None, end_date=None, testing_migration=None):
-    """Fetch JournalReport, the live GL posting source.
-
-    ``testing_migration`` (default: ``INTUIT_REPORTS_TESTING_MIGRATION``)
-    routes to Intuit's v2 reporting service; a no-op once Intuit's cutover
-    completes. https://medium.com/intuitdev/upcoming-changes-to-reports-apis-5083ec9aadce
-    """
+  def get_transactions(self, start_date=None, end_date=None):
+    """Fetch JournalReport, the live GL posting source."""
     params = {}
     if start_date:
       params["start_date"] = start_date
     if end_date:
       params["end_date"] = end_date
-    if testing_migration is None:
-      testing_migration = env.INTUIT_REPORTS_TESTING_MIGRATION
-    if testing_migration:
-      # Intuit checks only for the key's presence.
-      params["testing_migration"] = "true"
     transactions = self.client.get_report("JournalReport", params)
     return transactions
 

@@ -761,8 +761,9 @@ class S3BackupAdapter:
     original_checksum = self._calculate_checksum(backup_data)
 
     processed_data = backup_data
+    compress = self._should_compress(file_extension)
 
-    if self._should_compress(file_extension):
+    if compress:
       processed_data = self._compress_data(processed_data)
       compressed_size = len(processed_data)
       if original_size > 0:
@@ -806,7 +807,7 @@ class S3BackupAdapter:
             "backup-type": backup_type,
             "timestamp": timestamp.isoformat(),
             "original-size": str(original_size),
-            "compressed": str(self.enable_compression),
+            "compressed": str(compress),
           },
         )
       else:
@@ -823,7 +824,7 @@ class S3BackupAdapter:
               "backup-type": backup_type,
               "timestamp": timestamp.isoformat(),
               "original-size": str(original_size),
-              "compressed": str(self.enable_compression),
+              "compressed": str(compress),
             },
           ),
         )
