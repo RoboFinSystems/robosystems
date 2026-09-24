@@ -87,7 +87,7 @@ def _entry(db, event: Event, posting_date: date) -> str:
   return str(entry.id)
 
 
-def _execute(db, event_id: str, entry_ids: list[str]):
+def _execute(db, event_id: str, entry_ids: list[str], qb_clients=None):
   connection = MagicMock(
     graph_id=GRAPH_ID,
     write_policy="qb_authoritative",
@@ -111,7 +111,7 @@ def _execute(db, event_id: str, entry_ids: list[str]):
       "robosystems.models.core.connection.connection_credentials.ConnectionCredentials.get_by_connection_id",
       return_value=cred,
     ),
-    patch("robosystems.adapters.quickbooks.client.api.QBClient"),
+    patch("robosystems.adapters.quickbooks.client.api.QBClient") as qb_client_class,
     patch(
       "robosystems.operations.event_block.qb_writeback._save_with_retry",
       side_effect=lambda *a, **k: next(saved),
@@ -124,7 +124,9 @@ def _execute(db, event_id: str, entry_ids: list[str]):
       graph_id=GRAPH_ID,
       acquire_period_fence=False,
       entry_ids=entry_ids,
+      qb_clients=qb_clients,
     )
+  _execute.clients_built = qb_client_class.call_count  # type: ignore[attr-defined]
   return result, save
 
 
@@ -179,3 +181,37 @@ def test_each_period_publishes_its_own_entry(session):
   reloaded = session.get(Event, event.id)
   assert reloaded.status == "fulfilled"
   assert set(reloaded.metadata_["qb_entry_ids"]) == {august, september}
+
+
+def test_a_shared_client_cache_builds_one_client(session):
+  """Close publishes entry by entry; each build of a client is a token
+  refresh, so the run shares one."""
+  session.add_all(
+    [
+      Element(id="elem_exp", name="Expense", code="6000", balance_type="debit"),
+      Element(id="elem_acc", name="Accrued", code="2100", balance_type="credit"),
+    ]
+  )
+  event = Event(
+    event_type="schedule_entry_due",
+    event_category="adjustment",
+    occurred_at=datetime(2026, 8, 31, tzinfo=UTC),
+    source="schedule",
+    status="committed",
+    created_by="usr_test",
+    metadata_={},
+  )
+  session.add(event)
+  session.flush()
+  august = _entry(session, event, date(2026, 8, 31))
+  september = _entry(session, event, date(2026, 9, 1))
+  session.commit()
+
+  cache: dict = {}
+  _execute(session, str(event.id), [august], qb_clients=cache)
+  first = _execute.clients_built  # type: ignore[attr-defined]
+  _execute(session, str(event.id), [september], qb_clients=cache)
+  second = _execute.clients_built  # type: ignore[attr-defined]
+
+  assert (first, second) == (1, 0)
+  assert list(cache) == ["conn_qb"]

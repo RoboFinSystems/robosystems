@@ -899,6 +899,7 @@ def execute_event_block(
   graph_id: str,
   acquire_period_fence: bool = True,
   entry_ids: list[str] | None = None,
+  qb_clients: dict[str, Any] | None = None,
 ) -> ExecuteEventBlockResponse:
   """Publish an event to its connection's source-of-truth system.
 
@@ -919,6 +920,10 @@ def execute_event_block(
 
   Close passes ``acquire_period_fence=False``: it already holds the
   exclusive fence, and taking the shared side would deadlock on it.
+
+  ``qb_clients`` is a per-caller cache keyed by connection id. Close passes
+  one dict for the whole run, so it builds one client (one token refresh)
+  rather than one per entry.
   """
   # Local imports keep the QB SDK and platform DB out of create/update callers.
   from robosystems.adapters.quickbooks.client.api import QBAuthFailedError, QBClient
@@ -1084,15 +1089,19 @@ def execute_event_block(
 
   # Constructing QBClient runs the auth path (persists rotated tokens, flags
   # needs_reauth on auth failure).
-  try:
-    qb_client = QBClient(
-      realm_id=str(realm_id),
-      qb_credentials=credentials,
-      connection_id=str(connection_id),
-    )
-  except QBAuthFailedError:
-    # Surface to the caller — the operator must reconnect via OAuth.
-    raise
+  qb_client = qb_clients.get(str(connection_id)) if qb_clients is not None else None
+  if qb_client is None:
+    try:
+      qb_client = QBClient(
+        realm_id=str(realm_id),
+        qb_credentials=credentials,
+        connection_id=str(connection_id),
+      )
+    except QBAuthFailedError:
+      # Surface to the caller — the operator must reconnect via OAuth.
+      raise
+    if qb_clients is not None:
+      qb_clients[str(connection_id)] = qb_client
 
   # Only ledger rows publish; without them QB would get an entry the ledger
   # never holds.

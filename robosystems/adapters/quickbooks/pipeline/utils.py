@@ -53,6 +53,41 @@ def _normalize_tx_type(raw_tx_type: str) -> str:
 DBT_PROJECT_DIR = Path(__file__).resolve().parents[1] / "dbt"
 
 
+class JournalReportTruncatedError(Exception):
+  """Intuit cut the JournalReport short; the window must be narrowed."""
+
+
+# Intuit caps a report at 400,000 cells and ends it early with this notice
+# instead of an error. The Reports API does not paginate.
+_TRUNCATION_NOTICE = "unable to display more data"
+
+
+def journal_report_truncated(report: dict[str, Any] | None) -> bool:
+  """True when the report shows either sign of Intuit's cell cap.
+
+  The two signs are the notice text anywhere in the rows or header, and a
+  final transaction group with lines that never reaches its ``Summary`` row.
+  Every group of a complete report closes with one; the parser relies on it.
+  """
+  if not report:
+    return False
+  if _TRUNCATION_NOTICE in json.dumps(report.get("Header") or {}).lower():
+    return True
+  rows = (report.get("Rows") or {}).get("Row") or []
+  open_group = False
+  for row in rows:
+    if "Summary" in row:
+      open_group = False
+      continue
+    col_data = row.get("ColData") or []
+    for cell in col_data:
+      if _TRUNCATION_NOTICE in str(cell.get("value", "")).lower():
+        return True
+    if len(col_data) >= 8:
+      open_group = True
+  return open_group
+
+
 def parse_journal_report(
   report: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

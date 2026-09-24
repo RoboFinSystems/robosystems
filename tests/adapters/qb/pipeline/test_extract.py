@@ -240,8 +240,9 @@ class TestQbExtractSuccess:
       context = build_asset_context()
       qb_extract(context, config)
 
-    call_kwargs = mock_client.get_transactions.call_args
-    assert call_kwargs[1]["start_date"] == "2000-01-01"
+    # A full rebuild is fetched in windows; the first one starts in 2000.
+    first_window = mock_client.get_transactions.call_args_list[0]
+    assert first_window[1]["start_date"] == "2000-01-01"
 
   def test_extract_incremental_uses_lookback_start_date(self, tmp_path):
     """Test incremental extract computes start_date from lookback_days."""
@@ -336,7 +337,8 @@ class TestQbExtractSuccess:
       context = build_asset_context()
       qb_extract(context, config)
 
-    assert mock_client.get_transactions.call_args[1]["start_date"] == "2024-01-15"
+    first_window = mock_client.get_transactions.call_args_list[0]
+    assert first_window[1]["start_date"] == "2024-01-15"
 
   def test_extract_full_rebuild_beats_since_date(self, tmp_path):
     """full_rebuild takes precedence over since_date when both are set."""
@@ -381,7 +383,8 @@ class TestQbExtractSuccess:
       context = build_asset_context()
       qb_extract(context, config)
 
-    assert mock_client.get_transactions.call_args[1]["start_date"] == "2000-01-01"
+    first_window = mock_client.get_transactions.call_args_list[0]
+    assert first_window[1]["start_date"] == "2000-01-01"
 
   def test_extract_passes_credentials_to_qb_client(self, tmp_path):
     """Test that QBClient receives credentials from ConnectionCredentials."""
