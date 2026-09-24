@@ -220,11 +220,6 @@ def get_backup_prefix(
 
 
 # =============================================================================
-# Instance Database Backup Helpers
-# =============================================================================
-
-
-# =============================================================================
 # Report Bundle Helpers
 # =============================================================================
 
@@ -237,12 +232,8 @@ def get_report_bundle_key(
 ) -> str:
   """Build S3 key for a per-Report serialization bundle.
 
-  Versioned by ``generation_count`` (the monotonic counter on
-  ``Report.generation_count``) so prior generations stay addressable even after
-  a ``regenerate_report`` bump. ``Report.bundle_url`` points at the current
-  version; history lives on S3 for restatement audit trails. The ``g`` prefix
-  reads as "generation" — distinct from framework-version letters
-  (``rs-gaap/v1``, ``fac/v1``) elsewhere in the system.
+  Versioned by ``Report.generation_count`` so prior generations stay
+  addressable for restatement audit trails.
 
   Example:
       >>> get_report_bundle_key("kg456", "rpt_01K8", 1)
@@ -374,11 +365,8 @@ BACKUP_DOWNLOAD_EXTENSIONS = (
 def get_download_extension(s3_key: str, default: str = ".zip") -> str:
   """Return the extension a stored backup should be served as.
 
-  The stored object key is the only reliable record of what a backup actually
-  contains, so the served filename is derived from it rather than assumed.
-  Keeping the compound extension makes the download self-describing — the
-  recipient sees both the payload and its compression without opening the file.
-  Falls back to ``default`` when the key matches nothing known.
+  The stored key is the only reliable record of the payload and compression,
+  so the served filename keeps its compound extension.
 
   Example:
       >>> get_download_extension("graph-backups/databases/kg456/full/backup-20240115_123045.lbug.zip")

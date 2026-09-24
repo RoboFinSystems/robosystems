@@ -453,19 +453,11 @@ Resources:
             exec > >(tee /var/log/user-data-bootstrap.log) 2>&1
             echo "Starting shared replica bootstrap at $(date)..."
 
-            # Apply Amazon Linux security patches. The ASG launches from a pinned
-            # AMI refreshed monthly, so without this an instance runs whatever
-            # packages that AMI shipped with for up to a month after publication.
-            # --releasever=latest is required, not optional: AL2023 pins releasever
-            # to the version baked into the AMI, so a plain `dnf update` resolves
-            # against that frozen snapshot and upgrades nothing at all. For the same
-            # reason this cannot be narrowed to --security: AL2023 ships no
-            # updateinfo metadata, so security-only filtering matches nothing.
-            # Non-fatal on purpose: set -e would turn a transient repo error into
-            # a failed launch.
-            # kernel* is excluded because a kernel update needs a reboot to take
-            # effect — installing one here would have scanners report it patched
-            # while the vulnerable kernel is still running. AMI refresh covers those.
+            # Patch userspace on boot (the AMI pin is refreshed only monthly).
+            # --releasever=latest is required: AL2023 pins releasever to the AMI's
+            # snapshot, and --security matches nothing (no updateinfo metadata).
+            # Kernel excluded: it needs a reboot, so scanners would report it
+            # patched while the old kernel runs; AMI refresh covers it. Non-fatal.
             echo "Applying security updates..."
             dnf update -y --releasever=latest --exclude='kernel*' || echo "WARNING: security update failed, continuing boot"
 
@@ -528,30 +520,12 @@ Resources:
           LaunchTemplateSpecification:
             LaunchTemplateId: !Ref ReplicaLaunchTemplate
             Version: !GetAtt ReplicaLaunchTemplate.LatestVersionNumber
-          # Spot pool diversification: 16 GB ARM64 alternatives to the primary
-          # (r7g.large). Every alternative MUST match the primary's 16 GB — 8 GB
-          # types (and burstable t4g) trip the admission-control memory guard on
-          # the ~110 GB sec graph under full-report reads, latching into 503s.
-          #
-          # The primary stays first: on-demand capacity is allocated by list order
-          # (OnDemandAllocationStrategy, pinned below), so the on-demand base
-          # lands on r7g.large, the type the reserved instances cover.
-          #
-          # The first five sit in heavily reclaimed Spot pools. r8gd and i4g come
-          # from the Spot Instance Advisor's lowest interruption band, r9g
-          # (Graviton5) adds a newer pool, and r8gn and r6gd were added because
-          # they lifted the one zone still scoring low on Spot placement at full
-          # fleet size (2026-09). Their local NVMe, where present, is never
-          # mounted — the database downloads to the root volume.
-          #
-          # Every entry's Spot price must stay below r7g.large on-demand.
-          # price-capacity-optimized ranks pools by capacity first and price
-          # second, so it will launch an expensive type whenever it judges that
-          # pool the deepest. That rules out the c-family 2xlarge and the
-          # storage- and m-family xlarge types that carry large local disks. The
-          # 1-vCPU 16 GB types (x2gd.medium, x8g.medium) are cheap but also out:
-          # the replica is sized on r7g.large's 2 vCPUs, and one of them would
-          # serve full-report reads on half the CPU.
+          # Spot pool diversification. Every entry MUST have 16 GB (8 GB types
+          # trip the admission-control memory guard on full-report reads), at
+          # least 2 vCPUs, and a Spot price below r7g.large on-demand
+          # (price-capacity-optimized will launch an expensive pool it judges
+          # deepest). The primary stays first so the on-demand base lands on the
+          # RI-covered r7g.large. Local NVMe, where present, is never mounted.
           Overrides:
             - InstanceType: !Ref InstanceType
             - InstanceType: r6g.large
@@ -598,39 +572,19 @@ Resources:
         - Key: NodeType
           Value: shared_replica
           PropagateAtLaunch: true
-        # Gives the fleet one tag key that selects any graph node: LadybugRole in
-        # (writer, replica).
-        #
-        # Deliberately here on the ASG rather than in the launch template's
-        # TagSpecifications, and that placement is the whole point. The ASG
-        # references the template as `Version: !GetAtt
-        # ReplicaLaunchTemplate.LatestVersionNumber`, so *any* template edit bumps
-        # that version, which changes an ASG property that requires replacement
-        # and fires `UpdatePolicy: AutoScalingRollingUpdate`. With MaxBatchSize 1
-        # and PauseTime PT30M, adding a tag there would roll the entire replica
-        # fleet on the next deploy — each instance cold-downloading ~120GB of
-        # sec.lbug. Updating ASG `Tags` is a no-interruption change instead, and
-        # PropagateAtLaunch still puts the tag on every future instance.
-        #
-        # Replicas are meant to pick up new images on the nightly Dagster-driven
-        # ASG refresh, or on an explicit graph-asg-refresh.yml dispatch — never as
-        # a side effect of deploying a CloudFormation template.
-        #
-        # The value MUST be `replica`, not `shared_replica`:
-        # graph_volume_monitor's discover_lbug_instances filter drives volume
-        # expansion, and replicas carry no data volume to manage, so a value that
-        # matched it would pull the whole replica fleet into that loop. See
-        # discover_replica_instance_ids for why they are enumerated separately.
+        # One tag key that selects any graph node (LadybugRole in writer, replica).
+        # On the ASG, not the launch template: any template edit rolls the whole
+        # replica fleet (each instance re-downloading sec.lbug), while an ASG tag
+        # change is no-interruption. The value MUST be `replica`, not
+        # `shared_replica`, or graph_volume_monitor's discover_lbug_instances
+        # would pull the replicas (which have no data volume) into expansion.
         - Key: LadybugRole
           Value: replica
           PropagateAtLaunch: true
     CreationPolicy:
       ResourceSignal:
         Count: !If [HasMinInstances, !Ref MinInstances, 0]
-        # Measured cold boot is ~15-20 min: ~8 min S3 download (sec.lbug is
-        # ~120GB and growing) + OS/container setup + read-only DB open + warmup.
-        # PT30M keeps a fleet cycle from racing the signal deadline (PT20M was
-        # marginal and lost the race once the deploy stopped pinning the tag).
+        # Cold boot is ~15-20 min, dominated by the sec.lbug S3 download.
         Timeout: PT30M
     UpdatePolicy:
       AutoScalingRollingUpdate:
@@ -670,11 +624,8 @@ Resources:
         TargetValue: !Ref MemoryTargetValue
         DisableScaleIn: false
 
-  # Response time-based Auto Scaling (triggers scale-out when queries slow down)
-  # Disabled by default — TargetResponseTime has no datapoints during zero-traffic
-  # periods, causing auto-created alarms to enter INSUFFICIENT_DATA which blocks
-  # scale-in from ALL other policies. Enable via EnableResponseTimeScaling when
-  # the fleet has sustained traffic.
+  # Response-time scale-out. Off by default: with no traffic its auto-created
+  # alarms sit in INSUFFICIENT_DATA; enable once the fleet has sustained traffic.
   ReplicaResponseTimeScalingPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Condition: HasResponseTimeScaling
@@ -692,11 +643,8 @@ Resources:
             - Name: TargetGroup
               Value: !GetAtt ReplicaTargetGroup.TargetGroupFullName
         TargetValue: !Ref ResponseTimeTargetValue
-        # DisableScaleIn prevents this policy from blocking scale-in during zero-traffic
-        # periods. With no requests, TargetResponseTime has no datapoints, causing the
-        # auto-created alarms to enter INSUFFICIENT_DATA — which blocks scale-in from
-        # ALL other policies (CPU, memory). This policy still triggers scale-out on
-        # high latency; scale-in decisions are left to CPU and memory policies.
+        # With no traffic this policy's alarms go INSUFFICIENT_DATA, which would
+        # block scale-in from ALL policies; leave scale-in to CPU and memory.
         DisableScaleIn: true
 
   # ========================================
@@ -733,11 +681,7 @@ Resources:
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
       TargetGroupAttributes:
-        # Prefer the least-busy replica over round-robin. Round-robin spreads
-        # requests evenly regardless of how loaded each replica already is, so a
-        # replica handling a heavier workload keeps getting its full share;
-        # least_outstanding_requests biases new requests toward replicas with
-        # fewer in-flight requests. Applied in place - no instance cycling.
+        # Route to the replica with the fewest in-flight requests, not round-robin.
         - Key: load_balancing.algorithm.type
           Value: least_outstanding_requests
       Tags:
@@ -757,11 +701,8 @@ Resources:
   # ========================================
   # CLOUDWATCH ALARMS
   # ========================================
-  # Serving-capacity alarm: fires when fewer than MinInstances replicas can take
-  # traffic. This is the real availability signal - a replica still bootstrapping
-  # does not reduce the healthy count, so scale-out never trips it. With
-  # MinInstances=0 (cost-saving mode) the threshold makes it unfirable, which is
-  # correct for a deliberately empty fleet.
+  # Fires when fewer than MinInstances replicas can take traffic (scale-out never
+  # trips it; with MinInstances=0 it cannot fire, which is intended).
   InsufficientHealthyHostsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -783,16 +724,9 @@ Resources:
         - !Ref ReplicaAlertTopic
       TreatMissingData: notBreaching
 
-  # Stuck-host alarm: a replica that never finishes coming up (failed shared
-  # database download, crash-looping container) while healthy replicas still
-  # serve traffic - a gap InsufficientHealthyHostsAlarm cannot see.
-  #
-  # The evaluation window must clear normal bootstrap, which is dominated by the
-  # shared database download from S3 (~8 min for the ~120GB sec graph) plus the
-  # container pull and warmup - about 11 min end to end, and growing with the
-  # graph. The instance refresh already budgets 900s (InstanceWarmup) for this.
-  # 20 min clears both with margin; anything unhealthy that long is genuinely
-  # stuck, not warming.
+  # Stuck-host alarm: a replica that never comes up while healthy ones still
+  # serve (invisible to InsufficientHealthyHostsAlarm). The 20-min window must
+  # clear normal bootstrap (~11 min, growing with the sec graph download).
   UnhealthyHostsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -854,11 +788,8 @@ Resources:
         - !Ref ReplicaAlertTopic
       TreatMissingData: notBreaching
 
-  # Container-start marker from the replica entrypoint. Fires on every
-  # container start on an existing instance (unexpected — the serving process
-  # should start once per instance) and on fresh instance launches (expected
-  # during deploys and scale-out), so pages during an instance refresh are
-  # normal. The alarm exists for the unexpected case.
+  # Container-start marker from the replica entrypoint. Expected on launches
+  # (so it pages during refreshes); the alarm is for restarts on a live instance.
   ReplicaContainerStartMetricFilter:
     Type: AWS::Logs::MetricFilter
     Properties:
@@ -870,15 +801,9 @@ Resources:
           MetricValue: "1"
           Unit: Count
 
-  # The shared MASTER's start marker, from the same entrypoint into the same
-  # log group. Unlike a replica, the master is scaled 0->1 on purpose every
-  # night (shared_master_wake), so one start per day is expected and cannot
-  # page. What must page is a SECOND start while it is up — the container was
-  # killed and restarted under the nightly materialization, which nothing else
-  # detects until a job fails. A 12-hour sliding window never holds two nightly
-  # wakes but covers the master's whole waking life, so Sum > 1 is exactly
-  # "restarted while working". Homed here
-  # with the other shared-repository serving alarms.
+  # The shared MASTER's start marker. It wakes once a night on purpose, so only
+  # a SECOND start within 12h pages: the container restarted under the nightly
+  # materialization.
   SharedMasterContainerStartMetricFilter:
     Type: AWS::Logs::MetricFilter
     Properties:
@@ -906,18 +831,11 @@ Resources:
         - !Ref ReplicaAlertTopic
       TreatMissingData: notBreaching
 
-  # Replicas hold the database on the ROOT volume: it is a launch-template device
-  # with DeleteOnTermination and no autoscaling, and it is not in the volume
-  # registry — so the graph-volumes expansion ladder cannot help here and this
-  # alarm is deliberately notify-only. One threshold, not a ladder: the remedy is
-  # raising SHARED_REPLICAS_ROOT_VOLUME_SIZE_<ENV> and cycling the fleet, which is
-  # a deploy, so a warning tier would only page twice for the same action.
-  #
-  # Sizing matters because the download happens at boot: a replica s3 cp's the
-  # whole sec.lbug before it can serve, so once the file no longer fits, every
-  # instance that cycles fails to come up and the daily refresh cycles all of them.
-  # The failure is a cliff, not a slope. Metrics Insights for the same reason as
-  # graph-volumes.yaml — a MetricStat cannot match a partial dimension set.
+  # Replicas hold the database on the ROOT volume, outside the volume registry,
+  # so this is notify-only: the remedy is raising
+  # SHARED_REPLICAS_ROOT_VOLUME_SIZE_<ENV> and cycling the fleet. It is a cliff:
+  # once sec.lbug no longer fits, every cycled replica fails to boot. Metrics
+  # Insights because a MetricStat cannot match a partial dimension set.
   ReplicaRootDiskUsageAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:

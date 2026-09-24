@@ -1,13 +1,8 @@
 name: Publish Docs
 
-# Publishes the public docs catalog to the content CDN: the GitHub wiki
-# (technical docs, rendered at robosystems.ai/docs/technical) and docs/product/
-# (product pages, rendered on each site's /docs), as markdown bodies plus
-# index.json. The apps read https://<DOCS_BASE_URL>/index.json with ISR.
-#
-# Runs only where DOCS_BUCKET is set, so a fork without a content bucket skips it.
-# The upload is skipped when the built digest matches the published one, which
-# keeps the hourly run a no-op on quiet days.
+# Publishes the GitHub wiki (technical docs) and docs/product/ to the content
+# CDN as markdown plus index.json, which the apps read with ISR. Runs only where
+# DOCS_BUCKET is set; skips the upload when the built digest is unchanged.
 
 on:
   gollum:

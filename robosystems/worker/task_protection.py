@@ -1,15 +1,8 @@
-"""ECS task scale-in protection for the background worker.
+"""ECS scale-in protection for the background worker.
 
-When autoscaling is enabled, ECS scale-in terminates worker tasks. A worker
-busy with a long-running task that gets chosen for termination is SIGKILLed at
-the StopTimeout, and its task is only requeued by the reaper after the full
-task timeout elapses. To avoid that, the worker marks itself protected from
-scale-in while it is processing a task and clears protection when idle —
-the Fargate analog of the graph EC2 tier's ``set_instance_protection`` pattern.
-
-Best-effort: any failure is logged and swallowed, never raised. Outside ECS
-(local/dev/test have no ``ECS_CONTAINER_METADATA_URI_V4``) the manager disables
-itself and every call is a no-op.
+A worker killed by scale-in mid-task is only requeued after the full task
+timeout, so the worker protects itself while busy. Best-effort (failures are
+logged, never raised) and a no-op outside ECS.
 """
 
 import asyncio
@@ -22,27 +15,19 @@ from robosystems.logger import get_logger
 
 logger = get_logger(__name__)
 
-# ECS container metadata endpoint, injected by the Fargate agent.
 METADATA_URI_ENV = "ECS_CONTAINER_METADATA_URI_V4"
 
-# Protection lease length. Must exceed the longest task timeout
-# (dagster_job_monitor = 3600s = 60 min) so protection never lapses mid-task —
-# and twice the budget of any task that runs its work through
-# ``BaseTask.run_blocking``, whose thread-join grace is one more budget
-# (period_close: 2 x 600s). If an unprotect call fails, the lease self-expires
-# and the worker becomes eligible for scale-in again — a safe fallback.
+# Must exceed the longest task timeout, and twice the budget of any
+# run_blocking task (its join grace is one more budget). A failed unprotect
+# self-expires with the lease.
 PROTECTION_EXPIRES_MINUTES = 90
 
-# Timeout for the one-shot metadata fetch.
 METADATA_TIMEOUT_SECONDS = 2
 
-# Only protect tasks whose timeout exceeds the worker's SIGTERM grace
-# (StopTimeout = 119s). Shorter tasks always drain before SIGKILL on scale-in,
-# so protecting them would just churn the ECS API.
+# Shorter tasks drain within the SIGTERM grace (StopTimeout 119s).
 PROTECT_MIN_TIMEOUT_SECONDS = 120
 
-# Disable protection only after this many consecutive metadata-fetch failures,
-# so a single transient blip doesn't permanently turn it off.
+# Consecutive metadata-fetch failures before protection is disabled.
 MAX_METADATA_FAILURES = 10
 
 

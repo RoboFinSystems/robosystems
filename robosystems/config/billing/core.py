@@ -1,10 +1,4 @@
-"""
-Core billing configuration - Graph subscriptions and main billing plans.
-
-This module defines the primary subscription tiers for graph databases
-and core billing functionality. This is the SINGLE SOURCE OF TRUTH for
-all tier-related configuration.
-"""
+"""Graph subscription plans and core billing lookups."""
 
 import logging
 from decimal import Decimal
@@ -15,27 +9,11 @@ from ..credits import CreditConfig
 logger = logging.getLogger(__name__)
 
 
-# SINGLE SOURCE OF TRUTH: Subscription tier configuration
-# All tier-related settings are defined here in one place.
+# Editing a price here affects NEW checkouts only: existing subscriptions stay
+# on the immutable Stripe Price they were created with. A real price change
+# needs a Stripe subscription-item swap plus a database backfill.
 #
-# Editing a price here governs NEW checkouts only. Stripe prices are resolved
-# per checkout by matching the amount below against the plan product's active
-# prices, creating one if absent (PaymentProvider._get_or_create_graph_price).
-# Existing subscriptions stay attached to the immutable Stripe Price they were
-# created with, and stripe_price_id / base_price_cents are persisted per row on
-# billing_subscriptions — so a change here reprices nobody. Any price change
-# must ship a Stripe subscription-item swap plus a database backfill, or
-# existing subscribers keep paying the old amount indefinitely.
-#
-# Typical agent call (~5K input, ~1.5K output): ~38 credits
-#
-# Credit allocations (included with subscription):
-# - 8,000 credits = ~200 agent calls/month (~7/day)
-# - 32,000 credits = ~800 agent calls/month (~27/day)
-# - 100,000 credits = ~2,600 agent calls/month (~87/day)
-#
-# Only AI agent operations consume credits. MCP tools, database queries,
-# and all other operations are unlimited.
+# Only AI operations consume credits.
 DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
     "name": "ladybug-standard",
@@ -70,7 +48,6 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
 ]
 
 
-# Helper to get credit allocations by tier name (for backward compatibility)
 def get_tier_credit_allocation(tier: str) -> int:
   """Get monthly credit allocation for a tier from the billing plans."""
   for plan in DEFAULT_GRAPH_BILLING_PLANS:
@@ -79,7 +56,6 @@ def get_tier_credit_allocation(tier: str) -> int:
   return 0
 
 
-# Build TIER_CREDIT_ALLOCATIONS from plans for backward compatibility
 TIER_CREDIT_ALLOCATIONS = {
   plan["name"]: plan["monthly_credit_allocation"]
   for plan in DEFAULT_GRAPH_BILLING_PLANS
@@ -142,8 +118,6 @@ class BillingConfig:
     Only AI operations cost credits; everything else returns 0. ``context`` is
     accepted but unused.
     """
-    # Simply return the operation cost from CreditConfig
-    # No multipliers in the simplified model
     return CreditConfig.get_operation_cost(operation_type)
 
   @classmethod
@@ -157,27 +131,19 @@ class BillingConfig:
     """
     from robosystems.config.shared_repositories import get_manifest, get_plan_details
 
-    # Extract the plan tier from the plan name (e.g., 'sec-starter' -> 'starter')
     plan_tier = plan_name.split("-")[-1] if "-" in plan_name else plan_name
 
-    # Get plan details (pass repo_id for per-repo plan lookup)
     plan_details = get_plan_details(plan_tier, repo_id=repository_id)
     if not plan_details:
       return None
 
-    # Build display_name from repository name + plan name
-    # e.g., "SEC EDGAR Filings - Pro" instead of raw "advanced"
     manifest = get_manifest(repository_id)
     repo_display = manifest.name if manifest else repository_id.upper()
     plan_display = plan_details.get("name", plan_tier.title())
     display_name = f"{repo_display} - {plan_display}"
 
-    # Return in a consistent format with subscription plans. `name` is the
-    # canonical manifest plan key, not the caller's raw string: a prefixed
-    # input like 'sec-advanced' is accepted for lookup, but persisting it
-    # verbatim broke every downstream lookup keyed on the plan (rate limits
-    # returned {}, which reads as "no access", and credit/price config
-    # zeroed out).
+    # `name` is the canonical plan key, never the caller's prefixed string:
+    # downstream lookups (rate limits, credits, price) key on it.
     return {
       "name": plan_tier,
       "display_name": display_name,
@@ -216,7 +182,6 @@ class BillingConfig:
     """
     issues = []
 
-    # Validate all billing plans have required fields
     required_fields = ["name", "monthly_credit_allocation", "base_price_cents"]
     for plan in DEFAULT_GRAPH_BILLING_PLANS:
       for field in required_fields:
@@ -225,7 +190,6 @@ class BillingConfig:
             f"Billing plan '{plan.get('name', 'unknown')}' missing '{field}'"
           )
 
-    # Log validation results
     if issues:
       logger.warning(f"Billing configuration validation found {len(issues)} issues")
       for issue in issues:
@@ -253,8 +217,7 @@ class BillingConfig:
         for tier in ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]
         if cls.get_subscription_plan(tier)
       },
-      # AI operations use token-based pricing (see AIBillingConfig.TOKEN_PRICING)
-      # No fixed-cost AI operations - all are billed per token
+      # AI is billed per token (AIBillingConfig.TOKEN_PRICING).
       "ai_operation_costs": {},
       "no_credit_operations": [
         "query",

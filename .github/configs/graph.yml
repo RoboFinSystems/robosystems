@@ -1,25 +1,10 @@
-# Graph Database Deployment Configuration
-# This file defines all graph database writer configurations for both environments
+# Graph database (LadybugDB) writer tier configuration, per environment.
 #
-# ARCHITECTURE: LadybugDB-only graph tier system
-# - All tiers use LadybugDB backend (embedded graph database)
-# - Tiers differentiated by: instance isolation, subgraph support, resource allocation
-# - Platform metadata stored in PostgreSQL, graphs contain only business data
-# - Supports "MotherDuck for Graphs" pattern: DuckDB staging → LadybugDB materialization
-#
-# TIER PHILOSOPHY:
-# - Standard: Dedicated m7g.medium, single database + 3 subgraphs, cost-efficient entry
-# - Large: Dedicated m7g.large, subgraphs for organization, team collaboration
-# - XLarge: Dedicated r7g.xlarge, maximum subgraphs, advanced scale
-# - Shared: Public data repositories (SEC) - separate infrastructure
-#
-# MEMORY SIZING: LadybugDB buffer pools are lazily filled caps, not reservations,
-# so nominal (parent + subgraphs) may exceed max_memory_mb — subgraphs are rarely
-# all active at once. The hard ceiling is the admission-control guard, which
-# rejects once *absolute available* memory falls under min_available_mb
-# (graph_api/core/admission_control.py), so size parent + duckdb_memory_limit to
-# leave that headroom free even when both are hot. The percent-used figure the
-# same module reports is telemetry, not the gate.
+# MEMORY SIZING: buffer pools are lazily filled caps, not reservations, so
+# parent + subgraphs may nominally exceed max_memory_mb. The hard ceiling is
+# admission control (graph_api/core/admission_control.py), which rejects once
+# absolute available memory falls under min_available_mb; size parent +
+# duckdb_memory_limit to leave that free when both are hot.
 
 production:
   writers:
@@ -195,8 +180,6 @@ production:
         # Memory configuration
         # Parent gets a full 8GB pool; subgraphs are intentionally oversubscribed
         # (8192 + 25x1024 = 33.8GB nominal) since they are rarely all active.
-        # Previously the parent was capped at 1180MB - below Standard's - because
-        # a single flat average was divided across all 26 databases.
         max_memory_mb: 30720 # 30GB available (32GB - 2GB OS overhead)
         memory_per_db_mb: 8192 # 8GB for the parent database
         memory_per_subgraph_mb: 1024 # 1GB per subgraph (25 max)
@@ -249,13 +232,8 @@ production:
         # Note: Major repositories like SEC get dedicated instances for performance
 
         # Memory configuration - CONSERVATIVE DEFAULTS
-        # During normal operation, both DuckDB and LadybugDB use low memory.
-        # During staging/materialization, memory is temporarily boosted via overrides.
-        # This prevents OOM when both systems are active (staging reads + materialization writes).
-        #
-        # Container has ~59GB limit (64GB instance - 2GB OS - kernel overhead)
-        # Default: 10GB each leaves 39GB headroom for OS buffers, temp files, etc.
-        # Boost: Staging gets 55GB DuckDB, Materialization gets 50GB LadybugDB
+        # Both engines run low by default and are boosted only during staging or
+        # materialization, so they never both hold large pools (~59GB container limit).
         max_memory_mb: 10240 # 10GB default for LadybugDB (boosted to 50GB during materialization)
         memory_per_db_mb: 10240 # 10GB per database default
 

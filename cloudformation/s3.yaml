@@ -214,12 +214,8 @@ Resources:
             Status: Enabled
             Prefix: user-staging/
             ExpirationInDays: 30
-          # report-bundles/ deliberately has no expiration rule. Those objects
-          # are live report publications, deleted explicitly when a report is
-          # withdrawn (delete_report_artifacts in the roboledger reports
-          # commands). A time-based rule here would destroy the published
-          # artifact of a report whose row still exists. Absence of coverage
-          # is the correct state — do not "fix" it.
+          # report-bundles/ deliberately has no expiration rule: they are live
+          # publications, deleted explicitly when a report is withdrawn.
           # Graph backups expire after 90 days (max tier retention)
           - Id: ExpireGraphBackups
             Status: Enabled
@@ -747,7 +743,6 @@ Resources:
               - !GetAtt S3BucketSharedProcessed.Arn
               - !Sub ${S3BucketSharedProcessed.Arn}/*
 
-  # NOTE: S3 Secret removed in 2026-01 restructure
   # Bucket names are computed from environment in application code.
   # PUBLIC_DATA_CDN_URL is passed via ECS task definition environment variables.
 

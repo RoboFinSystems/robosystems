@@ -1,14 +1,4 @@
-"""
-Static constants configuration.
-
-This module contains fixed values that never change at runtime.
-For tunable defaults (SSM Parameter Store), see defaults.py.
-
-Categories:
-- CONSTANTS (this file): Fixed values that never change
-- TUNABLES (defaults.py): Operational parameters adjustable via SSM
-- SECRETS (secrets_manager.py): Sensitive credentials and API keys
-"""
+"""Fixed constants. Runtime-tunable values live in defaults.py."""
 
 # =============================================================================
 # OPERATIONAL CONSTANTS
@@ -24,56 +14,44 @@ DEFAULT_GRAPH_API_PORT = 8001
 MAX_QUERY_LENGTH = 10000  # characters
 MAX_ERROR_MESSAGE_LENGTH = 1000  # characters
 
-# Public API request-body size limits (bytes). Presigned uploads go straight to
-# S3, so request bodies to the public API are JSON/form payloads and small; the
-# limit bounds an unbounded-body allocation on the internet-facing surface,
-# which auth and rate limiting cannot — FastAPI reads the body before solving
-# dependencies. The webhook limit is tighter because a Stripe event is small.
+# Public request-body limits. FastAPI reads the body before auth or rate limits
+# run, so this is the only bound; uploads go to S3 via presigned URLs.
 PUBLIC_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10 MB
 WEBHOOK_MAX_REQUEST_SIZE = 512 * 1024  # 512 KB
 
-# Per-request timeout for the Dagster GraphQL client (submit / status poll).
-# The library default is 300 s; a status poll that takes longer than a few
-# seconds is a hung webserver, and the call runs from the API's own event
-# loop (background tasks, SSE monitors), so the default would hold every
-# tenant on the task for five minutes per hang.
+# Dagster GraphQL client timeout (library default 300s). It runs on the API
+# event loop, so a hung webserver would stall every tenant on the task.
 DAGSTER_CLIENT_TIMEOUT_SECONDS = 15
 
 # Batch Processing
-DEFAULT_BATCH_SIZE = 5000  # Optimized for Graph API bulk ingestion
+DEFAULT_BATCH_SIZE = 5000
 MIN_BATCH_SIZE = 1
-MAX_BATCH_SIZE = 10000  # Increased for large-scale operations
+MAX_BATCH_SIZE = 10000
 
 # File Processing
 MAX_FILES_PER_TASK = 1000
 MAX_FILE_SIZE_MB = 100
-PRESIGNED_URL_EXPIRY_SECONDS = 3600  # 1 hour
+PRESIGNED_URL_EXPIRY_SECONDS = 3600
 
-# Small file threshold for direct staging (bypasses Dagster for speed)
-# Files below this size are staged directly in the HTTP request
-# Files above this size use Dagster for async processing with progress tracking
-SMALL_FILE_STAGING_THRESHOLD_MB = 50  # 50MB
+# Below this, files stage inline in the request; above it, via Dagster.
+SMALL_FILE_STAGING_THRESHOLD_MB = 50
 
-# Platform-wide ceiling on rows in a single uploaded file, checked at ingest
-# from the measured (or estimated) row count. Equal to the largest tier's
-# `max_single_table_rows` in .github/configs/graph.yml — no tier can materialize
-# a table bigger than this, so a file above it is refused before it burns
-# storage. Smaller tiers are capped tighter by their own `max_single_table_rows`
-# at ingest as well; this is the bound that holds even for a hostile parquet
-# footer that declares an absurd row count against a 100 MB object.
+# Platform-wide row ceiling per uploaded file; equals the largest tier's
+# `max_single_table_rows` in graph.yml. Holds even against a hostile parquet
+# footer declaring an absurd row count.
 MAX_ROWS_PER_FILE = 100_000_000
 
 # Row Count Estimation Fallback (bytes per row for different formats)
-FALLBACK_BYTES_PER_ROW_PARQUET = 50  # Compressed format
-FALLBACK_BYTES_PER_ROW_CSV = 200  # Text format with moderate row size
-FALLBACK_BYTES_PER_ROW_JSON = 300  # Text format with more verbose structure
+FALLBACK_BYTES_PER_ROW_PARQUET = 50
+FALLBACK_BYTES_PER_ROW_CSV = 200
+FALLBACK_BYTES_PER_ROW_JSON = 300
 
 # Concurrent Operations (fixed limits)
 MAX_CONCURRENT_DOWNLOADS = 5
 
-# Time Limits
-TASK_TIME_LIMIT = 7200  # 2 hours
-TASK_SOFT_TIME_LIMIT = 6900  # 1 hour 55 minutes
+# Time Limits (seconds)
+TASK_TIME_LIMIT = 7200
+TASK_SOFT_TIME_LIMIT = 6900
 
 # OpenTelemetry
 DEFAULT_SAMPLING_RATE = 0.1
@@ -82,34 +60,29 @@ MAX_SAMPLING_RATE = 1.0
 
 # JWT Token Expiration
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30
-JWT_EXPIRY_HOURS = 0.5  # 30 minutes - used for access token creation
+JWT_EXPIRY_HOURS = 0.5  # used for access token creation
 
 # Email Token Expiration
-EMAIL_TOKEN_EXPIRY_HOURS = 24  # Email verification token validity
-PASSWORD_RESET_TOKEN_EXPIRY_HOURS = 1  # Password reset token validity
-ORG_INVITATION_EXPIRY_DAYS = 7  # Org invitation link validity
+EMAIL_TOKEN_EXPIRY_HOURS = 24
+PASSWORD_RESET_TOKEN_EXPIRY_HOURS = 1
+ORG_INVITATION_EXPIRY_DAYS = 7
 
 # Authentication Security Constants
 TOKEN_GRACE_PERIOD_MINUTES = 5  # Grace period for expired token refresh
 JWT_REVOCATION_GRACE_SECONDS = (
   5  # Grace period for in-flight requests during token refresh
 )
-# Valkey key prefix for revoked JWTs (`{prefix}{jti}`). Shared so the writer
-# (`middleware/auth/jwt.revoke_jwt_token`), the reader
-# (`is_jwt_token_revoked`), and the occupancy metric in
-# `middleware/auth/cache.get_cache_stats` cannot drift onto different keys.
+# Valkey key prefix for revoked JWTs (`{prefix}{jti}`), shared by writer,
+# reader and cache stats.
 JWT_REVOCATION_KEY_PREFIX = "revoked_jwt:"
-JWT_DEVICE_FINGERPRINT_ENABLED = True  # Enable device fingerprinting for token binding
+JWT_DEVICE_FINGERPRINT_ENABLED = True  # token binding
 
-# MCP OAuth 2.1 authorization server (routers/oauth, operations/oauth_server).
-# Access tokens are short-lived and refreshed proactively by clients (Claude
-# refreshes within 5 minutes of expiry); refresh tokens rotate on every use,
-# each rotation minting a fresh lifetime, so an idle connector lapses after
-# OAUTH_REFRESH_TOKEN_TTL_DAYS without use.
+# MCP OAuth 2.1 authorization server. Refresh tokens rotate on every use with
+# a fresh lifetime, so a connector lapses only after this many idle days.
 OAUTH_ACCESS_TOKEN_TTL_SECONDS = 3600
 OAUTH_REFRESH_TOKEN_TTL_DAYS = 90
 OAUTH_AUTHORIZATION_CODE_TTL_SECONDS = 120  # single-use; clients exchange at once
-OAUTH_PENDING_AUTHORIZATION_TTL_SECONDS = 600  # login + consent must finish in 10 min
+OAUTH_PENDING_AUTHORIZATION_TTL_SECONDS = 600  # login + consent must finish
 OAUTH_DCR_UNUSED_REGISTRATION_TTL_HOURS = 24  # dynamic registrations that never consent
 
 
@@ -118,7 +91,7 @@ OAUTH_DCR_UNUSED_REGISTRATION_TTL_HOURS = 24  # dynamic registrations that never
 # =============================================================================
 
 # Graph API Fixed Limits
-GRAPH_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB
+GRAPH_MAX_REQUEST_SIZE = 10 * 1024 * 1024
 GRAPH_CONNECT_TIMEOUT = 5.0  # seconds
 GRAPH_READ_TIMEOUT = 30.0  # seconds
 
@@ -146,10 +119,9 @@ GRAPH_MATERIALIZATION_THRESHOLD_MB = 500
 
 # LadybugDB Connection Management
 LBUG_MAX_CONNECTIONS_PER_DB = 10
-LBUG_CONNECTION_TTL_MINUTES = 30.0  # Connection time-to-live
+LBUG_CONNECTION_TTL_MINUTES = 30.0
 
-# Distributed Lock TTL
-INGESTION_LOCK_TTL = 3600  # 1 hour - for graph materialization locks
+INGESTION_LOCK_TTL = 3600  # seconds; graph materialization locks
 
 # =============================================================================
 # AWS CONFIGURATION
@@ -169,31 +141,20 @@ ARELLE_DOWNLOAD_TIMEOUT = 10  # seconds
 # XBRL Fixed Limits
 XBRL_EXTERNALIZATION_THRESHOLD = 1024  # characters
 
-# XBRL graph large nodes that require aggressive memory cleanup after LadybugDB ingestion
-# These tables contain millions of rows and consume significant memory
+# Multi-million-row tables that need aggressive memory cleanup after ingestion.
 XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,Dimension,Report"
 
-# SEC Processing Batch Size
-# Each Dagster run processes exactly one batch, then exits. The sensor
-# re-triggers if pending files remain, enabling natural memory release
-# between batches and crash resilience (at most one batch lost).
-# Part-file output: each batch writes one part_{uuid}.parquet per table.
-# 250 filings keeps Arrow concat well under memory limits (~325 MB peak
-# for Label at ~1.3 MB/file), producing one part file per table per batch.
-# S3 zip cache makes batch size independent of Spot interruption risk.
-# Q2 (proxy season, ~11k filings) = ~44 sensor-triggered runs.
+# Filings per Dagster run (one batch per run; the sensor re-triggers while
+# files remain, releasing memory between batches). 250 keeps the Arrow concat
+# near ~325 MB peak for Label.
 SEC_PROCESS_BATCH_SIZE = 250
 
 # =============================================================================
 # API VERSION CONSTANTS
 # =============================================================================
-# These are pinned API versions for external service compatibility.
-# They should only change when explicitly upgrading API versions,
-# not as part of secrets or runtime configuration.
+# Pinned external API versions; change only as a deliberate upgrade.
 
-# Stripe API Version
-# Pinned to ensure consistent behavior across deployments.
-# See: https://stripe.com/docs/api/versioning
+# https://stripe.com/docs/api/versioning
 STRIPE_API_VERSION = "2026-01-28.clover"
 
 # =============================================================================
@@ -221,16 +182,11 @@ class URIConstants:
 
 
 class ReportingStyleConstants:
-  """Reporting Style identifiers (Charlie Hoffman's term).
+  """Library-seeded Reporting Style Structure ids, one per equity form.
 
-  Library-seeded Structure UUIDs for the default-family Reporting Styles
-  declared in ``rs-gaap-reporting-styles/v1`` — the equity-form axis
-  (CORP/PART/LLC) over a fixed BSC / multi-step IS / indirect CF layout.
-  Each id is derived deterministically from its style's role URI via
-  ``generate_deterministic_uuid(role, namespace='structure')``; pinned
-  here so the ``entities.reporting_style_id`` default (stamped from the
-  entity's legal form at creation) and the renderer's picker share a
-  single source of truth.
+  Derived from each style's role URI via
+  ``generate_deterministic_uuid(role, namespace='structure')``; pinned so
+  the entity default and the renderer's picker agree.
   """
 
   DEFAULT_STYLE_ID = "025f5d48-12ce-5d65-b9eb-4f137a10ef06"

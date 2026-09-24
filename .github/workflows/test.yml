@@ -177,14 +177,9 @@ jobs:
 
       - name: Create and migrate the extensions database
         run: |
-          # The platform DB (robosystems_test) comes from the service
-          # container's POSTGRES_DB; the extensions DB is the second of the two
-          # databases this repo runs, and CI never made it — so every DB-backed
-          # extensions test skipped itself, silently, forever.
-          #
-          # Migrating is what makes them worth running: 0002 seeds the taxonomy
-          # library from the JSON-LD frameworks, which is exactly what the
-          # library-backed suites assert against. ~25s on a cold database.
+          # The service container only creates the platform DB. DB-backed
+          # extensions tests skip without this one, and the library-backed suites
+          # need migration 0002's taxonomy seed.
           echo "🗄️  Creating the extensions database..."
           PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
             -c "CREATE DATABASE extensions" \
@@ -278,11 +273,8 @@ jobs:
         timeout-minutes: 1
         run: |
           echo "🔍 Linting GitHub Actions workflows..."
-          # GitHub does not validate a workflow file until it is triggered, so a
-          # malformed expression is invisible until it breaks a run — and for a
-          # reusable workflow like service-refresh.yml the run it breaks is a
-          # deploy. Accepted pre-existing findings are baselined in
-          # .github/actionlint.yaml; anything reported here is new.
+          # GitHub validates a workflow only when it runs, so catch malformed
+          # expressions here. Accepted findings are baselined in .github/actionlint.yaml.
           uv run actionlint -shellcheck=
 
       - name: Scan dependencies for vulnerabilities

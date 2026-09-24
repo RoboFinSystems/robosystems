@@ -1,13 +1,6 @@
 #!/bin/bash
 # Graph Database Health Check
 # Container-state health checks for LadybugDB graph API instances.
-#
-# Note: An earlier version read a `<db>:ingestion:active:<instance>` flag
-# from Valkey to keep the instance marked healthy during heavy writes, but
-# that flag was never set by any writer. It has been removed. In-flight
-# destructive operations are now coordinated via the DynamoDB busy counter
-# (active_destructive_ops on instance-registry) which is read directly by
-# GHA refresh workflows — see robosystems/middleware/graph/instance_busy.py.
 
 set -e
 
@@ -29,11 +22,8 @@ if [ "${DATABASE_TYPE}" != "ladybug" ]; then
   exit 1
 fi
 
-# Ask run-graph-container.sh for the container name rather than re-deriving the
-# NODE_TYPE mapping a third time. Both scripts are downloaded from S3 in the same
-# userdata block, so they are always the same vintage. If it is missing, this
-# check cannot identify the container OR restart it (see below), so failing here
-# is more honest than guessing a name and reporting health for it.
+# run-graph-container.sh owns the container name mapping. Without it this check
+# can neither identify nor restart the container, so fail rather than guess.
 CONTAINER_NAME=$(/usr/local/bin/run-graph-container.sh --print-container-name) || {
   echo "[$(date)] ERROR: could not determine container name from run-graph-container.sh"
   exit 1

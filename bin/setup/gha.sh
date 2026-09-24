@@ -515,9 +515,8 @@ function setup_full_config() {
     # Stored in SSM: /robosystems/{env}/graph/ami-id
     # Updated via: graph-maintenance.yml workflow
     # AUTO_UPDATE: monthly scheduled refresh of the AMI variable (staging 1st, prod 2nd)
-    # AUTO_DEPLOY: whether that scheduled run also triggers an ASG refresh
-    # Both are read without a fallback in graph-maintenance.yml, so an unset
-    # value reads as "not true" and the scheduled work stays off.
+    # AUTO_DEPLOY: whether that scheduled run also dispatches a deploy
+    # Unset reads as "not true" in graph-maintenance.yml.
     gh variable set GRAPH_AMI_AUTO_UPDATE --body "true"
     gh variable set GRAPH_AMI_AUTO_DEPLOY --body "false"
 
@@ -534,12 +533,9 @@ function setup_full_config() {
     # Notification Configuration
     gh variable set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
 
-    # Sustained application 5xx over 5 minutes before the API error alarm
-    # fires (security stack, both environments). Starts deliberately low —
-    # there is no traffic baseline to tune against, and a noisy alarm in a
-    # folder checked several times a day is recoverable where a missing one
-    # is not. Retune with `just gha-set API_TARGET_ERROR_THRESHOLD <n>` and
-    # redeploy the security stack; no code change needed.
+    # Application 5xx count over 5 minutes above which the API error alarm fires
+    # (api stack). Deliberately low until there is a traffic baseline; retune
+    # with `just gha-set API_TARGET_ERROR_THRESHOLD <n>` and redeploy the API.
     gh variable set API_TARGET_ERROR_THRESHOLD --body "5"
 
     # Features Configuration

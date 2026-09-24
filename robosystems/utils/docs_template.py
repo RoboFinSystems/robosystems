@@ -14,7 +14,6 @@ from ..config.logging import get_logger
 
 logger = get_logger(__name__)
 
-# ReDoc dark theme configuration
 REDOC_DARK_THEME = {
   "colors": {
     "primary": {
@@ -187,9 +186,7 @@ def _get_fallback_template() -> str:
 </html>"""
 
 
-# Convenience functions for common use cases.
-# Authorization persistence in browser storage is a dev convenience only;
-# outside dev, credentials live no longer than the page.
+# Persisting authorization in browser storage is dev-only.
 def generate_robosystems_docs() -> str:
   """Generate docs for main RoboSystems API."""
   return generate_swagger_docs(
@@ -209,13 +206,11 @@ def generate_redoc_docs(
   openapi_url: str = "/openapi.json",
 ) -> str:
   """Render the dark-themed ReDoc page as an HTML string."""
-  # Sanitize inputs to prevent injection
   title = _sanitize_input(title)
   openapi_url = _sanitize_input(openapi_url)
 
   template_path = Path(__file__).parent.parent.parent / "static" / "redoc-template.html"
 
-  # Check if template file exists
   try:
     if template_path.exists() and template_path.is_file():
       template_content = template_path.read_text(encoding="utf-8")
@@ -226,7 +221,6 @@ def generate_redoc_docs(
   except OSError as e:
     logger.warning(f"Failed to load template {template_path}: {e}")
 
-  # Use fallback template
   return _get_redoc_fallback_template(title, openapi_url)
 
 
@@ -238,10 +232,8 @@ def _get_redoc_fallback_template(title: str, openapi_url: str) -> str:
   """
   import json
 
-  # Convert Python dict to JSON string for embedding
   theme_json = json.dumps(REDOC_DARK_THEME)
 
-  # Use string template that won't conflict with JSON braces
   template = """<!DOCTYPE html>
 <html>
   <head>
@@ -315,7 +307,6 @@ def _get_redoc_fallback_template(title: str, openapi_url: str) -> str:
   </body>
 </html>"""
 
-  # Replace all placeholders
   return (
     template.replace("__TITLE__", title)
     .replace("__OPENAPI_URL__", openapi_url)

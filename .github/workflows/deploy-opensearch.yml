@@ -142,10 +142,8 @@ jobs:
             echo "is_new_stack=false" >> $GITHUB_OUTPUT
           fi
 
-          # Select subnets for the domain. Single-AZ (default) uses the first subnet —
-          # byte-identical to the prior `cut -f1` behavior. Multi-AZ uses the first N
-          # (one per AZ); CFN List<AWS::EC2::Subnet::Id> params need commas escaped as
-          # "\," in the CLI shorthand so the list stays one ParameterValue.
+          # Single-AZ uses the first subnet; multi-AZ the first N (one per AZ). CFN
+          # list params need commas escaped as "\," in the CLI shorthand.
           if [ "${{ inputs.zone_awareness_enabled }}" = "true" ]; then
             SUBNET_IDS=$(echo "${{ inputs.subnet_ids }}" | cut -d ',' -f1-${{ inputs.availability_zone_count }} | sed 's/,/\\,/g')
           else

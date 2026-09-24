@@ -65,10 +65,8 @@ jobs:
       - name: Get version
         id: get-version
         run: |
-          # Every RoboFinSystems repo calls this workflow. The Python repos keep the
-          # version in pyproject.toml, the JavaScript ones in package.json; read
-          # whichever is present and refuse to continue on an empty version, so a
-          # mismatch can never produce a tag named "v" again (robosystems-core, 2026-09-02).
+          # Shared by every RoboFinSystems repo: read pyproject.toml or package.json,
+          # and refuse an empty version so a tag named "v" can never be cut.
           VERSION=""
           SOURCE=""
           if [ -f pyproject.toml ]; then
@@ -291,13 +289,8 @@ jobs:
               ]
             }')
 
-            # The credential is fed to curl through a config file on stdin rather
-            # than an -H flag. Writing -H "x-api-key: $ANTHROPIC_API_KEY" would not
-            # help: the shell expands the variable before exec, so the literal key
-            # still lands in the curl process argv, which any other process on the
-            # runner can read. printf is a bash builtin, so it adds no process of
-            # its own, and curl parses the config at startup so --retry resends the
-            # header correctly.
+            # The key goes to curl as a config file on stdin, not -H, so it never
+            # appears in a process argv (printf is a builtin).
           RESPONSE=$(printf 'header = "x-api-key: %s"\n' "$ANTHROPIC_API_KEY" \
             | curl -s --config - --max-time 180 --retry 3 --retry-delay 10 -X POST "https://api.anthropic.com/v1/messages" \
               -H "Content-Type: application/json" \
@@ -313,11 +306,7 @@ jobs:
             echo "Using fallback changelog"
             CHANGELOG="## What's Changed\n\n- ${{ steps.analyze-changes.outputs.commits_count }} commits with ${{ steps.analyze-changes.outputs.files_changed }} files changed\n- ${{ steps.analyze-changes.outputs.additions }} additions and ${{ steps.analyze-changes.outputs.deletions }} deletions\n\nSee commit history for detailed changes."
           else
-            # Concatenate every text block. Indexing content[0] assumed the
-            # first block is text, which stopped being true once CLAUDE_MODEL
-            # moved to a model that thinks by default - a leading thinking block
-            # made this return null and silently downgraded every release to
-            # commit stats.
+            # Concatenate every text block: the first block may be a thinking block.
             CHANGELOG=$(echo "$RESPONSE" | jq -r '[.content[]? | select(.type == "text") | .text] | join("")')
             STOP_REASON=$(echo "$RESPONSE" | jq -r '.stop_reason // "unknown"')
 

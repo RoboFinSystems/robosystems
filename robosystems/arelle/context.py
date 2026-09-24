@@ -1,24 +1,13 @@
-"""Canonical JSON-LD @context for the taxonomy library.
+"""Canonical JSON-LD @context shared by the serializer and the loader.
 
-The same context is used by the serializer (rdflib.Graph → JSON-LD) and
-the loader (JSON-LD → rdflib.Graph → TaxonomyPackage) to ensure
-consistent IRI prefixes and predicate names across every seed artifact.
-
-Predicate design:
-- Standard RDF/XBRL predicates use their canonical IRIs (rdfs:label,
-  skos:altLabel, owl:equivalentClass, etc).
-- RoboSystems-specific predicates use the `rs:` prefix
-  (https://robosystems.ai/vocab/).
-- Taxonomy-specific prefixes (fac, rs-gaap, us-gaap, …) point at the
-  authoritative namespaces used by Charlie Hoffman and FASB.
+Standard RDF/XBRL predicates keep their canonical IRIs; RoboSystems-specific
+ones use `rs:`; taxonomy prefixes point at their authoritative namespaces.
 """
 
 from __future__ import annotations
 
-# Base IRI for RoboSystems-owned predicates
 RS_VOCAB = "https://robosystems.ai/vocab/"
 
-# Canonical @context as a Python dict. Serialized directly to JSON-LD.
 CANONICAL_CONTEXT: dict = {
   # RDF / semantic web
   "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
@@ -27,25 +16,16 @@ CANONICAL_CONTEXT: dict = {
   "owl": "http://www.w3.org/2002/07/owl#",
   "xsd": "http://www.w3.org/2001/XMLSchema#",
   "dcterms": "http://purl.org/dc/terms/",
-  # XBRL core. The linkbase namespace is bound to `link` (XBRL-conventional
-  # and matching the export bundle); `xlink` + `xbrldi` are bound so reified
-  # arcs and dimensional members compact cleanly. `iso4217` is bound for
-  # instance-side unit measures.
+  # XBRL core
   "xbrli": "http://www.xbrl.org/2003/instance#",
   "link": "http://www.xbrl.org/2003/linkbase#",
   "xlink": "http://www.w3.org/1999/xlink#",
   "xbrldt": "http://xbrl.org/2005/xbrldt#",
   "xbrldi": "http://xbrl.org/2006/xbrldi#",
   "iso4217": "http://www.xbrl.org/2003/iso4217#",
-  # Taxonomy namespaces (external authorities).
-  # XBRL schemas use '#' fragment separator between the targetNamespace
-  # and the local element name, so concept IRIs need the '#' in the
-  # prefix mapping to compact correctly.
-  # Charlie publishes FAC under multiple target namespaces across
-  # iterations. `fac` is pinned to the 2021/kg mapping variant since
-  # that's the ingest target for the POC; `fac-luca` and
-  # `fac-seattlemethod` are retained so concepts authored against those
-  # older variants still compact to readable qnames.
+  # External taxonomies. XBRL concept IRIs use a '#' separator, so the prefix
+  # must include it to compact. FAC is published under several namespaces;
+  # the older variants are kept so their concepts still compact.
   "fac": "http://www.xbrlsite.com/fac#",
   "fac-luca": "http://luca.auditchain.finance/fac#",
   "fac-seattlemethod": "http://xbrlsite.azurewebsites.net/seattlemethod/fac#",
@@ -54,45 +34,23 @@ CANONICAL_CONTEXT: dict = {
   "us-gaap-2022": "http://fasb.org/us-gaap/2022-01-31#",
   "us-gaap-2024": "http://fasb.org/us-gaap/2024-01-31#",
   "us-gaap": "http://fasb.org/us-gaap/",
-  # rs-gaap — RoboSystems's year-independent canonical reporting taxonomy.
-  # Equivalence arcs bridge rs-gaap ↔ the dated external us-gaap namespaces,
-  # keeping our namespace stable as FASB evolves.
+  # Year-independent; equivalence arcs bridge it to the dated us-gaap namespaces.
   "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
-  # rs-gaap-disclosures — named Disclosures (BalanceSheet, IncomeStatement,
-  # PropertyPlantAndEquipmentDisclosure, …) anchored to the rs-gaap framework.
-  # Each entry is an abstract qname-addressable element AND a Structure with
-  # CAP + secType metadata. Sibling namespace to rs-gaap, not nested under it.
+  # Named Disclosures: each both an abstract element and a Structure.
   "disclosures": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
-  # rs-gaap-reporting-checklist — declares the abstract "FinancialReport"
-  # subjects that a Reporting Checklist's `financialReport-requiresDisclosure`
-  # arcs anchor on.
   "checklist": "https://robosystems.ai/taxonomy/rs-gaap/reporting-checklist/v1/",
-  # rs-gaap-reporting-styles — declares Style entities that compose specific
-  # Disclosures for a vertical / filer profile.
   "styles": "https://robosystems.ai/taxonomy/rs-gaap/reporting-styles/v1/",
-  # rs-metric — the library metric catalog (Key Financial Metrics).
-  # Each metric is a qname-addressable concept plus a Derive rule that
-  # computes it from rs-gaap anchor facts.
+  # Metric and driver catalogs: each entry a concept plus a Derive rule.
   "rs-metric": "https://robosystems.ai/taxonomy/rs-gaap/metrics/v1/",
-  # rs-driver — the forecast lever catalog (Driver Catalog). Each lever
-  # is a qname-addressable concept plus a Derive rule stating the driven
-  # mechanics against rs-gaap anchor targets; values are asserted per
-  # scenario as authored facts.
   "rs-driver": "https://robosystems.ai/taxonomy/rs-gaap/drivers/v1/",
   "ifrs": "http://xbrl.ifrs.org/taxonomy/",
   "dei": "http://xbrl.sec.gov/dei/",
-  # Seattle Method conceptual-model role URIs (Charlie's CM namespace)
+  # Seattle Method conceptual model
   "cm-roles": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/",
-  # cm — Seattle Method 'universal' conceptual model (Charlie Hoffman). The
-  # Debit/Credit posting-role concepts anchor has-part arcs from Chart-of-
-  # Accounts elements. '#' fragment separator so concept IRIs compact to
-  # cm:Debit / cm:Credit.
   "cm": "https://github.com/seattlemethod/universal/cm#",
   # RoboSystems vocabulary
   "rs": RS_VOCAB,
-  # Concept attributes — XBRL vocabulary where XBRL defines the attribute
-  # (balance, periodType), rs: for our denormalized booleans/axes that XBRL
-  # has no predicate for (monetary, abstract, elementType, classification …).
+  # Concept attributes: XBRL terms where XBRL defines them, else rs:.
   "classification": {"@id": f"{RS_VOCAB}classification"},
   "statementContext": {"@id": f"{RS_VOCAB}statementContext"},
   "derivationRole": {"@id": f"{RS_VOCAB}derivationRole"},
@@ -103,12 +61,8 @@ CANONICAL_CONTEXT: dict = {
   "elementType": {"@id": f"{RS_VOCAB}elementType"},
   "substitutionGroup": {"@id": f"{RS_VOCAB}substitutionGroup", "@type": "@id"},
   "source": {"@id": f"{RS_VOCAB}source"},
-  # Relationships. Structural taxonomy arcs (presentation / calculation /
-  # definition) are REIFIED as rs:Association nodes carrying xlink:from/to +
-  # xlink:arcrole + link:weight/order; there is no direct predicate for them.
-  # `equivalent` is the one exception — a genuine symmetric OWL relation with
-  # no weight/order/role to carry, so reifying it would only lose the OWL
-  # semantics the bridges rely on.
+  # Structural arcs are reified (no direct predicate). `equivalent` stays
+  # direct: reifying would lose the OWL semantics the bridges rely on.
   "equivalent": {"@id": "owl:equivalentClass", "@type": "@id"},
   # Reified-association predicates (one rs:Association node per arc)
   "from": {"@id": "xlink:from", "@type": "@id"},
@@ -136,9 +90,8 @@ CANONICAL_CONTEXT: dict = {
   "roleUri": {"@id": f"{RS_VOCAB}roleUri"},
   "conceptArrangementPattern": {"@id": f"{RS_VOCAB}conceptArrangementPattern"},
   "hasAssociation": {"@id": f"{RS_VOCAB}hasAssociation", "@type": "@id"},
-  # Instance layer — Fact + its aspects, mirroring the graph's FACT_HAS_*
-  # edges (Fact → Element / Entity / Period / Unit / Dimension). No XBRL
-  # `context` exists here: a Fact references its aspects directly.
+  # Instance layer: a Fact references its aspects directly (no XBRL context),
+  # mirroring the graph's FACT_HAS_* edges.
   "element": {"@id": f"{RS_VOCAB}element", "@type": "@id"},
   "entity": {"@id": f"{RS_VOCAB}entity", "@type": "@id"},
   "period": {"@id": f"{RS_VOCAB}period", "@type": "@id"},
@@ -148,10 +101,8 @@ CANONICAL_CONTEXT: dict = {
   "structure": {"@id": f"{RS_VOCAB}structure", "@type": "@id"},
   "numericValue": {"@id": f"{RS_VOCAB}numericValue", "@type": "xsd:decimal"},
   "decimals": {"@id": f"{RS_VOCAB}decimals"},
-  # Non-numeric (text-block) fact arm — string value, no unit/decimals.
-  # Vocabulary matches what @robosystems/report-components consumes:
-  # rs:stringValue for the text payload, rs:itemType on the concept
-  # ('textBlock' gates the narrative rendering arm).
+  # Text-block facts, as @robosystems/report-components consumes them
+  # (itemType 'textBlock' gates the narrative arm).
   "factType": {"@id": f"{RS_VOCAB}factType"},
   "stringValue": {"@id": f"{RS_VOCAB}stringValue", "@type": "xsd:string"},
   "contentType": {"@id": f"{RS_VOCAB}contentType"},
@@ -176,10 +127,8 @@ CANONICAL_CONTEXT: dict = {
   "mode": {"@id": f"{RS_VOCAB}mode"},
   "internalId": {"@id": f"{RS_VOCAB}internalId"},
   # ── Domain / package terms ─────────────────────────────────────────────
-  # Every term any framework seed uses must live here so the one canonical
-  # context is a true superset — undeclared terms would either drop on parse
-  # or compact to ugly rs:-prefixed keys. These are pure binary relations
-  # (drules), rule/trait/style metadata, and structure annotations.
+  # Every term any seed uses must be declared, or it drops on parse or
+  # compacts to an rs:-prefixed key.
   "category": {"@id": f"{RS_VOCAB}category"},
   "classifiedAs": {"@id": f"{RS_VOCAB}classifiedAs", "@type": "@id"},
   "deprecated": {"@id": f"{RS_VOCAB}deprecated", "@type": "xsd:boolean"},

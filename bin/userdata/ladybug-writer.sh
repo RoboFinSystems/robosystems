@@ -310,9 +310,7 @@ export DATA_DIR="/mnt/ladybug-data"
 # ==================================================================================
 # METRICS CONFIGURATION
 # ==================================================================================
-# Note: OpenTelemetry (OTEL) is disabled by default in the Graph API
-# Metrics are still collected and available via the /metrics endpoint as JSON
-# ADOT collector setup has been removed to simplify infrastructure
+# OTEL is disabled by default; metrics are served as JSON at /metrics.
 echo "Metrics available at container /metrics endpoint (JSON format)"
 
 # ==================================================================================

@@ -20,18 +20,9 @@ from robosystems.config.env import EnvConfig
 
 
 class StructuredFormatter(logging.Formatter):
-  """
-  JSON formatter that creates AWS CLI-searchable structured logs.
-
-  Output format optimized for CloudWatch Insights queries:
-  - Timestamp in ISO format
-  - Consistent field names for filtering
-  - Hierarchical component/action structure
-  - Metadata preserved as searchable fields
-  """
+  """JSON formatter with consistent field names for CloudWatch Insights."""
 
   def format(self, record: logging.LogRecord) -> str:
-    # Base log structure
     log_entry = {
       "timestamp": datetime.utcfromtimestamp(record.created).isoformat() + "Z",
       "level": record.levelname,
@@ -39,11 +30,9 @@ class StructuredFormatter(logging.Formatter):
       "message": record.getMessage(),
     }
 
-    # Add action if specified (for searching specific operations)
     if hasattr(record, "action"):
       log_entry["action"] = record.action
 
-    # Add user context if available
     if hasattr(record, "user_id"):
       log_entry["user_id"] = record.user_id
     if hasattr(record, "entity_id"):
@@ -51,13 +40,11 @@ class StructuredFormatter(logging.Formatter):
     if hasattr(record, "database"):
       log_entry["database"] = record.database
 
-    # Add performance metrics if available
     if hasattr(record, "duration_ms"):
       log_entry["duration_ms"] = record.duration_ms
     if hasattr(record, "status_code"):
       log_entry["status_code"] = record.status_code
 
-    # Add error details for ERROR/CRITICAL logs
     if record.levelno >= logging.ERROR:
       if record.exc_info:
         log_entry["error"] = {
@@ -66,26 +53,20 @@ class StructuredFormatter(logging.Formatter):
           "traceback": traceback.format_exception(*record.exc_info),
         }
 
-      # Add error category for easier searching
       if hasattr(record, "error_category"):
         log_entry["error_category"] = record.error_category
 
-    # Add any additional metadata
     if hasattr(record, "metadata"):
       log_entry["metadata"] = record.metadata
 
-    # Add request ID for tracing
     if hasattr(record, "request_id"):
       log_entry["request_id"] = record.request_id
 
-    # Structured operation-audit payload (who / what / which-tenant / result).
-    # Emitted via extra={"audit": {...}} by middleware.operations.log_operation_audit;
-    # without this the entire audit payload was silently dropped.
+    # Operation-audit payload from middleware.operations.log_operation_audit.
     if hasattr(record, "audit"):
       log_entry["audit"] = record.audit
 
-    # Security / auth event fields emitted by the security-logging middleware.
-    # Source IP and success flag are required for auth-anomaly detection.
+    # Auth-anomaly detection needs source IP and the success flag.
     if hasattr(record, "ip_address"):
       log_entry["ip_address"] = record.ip_address
     if hasattr(record, "success"):
@@ -128,10 +109,8 @@ def get_logging_config(environment: str | None = None) -> dict[str, Any]:
   """
   env = environment or EnvConfig.ENVIRONMENT
 
-  # Check for LOG_LEVEL override
   log_level_override = getattr(EnvConfig, "LOG_LEVEL", None)
 
-  # Environment-specific settings
   if env == "prod":
     default_level = "INFO"
     enable_debug = False
@@ -240,7 +219,6 @@ def get_logging_config(environment: str | None = None) -> dict[str, Any]:
     },
   }
 
-  # Add debug handler for staging/dev
   if enable_debug:
     config["handlers"]["debug"] = {
       "class": "logging.StreamHandler",
@@ -250,7 +228,6 @@ def get_logging_config(environment: str | None = None) -> dict[str, Any]:
       "stream": "ext://sys.stdout",
     }
 
-    # Add debug handler to application loggers
     for logger_name in [
       "robosystems",
       "robosystems.api",
@@ -269,7 +246,6 @@ def setup_logging(environment: str | None = None) -> None:
   logging.config.dictConfig(config)
 
 
-# Logging utility functions for structured logging
 def get_logger(name: str) -> logging.Logger:
   """Get a logger with structured logging capabilities."""
   return logging.getLogger(name)
@@ -453,5 +429,4 @@ def performance_timer(
   return decorator
 
 
-# Initialize logging on import
 setup_logging()

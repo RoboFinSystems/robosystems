@@ -15,23 +15,12 @@
 #   FORCE_IGNORE_BUSY  "true" bypasses the busy-counter wait entirely. Emergency
 #                      escape hatch — an interrupted materialization may require a
 #                      full graph rebuild.
-#   FORCE_RESTART      "true" restarts even when the image digest is unchanged, for
-#                      callers whose goal is the restart itself rather than a new
-#                      image. Secrets rotation is the case that matters: the
-#                      container reads its credentials from Secrets Manager and
-#                      caches them in-process, so the process has to be replaced to
-#                      pick up rotated ones promptly. Without this the digest-skip
-#                      correctly concludes there is nothing to pull, and rotation
-#                      propagates only when the cache TTL lapses.
+#   FORCE_RESTART      "true" restarts even when the image digest is unchanged
+#                      (secrets rotation: credentials are cached in-process).
 #
-# Exits 0 when the container was refreshed OR was already current, non-zero on
-# failure. The non-zero exit is load-bearing: SSM records it as `Failed`, which is
-# what lets a fleet-wide --max-errors budget halt a bad rollout instead of
-# marching a broken image across every customer's database. The one exception is
-# exit 3 (below), a benign skip: the fleet-refresh document (graph-infra.yaml
-# GraphRefreshDocument) normalizes it to 0 so a skip cannot consume that same
-# error budget — from SSM's side, only real failures look like failures. Hand
-# runs of this script still see the raw 3.
+# Exits 0 when refreshed or already current, non-zero on failure, so the fleet's
+# SSM --max-errors budget halts a bad rollout. Exit 3 is a benign skip that the
+# fleet document (graph-infra.yaml GraphRefreshDocument) normalizes to 0.
 
 set -o pipefail
 
@@ -48,12 +37,8 @@ STALE_WINDOW_SECONDS=21600
 # See require_complete_environment.
 REQUIRED_ENV_SCHEMA=2
 
-# Distinct exit code for "this instance predates the environment contract." The
-# fleet document maps it to exit 0, and the aggregator classifies the skip off
-# the REFRESH_RESULT marker printed alongside it: the instance has not cycled
-# since the contract landed, which is a transitional state to be waited out or
-# backfilled, not a broken refresh. Any other non-zero exit is a real failure
-# and must stay one.
+# "This instance predates the environment contract": a transitional skip, not a
+# failure. Any other non-zero exit is a real failure and must stay one.
 EXIT_STALE_ENV=3
 
 log() { echo "[refresh] $*"; }
@@ -72,12 +57,9 @@ set -a
 source /etc/environment
 set +a
 
-# A refresh sources only /etc/environment. Any variable the boot exported but did
-# not persist there silently falls back to run-graph-container.sh's defaults, and
-# the refreshed container then differs from the one this instance booted with —
-# drift that surfaces as a missing volume mount rather than an error. Rather than
-# guess at per-node-type completeness, trust the schema marker the userdata writes
-# once it has persisted the full set.
+# A refresh sources only /etc/environment, so anything the boot didn't persist
+# would silently fall back to defaults. Trust the GRAPH_ENV_SCHEMA marker the
+# userdata writes once it has persisted the full set.
 require_complete_environment() {
   local schema="${GRAPH_ENV_SCHEMA:-0}"
   if ! [ "${schema}" -ge "${REQUIRED_ENV_SCHEMA}" ] 2>/dev/null; then
@@ -102,12 +84,8 @@ require_complete_environment() {
 
 require_complete_environment
 
-# The image to converge on comes from /etc/environment, NOT from the environment
-# name. They are usually the same moving tag, but the shared replicas can be
-# pinned to a specific build tag during a storage-format-breaking engine upgrade
-# (SHARED_REPLICA_IMAGE_TAG_{PROD,STAGING} → ECRImageTag), precisely so that a
-# boot cannot pull a new engine before the new-format sec.lbug is published.
-# Pulling ":${ENVIRONMENT}" here would defeat that pin.
+# The image tag comes from /etc/environment, NOT the environment name: shared
+# replicas may be pinned to a build tag during a storage-format-breaking upgrade.
 export ECR_IMAGE="${ECR_URI}:${ECR_IMAGE_TAG}"
 ECR_REGISTRY="${ECR_URI%/*}"
 
@@ -123,19 +101,10 @@ log "target image=${ECR_IMAGE}"
 # ==================================================================================
 # WAIT FOR IN-FLIGHT DESTRUCTIVE OPS
 # ==================================================================================
-# This is one of two implementations of the `instance_busy` contract; the other
-# is the ASG-wide gate in .github/actions/refresh-graph-asg/action.yml, which asks
-# "is ANY instance in this ASG busy?" from a runner before replacing instances —
-# a decision an instance cannot make about itself. Neither is redundant, but the
-# fail-open rules below must stay identical in both. See that file's note at
-# STALE_WINDOW_SECONDS.
-#
-# This is a coordination signal, NOT a guard. `instance_busy`'s own module logs
-# write failures and never raises them, on the principle that a broken counter
-# must not block the actual work. Every escape hatch
-# below is therefore deliberate and must stay: a negative counter is idle, a
-# counter stuck with a stale heartbeat is a crashed writer, and a missing registry
-# row proceeds. Do not tighten these into a resource control.
+# instance_busy is a coordination signal, NOT a guard, so the fail-open rules are
+# deliberate: negative counter = idle, stale heartbeat = crashed writer, missing
+# row = proceed. The ASG-wide twin in .github/actions/refresh-graph-asg/action.yml
+# must apply the same rules.
 wait_until_idle() {
   if [ "${FORCE_IGNORE_BUSY}" = "true" ]; then
     log "WARNING: FORCE_IGNORE_BUSY=true — bypassing the busy-counter check"
@@ -192,10 +161,8 @@ wait_until_idle() {
         log "WARNING: stale busy counter (count=${count}, kind=${kind}, last=${last_at}, ${age}s ago > ${STALE_WINDOW_SECONDS}s). Treating as crashed and proceeding."
         return 0
       fi
-      # An unparseable heartbeat disables the crashed-writer escape hatch, so
-      # this run can only end in idle or timeout. Say so once rather than let
-      # the operator watch 30 minutes of "busy" with no idea why the stale
-      # check never fired. `date -d` needs GNU coreutils (present on AL2023).
+      # An unparseable heartbeat disables stale detection, so the wait can only
+      # end in idle or timeout; warn once. `date -d` needs GNU coreutils.
       if [ "${last_epoch}" -eq 0 ] && [ "${attempt}" -eq 1 ]; then
         log "WARNING: could not parse heartbeat '${last_at}' — stale-counter detection is inactive for this run"
       fi
@@ -213,8 +180,7 @@ wait_until_idle
 # ==================================================================================
 # PULL
 # ==================================================================================
-# The pull always precedes the stop, so customer-visible downtime is the restart
-# and not the download. Any future edit that reorders these is a regression.
+# Pull before stop, so downtime is the restart, not the download.
 log "logging in to ${ECR_REGISTRY}"
 aws ecr get-login-password --region "${AWS_REGION}" |
   docker login --username AWS --password-stdin "${ECR_REGISTRY}" >/dev/null ||
@@ -226,14 +192,8 @@ docker pull "${ECR_IMAGE}" || die "docker pull failed for ${ECR_IMAGE}"
 # ==================================================================================
 # DIGEST SKIP
 # ==================================================================================
-# The graph API image changes far less often than the API/worker images, so most
-# fleet refreshes have nothing to do. Skipping the restart when the pulled image
-# already matches the running one turns those into no-op pulls instead of a
-# customer-visible bounce per instance.
-#
-# REFRESH_RESULT is printed either way: a run that no-ops on nearly every instance
-# has to say so, or "success" becomes indistinguishable from "pulled nothing and
-# quietly did nothing."
+# Skip the restart when the pulled image matches the running one (most fleet
+# refreshes). REFRESH_RESULT is printed either way so no-ops are visible.
 PULLED_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "${ECR_IMAGE}" 2>/dev/null) || PULLED_IMAGE_ID=""
 RUNNING_IMAGE_ID=$(docker inspect --format '{{.Image}}' "${CONTAINER_NAME}" 2>/dev/null) || RUNNING_IMAGE_ID=""
 CONTAINER_RUNNING=$(docker inspect --format '{{.State.Running}}' "${CONTAINER_NAME}" 2>/dev/null) || CONTAINER_RUNNING="false"
@@ -259,10 +219,8 @@ fi
 # ==================================================================================
 # SWAP
 # ==================================================================================
-# run-graph-container.sh stops and removes the old container, starts the new one,
-# and blocks on its own bounded health check, exiting non-zero if the container
-# never becomes healthy. That health check is not repeated here — it lives in one
-# place, the same place that knows how the container is started.
+# run-graph-container.sh swaps the container and runs the bounded health check,
+# exiting non-zero if it never becomes healthy.
 log "swapping container via run-graph-container.sh"
 /usr/local/bin/run-graph-container.sh || die "run-graph-container.sh failed — container did not come up healthy"
 

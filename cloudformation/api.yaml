@@ -143,16 +143,9 @@ Parameters:
     Type: String
     Default: ""
 
-  # Sustained 5xx from the application over a 5-minute window. Deliberately a
-  # parameter, not a literal: there is no traffic baseline to tune against yet,
-  # so this will move — and a threshold that needs a code change to adjust ends
-  # up never adjusted. Sourced from the API_TARGET_ERROR_THRESHOLD GitHub
-  # variable so it can be retuned without a PR.
-  #
-  # Comparison is GreaterThanThreshold, matching the sibling ALB alarms, so the
-  # alarm fires *above* this count — 5 means the sixth 5xx in five minutes. Worth
-  # knowing where the floor sits: at current traffic, five 5xx in five minutes is
-  # already a lot of broken. Lower it rather than reaching for the operator.
+  # Application 5xx count over 5 minutes, above which the alarm fires
+  # (GreaterThanThreshold). A parameter (API_TARGET_ERROR_THRESHOLD) so it can be
+  # retuned without a PR once there is a traffic baseline.
   ApiTargetErrorThreshold:
     Type: Number
     Default: 5
@@ -402,11 +395,8 @@ Resources:
                   Resource: !ImportValue
                     Fn::Sub: "${PrometheusStackName}-PrometheusWorkspaceArn"
                 - !Ref AWS::NoValue
-              # S3 permissions - API role with least privilege access
-              # Read-only access to processed data, deployments, and the
-              # public data bucket (the published filing artifacts the
-              # information-block views read in-cluster; the bucket is
-              # CloudFront-OAC-only, so the role needs its own grant)
+              # S3 read-only: processed data, deployments, and the public data
+              # bucket (CloudFront-OAC-only, so the role needs its own grant).
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -1253,12 +1243,7 @@ Resources:
         !If [HasAlertEmail, [!Ref SecurityAlertTopic], !Ref "AWS::NoValue"]
 
   # ── API ALB health alarms ──────────────────────────────────────────────────
-  # These read the ALB and target group as CloudFormation resources, so the
-  # dimensions are always correct and always present. They previously lived in
-  # security.yaml, where api.yaml's inline-template ceiling had forced them, and
-  # had to reach the ALB by name through a live ELB lookup in the deploy job —
-  # a path that could not tell "the ALB does not exist yet" from "the describe
-  # call failed", and silently deleted the alarms in both cases.
+  # Dimensions come from the ALB and target group resources, so they always match.
   ApiAlbUnhealthyHostsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -1318,12 +1303,9 @@ Resources:
       AlarmActions:
         !If [HasAlertEmail, [!Ref SecurityAlertTopic], !Ref "AWS::NoValue"]
 
-  # The 5xx alarm above watches HTTPCode_ELB_5XX_Count — errors the *load
-  # balancer* generates. A healthy process returning 500 on every business
-  # endpoint produces none of those: its targets stay healthy, the liveness
-  # probe keeps passing, and the outage is invisible end to end. Target_5XX is
-  # the application's own errors, and is the one an outage actually rides
-  # through.
+  # The alarm above counts 5xx the load balancer generates; this one counts the
+  # application's own, which a process failing every request while its health
+  # check passes produces.
   ApiTarget5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -1477,10 +1459,7 @@ Resources:
         AutomaticallyAfterDays: 1000
       RotateImmediatelyOnUpdate: false
 
-  # Gated on HasLambdaImage alongside the function it watches. The previous copy
-  # in security.yaml was unconditional and named the function with a literal
-  # stack-name prefix, so on a deployment without a Lambda image it alarmed on a
-  # function that did not exist — no metrics, no data, permanently OK.
+  # Gated on HasLambdaImage alongside the function it watches.
   AdminKeyRotationErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: HasLambdaImage

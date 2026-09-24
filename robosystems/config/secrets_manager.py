@@ -1,57 +1,13 @@
-"""
-AWS Secrets Manager integration for dynamic secret retrieval.
+"""AWS Secrets Manager access for prod/staging.
 
-Fetches secrets at runtime instead of passing them through userdata scripts.
+Base secret ``robosystems/{env}`` holds keys, auth, SSO, service URLs and
+external API keys; extension secrets ``robosystems/{env}/{postgres,valkey,
+admin,graph-api}`` hold the rest (see SECRET_MAPPINGS). Feature flags live in
+SSM instead (parameter_store.py).
 
-## Architecture
-
-Secrets are organized in AWS Secrets Manager with the following structure:
-- Base secret: `robosystems/{environment}` (e.g., robosystems/prod, robosystems/staging)
-  Contains:
-    Encryption keys: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY
-    JWT/Auth: JWT_ISSUER, JWT_AUDIENCE
-    Enterprise SSO connection: SSO_OIDC_ISSUER, SSO_OIDC_CLIENT_ID,
-      SSO_OIDC_CLIENT_SECRET, SSO_OIDC_PROVIDER_LABEL, SSO_OIDC_BINDING_CLAIM,
-      SSO_DEFAULT_ROLE, ENTERPRISE_ORG_ID (dedicated deployments only)
-    Service URLs: ROBOSYSTEMS_URL, ROBOLEDGER_URL, ROBOINVESTOR_URL
-    Email: EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME
-    External services: INTUIT_*, SEC_GOV_USER_AGENT, OPENFIGI_API_KEY,
-      STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET,
-      TURNSTILE_SECRET_KEY, TURNSTILE_SITE_KEY
-    Note: STRIPE_API_VERSION is a constant in config/constants.py (not a secret)
-
-- Extension secrets: `robosystems/{environment}/{type}`
-  - `/postgres`: POSTGRES_USER, POSTGRES_PASSWORD
-  - `/valkey`: VALKEY_AUTH_TOKEN
-  - `/admin`: ADMIN_API_KEY
-  - `/graph-api`: GRAPH_API_KEY
-
-## Feature Flags
-
-Feature flags are not secrets and live in SSM Parameter Store at
-/robosystems/{environment}/features/{FLAG_NAME} — see parameter_store.py.
-
-## Usage
-
-The environment is detected automatically:
-- prod/staging: fetch from AWS Secrets Manager, cached by the instance-level
-  ``_cache`` dict with a **1-hour TTL** (``cache_ttl_seconds``) — ~256ms cold,
-  ~0.01ms warm. There is deliberately **no** ``lru_cache`` on this path: an LRU
-  never expires, so a rotated secret would be pinned for the life of the
-  process. The TTL is what makes rotation self-healing without a restart, and
-  ``refresh()`` is what makes it immediate.
-- dev: return an empty dict so callers fall back to environment variables
-
-env.py reads every sensitive value through this module, guarded so a missing
-boto3 or a circular import degrades to plain env vars rather than failing:
-
-```python
-try:
-    from robosystems.config.secrets_manager import get_secret_value
-    SECRET_VALUE = get_secret_value("SECRET_KEY", "default")
-except ImportError:
-    SECRET_VALUE = get_str_env("SECRET_KEY", "default")
-```
+Secrets are cached with a 1-hour TTL, deliberately not an ``lru_cache``: a
+TTL lets a rotated secret take effect without a restart (``refresh()`` makes
+it immediate).
 """
 
 import json
@@ -63,7 +19,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
-# Use standard logging to avoid circular import with robosystems.logger
+# Not robosystems.logger: that would be a circular import.
 logger = logging.getLogger(__name__)
 
 
@@ -76,67 +32,52 @@ class SecretsManager:
     region: str | None = None,
     cache_ttl_seconds: int = 3600,
   ):
-    """
-    Initialize the secrets manager; unset arguments fall back to env vars.
-    """
+    """Unset arguments fall back to env vars."""
     self.environment = environment or os.getenv("ENVIRONMENT", "dev")
     self.region = region or os.getenv("AWS_REGION", "us-east-1")
     self.cache_ttl_seconds = cache_ttl_seconds
 
-    # Initialize boto3 client
     self.client = boto3.client("secretsmanager", region_name=self.region)
 
-    # Cache for retrieved secrets with timestamps
-    # Format: {cache_key: (secret_data, timestamp)}
+    # {cache_key: (secret_data, fetched_at)}
     self._cache: dict[str, tuple[dict[str, Any], float]] = {}
 
   def get_secret(self, secret_type: str | None = None) -> dict[str, Any]:
-    """
-    Retrieve a secret from AWS Secrets Manager with TTL-based caching.
+    """Fetch a secret (TTL-cached); None ``secret_type`` is the base secret.
 
-    ``secret_type`` selects an extension secret ("postgres", "valkey", ...);
-    None retrieves the base environment secret. Returns {} outside
-    prod/staging.
+    Returns {} outside prod/staging or when the secret does not exist; other
+    failures raise in prod/staging (fail closed).
     """
-    # Only use Secrets Manager for prod/staging
     if self.environment not in ["prod", "staging"]:
       return {}
 
-    # Build cache key
     cache_key = f"{self.environment}/{secret_type}" if secret_type else self.environment
 
-    # Check cache with TTL
     if cache_key in self._cache:
       secret_data, timestamp = self._cache[cache_key]
       if time.time() - timestamp < self.cache_ttl_seconds:
         return secret_data
       else:
-        # Cache expired, remove it
         del self._cache[cache_key]
         logger.info(f"Cache expired for secret: {cache_key}")
 
-    # Build secret ID
     if secret_type:
       secret_id = f"robosystems/{self.environment}/{secret_type}"
     else:
       secret_id = f"robosystems/{self.environment}"
 
     try:
-      # Retrieve secret from AWS
       response = self.client.get_secret_value(SecretId=secret_id)
 
-      # Parse the secret string
       if "SecretString" in response:
-        # Special case: admin key is stored as raw string, not JSON
+        # The admin key is stored as a raw string, not JSON.
         if secret_type == "admin":
           secret_data = {"ADMIN_API_KEY": response["SecretString"]}
         else:
           secret_data = json.loads(response["SecretString"])
       else:
-        # Handle binary secrets (not expected for our use case)
         raise ValueError(f"Binary secret not supported for {secret_id}")
 
-      # Cache the result with timestamp
       self._cache[cache_key] = (secret_data, time.time())
 
       logger.info(f"Successfully retrieved secret: {secret_id}")
@@ -147,70 +88,52 @@ class SecretsManager:
 
       if error_code == "ResourceNotFoundException":
         logger.warning(f"Secret not found: {secret_id}")
-        # For missing secrets, return empty dict to allow fallback
         return {}
       elif error_code == "AccessDeniedException":
         logger.error(f"Access denied to secret: {secret_id}")
-        # For access issues in prod/staging, this is critical
         if self.environment in ["prod", "staging"]:
           raise
         return {}
       else:
         logger.error(f"Error retrieving secret {secret_id}: {error_code}")
-        # For other errors in prod/staging, raise to surface issues
         if self.environment in ["prod", "staging"]:
           raise
         return {}
     except Exception as e:
       logger.error(f"Unexpected error retrieving secret {secret_id}: {e}")
-      # For unexpected errors in prod/staging, raise to surface issues
       if self.environment in ["prod", "staging"]:
         raise
       return {}
 
   def get_admin_key(self) -> str:
-    """
-    Get the admin API key from the /admin extension secret.
-    """
+    """The admin API key (the ADMIN_API_KEY env var outside prod/staging)."""
     if self.environment not in ["prod", "staging"]:
-      # For local dev, optionally use env var
       return os.getenv("ADMIN_API_KEY", "")
 
     secrets = self.get_secret("admin")
     return secrets.get("ADMIN_API_KEY", "")
 
   def refresh(self, secret_type: str | None = None):
-    """
-    Drop cached secrets — one by type, or all when ``secret_type`` is None.
-    """
+    """Drop cached secrets: one by type, or all when ``secret_type`` is None."""
     if secret_type:
       cache_key = f"{self.environment}/{secret_type}"
       self._cache.pop(cache_key, None)
     else:
-      # Clear all caches
       self._cache.clear()
 
 
-# Global instance for easy access
 _secrets_manager: SecretsManager | None = None
 
 
 def get_secrets_manager() -> SecretsManager:
-  """
-  Get or create the process-wide SecretsManager.
-  """
+  """The process-wide SecretsManager."""
   global _secrets_manager
   if _secrets_manager is None:
     _secrets_manager = SecretsManager()
   return _secrets_manager
 
 
-# Secret mapping configuration
-# Organization mirrors env.py sections. Tuple format: (extension_secret_type, key_name)
-# extension_secret_type=None means the key is in the base secret (robosystems/{env})
-#
-# NOTE: Feature flags have been moved to SSM Parameter Store (see parameter_store.py).
-# Only actual secrets (credentials, API keys, encryption keys) remain here.
+# key -> (extension_secret_type, key_name); None type = the base secret.
 SECRET_MAPPINGS = {
   # --- Core: Encryption Keys ---
   "CONNECTION_CREDENTIALS_KEY": (None, "CONNECTION_CREDENTIALS_KEY"),
@@ -227,21 +150,16 @@ SECRET_MAPPINGS = {
   # --- Graph Databases ---
   "GRAPH_API_KEY": ("graph-api", "GRAPH_API_KEY"),
   # --- PostgreSQL ---
-  # ECS: DATABASE_URL set via task definition env var (CF params + secret resolve)
-  # EC2: DATABASE_URL constructed at runtime from DATABASE_ENDPOINT + POSTGRES_PASSWORD (fetched here)
+  # Only EC2 hosts read this; ECS gets DATABASE_URL from the task definition.
   "POSTGRES_PASSWORD": ("postgres", "POSTGRES_PASSWORD"),
   # --- Valkey/Redis ---
   "VALKEY_AUTH_TOKEN": ("valkey", "VALKEY_AUTH_TOKEN"),
   # --- AWS: S3 Credentials ---
-  # Note: Bucket names are computed from environment in env.py, not secrets
-  # Note: PUBLIC_DATA_CDN_URL is passed via ECS task definition, not secrets
   "AWS_S3_ACCESS_KEY_ID": (None, "AWS_S3_ACCESS_KEY_ID"),
   "AWS_S3_SECRET_ACCESS_KEY": (None, "AWS_S3_SECRET_ACCESS_KEY"),
   # --- Admin ---
   "ADMIN_API_KEY": ("admin", "ADMIN_API_KEY"),
-  # --- Enterprise SSO connection (JWT_ISSUER precedent: the issuer/client
-  # id/org pin are not secrets per se, but they ride with the client secret
-  # so the whole IdP connection is one operator surface in the base secret) ---
+  # --- Enterprise SSO connection (not all secret, but kept together) ---
   "SSO_OIDC_CLIENT_SECRET": (None, "SSO_OIDC_CLIENT_SECRET"),
   "SSO_OIDC_ISSUER": (None, "SSO_OIDC_ISSUER"),
   "SSO_OIDC_CLIENT_ID": (None, "SSO_OIDC_CLIENT_ID"),
@@ -265,7 +183,6 @@ SECRET_MAPPINGS = {
   "STRIPE_SECRET_KEY": (None, "STRIPE_SECRET_KEY"),
   "STRIPE_PUBLISHABLE_KEY": (None, "STRIPE_PUBLISHABLE_KEY"),
   "STRIPE_WEBHOOK_SECRET": (None, "STRIPE_WEBHOOK_SECRET"),
-  # NOTE: STRIPE_API_VERSION moved to constants.py - it's a fixed API version, not a secret
   # --- Cloudflare R2 ---
   "R2_ACCESS_KEY_ID": (None, "R2_ACCESS_KEY_ID"),
   "R2_SECRET_ACCESS_KEY": (None, "R2_SECRET_ACCESS_KEY"),
@@ -278,18 +195,13 @@ SECRET_MAPPINGS = {
 
 
 def get_secret_value(key: str, default: str = "") -> str:
+  """One secret: the env var of the same name wins, then Secrets Manager in
+  prod/staging, else ``default``.
   """
-  Get one secret value, e.g. "JWT_SECRET_KEY".
-
-  Reads Secrets Manager in prod/staging, and the environment variable of the
-  same name otherwise.
-  """
-  # First check environment variable
   env_value = os.getenv(key)
   if env_value:
     return env_value
 
-  # Only use Secrets Manager for prod/staging
   environment = os.getenv("ENVIRONMENT", "dev")
   if environment not in ["prod", "staging"]:
     return default
@@ -302,18 +214,12 @@ def get_secret_value(key: str, default: str = "") -> str:
       secrets = manager.get_secret(secret_type)
       return secrets.get(secret_key, default)
 
-    # If not in mappings, try base secret
     secrets = manager.get_secret()
     return secrets.get(key, default)
 
   except Exception as e:
-    # We only reach here in prod/staging (dev/test returned the default above).
-    # The inner get_secret() already fails closed for access/other errors by
-    # re-raising; swallowing here would silently substitute a possibly-insecure
-    # default (e.g. an empty encryption/signing key), so surface the failure.
-    # Missing-but-optional secrets do NOT reach this branch — get_secret()
-    # returns {} for ResourceNotFound, and {}.get(key, default) yields the
-    # default without raising.
+    # Fail closed: swallowing would substitute a possibly-insecure default
+    # (e.g. an empty signing key). A missing secret never reaches here.
     logger.error(f"Failed to retrieve secret '{key}' from Secrets Manager: {e}")
     raise
 
@@ -321,11 +227,7 @@ def get_secret_value(key: str, default: str = "") -> str:
 def get_secret_list_value(
   key: str, default: str = "", separator: str = ","
 ) -> list[str]:
-  """
-  Get a secret holding a separator-joined list, e.g. "JWT_AUDIENCE".
-
-  Splits on ``separator`` and trims each item.
-  """
+  """A separator-joined list secret, e.g. "JWT_AUDIENCE", trimmed."""
   value = get_secret_value(key, default)
   if not value:
     return []

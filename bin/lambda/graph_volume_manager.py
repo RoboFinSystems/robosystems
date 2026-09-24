@@ -45,25 +45,14 @@ GRAPH_REGISTRY_TABLE = os.environ.get(
   "GRAPH_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-graph-registry"
 )
 ALERT_TOPIC = os.environ["ALERT_TOPIC_ARN"]
-# Retention for pre-detach volume snapshots (tagged AutoDelete: true).
-#
-# This is the ONLY reaper. There is no DLM policy and no AWS Backup plan —
-# volume-layer scheduling was evaluated and declined, because a volume rule
-# protects kilobytes of irreplaceable data by copying gigabytes of rebuildable
-# data, and could not be made graceful across shared master, replicas and user
-# writers. Snapshots here are instance-lifecycle protection, not a backup
-# product; graph backups live in S3 and are taken nightly.
-#
-# Note this value governs cleanup while the snapshot tag says RetentionDays: 3.
-# The tag is descriptive; this is what actually deletes.
+# Retention for pre-detach volume snapshots (tagged AutoDelete: true). This is
+# the ONLY reaper (no DLM, no AWS Backup; graph backups live in S3). It governs
+# deletion regardless of the snapshot's descriptive RetentionDays tag.
 RETENTION_DAYS = int(os.environ.get("SNAPSHOT_RETENTION_DAYS", "7"))
 
-# How long a volume may sit in `claiming` before another launch may take it.
-# Only reached if the Lambda dies between claiming a volume and attaching it —
-# the ordinary failure path releases the claim itself. Must exceed the worst
-# case of attach_and_register_volume (instance_running waiter 5 min, plus the
-# volume_available waiter and attach retries) so a slow-but-live attach is
-# never stolen out from under itself.
+# How long a volume may sit in `claiming` (the Lambda died mid-attach) before
+# another launch may take it. Must exceed attach_and_register_volume's worst case
+# so a slow-but-live attach is never stolen.
 STALE_CLAIM_SECONDS = int(os.environ.get("STALE_CLAIM_SECONDS", "900"))
 
 # Volume defaults (used as fallback when tier not found in TIER_VOLUME_SPEC)
@@ -75,27 +64,13 @@ DEFAULT_THROUGHPUT = 125  # MB/s
 # Per-tier volume spec.
 #
 # `size` is the INITIAL size, not a cap: the volume monitor expands at 80% usage
-# every 15 minutes, and EBS volumes can grow but never shrink - so provisioning
-# small and growing on demand costs strictly less than provisioning for a ceiling
-# most graphs never reach. The product cap is enforced separately by
-# instance_storage_limit_gb in .github/configs/graph.yml (20/50/100 GB); these do
-# not need to match it, since expansion at 80% fires before the write-path cap
-# is reached. gp3's baseline performance is size-independent, so a smaller
-# volume carries no performance penalty.
+# and EBS can grow but never shrink, so start small. The product cap is
+# instance_storage_limit_gb in .github/configs/graph.yml.
 #
-# `iops` / `throughput` are the gp3 performance FLOOR for the tier. They are
-# applied at creation AND re-asserted on every attach by
-# reconcile_volume_performance: a data volume outlives many instances (the
-# shared master's is reattached on every nightly wake), so a creation-time
-# setting alone would leave every existing volume at whatever it was minted
-# with. The floor only ever raises a volume; it never lowers one.
-#
-# ladybug-shared runs the SEC nightly full rebuild, whose relationship-table
-# COPYs are bound by small random reads (endpoint hash-index probes + CSR
-# rewrites) into this volume. At the 3000-IOPS baseline the volume sits 78-93%
-# busy moving ~20 MB/s; at 12000 IOPS / 500 MB/s the same tables run ~2.4x
-# faster, which is why the shared tier is provisioned there. The other tiers
-# stay at baseline.
+# `iops` / `throughput` are the gp3 performance FLOOR, re-asserted on every
+# attach by reconcile_volume_performance (volumes outlive instances); it only
+# ever raises a volume. The shared tier's nightly SEC rebuild is bound by small
+# random reads, hence 12000 IOPS / 500 MB/s there.
 TIER_VOLUME_SPEC: dict[str, dict[str, int]] = {
   "ladybug-standard": {"size": 20, "iops": 3000, "throughput": 125},
   "ladybug-large": {"size": 50, "iops": 3000, "throughput": 125},
@@ -336,12 +311,10 @@ def recover_unregistered_shared_volumes(
 ) -> list[dict]:
   """Re-register EC2 volumes tagged for ``database`` that the registry has lost.
 
-  A registry sweep dropped the parked SEC master's row on 2026-08-23 (it aged
-  the row from the volume's creation date), and the next launch minted an
-  empty 200 GB replacement while the 300 GB original sat ``available`` in the
-  same AZ. The volume's tags are the durable record: rebuild the row from
-  them so the launch claims the real volume. Returns the rebuilt rows, oldest
-  first, in the shape ``find_volumes_with_database`` returns.
+  The volume's EC2 tags are the durable record: rebuild the row from them so a
+  launch claims the real volume instead of minting an empty replacement.
+  Returns the rebuilt rows, oldest first, in the shape
+  ``find_volumes_with_database`` returns.
   """
   response = ec2.describe_volumes(
     Filters=[
@@ -514,16 +487,8 @@ def claim_volume(volume_id: str, instance_id: str) -> bool:
   """Atomically take a volume out of the `available` pool.
 
   Returns True when this caller won the volume, False when another instance
-  claimed it first.
-
-  Selection above is a scan followed by a deterministic sort, so two instances
-  launching concurrently in the same AZ and tier see the same list and pick the
-  same candidate. Without this conditional write both proceed to attach; EC2
-  makes one of them lose with VolumeInUse, and the attach retry loop then waits
-  out a volume that will never free before failing the instance. That is
-  survivable while instances cycle one at a time, but it becomes the normal case
-  under any concurrent replacement — a batched rolling update, an ASG instance
-  refresh, a spot reclaim during a deploy, or two graphs provisioned together.
+  claimed it first. Concurrent launches in one AZ and tier sort candidates
+  identically, so without this conditional write both would attach the same one.
   """
   try:
     table.update_item(
@@ -765,17 +730,11 @@ def attach_and_register_volume(
     waiter.wait(InstanceIds=[instance_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60})
   except Exception as e:
     logger.error(f"Instance {instance_id} did not reach running state: {e}")
-    # Raise rather than return a 500 dict: callers holding a volume claim
-    # release it in their except path, and a return here would strand the
-    # volume in `claiming` (invisible to the pool) until the stale-claim
-    # sweep. The handler's top-level catch still maps this to a 500 response.
+    # Raise, not return: callers release their volume claim in their except path.
     raise RuntimeError(f"Instance not ready: {e!s}") from e
 
-  # Wait for volume to actually reach `available`. EBS detach is async — the
-  # detachment Lambda may have ack'd before the volume left `detaching`. Without
-  # this wait, AttachVolume races the previous instance's detach and EC2 returns
-  # VolumeInUse. Log-and-proceed on timeout; the retry loop below handles the
-  # residual race.
+  # EBS detach is async, so wait for `available` before attaching; on timeout,
+  # proceed and let the retry loop handle VolumeInUse.
   vol_waiter = ec2.get_waiter("volume_available")
   try:
     vol_waiter.wait(VolumeIds=[volume_id], WaiterConfig={"Delay": 5, "MaxAttempts": 24})
@@ -825,11 +784,9 @@ def attach_and_register_volume(
   waiter = ec2.get_waiter("volume_in_use")
   waiter.wait(VolumeIds=[volume_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60})
 
-  # Preserve the registry's existing databases list when present. This list is
-  # maintained by allocation_manager.py (add on graph create, remove on graph
-  # drop). Userdata for non-shared writers passes [] on every launch, so
-  # overwriting unconditionally wipes the volume-to-graph linkage on every
-  # instance replacement, orphaning the graphs the volume still carries.
+  # Preserve the registry's databases list (maintained by allocation_manager.py):
+  # writer userdata passes [] on every launch, and overwriting would orphan the
+  # graphs the volume still carries.
   current = table.get_item(Key={"volume_id": volume_id}).get("Item", {})
   existing_dbs = current.get("databases") or []
   caller_dbs = databases if isinstance(databases, list) else [databases]
@@ -1036,21 +993,11 @@ def _maybe_snapshot_pre_detach(
   AWS copies blocks from the volume in the background even after detach,
   so we don't wait. Failure logs + alerts but does NOT block the detach.
 
-  For shared_master the snapshot is a *rolling single*: after the new snapshot
-  is created we delete any prior pre-detach snapshots of the same volume, so at
-  most one exists at a time. The master detaches on every park cycle and its
-  graph is fully rebuilt nightly (each snapshot delta ≈ the whole volume), so
-  retaining a window's worth accumulates expensively — and the master's real
-  backup is S3 anyway, making the EBS snapshot a single last-known-good fallback
-  rather than a history. Prune runs only AFTER a successful create, so there is
-  never a moment with zero fallback.
-
-  Dedicated writers are not pruned, so they accumulate a history bounded only by
-  ``RETENTION_DAYS``. In practice that history is usually empty: writers run
-  on-demand rather than Spot, so their volumes detach only on a deliberate fleet
-  cycle, and long stretches pass with no snapshot at all. **Do not read this as
-  backup coverage for writer graphs** — they are protected by the nightly S3
-  backups. This is a fast-recovery convenience for instance replacement.
+  For shared_master the snapshot is a *rolling single*: prior pre-detach
+  snapshots are pruned only after the new one is created (it detaches every park
+  cycle and is rebuilt nightly, so a history would be expensive; its real backup
+  is S3). Writer snapshots are kept for ``RETENTION_DAYS``. Neither is backup
+  coverage: graphs are protected by the nightly S3 backups.
   """
   if node_type == "shared_replica":
     logger.info(f"Skipping pre-detach snapshot for {volume_id}: shared_replica")
@@ -1304,10 +1251,7 @@ def cleanup_old_snapshots(event: dict[str, Any]) -> dict[str, Any]:
   """
   now = datetime.now(UTC)
 
-  # Find snapshots to delete. describe_snapshots returns up to 1000 per page;
-  # paginate via NextToken so we don't silently miss snapshots at scale (which
-  # would leak past the retention window). Pre-detach snapshots add per-detach
-  # snapshot churn so this matters more than it did pre-PR-664.
+  # describe_snapshots pages at 1000; paginate so none leak past retention.
   all_snapshots = []
   next_token = None
   while True:
@@ -1498,12 +1442,8 @@ def sync_registry_with_ec2(event: dict[str, Any]) -> dict[str, Any]:
       actual_status = "attached" if ec2_volume["Attachments"] else "available"
       registry_status = registry_item.get("status")
 
-      # In-flight states are invariants, not mismatches: `claiming` is a
-      # volume mid-attach (flipping it back to `available` invites a
-      # double-claim), `expanding` is a resize awaiting its filesystem grow,
-      # and attaching/detaching are EBS transitions. EC2's binary
-      # attached/available view cannot adjudicate any of them — the
-      # stale-claim sweep and the monitor own their lifecycles.
+      # In-flight states aren't mismatches: EC2's attached/available view can't
+      # judge them, and the stale-claim sweep and the monitor own them.
       if registry_status in ("claiming", "expanding", "attaching", "detaching"):
         logger.info(
           f"Volume {volume_id} is {registry_status} (in-flight); skipping sync"

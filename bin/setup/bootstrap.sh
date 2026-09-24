@@ -475,12 +475,8 @@ deploy_oidc_create() {
     print_success "GitHub OIDC stack created"
 }
 
-# Update path. The template is applied through a change set so the operator
-# sees which resources would change before anything is touched, and a stack
-# that already matches the template is reported as such — the prompt only
-# appears when there is something to apply. That closes the gap where a
-# hardening edit sat in the template for weeks, unapplied, because nothing
-# said the live stack was behind.
+# Update path, through a change set: the operator sees what would change before
+# anything is applied, and a stack already matching the template is reported.
 deploy_oidc_update() {
     local stack_status="$1"
 
@@ -655,11 +651,8 @@ configure_github() {
 # FRONTEND REPOSITORY CONFIGURATION
 # =============================================================================
 
-# The frontend apps deploy through the stack this script owns, assuming the
-# separate frontend role. Nothing they need is per-repo — one role ARN, one
-# account, one region, all three known here the moment the stack is up. So the
-# identity variables are pushed from this side, and the app repos need no AWS
-# access, no aws CLI and no SSO profile of their own.
+# Push the frontend role's identity variables to the app repos, which need no
+# AWS access of their own.
 configure_frontend_repos() {
     print_header "Configuring Frontend Repositories"
 
@@ -688,11 +681,8 @@ configure_frontend_repos() {
         --query 'Stacks[0].Parameters' \
         --output json 2>/dev/null) || params="[]"
 
-    # A stack with no Parameters block answers this query with a literal null,
-    # which the || above does not catch: the call succeeded. Iterating null in
-    # jq exits 5, and under set -e that kills the whole bootstrap run instead
-    # of reaching the skip below. Written as an if, never `[ ... ] && ...`,
-    # which would itself trip errexit on the far more common non-null case.
+    # A stack with no Parameters returns a literal null, which jq cannot
+    # iterate under set -e. Keep this an if: `[ ... ] && ...` trips errexit.
     if [ "$params" = "null" ]; then
         params="[]"
     fi

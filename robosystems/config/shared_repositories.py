@@ -1,30 +1,8 @@
-"""
-Shared Repository Registry.
+"""Shared repository registry: manifests declared by adapters, collected on
+first access, plus the plan/billing/rate-limit accessors over them.
 
-Single source of truth for all shared repository definitions. Manifests are
-declared by adapters and collected here on first access.
-
-This module owns all billing/rate-limit accessor functions for shared
-repositories. Plans, pricing, features, and endpoint access are declared
-per-repo in adapter manifests. Plans are plain strings — the manifest is the
-single source of truth.
-
-Usage:
-    from robosystems.config.shared_repositories import (
-        is_shared_repository,
-        get_manifest,
-        get_all_repository_ids,
-        get_plan_details,
-        get_rate_limits,
-    )
-
-    if is_shared_repository("sec"):
-        manifest = get_manifest("sec")
-        print(manifest.name)  # "SEC EDGAR Filings"
-
-Adding a new shared repository:
-    1. Create adapters/{name}/manifest.py with a SharedRepositoryManifest
-    2. Add one import + _register() call to _load_manifests() below
+To add a repository: create adapters/{name}/manifest.py with a
+SharedRepositoryManifest and register it in _load_manifests().
 """
 
 from __future__ import annotations
@@ -59,10 +37,6 @@ def _load_manifests() -> None:
   from robosystems.adapters.sec.manifest import SEC_MANIFEST
 
   _register(SEC_MANIFEST)
-
-  # Future adapters:
-  # from robosystems.adapters.industry.manifest import INDUSTRY_MANIFEST
-  # _register(INDUSTRY_MANIFEST)
 
   _loaded = True
 

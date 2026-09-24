@@ -1,9 +1,5 @@
-# CloudFormation Stack Names Configuration
-# This file defines all CloudFormation stack names for both environments
-# Used by both GitHub Actions workflows and application code for consistency
-#
-# IMPORTANT: These names must match exactly what's defined in the GitHub Actions workflows
-# The workflows are the source of truth - this config mirrors them for application use
+# CloudFormation stack names per environment, for workflows and application code.
+# Must match the names in the GitHub Actions workflows, which are the source of truth.
 
 # Stack naming convention: RoboSystems{Component}{Variant}{Environment}
 # Examples:

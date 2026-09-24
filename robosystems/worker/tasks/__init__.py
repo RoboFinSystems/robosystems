@@ -34,9 +34,7 @@ def register_task(task_type: str):
         f"{TASK_REGISTRY[task_type].__name__} -> {cls.__name__}"
       )
     TASK_REGISTRY[task_type] = cls
-    # The handler's own key into TASK_TIMEOUTS: a task sizes the waits it
-    # makes (a fence wait, a thread-join grace) from its budget, and the
-    # budget is looked up by this string.
+    # Lets a task size its own waits from its TASK_TIMEOUTS budget.
     cls.task_type = task_type
     return cls
 
@@ -49,25 +47,15 @@ def get_task_handler(task_type: str) -> type[BaseTask] | None:
 
 
 def load_adapter_tasks() -> None:
-  """Load worker tasks from enabled adapters.
+  """Load worker tasks from enabled adapters, once at worker startup.
 
-  Each adapter can expose a get_worker_components() function that
-  returns {"task_types": [...]} after importing its task modules
-  (which triggers @register_task side effects).
-
-  Called once at worker startup from worker/__init__.py.
+  An adapter registers by calling its get_worker_components() here, gated on
+  its flag; importing its task modules triggers @register_task. No adapter
+  registers tasks today.
   """
   if _adapter_tasks_loaded:
     return
   _adapter_tasks_loaded.append(True)
-
-  # Future adapters register tasks here:
-  #
-  # from robosystems.config import env
-  #
-  # if env.SEC_PIPELINE_ENABLED:
-  #   from robosystems.adapters.sec.tasks import get_worker_components
-  #   get_worker_components()  # triggers @register_task side effects
 
 
 def clear_registry() -> None:

@@ -13,15 +13,13 @@ from rich.console import Console
 
 console = Console()
 
-# `aws ssm wait command-executed` is botocore's CommandExecuted waiter: delay 5,
-# maxAttempts 20. Neither is configurable, so the wait always gives up at ~100s
-# no matter what `timeout` says — and an in-flight command has no ResponseCode,
-# which is what used to surface as "failed with exit code -1".
+# botocore's CommandExecuted waiter (delay 5, maxAttempts 20, not configurable)
+# gives up at ~100s whatever `timeout` says, and an in-flight command has no
+# ResponseCode.
 _WAITER_CEILING_S = 100
 _POLL_INTERVAL_S = 5
 
-# SSM invocation statuses that mean "not finished yet". Anything else is terminal
-# (Success, Cancelled, TimedOut, Failed) and carries a ResponseCode.
+# Anything else is terminal and carries a ResponseCode.
 _IN_FLIGHT_STATUSES = frozenset({"Pending", "InProgress", "Delayed"})
 
 

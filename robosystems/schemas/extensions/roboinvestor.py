@@ -18,11 +18,7 @@ source.
 
 from ..models import Node, Property, Relationship
 
-# NOTE: Before adding nodes or edges here, review schemas/base.py invariants.
-# Universally-applicable concepts (Entity, Taxonomy, Element, Dimension,
-# Structure, Association, Classification) belong in base.py, not here.
-# Aspects (Period, Unit, Dimension) never attach to declarative nodes like
-# Entity, Report, Taxonomy, Portfolio — that's a category error.
+# Review the invariants in schemas/base.py before adding nodes or edges here.
 
 # ── Nodes (materialized from OLTP) ───────────────────────────────────────
 

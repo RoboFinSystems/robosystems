@@ -49,12 +49,9 @@ if [ "${NODE_TYPE}" = "writer" ]; then
   # User database writer registration
   echo "Registering user writer instance..."
 
-  # A replacement instance adopts the databases already on its reattached
-  # volume, so registering with a hardcoded count of 0 makes the allocator
-  # believe an occupied dedicated writer has free capacity and double-book
-  # it. The volume-manager Lambda response written during storage setup
-  # carries the authoritative database list; count parent graphs from it
-  # (subgraph IDs contain "_" and share the parent's capacity slot).
+  # A replacement instance adopts the databases on its reattached volume; a
+  # count of 0 would let the allocator double-book it. Count parent graphs from
+  # the volume-manager response (subgraph IDs contain "_" and share the slot).
   DB_COUNT=0
   if [ -f /tmp/volume-response.json ]; then
     DB_COUNT=$(jq -r '[.databases[]? | select(contains("_") | not)] | length' \

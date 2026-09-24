@@ -47,10 +47,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
   Refuses any step whose ClientRequestToken is not staged AWSPENDING.
   """
-  # Pre-initialize ``step`` so the ``except`` block can log even if the
-  # ``event`` lookups below raise. Without this, a missing
-  # ``event['Step']`` raises KeyError → except clause references unbound
-  # ``step`` → UnboundLocalError masks the real failure.
+  # Bound before the lookups so the except block can log a malformed event.
   step = "<unknown>"
   try:
     secret_arn = event["SecretId"]

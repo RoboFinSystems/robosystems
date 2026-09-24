@@ -27,8 +27,7 @@ import httpx
 
 from robosystems.logger import logger
 
-# Schema definitions for different repository types
-# Each defines the node types and sample queries for that schema
+# Node types and sample queries per repository schema
 REPOSITORY_SCHEMAS = {
   "sec": {
     "name": "SEC EDGAR",
@@ -74,7 +73,6 @@ class GraphHealthChecker:
     self.api_url = api_url
     self.database_path = f"./data/lbug-dbs/{graph_id}.lbug"
 
-    # Determine schema based on graph_id
     if graph_id in REPOSITORY_SCHEMAS:
       self.schema = REPOSITORY_SCHEMAS[graph_id]
     else:
@@ -94,7 +92,6 @@ class GraphHealthChecker:
     logger.info(f"Testing direct database access to {self.graph_id}...")
     result = HealthCheckResult(status="unknown", connection=False)
 
-    # Check if database file exists
     if not Path(self.database_path).exists():
       logger.warning(f"  Database file not found: {self.database_path}")
       result.status = "not_found"
@@ -109,7 +106,6 @@ class GraphHealthChecker:
       result.connection = True
       logger.info(f"  Connected to {self.database_path}")
 
-      # Run node count queries
       for name, query in self.schema["node_counts"].items():
         try:
           query_result = conn.execute(query)
@@ -124,7 +120,6 @@ class GraphHealthChecker:
           result.data[name] = None
           result.errors.append(f"Query {name}: {e!s}")
 
-      # Run relationship count
       try:
         rel_result = conn.execute("MATCH ()-[r]->() RETURN count(r) as count")
         if rel_result.has_next():
@@ -133,7 +128,6 @@ class GraphHealthChecker:
       except Exception as e:
         result.errors.append(f"Relationship count: {e!s}")
 
-      # Run sample query
       try:
         sample_result = conn.execute(self.schema["sample_query"])
         samples = []
@@ -150,7 +144,6 @@ class GraphHealthChecker:
       except Exception as e:
         result.errors.append(f"Sample query: {e!s}")
 
-      # Determine status
       primary_count = None
       if self.schema["primary_node"]:
         # Check primary node type count
@@ -193,7 +186,6 @@ class GraphHealthChecker:
     result = HealthCheckResult(status="unknown", connection=False)
 
     async with httpx.AsyncClient() as client:
-      # Test API connectivity
       try:
         response = await client.get(f"{self.api_url}/health", timeout=10.0)
         if response.status_code == 200:
@@ -207,7 +199,6 @@ class GraphHealthChecker:
         result.status = "error"
         return result
 
-      # Check if database exists
       try:
         response = await client.get(f"{self.api_url}/databases", timeout=10.0)
         if response.status_code == 200:
@@ -221,7 +212,6 @@ class GraphHealthChecker:
       except Exception as e:
         result.errors.append(f"Database list: {e!s}")
 
-      # Run queries through API
       query_url = f"{self.api_url}/databases/{self.graph_id}/query"
 
       for name, query in self.schema["node_counts"].items():
@@ -246,7 +236,6 @@ class GraphHealthChecker:
           result.data[name] = None
           result.errors.append(f"Query {name}: {e!s}")
 
-      # Relationship count
       try:
         response = await client.post(
           query_url,
@@ -261,7 +250,6 @@ class GraphHealthChecker:
       except Exception as e:
         result.errors.append(f"Relationship count: {e!s}")
 
-      # Sample query
       try:
         response = await client.post(
           query_url,
@@ -278,7 +266,6 @@ class GraphHealthChecker:
       except Exception as e:
         result.errors.append(f"Sample query: {e!s}")
 
-      # Determine status
       has_data = any(
         v is not None and v > 0
         for k, v in result.data.items()
@@ -304,7 +291,6 @@ class GraphHealthChecker:
       "analysis": "",
     }
 
-    # Compare data counts
     all_keys = set(direct.data.keys()) | set(api.data.keys())
     for key in all_keys:
       if key == "samples":
@@ -322,7 +308,6 @@ class GraphHealthChecker:
           }
         )
 
-    # Analyze
     if comparison["match"]:
       if direct.status == "healthy" and api.status == "healthy":
         comparison["analysis"] = "Both access methods working correctly"
@@ -344,7 +329,6 @@ class GraphHealthChecker:
     logger.info(f"Schema: {self.schema['name']}")
     logger.info("=" * 60)
 
-    # Direct access check
     direct_result = self.check_direct_access()
     self.results["direct_access"] = {
       "status": direct_result.status,
@@ -353,7 +337,6 @@ class GraphHealthChecker:
       "errors": direct_result.errors,
     }
 
-    # API access check
     api_result = await self.check_api_access()
     self.results["api_access"] = {
       "status": api_result.status,
@@ -362,10 +345,8 @@ class GraphHealthChecker:
       "errors": api_result.errors,
     }
 
-    # Compare
     self.results["comparison"] = self.compare_results(direct_result, api_result)
 
-    # Overall status (prefer API status)
     if api_result.status == "healthy" or direct_result.status == "healthy":
       overall = "healthy"
     elif api_result.status == "empty" or direct_result.status == "empty":

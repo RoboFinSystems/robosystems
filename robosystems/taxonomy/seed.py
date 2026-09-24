@@ -1,17 +1,6 @@
-"""Seed data for the standard US GAAP reporting taxonomy.
-
-Defines SFAC 6 root elements, US GAAP reporting concepts, and the
-Income Statement and Balance Sheet reporting structures with their
-hierarchy associations. Derived from the existing CanonicalConcept
-definitions in adapters/sec/taxonomy/.
-
-Cash Flow Statement is intentionally omitted — the generator that
-renders it isn't implemented yet. SEC XBRL cash flow parsing (for
-externally-filed 10-K/10-Q data) lives in adapters/sec/ and is
-separate from this seed.
-
-The seed function uses raw SQL (not ORM) for use in Alembic migrations.
-All data goes into the public schema (shared across tenants).
+"""Python-dict seed of the US GAAP reporting taxonomy (SFAC 6 roots, IS and BS
+structures), run by extensions migrations 0001/0002; later migrations seed
+from JSON-LD instead. Raw SQL into the public schema. No cash flow structure.
 """
 
 from sqlalchemy import text
@@ -23,12 +12,6 @@ from sqlalchemy import text
 TAXONOMY_ID = "tax_usgaap_reporting"
 STRUCT_IS_ID = "struct_income_statement"
 STRUCT_BS_ID = "struct_balance_sheet"
-# Cash Flow Statement is intentionally NOT seeded. A functional
-# CF generator is not yet implemented for roboledger — when it is,
-# re-introduce STRUCT_CF_ID, the CASH_FLOW_ELEMENTS list, and the
-# corresponding entries in STRUCTURES / STRUCTURE_ROOT_ELEMENTS /
-# ROOT_ORDER. SEC XBRL CF parsing lives in adapters/sec/ and is
-# unaffected.
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SFAC 6 Root Elements (depth 0, all abstract)
@@ -646,8 +629,6 @@ BALANCE_SHEET_ELEMENTS = [
   ),
 ]
 
-# Cash Flow elements are intentionally not seeded — see module docstring.
-
 ALL_GAAP_ELEMENTS = INCOME_STATEMENT_ELEMENTS + BALANCE_SHEET_ELEMENTS
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -703,15 +684,7 @@ def _structure_for_element(elem: dict) -> str:
 
 
 def seed_reporting_taxonomy(connection) -> None:
-  """Seed the standard US GAAP reporting taxonomy into the public schema.
-
-  Idempotent: skips if taxonomy already exists.
-  Uses raw SQL for compatibility with Alembic migrations.
-
-  Args:
-      connection: A SQLAlchemy connection (from op.get_bind() in migrations).
-  """
-  # Check if already seeded
+  """Seed the public schema; idempotent. ``connection`` is op.get_bind()."""
   result = connection.execute(
     text("SELECT id FROM public.taxonomies WHERE id = :id"),
     {"id": TAXONOMY_ID},
@@ -730,10 +703,7 @@ def seed_reporting_taxonomy(connection) -> None:
       "id": TAXONOMY_ID,
       "name": "US GAAP Reporting Taxonomy",
       "desc": "Standard US GAAP reporting hierarchy rooted in SFAC 6",
-      # 0001 seeds this row with taxonomy_type='reporting' because 0001's
-      # CHECK constraint doesn't admit 'reporting_standard'. 0002 widens the
-      # CHECK and backfills this row to 'reporting_standard' as part of the
-      # Taxonomy Block rename.
+      # 0001's CHECK does not admit 'reporting_standard'; 0002 backfills it.
       "type": "reporting",
       "version": "2024",
       "standard": "us-gaap",
@@ -765,13 +735,8 @@ def seed_reporting_taxonomy(connection) -> None:
   for e in ALL_GAAP_ELEMENTS:
     _insert_element(connection, e)
 
-  # 5. Create structure-root elements so they can be referenced in associations.
-  # The associations FK requires both from/to to be valid element IDs.
-  # These abstract elements represent the root of each financial statement.
-  #
-  # NOTE: source="system" (NOT in COA_SOURCES) so they are never returned by
-  # the /accounts/tree endpoint or any Chart of Accounts lookup. They are
-  # internal FK anchors, not user-facing accounts.
+  # 5. Statement-root elements: FK anchors for associations. source="system"
+  # keeps them out of every Chart of Accounts lookup.
   STRUCTURE_ROOT_ELEMENTS = [
     {
       "id": STRUCT_BS_ID,
@@ -948,17 +913,7 @@ def seed_reporting_taxonomy(connection) -> None:
 
 
 def seed_tenant_reporting_taxonomy(connection, schema: str) -> None:
-  """Copy the standard reporting taxonomy from public schema into a tenant schema.
-
-  Called by provision_tenant_schema() so that each tenant can see the shared
-  reporting taxonomy via its own tables (avoiding search_path shadowing).
-
-  Idempotent: skips if taxonomy already exists in the tenant schema.
-
-  Args:
-      connection: A SQLAlchemy connection.
-      schema: The tenant schema name (e.g., 'kg19d355cfe0460db38a').
-  """
+  """Copy the reporting taxonomy from public into a tenant schema; idempotent."""
   result = connection.execute(
     text(f"SELECT id FROM {schema}.taxonomies WHERE id = :id"),
     {"id": TAXONOMY_ID},

@@ -74,12 +74,8 @@ MAIN_API_TAGS = [
   },
   # ── Domain applications — extensions ──────────────────────────────────────
   #
-  # RoboLedger is split one tag per workflow stage, in the order a ledger
-  # lives through them: set it up, teach it a taxonomy, author blocks, post
-  # events, close the month, build the report, send it, analyze it. A single
-  # tag held all 52 commands until 2026-09-19, which rendered on the public
-  # reference as one undifferentiated list a quarter of the whole API long.
-  # Adding a RoboLedger operation means picking the stage it belongs to.
+  # RoboLedger has one tag per workflow stage, in the order a ledger lives
+  # through them; a new operation picks its stage.
   {
     "name": "GraphQL",
     "description": "🧩 GraphQL endpoint - Unified GraphQL endpoint for extensions read queries",
@@ -171,13 +167,9 @@ MAIN_API_TAGS = [
     "description": "👤 User management - Profile, settings, and account information",
   },
   #
-  # Auth keeps the sign-in story together — register, login, session, email
-  # verification, password — because those are one narrative a reader follows.
-  # The three mechanisms below are carved out instead: each is self-contained,
-  # with its own multi-step flow, and none is on the path of a plain password
-  # login. Carving out rather than renaming the parent is deliberate — it keeps
-  # `api/auth/` in the Python SDK, where `login_user` and `register_user` are
-  # the only symbols any consumer imports.
+  # Auth keeps the sign-in story; the self-contained mechanisms below are
+  # carved out. The parent is not renamed: tags are Python SDK paths, and
+  # `api/auth/` must stay put.
   {
     "name": "Auth",
     "description": "🔐 Authentication - Register, sign in, manage the session, verify email, and reset passwords",

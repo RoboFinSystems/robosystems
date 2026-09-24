@@ -9,29 +9,15 @@ from .xbrl import xbrl_node_properties, xbrl_relationship_properties
 
 # Base Schema Definition — Common Foundation
 #
-# INVARIANT 1 (Aspirational base): Base contains concepts that are universally
-# applicable to the ontology regardless of current consumer count. Period, Unit,
-# Element, Taxonomy, Dimension, Association, Structure are declared here even
-# though only roboledger currently populates most of them, because further
-# extensions grow into them. The rule for promoting a
-# concept into base is "is it universally applicable" — NOT "do two extensions
-# use it today." Waiting for a second consumer before promoting turns every
-# promotion into a breaking refactor against materialized data.
+# INVARIANT 1: a concept belongs in base if it is universally applicable, not
+# once two extensions use it; promoting later is a breaking refactor against
+# materialized data.
 #
-# INVARIANT 2 (Aspects attach only to measured events): Period, Unit, and
-# Dimension are aspects that qualify measured observations (Fact in reporting,
-# LineItem dimensional tags in ledger, future Trade in investor). They never
-# attach to declarative nodes like Entity, Report, Taxonomy, Portfolio. Any
-# edge of the form (Entity|Report|Taxonomy|Portfolio)_HAS_(Period|Unit|Dimension)
-# is a category error — rewrite as a node property or as a query over the
-# underlying events. Related: the same conceptual type (currency, time) can
-# appear as a static attribute on a declarative node OR as an aspect edge on
-# a measured event. These are distinct roles — declaration vs observation —
-# and both are legitimate.
+# INVARIANT 2: Period, Unit and Dimension are aspects of measured events
+# (Fact, LineItem, Trade) and never attach to declarative nodes (Entity,
+# Report, Taxonomy, Portfolio); use a node property there instead.
 #
-# NOTE: Platform metadata (users, connections, graph metadata) are stored in
-# PostgreSQL, not in the LadybugDB graph database. This schema contains only
-# business domain concepts.
+# Platform metadata lives in PostgreSQL; this schema is business domain only.
 BASE_NODES = [
   Node(
     name="Entity",
@@ -92,9 +78,6 @@ BASE_NODES = [
     properties=xbrl_node_properties("Dimension"),
   ),
   # XBRL Taxonomy Infrastructure — Structure, Association, Trait, Classification
-  # These are base ontology concepts (taxonomy link networks and pattern/trait
-  # metadata), not roboledger-specific. Any extension that works with a formal
-  # taxonomy (XBRL, RDF, etc.) traverses these nodes.
   Node(
     name="Structure",
     description="XBRL taxonomy structure",
@@ -126,10 +109,7 @@ BASE_NODES = [
     properties=xbrl_node_properties("Classification"),
   ),
   # ── REA primitives ──────────────────────────────────────────────────
-  # Agent + Event are universal REA primitives, promoted to base per
-  # INVARIANT 1. Today only roboledger populates them. Shared-repository
-  # graphs (e.g. SEC) get empty node tables — harmless, materialization
-  # writes no rows.
+  # In base per INVARIANT 1; reporting-only graphs exclude them (see below).
   Node(
     name="Agent",
     description="REA counterparty — the external actor a business event is exchanged with "
@@ -206,13 +186,9 @@ BASE_NODES = [
 ]
 
 # Base Relationships - Common Foundation
-# NOTE: Platform relationships (user access, connections) are managed in PostgreSQL.
-# This schema contains only business domain relationships.
 BASE_RELATIONSHIPS = [
-  # NOTE: parent-subsidiary ownership has no edge here — nothing writes one on
-  # either path (SEC or OLTP materialization). Add ENTITY_OWNS_ENTITY when
-  # multi-entity consolidation ships; OLTP entities.parent_entity_id is the
-  # designated source.
+  # No parent-subsidiary edge: nothing writes one. When consolidation ships,
+  # add ENTITY_OWNS_ENTITY sourced from OLTP entities.parent_entity_id.
   # XBRL Core Relationships - Global relationships for shared XBRL concepts
   Relationship(
     name="ELEMENT_HAS_LABEL",
@@ -229,9 +205,7 @@ BASE_RELATIONSHIPS = [
     properties=xbrl_relationship_properties("ELEMENT_HAS_REFERENCE"),
   ),
   # Global Taxonomy Structure Relationships
-  # NOTE: there is no direct element↔taxonomy membership edge — membership is
-  # derived through Structure associations (STRUCTURE_HAS_TAXONOMY +
-  # STRUCTURE_HAS_ASSOCIATION).
+  # Element↔taxonomy membership is derived through Structure associations.
   Relationship(
     name="TAXONOMY_HAS_LABEL",
     from_node="Taxonomy",
@@ -270,7 +244,6 @@ BASE_RELATIONSHIPS = [
     properties=xbrl_relationship_properties("DIMENSION_HAS_MEMBER_ELEMENT"),
   ),
   # Taxonomy Structure / Association / Classification infrastructure
-  # (relocated from roboledger — these are base ontology concepts, not reporting)
   Relationship(
     name="STRUCTURE_HAS_TAXONOMY",
     from_node="Structure",
@@ -337,10 +310,8 @@ BASE_RELATIONSHIPS = [
     ],
   ),
   # Taxonomy extension chain (version upgrades, entity extensions, industry overlays)
-  # NOTE: single-parent by design — a taxonomy has exactly one parent in the
-  # extension chain. Secondary "extends" relationships should be modeled as
-  # mapping taxonomies via source_taxonomy_id / target_taxonomy_id on the
-  # Taxonomy OLTP model, not as additional TAXONOMY_EXTENDS_TAXONOMY edges.
+  # Single parent by design; model other "extends" links as mapping taxonomies
+  # (source/target_taxonomy_id), not extra edges.
   Relationship(
     name="TAXONOMY_EXTENDS_TAXONOMY",
     from_node="Taxonomy",
@@ -427,18 +398,10 @@ BASE_RELATIONSHIPS = [
 # ---------------------------------------------------------------------------
 # Reporting-only exclusions
 # ---------------------------------------------------------------------------
-# The REA event/agent substrate (Event, Agent) and the advisory element Trait
-# node live in the base schema because accounting (roboledger) graphs populate
-# them. Reporting-only repositories — the SEC shared repo today — never create
-# economic events, counterparties, or element traits. The entity↔taxonomy link
-# edges are likewise tenant-only: they materialize from the extensions OLTP
-# database (taxonomy adoption rows, extension chains) and have no SEC XBRL
-# source. All are excluded from a reporting-only graph's schema so the empty
-# node/relationship tables are neither created nor materialized.
-#
-# Consumed by ContextAwareSchemaLoader (schema DDL) and
-# RoboLedgerContext.get_all_table_names_for_context (materialization list);
-# keep both call sites using these constants so the two paths stay in lockstep.
+# Tables a reporting-only repository (SEC) never populates: REA events and
+# agents, element traits, and the tenant-OLTP entity↔taxonomy links. Both
+# ContextAwareSchemaLoader and RoboLedgerContext.get_all_table_names_for_context
+# must use these so schema DDL and materialization stay in lockstep.
 REPORTING_ONLY_EXCLUDED_NODES: frozenset[str] = frozenset({"Event", "Agent", "Trait"})
 REPORTING_ONLY_EXCLUDED_RELATIONSHIPS: frozenset[str] = frozenset(
   {

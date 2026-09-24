@@ -1,39 +1,14 @@
-"""Filesystem discovery for the reporting-framework library.
+"""Filesystem discovery for the repo-root ``frameworks/`` library.
 
-The library lives at the repo-root ``frameworks/`` directory (peer to
-``robosystems/``), with content nested under per-framework directories:
+- ``frameworks/{name}/{version}.json``: manifest pinning package and bridge
+  versions (several manifests can coexist).
+- ``frameworks/{name}/packages/{std}/{ver}/taxonomy.jsonld``: taxonomy units.
+- ``frameworks/{name}/bridges/{name}/{ver}/taxonomy.jsonld``: cross-namespace
+  equivalence taxonomies.
 
-- ``frameworks/{name}/{version}.json`` — composition manifest that pins
-  specific package + bridge versions. Multiple manifests (v1.json,
-  v2.json, …) can coexist side-by-side at the framework root.
-- ``frameworks/{name}/packages/{std}/{ver}/taxonomy.jsonld`` — atomic
-  taxonomy units owned by this framework. Each package has its own
-  version directory so multiple package versions can coexist and be
-  referenced by different framework manifests.
-- ``frameworks/{name}/bridges/{name}/{ver}/taxonomy.jsonld`` — cross-
-  namespace equivalence taxonomies owned by this framework.
-
-Packages and bridges live at the framework root (not under a per-
-framework-version directory) because the common case is that successive
-framework versions share most package versions; pulling them out of
-a per-version directory avoids duplication when only the composition
-(manifest) changes.
-
-This module is the seam between the filesystem layout and the rest of
-the system. The migration uses it to walk seed files in framework-pinned
-order; ``pins.py`` uses ``expand_framework_to_pin`` to flatten a manifest
-into the ``{standard: version}`` shape ``writer`` expects.
-
-A package and a bridge are both addressable as ``(name, version)``
-pairs; they differ only in directory placement within a framework
-(separating the two at the filesystem level lets us reason about
-composition without cracking open every ``taxonomy.jsonld``).
-
-Every future framework (rs-call-report, rs-irs, rs-ferc, rs-statutory,
-rs-ifrs) is a sibling under ``frameworks/`` with the same internal
-shape. Packages with byte-identical content (e.g. ``fac/v1``) may be
-duplicated across frameworks — atoms are self-contained inside their
-framework, and the framework is the authority boundary.
+Packages and bridges sit at the framework root so successive manifests share
+them. A framework is its own authority boundary: identical packages may be
+duplicated across frameworks.
 """
 
 from __future__ import annotations
@@ -57,13 +32,7 @@ def framework_root(
   name: str,
   root: Path | None = None,
 ) -> Path:
-  """Return the per-framework directory: ``frameworks/{name}/``.
-
-  This is the anchor every other discovery operation derives from —
-  manifest files (``v1.json``, ``v2.json``, …), packages, and bridges
-  all live inside this directory. Framework versions are encoded in
-  the manifest filename, not in a subdirectory.
-  """
+  """``frameworks/{name}/``; versions are manifest filenames, not directories."""
   base = root or FRAMEWORKS_DIR
   return base / name
 
@@ -72,13 +41,7 @@ def list_packages(
   framework: str,
   root: Path | None = None,
 ) -> list[Path]:
-  """Walk a framework's ``packages/`` for every ``v*/taxonomy.jsonld``.
-
-  Returns a flat list of absolute paths sorted by ``(package_name,
-  version)``. Packages live at the framework root, not under a per-
-  framework-version subdirectory — multiple manifest versions share
-  the same package pool.
-  """
+  """Every ``packages/*/v*/taxonomy.jsonld``, sorted by (package, version)."""
   base = framework_root(framework, root) / "packages"
   return _list_taxonomy_jsonld(base)
 
@@ -97,11 +60,7 @@ def package_path(
   version: str,
   packages_root: Path,
 ) -> Path:
-  """Resolve a ``(standard, version)`` pair to its on-disk path.
-
-  ``packages_root`` is the per-framework packages directory; callers
-  typically derive it as ``framework_root(fw) / "packages"``.
-  """
+  """On-disk path of a ``(standard, version)`` package under ``packages_root``."""
   return packages_root / standard / version / "taxonomy.jsonld"
 
 
@@ -110,11 +69,7 @@ def bridge_path(
   version: str,
   bridges_root: Path,
 ) -> Path:
-  """Resolve a ``(bridge, version)`` pair to its on-disk path.
-
-  ``bridges_root`` is the per-framework bridges directory; callers
-  typically derive it as ``framework_root(fw) / "bridges"``.
-  """
+  """On-disk path of a ``(bridge, version)`` under ``bridges_root``."""
   return bridges_root / bridge / version / "taxonomy.jsonld"
 
 
@@ -123,18 +78,10 @@ def load_framework_manifest(
   version: str,
   root: Path | None = None,
 ) -> dict:
-  """Read ``frameworks/{name}/{version}.json`` and validate.
+  """Read and validate ``frameworks/{name}/{version}.json``.
 
-  Validates top-level keys, name/version agreement with the path, and
-  the shape of each ``packages[]`` / ``bridges[]`` entry — so a manifest
-  with a malformed entry (e.g. a package missing ``version``) fails here
-  with a clear message rather than raising an opaque ``KeyError`` later
-  inside ``expand_framework_to_pin`` / ``list_framework_seed_paths``.
-
-  Raises:
-      FileNotFoundError: manifest file missing
-      ValueError: manifest is missing required keys, declares a
-          mismatched name/version, or has a malformed entry
+  Validates entry shapes here so a malformed manifest fails clearly rather
+  than as a KeyError downstream. Raises FileNotFoundError or ValueError.
   """
   path = framework_root(name, root) / f"{version}.json"
   if not path.exists():
@@ -183,24 +130,13 @@ def expand_framework_to_pin(
   """Flatten a framework manifest (and its ``depends_on`` chain) into
   a ``{standard: version}`` dict.
 
-  The flat dict is the shape that ``writer.copy_library_into_tenant``
-  consumes. Bridges and packages share a flat namespace because the loader
-  treats them identically once parsed — every ``taxonomy.jsonld`` declares
-  a ``standard`` field that becomes the dict key, regardless of whether
-  it lived under ``packages/`` or ``bridges/`` on disk.
+  Packages and bridges share one namespace. Dependencies expand first
+  (depth-first) and this framework's entries overlay them; cycles raise
+  ValueError.
 
-  Dependency frameworks are expanded first (depth-first); the current
-  framework's packages overlay on top, letting a downstream framework
-  pin a different version of a dependency-owned package via override.
-  Cycles raise ``ValueError``.
-
-  An entry marked ``tenant_copy: false`` is **omitted** from the pin: it
-  is still seeded into the public library (``list_framework_seed_paths``
-  keys off file presence, not this flag) but is not copied into per-tenant
-  schemas by ``writer.copy_library_into_tenant``. This is how a dormant
-  package stays canonical in the library without bloating (and freezing
-  into) every immutable tenant schema. Flip it back to ``true`` and
-  re-sync to promote a public-only package into existing tenants.
+  ``tenant_copy: false`` entries are omitted: still seeded into ``public``,
+  but not copied into tenant schemas. Set it back to true and re-sync to
+  promote one.
   """
   seen = _seen if _seen is not None else set()
   key = (manifest["framework"], manifest["version"])
@@ -216,11 +152,11 @@ def expand_framework_to_pin(
     pin.update(expand_framework_to_pin(dep_manifest, root=root, _seen=seen))
   for pkg in manifest.get("packages", []):
     if not pkg.get("tenant_copy", True):
-      continue  # public-only: seeded into the library, not copied per-tenant
+      continue
     pin[pkg["standard"]] = pkg["version"]
   for brg in manifest.get("bridges", []):
     if not brg.get("tenant_copy", True):
-      continue  # public-only: seeded into the library, not copied per-tenant
+      continue
     pin[brg["bridge"]] = brg["version"]
   return pin
 
@@ -236,26 +172,10 @@ def list_framework_seed_paths(
   on-disk paths of every seed it pins, ordered by load dependency then
   by the ``ordinal`` field within each section.
 
-  Dependencies load first (depth-first walk of ``depends_on``), then
-  the current framework's packages, then its bridges. Within each
-  section, entries are sorted by ``ordinal`` so the per-manifest load
-  order is preserved. Cycles raise ``ValueError``.
-
-  ``root`` overrides the default ``FRAMEWORKS_DIR`` for tests. Per-
-  framework directories are derived from ``manifest["framework"]``, so
-  a dependency framework's packages resolve against its own framework
-  root, not the caller's.
-
-  When ``skip_missing_optional`` is True (default), entries marked
-  ``is_required: false`` whose taxonomy.jsonld doesn't exist on disk
-  are silently skipped — useful while authoring a framework whose
-  optional packages haven't been written yet. Missing required entries
-  always raise.
-
-  A diamond ``depends_on`` (e.g. ``rs-call-report → [fac, rs-gaap]`` and
-  ``rs-gaap → fac``) reaches a shared dependency via multiple branches;
-  the top-level call deduplicates the result, order-preserving, so each
-  seed appears exactly once in load order.
+  Dependencies first, then packages, then bridges, each section sorted by
+  ``ordinal``. Cycles raise ValueError. With ``skip_missing_optional``,
+  missing ``is_required: false`` entries are skipped; missing required ones
+  always raise. A diamond ``depends_on`` is deduplicated in the top-level call.
   """
   is_root_call = _seen is None
   seen = _seen if _seen is not None else set()
@@ -268,7 +188,6 @@ def list_framework_seed_paths(
 
   paths: list[Path] = []
 
-  # 1) Recurse into depends_on first so dependencies load before us.
   for dep in manifest.get("depends_on", []):
     dep_manifest = load_framework_manifest(dep["framework"], dep["version"], root)
     paths.extend(
@@ -280,7 +199,6 @@ def list_framework_seed_paths(
       )
     )
 
-  # 2) This framework's own packages + bridges.
   fw_dir = framework_root(manifest["framework"], root)
   packages_root = fw_dir / "packages"
   bridges_root = fw_dir / "bridges"
@@ -307,8 +225,6 @@ def list_framework_seed_paths(
     paths.append(path)
 
   if is_root_call:
-    # Diamond depends_on can reach a shared dependency via multiple
-    # branches; collapse duplicates while preserving first-seen order.
     return list(dict.fromkeys(paths))
   return paths
 
@@ -316,11 +232,7 @@ def list_framework_seed_paths(
 def list_framework_manifests(root: Path | None = None) -> list[Path]:
   """Walk ``frameworks/{name}/{version}.json`` for every framework manifest.
 
-  Returns absolute paths sorted by ``(framework_name, version)``. Used by
-  the framework-seeding migration to enumerate every manifest on disk.
-  Hidden files (dot-prefixed) and non-.json files are skipped, so the
-  sibling ``packages/`` and ``bridges/`` directories don't pollute the
-  result.
+  Sorted by (framework, version); hidden and non-.json entries are skipped.
   """
   base = root or FRAMEWORKS_DIR
   if not base.exists():
@@ -347,8 +259,7 @@ def _list_taxonomy_jsonld(root: Path) -> list[Path]:
 
 
 def _iter_dirs(root: Path) -> Iterable[Path]:
-  """Yield child directories of ``root``, skipping hidden entries
-  (``.DS_Store``, dot-prefixed files committed accidentally)."""
+  """Non-hidden child directories of ``root``."""
   for entry in root.iterdir():
     if entry.is_dir() and not entry.name.startswith("."):
       yield entry

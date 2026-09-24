@@ -40,10 +40,8 @@ outputs:
 runs:
   using: composite
   steps:
-    # The key file proves ownership of the host, and a submission for a host that
-    # cannot serve it is rejected. Checking first turns a silent no-op into a failed
-    # step that names the cause — the failure mode otherwise is a workflow that stays
-    # green for weeks while announcing nothing.
+    # IndexNow rejects a host that can't serve its key file; fail loudly here
+    # instead of staying green while announcing nothing.
     - name: Verify the key is served at the host root
       shell: bash
       env:

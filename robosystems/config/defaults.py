@@ -1,64 +1,34 @@
-"""
-Centralized default values for tunable configuration.
+"""Defaults for runtime-tunable parameters.
 
-These values apply when no SSM parameter is set.
-Override priority: Environment Variable > SSM Parameter Store > Default
-
-Categories:
-- CONSTANTS (in constants.py): Values that never change (protocol limits, business rules)
-- TUNABLES (here + SSM): Operational parameters adjustable at runtime
-- SECRETS (in secrets_manager.py): Sensitive credentials and API keys
+Override priority: env var > SSM Parameter Store > these defaults. Fixed
+values live in constants.py, credentials in secrets_manager.py.
 """
 
 
 class DatabaseDefaults:
-  """
-  Database connection pool defaults.
+  """SQLAlchemy pool defaults.
 
-  These values control SQLAlchemy connection pooling to PostgreSQL (RDS).
-  Tune based on instance size and number of ECS tasks:
-  - pool_size + max_overflow = max connections per task
-  - Total connections = (pool_size + max_overflow) x number_of_tasks
-  - Must stay under RDS max_connections for the instance type
-
-  RDS max_connections by instance (PostgreSQL):
-  - db.t4g.micro:  ~112
-  - db.t4g.small:  ~225
-  - db.t4g.medium: ~450
-  - db.t4g.large:  ~900
+  (pool_size + max_overflow) x ECS tasks must stay under the RDS instance's
+  max_connections (~112 t4g.micro, ~225 small, ~450 medium, ~900 large).
   """
 
   POOL_SIZE = 5  # Baseline connections held open per task
   MAX_OVERFLOW = 10  # Additional connections above pool_size (burst)
   POOL_TIMEOUT = 30  # Seconds to wait for a connection from the pool
-  POOL_RECYCLE = 3600  # Recycle connections after 1 hour (handles RDS drops)
-  # Per-statement ceiling for the platform engine, applied at connect time.
-  # The platform session is synchronous and called from async handlers, so a
-  # statement that runs unbounded holds the event loop — and every tenant on
-  # the task — for its whole duration. Migrations use their own engine and
-  # are unaffected. 0 disables.
+  POOL_RECYCLE = 3600  # Seconds; handles RDS-side drops
+  # The platform session is synchronous and called from async handlers, so an
+  # unbounded statement holds the event loop for every tenant. 0 disables.
   STATEMENT_TIMEOUT_MS = 30_000
 
-  # Extensions OLTP database — a separate engine/pool from the platform DB.
-  # The per-graph OLTP write path (journal entries, etc.) is the hot path, so
-  # this is tuned independently, and is SSM-tunable: raise it with RDS
-  # instance size.
+  # Extensions OLTP engine, tuned independently (it carries the hot write path).
   EXTENSIONS_POOL_SIZE = 5
   EXTENSIONS_MAX_OVERFLOW = 10
-  # Per-statement ceiling for interactive extensions sessions (request-scoped
-  # reads and command writes). The pool is shared by every tenant, so a
-  # statement that runs unbounded holds a shared connection for everyone;
-  # bulk paths (loader syncs, migrations, backfills) opt out explicitly.
+  # Interactive extensions sessions; bulk paths opt out explicitly.
   EXTENSIONS_STATEMENT_TIMEOUT_MS = 30_000
 
 
 class CacheDefaults:
-  """
-  Cache TTL defaults (seconds).
-
-  These values balance freshness with performance. Shorter TTLs mean
-  more frequent cache misses but fresher data.
-  """
+  """Cache TTL defaults (seconds)."""
 
   # General TTL categories
   SHORT = 300  # 5 minutes - frequently changing data
@@ -80,11 +50,7 @@ class CacheDefaults:
 
 
 class TimeoutDefaults:
-  """
-  Operation timeout defaults (seconds).
-
-  These values balance responsiveness with allowing operations to complete.
-  """
+  """Operation timeout defaults (seconds)."""
 
   HTTP = 30  # Standard HTTP request timeout
   QUERY = 30  # Database query timeout
@@ -97,26 +63,13 @@ class TimeoutDefaults:
 
 
 class AdmissionDefaults:
-  """
-  Admission control thresholds.
+  """Admission control thresholds, read differently by two controllers.
 
-  These thresholds determine when to start rejecting new requests
-  to protect system stability.
-
-  These constants feed two different admission controllers, which use them
-  differently. Read the consumer before reasoning about either.
-
-  graph_api/core/admission_control.py (the LadybugDB query path) reports
-  MEMORY_THRESHOLD but deliberately does not reject on it: a LadybugDB buffer
-  pool is a fixed pre-commitment that is supposed to fill, so percent of total
-  memory conflates that constant with the query working set that actually
-  predicts exhaustion. There, rejection is gated on MIN_AVAILABLE_MB, an
-  absolute headroom figure that does not move when the pool or the instance
-  size changes.
-
-  middleware/graph/admission_control.py (the routing path) does the opposite:
-  it rejects on MEMORY_THRESHOLD as a straight percentage and never reads
-  MIN_AVAILABLE_MB.
+  graph_api/core/admission_control.py only reports MEMORY_THRESHOLD and
+  rejects on MIN_AVAILABLE_MB: the LadybugDB buffer pool is meant to fill, so
+  percent-of-memory would conflate it with the working set.
+  middleware/graph/admission_control.py rejects on MEMORY_THRESHOLD and never
+  reads MIN_AVAILABLE_MB.
   """
 
   MEMORY_THRESHOLD = 85.0  # Report memory pressure at 85% usage
@@ -126,11 +79,7 @@ class AdmissionDefaults:
 
 
 class QueueDefaults:
-  """
-  Queue configuration defaults.
-
-  These values control query queue behavior and capacity limits.
-  """
+  """Query queue defaults."""
 
   MAX_SIZE = 1000  # Maximum pending queries in queue
   MAX_CONCURRENT = 50  # Maximum concurrent query execution
@@ -139,35 +88,21 @@ class QueueDefaults:
 
 
 class CircuitBreakerDefaults:
-  """
-  Circuit breaker defaults.
-
-  Circuit breakers protect downstream services from cascading failures.
-  """
+  """Circuit breaker defaults."""
 
   FAILURE_THRESHOLD = 5  # Failures before opening circuit
   TIMEOUT = 60  # Seconds before retry after circuit opens
 
 
 class LoadSheddingDefaults:
-  """
-  Load shedding thresholds (all values are percentages 0-100).
-
-  Load shedding is a last-resort protection mechanism that randomly
-  rejects requests when system pressure is too high.
-  """
+  """Load shedding thresholds (percent pressure)."""
 
   START_PRESSURE = 80.0  # Start shedding at 80% pressure
   STOP_PRESSURE = 60.0  # Stop shedding when below 60% pressure
 
 
 class MCPDefaults:
-  """
-  MCP (Model Context Protocol) operation defaults.
-
-  These values protect LLM context windows from being overwhelmed
-  by large result sets.
-  """
+  """MCP result-size defaults, protecting LLM context windows."""
 
   MAX_RESULT_ROWS = 1000  # Default row limit for queries
   MAX_RESULT_SIZE_MB = 5.0  # Maximum result size in MB
@@ -176,11 +111,7 @@ class MCPDefaults:
 
 
 class WorkerDefaults:
-  """
-  Worker/thread pool defaults.
-
-  These values control parallel processing for batch operations.
-  """
+  """Worker pool defaults for batch operations."""
 
   MAX_WORKERS = 10  # Parallel workers for batch operations (e.g., S3 uploads)
   MIN_WORKERS = 1  # Minimum workers
@@ -188,11 +119,7 @@ class WorkerDefaults:
 
 
 class RetryDefaults:
-  """
-  Retry configuration defaults.
-
-  These values control retry behavior for transient failures.
-  """
+  """Retry defaults for transient failures."""
 
   MAX_RETRIES = 3  # Maximum retry attempts
   MIN_DELAY = 1  # Minimum delay between retries (seconds)
@@ -201,49 +128,31 @@ class RetryDefaults:
 
 
 class RateLimitDefaults:
-  """
-  Rate limiting defaults.
-
-  These values control burst protection windows.
-  """
+  """Rate limit window defaults (seconds)."""
 
   WINDOW_SHORT = 60  # 1 minute window for burst limits
   WINDOW_LONG = 300  # 5 minute window for sustained limits
 
 
 class SSEDefaults:
-  """
-  Server-Sent Events (SSE) defaults.
-
-  These values control SSE connection limits.
-  """
+  """Server-Sent Events defaults."""
 
   MAX_CONNECTIONS_PER_USER = 5  # Max concurrent SSE connections per user
   QUEUE_SIZE = 100  # Event queue size per connection
-  # Seconds of event silence before the stream emits a keepalive. Must stay
-  # comfortably below the client read timeout (the Python SDK's SSE client
-  # defaults to 30s) — an operation that runs longer than this without
-  # emitting progress otherwise races the client's timeout and the client
-  # drops a job that is still running server-side.
+  # Seconds of silence before a keepalive. Must stay well below the client read
+  # timeout (30s in the Python SDK) or clients drop jobs still running.
   KEEPALIVE_INTERVAL = 10
 
 
 class LimitsDefaults:
-  """
-  Default limits for various resources.
+  """Runtime-adjustable resource quotas."""
 
-  These values control quotas and resource limits that can be adjusted at runtime.
-  """
-
-  # Safe-by-default: the code default is the floor, so SSM can only ever
-  # RAISE the cap, never a permissive fallback. An org bootstrapped during
-  # an SSM blip snapshots THIS value into org_limits.max_graphs durably, so
-  # the code default must be the conservative one. Prod SSM sets it to 1.
+  # Must stay the conservative floor: an org bootstrapped during an SSM blip
+  # snapshots this value into org_limits.max_graphs durably.
   ORG_GRAPHS_DEFAULT = 1  # Default max graphs per organization
 
 
-# SSM Parameter paths for tunables
-# These paths are used by tuning.py to fetch overrides from SSM
+# SSM paths (under tuning/) that tuning.py reads overrides from.
 SSM_TUNING_PATHS = {
   # Cache TTLs
   "cache/BALANCE_TTL": CacheDefaults.BALANCE_TTL,

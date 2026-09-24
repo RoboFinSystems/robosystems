@@ -1,9 +1,4 @@
-"""
-Centralized rate limiting configuration.
-
-This module contains all rate limit definitions for different subscription tiers
-and endpoint categories.
-"""
+"""Rate limits per subscription tier and endpoint category."""
 
 from enum import Enum
 
@@ -67,10 +62,8 @@ class EndpointCategory(str, Enum):
 class RateLimitConfig:
   """Centralized rate limiting configuration."""
 
-  # Default rate limit if not specified
   DEFAULT_LIMIT = (100, RateLimitPeriod.HOUR)
 
-  # Rate limit window sizes (for sliding window implementation)
   WINDOW_SIZE_SECONDS = {
     RateLimitPeriod.MINUTE: 60,
     RateLimitPeriod.HOUR: 3600,
@@ -80,7 +73,6 @@ class RateLimitConfig:
   # Burst allowance multiplier (allows short bursts above limit)
   BURST_MULTIPLIER = 1.2
 
-  # Rate limit headers to include in responses
   RATE_LIMIT_HEADERS = {
     "limit": "X-RateLimit-Limit",
     "remaining": "X-RateLimit-Remaining",
@@ -88,24 +80,11 @@ class RateLimitConfig:
     "retry_after": "Retry-After",
   }
 
-  # Subscription tier rate limits
-  # BURST-FOCUSED CONFIGURATION: Short windows for burst protection
-  # Volume control is handled by the credit system
-  # Format: {tier: {category: (limit, period)}}
-  # Categories served by the customer's own dedicated LadybugDB instance.
-  # These scale by tier and bucket per graph; everything else is shared
-  # infrastructure, stays flat, and buckets per user. See the comment on
-  # SUBSCRIPTION_RATE_LIMITS below for why the distinction matters.
-  #
-  # GRAPH_SEARCH is deliberately absent: it hits the shared OpenSearch cluster,
-  # not the tenant's instance. GRAPH_IMPORT is absent because LadybugDB ingests
-  # sequentially regardless of tier, so extra cores buy nothing there.
-  # GRAPH_BACKUP, GRAPH_MANAGEMENT, and GRAPH_SYNC are also deliberately
-  # absent: they are low-frequency control-plane operations whose cost lands
-  # on shared infrastructure — S3 for backups, the platform database and
-  # orchestration for management, external providers via the shared worker
-  # pool for sync — not on the tenant's own cores, so tier vCPU is not the
-  # scaling axis for any of them.
+  # Categories served by the customer's own LadybugDB instance: they scale by
+  # tier and bucket per graph (see SUBSCRIPTION_RATE_LIMITS). Deliberately
+  # absent: GRAPH_SEARCH (shared OpenSearch), GRAPH_IMPORT (ingestion is
+  # sequential whatever the cores), and the control-plane BACKUP/MANAGEMENT/
+  # SYNC, whose cost lands on shared infrastructure.
   DEDICATED_RESOURCE_CATEGORIES: frozenset[EndpointCategory] = frozenset(
     {
       EndpointCategory.GRAPH_QUERY,
@@ -120,31 +99,13 @@ class RateLimitConfig:
   SUBSCRIPTION_RATE_LIMITS: dict[
     str, dict[EndpointCategory, tuple[int, RateLimitPeriod]]
   ] = {
-    # -----------------------------------------------------------------------
-    # MANAGED SERVICE RATE LIMITS
+    # Burst protection in one-minute windows; volume is governed by credits.
     #
-    # Two kinds of limit live in this table, and they differ by what they
-    # protect:
-    #
-    #   Dedicated  — categories in DEDICATED_RESOURCE_CATEGORIES hit the
-    #                customer's own LadybugDB instance. Every customer tier is
-    #                databases_per_instance: 1, so a heavy tenant harms only
-    #                themselves. These scale with the tier's vCPU count
-    #                (m7g.medium 1 → m7g.large 2 → r7g.xlarge 4), because read
-    #                throughput is what the extra cores actually buy.
-    #
-    #   Shared     — everything else lands on infrastructure every tenant
-    #                shares: OpenSearch (t3.medium), the extensions RDS, the
-    #                API tier itself. These stay flat across tiers and bucket
-    #                per user, so buying more graphs cannot multiply one
-    #                customer's load on a resource others depend on.
-    #
-    # LadybugDB is dedicated per graph, not shared, which is what lets the
-    # dedicated half differentiate by tier at all.
-    #
-    # Admission control remains the real overload backstop; these numbers are a
-    # product lever, not the safety mechanism.
-    # -----------------------------------------------------------------------
+    # Dedicated categories hit the customer's own instance (one database per
+    # instance), so they scale with the tier's vCPU count. Shared categories
+    # stay flat and bucket per user, so buying more graphs cannot multiply one
+    # customer's load on shared infrastructure. Admission control, not these
+    # numbers, is the overload backstop.
     "base": {
       # Anonymous / unrecognized tier — tightest limits
       EndpointCategory.AUTH: (10, RateLimitPeriod.MINUTE),
@@ -173,10 +134,7 @@ class RateLimitConfig:
       EndpointCategory.TABLE_UPLOAD: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.TABLE_MANAGEMENT: (5, RateLimitPeriod.MINUTE),
     },
-    # ladybug-standard: m7g.medium (4GB, 1 vCPU) — the anchor the other tiers
-    # multiply from. Sized for m7g.large and deliberately retained after the
-    # resize: cutting limits on existing customers would be a service
-    # regression in exchange for protection admission control already provides.
+    # ladybug-standard (1 vCPU): the anchor the other tiers multiply from.
     "ladybug-standard": {
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
@@ -184,7 +142,7 @@ class RateLimitConfig:
       EndpointCategory.STATUS: (120, RateLimitPeriod.MINUTE),
       EndpointCategory.SSE: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
-      # Graph-scoped — sized for m7g.large
+      # Graph-scoped
       EndpointCategory.GRAPH_READ: (120, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_WRITE: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_ANALYTICS: (15, RateLimitPeriod.MINUTE),
@@ -207,8 +165,7 @@ class RateLimitConfig:
       EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.TABLE_MANAGEMENT: (15, RateLimitPeriod.MINUTE),
     },
-    # ladybug-large: m7g.large (8GB, 2 vCPU) — 2x Standard's vCPU, so the
-    # dedicated-resource categories double. Shared categories match Standard.
+    # ladybug-large (2 vCPU): dedicated categories 2x Standard.
     "ladybug-large": {
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
@@ -239,8 +196,7 @@ class RateLimitConfig:
       EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.TABLE_MANAGEMENT: (15, RateLimitPeriod.MINUTE),
     },
-    # ladybug-xlarge: r7g.xlarge (32GB, 4 vCPU) — 4x Standard's vCPU, so the
-    # dedicated-resource categories quadruple. Shared categories match Standard.
+    # ladybug-xlarge (4 vCPU): dedicated categories 4x Standard.
     "ladybug-xlarge": {
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
@@ -277,15 +233,9 @@ class RateLimitConfig:
   def get_rate_limit(
     cls, tier: str, category: EndpointCategory
   ) -> tuple[int, int] | None:
-    """
-    Get rate limit for a subscription tier and endpoint category.
-
-    Returns:
-        Tuple of (limit, window_seconds) or None if not configured
-    """
+    """(limit, window_seconds) for the tier (unknown → base), or None."""
     tier_limits = cls.SUBSCRIPTION_RATE_LIMITS.get(tier)
     if not tier_limits:
-      # Default to base tier if unknown
       tier_limits = cls.SUBSCRIPTION_RATE_LIMITS["base"]
 
     limit_config = tier_limits.get(category)
@@ -299,42 +249,23 @@ class RateLimitConfig:
   def get_endpoint_category(
     cls, path: str, method: str = "GET"
   ) -> EndpointCategory | None:
-    """
-    Determine the category of an endpoint based on its path and method.
-
-    Args:
-        path: The API endpoint path
-        method: HTTP method
-
-    Returns:
-        The endpoint category or None if not categorized
-    """
-    # Extensions surface — OLTP on shared RDS, so it gets its own buckets
-    # (EXTENSIONS_GRAPHQL / EXTENSIONS_WRITE) independent of the LadybugDB
-    # graph categories, so the two backends can be tuned separately.
-    # Checked BEFORE the `/v1/` prefix strip because the extensions
-    # surface is mounted at the top level, not under `/v1/`.
+    """Endpoint category for a path and method, or None if uncategorized."""
+    # Extensions (OLTP) have their own buckets; mounted outside /v1/.
     if path.startswith("/extensions/"):
       ext_parts = path[len("/extensions/") :].split("/")
       # /extensions/{graph_id}/graphql → EXTENSIONS_GRAPHQL (typed OLTP reads)
       if len(ext_parts) >= 2 and ext_parts[1] == "graphql":
         return EndpointCategory.EXTENSIONS_GRAPHQL
-      # /extensions/{domain}/{graph_id}/operations/{op_name} → EXTENSIONS_WRITE
-      # (command writes; analytical view operations ride here too for now).
+      # /extensions/{domain}/{graph_id}/operations/{op_name} (views too)
       if len(ext_parts) >= 4 and ext_parts[2] == "operations":
         return EndpointCategory.EXTENSIONS_WRITE
-      # Any other extensions endpoint (e.g. report bundle download) → the
-      # extensions write bucket rather than dropping to the unbounded default.
+      # Anything else here, rather than the unbounded default.
       return EndpointCategory.EXTENSIONS_WRITE
 
-    # Remove version prefix
     if path.startswith("/v1/"):
       path = path[4:]
 
-    # The graph-agnostic MCP transports (POST /v1/mcp and its RoboLedger twin
-    # /v1/mcp/roboledger): the OAuth grant, not the path, names the graph, so
-    # the routes are categorized by their suffix alone — they must land in the
-    # MCP bucket like their per-graph sibling.
+    # Graph-agnostic MCP transports (the OAuth grant names the graph).
     if path in ("mcp", "mcp/roboledger"):
       return EndpointCategory.GRAPH_MCP
 
@@ -352,20 +283,14 @@ class RateLimitConfig:
     elif "operations" in path and "stream" in path:
       return EndpointCategory.SSE
 
-    # Check if it's a graph-scoped endpoint
     path_parts = path.strip("/").split("/")
 
-    # Non-graph-scoped schema validation (/graphs/schema/validate) — validate a
-    # candidate schema BEFORE a graph exists, so it carries no graph_id. It is
-    # read-like, so use the graph-read bucket rather than the default POST write
-    # bucket. Unambiguous: a graph named "schema" would be /graphs/schema/schema/…
+    # Pre-creation schema validation carries no graph_id; read-like despite POST.
     if path_parts[:3] == ["graphs", "schema", "validate"]:
       return EndpointCategory.GRAPH_READ
 
     # Graph-scoped endpoints (format: /graphs/{graph_id}/...)
     if len(path_parts) >= 2 and path_parts[0] == "graphs":
-      # For graph-scoped endpoints, endpoint_type is the part after graph_id
-      # path_parts: ['graphs', '{graph_id}', 'endpoint_type', ...]
       endpoint_type = path_parts[2] if len(path_parts) >= 3 else None
 
       # Files operations (first-class resources or nested under tables)
@@ -402,25 +327,18 @@ class RateLimitConfig:
       elif endpoint_type == "schema":
         return EndpointCategory.GRAPH_READ
 
-      # Query layer — POST /v1/graphs/{graph_id}/query/{cypher,sql}, so the
-      # segment after graph_id (endpoint_type) is "query" and the language is
-      # the next segment. Cypher → GRAPH_QUERY; SQL → the DuckDB/columnar
-      # bucket (TABLE_QUERY).
+      # /query/{cypher,sql}: SQL goes to the DuckDB bucket.
       elif endpoint_type == "query":
         if len(path_parts) >= 4 and path_parts[3] == "sql":
           return EndpointCategory.TABLE_QUERY
         return EndpointCategory.GRAPH_QUERY
 
-      # Content metrics + consumption usage — aggregation-heavy reads get a
-      # dedicated bucket. Match on the endpoint segment as it actually appears
-      # in the path. Keep this in step with routers/graphs/usage.py.
+      # Aggregation-heavy reads; keep in step with routers/graphs/usage.py.
       elif endpoint_type in ("metrics", "usage"):
         return EndpointCategory.GRAPH_ANALYTICS
 
-      # Graph lifecycle operations — POST /operations/{op_name}. Dedicated
-      # buckets so expensive rebuild/backup work can't be abused by sharing
-      # the generic write limit. Match the op-name segment specifically rather
-      # than the whole path, so a graph_id can't accidentally route the bucket.
+      # Lifecycle operations. Match the op-name segment, not the whole path, so
+      # a graph_id can't route the bucket.
       elif endpoint_type == "operations":
         op_name = path_parts[3] if len(path_parts) > 3 else ""
         if "backup" in op_name:  # create-backup
@@ -430,9 +348,7 @@ class RateLimitConfig:
         else:  # create/delete subgraph, delete-graph, change-tier/style
           return EndpointCategory.GRAPH_MANAGEMENT
 
-      # Connection management (reads/mutations) + the data-sync trigger.
-      # Only the actual /sync call belongs in the tight sync bucket; listing
-      # connections, options, and OAuth callbacks are ordinary reads/writes.
+      # Only the /sync call gets the tight sync bucket.
       elif endpoint_type == "connections":
         if "sync" in path:
           return EndpointCategory.GRAPH_SYNC
@@ -441,34 +357,26 @@ class RateLimitConfig:
         else:
           return EndpointCategory.GRAPH_READ
 
-      # Import operations
       elif "import" in path or "ingest" in path:
         return EndpointCategory.GRAPH_IMPORT
 
-      # Write operations (POST, PUT, DELETE)
       elif method in ["POST", "PUT", "DELETE", "PATCH"]:
         return EndpointCategory.GRAPH_WRITE
 
-      # Default to read for other graph operations
       else:
         return EndpointCategory.GRAPH_READ
 
     return None
 
 
-# Per-endpoint burst limits, in requests per window. These bound how fast a
-# single caller can hit one endpoint family; the per-tier limits above bound
-# volume. They are constants on purpose — a limit that can be raised at runtime
-# is a limit an attacker benefits from raising, and the safe direction (down)
-# is already reachable by deploying. Nothing reads these from the environment.
+# Per-endpoint burst limits, in requests per window. Constants on purpose: a
+# limit raisable at runtime is one an attacker benefits from raising.
 BURST_LIMITS: dict[str, int] = {
   # Identity-based limits for the general API bucket, per minute.
   "api_key": 1000,  # 60k/hour possible
   "jwt": 500,  # 30k/hour possible
   "anonymous": 10,  # 600/hour possible
-  # Authentication. Each attempt count is followed by its window in seconds —
-  # keeping the pair adjacent is the point, since a count and a window that live
-  # apart get changed apart.
+  # Authentication: each attempt count is followed by its window in seconds.
   "auth_attempts": 10,
   "auth_window": 300,
   "login_attempts": 5,
@@ -481,9 +389,7 @@ BURST_LIMITS: dict[str, int] = {
   "logout": 300,
   "sso": 100,
   "oidc": 120,  # 2 per flow
-  # MCP OAuth 2.1 authorization server. Anonymous callers get limit//10:
-  # the token and registration endpoints are unauthenticated by nature, so
-  # their effective per-IP rates are 30/min and 5/min.
+  # MCP OAuth 2.1 authorization server. Anonymous callers get limit//10.
   "oauth_authorize": 120,  # browser GET; anonymous → 12/min per IP
   "oauth_consent": 120,  # JWT-authenticated consent read + decision
   "oauth_token": 300,  # code exchange + refresh; anonymous → 30/min per IP
@@ -504,8 +410,7 @@ BURST_LIMITS: dict[str, int] = {
   "backup_ops": 10,  # expensive operations
   "billing": 60,  # checkout polls at ~20/min
   "webhook": 1200,  # anonymous → 120/min per IP
-  # Server-Sent Events. A fallback: the per-tier limits above are consulted
-  # first, and these apply only when that lookup returns nothing.
+  # SSE fallback, used only when the per-tier lookup returns nothing.
   "sse_connections": 10,
   "sse_connections_window": 60,
 }

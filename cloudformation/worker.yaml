@@ -330,14 +330,9 @@ Resources:
                   - logs:DescribeLogStreams
                 Resource:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/robosystems/${Environment}/worker:*"
-              # CloudWatch Metrics
-              #
-              # Two namespaces, and the second one is load-bearing. Graph
-              # allocation runs in the worker, and its failure metric publishes
-              # to RoboSystems/Graph/${Environment} (allocation_manager.py's
-              # _publish_failure_metric) because that is the namespace the
-              # AllocationFailures alarms in graph-ladybug.yaml watch. Without
-              # it the publish is denied, and the alarms read no-data as OK.
+              # CloudWatch Metrics. RoboSystems/Graph/${Environment} is needed
+              # because graph allocation runs here and publishes the failure
+              # metric the AllocationFailures alarms in graph-ladybug.yaml watch.
               - Effect: Allow
                 Action:
                   - cloudwatch:PutMetricData
@@ -470,11 +465,8 @@ Resources:
             # tools read when an operator calls them from this process.
             - Name: PUBLIC_DATA_BUCKET
               Value: !Select [5, !Split [":", !Ref PublicDataBucketArn]]
-            # Dagster event-log storage — lets worker tasks report runless
-            # AssetMaterialization events to the Dagster asset catalog
-            # (graph_creation, subgraph_creation, graph_tier_upgrade,
-            # extensions_materialize). Without these the baked dagster.yaml's
-            # postgres storage can't resolve, and DagsterInstance.get() fails.
+            # Dagster event-log storage, so worker tasks can report runless
+            # AssetMaterialization events; DagsterInstance.get() fails without it.
             - Name: DAGSTER_HOME
               Value: /app/dagster_home
             - Name: DAGSTER_POSTGRES_HOST
@@ -581,11 +573,8 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub robosystems-worker-queue-depth-high-${Environment}
-      # Backlog counts queued + executing tasks. QueueDepth alone counted only
-      # the waiting ones, so one worker busy on a long close with two tasks
-      # queued behind it never crossed the threshold (F10 in the operator
-      # console-hardening review). With Backlog, two waiting behind one busy
-      # reads 3 and scales out.
+      # Backlog counts queued + executing tasks, so two waiting behind one busy
+      # worker reads 3 and scales out.
       AlarmDescription: Worker backlog (queued + in flight) exceeds threshold - scale out
       Namespace: !Sub RoboSystems/Worker/${Environment}
       MetricName: Backlog

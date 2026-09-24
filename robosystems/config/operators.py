@@ -1,18 +1,9 @@
-"""
-AI Operator configuration: the model registry and profiles, execution
-profiles and mode limits, orchestrator routing, and operator capabilities.
+"""AI Operator configuration: model registry and profiles, execution
+profiles, orchestrator routing, operator capabilities.
 
-"Operator" is the AI-executor concept (Claude/MCP), distinct from REA ``Agent``
-(counterparty) in ``models/extensions/roboledger/agent.py``.
-
-Platform models run through Bedrock's Converse API (``operations/operators/
-ai_client.py``), so a model swap is a registry row here, not a code change
-there. A deployment may also turn on one self-hosted model behind an
-OpenAI-compatible endpoint (``OPENAI_COMPAT_ENABLED``) — the open-source
-runtime's alternative to Bedrock; it is off in hosted prod. Customer-facing
-surfaces name a *profile* (economy / balanced / quality) rather than a model
-id: the catalog churns, and a concrete-model enum would churn the published
-SDKs with it.
+A model swap is a registry row here, not a code change. Customer-facing
+surfaces name a *profile* rather than a model id, so catalog churn never
+reaches the published SDKs.
 """
 
 from dataclasses import dataclass, field
@@ -23,8 +14,7 @@ from robosystems.config.env import env
 
 
 class ModelProfile(Enum):
-  """The stable names a caller can bind to. Which model backs each is a
-  config value expected to change; the names are not."""
+  """Stable names callers bind to; the model behind each is config."""
 
   ECONOMY = "economy"
   BALANCED = "balanced"
@@ -48,8 +38,7 @@ class OperatorModel(Enum):
   SONNET_4 = "claude-sonnet-4-20250514"  # Last resort fallback
   OPUS_5 = "claude-opus-5"
   GPT_5_6_LUNA = "gpt-5.6-luna"
-  # The deployment's self-hosted model; which model that is, is the
-  # deployment's choice (OPENAI_COMPAT_MODEL). Registered only when enabled.
+  # The deployment's self-hosted model, registered only when enabled.
   OPENAI_COMPAT = "openai-compat"
 
 
@@ -63,9 +52,8 @@ class ModelSpec:
   parameters is a 400 on every call.
   """
 
-  # Inference-profile id sent on the wire (`us.*` = regional, keeps
-  # inference in the US; `global.*` exists for each and is a +10% saving
-  # traded against data residency — not taken, see ref/economics.md).
+  # Inference-profile id sent on the wire. `us.*` keeps inference in the US
+  # (`global.*` is cheaper but gives up data residency).
   model_id: str
   # Key into AIBillingConfig.TOKEN_PRICING. Validated against the rate card
   # by validate_configuration(); the meter raises on a miss.
@@ -77,9 +65,7 @@ class ModelSpec:
   # Whether `temperature` is accepted. The Claude 5 family and GPT-5.6 both
   # reject it with a 400.
   accepts_sampling_params: bool
-  # Hard output cap when the model's is below what the execution profiles
-  # ask for (EXTENDED asks 8,000). None = no cap that binds. GLM 4.7 would
-  # carry 4,096 here.
+  # Hard output cap when below what the execution profiles ask; None = none.
   max_output_tokens: int | None = None
   # Model-specific request fields passed through Converse's
   # additionalModelRequestFields verbatim.
@@ -94,14 +80,9 @@ class ModelSpec:
 _CLAUDE_5_REQUEST_FIELDS: dict[str, Any] = {"thinking": {"type": "disabled"}}
 
 
-# The Bedrock rows. Every one is a `us.` cross-region profile today. Most of
-# the open-weight catalog is In-Region only (no `us.` / `global.` profiles),
-# so the first such row brings a residency/failover field with it.
-#
-# Wire ids: Bedrock publishes the Claude 5 family and GPT-5.6 as
-# unversioned ids (`us.anthropic.claude-sonnet-5`, no `-v1:0`); the 4.x
-# rows keep the versioned form. Both shapes are verified against the
-# account's inference-profile list — do not "fix" one to match the other.
+# Wire ids: Bedrock publishes the Claude 5 family and GPT-5.6 unversioned (no
+# `-v1:0`); the 4.x rows keep the versioned form. Both are correct — do not
+# "fix" one to match the other.
 _BEDROCK_MODELS: dict[OperatorModel, ModelSpec] = {
   OperatorModel.SONNET_5: ModelSpec(
     model_id="us.anthropic.claude-sonnet-5",
@@ -135,10 +116,7 @@ _BEDROCK_MODELS: dict[OperatorModel, ModelSpec] = {
     accepts_sampling_params=False,
     additional_request_fields=_CLAUDE_5_REQUEST_FIELDS,
   ),
-  # Verified over Converse 2026-09-15: tool use works, `temperature` and
-  # explicit cache points are rejected, implicit caching reports through
-  # usage. Not available In-Region on bedrock-runtime — the `us.` profile
-  # is the only regional address.
+  # The `us.` profile is its only regional address (not available In-Region).
   OperatorModel.GPT_5_6_LUNA: ModelSpec(
     model_id="us.openai.gpt-5.6-luna",
     pricing_key="openai_gpt_5_6_luna",
@@ -147,8 +125,7 @@ _BEDROCK_MODELS: dict[OperatorModel, ModelSpec] = {
   ),
 }
 
-# Profile → model, platform-wide. A config value: re-point a profile at
-# next quarter's winner without touching any caller.
+# Profile → model, platform-wide.
 _PLATFORM_PROFILE_MODELS: dict[ModelProfile, OperatorModel] = {
   ModelProfile.ECONOMY: OperatorModel.GPT_5_6_LUNA,
   ModelProfile.BALANCED: OperatorModel.SONNET_5,
@@ -157,12 +134,7 @@ _PLATFORM_PROFILE_MODELS: dict[ModelProfile, OperatorModel] = {
 
 
 def self_hosted_model_spec(model_id: str, max_output_tokens: int) -> ModelSpec:
-  """The row for a deployment's self-hosted model.
-
-  Sampling parameters are accepted by every OpenAI-compatible server we
-  target; there are no cache points to send (a server that caches prefixes
-  does it on its own and reports the reads in usage).
-  """
+  """The row for a deployment's self-hosted OpenAI-compatible model."""
   return ModelSpec(
     model_id=model_id,
     pricing_key="openai_compat",
@@ -275,15 +247,8 @@ class ModelConfig:
 
 
 class OperatorConfig:
-  """
-  Centralized configuration for the multi-operator system.
+  """Operator settings."""
 
-  This is the single source of truth for all operator-related settings.
-  """
-
-  # One row per model this deployment can run: the Bedrock rows always, the
-  # self-hosted row only when OPENAI_COMPAT_ENABLED is on. When it is off,
-  # nothing can resolve to that row and the meter refuses it.
   MODEL_REGISTRY: dict[OperatorModel, ModelSpec] = build_model_registry(
     openai_compat_enabled=env.OPENAI_COMPAT_ENABLED,
     openai_compat_base_url=env.OPENAI_COMPAT_BASE_URL,
@@ -291,9 +256,8 @@ class OperatorConfig:
     openai_compat_max_output_tokens=env.OPENAI_COMPAT_MAX_OUTPUT_TOKENS,
   )
 
-  # Profile → model. The platform mapping, re-pointed per deployment by
-  # OPERATOR_PROFILE_*. No platform default moves without an A/B on the real
-  # operator shape first (specs/ai-operators/llm-provider-abstraction §4.1).
+  # The platform mapping, re-pointed per deployment by OPERATOR_PROFILE_*.
+  # Move a platform default only after an A/B on the real operator shape.
   PROFILE_MODELS: dict[ModelProfile, OperatorModel] = build_profile_models(
     {
       ModelProfile.ECONOMY: env.OPERATOR_PROFILE_ECONOMY,
@@ -303,7 +267,6 @@ class OperatorConfig:
     MODEL_REGISTRY,
   )
 
-  # Default Model Configuration
   DEFAULT_MODEL_CONFIG = ModelConfig(
     default_profile=ModelProfile.BALANCED,
     fallback_model=OperatorModel.SONNET_4_6,
@@ -313,7 +276,6 @@ class OperatorConfig:
     timeout_seconds=60,
   )
 
-  # Execution Profiles by Mode
   EXECUTION_PROFILES = {
     OperatorExecutionMode.QUICK: ExecutionProfile(
       min_time_seconds=2,
@@ -353,16 +315,13 @@ class OperatorConfig:
     ),
   }
 
-  # Per-operator-class routing: a profile or a pinned model. Sits between
-  # an explicit per-call choice and the platform default. The natural home
-  # for running RFS's own graphs on the economy profile without any
-  # customer-facing choice existing.
+  # Per-operator-class profile or pinned model, between an explicit per-call
+  # choice and the platform default.
   OPERATOR_MODEL_OVERRIDES: dict[str, ModelProfile | OperatorModel] = {
     # Example: "analyst": ModelProfile.ECONOMY,
     # Example: "mapping": OperatorModel.SONNET_5,
   }
 
-  # Orchestrator Configuration
   ORCHESTRATOR_CONFIG = {
     "fallback_operator": "analyst",
     "confidence_threshold": 0.7,
@@ -371,7 +330,6 @@ class OperatorConfig:
     "routing_strategy": "best_match",
   }
 
-  # Operator Capabilities Configuration
   OPERATOR_CAPABILITIES = {
     "analyst": {
       "supported_modes": ["quick", "standard", "extended", "streaming"],
@@ -461,15 +419,7 @@ class OperatorConfig:
 
   @classmethod
   def get_mode_limits(cls, mode: str) -> dict[str, Any]:
-    """
-    Get operational limits for a mode (backward compatible with BaseOperator).
-
-    Args:
-        mode: Mode name as string
-
-    Returns:
-        Dict with limits
-    """
+    """Limits for a mode name in BaseOperator's dict shape (unknown → standard)."""
     try:
       mode_enum = OperatorExecutionMode(mode.lower())
     except ValueError:
@@ -498,12 +448,7 @@ class OperatorConfig:
 
   @classmethod
   def validate_configuration(cls) -> dict[str, Any]:
-    """
-    Validate operator configuration consistency.
-
-    Returns:
-        Dict with validation results
-    """
+    """Check the registry, profiles, overrides and profiles are consistent."""
     from robosystems.config.billing.ai import AIBillingConfig
 
     issues = []
@@ -522,7 +467,6 @@ class OperatorConfig:
       if target not in cls.MODEL_REGISTRY:
         issues.append(f"Profile '{profile.value}' maps to unregistered model: {target}")
 
-    # Validate all operator overrides reference valid models or profiles
     for operator_type, choice in cls.OPERATOR_MODEL_OVERRIDES.items():
       try:
         cls.to_registered_model(choice)
@@ -531,18 +475,15 @@ class OperatorConfig:
           f"Operator '{operator_type}' has invalid model override: {choice}"
         )
 
-    # Validate the default resolves
     try:
       cls.resolve_model()
     except (ValueError, KeyError) as e:
       issues.append(f"Default model does not resolve: {e}")
 
-    # Validate fallback operator exists in capabilities
     fallback = cls.ORCHESTRATOR_CONFIG.get("fallback_operator")
     if fallback and fallback not in cls.OPERATOR_CAPABILITIES:
       issues.append(f"Fallback operator not found in capabilities: {fallback}")
 
-    # Validate all modes have execution profiles
     for mode in OperatorExecutionMode:
       if mode not in cls.EXECUTION_PROFILES:
         issues.append(f"Missing execution profile for mode: {mode.value}")
@@ -560,12 +501,7 @@ class OperatorConfig:
 
   @classmethod
   def get_all_config(cls) -> dict[str, Any]:
-    """
-    Get complete operator configuration.
-
-    Returns:
-        Complete configuration dict
-    """
+    """The whole operator configuration as a dict."""
     return {
       "models": {
         "default": cls.DEFAULT_MODEL_CONFIG.default_profile.value,
