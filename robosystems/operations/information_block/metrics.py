@@ -89,7 +89,8 @@ def _bind_operand(
   """Most recent persisted fact for one operand ending exactly at ``period_end``.
 
   Binds report and metric sets, so a metric computed on another structure
-  resolves. Newest set wins, then the longest window (FY over Q4).
+  resolves. The longest window wins (FY over Q4 over December), then the
+  newest set: a newer monthly report must not answer for the year.
   ``scenario_id=None`` binds actuals only; otherwise scenario facts are
   preferred with actuals as fallback, so an ``avg()`` begin at the seam
   still reaches the actual base month.
@@ -110,8 +111,8 @@ def _bind_operand(
     )
     .order_by(
       FactSet.scenario_id.asc().nulls_last(),
-      FactSet.created_at.desc(),
       Fact.period_start.asc().nulls_first(),
+      FactSet.created_at.desc(),
     )
     .limit(1)
   )
