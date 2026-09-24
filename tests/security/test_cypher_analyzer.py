@@ -676,6 +676,16 @@ class TestFindGuardedStringMatch:
       "MATCH (f:Fact) WHERE any(x IN [f.value] WHERE x CONTAINS 'g') RETURN f",
       "MATCH (f:Fact) RETURN [x IN [f.value] WHERE x CONTAINS 'g'] LIMIT 5",
       "MATCH (f:Fact) RETURN list_filter([f.value], x -> x CONTAINS 'g') LIMIT 5",
+      # A function-derived alias read again, outside any WHERE (PR #1508).
+      (
+        "MATCH (f:Fact) WITH f, regexp_extract(f.value, 'p') <> '' AS hit "
+        "RETURN f.identifier, hit"
+      ),
+      # A CASE WHEN condition is a predicate.
+      (
+        "MATCH (f:Fact) "
+        "RETURN CASE WHEN regexp_extract(f.value, 'p') <> '' THEN 1 ELSE 0 END AS x"
+      ),
       # A name reused across UNION or WITH still resolves to the Fact label.
       (
         "MATCH (f:Element) RETURN f.name AS n LIMIT 1 UNION "
@@ -705,6 +715,8 @@ class TestFindGuardedStringMatch:
       "MATCH (f:Fact) WHERE lower(f.identifier) = 'x' RETURN f.value LIMIT 5",
       # A rebound node of an unguarded label.
       "MATCH (e:Element) WITH e AS x WHERE lower(x.uri) CONTAINS 'us-gaap' RETURN x",
+      # A CASE WHEN over another property, returning the guarded one.
+      "MATCH (f:Fact) RETURN CASE WHEN f.identifier = 'x' THEN f.value END LIMIT 5",
       # A lambda over something else.
       "MATCH (f:Fact) RETURN list_filter([1, 2], x -> x > 1), f.value LIMIT 5",
     ],

@@ -364,7 +364,7 @@ class CypherSecurityAnalyzer:
         )
         if match:
           return match
-      return None
+      return self._derived_alias_read(tokens, aliases, derived)
     except Exception as e:
       logger.warning(f"Guarded string-match analysis failed: {e}")
       return None
@@ -526,13 +526,18 @@ class CypherSecurityAnalyzer:
     return tokens[opener + 1 :]
 
   def _predicates(self, tokens: list[str]) -> list[list[str]]:
-    """Every WHERE expression and lambda body, each up to its clause end."""
+    """Every WHERE expression, CASE WHEN condition and lambda body, each up to
+    its clause end (a WHEN condition ends at its THEN)."""
     predicates: list[list[str]] = []
     for i, token in enumerate(tokens):
-      if token.upper() == "WHERE" or (token == ">" and i and tokens[i - 1] == "-"):
-        start = i + 1
+      upper = token.upper()
+      if upper == "WHERE" or (token == ">" and i and tokens[i - 1] == "-"):
+        stops: set[str] = set()
+      elif upper == "WHEN":
+        stops = {"THEN", "ELSE", "END"}
       else:
         continue
+      start = i + 1
       depth = 0
       predicate: list[str] = []
       for part in tokens[start:]:
@@ -543,12 +548,38 @@ class CypherSecurityAnalyzer:
             break
           depth -= 1
         elif depth == 0 and (
-          part == "|" or part == ";" or part.upper() in self.PREDICATE_BOUNDARIES
+          part == "|"
+          or part == ";"
+          or part.upper() in self.PREDICATE_BOUNDARIES
+          or part.upper() in stops
         ):
           break
         predicate.append(part)
       predicates.append(predicate)
     return predicates
+
+  def _derived_alias_read(
+    self,
+    tokens: list[str],
+    aliases: dict[str, GuardedStringMatch],
+    derived: set[str],
+  ) -> GuardedStringMatch | None:
+    """A function-derived alias read anywhere after it is bound.
+
+    Projecting a function of the guarded text is served; carrying that result
+    on to another clause (a filter, a comparison, a second projection) is how
+    a per-row test of the text gets past the predicate check.
+    """
+    for i, token in enumerate(tokens):
+      name = token.lower()
+      if name not in derived:
+        continue
+      before = tokens[i - 1] if i else ""
+      after = tokens[i + 1] if i + 1 < len(tokens) else ""
+      if before.upper() == "AS" or before in (".", "$") or after == ".":
+        continue
+      return aliases[name]
+    return None
 
   def _function_over_guarded(
     self,
