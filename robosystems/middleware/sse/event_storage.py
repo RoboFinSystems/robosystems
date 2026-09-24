@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import redis.asyncio as redis_async
 from redis import Redis
+from redis.exceptions import WatchError
 
 from robosystems.config.defaults import CacheDefaults
 from robosystems.logger import logger
@@ -439,11 +440,13 @@ class SSEEventStorage:
         else:
           pipe.unwatch()
 
-      except Exception:
-        # Key was modified mid-transaction: another status-changing event won.
+      except WatchError:
+        # Another status-changing event won the transition.
         logger.debug(
           f"[SYNC] Metadata update skipped for {operation_id} due to concurrent modification"
         )
+      except Exception as e:
+        logger.warning(f"[SYNC] Metadata update failed for {operation_id}: {e}")
 
     if terminal_failure:
       _invalidate_idempotency_sync(operation_id)
@@ -516,52 +519,58 @@ class SSEEventStorage:
     metadata_key = f"{self.metadata_prefix}{operation_id}"
     terminal_failure = False
 
-    try:
-      await redis.watch(metadata_key)
+    # WATCH must run on the pipeline: on the client it is a no-op in redis-py.
+    async with redis.pipeline() as pipe:
+      try:
+        await pipe.watch(metadata_key)
 
-      metadata_json = await redis.get(metadata_key)
-      if not metadata_json:
-        await redis.unwatch()
-        return
+        metadata_json = await pipe.get(metadata_key)
+        if not metadata_json:
+          await pipe.unwatch()
+          return
 
-      metadata_dict = json.loads(metadata_json)
-      metadata = OperationMetadata(**metadata_dict)
+        metadata_dict = json.loads(metadata_json)
+        metadata = OperationMetadata(**metadata_dict)
 
-      new_status = _next_status(event_type)
+        new_status = _next_status(event_type)
 
-      if new_status and _transition_allowed(metadata.status, new_status):
-        entering_failure = (
-          new_status in _TERMINAL_FAILURE_STATUSES
-          and metadata.status not in _TERMINAL_STATUSES
-        )
-        metadata.status = new_status
-        metadata.updated_at = datetime.now(UTC).isoformat()
+        if new_status and _transition_allowed(metadata.status, new_status):
+          entering_failure = (
+            new_status in _TERMINAL_FAILURE_STATUSES
+            and metadata.status not in _TERMINAL_STATUSES
+          )
+          metadata.status = new_status
+          metadata.updated_at = datetime.now(UTC).isoformat()
 
-        if event_type == EventType.OPERATION_COMPLETED:
-          new_result = data.get("result") or {}
-          if metadata.result_data:
-            metadata.result_data.update(new_result)
+          if event_type == EventType.OPERATION_COMPLETED:
+            new_result = data.get("result") or {}
+            if metadata.result_data:
+              metadata.result_data.update(new_result)
+            else:
+              metadata.result_data = new_result
+          elif event_type == EventType.OPERATION_ERROR:
+            metadata.error_message = data.get("error", "Unknown error")
           else:
-            metadata.result_data = new_result
-        elif event_type == EventType.OPERATION_ERROR:
-          metadata.error_message = data.get("error", "Unknown error")
+            _apply_input_request(metadata, event_type, data)
+
+          ttl = await pipe.ttl(metadata_key)
+          if ttl > 0:
+            pipe.multi()
+            pipe.setex(metadata_key, ttl, json.dumps(metadata.to_dict()))
+            await pipe.execute()
+            terminal_failure = entering_failure
+          else:
+            await pipe.unwatch()
         else:
-          _apply_input_request(metadata, event_type, data)
+          await pipe.unwatch()
 
-        ttl = await redis.ttl(metadata_key)
-        if ttl > 0:
-          pipe = redis.pipeline()
-          pipe.setex(metadata_key, ttl, json.dumps(metadata.to_dict()))
-          await pipe.execute()
-          terminal_failure = entering_failure
-      else:
-        await redis.unwatch()
-
-    except Exception:
-      # Key was modified mid-transaction: another status-changing event won.
-      logger.debug(
-        f"Metadata update skipped for {operation_id} due to concurrent modification"
-      )
+      except WatchError:
+        # Another status-changing event won the transition.
+        logger.debug(
+          f"Metadata update skipped for {operation_id} due to concurrent modification"
+        )
+      except Exception as e:
+        logger.warning(f"Metadata update failed for {operation_id}: {e}")
 
     if terminal_failure:
       await _invalidate_idempotency(operation_id)

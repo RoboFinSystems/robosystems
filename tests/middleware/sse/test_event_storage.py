@@ -781,12 +781,16 @@ class TestTerminalFailureEvictsIdempotency:
   must go, or every retry with the same key replays `pending` for 24h."""
 
   def _async_storage(self, metadata_json: str | None) -> SSEEventStorage:
-    mock_redis = AsyncMock()
-    mock_redis.get.return_value = metadata_json
-    mock_redis.ttl.return_value = 600
-    # setex is queued synchronously on the pipeline; only execute is awaited.
+    # Reads run on the watched pipeline; multi/setex queue synchronously.
     pipe = Mock()
+    pipe.__aenter__ = AsyncMock(return_value=pipe)
+    pipe.__aexit__ = AsyncMock(return_value=False)
+    pipe.watch = AsyncMock()
+    pipe.unwatch = AsyncMock()
+    pipe.get = AsyncMock(return_value=metadata_json)
+    pipe.ttl = AsyncMock(return_value=600)
     pipe.execute = AsyncMock()
+    mock_redis = AsyncMock()
     mock_redis.pipeline = Mock(return_value=pipe)
     return SSEEventStorage(redis_client=mock_redis)
 
@@ -1032,7 +1036,10 @@ class TestIntegrationScenarios:
     mock_redis = AsyncMock()
     mock_redis.exists.return_value = True
     mock_redis.incr.side_effect = [1, 2, 3]  # Sequence numbers
-    mock_redis.get.return_value = None  # No existing metadata
+    pipe = AsyncMock()
+    pipe.__aenter__.return_value = pipe
+    pipe.get.return_value = None  # No existing metadata
+    mock_redis.pipeline = Mock(return_value=pipe)
 
     storage = SSEEventStorage(redis_client=mock_redis)
 
@@ -1081,7 +1088,10 @@ class TestIntegrationScenarios:
     mock_redis = AsyncMock()
     mock_redis.exists.return_value = True
     mock_redis.incr.side_effect = [1, 2]
-    mock_redis.get.return_value = None  # No existing metadata
+    pipe = AsyncMock()
+    pipe.__aenter__.return_value = pipe
+    pipe.get.return_value = None  # No existing metadata
+    mock_redis.pipeline = Mock(return_value=pipe)
 
     storage = SSEEventStorage(redis_client=mock_redis)
 
@@ -1219,3 +1229,65 @@ class TestAwaitingInputLifecycle:
     )
     _apply_input_request(metadata, EventType.OPERATION_STARTED, {"message": "Starting"})
     assert metadata.input_request is None
+
+
+@pytest.mark.unit
+class TestAsyncMetadataCompareAndSwap:
+  """Live Valkey: a write landing between the read and the write must win."""
+
+  @pytest.fixture
+  async def live_redis(self):
+    import redis as redis_sync
+    import redis.asyncio as redis_async
+
+    url = "redis://:valkey@localhost:6379/15"
+    client = redis_async.Redis.from_url(url, decode_responses=True)
+    try:
+      await client.ping()
+    except Exception:
+      pytest.skip("Valkey not reachable")
+    side = redis_sync.Redis.from_url(url, decode_responses=True)
+    yield client, side
+    side.close()
+    await client.aclose()
+
+  @pytest.mark.asyncio
+  async def test_concurrent_completion_is_not_overwritten(self, live_redis):
+    import json
+    import uuid
+
+    from robosystems.middleware.sse import event_storage as module
+
+    client, side = live_redis
+    storage = module.SSEEventStorage(redis_client=client)
+    op_id = f"op_{uuid.uuid4().hex}"
+    key = f"{storage.metadata_prefix}{op_id}"
+    base = {
+      "operation_id": op_id,
+      "operation_type": "test",
+      "user_id": "usr",
+      "graph_id": None,
+      "status": "pending",
+      "created_at": "2026-09-23T00:00:00+00:00",
+      "updated_at": "2026-09-23T00:00:00+00:00",
+    }
+    side.setex(key, 300, json.dumps(base))
+
+    real_metadata = module.OperationMetadata
+    raced = {"done": False}
+
+    def racing_metadata(**kwargs):
+      # Another process completes the operation after this one has read it.
+      if not raced["done"]:
+        raced["done"] = True
+        side.setex(key, 300, json.dumps({**base, "status": "completed"}))
+      return real_metadata(**kwargs)
+
+    try:
+      with patch.object(module, "OperationMetadata", side_effect=racing_metadata):
+        await storage._update_operation_metadata(
+          op_id, module.EventType.OPERATION_STARTED, {}
+        )
+      assert json.loads(side.get(key))["status"] == "completed"
+    finally:
+      side.delete(key)
