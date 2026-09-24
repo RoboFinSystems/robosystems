@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Mirrors the DB-level check constraint on `entries.type`:
 #   CHECK (type IN ('standard','adjusting','closing','reversing'))
@@ -84,6 +84,11 @@ class ScheduleMetadataRequest(BaseModel):
   )
 
 
+# Fifty years of monthly facts. Each month costs memory while the schedule is
+# built, so an unbounded range let one small request exhaust the API.
+MAX_SCHEDULE_MONTHS = 600
+
+
 class CreateScheduleRequest(BaseModel):
   name: str = Field(..., description="Schedule name")
   taxonomy_id: str | None = Field(
@@ -124,6 +129,19 @@ class CreateScheduleRequest(BaseModel):
       "artifact_mechanics for audit; no FK constraint."
     ),
   )
+
+  @model_validator(mode="after")
+  def _bounded_range(self) -> CreateScheduleRequest:
+    if self.period_end < self.period_start:
+      raise ValueError("period_end must not be before period_start")
+    months = (self.period_end.year - self.period_start.year) * 12 + (
+      self.period_end.month - self.period_start.month
+    )
+    if months >= MAX_SCHEDULE_MONTHS:
+      raise ValueError(
+        f"A schedule can span at most {MAX_SCHEDULE_MONTHS} months (got {months + 1})."
+      )
+    return self
 
 
 class PromoteObligationsRequest(BaseModel):

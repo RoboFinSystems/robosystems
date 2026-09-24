@@ -10,6 +10,7 @@ model is cached per report in Valkey (``MCP_CACHE``).
 
 from __future__ import annotations
 
+import asyncio
 import time
 import zlib
 from concurrent.futures import ThreadPoolExecutor
@@ -107,6 +108,12 @@ def _cache() -> Any:
   return _redis_client
 
 
+# A cold build holds a whole report in memory (~250 MB for a large filing), so
+# a process builds one at a time, and callers of the same report share it.
+_BUILD_SLOTS = asyncio.Semaphore(1)
+_builds_in_flight: dict[str, asyncio.Task[XbrlModel]] = {}
+
+
 def _cache_key(graph_id: str, report_id: str) -> str:
   return f"ib:model:v{MODEL_CACHE_VERSION}:{graph_id}:{report_id}"
 
@@ -124,6 +131,30 @@ async def load_report_model(graph_id: str, report_id: str) -> tuple[XbrlModel, b
     if blob:
       return await run_off_loop(_thaw, blob), True
 
+  build = _builds_in_flight.get(key)
+  if build is None:
+    build = asyncio.create_task(_build_once(key, graph_id, report_id, cache))
+    _builds_in_flight[key] = build
+    build.add_done_callback(lambda done, k=key: _build_finished(k, done))
+  # Shielded: a caller that goes away does not cancel the build others await.
+  return await asyncio.shield(build), False
+
+
+async def _build_once(key: str, graph_id: str, report_id: str, cache: Any) -> XbrlModel:
+  async with _BUILD_SLOTS:
+    return await _build_and_cache(key, graph_id, report_id, cache)
+
+
+def _build_finished(key: str, done: asyncio.Task[XbrlModel]) -> None:
+  _builds_in_flight.pop(key, None)
+  if not done.cancelled():
+    # Retrieved so a build whose callers all left doesn't log as unhandled.
+    done.exception()
+
+
+async def _build_and_cache(
+  key: str, graph_id: str, report_id: str, cache: Any
+) -> XbrlModel:
   started = time.perf_counter()
   shared = is_shared_repository_or_subgraph(graph_id)
   if shared:
@@ -144,7 +175,7 @@ async def load_report_model(graph_id: str, report_id: str) -> tuple[XbrlModel, b
       await cache.set(key, frozen, ex=ttl)
     except Exception as exc:
       logger.warning(f"information-block model cache write failed for {key}: {exc}")
-  return model, False
+  return model
 
 
 def _freeze(model: XbrlModel) -> bytes:
