@@ -388,7 +388,7 @@ class GraphClientFactory:
     if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
       if not await cls._master_circuit_breaker.should_attempt():
         logger.warning("Shared master circuit breaker is open, using fallback")
-        if env.GRAPH_API_URL:
+        if env.is_development() and env.GRAPH_API_URL:
           return env.GRAPH_API_URL
         raise ServiceUnavailableError(
           "Shared master unavailable (circuit breaker open)"
@@ -757,14 +757,11 @@ async def get_graph_client_for_sec_ingestion() -> GraphClient:
       api_url = await GraphClientFactory._get_shared_master_url()
       logger.info(f"Discovered shared master for SEC ingestion: {api_url}")
     except Exception as e:
-      logger.warning(f"Failed to discover shared master: {e}")
-      if env.GRAPH_API_URL:
-        api_url = env.GRAPH_API_URL
-        logger.warning("Using API Gateway fallback for SEC ingestion")
-      else:
-        raise ServiceUnavailableError(
-          "Cannot find shared master for SEC ingestion and no fallback configured"
-        )
+      # No GRAPH_API_URL fallback: it defaults to localhost, and SEC writes
+      # anywhere but the master are lost.
+      raise ServiceUnavailableError(
+        f"Cannot find shared master for SEC ingestion: {e}"
+      ) from e
 
   api_key = env.GRAPH_API_KEY
 

@@ -18,6 +18,34 @@ from .configs import (
   sec_quarter_partitions,
 )
 
+_MAX_429_RETRIES = 3
+_MAX_RETRY_AFTER = 300
+
+
+async def _get_with_429_retry(session, url: str, log) -> tuple[int, bytes]:
+  """GET ``url``, waiting out 429s in place so the caller keeps its slot.
+
+  Returns ``(status, body)``; the body is empty for a 404 or an exhausted 429.
+  """
+  import asyncio
+
+  for attempt in range(_MAX_429_RETRIES + 1):
+    async with session.get(url) as response:
+      if response.status == 404:
+        return 404, b""
+      if response.status != 429:
+        response.raise_for_status()
+        return response.status, await response.read()
+      if attempt == _MAX_429_RETRIES:
+        log.warning(f"Rate limited, giving up after {_MAX_429_RETRIES} retries")
+        return 429, b""
+      retry_after = min(int(response.headers.get("Retry-After", 60)), _MAX_RETRY_AFTER)
+    log.warning(
+      f"Rate limited, waiting {retry_after}s (retry {attempt + 1}/{_MAX_429_RETRIES})"
+    )
+    await asyncio.sleep(retry_after)
+  raise AssertionError("unreachable")
+
 
 @asset(
   group_name="sec_pipeline",
@@ -328,26 +356,18 @@ def sec_raw_filings(
         async with limiter:
           try:
             async with aiohttp.ClientSession(headers=SEC_HEADERS) as session:
-              async with session.get(url) as response:
-                if response.status == 404:
-                  no_xbrl += 1
-                  no_xbrl_filings.append(f"{hit.cik}/{hit.accession}")
-                  return True
+              status, content = await _get_with_429_retry(session, url, context.log)
 
-                if response.status == 429:
-                  retry_after = int(response.headers.get("Retry-After", 60))
-                  context.log.warning(f"Rate limited, waiting {retry_after}s")
-                  await asyncio.sleep(retry_after)
-                  return await download_filing(hit)
+            if status == 404:
+              no_xbrl += 1
+              no_xbrl_filings.append(f"{hit.cik}/{hit.accession}")
+              return True
 
-                response.raise_for_status()
-                content = await response.read()
+            if not content:
+              failed += 1
+              return False
 
-                if not content:
-                  failed += 1
-                  return False
-
-                await monitor.record(len(content))
+            await monitor.record(len(content))
 
           except Exception as e:
             context.log.debug(f"Download failed for {hit.accession}: {e}")
