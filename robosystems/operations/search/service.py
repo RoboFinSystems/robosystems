@@ -1,9 +1,4 @@
-"""Search service — business logic layer over OpenSearch client.
-
-Provides graph_id-scoped search and retrieval, mapping OpenSearch
-responses to Pydantic models. Default mode is BM25-only (fast);
-hybrid BM25 + KNN is opt-in via semantic=True on SearchRequest.
-"""
+"""Graph-scoped search and retrieval over OpenSearch, returning Pydantic models."""
 
 from __future__ import annotations
 
@@ -98,9 +93,7 @@ class SearchService:
   def search_documents(self, graph_id: str, request: SearchRequest) -> SearchResponse:
     """Search documents with graph_id isolation.
 
-    Default mode is BM25-only (fast keyword search). When request.semantic
-    is True, uses hybrid BM25 + KNN search which adds vector similarity
-    scoring at the cost of higher latency on large corpora.
+    BM25 by default; hybrid BM25 + KNN when request.semantic is True.
 
     With request.group, hits from a filer's successive filings of the same
     section fold into one (group_successive_filings); the page is drawn from
@@ -273,9 +266,7 @@ class SearchService:
     if not sections:
       raise ValueError("Document produced no indexable sections")
 
-    # User docs take a "udoc_" prefix so the PG document ID is trivially
-    # extractable from search results: "udoc_{pg_doc_id}_{section_idx}" →
-    # rsplit("_", 1)[0][5:]. SEC/pipeline docs use "doc_" (no PG document row).
+    # "udoc_{pg_doc_id}_{section_idx}": the PG id is recoverable from a hit.
     if request.external_id:
       base_id = f"udoc_{request.external_id}"
     else:
@@ -386,7 +377,6 @@ class SearchService:
     return self.client.health()
 
 
-# Lazy singleton
 _service: SearchService | None = None
 
 

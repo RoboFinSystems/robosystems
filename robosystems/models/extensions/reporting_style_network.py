@@ -1,19 +1,9 @@
 """ReportingStyleNetwork — Reporting Style → Network composition.
 
-Tenant-scoped junction table. One row per (reporting_style, statement_type)
-pair, pointing at the Network Structure the renderer should use for that
-statement type when this Reporting Style is in effect.
-
-Library-seeded: each default-family Style (Default / Partnership / LLC)
-ships with 4 rows (BS / IS / CF / SE) pinned to canonical rs-gaap
-Networks. Additional styles (BSU/NET layouts, single-step IS, direct CF,
-vertical profiles) land later as pure package content or customer-authored
-Taxonomy Blocks.
-
-No DB foreign key on ``network_id`` / ``reporting_style_id``: both are
-``Structure.id`` values, validated at the application layer. Library
-immutability triggers (see ``robosystems/db/extensions.py``) block tenant
-writes to library-seeded rows.
+One row per (reporting_style, statement_type): the Network Structure the
+renderer uses for that statement under that style. Both ids are
+``Structure.id`` values validated in the application (no DB FK); library
+immutability triggers block tenant writes to seeded rows.
 """
 
 from datetime import UTC, datetime

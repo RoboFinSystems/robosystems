@@ -358,10 +358,7 @@ class FiscalCalendarResponse(BaseModel):
       "'pending_obligations', 'stranded_obligations'"
     ),
   )
-  # Detail fields for actionable blockers — populated only when the
-  # corresponding code is present in `blockers`. Keeps the default
-  # response shape compact while giving close agents and UIs the
-  # context they need to resolve a blocker without a sidecar query.
+  # Populated only when the matching code is in `blockers`.
   pending_obligation_count: int = Field(
     0,
     description=(

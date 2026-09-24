@@ -1,9 +1,5 @@
-"""Association model — relationships between elements across taxonomies.
-
-Tenant-scoped table. Defines parent-child hierarchies within taxonomies
-and mapping associations between taxonomies (CoA → GAAP).
-Materializes to Association nodes in the graph.
-"""
+"""Associations: element-to-element arcs, both hierarchies within a taxonomy
+and mappings between taxonomies (CoA → GAAP)."""
 
 from datetime import UTC, datetime
 
@@ -22,14 +18,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
-# The `associations.association_type` vocabulary — the single source for the
-# model CHECK and the tenant-provisioning widen step.
-# 'definition' arcs land from rs-gaap-disclosure-mechanics,
-# rs-gaap-reporting-checklist and rs-gaap-reporting-styles.
-# 'derivation' arcs map BS leaves to their CF default change tags.
-# 'has-part' — Conceptual Model posting arcs: cm:Debit/cm:Credit ─has-part→ a
-# CoA element, declaring the debit/credit legs of a schedule's posting
-# template as first-class atoms.
+# `associations.association_type` vocabulary for the CHECK and the tenant
+# widen step. 'derivation' maps BS leaves to their CF change tags;
+# 'has-part' links cm:Debit/cm:Credit to the CoA legs of a schedule's
+# posting template.
 ASSOCIATION_TYPE_VALUES: tuple[str, ...] = (
   "presentation",
   "calculation",
@@ -70,32 +62,26 @@ class Association(ExtensionsBase):
     ),
   )
 
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("assoc"))
 
-  # Structure membership
   structure_id = Column(String, ForeignKey("structures.id"), nullable=False)
 
-  # Relationship
   from_element_id = Column(String, ForeignKey("elements.id"), nullable=False)
   to_element_id = Column(String, ForeignKey("elements.id"), nullable=False)
 
-  # Association properties
   association_type = Column(String, nullable=False, default="presentation")
   arcrole = Column(String, nullable=True)
   order_value = Column(Float, nullable=True, default=0)
   weight = Column(Float, nullable=True)
 
-  # AI provenance (for mapping associations)
+  # AI provenance, for mapping associations.
   confidence = Column(Float, nullable=True)
   suggested_by = Column(String, nullable=True)
   approved_by = Column(String, nullable=True)
   approved_at = Column(DateTime, nullable=True)
 
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
 
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

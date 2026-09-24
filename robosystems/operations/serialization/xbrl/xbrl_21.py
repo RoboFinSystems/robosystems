@@ -1,21 +1,9 @@
-"""XBRL 2.1 emitter — walks the v1.0 bundle, produces a flat zip.
+"""XBRL 2.1 emitter: a :class:`StatementBundle` to a flat zip of instance,
+schema and linkbase files.
 
-The output is the standalone files (``instance.xml`` + ``report.xsd``
-+ ``report-pre.xml`` + ``report-cal.xml`` + ``report-def.xml`` +
-``report-lab.xml``) zipped together. The full XBRL Report Package shape
-(``META-INF/taxonomyPackage.xml`` and related) and reference linkbases
-are not yet emitted.
-
-Walks the same :class:`StatementBundle` as the JSON-LD encoder — the
-two share an envelope, not just a fact set. ``rs:`` extensions are
-dropped from the XBRL output (they have no place in standards-compliant
-XBRL); round-trip is at the fact level.
-
-Hand-emitted with lxml rather than Arelle's ``saveInstance``. Arelle's
-XBRL-emit path requires constructing ``ModelInstanceObject`` /
-``ModelConcept`` / etc. internals; lxml builds the XML tree directly
-with ~10x less code. Arelle is used downstream for *validation* of
-emitted output (round-trip harness).
+``rs:`` extensions are dropped. The Report Package ``META-INF`` wrapper and
+reference linkbases are not emitted. Built with lxml directly; Arelle is only
+used downstream to validate the output.
 """
 
 from __future__ import annotations
@@ -38,7 +26,7 @@ from robosystems.operations.serialization.bundle import (
   concept_label,
 )
 
-# ── Namespace constants (matching the v1.0 ontology) ─────────────────────
+# ── Namespace constants ──────────────────────────────────────────────────
 
 NS_XBRLI = "http://www.xbrl.org/2003/instance"
 NS_LINK = "http://www.xbrl.org/2003/linkbase"
@@ -47,10 +35,6 @@ NS_XSI = "http://www.w3.org/2001/XMLSchema-instance"
 NS_XS = "http://www.w3.org/2001/XMLSchema"
 NS_XML = "http://www.w3.org/XML/1998/namespace"
 NS_ISO4217 = "http://www.xbrl.org/2003/iso4217"
-# rs-gaap is the canonical reporting taxonomy emitted into report.xsd
-# under its published namespace IRI; concepts referenced from other
-# frameworks (fac, us-gaap, ifrs, dei, etc.) are emitted under their
-# own namespaces via the prefix table below.
 NS_RS_GAAP = "https://robosystems.ai/taxonomy/rs-gaap/v1/"
 NS_FAC = "http://www.xbrlsite.com/fac"
 NS_US_GAAP = "http://fasb.org/us-gaap"
@@ -58,7 +42,6 @@ NS_IFRS = "http://xbrl.ifrs.org/taxonomy"
 NS_DEI = "http://xbrl.sec.gov/dei"
 NS_DISCLOSURES = "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/"
 
-# Maps a bundle prefix → emitted XBRL namespace URI.
 _PREFIX_TO_NAMESPACE: dict[str, str] = {
   "rs-gaap": NS_RS_GAAP,
   "fac": NS_FAC,
@@ -75,18 +58,10 @@ _PREFIX_TO_NAMESPACE: dict[str, str] = {
 
 
 def serialize_to_xbrl_21(bundle: StatementBundle) -> bytes:
-  """Emit the bundle as a flat-zip XBRL 2.1 Report Package.
+  """Emit the bundle as flat-zip XBRL 2.1 bytes.
 
-  Returns the zip bytes ready to stream as a download or write to
-  storage. The shape is a flat zip containing standalone files; the
-  full Report Package META-INF directory is not yet wrapped around them.
-
-  Tenant-authored disclosure notes are excluded from this flavor
-  (:func:`_strip_disclosure_content`) — they ride in the JSON-LD /
-  holon flavors, whose SHACL validation covers them. Belt-and-braces on
-  top of the strip: any remaining Nonnumeric fact is dropped, since the
-  numeric emitter (``_format_value`` + mandatory unitRef/decimals)
-  cannot represent one.
+  Disclosure notes are stripped (they ride in the JSON-LD / holon flavors),
+  and any remaining Nonnumeric fact is dropped: the emitter is numeric-only.
   """
   bundle = _strip_disclosure_content(bundle)
   if any(f.value is None for f in bundle.facts):
@@ -97,10 +72,7 @@ def serialize_to_xbrl_21(bundle: StatementBundle) -> bytes:
   with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
     zf.writestr("instance.xml", _serialize_xml(_build_instance(bundle)))
     zf.writestr("report.xsd", _serialize_xml(_build_schema(bundle)))
-    # Only emit linkbase files that actually carry arcs/labels. An empty
-    # ``<link:linkbase/>`` is valid XML but useless noise that reads as a
-    # missing-relations bug to a reviewing XBRL processor — and each
-    # linkbaseRef is already gated on the same condition in ``_build_schema``.
+    # Same gates as the linkbaseRefs in ``_build_schema``.
     if bundle.linkbases.presentation_links:
       zf.writestr(
         "report-pre.xml", _serialize_xml(_build_presentation_linkbase(bundle))
@@ -115,7 +87,6 @@ def serialize_to_xbrl_21(bundle: StatementBundle) -> bytes:
 
 
 def _serialize_xml(root: etree._Element) -> bytes:
-  """Serialize an lxml tree to UTF-8 XML bytes with declaration."""
   return etree.tostring(
     root,
     xml_declaration=True,
@@ -126,19 +97,12 @@ def _serialize_xml(root: etree._Element) -> bytes:
 
 
 def _strip_disclosure_content(bundle: StatementBundle) -> StatementBundle:
-  """Return a bundle without ``regulatory_disclosure`` structures' content.
+  """Return the bundle without disclosure structures' links, facts and concepts.
 
-  Tenant-authored disclosure notes are carried by the JSON-LD / holon
-  flavors (SHACL-validated), but this emitter's conventions are
-  statement-shaped: fixed framework prefixes (an extension concept like
-  ``driftline:X`` has no namespace here), one arc type per Network ELR
-  (a note carries presentation AND calculation arcs on one structure —
-  Arelle flags the duplicate), and no per-fact context typing for
-  non-statement structures. Until the emitter learns those, notes are
-  excluded here rather than shipping an instance Arelle rejects.
-
-  No-op (returns the same object) when the bundle carries no disclosure
-  links.
+  This emitter is statement-shaped: fixed framework prefixes (extension
+  concepts get no namespace), one arc type per ELR, and no per-fact context
+  typing, so a note would produce an instance Arelle rejects. Returns the
+  same object when there is nothing to strip.
   """
   disclosure_structure_ids = {
     link.structure_id
@@ -178,10 +142,7 @@ def _strip_disclosure_content(bundle: StatementBundle) -> StatementBundle:
     if f.structure_id is None or f.structure_id not in disclosure_structure_ids
   ]
 
-  # Keep only concepts still referenced by a surviving fact or arc —
-  # extension concepts referenced solely by the stripped note would
-  # otherwise be declared under a framework namespace they don't belong
-  # to (the fixed-prefix mangle).
+  # Otherwise note-only extension concepts get declared under rs-gaap.
   referenced_qnames = {f.element_qname for f in facts}
   for group in (
     linkbases.presentation_links,
@@ -194,13 +155,9 @@ def _strip_disclosure_content(bundle: StatementBundle) -> StatementBundle:
         referenced_qnames.add(arc.to_qname)
   schema_concepts = [c for c in bundle.schema_concepts if c.qname in referenced_qnames]
 
-  # Drop period nodes no surviving fact references so the derived
-  # context set stays minimal.
   referenced_periods = {f.period_ref for f in facts}
   period_nodes = [p for p in bundle.period_nodes if p.id in referenced_periods]
 
-  # Drop units no surviving fact references (a unit used only by a stripped
-  # note's facts would leave an unreferenced <xbrli:unit> in the instance).
   referenced_units = {f.unit_ref for f in facts}
   units = [u for u in bundle.units if u.id in referenced_units]
 
@@ -219,37 +176,24 @@ def _strip_disclosure_content(bundle: StatementBundle) -> StatementBundle:
 
 
 def _build_instance(bundle: StatementBundle) -> etree._Element:
-  """Build the XBRL instance document with contexts, units, and facts.
-
-  Structure follows XBRL 2.1: ``<xbrli:xbrl>`` root with a
-  ``<link:schemaRef>`` pointing at the bundled ``report.xsd``, then a
-  flat sequence of ``<xbrli:context>`` blocks, ``<xbrli:unit>`` blocks,
-  and one fact element per :class:`BundleFact` typed by its concept
-  qname.
-  """
+  """Build the XBRL instance document: schemaRef, contexts, units, facts."""
   nsmap = _build_instance_nsmap(bundle)
   root = etree.Element(
     f"{{{NS_XBRLI}}}xbrl", nsmap=nsmap, attrib=_xsi_schema_location()
   )
 
-  # schemaRef → bundled report.xsd
   schema_ref = etree.SubElement(root, f"{{{NS_LINK}}}schemaRef")
   schema_ref.set(f"{{{NS_XLINK}}}type", "simple")
   schema_ref.set(f"{{{NS_XLINK}}}href", "report.xsd")
 
-  # Bundles carry graph-native period nodes, not XBRL contexts —
-  # derive the contexts here (XBRL 2.1 requires shared <context> elements).
   contexts, ctx_for_period = _derive_contexts(bundle)
   for ctx in contexts:
     _append_context(root, ctx)
   for unit in bundle.units:
     _append_unit(root, unit)
-  # Collapse redundant facts. The same concept value legitimately appears in
-  # several FactSets (e.g. NetIncomeLoss flows through IS, CF and SE), but in a
-  # single instance that yields identical <concept contextRef unitRef>value
-  # tuples — which XBRL Cloud / Arelle flag as duplicate facts. We dedupe on
-  # the FULL tuple including value+decimals, so a genuine inconsistency (same
-  # aspects, different value) is preserved for the validator to surface.
+  # One value appears in several FactSets (NetIncomeLoss in IS, CF and SE),
+  # which validators flag as duplicate facts. Dedupe on the full tuple
+  # including value, so a real inconsistency still reaches the validator.
   seen: set[tuple[str, str, str, str, str]] = set()
   for fact in bundle.facts:
     context_ref = ctx_for_period[fact.period_ref]
@@ -271,11 +215,9 @@ def _build_instance(bundle: StatementBundle) -> etree._Element:
 def _derive_contexts(
   bundle: StatementBundle,
 ) -> tuple[list[BundleContext], dict[str, str]]:
-  """Reconstruct ``<xbrli:context>`` set from the bundle's period nodes.
+  """One context per period node (single entity per bundle).
 
-  The bundle collapses entity+period into per-fact references; XBRL 2.1 still
-  needs shared contexts. Single entity per bundle → one context per
-  period node. Returns ``(contexts, period_ref -> context_id)``.
+  Returns ``(contexts, period_ref -> context_id)``.
   """
   contexts: list[BundleContext] = []
   ctx_for_period: dict[str, str] = {}
@@ -295,8 +237,6 @@ def _derive_contexts(
 
 
 def _build_instance_nsmap(bundle: StatementBundle) -> dict[str | None, str]:
-  """Build the namespace map for the instance root, including every
-  framework prefix referenced by facts or concepts."""
   ns: dict[str | None, str] = {
     "xbrli": NS_XBRLI,
     "link": NS_LINK,
@@ -311,8 +251,6 @@ def _build_instance_nsmap(bundle: StatementBundle) -> dict[str | None, str]:
 
 
 def _bundle_framework_prefixes(bundle: StatementBundle) -> set[str]:
-  """Collect every framework prefix referenced in the bundle (from
-  concept qnames and fact element qnames)."""
   prefixes: set[str] = set()
   for concept in bundle.schema_concepts:
     if ":" in concept.qname:
@@ -324,9 +262,6 @@ def _bundle_framework_prefixes(bundle: StatementBundle) -> set[str]:
 
 
 def _xsi_schema_location() -> dict[str, str]:
-  """xsi:schemaLocation pointing at the XBRL 2.1 instance schema +
-  the bundled report.xsd. Standard XBRL processors use this to
-  resolve concept declarations."""
   return {
     f"{{{NS_XSI}}}schemaLocation": (
       f"{NS_XBRLI} http://www.xbrl.org/2003/xbrl-instance-2003-12-31.xsd "
@@ -360,14 +295,6 @@ def _append_unit(parent: etree._Element, unit: BundleUnit) -> None:
 
 
 def _append_fact(parent: etree._Element, fact: BundleFact, context_ref: str) -> None:
-  """Emit a fact element typed by its concept qname.
-
-  XBRL's "the element name IS the type tag" pattern — the fact element
-  uses the concept qname as its tag, with contextRef / unitRef /
-  decimals on attributes and the numeric value as the element text. The
-  ``context_ref`` is derived (see :func:`_derive_contexts`) since bundle
-  facts carry a ``period_ref`` rather than an XBRL context ref.
-  """
   if ":" in fact.element_qname:
     prefix, local = fact.element_qname.split(":", 1)
     namespace = _PREFIX_TO_NAMESPACE.get(prefix, NS_RS_GAAP)
@@ -385,14 +312,9 @@ def _append_fact(parent: etree._Element, fact: BundleFact, context_ref: str) -> 
 
 
 def _format_value(value: float | None) -> str:
-  """Format a numeric fact value the XBRL way.
-
-  Integer-valued floats render without a decimal point (XBRL convention
-  for whole-currency amounts). Non-integers preserve full precision.
-  """
+  """Integer values render without a decimal point; others at full precision."""
   if value is None:
-    # Unreachable by construction: serialize_to_xbrl_21 filters
-    # Nonnumeric facts after the disclosure strip.
+    # Unreachable: serialize_to_xbrl_21 filters Nonnumeric facts.
     raise ValueError("Nonnumeric fact reached the XBRL numeric emitter")
   decimal_value = Decimal(str(value))
   if decimal_value == decimal_value.to_integral_value():
@@ -404,14 +326,7 @@ def _format_value(value: float | None) -> str:
 
 
 def _build_schema(bundle: StatementBundle) -> etree._Element:
-  """Build the per-report XBRL taxonomy schema document.
-
-  Declares one ``<xs:element>`` per concept in the bundle, under the
-  rs-gaap targetNamespace (concepts emitted into this schema ARE
-  rs-gaap concepts; the schema completes the rs-gaap declarations
-  scoped to this report). Linkbase references at the bottom point at
-  the bundled linkbase files.
-  """
+  """Build ``report.xsd``: every bundle concept under the rs-gaap namespace."""
   nsmap: dict[str | None, str] = {
     "xs": NS_XS,
     "xbrli": NS_XBRLI,
@@ -428,8 +343,6 @@ def _build_schema(bundle: StatementBundle) -> etree._Element:
     },
   )
 
-  # Import xbrli — required so xbrli:item / xbrli:monetaryItemType etc.
-  # resolve at the schema-validation level.
   etree.SubElement(
     root,
     f"{{{NS_XS}}}import",
@@ -439,22 +352,14 @@ def _build_schema(bundle: StatementBundle) -> etree._Element:
     },
   )
 
-  # Per XBRL 2.1 §5.1.2: ``link:linkbaseRef`` and ``link:roleType``
-  # may only appear inside ``xs:schema/xs:annotation/xs:appinfo``.
-  # Emitting them directly under the schema root produces an
-  # ``xbrl.5.1.2.linkbaseRefLocation`` load error. The roleType
-  # appinfo block is the same one — both kinds of XBRL annotation
-  # share the wrapper.
+  # XBRL 2.1 §5.1.2: roleType and linkbaseRef must sit inside
+  # xs:annotation/xs:appinfo, not under the schema root.
   appinfo = _ensure_appinfo(root)
   _append_role_type_declarations(appinfo, bundle)
 
-  # Per-concept declarations (under schema root, NOT inside appinfo —
-  # element declarations are first-class schema content)
   for concept in sorted(bundle.schema_concepts, key=lambda c: c.qname):
     _append_concept_declaration(root, concept)
 
-  # Linkbase references go inside the SAME appinfo block as the
-  # roleType declarations (XBRL spec requirement).
   if bundle.linkbases.presentation_links:
     _append_linkbase_ref(appinfo, "report-pre.xml", "presentationLinkbaseRef")
   if bundle.linkbases.calculation_links:
@@ -468,9 +373,6 @@ def _build_schema(bundle: StatementBundle) -> etree._Element:
 
 
 def _ensure_appinfo(schema_root: etree._Element) -> etree._Element:
-  """Return the schema's ``<xs:annotation><xs:appinfo>`` element,
-  creating both wrappers if they don't exist yet. Both ``link:roleType``
-  and ``link:linkbaseRef`` go inside this block per XBRL 2.1 §5.1.2."""
   annotation = schema_root.find(f"{{{NS_XS}}}annotation")
   if annotation is None:
     annotation = etree.SubElement(schema_root, f"{{{NS_XS}}}annotation")
@@ -483,14 +385,9 @@ def _ensure_appinfo(schema_root: etree._Element) -> etree._Element:
 def _append_role_type_declarations(
   appinfo: etree._Element, bundle: StatementBundle
 ) -> None:
-  """Emit one ``<link:roleType>`` per unique custom ``xlink:role``
-  referenced by the bundle's linkbases into the schema's appinfo block.
+  """Declare one ``<link:roleType>`` per ELR used, with its ``usedOn`` link types.
 
-  XBRL 2.1 requires every Extended Link Role (ELR) URI used in a
-  linkbase to be declared in a schema via ``<link:roleType>`` with a
-  matching ``<link:usedOn>`` enumeration of the link types it may
-  appear on. Without these, Arelle (and any other conformant XBRL
-  processor) reports ``Role ... is missing a roleRef``.
+  XBRL 2.1 requires every ELR used in a linkbase to be declared this way.
   """
   used_on_per_role = _collect_role_usage(bundle)
   for role_uri, used_on in sorted(used_on_per_role.items()):
@@ -521,10 +418,7 @@ def _any_arcs(bundle: StatementBundle) -> bool:
 
 
 def _collect_role_usage(bundle: StatementBundle) -> dict[str, set[str]]:
-  """Walk the bundle's linkbases and return ``{role_uri: {link_type, …}}``
-  for every non-empty ``xlink:role`` referenced. Used to drive the
-  roleType emission so each role declares exactly the link types it's
-  actually used on (XBRL conformance requirement)."""
+  """``{role_uri: {link_type, …}}`` for every role on a link with arcs."""
   by_role: dict[str, set[str]] = {}
   for link in bundle.linkbases.presentation_links:
     if link.role_uri and link.arcs:
@@ -539,38 +433,17 @@ def _collect_role_usage(bundle: StatementBundle) -> dict[str, set[str]]:
 
 
 def _role_uri_to_id(role_uri: str) -> str:
-  """Mint a stable, NCName-valid id for a role URI.
-
-  The id is what ``<link:roleRef xlink:href="report.xsd#…">`` targets
-  from each linkbase; it must be a valid ``xs:ID`` and must agree on
-  both sides of the reference. We use the role's last URI segment
-  with non-NCName characters replaced by underscores and a leading
-  ``role_`` prefix to guarantee a letter start regardless of how the
-  taxonomy author named the role.
-  """
+  """Stable ``xs:ID`` for a role URI; roleRef hrefs and roleType ids must agree."""
   last = role_uri.rsplit("/", 1)[-1]
   sanitized = "".join(c if c.isalnum() or c in "-_." else "_" for c in last)
   return f"role_{sanitized}"
 
 
 def _append_concept_declaration(parent: etree._Element, concept: BundleElement) -> None:
-  """One ``<xs:element>`` per concept with XBRL attributes.
+  """One ``<xs:element>`` per concept.
 
-  Both ``id`` and ``name`` must be valid ``xs:NCName`` per the XML
-  Schema spec — NCNames start with a letter or underscore and contain
-  only letters, digits, hyphens, underscores, and periods. Two pitfalls
-  this declaration avoids:
-
-  * The bundle's internal id is a ULID (``elem_01K…``) which starts
-    with a letter when prefixed but commonly starts with a digit when
-    raw — failing Arelle's ``xs:ID`` regex. We use the qname-derived
-    id (``rs-gaap_Assets``) so the schema id and the linkbase locator
-    href ``report.xsd#rs-gaap_Assets`` agree and resolve cleanly.
-  * The bundle's human-readable ``name`` (``"Treasury Stock, Value"``)
-    contains spaces, commas, parentheses — none of which are NCName
-    characters. We use the qname's local part (``TreasuryStockValue``)
-    which is always a valid NCName by construction (taxonomy authors
-    enforce this upstream).
+  ``id`` and ``name`` must be NCNames, so both derive from the qname rather
+  than the ULID id or the human-readable ``name``.
   """
   attrs: dict[str, str] = {
     "id": _concept_id(concept),
@@ -583,18 +456,13 @@ def _append_concept_declaration(parent: etree._Element, concept: BundleElement) 
     "nillable": "true",
     f"{{{NS_XBRLI}}}periodType": concept.period_type,
   }
-  # Per XBRL 2.1 §5.1.1.2: ``xbrli:balance`` is only valid on
-  # monetary item types, and concept declarations marked abstract
-  # must not carry it. Arelle reports
-  # ``Item ... may not have a balance`` when we violate either.
+  # XBRL 2.1 §5.1.1.2: balance is valid only on non-abstract monetary items.
   if concept.balance_type and not concept.is_abstract and concept.is_monetary:
     attrs[f"{{{NS_XBRLI}}}balance"] = concept.balance_type
   etree.SubElement(parent, f"{{{NS_XS}}}element", attrib=attrs)
 
 
 def _append_linkbase_ref(parent: etree._Element, href: str, role_local: str) -> None:
-  """Append a ``<link:linkbaseRef>`` pointing at a bundled linkbase
-  file. The role uses the XBRL standard linkbase-role URIs."""
   etree.SubElement(
     parent,
     f"{{{NS_LINK}}}linkbaseRef",
@@ -608,29 +476,11 @@ def _append_linkbase_ref(parent: etree._Element, href: str, role_local: str) -> 
 
 
 def _concept_id(concept: BundleElement) -> str:
-  """Schema-local id for a concept — used as the ``xlink:href`` fragment
-  target from linkbase locators (``report.xsd#<id>``).
-
-  Must be a valid ``xs:ID`` (NCName) — letter or underscore start, no
-  spaces / colons / other punctuation. We derive the id from the
-  qname via ``_qname_to_id`` (``rs-gaap:Assets`` → ``rs-gaap_Assets``)
-  so the schema-side id is naming-equivalent to the locator-side
-  reference (linkbases already use ``_qname_to_id`` for ``xlink:href``
-  fragments). Using ``concept.id`` directly would commonly produce a
-  digit-leading ULID which is not a valid NCName; resolver mismatches
-  between schema and linkbases would surface as Arelle ``MissingLoc``
-  errors at validation time.
-  """
+  """Schema id for a concept; must match the linkbase locator fragments."""
   return _qname_to_id(concept.qname)
 
 
 def _local_name(qname: str) -> str:
-  """The part of a qname after the colon (``rs-gaap:Assets`` →
-  ``Assets``). Used as the ``name`` attribute on ``<xs:element>``
-  declarations, which must be a valid NCName — the prefix is dropped
-  because the namespace comes from the schema's ``targetNamespace``,
-  not the element name itself.
-  """
   return qname.split(":", 1)[-1]
 
 
@@ -664,33 +514,20 @@ def _build_definition_linkbase(bundle: StatementBundle) -> etree._Element:
   )
 
 
-# Standard XBRL label-linkbase role/arcrole URIs (XBRL 2.1 §5.2.2).
 _ROLE_LINK = "http://www.xbrl.org/2003/role/link"
 _ROLE_LABEL = "http://www.xbrl.org/2003/role/label"
 _ARCROLE_CONCEPT_LABEL = "http://www.xbrl.org/2003/arcrole/concept-label"
 
 
-# The label rule lives beside ``BundleElement`` so this linkbase and the
-# JSON-LD encoder read the same one; see :func:`concept_label`.
 _concept_label = concept_label
 
 
 def _has_labels(bundle: StatementBundle) -> bool:
-  """Whether any concept has a meaningful label worth a label linkbase."""
   return any(_concept_label(c) is not None for c in bundle.schema_concepts)
 
 
 def _build_label_linkbase(bundle: StatementBundle) -> etree._Element:
-  """Build ``report-lab.xml`` — one standard ``label`` per concept.
-
-  Shape per XBRL 2.1 §5.2.2: a single ``<link:labelLink>`` holding, for
-  each concept, a ``<link:loc>`` to its schema declaration, a
-  ``<link:label>`` resource carrying the text (standard label role,
-  ``xml:lang="en"``), and a ``<link:labelArc>`` (``concept-label``
-  arcrole) wiring loc → label. Locators reuse the same
-  ``report.xsd#<qname_to_id>`` scheme as the other linkbases so they
-  resolve against the bundled schema.
-  """
+  """Build ``report-lab.xml``: one loc + standard label + arc per labelled concept."""
   nsmap: dict[str | None, str] = {"link": NS_LINK, "xlink": NS_XLINK, "xsi": NS_XSI}
   root = etree.Element(
     f"{{{NS_LINK}}}linkbase",
@@ -706,8 +543,6 @@ def _build_label_linkbase(bundle: StatementBundle) -> etree._Element:
     f"{{{NS_LINK}}}labelLink",
     attrib={f"{{{NS_XLINK}}}type": "extended", f"{{{NS_XLINK}}}role": _ROLE_LINK},
   )
-  # Deterministic order; one loc + label + arc per concept with a meaningful
-  # label. Concepts whose only text echoes the QName are left unlabelled.
   for concept in sorted(bundle.schema_concepts, key=lambda c: c.qname):
     label_text = _concept_label(concept)
     if label_text is None:
@@ -754,13 +589,6 @@ def _build_linkbase(
   arc_local: str,
   include_weight: bool,
 ) -> etree._Element:
-  """Build a presentation / calculation / definition linkbase document.
-
-  Shape: ``<link:linkbase>`` root wrapping one ``<link:roleRef>`` per
-  ELR plus one ``<link:{presentationLink}>`` per ELR. Each link wraps
-  one ``<link:loc>`` per distinct concept endpoint and one
-  ``<link:{presentationArc}>`` per arc.
-  """
   nsmap: dict[str | None, str] = {
     "link": NS_LINK,
     "xlink": NS_XLINK,
@@ -801,7 +629,6 @@ def _append_link_block(
   arc_local: str,
   include_weight: bool,
 ) -> None:
-  """One ``<link:presentationLink>`` (or calc/def) with locs + arcs."""
   link_attrs: dict[str, str] = {
     f"{{{NS_XLINK}}}type": "extended",
   }
@@ -809,10 +636,6 @@ def _append_link_block(
     link_attrs[f"{{{NS_XLINK}}}role"] = link.role_uri
   link_el = etree.SubElement(parent, f"{{{NS_LINK}}}{link_local}", attrib=link_attrs)
 
-  # Emit one <link:loc> per distinct concept referenced by the link's
-  # arcs. XLink labels are arbitrary but conventional — use the concept
-  # qname (with ":" replaced for XML id compatibility) so debugging is
-  # easier when comparing emitted vs reference linkbases.
   concept_qnames: set[str] = set()
   for arc in link.arcs:
     concept_qnames.add(arc.from_qname)
@@ -828,7 +651,6 @@ def _append_link_block(
       },
     )
 
-  # Emit one arc per BundleArc
   for arc in link.arcs:
     _append_arc(link_el, arc, arc_local, include_weight)
 
@@ -853,32 +675,17 @@ def _append_arc(
 
 
 def _qname_to_id(qname: str) -> str:
-  """Convert ``prefix:Local`` to ``prefix_Local`` for schema id refs.
-
-  Linkbase locators point at ``report.xsd#<id>`` and schema ids can't
-  contain ``:``. We use the bundled element's internal id where
-  possible; this fallback covers cases where the locator points at a
-  framework concept not in our schema slice (rare in v1.0 since the
-  schema slice covers everything referenced).
-  """
+  """``prefix:Local`` → ``prefix_Local``; schema ids can't contain ``:``."""
   return qname.replace(":", "_")
 
 
 def _qname_to_label(qname: str) -> str:
-  """XLink label — same convention as the schema id."""
   return _qname_to_id(qname)
 
 
 def _role_id(link: BundleLinkbaseLink) -> str:
-  """Schema-local id for a linkbase's roleRef href fragment.
-
-  Must match the id emitted in the corresponding ``<link:roleType>``
-  declaration in ``report.xsd`` so the cross-reference resolves at
-  validation time. Both sides derive from ``_role_uri_to_id`` over the
-  link's ``role_uri``, never from ``link.structure_id``: the same ELR
-  (xlink:role URI) can be reused across several Networks, and the
-  schema-side declaration is keyed on the role URI.
-  """
+  """roleRef fragment; keyed on role URI (not structure id) to match roleType,
+  since one ELR can be shared by several Networks."""
   return (
     _role_uri_to_id(link.role_uri) if link.role_uri else f"role_{link.structure_id}"
   )

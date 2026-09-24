@@ -55,8 +55,6 @@ class ElementLabel(ExtensionsBase):
   role = Column(String, nullable=False, default="standard")
   language = Column(String, nullable=False, default="en")
   text = Column(Text, nullable=False)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   created_by = Column(String, nullable=False, default="system")
 

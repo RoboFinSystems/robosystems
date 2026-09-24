@@ -1,15 +1,7 @@
-"""User provisioning kernel.
+"""The one place a user account is created (password registration and SCIM).
 
-The one place a user account is created. Password registration
-(``routers/auth/register.py``) and SCIM ``POST /Users`` both delegate here,
-so account-creation invariants (duplicate check, org attachment, limits) are
-enforced once rather than per transport.
-
-Contract (the operations-kernel rules): session-in, dataclass-out, domain
-exceptions — never HTTP. Callers own their gates (input validation, CAPTCHA,
-rate limits, registration-mode checks) and all side channels (emails,
-metrics, audit events); this module only mutates the database, in a single
-transaction.
+Only mutates the database, in one transaction; callers own validation, rate
+limits, emails and audit.
 """
 
 from dataclasses import dataclass
@@ -44,8 +36,7 @@ class ProvisionedUser:
   user: User
   org: Org
   org_role: OrgRole
-  # Set only when the caller asked for an email-verification token; the
-  # caller is responsible for sending it.
+  # Set only when requested; the caller sends it.
   verification_token: str | None
 
 
@@ -69,18 +60,13 @@ def provision_user(
 
   Org attachment, by precedence:
 
-  - ``invitation`` + ``invited_org`` — the invited-registration path: join the
-    inviting org at the invited role and mark the invitation accepted. The
-    caller must have already resolved and validated the invitation (email
-    match, expiry).
-  - ``target_org`` — the IdP-provisioning path (SCIM): join the given org at
-    ``target_org_role``. Pass ``password_hash=None`` and an ``external_id``;
-    the IdP asserted the mailbox, so ``email_verified=True``.
-  - neither — the self-registration path: mint a personal org (user as OWNER)
-    with default limits.
+  - ``invitation`` + ``invited_org``: join at the invited role and accept the
+    invitation (the caller has already validated email match and expiry).
+  - ``target_org`` (SCIM): join at ``target_org_role``; pass
+    ``password_hash=None``, an ``external_id``, and ``email_verified=True``.
+  - neither: mint a personal org with the user as OWNER.
 
-  Everything lands in one transaction: on any failure the session is rolled
-  back and no partial account remains.
+  Rolls back on any failure, leaving no partial account.
   """
   if User.get_by_email(email, session) is not None:
     raise EmailAlreadyRegisteredError("Email already registered")

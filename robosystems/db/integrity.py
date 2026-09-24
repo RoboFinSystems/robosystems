@@ -1,16 +1,9 @@
 """Name the constraint an ``IntegrityError`` violated.
 
-A command that pre-checks for a conflict and then inserts still loses the
-occasional race to a concurrent identical insert; the database answers with
-an ``IntegrityError``, and the command translates it into the same typed
-conflict its pre-check raises. That translation must be *specific*: catching
-every ``IntegrityError`` as "duplicate" would report an unrelated fault — a
-foreign key to a row that vanished, a CHECK on a bad value — as a benign
-conflict and hide it. So the sites ask which constraint fired.
-
-psycopg2 exposes it on ``exc.orig.diag.constraint_name``; when the driver
-does not carry a diagnostic (a stub in tests, another driver), the message
-is parsed for the ``"name"`` PostgreSQL quotes after ``constraint``/``index``.
+Commands that lose an insert race translate the error into their typed
+conflict only for the expected constraint, so an unrelated FK or CHECK
+failure is not hidden as a duplicate. Falls back to parsing the message when
+the driver carries no diagnostic.
 """
 
 from __future__ import annotations

@@ -1,16 +1,7 @@
-"""Extensions OLTP models.
+"""Extensions OLTP models (ExtensionsBase, schema-per-graph tenancy).
 
-These models use ExtensionsBase (not the platform Base/Model) and live
-in the separate 'extensions' database with schema-per-graph-id tenancy.
-
-Top-level files mirror schemas/base.py — they are base ontology concepts
-universally applicable regardless of which extension consumes them
-(Entity, Taxonomy, Element, Dimension, Association, Structure, plus the
-EntityTaxonomy join table). Extension-specific models live in subfolders
-(roboledger/, roboinvestor/).
-
-See schemas/base.py for the two invariants governing the base-vs-extension
-split and the aspects-only-on-events rule.
+Top-level modules are base ontology concepts mirroring schemas/base.py;
+extension-specific models live in roboledger/ and roboinvestor/.
 """
 
 # Base ontology concepts

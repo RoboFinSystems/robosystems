@@ -1,12 +1,5 @@
-"""Derive an entity's initial Reporting Style from its legal form.
-
-Used at entity-provision time (``_provision_entity``). The mapping is
-intentionally small and DB-free: it points entity legal forms at the
-library-seeded Style Structure ids. An explicit ``reporting_style_id`` on
-the create request overrides the derived default; everything unknown falls
-back to the corporate Default. Post-creation, the entity's Style is changed
-through the ``change-reporting-style`` operation instead.
-"""
+"""Derive an entity's initial Reporting Style from its legal form, at provision
+time. Later changes go through the ``change-reporting-style`` operation."""
 
 from __future__ import annotations
 
@@ -33,12 +26,10 @@ def default_style_for(entity_type: str | None) -> str:
 
 
 def resolve_reporting_style_id(entity_data: dict[str, Any] | None) -> str:
-  """Resolve the Reporting Style id to pin on a new entity.
+  """Reporting Style id for a new entity: an explicit ``reporting_style_id``,
+  else one derived from ``entity_type``, else the corporate Default.
 
-  Precedence: an explicit ``reporting_style_id`` on the create request wins;
-  otherwise it's derived from the entity's ``entity_type``; otherwise the
-  corporate Default. ``entity_data`` is the raw create payload dict (read
-  before the tenant schema exists), so this never touches the database.
+  Reads only the raw create payload; never touches the database.
   """
   if not entity_data:
     return _RS.DEFAULT_STYLE_ID

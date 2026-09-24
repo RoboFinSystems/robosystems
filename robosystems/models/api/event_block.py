@@ -40,12 +40,7 @@ ResourceType = Literal[
   "labor",
 ]
 
-# Canonical 19-verb action vocabulary refining `event_category`. The verbs
-# disambiguate concepts `event_category` collapses (custody-only vs rights-
-# transfer, work vs deliverService, etc.). Vocabulary converges with
-# Valueflows; the canonical home is
-# `robosystems.models.extensions.roboledger.event.EVENT_ACTIONS` — keep this
-# Literal in sync with that frozenset and the DB CHECK constraint.
+# Keep in sync with `models.extensions.roboledger.event.EVENT_ACTIONS`.
 EventAction = Literal[
   "produce",
   "raise",
@@ -254,10 +249,7 @@ class CreateEventBlockRequest(BaseModel):
     ),
   )
 
-  # REA duality links — economic relationships expressing obligation origin
-  # (`obligated_by_event_id`) and obligation discharge (`discharges_event_id`).
-  # Forward-materialization + settlement links. Both are application-validated
-  # self-references; same nullable-FK pattern as the correction chain.
+  # REA duality links: obligation origin and discharge.
   obligated_by_event_id: str | None = Field(
     None,
     description=(

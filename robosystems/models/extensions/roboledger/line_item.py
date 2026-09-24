@@ -1,9 +1,5 @@
-"""LineItem model — individual debits and credits.
-
-Maps to LineItem nodes in the graph. Each line item belongs to an entry
-and references an element. Exactly one of debit_amount/credit_amount
-must be positive; the other must be zero.
-"""
+"""Journal entry lines. Exactly one of debit_amount/credit_amount is positive;
+the other is zero."""
 
 from datetime import UTC, datetime
 
@@ -40,40 +36,24 @@ class LineItem(ExtensionsBase):
       name="check_not_both_amounts",
     ),
   )
-
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("li"))
-
-  # Relationships
   entry_id = Column(
     String, ForeignKey("entries.id", ondelete="CASCADE"), nullable=False
   )
   element_id = Column(String, ForeignKey("elements.id"), nullable=False)
 
-  # Flow concept (the economic-flow / "transaction description" classification
-  # this line represents — e.g. rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment).
-  # Drives rollforward attribution and cash-flow/equity-flow rendering.
-  # Nullable: not every line carries a flow (e.g. simple balance transfers).
-  # Points at the element the source flow tag names directly (rs-gaap when the
-  # enrichment classifier emits rs-gaap-valued tags; the source vocabulary in
-  # cross-taxonomy projections). A valid flow element carries an `activityType`
-  # trait.
+  # The economic flow this line represents (e.g.
+  # rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment), driving rollforward
+  # attribution and cash-flow/equity-flow rendering. NULL when the line
+  # carries no flow. A valid flow element has an `activityType` trait.
   flow_element_id = Column(String, ForeignKey("elements.id"), nullable=True)
 
-  # Financial (minor currency units — cents)
+  # Cents.
   debit_amount = Column(BigInteger, nullable=False, default=0)
   credit_amount = Column(BigInteger, nullable=False, default=0)
-
-  # Description
   description = Column(String, nullable=True)
-
-  # Ordering
   line_order = Column(Integer, nullable=False, default=0)
-
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

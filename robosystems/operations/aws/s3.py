@@ -1,6 +1,4 @@
-"""
-S3 adapter for graph database backup storage with compression and lifecycle management.
-"""
+"""S3 clients: general object storage and graph database backups."""
 
 import asyncio
 import gzip
@@ -26,10 +24,8 @@ GZIP_MAGIC = b"\x1f\x8b"
 def gunzip_if_gzipped(data: bytes) -> bytes:
   """Un-gzip a payload if it is gzipped, otherwise return it unchanged.
 
-  Detection is by magic bytes because gzip is self-identifying and the stored
-  populations are mixed: a key that was written plain can later be rewritten
-  gzipped in place, under the same name. boto3 hands back the stored bytes
-  whatever ``Content-Encoding`` says, so the payload answers the question itself.
+  By magic bytes: stored populations are mixed (a key can be rewritten gzipped
+  in place), and boto3 returns stored bytes whatever ``Content-Encoding`` says.
   """
   if data[:2] == GZIP_MAGIC:
     return gzip.decompress(data)
@@ -48,23 +44,13 @@ class S3Client:
     """Defaults to ``env.AWS_DEFAULT_REGION`` / ``env.AWS_ENDPOINT_URL``."""
     self.region_name = region_name or env.AWS_DEFAULT_REGION
     self.endpoint_url = endpoint_url or env.AWS_ENDPOINT_URL
-    # Optional second endpoint used only when *signing presigned URLs*.
-    # In dev the API container reaches LocalStack via docker DNS
-    # (``http://localstack:4566``), but that hostname isn't reachable from
-    # the host browser. Setting ``AWS_S3_PRESIGN_ENDPOINT_URL`` to
-    # ``http://localhost:4566`` produces signed URLs that the browser can
-    # follow. Unset in staging/prod — boto3's default real-AWS endpoints
-    # are already browser-reachable, so the override stays None and the
-    # presign client is the same instance as the upload/download client.
+    # Dev only: the container reaches LocalStack by docker DNS, which the host
+    # browser can't resolve, so presigned URLs are signed against this
+    # endpoint instead. Unset in staging/prod.
     self.presign_endpoint_url = env.AWS_S3_PRESIGN_ENDPOINT_URL or None
 
-    # Build the primary client (used for upload, download, head, list, etc.).
     self.s3_client = self._build_client(self.endpoint_url)
 
-    # Lazy-initialised secondary client for presigned URL signing.
-    # ``_build_client`` is cheap (boto3 creates the underlying session on
-    # first request), so we materialise this up front only when the
-    # override is actually set; otherwise reuse the primary client.
     self._presign_client = (
       self._build_client(self.presign_endpoint_url)
       if self.presign_endpoint_url
@@ -74,43 +60,28 @@ class S3Client:
     logger.debug(f"Initialized S3Client for region {self.region_name}")
 
   def _build_client(self, endpoint_url: str | None) -> Any:
-    """Construct an underlying boto3 ``s3`` client.
-
-    Centralises the credential + retry config so both the primary
-    upload/download client and the optional presign-only client land
-    on the same defaults.
-    """
     s3_config: dict[str, Any] = {
       "region_name": self.region_name,
     }
-    # Only include endpoint_url if set (empty string breaks boto3)
+    # An empty endpoint_url breaks boto3.
     if endpoint_url:
       s3_config["endpoint_url"] = endpoint_url
 
-    # Prefer IAM roles over access keys for security
-    # In production/staging: Use ECS task role automatically
-    # In development: Use AWS CLI profile or access keys as fallback
+    # Prod/staging use the ECS task role; dev falls back to keys or the CLI chain.
     if env.ENVIRONMENT in ["prod", "staging"]:
-      # Use IAM role automatically - boto3 will detect ECS task role
       logger.debug("Using IAM role for S3 access (production/staging)")
     elif env.AWS_S3_ACCESS_KEY_ID:
-      # Development fallback: use access keys if provided
       logger.debug("Using access keys for S3 access (development)")
       s3_config["aws_access_key_id"] = env.AWS_S3_ACCESS_KEY_ID
       if env.AWS_S3_SECRET_ACCESS_KEY:
         s3_config["aws_secret_access_key"] = env.AWS_S3_SECRET_ACCESS_KEY
     else:
-      # Development: try to use AWS CLI profile
       logger.debug("Using default AWS credentials chain for S3 access")
 
     return boto3.client(
       "s3",
-      # SigV4 explicitly: botocore still presigns with SigV2 in us-east-1
-      # by default, and a SigV2 URL signs no headers — so the
-      # `ContentLength` the upload presign declares would not bind the PUT.
-      # Under SigV4 `content-length` joins the signed headers and a PUT with
-      # a different length is refused by S3. Every current bucket and region
-      # accepts SigV4; SigV2 has been deprecated by AWS since 2020.
+      # botocore presigns with SigV2 in us-east-1 by default, which signs no
+      # headers; SigV4 makes the presigned `ContentLength` bind the PUT.
       config=BotoConfig(
         signature_version="s3v4",
         retries={"mode": "adaptive", "max_attempts": 3},
@@ -129,10 +100,7 @@ class S3Client:
     content_encoding: str | None = None,
     storage_class: str | None = None,
   ) -> bool:
-    """Upload a UTF-8 string as an S3 object. False on any failure.
-
-    Retries come from the boto3 client's adaptive retry configuration.
-    """
+    """Upload a UTF-8 string as an S3 object. False on any failure."""
     content_bytes = content.encode("utf-8")
 
     put_args: dict[str, Any] = {
@@ -191,11 +159,7 @@ class S3Client:
     content_encoding: str | None = None,
     storage_class: str | None = None,
   ) -> bool:
-    """Upload raw bytes as an S3 object. False on any failure.
-
-    The binary sibling of :meth:`upload_string`, for artifacts that aren't
-    UTF-8 text (e.g. the XBRL serialization zip).
-    """
+    """Upload raw bytes as an S3 object. False on any failure."""
     put_args: dict[str, Any] = {
       "Bucket": bucket,
       "Key": key,
@@ -306,8 +270,7 @@ class S3Client:
   def download_string(self, bucket: str, key: str) -> str | None:
     """Download an S3 object as a UTF-8 string, or None if unavailable.
 
-    An object stored gzipped (``Content-Encoding: gzip``) is decoded: an HTTP
-    client would do that on its own, ``get_object`` does not.
+    Gzipped objects are decoded (``get_object`` does not do it).
     """
     try:
       response = self.s3_client.get_object(Bucket=bucket, Key=key)
@@ -338,8 +301,6 @@ class S3Client:
 
     except ClientError as e:
       error_code = e.response.get("Error", {}).get("Code", "")
-
-      # Log security errors for audit trail
       if error_code in {"AccessDenied", "UnauthorizedAccess"}:
         logger.critical(
           f"S3 SECURITY VIOLATION - {error_code}: Delete operation denied for "
@@ -378,9 +339,7 @@ class S3Client:
     """Sign a time-limited download URL, or None if signing fails.
 
     ``response_content_type`` / ``response_content_disposition`` override the
-    headers S3 returns, for artifacts whose stored ``Content-Type`` doesn't
-    match the desired download behaviour. Use the async
-    :meth:`S3BackupAdapter.generate_download_url` inside an event loop.
+    headers S3 returns.
     """
     params: dict[str, Any] = {"Bucket": bucket, "Key": key}
     if response_content_type:
@@ -388,8 +347,6 @@ class S3Client:
     if response_content_disposition:
       params["ResponseContentDisposition"] = response_content_disposition
     try:
-      # ``_presign_client`` is the same instance as ``s3_client`` unless
-      # ``AWS_S3_PRESIGN_ENDPOINT_URL`` is set (dev-only LocalStack path).
       return self._presign_client.generate_presigned_url(
         "get_object",
         Params=params,
@@ -451,7 +408,7 @@ class S3Client:
 
   def batch_upload_strings(
     self,
-    items: list[tuple[str, str, str]],  # List of (content, bucket, key) tuples
+    items: list[tuple[str, str, str]],
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
     max_workers: int | None = None,
@@ -470,7 +427,6 @@ class S3Client:
     results = {}
 
     def upload_item(item: tuple[str, str, str]) -> tuple[str, bool]:
-      """Upload a single item."""
       content, bucket, key = item
       success = self.upload_string(
         content=content,
@@ -483,12 +439,9 @@ class S3Client:
       )
       return key, success
 
-    # Use ThreadPoolExecutor for parallel uploads
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-      # Submit all upload tasks
       futures = [executor.submit(upload_item, item) for item in items]
 
-      # Collect results as they complete
       for future in futures:
         try:
           key, success = future.result()
@@ -497,10 +450,7 @@ class S3Client:
             logger.warning(f"Failed to upload batch item: {key}")
         except Exception as e:
           logger.error(f"Error in batch upload: {e}")
-          # If we can extract the key from the exception context, mark it as failed
-          # Otherwise, we'll just log the error
 
-    # Log batch upload summary
     successful = sum(1 for success in results.values() if success)
     total = len(items)
     logger.info(f"Batch upload completed: {successful}/{total} successful")
@@ -525,28 +475,22 @@ class BackupMetadata:
   database_version: str | None = None
   backup_format: str = "cypher"
   s3_key: str | None = None
-  # Key of the sidecar JSON written alongside the payload. Carried so the
-  # caller can record it: retention deletes the sidecar only when the row knows
-  # where it is, and nothing used to tell the row.
+  # Retention can delete the sidecar only if the caller records this key.
   s3_metadata_key: str | None = None
-  # Whether the archive carries the graph's semantic memory store: "included",
-  # "absent", or None for a backup taken before memory was captured at all.
-  # None is a third state, not a synonym for "absent" — see the manifest
-  # contract in the backup spec.
+  # "included", "absent", or None for a backup from before memory was captured
+  # (a third state, not a synonym for "absent").
   memory: str | None = None
   # Set only when the archive's contents differed from the live database at
   # backup time. Absent on the ordinary path.
   payload_delta: dict[str, Any] | None = None
 
   def to_dict(self) -> dict[str, Any]:
-    """Convert metadata to dictionary for JSON serialization."""
     data = asdict(self)
     data["timestamp"] = self.timestamp.isoformat()
     return data
 
   @classmethod
   def from_dict(cls, data: dict[str, Any]) -> "BackupMetadata":
-    """Create metadata from dictionary."""
     data["timestamp"] = datetime.fromisoformat(data["timestamp"])
     return cls(**data)
 
@@ -559,9 +503,7 @@ class S3BackupAdapter:
   Callers must pass the *same* timestamp to upload and to any later lookup —
   the timestamp is the only join key between the two paths.
 
-  This class compresses; it does not encrypt at the application layer. Objects
-  are written with S3 server-side encryption (SSE-AES256), which is what
-  protects them at rest.
+  No application-layer encryption; objects are written with SSE-AES256.
   """
 
   def __init__(
@@ -580,7 +522,6 @@ class S3BackupAdapter:
         "S3 bucket name must be provided via parameter or USER_DATA_BUCKET env var"
       )
 
-    # Initialize S3 client
     self._init_s3_client()
 
     logger.info(
@@ -663,11 +604,8 @@ class S3BackupAdapter:
     timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
     return f"graph-backups/metadata/{graph_id}/backup-{timestamp_str}.json"
 
-  # Payload extensions that are already compressed archives. Gzipping one of
-  # these buys almost nothing and breaks the contract the extension states: the
-  # download endpoint presigns the stored object directly, so a `.lbug.zip` that
-  # is really gzip-wrapping-a-zip cannot be opened by anything that trusts the
-  # name. Every export format lands as a zip, so in practice this covers them all.
+  # Never gzip these: downloads presign the stored object directly, so a
+  # gzip-wrapped `.lbug.zip` would not open as its name promises.
   _ALREADY_COMPRESSED_EXTENSIONS = (".zip", ".gz", ".zst")
 
   def _should_compress(self, file_extension: str | None) -> bool:
@@ -686,15 +624,7 @@ class S3BackupAdapter:
     return gzip.compress(data)
 
   def _decompress_data(self, data: bytes) -> bytes:
-    """Un-gzip a payload if it is gzipped, otherwise return it unchanged.
-
-    Detection is by magic bytes rather than by the adapter's ``enable_compression``
-    flag, because the stored population is mixed: objects written before archives
-    stopped being double-compressed are gzipped, and newer ones are not. A flag
-    cannot describe both, and gzip is self-identifying, so the payload is allowed
-    to answer the question itself. This also removes the old requirement that read
-    and write agree on a setting that could be changed between them.
-    """
+    """By magic bytes, not ``enable_compression``: stored backups are mixed."""
     return gunzip_if_gzipped(data)
 
   def _calculate_checksum(self, data: bytes) -> str:
@@ -798,13 +728,10 @@ class S3BackupAdapter:
   ) -> BackupMetadata:
     """Compress and store a backup plus its metadata sidecar.
 
-    ``backup_type`` must be ``full`` or ``incremental``. ``timestamp`` should
-    always be supplied by the caller: it is the key both S3 paths are derived
-    from, so generating one here would desynchronise the payload from the
-    metadata the caller records. ``file_extension`` overrides the default
-    ``.lbug[.gz]`` suffix (e.g. ``.csv.zip``).
-
-    The stored checksum covers the pre-compression bytes.
+    Always pass ``timestamp``: it is the only join key between payload and
+    sidecar, so one generated here desynchronises them from the caller's
+    record. ``file_extension`` overrides the default ``.lbug[.gz]``. The
+    checksum covers the pre-compression bytes.
     """
     if not isinstance(backup_data, bytes):
       raise TypeError(f"backup_data must be bytes, got {type(backup_data)}")
@@ -821,7 +748,6 @@ class S3BackupAdapter:
       raise ValueError("graph_id cannot be empty")
 
     if timestamp is None:
-      # This should only happen for direct API calls, not backup operations
       timestamp = datetime.now(UTC)
       logger.warning(
         f"No timestamp provided to upload_backup - this may cause S3 key mismatches. Generated: {timestamp.isoformat()}"
@@ -915,10 +841,6 @@ class S3BackupAdapter:
         backup_duration_seconds=metadata.get("backup_duration_seconds", 0.0),
         database_version=metadata.get("database_version")
         or metadata.get("lbug_version"),
-        # The caller already puts the requested format in `metadata`; reading
-        # it here rather than hardcoding keeps the stored record honest the
-        # first time a format other than a full dump is offered. Latent today
-        # — the public create route accepts full dumps only.
         backup_format=metadata.get("backup_format", "full_dump"),
         s3_key=backup_path,
         s3_metadata_key=metadata_path,
@@ -994,7 +916,7 @@ class S3BackupAdapter:
       paginator = self.s3_client.get_paginator("list_objects_v2")
       backups = []
 
-      # boto3's paginator is sync; each page is fetched on the calling thread.
+      # Sync paginator: pages are fetched on the event loop thread.
       page_iterator = paginator.paginate(Bucket=self.bucket_name, Prefix=prefix)
       for page in page_iterator:
         if "Contents" in page:
@@ -1004,7 +926,6 @@ class S3BackupAdapter:
               ext in key
               for ext in ["/backup-", ".zip", ".cypher", ".json", ".parquet", ".lbug"]
             ) and not key.endswith("/"):
-              # Parse backup information from key
               parts = key.split("/")
               if len(parts) >= 4:
                 backups.append(

@@ -1,13 +1,7 @@
 """ElementTrait — junction between elements and traits.
 
-An element can carry multiple traits across multiple categories
-(e.g. ``elementsOfFinancialStatements=asset``, ``liquidity=current``,
-``activityType=operatingActivity`` for NetCashFlowFromInvesting).
-
-``is_primary`` picks the canonical row per category — used when a
-single representative value per axis is needed for display or filtering.
-``confidence`` and ``source`` track AI-suggested or adapter-derived
-provenance.
+An element carries traits across many categories; ``is_primary`` picks the
+representative row per category.
 """
 
 from datetime import UTC, datetime
@@ -48,8 +42,6 @@ class ElementTrait(ExtensionsBase):
   # Confidence (for AI-suggested rows) and provenance.
   confidence = Column(Float, nullable=True)
   source = Column(String, nullable=True)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

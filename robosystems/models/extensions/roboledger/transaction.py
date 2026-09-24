@@ -1,8 +1,4 @@
-"""Transaction model — business events.
-
-Maps to Transaction nodes in the graph. Represents what happened in the
-real world (invoice, payment, deposit, etc.).
-"""
+"""Transactions: source documents such as invoices, payments, and deposits."""
 
 from datetime import UTC, datetime
 
@@ -42,50 +38,31 @@ class Transaction(ExtensionsBase):
     ),
     CheckConstraint("amount >= 0", name="check_transaction_amount"),
   )
-
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("txn"))
   number = Column(String, nullable=True)
   idempotency_key = Column(String, unique=True, nullable=True)
-
-  # Classification
   type = Column(String, nullable=False)
   category = Column(String, nullable=True)
 
-  # Financial (minor currency units — cents)
-  amount = Column(BigInteger, nullable=False)
+  amount = Column(BigInteger, nullable=False)  # cents
   currency = Column(String, nullable=False, default="USD")
-
-  # Dates
   date = Column(Date, nullable=False)
   due_date = Column(Date, nullable=True)
 
-  # Counterparty
   merchant_name = Column(String, nullable=True)
   reference_number = Column(String, nullable=True)
-
-  # Description
   description = Column(String, nullable=True)
 
-  # Source provenance
   source = Column(String, nullable=False, default="native")
   source_id = Column(String, nullable=True)
   connection_id = Column(String, nullable=True)
 
-  # Event audit chain — links this transaction to the business event that
-  # caused it. NULL when there is no upstream event, as for an explicit
-  # journal entry.
+  # The business event that caused this transaction, if any.
   triggered_by_event_id = Column(String, nullable=True)
-
-  # State
   status = Column(String, nullable=False, default="pending")
   posted_at = Column(DateTime, nullable=True)
-
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
   version = Column(Integer, nullable=False, default=1)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

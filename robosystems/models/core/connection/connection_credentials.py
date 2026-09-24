@@ -26,20 +26,13 @@ class ConnectionCredentials(Model):
     String, primary_key=True, default=lambda: f"cred_{secrets.token_urlsafe(16)}"
   )
 
-  # Connection identification
-  connection_id = Column(
-    String, nullable=False, index=True
-  )  # References Graph Connection.connection_id
-  provider = Column(String, nullable=False, index=True)  # QuickBooks, SEC
-  user_id = Column(String, nullable=False, index=True)  # References User.id
+  connection_id = Column(String, nullable=False, index=True)  # Connection.id
+  provider = Column(String, nullable=False, index=True)
+  user_id = Column(String, nullable=False, index=True)
 
-  # Encrypted credential storage
-  encrypted_credentials = Column(
-    Text, nullable=False
-  )  # JSON blob of credentials, encrypted
+  encrypted_credentials = Column(Text, nullable=False)  # Fernet-encrypted JSON
 
-  # Metadata
-  expires_at = Column(DateTime, nullable=True)  # When credentials expire
+  expires_at = Column(DateTime, nullable=True)
   is_active = Column(Boolean, default=True, nullable=False)
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
@@ -50,45 +43,35 @@ class ConnectionCredentials(Model):
   )
 
   def __repr__(self) -> str:
-    """String representation of the credentials."""
     return f"<ConnectionCredentials {self.id} {self.provider} {self.connection_id}>"
 
   @staticmethod
   def _get_encryption_key() -> bytes:
-    """Get or generate the credential-encryption key.
+    """The Fernet key for credential encryption.
 
-    In prod/staging ``CONNECTION_CREDENTIALS_KEY`` MUST be set explicitly. Only
-    dev/test/local may fall back to a key derived from ``JWT_SECRET_KEY`` — a
-    fast, unsalted derivation that must never protect real customer credentials
-    and must never share key material with the token-signing secret in a
-    deployed environment.
+    ``CONNECTION_CREDENTIALS_KEY`` is required in prod/staging. Dev/test may
+    fall back to a weak, unsalted derivation from ``JWT_SECRET_KEY``.
     """
     key = env.CONNECTION_CREDENTIALS_KEY
     if not key:
-      # Never allow the weak JWT-derived fallback in prod/staging. Startup
-      # validation also requires the key there; this is defense-in-depth.
+      # Defense in depth: startup validation also requires the key there.
       if env.ENVIRONMENT in ("prod", "staging"):
         raise ValueError(
           f"CONNECTION_CREDENTIALS_KEY must be set in {env.ENVIRONMENT}; "
           "refusing to derive a credential key from JWT_SECRET_KEY."
         )
-      # Dev/test/local only: derive a deterministic key from JWT_SECRET_KEY.
       logger.warning(
         "CONNECTION_CREDENTIALS_KEY is not set; deriving a dev-only key from "
         "JWT_SECRET_KEY. Do not rely on this outside local development."
       )
       jwt_secret = env.JWT_SECRET_KEY
       if jwt_secret:
-        # Create a deterministic key from JWT secret
         import hashlib
 
-        # Use SHA256 to create a 32-byte key from the JWT secret
         hash_input = f"{jwt_secret}_connection_encryption".encode()
-        key_bytes = hashlib.sha256(hash_input).digest()[:32]  # Ensure exactly 32 bytes
-        # Fernet.generate_key() creates a 32-byte key, we need to match that format
+        key_bytes = hashlib.sha256(hash_input).digest()[:32]
         key = base64.urlsafe_b64encode(key_bytes).decode()
       else:
-        # Fail fast if no key is available
         logger.error(
           "No encryption key found. Please set CONNECTION_CREDENTIALS_KEY or JWT_SECRET_KEY."
         )
@@ -96,15 +79,11 @@ class ConnectionCredentials(Model):
           "CONNECTION_CREDENTIALS_KEY must be set for credential encryption."
         )
 
-    # Fernet expects the key as base64-encoded bytes (not decoded)
-    # So we return the base64 string as bytes
+    # Fernet takes the base64 string itself, as bytes; decode only to validate.
     try:
-      # Validate it's proper base64
       base64.urlsafe_b64decode(key.encode())
-      # Return the base64 string as bytes (what Fernet expects)
       return key.encode()
     except Exception:
-      # If key is malformed, raise an exception
       logger.error(
         "Invalid encryption key format. The key must be a URL-safe base64-encoded string."
       )

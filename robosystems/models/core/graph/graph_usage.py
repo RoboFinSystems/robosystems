@@ -1,12 +1,8 @@
-"""Per-event usage records: storage snapshots, credit consumption, API calls.
+"""Append-only usage events: storage snapshots, credit consumption, API calls.
 
-One append-only table backs storage reporting, credit analytics, and
-performance insight. Storage is included in each tier and is **not** metered or
-billed for overage (``config/billing/__init__.py``) — the storage columns here
-feed usage reporting and the tier storage cap, not a per-GB charge. Rows carry
-pre-split billing_year/month/day/hour columns
-so period rollups are index-only scans. Nothing here reads subscription
-pricing — that stays in ``config/billing/``.
+Storage is included in each tier and not billed per GB; the storage columns
+feed reporting and the tier cap. Pre-split billing_year/month/day/hour columns
+keep period rollups index-only.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -62,26 +58,18 @@ class UsageEventType(str, Enum):
   ERROR_EVENT = "error_event"  # Error occurrences
 
 
-# A single reading stands in for the time since the one before it. Cap that
-# span so a sensor outage — or a graph deleted mid-month, whose last reading
-# would otherwise stretch to the period end — can't skew the average.
-# Deliberately generous relative to the snapshot cadence: this is a ceiling
-# on damage, not an encoding of the schedule.
+# Cap on the span one reading stands in for, so a sensor outage cannot skew
+# the average. A ceiling on damage, not the snapshot schedule.
 MAX_SNAPSHOT_WEIGHT_HOURS = 24.0
 
 
 def _time_weighted_average_gb(
   measurements: list[dict[str, Any]], period_start: datetime
 ) -> float:
-  """Average storage over the period, weighting each reading by how long it stood.
+  """Time-weighted average storage: snapshots are not evenly spaced.
 
-  Not a mean of the readings: snapshots are not guaranteed evenly spaced, so
-  a plain mean over-counts whatever the sensor happened to sample more often.
-  Weighting off the timestamps also keeps this correct if the sensor's
-  interval changes — it lives in another module and has moved before.
-
-  Backward-looking on purpose: a reading is credited for the span *since* the
-  previous one, so the average never covers time nobody observed.
+  Each reading is credited for the span since the previous one, so the
+  average never covers unobserved time.
   """
   weighted_gb = 0.0
   observed_hours = 0.0
@@ -109,29 +97,21 @@ class GraphUsage(Model):
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("usg"))
 
-  # Core identification
   user_id = Column(String, nullable=False, index=True)
   graph_id = Column(String, nullable=False, index=True)
 
-  # Event classification
   event_type = Column(String, nullable=False, index=True)  # UsageEventType
-  operation_type = Column(String, nullable=True)  # Specific operation within event type
+  operation_type = Column(String, nullable=True)
 
-  # Graph tier and infrastructure
-  graph_tier = Column(
-    String, nullable=False, index=True
-  )  # ladybug-standard, ladybug-large, ladybug-xlarge, etc.
-  instance_id = Column(String, nullable=True)  # Infrastructure instance
-  region = Column(String, nullable=True)  # AWS region
+  graph_tier = Column(String, nullable=False, index=True)
+  instance_id = Column(String, nullable=True)
+  region = Column(String, nullable=True)
 
-  # Storage metrics (usage reporting and the tier storage cap — not billed per GB)
-  storage_bytes = Column(BigInteger, nullable=True)  # Total storage size in bytes
-  storage_gb = Column(Float, nullable=True)  # Total storage in GB
-  storage_delta_gb = Column(
-    Float, nullable=True
-  )  # Change in storage since last snapshot
+  storage_bytes = Column(BigInteger, nullable=True)
+  storage_gb = Column(Float, nullable=True)
+  storage_delta_gb = Column(Float, nullable=True)  # since last snapshot
 
-  # Storage breakdown by type (all in GB)
+  # Storage breakdown (GB)
   files_storage_gb = Column(Float, nullable=True)  # S3: User-uploaded files
   tables_storage_gb = Column(Float, nullable=True)  # S3: CSV/Parquet table imports
   graphs_storage_gb = Column(Float, nullable=True)  # EBS: LadybugDB database files
@@ -139,42 +119,32 @@ class GraphUsage(Model):
     Float, nullable=True
   )  # EBS: Subgraph data (part of database)
 
-  # Credit metrics
-  credits_consumed = Column(Numeric(10, 2), nullable=True)  # Credits used
-  base_credit_cost = Column(
-    Numeric(10, 2), nullable=True
-  )  # Base cost before multiplier
+  credits_consumed = Column(Numeric(10, 2), nullable=True)
+  base_credit_cost = Column(Numeric(10, 2), nullable=True)  # before multiplier
 
-  # Performance metrics
-  duration_ms = Column(Integer, nullable=True)  # Operation duration
-  memory_mb = Column(Float, nullable=True)  # Memory usage
-  cpu_percent = Column(Float, nullable=True)  # CPU usage
+  duration_ms = Column(Integer, nullable=True)
+  memory_mb = Column(Float, nullable=True)
+  cpu_percent = Column(Float, nullable=True)
 
-  # API metrics
-  request_size_kb = Column(Float, nullable=True)  # Request payload size
-  response_size_kb = Column(Float, nullable=True)  # Response payload size
-  status_code = Column(Integer, nullable=True)  # HTTP status code
+  request_size_kb = Column(Float, nullable=True)
+  response_size_kb = Column(Float, nullable=True)
+  status_code = Column(Integer, nullable=True)
 
-  # Cost and billing
-  cached_operation = Column(Boolean, nullable=True)  # Whether operation was cached
-  storage_overage_gb = Column(Float, nullable=True)  # Storage over included amount
-  estimated_cost_cents = Column(Integer, nullable=True)  # Estimated cost in cents
+  cached_operation = Column(Boolean, nullable=True)
+  storage_overage_gb = Column(Float, nullable=True)
+  estimated_cost_cents = Column(Integer, nullable=True)
 
-  # Error tracking
-  error_type = Column(String, nullable=True)  # Error classification
-  error_message = Column(Text, nullable=True)  # Error details
+  error_type = Column(String, nullable=True)
+  error_message = Column(Text, nullable=True)
 
-  # Metadata
-  event_metadata = Column("metadata", Text, nullable=True)  # JSON metadata
-  user_agent = Column(String, nullable=True)  # Client user agent
-  ip_address = Column(String, nullable=True)  # Client IP
+  event_metadata = Column("metadata", Text, nullable=True)  # JSON
+  user_agent = Column(String, nullable=True)
+  ip_address = Column(String, nullable=True)
 
-  # Timing
   recorded_at = Column(
     DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True
   )
 
-  # Billing period tracking
   billing_year = Column(Integer, nullable=False, index=True)
   billing_month = Column(Integer, nullable=False, index=True)
   billing_day = Column(Integer, nullable=False, index=True)
@@ -316,11 +286,8 @@ class GraphUsage(Model):
   ) -> dict[str, dict]:
     """Get a graph's monthly storage summary.
 
-    Keyed by graph, never by user: the usage-monitor sensor writes snapshots
-    under one arbitrary admin's user_id, so a user-keyed read would return
-    nothing for every other org member and would fracture history whenever
-    graph admins change. Storage is a property of the graph; per-graph access
-    is enforced at the route.
+    Keyed by graph, never user: the sensor writes snapshots under an
+    arbitrary admin's user_id. Access is enforced at the route.
     """
     records = (
       session.query(cls)
@@ -541,8 +508,8 @@ class GraphUsage(Model):
 
   @classmethod
   def _calculate_performance_score(cls, operation_stats: dict) -> int:
-    """Score 0-100 from the call-count-weighted mean duration; lower is
-    better, and anything under 100ms scores a full 100."""
+    """Score 50-100 from the call-count-weighted mean duration; faster scores
+    higher, and under 100ms scores 100."""
     if not operation_stats:
       return 100
 

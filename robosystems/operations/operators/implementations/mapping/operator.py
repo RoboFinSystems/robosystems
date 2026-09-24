@@ -1,21 +1,7 @@
-"""MappingOperator — autonomous CoA → rs-gaap mapping.
-
-Iterates through unmapped Chart of Accounts elements, calls Bedrock to
-match each to an rs-gaap reporting concept, and writes confirmed mappings
-(``association_type='mapping'``) via MCP tool classes (direct
-instantiation). This is the rs-gaap-anchored model: rs-gaap is the
-canonical reporting target the renderer consumes, and the FAC view is
-*derived* from each CoA → rs-gaap arc through the fac-to-rs-gaap
-equivalence bridge — never stored as a separate per-tenant CoA → FAC arc.
-
-Candidates are narrowed by the CoA element's EFS trait and (for
-assets/liabilities) its liquidity trait, so the AI chooses among a tight,
-section-correct candidate set rather than guessing current-vs-noncurrent.
-
-Uses the same MCP tools as cowork (Claude Desktop): the adapter's tool access
-(`HttpToolAccess` on both the API and worker paths) hands `get_tool_instance`
-back as a name-bound handle that dispatches through `GraphMCPTools`.
-"""
+"""MappingOperator — maps unmapped CoA elements to rs-gaap concepts with the
+model, writing ``association_type='mapping'`` arcs through the MCP tools. The
+FAC view is derived from those arcs via the fac-to-rs-gaap bridge, never stored
+per tenant. Candidates are narrowed by EFS trait and liquidity first."""
 
 from __future__ import annotations
 
@@ -47,25 +33,15 @@ from robosystems.operations.operators.operator_registry import register_operator
 
 logger = logging.getLogger(__name__)
 
-# Confidence thresholds
 CONFIDENCE_AUTO_APPROVE = 0.90
 CONFIDENCE_MIN_MAP = 0.70
 
-# Max elements per Bedrock call (batched by classification)
 BATCH_SIZE = 10
 
-# Max re-invocation passes the bounded mapping loop will make. Each pass
-# re-fetches ONLY the still-unmapped elements (idempotent) and persists
-# each mapping as it goes, so passes resume rather than repeat work — a
-# pass interrupted by the worker timeout just continues on the next. The
-# loop is additionally bounded by the graph's credit balance (checked
-# before each pass) and stops early when a pass maps nothing new (the
-# remaining elements are unmappable by the operator). The cap is a final
-# safety net so a fast-failing pass can't spin indefinitely.
+# Safety net on top of the credit and no-progress stops, so a fast-failing
+# pass can't spin indefinitely.
 MAX_MAPPING_PASSES = 6
 
-# Compiled once: deterministic CoA-name → rs-gaap qname overrides for
-# synthesized-detail concepts the AI tends to collapse into the net parent.
 _NAME_PATTERN_OVERRIDES: tuple[tuple[re.Pattern[str], str], ...] = tuple(
   (re.compile(pat, re.IGNORECASE), qname)
   for pat, qname in RS_GAAP_NAME_PATTERN_OVERRIDES
@@ -73,12 +49,8 @@ _NAME_PATTERN_OVERRIDES: tuple[tuple[re.Pattern[str], str], ...] = tuple(
 
 
 def _deterministic_rs_gaap_override(coa_elem: dict) -> str | None:
-  """Force an rs-gaap qname when the element's name/code is unambiguous.
-
-  Applies only to synthesized-detail concepts such as accumulated
-  depreciation, where the account name is a stronger signal than the model's
-  semantic match — which otherwise collapses the contra into the net parent.
-  """
+  """Force an rs-gaap qname for synthesized-detail accounts (e.g. accumulated
+  depreciation), which the model otherwise collapses into the net parent."""
   text = f"{coa_elem.get('name') or ''} {coa_elem.get('code') or ''}"
   for pattern, qname in _NAME_PATTERN_OVERRIDES:
     if pattern.search(text):
@@ -88,8 +60,6 @@ def _deterministic_rs_gaap_override(coa_elem: dict) -> str | None:
 
 @register_operator("mapping")
 class MappingOperator(Operator):
-  """Autonomous CoA → rs-gaap mapping via Bedrock AI and MCP tools."""
-
   spec = OperatorSpec(
     name="Mapping Operator",
     description="Autonomous Chart of Accounts to rs-gaap reporting-concept mapping",
@@ -106,16 +76,9 @@ class MappingOperator(Operator):
   )
 
   async def run(self, ctx: OperatorContext) -> OperatorResult:
-    """Bounded, credit-constrained mapping loop.
-
-    Re-invokes the single-pass mapper until the CoA is fully mapped, a
-    pass makes no further progress (remaining elements are unmappable by
-    the operator), the graph runs out of credits, or the pass cap is hit
-    — whichever comes first. Each pass only touches still-unmapped
-    elements and persists each mapping as it goes, so the loop never
-    re-maps confirmed elements and a pass interrupted by the worker
-    timeout simply resumes on the next run.
-    """
+    """Repeat single passes until fully mapped, no progress, out of credits,
+    or the pass cap. Each pass fetches only still-unmapped elements and
+    persists as it goes, so an interrupted run resumes rather than repeats."""
     mapped_total = 0
     flagged_total = 0
     last_skipped = 0
@@ -124,17 +87,11 @@ class MappingOperator(Operator):
     stop_reason = "pass_cap_reached"
 
     for attempt in range(1, MAX_MAPPING_PASSES + 1):
-      # Stop before starting another (paid) pass if cancelled.
-      # ``_run_single_pass`` also checks mid-pass, but gating here avoids
-      # kicking off a fresh pass at all.
       if await ctx.progress.is_cancelled():
         stop_reason = "cancelled"
         break
-      # Credit pre-check — the graph's own balance bounds the loop. AI
-      # credits are consumed post-call (and lookup failures are swallowed
-      # downstream), so this is the only place spend is gated before a
-      # pass rather than after it. The check does a sync DB read, so run it
-      # off the event loop.
+      # Credits are debited after each call, so this is the only gate before
+      # spend. Sync DB read, hence the thread.
       if not await asyncio.to_thread(self._has_credit_budget, ctx):
         stop_reason = "insufficient_credits"
         break
@@ -144,20 +101,15 @@ class MappingOperator(Operator):
       coverage_percent = md.get("coverage_percent", coverage_percent)
       pass_mapped = md.get("mapped", 0)
       pass_flagged = md.get("flagged", 0)
-      # mapped + flagged both persist an association, so they leave the
-      # unmapped set and are never recounted across passes — safe to sum.
+      # mapped/flagged leave the unmapped set, so they sum across passes;
+      # skipped elements are retried, so only the last pass counts.
       mapped_total += pass_mapped
       flagged_total += pass_flagged
-      # skipped elements get no association and are re-attempted next pass,
-      # so reflect the LAST pass only rather than summing (avoids double count).
       last_skipped = md.get("skipped", 0)
 
       if coverage_percent >= 100:
         stop_reason = "complete"
         break
-      # A pass that confirmed/flagged nothing new means the rest are
-      # unmappable by the operator — stop instead of paying for the same
-      # no-op pass every iteration.
       if pass_mapped == 0 and pass_flagged == 0:
         stop_reason = "no_progress"
         break
@@ -179,12 +131,7 @@ class MappingOperator(Operator):
     )
 
   def _has_credit_budget(self, ctx: OperatorContext) -> bool:
-    """Whether the graph has a positive credit balance for another pass.
-
-    Fails open on lookup error — the ``MAX_MAPPING_PASSES`` cap still
-    bounds worst-case spend, so a transient platform-DB hiccup shouldn't
-    strand a mapping run.
-    """
+    """Fails open on lookup error: ``MAX_MAPPING_PASSES`` still bounds spend."""
     try:
       from robosystems.database import SessionFactory
       from robosystems.operations.graph.credit_service import CreditService
@@ -242,19 +189,13 @@ class MappingOperator(Operator):
     await ctx.progress.report(f"Found {total} unmapped elements", percent=0)
 
     mapped, flagged, skipped = 0, 0, 0
-    # Arcs the ledger refused because the account already has landed history
-    # in a closed month. Counted apart from ``skipped``: these are not the
-    # operator's call, they need the months reopened first.
+    # Arcs refused because the account has history in a closed month; they
+    # need the months reopened, so they are not counted as ``skipped``.
     refused_closed_history = 0
     processed = 0
 
-    # Group by (EFS trait, liquidity) for candidate lookup. Liquidity
-    # (current/noncurrent) narrows asset/liability candidates to the right
-    # balance-sheet section; it is None for equity/revenue/expense and for
-    # accounts carrying no liquidity trait, which fall back to EFS-only
-    # candidates. Elements without an EFS trait can't be narrowed at all —
-    # collect them as ``unclassified`` and surface them to the caller rather
-    # than silently folding them into ``skipped``.
+    # Group by (EFS trait, liquidity); liquidity is None outside assets and
+    # liabilities. Elements with no EFS trait are reported as ``unclassified``.
     unclassified: list[dict] = []
     by_group: dict[tuple[str, str | None], list[dict]] = defaultdict(list)
     for elem in elements:
@@ -264,11 +205,9 @@ class MappingOperator(Operator):
         continue
       by_group[(cls, elem.get("liquidity"))].append(elem)
 
-    # Backs the deterministic-override path, which needs the element's name.
     elem_by_id: dict[str, dict] = {e["id"]: e for e in elements}
 
-    # One suggest-mapping call per group, not per element: candidates depend
-    # only on (trait, liquidity), so every element in a group shares a slate.
+    # Candidates depend only on (trait, liquidity): one call per group.
     candidates_by_group: dict[tuple[str, str | None], list[dict]] = {}
     for (cls, liq), group_elements in by_group.items():
       suggest_result = await suggest_tool.execute(
@@ -280,10 +219,6 @@ class MappingOperator(Operator):
       )
       candidates_by_group[(cls, liq)] = suggest_result.get("candidates", [])
 
-    # Each confirmed / flagged mapping is persisted to coa_mapping as
-    # association_type='mapping' — the CoA → rs-gaap arc that fact_grid, trial
-    # balance, and coverage readers all consume. The FAC view is derived from
-    # this arc via the fac-to-rs-gaap bridge, never stored per-tenant.
     for (cls, liq), cls_elements in by_group.items():
       candidates = candidates_by_group.get((cls, liq), [])
       if not candidates:
@@ -300,10 +235,7 @@ class MappingOperator(Operator):
         try:
           mappings = await self._map_batch(ctx, batch, candidates)
 
-          # Dedupe by element_id, keeping the highest-confidence pick. The
-          # model occasionally returns the same element twice in a batch (or
-          # in a duplicated wrapping array the tolerant parser recovers), and
-          # each duplicate would re-run the write path for the same CoA arc.
+          # The model sometimes repeats an element; keep the most confident.
           seen_in_batch: dict[str, dict] = {}
           for m in mappings:
             eid = m.get("element_id")
@@ -315,10 +247,7 @@ class MappingOperator(Operator):
             ):
               seen_in_batch[eid] = m
 
-          # Count elements the model dropped from its response entirely.
-          # Uncounted, they vanish from the totals and nothing tells the user
-          # an account still needs attention — an unmapped account strands its
-          # balance out of the financial statements.
+          # Elements the model dropped must still show up in the totals.
           batch_ids = {e["id"] for e in batch}
           for missing_id in batch_ids - seen_in_batch.keys():
             logger.warning(
@@ -332,11 +261,6 @@ class MappingOperator(Operator):
             target = m.get("target_id")
             confidence = m["confidence"]
 
-            # Deterministic override for unambiguous synthesized-detail
-            # accounts (e.g. "Accumulated Depreciation") that the AI tends
-            # to collapse into the net parent (PP&E Net). The account name
-            # is a stronger signal than the semantic match; resolve the
-            # rs-gaap qname directly, independent of the candidate set.
             override_qname = _deterministic_rs_gaap_override(
               elem_by_id[m["element_id"]]
             )
@@ -344,9 +268,7 @@ class MappingOperator(Operator):
               override_id = await self._resolve_qname_to_id(ctx, override_qname)
               if override_id:
                 target = override_id
-                # Guarantee the override auto-approves regardless of how the
-                # threshold is tuned — the deterministic name match is a
-                # stronger signal than any AI confidence score.
+                # A name match always auto-approves, however thresholds move.
                 confidence = max(confidence, CONFIDENCE_AUTO_APPROVE)
 
             if target and confidence >= CONFIDENCE_AUTO_APPROVE:
@@ -357,12 +279,8 @@ class MappingOperator(Operator):
               skipped += 1
               continue
 
-            # Persist the CoA → rs-gaap arc as the primary mapping target.
-            # Counted only once the write lands: the tool never raises — it
-            # returns `{"error": ...}` for a rejected element, a duplicate,
-            # or a database fault — so counting before the call reported
-            # every failure as a mapping and the summary disagreed with the
-            # books.
+            # Count only once the write lands: the tool returns
+            # `{"error": ...}` on rejection rather than raising.
             try:
               written = await create_tool.execute(
                 {
@@ -395,9 +313,7 @@ class MappingOperator(Operator):
               flagged += 1
 
         except AIProviderError:
-          # Provider-down is not "the model mapped nothing": counting it as
-          # a skipped batch reports a successful run at 0% coverage. Let it
-          # fail the operation with the provider's message.
+          # Provider-down must fail the run, not report 0% coverage.
           raise
         except Exception as e:
           logger.warning(f"Batch mapping failed for {cls}: {e}")
@@ -415,10 +331,6 @@ class MappingOperator(Operator):
     except Exception:
       coverage_percent = ((mapped + flagged) / total * 100) if total > 0 else 0
 
-    # Surface accounts that carry no EFS trait — they can't be narrowed or
-    # mapped until classified. Distinct from ``skipped`` (which the agent
-    # could classify but didn't auto-approve); these need a classification
-    # upstream (QB AccountType gap, or a manual element created trait-less).
     content = (
       f"Mapped {mapped} elements, flagged {flagged} for review, skipped {skipped}"
     )
@@ -448,18 +360,8 @@ class MappingOperator(Operator):
     )
 
   async def _resolve_qname_to_id(self, ctx: OperatorContext, qname: str) -> str | None:
-    """Resolve an rs-gaap qname → element_id within the operator's tenant
-    schema.
-
-    Backs the deterministic name-pattern override (e.g. "Accumulated
-    Depreciation" → ``rs-gaap:AccumulatedDepreciation…``): the override
-    names a target qname directly, independent of the AI candidate set, so
-    it has to be resolved to the tenant's element_id before persisting the
-    arc. Cached on the operator instance for the duration of a single
-    ``run()`` so repeated overrides don't re-query for the same qname.
-    Returns ``None`` when the qname isn't seeded — surfaces missing taxonomy
-    data instead of silently falling through.
-    """
+    """Tenant element id for ``qname``, cached per instance; ``None`` (logged)
+    when the qname isn't seeded."""
     if not hasattr(self, "_qname_cache"):
       self._qname_cache: dict[str, str | None] = {}
     if qname in self._qname_cache:
@@ -490,19 +392,12 @@ class MappingOperator(Operator):
     elements: list[dict],
     candidates: list[dict],
   ) -> list[dict]:
-    """Ask the model to match a batch of CoA elements to rs-gaap candidates.
-
-    ``candidates`` is the EFS- (+ liquidity-) narrowed set from
-    ``suggest-mapping``: a tight, section-correct slate rather than the full
-    ~2,000 rs-gaap variants. Returns one result per element on the happy path,
-    but callers must tolerate a short list — see `_parse_response`.
-    """
+    """One result per element when all goes well; callers must tolerate a
+    short list (see `_parse_response`)."""
     prompt = build_mapping_prompt(elements, candidates)
 
-    # Sized to fit a full BATCH_SIZE=10 response including verbose `reasoning`
-    # fields. A tighter ceiling truncates the JSON mid-string, and a batch that
-    # only partially parses silently drops those accounts into "skipped" —
-    # unmapped accounts strand real balances out of the statements.
+    # Sized for a full batch with `reasoning`; a tighter ceiling truncates the
+    # JSON and drops accounts into "skipped".
     response = await ctx.ai.create_message(
       messages=[AIMessage(role="user", content=prompt)],
       system=MAPPING_SYSTEM_PROMPT,
@@ -515,19 +410,8 @@ class MappingOperator(Operator):
     return self._parse_response(response.content, elements)
 
   def _parse_response(self, content: str, elements: list[dict]) -> list[dict]:
-    """Parse the model's JSON into mapping results, or return zero-confidence
-    placeholders for the whole batch if nothing can be recovered.
-
-    Deliberately tolerant of three shapes the model produces despite the
-    prompt, each of which plain ``json.loads`` rejects outright:
-
-    1. Markdown fences (```json … ```) — stripped before parsing.
-    2. Several JSON values back to back (one object per line instead of one
-       wrapping array, or an array followed by a stray object). Scanned with
-       ``json.JSONDecoder.raw_decode``, accumulating every top-level value.
-    3. Explanatory prose between values — skipped by advancing past anything
-       that isn't `{` or `[`.
-    """
+    """Parse the model's JSON, tolerating fences, back-to-back values and prose
+    between them; zero-confidence placeholders for the batch if nothing parses."""
     try:
       text = self._strip_markdown_fences(content.strip())
       mappings = self._parse_concatenated_json(text)
@@ -565,13 +449,8 @@ class MappingOperator(Operator):
 
   @staticmethod
   def _strip_markdown_fences(text: str) -> str:
-    """Strip a single ```json … ``` (or bare ```) wrapper if present.
-
-    The model follows the prompt's "Respond ONLY with the JSON" rule
-    inconsistently. Only a fence that brackets the entire payload is stripped;
-    fences appearing mid-stream after a leading explanation are left for the
-    tolerant scan in `_parse_concatenated_json`.
-    """
+    """Strip a fence only when it brackets the whole payload; mid-stream fences
+    are left for `_parse_concatenated_json`."""
     if not text.startswith("```"):
       return text
     after_open = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -581,19 +460,9 @@ class MappingOperator(Operator):
 
   @staticmethod
   def _parse_concatenated_json(text: str) -> list:
-    """Decode every top-level JSON value in ``text`` and flatten lists.
-
-    Walks the buffer one value at a time with ``json.JSONDecoder().raw_decode``
-    so ``[{...}, {...}]\\n{...}`` or ``{...}\\n{...}\\n{...}`` yields all the
-    contained objects instead of failing on the first leftover byte.
-
-    On a mid-stream decode error (truncated array, unterminated string from a
-    max_tokens cutoff, malformed trailing object) whatever was already
-    extracted is kept. Partial recovery is correct here: 6 of 7 mappings beats
-    0, and the caller tolerates a short list — missing element_ids fall through
-    to "skipped" rather than corrupting the rest. A truncated array is scanned
-    for its complete inner objects for the same reason.
-    """
+    """Decode every top-level JSON value in ``text``, flattening lists. On a
+    truncated value (max_tokens cutoff) keep what was already decoded, plus any
+    complete objects inside a truncated array."""
     decoder = json.JSONDecoder()
     out: list = []
     i = 0
@@ -606,9 +475,6 @@ class MappingOperator(Operator):
       try:
         value, end = decoder.raw_decode(text, i)
       except json.JSONDecodeError:
-        # Truncated value. Inside a `[...]` of object literals — the typical
-        # max_tokens cutoff shape — scan forward for each complete `{...}`.
-        # Otherwise stop with whatever has accumulated.
         if text[i] == "[":
           inner = i + 1
           while inner < n:

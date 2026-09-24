@@ -1,14 +1,9 @@
 """OAuth 2.1 client registrations for the MCP authorization server.
 
-A row is an MCP client that may ask a user for consent: registered
-dynamically (RFC 7591 — an IDE or a gateway registering itself), resolved
-from a Client ID Metadata Document (an HTTPS ``client_id`` URL whose document
-we fetched and cached), or pre-registered by an operator (the Connectors
-Directory's held credentials, an enterprise gateway's confidential client).
-
-The client never holds tenant scope. Scope lives on ``OAuthGrant`` — one row
-per user consent — so a client_id shared by every user of a directory
-connector cannot widen anyone's access.
+Clients arrive by dynamic registration (RFC 7591), a Client ID Metadata
+Document (an HTTPS ``client_id`` URL), or operator pre-registration. A client
+never holds tenant scope; that lives on the per-consent ``OAuthGrant``, so a
+client_id shared across users cannot widen anyone's access.
 """
 
 import hashlib
@@ -348,8 +343,7 @@ class OAuthClient(Model):
     first consent clears ``expires_at`` (``mark_used``), so no row that
     holds a grant is ever eligible."""
     now = datetime.now(UTC)
-    # The attribute reads as Optional to the type checker because mark_used
-    # assigns None to it; the class-level column itself never is.
+    # Cast for the type checker, which infers Optional from mark_used.
     expires_at = cast(Column[datetime | None], cls.expires_at)
     try:
       count = (

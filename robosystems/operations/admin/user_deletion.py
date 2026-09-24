@@ -1,15 +1,10 @@
 """Administrative user deletion.
 
-Two support cases share one implementation: freeing an email that a self-registered
-account is squatting so the org can invite it, and honoring an account-deletion
-request (a standing SOC 2 obligation).
-
-Deletion is deliberately narrow. It refuses while the user's organization still
-holds anything of value — live graphs, subscriptions in force, repository access —
-so it can never be the path by which paid infrastructure or a billing relationship
-disappears. Financial and audit history outlives the account: billing rows are
-retained with the actor de-referenced rather than deleted, and an organization
-carrying any financial artifact is kept even once its last member is gone.
+Refuses while the user's org still holds anything of value (live graphs,
+subscriptions in force, repository access), so it is never how paid
+infrastructure disappears. Billing and audit history outlive the account: rows
+are kept with the actor de-referenced, and an org with any financial artifact
+is retained even once empty.
 """
 
 from dataclasses import dataclass, field
@@ -94,9 +89,8 @@ class UserDeletionPlan:
 def _org_must_be_retained(org_id: str, session: Session) -> bool:
   """Whether an org carries records that must outlive its last member.
 
-  Billing history is kept for compliance, and deprovisioned graphs stay as the
-  record of what once ran — so an org holding either is retained as an empty
-  shell rather than deleted. It is invisible to the product either way.
+  Billing history (compliance) and deprovisioned graphs (the record of what
+  ran) keep the org as an empty shell.
   """
   if session.query(BillingSubscription).filter_by(org_id=org_id).count():
     return True
@@ -110,8 +104,7 @@ def _org_must_be_retained(org_id: str, session: Session) -> bool:
 def plan_user_deletion(user_id: str, session: Session) -> UserDeletionPlan:
   """Assess a deletion: what blocks it, and what it would remove.
 
-  Read-only — safe to call for a dry run and called again by the executor so
-  the guards are evaluated against the same state as the deletes.
+  Read-only; the executor re-plans so guards see the same state as the deletes.
   """
   user = User.get_by_id(user_id, session)
   if not user:
@@ -252,12 +245,9 @@ def plan_user_deletion(user_id: str, session: Session) -> UserDeletionPlan:
 def _invalidate_auth_caches(user_id: str, api_key_fingerprints: list[str]) -> None:
   """Evict everything that could still authenticate the deleted account.
 
-  A JWT is refused once its user row is gone, and an API key once its row is
-  gone — but only when the check reaches the database. Both paths are fronted
-  by a cache with a TTL of minutes, so without this sweep a deleted account
-  keeps authenticating from cache. Best-effort: a Redis failure is logged at
-  CRITICAL rather than raised, because the deletion has already committed and
-  the entries lapse on TTL.
+  JWT and API-key checks are cached for minutes, so a deleted account would
+  keep authenticating from cache. Best-effort: the deletion has committed, so
+  failures log CRITICAL and the entries lapse on TTL.
   """
   import importlib
 
@@ -291,8 +281,8 @@ def execute_user_deletion(
 ) -> UserDeletionPlan:
   """Delete a user account and everything scoped to it.
 
-  Re-plans first and raises `UserDeletionBlocked` if anything still holds the
-  account, so a stale dry run can never authorize a deletion.
+  Re-plans first and raises `UserDeletionBlocked`, so a stale dry run can
+  never authorize a deletion.
   """
   plan = plan_user_deletion(user_id, session)
   if not plan.can_delete:
@@ -302,11 +292,9 @@ def execute_user_deletion(
   if not user:
     raise UserNotFound(f"User {user_id} not found")
 
-  # The bulk delete below bypasses UserAPIKey.delete(), which is where a key
-  # normally clears its own cache entry — and the fingerprint that addresses
-  # that entry dies with the row. Capture it now; the caches are purged after
-  # the commit so a request racing the deletion cannot re-populate them from
-  # a row that still exists.
+  # The bulk delete bypasses UserAPIKey.delete()'s cache eviction, and the
+  # fingerprint dies with the row: capture now, purge after commit (so a racing
+  # request cannot re-populate from a row that still exists).
   api_key_fingerprints = [
     row.key_fingerprint
     for row in session.query(UserAPIKey.key_fingerprint)
@@ -314,8 +302,7 @@ def execute_user_deletion(
     .all()
     if row.key_fingerprint
   ]
-  # OAuth access tokens are cached under their digest in the same store;
-  # refresh tokens are never cached. Same capture-then-purge discipline.
+  # Access tokens are cached under their digest; refresh tokens never are.
   oauth_token_digests = [
     row.token_hash
     for row in session.query(OAuthToken.token_hash)
@@ -323,8 +310,7 @@ def execute_user_deletion(
     .all()
   ]
 
-  # Audit and billing history survive the account — the actor is de-referenced,
-  # never deleted, because retention is itself a compliance requirement.
+  # Retention is a compliance requirement: de-reference, never delete.
   session.query(BillingAuditLog).filter_by(actor_user_id=user_id).update(
     {"actor_user_id": None}, synchronize_session=False
   )
@@ -366,20 +352,14 @@ def execute_user_deletion(
   session.query(OrgInvitation).filter_by(invited_by=user_id).delete(
     synchronize_session=False
   )
-  # Documents and connections are graph assets that happen to record their
-  # creator, so the graph's teardown owns their removal (deprovision_service
-  # deletes both by graph_id). These two lines are a backstop for rows whose
-  # graph predates that cleanup: the org_has_live_graphs blocker above means
-  # every graph the user could reach is already DEPROVISIONED by the time we
-  # get here, so they cannot take a live org integration down with them.
-  # Do not relax that blocker without re-pointing these at the graph — by
-  # creator, this would delete the org's QuickBooks connection and its CDC
-  # watermark because a departing member happened to wire it up.
+  # Graph teardown owns documents and connections; this by-creator delete is a
+  # backstop that is safe only because the org_has_live_graphs blocker means
+  # every reachable graph is deprovisioned. Relaxing that blocker would let a
+  # departing member's deletion take the org's live QB connection with it.
   session.query(Document).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(Connection).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(GraphUser).filter_by(user_id=user_id).delete(synchronize_session=False)
-  # OAuth consents: tokens hang off grants, grants off the user — deepest
-  # first, or the FK into users refuses the account row below.
+  # Tokens before grants before the user (FK order).
   session.query(OAuthToken).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(OAuthGrant).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(UserAPIKey).filter_by(user_id=user_id).delete(synchronize_session=False)

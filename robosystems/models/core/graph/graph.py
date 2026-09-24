@@ -1,12 +1,8 @@
 """Metadata for every graph database, user-created or shared repository.
 
-Access control differs by kind: user graphs go through ``GraphUser``
-(role-based), shared repositories through ``UserRepository``
-(subscription-based).
-
-A graph is owned by one organization (``org_id``), which is the billing party
-and the only source of users who can be granted access. Shared repositories
-have no owning org.
+User graphs are owned by one org (the billing party) and grant access through
+``GraphUser``; shared repositories have no org and grant access through
+``UserRepository`` subscriptions.
 """
 
 from collections.abc import Sequence
@@ -80,15 +76,11 @@ class Graph(Model):
     String, primary_key=True
   )  # e.g., "kg1a2b3c4d5", "sec", "generic_123"
 
-  # Ownership - graph is owned by an organization
-  # Nullable for shared repositories which are system-wide
-  org_id = Column(
-    String, ForeignKey("orgs.id"), nullable=True
-  )  # Organization that owns and pays for this graph (None for shared repositories)
+  # None for shared repositories.
+  org_id = Column(String, ForeignKey("orgs.id"), nullable=True)
 
-  # Basic metadata
-  graph_name = Column(String, nullable=False)  # Human-readable name
-  graph_type = Column(String, nullable=False)  # "generic" or "entity"
+  graph_name = Column(String, nullable=False)
+  graph_type = Column(String, nullable=False)  # generic, entity, repository
 
   # Schema information
   base_schema = Column(
@@ -99,58 +91,29 @@ class Graph(Model):
   )  # ["roboledger", "roboinvestor"] for entity graphs
 
   # Infrastructure metadata
-  graph_instance_id = Column(
-    String, nullable=False, default="default", index=True
-  )  # Cluster/instance identifier
-  graph_cluster_region = Column(String, nullable=True)  # Geographic region for cluster
+  graph_instance_id = Column(String, nullable=False, default="default", index=True)
+  graph_cluster_region = Column(String, nullable=True)
 
-  # Credit system integration
   graph_tier = Column(
     String, nullable=False, default=GraphTier.LADYBUG_STANDARD.value
-  )  # ladybug-standard, ladybug-large, ladybug-xlarge, etc. (infrastructure tier)
+  )  # ladybug-standard, ladybug-large, ladybug-xlarge, ...
 
-  # Subgraph support (all dedicated tiers; max count varies by tier)
-  parent_graph_id = Column(
-    String, nullable=True, index=True
-  )  # Parent graph ID if this is a subgraph
-  subgraph_index = Column(
-    Integer, nullable=True
-  )  # Numeric index (1, 2, 3, ...) for subgraphs
-  subgraph_name = Column(
-    String, nullable=True
-  )  # Custom alphanumeric name (max 20 chars, alphanumeric only)
-  is_subgraph = Column(
-    Boolean, default=False, nullable=False
-  )  # True if this is a subgraph
-  subgraph_metadata = Column(
-    JSONB, nullable=True
-  )  # Additional subgraph-specific metadata (TTL, type, etc.)
+  # Subgraphs (max count varies by tier)
+  parent_graph_id = Column(String, nullable=True, index=True)
+  subgraph_index = Column(Integer, nullable=True)  # 1, 2, 3, ...
+  subgraph_name = Column(String, nullable=True)  # alphanumeric, max 20 chars
+  is_subgraph = Column(Boolean, default=False, nullable=False)
+  subgraph_metadata = Column(JSONB, nullable=True)
 
-  # Repository support (for shared data repositories like SEC, industry, economic)
-  is_repository = Column(
-    Boolean, default=False, nullable=False
-  )  # True if this is a shared repository
-  repository_type = Column(
-    String, nullable=True
-  )  # Type of repository: "sec", "industry", "economic", etc.
-  data_source_type = Column(
-    String, nullable=True
-  )  # Source type: "sec_edgar", "bls_api", "fred_api", etc.
-  data_source_url = Column(String, nullable=True)  # URL or endpoint for data source
-  last_sync_at = Column(
-    DateTime, nullable=True
-  )  # Last successful data synchronization timestamp
-  sync_status = Column(
-    String, nullable=True
-  )  # Sync status: "active", "syncing", "error", "stale"
-  sync_frequency = Column(
-    String, nullable=True
-  )  # Expected sync frequency: "daily", "weekly", "monthly", "quarterly"
-  sync_error_message = Column(
-    String, nullable=True
-  )  # Last error message if sync_status is "error"
-
-  # Timestamps
+  # Shared repositories
+  is_repository = Column(Boolean, default=False, nullable=False)
+  repository_type = Column(String, nullable=True)  # "sec", ...
+  data_source_type = Column(String, nullable=True)  # "sec_edgar", ...
+  data_source_url = Column(String, nullable=True)
+  last_sync_at = Column(DateTime, nullable=True)  # last successful sync
+  sync_status = Column(String, nullable=True)  # active, syncing, error, stale
+  sync_frequency = Column(String, nullable=True)  # daily, weekly, monthly, quarterly
+  sync_error_message = Column(String, nullable=True)
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
@@ -159,49 +122,31 @@ class Graph(Model):
     nullable=False,
   )
 
-  # Staleness tracking: set when the DuckDB staging layer holds changes the
-  # graph database has not materialized yet.
-  graph_stale = Column(
-    Boolean, default=False, nullable=False
-  )  # True if DuckDB has changes not yet in graph database
+  # Set when the DuckDB staging layer holds changes not yet materialized.
+  graph_stale = Column(Boolean, default=False, nullable=False)
   graph_stale_reason = Column(
     String, nullable=True
-  )  # Reason for staleness (e.g., "file_deleted", "file_added")
-  graph_stale_at = Column(DateTime, nullable=True)  # When graph became stale
+  )  # e.g. "file_deleted", "file_added"
+  graph_stale_at = Column(DateTime, nullable=True)
 
   graph_metadata = Column(JSONB, nullable=True)  # Free-form extras
 
-  # Per-graph taxonomy library pinning: {standard: version, ...}.
-  # When NULL, the provisioner falls back to DEFAULT_TAXONOMY_PIN. Each
-  # listed (standard, version) pair is copied from public.* into the tenant
-  # schema at provision time. See robosystems/taxonomy/pins.py.
+  # {standard: version, ...} copied from public.* into the tenant schema at
+  # provision time. NULL means DEFAULT_TAXONOMY_PIN (taxonomy/pins.py).
   taxonomy_pin = Column(JSONB, nullable=True)
 
-  # Reporting Style lives on the entity (extensions DB), not the graph —
-  # co-located with the ``structures`` / ``reporting_style_networks`` it
-  # points at, and at the grain where heterogeneous subsidiaries can each
-  # carry their own Style. See ``models/extensions/entity.py`` and
-  # ``operations/roboledger/reports/network_picker.py``.
+  # Reporting Style lives on the extensions-DB entity, not here.
 
-  # Per-graph autopilot for the period-boundary obligation promoter.
-  # When False (default — co-pilot), the sensor flips matured `pending`
-  # schedule_entry_due events to `classified` but stops there; an
-  # operator/agent drives draft creation. When True (autopilot), the
-  # sensor also dispatches the registered handler so the closing-entry
-  # draft lands in the GL on the same tick. Overrides the process-wide
-  # EXTENSIONS_PROMOTION_AUTO_DISPATCH env var; the env var supplies the
-  # default when this column is NULL.
+  # Obligation promoter autopilot: True also dispatches the handler for
+  # matured schedule_entry_due events so the draft lands on the same tick;
+  # False stops at `classified`. NULL defers to
+  # EXTENSIONS_PROMOTION_AUTO_DISPATCH.
   auto_dispatch_obligations = Column(Boolean, nullable=True)
 
-  # Lifecycle status
-  status = Column(
-    String, nullable=False, default=GraphStatus.ACTIVE.value
-  )  # queued, provisioning, active, suspended, deprovisioned
+  status = Column(String, nullable=False, default=GraphStatus.ACTIVE.value)
 
-  # Soft-delete marker
   deleted_at = Column(DateTime, nullable=True)
 
-  # Relationships
   org = relationship("Org", back_populates="graphs")
   graph_users = relationship(
     "GraphUser", back_populates="graph", cascade="all, delete-orphan"
@@ -214,22 +159,17 @@ class Graph(Model):
 
   @property
   def has_extension(self) -> bool:
-    """Check if this graph has any schema extensions."""
     extensions = self.schema_extensions
     if extensions is None:
       return False
-    # At runtime, extensions is a list; type checker doesn't know this
     return len(extensions) > 0
 
   @property
   def description(self) -> str:
-    """Free-form description, or ``""`` when unset.
+    """Description from ``graph_metadata``, or ``""``.
 
-    Stored inside the ``graph_metadata`` JSONB blob rather than in a column
-    of its own, so nothing at the database level constrains what a row can
-    hold. Type-check rather than trust: a malformed value reaching a
-    response model fails validation for the *whole* response, so a single
-    bad row would take out the entire graph list.
+    Type-checked because the JSONB is unconstrained and one malformed value
+    would fail validation of the whole graph-list response.
     """
     metadata = self.graph_metadata
     if not isinstance(metadata, dict):
@@ -239,11 +179,8 @@ class Graph(Model):
 
   @property
   def tags(self) -> list[str]:
-    """Organizational tags, or ``[]`` when unset.
-
-    Same free-form JSONB caveat as ``description`` — non-string entries are
-    dropped rather than passed through to a response model.
-    """
+    """Tags from ``graph_metadata``, or ``[]``; non-strings are dropped (see
+    ``description``)."""
     metadata = self.graph_metadata
     if not isinstance(metadata, dict):
       return []
@@ -361,14 +298,10 @@ class Graph(Model):
   def get_by_id(
     cls, graph_id: str, session: Session, include_deprovisioned: bool = False
   ) -> Optional["Graph"]:
-    """Get a graph by its ID, skipping deprovisioned graphs by default.
+    """Get a graph by ID, skipping deprovisioned graphs by default.
 
-    A graph whose ``deleted_at`` is stamped is gone too: teardown stamps it
-    first and flips ``status`` last, and in between the tenant schema and
-    database are being dropped. Serving such a graph would bind sessions to a
-    schema that no longer exists — so the soft-delete stamp, not just the
-    terminal status, is what "deprovisioned" means to every reader that does
-    not opt in.
+    A stamped ``deleted_at`` also counts as deprovisioned: teardown stamps it
+    first and flips ``status`` last, while the tenant schema is being dropped.
     """
     query = session.query(cls).filter(cls.graph_id == graph_id)
     if not include_deprovisioned:
@@ -646,19 +579,12 @@ class Graph(Model):
     session.commit()
 
   def mark_fresh(self, session: Session, *, started_at: datetime | None = None) -> bool:
-    """Record a completed materialization; clear staleness only if nothing
-    was written after the materialization began.
+    """Record a completed materialization. Returns True if staleness cleared.
 
-    ``started_at`` is the moment the materialization snapshotted its source
-    (before staging). A write that lands after that stamps a later
-    ``graph_stale_at`` and is not in the graph, so clearing the flag would
-    lose it until an unrelated later write — the compare-and-clear is done
-    in SQL so a stale identity map cannot mask a newer stamp. Without
-    ``started_at`` the clear is unconditional (legacy callers).
-
-    Always stamps ``last_materialized_at`` and bumps
-    ``materialization_count`` in ``graph_metadata``. Returns True when the
-    staleness flag was cleared.
+    With ``started_at`` (when the source was snapshotted), staleness clears
+    only if no write stamped ``graph_stale_at`` after it; the compare is in SQL
+    so a stale identity map cannot mask a newer stamp. Without it the clear
+    is unconditional.
     """
     metadata = {**self.graph_metadata} if self.graph_metadata else {}
     metadata["last_materialized_at"] = datetime.now(UTC).isoformat()
@@ -683,7 +609,6 @@ class Graph(Model):
       )
     cleared = (session.execute(clear).rowcount or 0) > 0
     session.commit()
-    # The commit expires the instance, so callers reading the stale fields
-    # afterwards see the row as the UPDATE left it, not the pre-clear values.
+    # The UPDATE bypassed the identity map; reload the stale fields.
     session.refresh(self)
     return cleared

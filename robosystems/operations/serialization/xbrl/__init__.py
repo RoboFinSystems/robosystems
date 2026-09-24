@@ -1,10 +1,4 @@
-"""XBRL-family encoder dispatch.
-
-XBRL 2.1 and the Tavi compiled model are implemented; further OIM
-flavors (xBRL-CSV, xBRL-JSON) slot in by adding a module and an arm
-here. The public ``serialize_to_xbrl`` entry point keeps a stable
-signature regardless of which flavor is requested.
-"""
+"""XBRL-family encoder dispatch."""
 
 from __future__ import annotations
 
@@ -16,13 +10,7 @@ def serialize_to_xbrl(
   bundle: StatementBundle,
   flavor: XbrlFlavor = XbrlFlavor.XBRL_2_1,
 ) -> bytes:
-  """Serialize a ``StatementBundle`` to an XBRL-family format.
-
-  Returns bytes — XBRL 2.1 emits a flat zip of standalone files
-  (``instance.xml`` + ``report.xsd`` + linkbases) ready for download;
-  Tavi emits compact JSON. Further OIM flavors return their canonical
-  content (xBRL-JSON bytes, xBRL-CSV multi-file zip) when added.
-  """
+  """XBRL 2.1 returns a zip of instance + schema + linkbases; Tavi returns JSON."""
   if flavor is XbrlFlavor.XBRL_2_1:
     from robosystems.operations.serialization.xbrl.xbrl_21 import (
       serialize_to_xbrl_21,

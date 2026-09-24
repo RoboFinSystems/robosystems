@@ -121,19 +121,15 @@ async def materialize_graph_directly(
         )
       return result
 
-    # Get graph client
     client = await GraphClientFactory.create_client(
       graph_id=graph_id, operation_type="write"
     )
 
-    # Publish "destructive op in-flight" on the target instance so GHA
-    # pre-refresh workflows wait before cycling the container. Paired
-    # with end_destructive_op in the finally below. See instance_busy.py.
+    # Instance-busy signal so refresh workflows wait before cycling the container.
     busy_instance_id = client._instance_id or ""
     await begin_destructive_op(busy_instance_id, OP_KIND_MATERIALIZATION)
 
     try:
-      # Handle rebuild if requested
       if rebuild:
         if operation_id:
           await manager.emit_progress(
@@ -183,7 +179,6 @@ async def materialize_graph_directly(
           db.commit()
           raise
 
-      # Get tables with staged data
       if operation_id:
         await manager.emit_progress(operation_id, "Discovering staged tables...", 45)
 
@@ -214,7 +209,7 @@ async def materialize_graph_directly(
           )
         return result
 
-      # Sort tables: nodes before relationships (using table_type field)
+      # Nodes before relationships.
       node_tables = [
         t.table_name for t in tables_with_staged_data if t.table_type == "node"
       ]
@@ -235,7 +230,6 @@ async def materialize_graph_directly(
           50,
         )
 
-      # Materialize each table
       tables_materialized = []
       total_rows = 0
       base_progress = 50
@@ -273,7 +267,6 @@ async def materialize_graph_directly(
           logger.error(f"Failed to materialize table {table_name}: {e}")
           raise
 
-      # Mark graph as fresh
       logger.info("[95%] Marking graph as fresh")
       if operation_id:
         await manager.emit_progress(operation_id, "Marking graph as fresh...", 95)
@@ -282,7 +275,6 @@ async def materialize_graph_directly(
           f"{graph_id} was written during the materialization; leaving it stale"
         )
 
-      # Update graph metadata if rebuild was performed
       if rebuild:
         graph_metadata = (
           {**graph_record.graph_metadata} if graph_record.graph_metadata else {}
@@ -323,7 +315,7 @@ async def materialize_graph_directly(
           operation_id, result=result, message=result["message"]
         )
 
-      # Report AssetMaterialization to Dagster (fire-and-forget)
+      # Fire-and-forget, so the run shows in the Dagster UI.
       from robosystems.dagster.reporting import report_asset_materialization
 
       await report_asset_materialization(
@@ -342,8 +334,6 @@ async def materialize_graph_directly(
       return result
 
     finally:
-      # Decrement busy counter before closing client — primitive swallows
-      # its own errors, so this never masks client.close() failures.
       await end_destructive_op(busy_instance_id, OP_KIND_MATERIALIZATION)
       await client.close()
 

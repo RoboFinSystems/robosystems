@@ -1,32 +1,15 @@
-"""Reclaim the disk the storage breakdown calls reclaimable.
+"""Reclaim the disk the storage breakdown calls reclaimable (daily Dagster job).
 
-Two classes of leftover accumulate on an instance and nothing else collects
-them:
+- **Transient build artifacts** (`{base}-wip` / `{base}-prev`) stranded by a
+  crashed blue-green build. Builds never resume one, and the Graph API refuses
+  the delete while a build holds the base's lock.
+- **Orphan estates**: `{parent}_*` databases, vectors and staging whose
+  registry row is gone, which ``delete-subgraph`` can no longer reach.
 
-- **Transient build artifacts** (`{base}-wip` / `{base}-prev`): a crashed
-  blue-green build strands its WIP copy, and only a later materialization of
-  the *same* database would clean it up (builds start by deleting any leftover
-  WIP — there are no resume semantics, so deleting one early costs nothing).
-  The Graph API refuses the delete while a build holds the base's
-  materialization lock, so an in-flight rebuild cannot lose its target.
-- **Orphan estates**: `{parent}_*` databases (plus their vector indexes and
-  staging files) whose registry row is gone — the remains of a deleted
-  subgraph. ``delete-subgraph`` cannot reach them because it resolves through
-  the registry, which is precisely what no longer knows they exist.
-
-Labelling reuses the same registry pass the storage breakdown uses
-(`IngestionLimitChecker.label_orphans`), so this deletes exactly what
-``/usage`` reports as `orphan`/`transient` — never anything the breakdown
-still attributes to a live database. A registry read failure leaves items
-unlabelled, so orphans are then *not* deleted: the sweep fails safe.
-
-Driven by the daily ``storage_reclaim`` Dagster job, not by any user-facing
-surface.
-
-Known limitation: an orphan whose ``.lbug`` file is already gone but whose
-vector index or staging file lingers is skipped (the Graph API's delete is
-anchored on the database file). Those fragments are rare and small; they are
-reported in ``skipped`` rather than silently ignored.
+Labels come from the same registry pass as ``/usage``
+(`IngestionLimitChecker.label_orphans`); a registry read failure leaves items
+unlabelled, so nothing is deleted. An orphan whose ``.lbug`` is already gone
+cannot be deleted (the Graph API anchors on it) and is reported in ``skipped``.
 """
 
 from __future__ import annotations
@@ -107,10 +90,8 @@ async def reclaim_instance_storage(
           f"({entry['bytes']} bytes) on {graph_id}'s instance"
         )
       except Exception as e:
-        # 409 = a materialization holds the base lock (transient artifacts
-        # only); 404 = no lbug file to anchor the delete (vectors/staging
-        # fragment). Both are per-item outcomes, not reasons to abort the
-        # rest of the sweep.
+        # 409: a build holds the base lock; 404: no lbug to anchor the delete.
+        # Per-item outcomes, not reasons to abort the sweep.
         skipped.append({**entry, "reason": str(e)})
         logger.warning(f"Could not reclaim {target_id} on {graph_id}: {e}")
 

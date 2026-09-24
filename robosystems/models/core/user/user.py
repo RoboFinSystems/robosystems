@@ -17,22 +17,18 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 
 @dataclass(frozen=True)
 class DeactivationResult:
-  """What a deactivation actually accomplished, not what it attempted.
+  """What a deactivation actually accomplished.
 
-  The DB flag flip always commits (or the whole call raises); the side
-  effects — auth-cache invalidation and API-key revocation, where each key
-  has its own DB flip *and* its own validation-cache entry — are
-  best-effort, and a caller acting as an offboarding kill switch (SCIM)
-  must know whether they took so it can fail loud and be retried.
+  The DB flag flip always commits (or raises); cache invalidation and key
+  revocation are best-effort, and a kill-switch caller (SCIM) needs to know
+  whether they took so it can fail loud and retry.
   """
 
   # -1 when the key list could not even be loaded (count unknown).
   keys_found: int
   keys_revoked: int
-  # The user-level JWT/session caches.
-  cache_invalidated: bool
-  # The per-key validation caches — a revoked key row with a surviving
-  # cache entry keeps authenticating until the entry's TTL.
+  cache_invalidated: bool  # user-level JWT/session caches
+  # A revoked key with a surviving cache entry authenticates until TTL.
   key_caches_invalidated: bool
 
   @property
@@ -52,20 +48,16 @@ class User(Model):
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("user"))
   email = Column(String, unique=True, nullable=False, index=True)
   name = Column(String, nullable=False)
-  # NULL for IdP-governed accounts (SCIM-provisioned, and later passwordless
-  # signup). Password login and password change already refuse a falsy hash;
-  # the password-reset flow refuses NULL outright so a reset email can never
-  # bootstrap a password onto an IdP-governed account.
+  # NULL for IdP-governed accounts; password reset refuses NULL so a reset
+  # email cannot bootstrap a password onto one.
   password_hash = Column(String, nullable=True)
-  # SCIM externalId, round-tripped to the IdP. A non-null value marks the
-  # account as IdP-provisioned — the provenance predicate the OIDC email-match
-  # link step gates on (email alone must never bind an IdP login to a
-  # locally-created account).
+  # SCIM externalId. Non-null marks the account IdP-provisioned, which the
+  # OIDC email-match link requires: email alone must never bind an IdP login
+  # to a locally-created account.
   external_id = Column(String, nullable=True, index=True)
   is_active = Column(Boolean, default=True, nullable=False)
   email_verified = Column(Boolean, default=False, nullable=False)
-  # Bumped on password reset / logout-everywhere; embedded in JWT payload and
-  # checked on every auth so prior tokens (incl. refresh chain) stop working.
+  # Embedded in JWTs and checked on every auth; bumping it kills prior tokens.
   session_version = Column(Integer, default=0, nullable=False, server_default="0")
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
@@ -74,8 +66,6 @@ class User(Model):
     onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
-
-  # Relationships
   user_api_keys = relationship(
     "UserAPIKey", back_populates="user", cascade="all, delete-orphan"
   )
@@ -105,11 +95,7 @@ class User(Model):
 
   @classmethod
   def get_by_email(cls, email: str, session: Session) -> Optional["User"]:
-    """Get a user by email, case-insensitively.
-
-    Emails are stored lowercased, so lowering the input keeps this an indexed
-    equality lookup rather than a functional scan.
-    """
+    """Get a user by email, case-insensitively (emails are stored lowercased)."""
     return session.query(cls).filter(cls.email == email.lower()).first()
 
   @classmethod
@@ -122,12 +108,8 @@ class User(Model):
     external_id: str | None = None,
     auto_commit: bool = True,
   ) -> "User":
-    """Create a new user.
-
-    ``password_hash`` is required but nullable: pass ``None`` explicitly for
-    IdP-governed accounts rather than omitting it, so a passwordless user is
-    always a deliberate call-site decision.
-    """
+    """Create a user. ``password_hash`` has no default so a passwordless
+    (IdP-governed) account is always an explicit ``None``."""
     user = cls(
       email=email.lower(),
       name=name,
@@ -192,20 +174,10 @@ class User(Model):
   def deactivate(self, session: Session) -> DeactivationResult:
     """Deactivate the user, reporting how completely the kill switch applied.
 
-    Bumps ``session_version``, which invalidates every JWT issued for this
-    user, and revokes all of the user's API keys. If the user is reactivated
-    later, they must re-authenticate and regenerate API keys — prior tokens
-    and keys cannot resume. This is intentional: a deactivated account is a
-    security boundary, and we don't want suspended/banned/restored accounts
-    to be revivable just by replaying an old token or a still-valid API key.
-
-    API-key revocation is part of the same act: keys carry no
-    ``session_version``, so deactivation has to reach them directly rather
-    than through the session-version bump that covers tokens.
-
-    Idempotent and re-asserting: calling this on an already-inactive user
-    re-runs the cache invalidation and key sweep, which is exactly what a
-    retry after a partial failure needs.
+    Bumps ``session_version`` (killing JWTs) and revokes API keys and OAuth
+    tokens, which carry no session version. A reactivated user must
+    re-authenticate and mint new keys; nothing old resumes. Safe to re-run
+    after a partial failure: it repeats the cache invalidation and key sweep.
     """
     self.is_active = False
     self.session_version = (self.session_version or 0) + 1
@@ -239,12 +211,8 @@ class User(Model):
       raise
 
   def invalidate_sessions(self, session: Session) -> None:
-    """Bump session_version, invalidating all existing JWTs for this user.
-
-    OAuth tokens carry no ``session_version`` (like API keys), so the same
-    act revokes them directly — a password change or kill switch reaches
-    every MCP connector the user consented to.
-    """
+    """Bump session_version, invalidating all JWTs, and revoke OAuth tokens
+    (which carry no session version)."""
     self.session_version = (self.session_version or 0) + 1
     self.updated_at = datetime.now(UTC)
     try:
@@ -257,10 +225,8 @@ class User(Model):
     self._revoke_oauth_tokens(session, reason="sessions_invalidated")
 
   def _revoke_oauth_tokens(self, session: Session, *, reason: str) -> int:
-    """Revoke every OAuth token minted for this user. Best-effort like
-    ``_revoke_api_keys``: a failure is logged, never aborts the caller —
-    the ``user.is_active`` / grant checks in the token validator are the
-    backstop, and re-running the invalidation retries the sweep."""
+    """Revoke every OAuth token for this user. Best-effort: failures are
+    logged; the validator's is_active and grant checks are the backstop."""
     from .oauth_token import OAuthToken
 
     try:
@@ -272,21 +238,11 @@ class User(Model):
   def _revoke_api_keys(self, session: Session) -> tuple[int, int, bool]:
     """Deactivate this user's API keys and clear their validation caches.
 
-    Returns ``(revoked, found, caches_cleared)``: the number of active keys
-    that were actually revoked alongside the number found — revocation is
-    best-effort per key, and an incident response that reads "4 keys revoked"
-    when one failed is worse than no number at all — plus whether every key's
-    validation-cache entry was cleared. ``found`` is ``-1`` when the key list
-    could not even be loaded, which callers must read as incomplete.
-
-    Every key row is swept, not just the active ones: a key revoked on an
-    earlier pass whose cache invalidation failed keeps authenticating from
-    cache until TTL, and it no longer appears in the active list — so a retry
-    that only looked at active rows could never repair it. Failures are
-    logged per-key but never abort the user deactivation; the
-    ``user.is_active`` guard in ``validate_api_key`` is the authoritative
-    backstop if a key is missed, and re-running the deactivation retries
-    whatever did not take.
+    Returns ``(revoked, found, caches_cleared)``; ``found`` is -1 when the
+    keys could not be loaded. Inactive keys get their caches cleared too, so
+    a retry repairs a key whose earlier cache invalidation failed. Per-key
+    failures are logged, never raised; ``validate_api_key``'s is_active guard
+    is the backstop.
     """
     from .user_api_key import UserAPIKey
 
@@ -330,20 +286,11 @@ class User(Model):
     return revoked, len(active_keys), caches_cleared
 
   def _invalidate_auth_cache(self) -> bool:
-    """Invalidate auth caches derived from this user, True when it took.
+    """Delete auth caches derived from this user; False if unconfirmed.
 
-    Always DELETE rather than rewrite: the cached entry's session_version
-    is what gates the cache hit, so an old entry left in place defeats the
-    DB session_version bump. Letting the cache repopulate lazily on the
-    next legitimate request is one extra DB hit per invalidation event
-    (password reset / deactivate / logout-everywhere) — cheap.
-
-    Returns False when the delete could not be confirmed after retries, so
-    a failed invalidation is visible to the caller rather than assumed to
-    have taken. A cache entry that outlives its delete is bounded by its
-    TTL; the DB session_version stays the source of truth. If that bound
-    ever needs to be tighter, hold the version of record in a no-TTL key
-    rather than relying on cache expiry.
+    Delete, never rewrite: the cached session_version gates the cache hit,
+    so a surviving entry defeats the bump. An entry that outlives a failed
+    delete is bounded by its TTL.
     """
     import importlib
 
@@ -357,9 +304,7 @@ class User(Model):
     user_id = str(self.id)
 
     def _try_invalidate() -> bool:
-      # Both methods return True on success, False on Redis failure.
-      # We require BOTH to succeed: a stale entry in either cache could
-      # let an old token continue to authenticate.
+      # Both must succeed: a stale entry in either lets an old token through.
       try:
         user_ok = api_key_cache.invalidate_jwt_user_data(user_id)
         graph_ok = api_key_cache.invalidate_user_jwt_graph_access(user_id)
@@ -368,17 +313,14 @@ class User(Model):
         logger.warning(f"Auth cache invalidation attempt failed for {user_id}: {e}")
         return False
 
-    # One retry with a short backoff handles transient Redis blips
-    # (connection reset, single-node failover) without going to extremes.
+    # One short retry for transient Redis blips.
     if _try_invalidate():
       return True
     time.sleep(0.05)
     if _try_invalidate():
       return True
 
-    # Both attempts failed. Log loudly — this is the fail-open window.
-    # Surface as an error so it's monitorable; downstream alerting should
-    # treat repeated occurrences as a Redis-availability incident.
+    # Fail-open window: log as an error so it is monitorable.
     logger.error(
       f"CRITICAL: auth cache invalidation failed twice for user {user_id}; "
       f"prior session may remain valid for up to JWT/cache TTL"

@@ -719,11 +719,8 @@ class FinancialStatementAnalysisResponse(BaseModel):
 
 # ── Information-block views (disclosures + information-block) ────────────────
 #
-# The two shaped tools `xbrlkit serve` offers over a loaded filing, served
-# over a report the platform holds whole (the published filing on a shared
-# repository, the ledger's own report on a tenant). The payload is xbrlkit's own — the same keys the
-# local tool returns — under the envelope, with the graph and report stamped
-# on it; `extra="allow"` keeps a key xbrlkit adds later from being dropped.
+# xbrlkit's two shaped tools, run over a report held whole. The payload is
+# xbrlkit's own; `extra="allow"` keeps keys it adds later.
 
 # xbrlkit's caps (`xbrlkit.serve.MAX_BLOCK_ROWS` / `MAX_BLOCK_MEMBERS_CAP`),
 # restated here so the request models need not import the tool module; the

@@ -75,8 +75,6 @@ class EventHandler(ExtensionsBase):
   approved_at = Column(DateTime, nullable=True)
 
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

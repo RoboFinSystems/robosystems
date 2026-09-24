@@ -1,12 +1,8 @@
 """Connected apps: a user's OAuth grants — list and revoke.
 
-A grant is one consent (user x client x graph x resource). Listing shows
-what a user has connected and where each connection reaches; revoking a
-grant kills every token minted from it and clears their validation-cache
-entries, so the connector stops at its next call rather than at the next
-cache miss. This is the proportionate answer to "disconnect this app" —
-the alternatives are a password change (every grant) or an operator
-deactivating the client (every user of it).
+A grant is one consent (user x client x graph x resource). Revoking one
+kills every token minted from it and clears their validation-cache entries,
+so the connector stops at its next call.
 """
 
 from datetime import datetime

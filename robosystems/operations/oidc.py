@@ -1,16 +1,9 @@
 """OIDC login kernel: connection config, flow state, token validation, user resolution.
 
-The IdP authenticates; the platform mints. These functions cover everything
-between the two — building the authorize redirect, holding the in-flight flow
-state, exchanging and validating the ID token, and resolving the asserted
-identity to a local user. Resolution is link-only: login never creates a
-user, and the one-time email-match fallback is gated on SCIM provenance
-(``users.external_id``), never on the email string alone.
-
-Contract: session-in, dataclass-out, domain exceptions — the router
-translates to redirects. Connection config is env-backed behind
-``get_oidc_connection()``; the resolver is the single seam any other
-connection source would slot in behind.
+Resolution is link-only: login never creates a user, and the one-time
+email-match fallback is gated on SCIM provenance (``users.external_id``),
+never on the email string alone. Domain exceptions; the router translates
+them to redirects.
 """
 
 import hashlib
@@ -137,13 +130,10 @@ _STATE_KEY_PREFIX = "oidc:state:"
 class OIDCState:
   """Single-use, 10-minute state for an in-flight OIDC login.
 
-  Same shape as ``operations/providers/oauth_handler.OAuthState`` and for the
-  same reasons: Valkey because the callback lands on an arbitrary task,
-  SHA-256 keys so a store read can't replay a flow, ``GETDEL`` so redemption
-  is atomically single-use, and fail-closed validation. Distinct class
-  because the payload differs — a login flow has no user yet, so the state
-  carries the ``nonce`` + PKCE verifier + validated ``return_to`` instead of
-  a connection/user pair.
+  Same design as ``oauth_handler.OAuthState``: Valkey (the callback lands on
+  any task), SHA-256 keys (a store read can't replay a flow), ``GETDEL``
+  (atomic single use), fail-closed. Carries the nonce, PKCE verifier and
+  validated ``return_to``.
   """
 
   @staticmethod
@@ -161,10 +151,9 @@ class OIDCState:
   ) -> str:
     """Mint a state token and persist what the callback needs to resume.
 
-    ``browser_state`` is the flow's browser-binding secret: it is mirrored
-    into an HttpOnly cookie by the login endpoint and re-checked at the
-    callback, so the browser that completes the flow must be the one that
-    started it (login-CSRF / forced-authentication defense).
+    ``browser_state`` is mirrored into an HttpOnly cookie and re-checked at
+    the callback, so only the browser that started the flow can finish it
+    (login-CSRF defense).
     """
     state = secrets.token_urlsafe(32)
     payload = {
@@ -230,9 +219,7 @@ def parse_return_to(raw: str | None, available_apps: list[str]) -> str | None:
 
 
 def _is_safe_relative_path(path: str) -> bool:
-  # Mirrors routers/auth/utils.is_safe_relative_path (kept local to avoid an
-  # operations→routers import): a single-slash-rooted path with no
-  # backslash/whitespace tricks, so it can never be scheme-relative.
+  # Mirrors routers/auth/utils.is_safe_relative_path: never scheme-relative.
   return (
     path.startswith("/")
     and not path.startswith("//")
@@ -368,10 +355,8 @@ async def validate_id_token(
   except pyjwt.PyJWTError as exc:
     raise OIDCTokenInvalidError(f"id_token rejected: {exc}") from exc
 
-  # str() coercion, not just `or ""`: a non-string nonce claim (valid JSON,
-  # invalid per spec) would make compare_digest raise TypeError, which would
-  # escape the callback's OIDCTokenInvalidError handler and 500 instead of
-  # redirecting. Coercing keeps every rejection on the same path.
+  # str(): a non-string nonce would make compare_digest raise TypeError (a 500)
+  # instead of an OIDCTokenInvalidError.
   token_nonce = str(claims.get("nonce") or "")
   if not secrets.compare_digest(token_nonce, nonce):
     raise OIDCTokenInvalidError("id_token nonce mismatch")
@@ -405,31 +390,16 @@ def resolve_oidc_user(
 ) -> OIDCResolution:
   """Resolve ``(issuer, sub)`` to a local user — link-only, never JIT.
 
-  Primary lookup is the ``user_identities`` link. On a miss, exactly one
-  fallback: an active user whose email matches AND whose SCIM ``external_id``
-  equals ``binding_value`` (the ID-token claim named by
-  ``SSO_OIDC_BINDING_CLAIM`` — ``sub`` by default; Okta sends the same user id
-  in both channels) AND who has no identity for this issuer yet — then the
-  link is written and is the lookup forever after. Equality is required, not
-  mere presence: a matching mailbox is not provenance on its own, and an
-  empty ``external_id`` is not a match. A missing or empty ``binding_value``
-  never links.
+  Primary lookup is the ``user_identities`` link. On a miss, one fallback
+  writes the link: an active user whose email matches, whose SCIM
+  ``external_id`` equals the non-empty ``binding_value`` (the claim named by
+  ``SSO_OIDC_BINDING_CLAIM``), and who has no identity for this issuer yet.
+  An explicit ``email_verified: false`` refuses the fallback (OIDC Core
+  §5.7); an absent claim does not (Entra omits it).
 
-  When ``ENTERPRISE_ORG_ID`` pins the deployment's org, membership is
-  required on *every* resolution, not only at link time: an identity linked
-  before the org was pinned, or a user since removed from the pinned org,
-  stops resolving. (The fallback additionally checks membership before
-  writing a link, so a refused resolution never leaves one behind.)
-
-  The email-match fallback additionally refuses a claim whose ``email`` the
-  IdP marked *unverified* (``email_verified: false``). It does not *require*
-  the claim to be present-and-true — Entra omits ``email_verified`` entirely
-  — but an explicit false is exactly the case OIDC Core §5.7 warns against
-  using as an identifier, so binding on it is refused.
-
-  The ``is_active`` check runs even for a valid link because IdP assignment
-  and SCIM assignment can drift apart (Okta runs them as two apps): a
-  SCIM-deactivated user may still reach the callback with a valid ID token.
+  With ``ENTERPRISE_ORG_ID`` set, org membership is required on every
+  resolution, and checked before a link is written. ``is_active`` is checked
+  even for an existing link: IdP and SCIM assignment can drift apart.
   """
   linked = False
   identity = UserIdentity.get_by_issuer_subject(issuer, subject, session)

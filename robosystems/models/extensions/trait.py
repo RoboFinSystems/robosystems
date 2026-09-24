@@ -1,21 +1,9 @@
-"""Trait — FASB us-gaap metamodel vocabulary members.
+"""Trait: a member of a controlled element-classification axis, e.g.
+``(category='liquidity', identifier='current')``.
 
-A Trait is a named member of a controlled classification vocabulary axis:
-``(category='elementsOfFinancialStatements', identifier='asset')``,
-``(category='liquidity', identifier='current')``,
-``(category='flowClassification', identifier='inflow')``, etc.
-
-The 26 categories cover the 24 orthogonal FASB metamodel trait axes plus
-``flowClassification`` (derived from FASB instant-* arcroles) and the RS
-``recurrence`` analytical axis (earnings persistence / NOPAT). Element
-assignments live in ``element_traits`` via :class:`ElementTrait`.
-
-This is distinct from :class:`Classification` (association-side), which
-covers structural patterns (``concept_arrangement``, ``member_arrangement``,
-``named_disclosure``) applied to Associations, not Elements.
-
-``id`` is shared with the graph ``Trait`` node so OLTP rows and graph
-counterparts refer to the same trait.
+Element assignments live in ``element_traits``. Structural patterns applied
+to associations are :class:`Classification` instead. ``id`` is shared with
+the graph ``Trait`` node.
 """
 
 from datetime import UTC, datetime
@@ -59,38 +47,28 @@ class Trait(ExtensionsBase):
       "'indirectCashFlowReconcilingItem', "
       # Flow classification (FASB instant-* arcroles)
       "'flowClassification', "
-      # RS analytical extension — earnings persistence (normalized earnings / NOPAT)
+      # RS extension: earnings persistence
       "'recurrence'"
       ")",
       name="check_trait_category",
     ),
   )
-
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("trt"))
 
-  # Axis membership
   category = Column(String, nullable=False)
   identifier = Column(String, nullable=False)
 
-  # Where this trait comes from: 'fac-traits' | 'fac' |
-  # 'rs-gaap' | 'system' (built-in) | 'user'.
+  # 'fac-traits' | 'fac' | 'rs-gaap' | 'system' | 'user'
   type = Column(String, nullable=False, default="system")
-
-  # Display
   name = Column(String, nullable=True)
   description = Column(String, nullable=True)
 
-  # Confidence (optional, for AI-suggested traits)
+  # For AI-suggested traits.
   confidence = Column(Float, nullable=True)
 
-  # Source provenance (optional free-form: URL, spec section, adapter name)
+  # Free-form: URL, spec section, adapter name.
   source = Column(String, nullable=True)
-
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

@@ -1,14 +1,8 @@
 """Repository subscription billing lifecycle.
 
-Shared repositories are billed to the organization but granted per user, so a
-cancellation has to reach three places: the payment provider, the billing row,
-and the member's access record. Routers and off-boarding both go through here
-so the three can never drift apart.
-
-Distinct from `operations/graph/repository_subscription_service.py`, which owns
-the access-grant layer alone (`UserRepository` rows and their credit pools) and
-knows nothing about the provider. This module is the outer lifecycle and calls
-into that layer; anything that stops billing belongs here.
+A cancellation must reach the payment provider, the billing row, and the
+member's access grant together. `graph/repository_subscription_service.py`
+owns the grant layer alone; anything that stops billing belongs here.
 """
 
 from sqlalchemy.orm import Session
@@ -26,12 +20,10 @@ class RepositorySubscriptionError(Exception):
 
 
 class ProviderCancellationError(RepositorySubscriptionError):
-  """The payment provider could not cancel — nothing local was changed.
+  """The payment provider could not cancel; nothing local was changed.
 
-  Both provider cancel methods treat an already-canceled or missing
-  subscription as success, so a failure here means the customer is still being
-  billed. Revoking access anyway would charge them for something they can no
-  longer use.
+  Already-canceled counts as success, so this means the customer is still
+  being billed, and access must not be revoked.
   """
 
 
@@ -44,9 +36,8 @@ def cancel_repository_subscription(
 ) -> None:
   """Cancel one repository subscription and revoke the matching access.
 
-  Provider first: a provider failure raises before anything local changes, so
-  the retry path stays open. `immediate=False` leaves access in place until the
-  period closes; `immediate=True` revokes it now.
+  Provider first, so a provider failure leaves nothing changed locally.
+  `immediate=False` keeps access until the period closes.
   """
   from robosystems.operations.providers.payment_provider import get_payment_provider
 
@@ -68,8 +59,7 @@ def cancel_repository_subscription(
       )
       raise ProviderCancellationError(str(e)) from e
 
-  # A subscription that never reached an active period has no period end to
-  # cancel into — the only honest option is an immediate stop.
+  # No period end to cancel into: stop immediately.
   subscription.cancel(
     session, immediate=immediate or subscription.current_period_end is None
   )
@@ -132,18 +122,12 @@ def cancel_user_repository_subscriptions(
   and revoke every repository grant they still hold — whether or not a live
   subscription stands behind it.
 
-  Used when a member is removed from the org: the org paid for that access
-  because of the membership, so it ends with the membership rather than
-  running to the period end on someone else's card.
+  For org off-boarding: access the org paid for ends with the membership.
+  Grants are swept separately because a period-end cancellation leaves the
+  grant alive until ``expires_at``, and authorization reads the grant.
 
-  The second sweep exists because a period-end cancellation moves the billing
-  row to a terminal status at once while deliberately leaving the grant alive
-  until ``expires_at``. Authorization reads the grant, not the billing row, so
-  a sweep keyed on live subscriptions alone would off-board the member and
-  leave them inside the repository until the period closed.
-
-  Raises ProviderCancellationError if the provider refuses — the caller must
-  abort rather than off-board a member the org keeps paying for.
+  Raises ProviderCancellationError if the provider refuses; the caller must
+  abort the off-boarding.
   """
   subscriptions = BillingSubscription.get_live_subscriptions_for_user(
     user_id, session, resource_type="repository"

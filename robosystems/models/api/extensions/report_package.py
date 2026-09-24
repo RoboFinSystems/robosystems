@@ -131,13 +131,9 @@ class ReportPackageEnvelope(BaseModel):
   generation_status: str
   last_generated: datetime | None = None
 
-  # Filing lifecycle (business). On a report shared in from another graph
-  # these describe the *sender's* filing of it: `share_report` carries
-  # `filing_status` and `filed_at` onto the copy so a recipient can tell a
-  # draft they were sent from final statements. `filed_by` is deliberately
-  # left null there — it is the sender's platform user id, which resolves to
-  # nobody in the recipient's graph and is rendered verbatim by the viewer.
-  # The asymmetry is intentional; don't "fix" it by copying the field too.
+  # On a shared-in report these describe the sender's filing. `filed_by` is
+  # deliberately left null there: the sender's user id means nothing in the
+  # recipient's graph.
   filing_status: str
   filed_at: datetime | None = None
   filed_by: str | None = None

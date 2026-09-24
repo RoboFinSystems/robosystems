@@ -1,24 +1,6 @@
-"""Information Block + Report serialization — interop export side.
-
-Two encoder families share one envelope (``StatementBundle``):
-
-* ``serialize_to_rdf(bundle, flavor=RdfFlavor.JSONLD)`` — RDF-family
-  serializer. JSON-LD is the default; the holon is the dataset-form
-  flavor; Turtle, N-Quads, RDF/XML slot in as additional ``RdfFlavor``
-  values without API change.
-* ``serialize_to_xbrl(bundle, flavor=XbrlFlavor.XBRL_2_1)`` — XBRL-family
-  serializer. XBRL 2.1 is the default; ``TAVI`` is the Project Tavi
-  compiled model, emitted by xbrlkit through the bundle → ``XbrlModel``
-  bridge (``model.py``) — the waist the remaining encoders move behind;
-  further OIM flavors (xBRL-CSV, xBRL-JSON) slot in later.
-
-Producers populate the bundle:
-
-* ``build_report_bundle(session, report_id)`` — assembles a published
-  Report (FactSets + Facts + framework slice + IB envelopes) into a
-  mode='report' ``StatementBundle``. Stamped at publish, stored in S3.
-* ``mode='live'`` ephemeral snapshots have no producer — the bundle
-  shape supports the mode, nothing builds one.
+"""Report serialization for export: ``build_report_bundle`` produces a
+``StatementBundle``; ``serialize_to_rdf`` and ``serialize_to_xbrl`` encode it by
+flavor. Nothing produces ``mode='live'`` bundles yet.
 """
 
 from robosystems.operations.serialization.bundle import (

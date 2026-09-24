@@ -1,12 +1,5 @@
-"""Bounded, model-driven tool-use loop for operators.
-
-The model chooses which read-only MCP tools to call; every tool error comes
-back as an error-status tool result so it can correct itself and retry. The
-loop is the shared harness behind `AnalystOperator` and any other read/analysis
-operator — the model-via-MCP tool loop run in-process on Bedrock Converse,
-with per-call credit tracking supplied by `TrackedAIClient`. The transcript
-is Converse content blocks throughout, so it drives any model in the registry.
-"""
+"""Bounded, model-driven tool-use loop for read/analysis operators. Tool errors
+go back to the model as error results so it can correct itself."""
 
 from __future__ import annotations
 
@@ -24,27 +17,19 @@ from robosystems.operations.operators.ai_client import (
 if TYPE_CHECKING:
   from robosystems.operations.operators.operator_context import OperatorContext
 
-# Tool results fed back to the model are capped so a large query result can't
-# blow the context window or run up credit spend — the model only needs
-# enough rows to reason about. The full result is captured separately (rows)
-# for the caller/frontend, which paginates.
+# Caps what the model sees; the caller gets the full rows separately.
 _MAX_TOOL_RESULT_CHARS = 12000
 
-# Orientation tools are the exception: a truncated schema or example set is
-# worse than none, because the model then plans queries against
-# relationships it never saw. A tenant schema with the ledger spine runs
-# 20-30k chars, so these get a cap well above the largest real payload and
-# only a pathological graph truncates.
+# A truncated schema is worse than none (the model plans against relationships
+# it never saw), so orientation tools get a cap above any real payload.
 _ORIENTATION_TOOL_RESULT_CHARS = 48000
 _TOOL_RESULT_CHAR_CAPS: dict[str, int] = {
   "get-graph-schema": _ORIENTATION_TOOL_RESULT_CHARS,
   "get-example-queries": _ORIENTATION_TOOL_RESULT_CHARS,
 }
 
-# A turn whose tool calls ALL fail is not charged against the tool budget, up
-# to this many times per run. Error feedback is the point of the loop, and
-# charging a budgeted turn for a syntax error starves quick mode of the one
-# retry it needs to recover.
+# Uncharged turns per run for a turn whose tool calls ALL failed, so quick mode
+# keeps its one retry after a syntax error.
 DEFAULT_MAX_ERROR_RETRIES = 2
 
 _ANSWER_NOW = (
@@ -65,8 +50,6 @@ _NO_ANSWER = (
 
 @dataclass
 class ToolLoopResult:
-  """Outcome of a tool-use loop."""
-
   text: str
   rows: list[dict[str, Any]] | None = None  # last read-graph-cypher result set
   cypher: str | None = None  # the query that produced ``rows``
@@ -79,7 +62,6 @@ class ToolLoopResult:
 
 
 def _serialize_tool_result(result: Any, tool_name: str | None = None) -> str:
-  """JSON-encode a tool result for feedback, capped in size per tool."""
   cap = _TOOL_RESULT_CHAR_CAPS.get(tool_name or "", _MAX_TOOL_RESULT_CHARS)
   text = json.dumps(result, default=str)
   if len(text) > cap:
@@ -88,7 +70,6 @@ def _serialize_tool_result(result: Any, tool_name: str | None = None) -> str:
 
 
 def _seed_history(ctx: OperatorContext) -> list[AIMessage]:
-  """Convert the last few conversation turns into plain-text messages."""
   messages: list[AIMessage] = []
   for msg in ctx.history[-5:]:
     if isinstance(msg, dict):
@@ -117,36 +98,22 @@ async def run_tool_loop(
 ) -> ToolLoopResult:
   """Run a bounded tool-use loop and return the model's final answer.
 
-  The model gets the read-only tools named by ``tool_names``, intersected with
-  what the graph actually exposes, and iterates: call tools → observe results
-  (errors included) → answer in natural language. ``max_iterations`` caps the
-  round-trips that may call tools. A round-trip whose tool calls all failed is
-  not charged against that cap, up to ``max_error_retries`` times, so a bad
-  query costs the model a correction rather than a step. On hitting the cap
-  one further turn nudges the model to answer from what it has with tool use
-  disabled, so the loop always costs at most
-  ``max_iterations + max_error_retries + 1`` model calls.
+  ``tool_names`` is intersected with what the graph exposes, and only that set
+  is dispatched. At most ``max_iterations + max_error_retries + 1`` model
+  calls: all-error turns are uncharged up to ``max_error_retries``, and on the
+  cap one wrap-up turn asks for an answer.
 
-  ``max_credits`` is a soft per-run ceiling checked between model calls
-  against the run's accumulated spend (`TrackedAIClient.total_credits`): once
-  reached, no further tool turn starts and the model is nudged to answer from
-  what it has — so the wrap-up turn itself can carry the total somewhat past
-  the ceiling, but a runaway run stops at a number the caller chose rather
-  than at the iteration cap.
-
-  ``user_message`` replaces ``ctx.query`` as the opening user turn, for a
-  caller that prefixes the question with per-request context (recalled
-  memories). That context is tenant data and varies per question, so it
-  belongs here in the transcript, never in the cached system prefix.
+  ``max_credits`` is a soft ceiling checked between calls; the wrap-up turn
+  can carry spend somewhat past it. ``user_message`` replaces ``ctx.query``
+  as the opening turn, for per-request context that must stay out of the
+  cached system prefix.
   """
   tools = await ctx.tools.get_tool_schemas(tool_names)
   if not tools:
     logger.warning(
       "run_tool_loop: none of %s available on graph %s", tool_names, ctx.graph_id
     )
-  # The dispatch below must enforce this set, not just advertise it: the
-  # model can emit any tool name, and call_tool dispatches whatever the
-  # underlying tool manager exposes.
+  # Enforced at dispatch, not just advertised: call_tool would run any name.
   advertised = {t["name"] for t in tools}
 
   messages: list[AIMessage] = _seed_history(ctx)
@@ -156,18 +123,15 @@ async def run_tool_loop(
   last_rows: list[dict[str, Any]] | None = None
   last_cypher: str | None = None
 
-  tool_turns = 0  # round-trips charged against max_iterations
-  error_retries = 0  # uncharged round-trips granted so far
+  tool_turns = 0
+  error_retries = 0
   model_calls = 0
   hit_ceiling = False
   step = 60 // max(max_iterations, 1)
 
   while tool_turns < max_iterations:
-    # A cancel lands on the operation store and nothing else in this loop
-    # would ever see it: on the worker the run kept calling the model after
-    # the client was told "cancelled". Checked before every call, including
-    # the first, so a run cancelled while it waited in the queue spends
-    # nothing. No wrap-up call either — the caller asked for silence.
+    # Before every call, including the first, so a run cancelled while
+    # queued spends nothing. No wrap-up call on cancel.
     if await ctx.progress.is_cancelled():
       return ToolLoopResult(
         text="Cancelled before an answer was reached.",
@@ -179,8 +143,7 @@ async def run_tool_loop(
         error_retries=error_retries,
       )
 
-    # Between-calls credit check: the first call always runs (its cost is
-    # unknowable up front and the pre-flight already gated the run).
+    # The first call always runs; the pre-flight already gated it.
     if (
       max_credits is not None
       and model_calls > 0
@@ -202,14 +165,10 @@ async def run_tool_loop(
       operator_type=operator_type,
       operation_description=operation_description,
       tools=tools,
-      # The transcript grows monotonically across iterations, so a breakpoint
-      # on the trailing turn means every call from the second onward reads the
-      # previous call's cache entry and extends it.
       cache_conversation=True,
     )
     model_calls += 1
 
-    # No tool call means the model is answering — done.
     if response.stop_reason != "tool_use":
       return ToolLoopResult(
         text=response.content,
@@ -220,8 +179,7 @@ async def run_tool_loop(
         error_retries=error_retries,
       )
 
-    # Replay the assistant turn verbatim — text, tool-use, and any reasoning
-    # block the model returned (a reasoning signature is checked on replay).
+    # Verbatim: a reasoning block's signature is checked on replay.
     messages.append(AIMessage(role="assistant", content=response.content_blocks))
 
     tool_results: list[dict[str, Any]] = []
@@ -248,15 +206,11 @@ async def run_tool_loop(
         continue
       try:
         result = await ctx.tools.call_tool(name, args, return_raw=True)
-        # Registrar/domain tools report failure as {"error": ...} instead of
-        # raising; treat both paths as errors so the model gets the feedback.
+        # Some tools return {"error": ...} instead of raising.
         if isinstance(result, dict) and "error" in result:
           is_error = True
         elif name == "read-graph-cypher" and isinstance(result, list) and result:
-          # Capture the last NON-EMPTY result set so a later exploratory or
-          # zero-row query doesn't wipe the rows that back the answer. If every
-          # query returns empty, last_rows stays None and the console shows no
-          # table — correct for a genuinely empty answer.
+          # Last NON-EMPTY set, so a later zero-row probe can't wipe it.
           last_rows = result
           last_cypher = args.get("query")
       except Exception as e:  # cypher_tool raises ValueError on bad queries
@@ -277,9 +231,6 @@ async def run_tool_loop(
     else:
       error_retries += 1
 
-  # Iteration cap or credit ceiling reached. The wrap-up below is the loop's
-  # only other model call, and hitting the cap is exactly when a run has been
-  # going long enough for a client to cancel — so it gets the same guard.
   if await ctx.progress.is_cancelled():
     return ToolLoopResult(
       text="Cancelled before an answer was reached.",
@@ -291,12 +242,9 @@ async def run_tool_loop(
       error_retries=error_retries,
     )
 
-  # Nudge for a final answer, appending the nudge to the trailing user turn
-  # (a second consecutive user message would be rejected). `tools` stays
-  # defined — Converse rejects a transcript carrying tool blocks without a
-  # toolConfig — and it has no way to forbid a further call, so the nudge
-  # does that in words and a stray tool call below is treated as terminal:
-  # nobody would execute it.
+  # Appended to the trailing user turn (consecutive user messages are
+  # rejected). `tools` must stay set while the transcript has tool blocks, so
+  # the nudge forbids tools in words and a stray tool call is not executed.
   answer_now = _ANSWER_NOW_CREDITS if hit_ceiling else _ANSWER_NOW
   final_messages = list(messages)
   last = final_messages[-1]

@@ -124,16 +124,10 @@ class SESEmailService:
   def _auth_link_parts(self, app: str) -> tuple[str, str]:
     """Base URL and return_to suffix for auth action links (verify/reset/invite).
 
-    Auth links always target the login home, carrying the originating app as
-    return_to so the user is bridged onward after the action. The product apps
-    render no interactive auth surface to land on — pointing an emailed link at
-    one only bounces the recipient to the login home anyway, a hop that can
-    strip the token. Email branding stays per-app.
-
-    A single-app deployment is its own login home, so this degrades to the
-    app's own URL with no suffix.
+    Always the login home (product apps have no auth surface, and the bounce
+    can strip the token), with the originating app as return_to unless it is
+    the login home itself.
     """
-    # The login home bridging back to itself is a no-op; skip the suffix.
     suffix = "" if app == env.LOGIN_HOME_APP else f"&return_to={quote(app)}"
     return self.login_home_url, suffix
 

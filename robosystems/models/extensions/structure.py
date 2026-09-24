@@ -1,12 +1,8 @@
-"""Structure model — organizes elements into named taxonomic structures.
+"""Tenant-scoped structures: named groupings of element associations within a
+taxonomy (the OLTP side of graph Structure nodes).
 
-Tenant-scoped table. The OLTP representation of Structure nodes in the graph.
-Each structure belongs to a taxonomy and contains element associations.
-
-``artifact_mechanics`` is the typed mechanics column the envelope builder
-reads; ``metadata_`` carries the same content untyped. Writers must populate
-both — read paths prefer ``artifact_mechanics`` but fall back to ``metadata_``
-for rows that lack it.
+Writers populate both ``artifact_mechanics`` (typed) and ``metadata_``
+(untyped); readers prefer the former and fall back to the latter.
 """
 
 from datetime import UTC, datetime
@@ -26,11 +22,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
-# Concept Arrangement Pattern (CAP) vocabulary — the single source of truth for
-# the ``structures.concept_arrangement`` CHECK below, the API request Literal in
-# ``models/api/taxonomy_block.py`` (tied here by a drift test), and seed
-# validation. 8 canonical + 5 cm.xsd text-block/detail specializations + 2
-# pseudo (15 total).
+# Concept Arrangement Pattern (CAP) vocabulary: the source for the CHECK below,
+# the API request Literal in ``models/api/taxonomy_block.py`` (a drift test
+# ties them), and seed validation.
 CONCEPT_ARRANGEMENT_VALUES: tuple[str, ...] = (
   # 8 canonical CAPs
   "set",
@@ -41,8 +35,7 @@ CONCEPT_ARRANGEMENT_VALUES: tuple[str, ...] = (
   "variance",
   "arithmetic",
   "text_block",
-  # 5 cm.xsd text-block / detail specializations (Charlie encodes
-  # text-block level as the CAP itself).
+  # 5 cm.xsd text-block / detail specializations (level is the CAP itself)
   "level1_textblock",
   "level2_textblock",
   "level3_textblock",
@@ -67,10 +60,9 @@ TEXT_BLOCK_CAPS: frozenset[str] = frozenset(
 )
 
 
-# The `structures.block_type` vocabulary — the single source for the model
-# CHECK and the tenant-provisioning widen step (`copy_library_into_tenant`
-# mirrors rows from `public.structures`; a tenant-side CHECK narrower than
-# public's silently fails graph creation when the library adds a value).
+# `structures.block_type` vocabulary: the source for the CHECK and for the
+# tenant-provisioning widen step (a tenant CHECK narrower than public's breaks
+# graph creation when the library adds a value).
 BLOCK_TYPE_VALUES: tuple[str, ...] = (
   # Renderable financial-statement presentations (the user-facing forms)
   "income_statement",
@@ -84,24 +76,18 @@ BLOCK_TYPE_VALUES: tuple[str, ...] = (
   "reconciliation",
   "policy",
   "metric",
-  # Forecast — the authored scenario container (FP&A engine): lever
-  # assertions + scenario identity; derived forward facts land in the
-  # existing statement/metric block types stamped with fact_sets.scenario_id.
+  # Authored FP&A scenario container; derived forward facts land in the
+  # statement/metric types stamped with fact_sets.scenario_id.
   "forecast",
   # Chart-of-accounts and CoA→GAAP mapping
   "chart_of_accounts",
   "coa_mapping",
-  # Reference-taxonomy structure kinds (XBRL network roles distinct from
-  # presentation): formal calculation/business rules, named SEC/regulatory
-  # disclosures, crosswalks between taxonomies. Filtered out of the
-  # report-package render path; consumed by the rule engine, disclosure
-  # registry and mapping resolver.
+  # Reference-taxonomy network roles (rules, regulatory disclosures,
+  # crosswalks); never rendered in report packages.
   "validation_rules",
   "regulatory_disclosure",
   "taxonomy_mapping",
-  # Reporting Style — the bundle a company picks; pinned per entity via
-  # entities.reporting_style_id and composed per statement_type via
-  # reporting_style_networks.
+  # Pinned per entity via entities.reporting_style_id.
   "reporting_style",
   # Escape hatch
   "custom",
@@ -113,9 +99,7 @@ class Structure(ExtensionsBase):
   __table_args__ = (
     Index("idx_structures_taxonomy", "taxonomy_id"),
     Index("idx_structures_type", "block_type"),
-    # Expression index over metadata->>'role_uri' to support the
-    # ``load_disclosure_id_for_structure`` LIKE lookup. ``role_uri`` is
-    # stored inside the metadata JSONB blob, not as a top-level column.
+    # Serves the role_uri lookup in ``load_disclosure_id_for_structure``.
     Index(
       "idx_structures_role_uri",
       sqlalchemy_text("(metadata->>'role_uri')"),
@@ -124,17 +108,13 @@ class Structure(ExtensionsBase):
       "block_type IN (" + ", ".join(f"'{v}'" for v in BLOCK_TYPE_VALUES) + ")",
       name="check_block_type",
     ),
-    # Concept Arrangement Pattern (CAP). Vocabulary from
-    # ``CONCEPT_ARRANGEMENT_VALUES`` (single source of truth). NULL allowed
-    # for block types that don't declare a default.
     CheckConstraint(
       "concept_arrangement IS NULL OR concept_arrangement IN ("
       + ", ".join(f"'{v}'" for v in CONCEPT_ARRANGEMENT_VALUES)
       + ")",
       name="check_concept_arrangement",
     ),
-    # Member Arrangement Pattern (MAP). 5 canonical, from non-aggregating
-    # to fully aggregating. NULL allowed for non-hypercube block types.
+    # Member Arrangement Pattern (MAP), non-aggregating to fully aggregating.
     CheckConstraint(
       "member_arrangement IS NULL OR member_arrangement IN ("
       "'is_a', 'whole_part', 'nested_whole_part', "
@@ -144,73 +124,37 @@ class Structure(ExtensionsBase):
     ),
   )
 
-  # Identity
   id = Column(
     String, primary_key=True, default=lambda: generate_prefixed_ulid("struct")
   )
   name = Column(String, nullable=False)
   description = Column(String, nullable=True)
 
-  # Type
   block_type = Column(String, nullable=False)
 
-  # Taxonomy membership
   taxonomy_id = Column(String, ForeignKey("taxonomies.id"), nullable=False)
 
-  # Graph reference
   graph_structure_id = Column(String, nullable=True)
 
-  # State
   is_active = Column(Boolean, nullable=False, default=True)
 
-  # Information Model axis columns: the canonical Concept Arrangement
-  # Pattern and Member Arrangement Pattern enumerations from Charlie
-  # Hoffman's Seattle Method.
-  #
-  # concept_arrangement — 8 canonical CAPs + 5 cm.xsd text-block /
-  # detail specializations + 2 pseudo-patterns (15 total). The
-  # specializations mirror seattlemethod/universal/cm.xsd — Charlie
-  # encodes text-block "level" as a first-class CAP value, not a
-  # separate axis (PROOF disclosure-mechanics).
-  #
-  #   Canonical (8):     set | roll_up | roll_forward | roll_forward_info
-  #                      | adjustment | variance | arithmetic | text_block
-  #   cm.xsd ext (5):    level1_textblock | level2_textblock |
-  #                      level3_textblock | level4_detail |
-  #                      table_equivalent_textblock
-  #   Pseudo (2):        grid | compound_fact
-  #
-  # Nullable until every block type declares a default. CHECK constraint
-  # below enforces the closed vocabulary.
+  # Seattle Method information-model axes. NULL where a block type declares
+  # no default; MAP is NULL for non-hypercube block types.
   concept_arrangement = Column(String, nullable=True)
-  # member_arrangement — 5 canonical MAPs along the aggregation spectrum
-  # from non-aggregating to fully aggregating:
-  #   is_a | whole_part | nested_whole_part |
-  #   two_dimension_aggregation | complex_aggregating_whole_part.
-  # Null for non-hypercube block types.
   member_arrangement = Column(String, nullable=True)
 
-  # Typed Artifact Mechanics. Pydantic discriminated union (see
-  # ``models/api/information_block.py::ArtifactMechanics``) persisted as
-  # JSONB. Read paths validate shape on envelope build; writes stamp this
-  # column alongside ``metadata_``.
+  # ``ArtifactMechanics`` (models/api/information_block.py) as JSONB.
   artifact_mechanics = Column(JSONB, nullable=True)
 
-  # Renderer caveat, e.g. "(in thousands, except per share)". NOT XBRL
-  # parenthetical explanation — Charlie's parenthetical is fact-level via
-  # XBRL footnotes (Framework p.8). This is a Structure-level renderer
-  # hint, our extension.
+  # Structure-level renderer caveat, e.g. "(in thousands, except per share)";
+  # not an XBRL parenthetical, which is fact-level.
   renderer_note = Column(String, nullable=True)
 
-  # Nullable FK to ``structure_templates``. No FK constraint yet so
-  # writes that pin a template don't require coordinated lifecycle with
-  # the templates table.
+  # References ``structure_templates.id``; deliberately no FK constraint.
   template_id = Column(String, nullable=True)
 
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
 
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

@@ -1,10 +1,6 @@
-"""FiscalPeriod model — per-tenant fiscal period records.
-
-Tenant-scoped: lives in each `kg*` schema, not in public. Used for
-period close controls (prevent posting to closed periods). The `graph_id`
-column is retained as a defensive discriminator but the primary tenant
-isolation comes from the schema boundary.
-"""
+"""Per-tenant fiscal periods, backing the closed-period posting controls.
+Isolation comes from the tenant schema; `graph_id` is a defensive
+discriminator."""
 
 from datetime import UTC, datetime
 
@@ -38,8 +34,6 @@ class FiscalPeriod(ExtensionsBase):
       name="check_fiscal_period_dates",
     ),
   )
-
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("fp"))
   graph_id = Column(String, nullable=False)
   name = Column(String, nullable=False)
@@ -48,22 +42,14 @@ class FiscalPeriod(ExtensionsBase):
   start_date = Column(Date, nullable=False)
   end_date = Column(Date, nullable=False)
   period_type = Column(String, nullable=False)
-
-  # State
   status = Column(String, nullable=False, default="open")
   closed_at = Column(DateTime, nullable=True)
   closed_by = Column(String, nullable=True)
 
-  # The close receipt, stamped in the same transaction as the status flip
-  # above. Without it the close result exists only in the HTTP response,
-  # so a transport failure on a close that SUCCEEDED leaves the operator
-  # reconstructing what happened from four separate state reads. Written
-  # by PeriodCloseService.close(); read back by get-period-close-status
-  # and the fiscal-calendar response. Nullable: a period can be closed
-  # without one (notably those seeded closed by initialize_ledger).
+  # Close receipt, written in the same transaction as the status flip so a
+  # successful close survives a lost HTTP response. NULL for periods closed
+  # without one (e.g. seeded closed by initialize_ledger).
   close_receipt = Column(JSONB, nullable=True)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

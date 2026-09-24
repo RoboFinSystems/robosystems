@@ -1,23 +1,8 @@
-"""Fact model — financial data points.
+"""Facts: one element's value for one period, numeric or not.
 
-Bridge between fact generation (Python computation) and graph materialization
-(postgres_scanner reads this table). Each row represents one discrete financial
-data point: an element's aggregated balance for a specific period, or a
-non-numeric (string / text-block) value such as a bound disclosure narrative.
-
-A fact is numeric XOR non-numeric: ``fact_type`` discriminates, and the
-``ck_facts_value_shape`` CHECK enforces exactly one of ``value`` /
-``string_value`` populated. This mirrors the graph ``Fact`` node in
-``schemas/extensions/roboledger.py``.
-
-Every Fact belongs to exactly one FactSet (the parent envelope that pins the
-period bounds and back-references the Report or Schedule that created it).
-Reports stamp facts via ``_persist_report_facts``; schedules stamp them via
-``ScheduleService``. Both create the FactSet row before the facts that
-reference it.
-
-Written by generate_report_facts(), read by ExtensionsMaterializer and
-render_structure_view().
+``fact_type`` discriminates numeric from non-numeric (text-block) facts, and
+``ck_facts_value_shape`` requires exactly one of ``value`` / ``string_value``.
+Every fact belongs to one FactSet, which is created first.
 """
 
 from datetime import UTC, datetime
@@ -76,8 +61,7 @@ class Fact(ExtensionsBase):
   value = Column(Float, nullable=True)  # natural-sign dollars; NULL for Nonnumeric
   string_value = Column(Text, nullable=True)  # inline text payload for Nonnumeric
   fact_type = Column(String, nullable=False, default="Numeric")
-  # value_type is always 'inline' today; 'external_resource' is reserved for
-  # blocks externalized to S3/OpenSearch (the SEC pipeline pattern).
+  # Always 'inline' today; 'external_resource' is reserved.
   value_type = Column(String, nullable=False, default="inline")
   content_type = Column(String, nullable=True)  # MIME, e.g. 'text/markdown'
   # XBRL @decimals for numeric facts. NULL means unspecified; materialize
@@ -90,16 +74,12 @@ class Fact(ExtensionsBase):
   # all rows, and materialize skips the FACT_HAS_UNIT edge for Nonnumeric.
   unit = Column(String, nullable=False, default="USD")
   entity_id = Column(String, nullable=False)
-  structure_id = Column(String, nullable=True)  # structure this fact belongs to
-  # Every fact has exactly one parent FactSet, created before the fact is
-  # stamped; deleting the FactSet cascades to its facts.
+  structure_id = Column(String, nullable=True)
   fact_set_id = Column(
     String, ForeignKey("fact_sets.id", ondelete="CASCADE"), nullable=False
   )
-  # fact_scope distinguishes "historical" (already reflected in opening
-  # balances, ignored by the close workflow) from "in_scope" (the close
-  # workflow drafts entries from these). Defaults to 'in_scope' so
-  # non-schedule facts stay visible to scope-unaware queries.
+  # "historical" facts are already in opening balances and ignored by close;
+  # "in_scope" facts are drafted into entries.
   fact_scope = Column(String, nullable=False, default="in_scope")
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 

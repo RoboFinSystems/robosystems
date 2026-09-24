@@ -74,9 +74,6 @@ class OrchestratorConfig:
       self.enable_rag = OperatorConfig.ORCHESTRATOR_CONFIG["enable_rag"]
 
 
-# The API-facing response shape, imported here because the orchestrator is
-# where OperatorResult is converted into it.
-
 from robosystems.operations.operators.base import OperatorResponse  # noqa: E402
 
 
@@ -110,7 +107,7 @@ class OperatorOrchestrator:
     self._schema_extensions: list[str] | None = None
 
   def _get_schema_extensions(self) -> list[str]:
-    """Resolve schema extensions for the current graph (cached per instance)."""
+    """Cached per instance."""
     if self._schema_extensions is None:
       from robosystems.middleware.mcp.tools.manager import resolve_schema_extensions
 
@@ -118,7 +115,6 @@ class OperatorOrchestrator:
     return self._schema_extensions
 
   def _filter_by_scope(self, operators: dict[str, Operator]) -> dict[str, Operator]:
-    """Remove operators whose graph_scope excludes the current graph."""
     extensions = self._get_schema_extensions()
     return {
       operator_type: operator
@@ -127,7 +123,6 @@ class OperatorOrchestrator:
     }
 
   def _get_all_operators(self) -> dict[str, Operator]:
-    """Get all registered operator instances eligible for the current graph."""
     operators = {}
     for operator_type in list_operators():
       try:
@@ -168,9 +163,8 @@ class OperatorOrchestrator:
   ) -> OperatorResponse:
     """Route a query to an operator and return its response.
 
-    An explicit `operator_type` bypasses routing entirely. Failures are
-    returned as an error-bearing response rather than raised — this is the
-    boundary the API renders directly.
+    An explicit `operator_type` bypasses routing. Failures come back as an
+    error-bearing response rather than raised.
     """
     start_time = time.time()
     self._metrics["total_queries"] += 1
@@ -442,14 +436,8 @@ class OperatorOrchestrator:
     context: dict[str, Any],
     stream_callback: Callable | None = None,
   ) -> OperatorResponse:
-    """Execute an operator via the API adapter, converting failures to responses.
-
-    The credit pre-flight deliberately lives in the adapter, not here: the SSE
-    and background-queue strategies call the adapter directly and never build an
-    orchestrator. This layer's only job on that front is to render the refusal
-    gracefully for the sync path, which returns a body rather than an error
-    status.
-    """
+    """Run via the API adapter (which does the credit pre-flight), converting
+    failures, including a credit refusal, to responses."""
     try:
       result = await asyncio.wait_for(
         run_operator_api(

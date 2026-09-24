@@ -1,10 +1,7 @@
 """OpenSearch client wrapper with graph_id tenant isolation.
 
-Every query is filtered by graph_id to ensure multi-tenant isolation.
-Default search mode is BM25-only for fast keyword matching. Hybrid
-BM25 + KNN search is available via search_hybrid() for semantic
-similarity when opted in. This is a platform-level client — not
-specific to any adapter.
+Every query is filtered by graph_id. BM25 is the default mode; hybrid
+BM25 + KNN (search_hybrid) is opt-in.
 """
 
 from contextlib import contextmanager
@@ -13,18 +10,13 @@ from typing import Any
 
 from robosystems.logger import logger
 
-# Search pipeline for hybrid (BM25 + KNN) score normalization.
-# Without this, BM25 scores (~10-40) drown out KNN cosine scores (~0-1).
-# The normalization processor maps both to [0,1] before combining.
+# Without normalization, BM25 scores (~10-40) drown out KNN cosine (~0-1).
 HYBRID_PIPELINE_NAME = "hybrid-search-pipeline"
 
-# Candidates each hybrid sub-query contributes per shard, independent of the
-# page asked for. min_max normalizes over this pool, so a pool that tracked
-# `size` gave the same document different scores at different page sizes;
-# held constant, a smaller page is a prefix of a larger one. It is also the
-# hybrid query's pagination_depth, which OpenSearch requires once `from` > 0.
-# 100 matches the Faiss default ef_search, so k=100 costs a query no extra
-# HNSW traversal.
+# Per-shard candidates each hybrid sub-query contributes, independent of page
+# size: min_max normalizes over this pool, so a fixed pool keeps scores stable
+# across pages. Also the pagination_depth OpenSearch requires once `from` > 0.
+# Matches Faiss's default ef_search, so costs no extra HNSW traversal.
 HYBRID_CANDIDATE_DEPTH = 100
 
 # A hit's snippet is highlight fragments joined with " ... ": the standard
@@ -51,10 +43,9 @@ HYBRID_PIPELINE_BODY: dict[str, Any] = {
   ],
 }
 
-# A long SEC section is indexed as consecutive parts (see
-# adapters/sec/pipeline/text_index.py): 1-based part, the section's part count,
-# the id its parts share, and the next part's id. Added to an existing index
-# on startup (an additive mapping change).
+# A long SEC section is indexed as consecutive parts (1-based part, part
+# count, shared parent id, next part's id). Added to existing indexes on
+# startup.
 PART_FIELDS: dict[str, Any] = {
   "part": {"type": "integer"},
   "part_count": {"type": "integer"},
@@ -62,15 +53,12 @@ PART_FIELDS: dict[str, Any] = {
   "next_document_id": {"type": "keyword"},
 }
 
-# Index mapping — faiss engine for better normalized embedding performance.
-# For normalized embeddings (bge-small-en-v1.5), innerproduct is equivalent
-# to cosine similarity and avoids the per-query normalization overhead.
+# Embeddings are normalized, so innerproduct equals cosine without the
+# per-query normalization.
 INDEX_MAPPING = {
   "mappings": {
     "properties": {
-      # Tenant isolation
       "graph_id": {"type": "keyword"},
-      # Document identity
       "document_id": {"type": "keyword"},
       "source_type": {
         "type": "keyword"
@@ -121,12 +109,9 @@ INDEX_MAPPING = {
       "last_modified": {"type": "date"},
       # Timestamps
       "indexed_at": {"type": "date"},
-      # Embedding — faiss engine for normalized embedding performance.
-      # fp16 scalar quantization halves the HNSW graph's native-memory footprint.
-      # bge-small vectors are normalized to [-1, 1], far inside fp16's ±65504, so
-      # clip stays off: an out-of-range value is a bug to reject, not round away.
-      # An encoder is a mapping property — changing it means recreating the index
-      # (`just admin <env> search recreate-index`, then rebuild from source).
+      # fp16 quantization halves HNSW memory; vectors lie in [-1, 1], so clip
+      # stays off (an out-of-range value is a bug to reject). Changing the
+      # encoder requires recreating the index.
       "embedding": {
         "type": "knn_vector",
         "dimension": 384,  # fastembed BAAI/bge-small-en-v1.5
@@ -163,8 +148,8 @@ class OpenSearchClient:
   def client(self):
     """Lazy-initialize the OpenSearch client.
 
-    Detects AWS managed domains by URL pattern and uses SigV4 auth automatically.
-    Local/Docker URLs use direct connection with no auth.
+    AWS managed domains (by hostname) use SigV4; anything else connects
+    unauthenticated.
     """
     if self._client is None:
       from opensearchpy import OpenSearch
@@ -220,8 +205,7 @@ class OpenSearchClient:
   def _ensure_part_fields(self) -> None:
     """Add the section-part fields to an index created before they existed.
 
-    Adding a field to a mapping is allowed and idempotent; changing one is
-    not, and none of these existed before, so the call is safe to repeat.
+    Adding fields is idempotent, so this is safe to repeat.
     """
     try:
       self.client.indices.put_mapping(
@@ -231,12 +215,7 @@ class OpenSearchClient:
       logger.warning(f"Failed to add section-part fields to the mapping: {e}")
 
   def _create_hybrid_pipeline(self) -> None:
-    """Create or update the hybrid search pipeline for score normalization.
-
-    This pipeline normalizes BM25 and KNN scores to the same scale before
-    combining them. Without it, BM25 scores (~10-40) dominate KNN cosine
-    similarity scores (~0-1), making the vector component negligible.
-    """
+    """Create or update the hybrid search score-normalization pipeline."""
     try:
       self.client.http.put(
         f"/_search/pipeline/{HYBRID_PIPELINE_NAME}",
@@ -250,10 +229,8 @@ class OpenSearchClient:
   def bulk_write_mode(self, write_interval: str = "60s", steady_interval: str = "30s"):
     """Slow refresh during bulk writes, restore normal interval on exit.
 
-    During bulk ingestion, frequent refreshes create new Lucene segments and
-    trigger FAISS KNN graph rebuilds every second, degrading search latency.
-    This slows refresh to ``write_interval`` during the load, then restores
-    ``steady_interval`` for normal operations.
+    Each refresh creates Lucene segments and FAISS graph rebuilds, which
+    degrade search latency during bulk ingestion.
     """
     try:
       self.client.indices.put_settings(
@@ -360,8 +337,8 @@ class OpenSearchClient:
       if filters.get("form_type"):
         filter_clauses.append({"term": {"form_type": filters["form_type"].upper()}})
       if filters.get("section"):
-        # A narrative's id is lower case ("item_1a"); a disclosure's id is its
-        # element qname, whose case is significant ("us-gaap:GoodwillDisclosureTextBlock")
+        # Narrative ids are lower case ("item_1a"); disclosure ids are
+        # case-significant qnames.
         section = filters["section"]
         filter_clauses.append(
           {"terms": {"section_id": sorted({section, section.lower()})}}
@@ -421,10 +398,7 @@ class OpenSearchClient:
   ) -> dict[str, Any]:
     """BM25 text search with mandatory graph_id filtering.
 
-    Keyword search over OpenSearch's inverted index, and the default search
-    mode — it stays fast regardless of corpus size because BM25 scoring only
-    touches matching postings lists. Returns the raw OpenSearch response
-    (hits plus highlights).
+    Returns the raw OpenSearch response (hits plus highlights).
     """
     filter_clauses = self._build_filter_clauses(graph_id, filters)
 
@@ -469,44 +443,18 @@ class OpenSearchClient:
   ) -> dict[str, Any]:
     """Hybrid text + vector search with mandatory graph_id filtering.
 
-    Uses OpenSearch's native hybrid query type with a normalization search
-    pipeline. The pipeline normalizes BM25 and KNN scores to [0,1] via
-    min_max, then combines them with weighted arithmetic mean (0.4 BM25,
-    0.6 KNN). This ensures vector similarity actually influences ranking
-    instead of being drowned out by raw BM25 scores.
-
-    Slower than BM25-only due to HNSW graph traversal, especially on
-    large corpora without narrow filters. Best used with entity or
-    section filters that reduce the KNN candidate set.
-
-    Candidate pool: each sub-query contributes HYBRID_CANDIDATE_DEPTH
-    results whatever the page size, so scores and order are stable across
-    `size` and `offset`. Pages past that depth (offset + size > 100)
-    return fewer results than asked. Prefer narrow filters over deep
-    pagination.
-
-    Tenant isolation: OpenSearch 2.x doesn't support top-level filters on
-    hybrid queries (that's 3.0+). Instead, filters are applied inside each
-    sub-query — BM25 via bool.filter, KNN via knn.filter. This ensures
-    both sub-queries only score documents belonging to the target graph_id,
-    preventing cross-tenant data leakage in KNN results.
-
-    ``query_embedding`` must be a 384-dim fastembed vector matching the
-    index mapping. Returns the raw OpenSearch response (hits plus
-    highlights).
+    Scores are normalized by ``HYBRID_PIPELINE_NAME``. Slower than BM25, so
+    best with narrow filters. Pages past HYBRID_CANDIDATE_DEPTH return fewer
+    results than asked. ``query_embedding`` must be a 384-dim fastembed
+    vector. Returns the raw OpenSearch response.
     """
     filter_clauses = self._build_filter_clauses(graph_id, filters)
 
     filter_body: dict[str, Any] = {"bool": {"filter": filter_clauses}}
 
-    # The hybrid query's queries array is positional — index 0 maps to
-    # weight 0 (BM25=0.4) and index 1 maps to weight 1 (KNN=0.6) in
-    # the normalization pipeline.
-    #
-    # Filters are applied INSIDE each sub-query (not as post_filter) to
-    # ensure tenant isolation. With post_filter, KNN would search across
-    # all tenants first and filter after — allowing one tenant's documents
-    # to push another tenant's results out of the top-K.
+    # Sub-query order is positional: [BM25, KNN] match the pipeline weights.
+    # Filters go inside each sub-query (OpenSearch 2.x has no top-level hybrid
+    # filter); a post_filter would let other tenants crowd the KNN top-K.
     search_body: dict[str, Any] = {
       "query": {
         "hybrid": {
@@ -562,7 +510,7 @@ class OpenSearchClient:
       result = self.client.get(index=self.index_name, id=document_id)
       source = result.get("_source", {})
 
-      # Verify graph_id matches — defense in depth
+      # Defense in depth.
       if source.get("graph_id") != graph_id:
         logger.warning(
           f"graph_id mismatch on document {document_id}: "
@@ -602,8 +550,7 @@ class OpenSearchClient:
   def delete_by_accession(self, graph_id: str, source_type: str, accession: str) -> int:
     """Delete every document of one source type for one filing.
 
-    A re-index writes the filing's documents afresh; their ids depend on how
-    each section was split into parts, so the previous set is removed first.
+    Run before a re-index: ids depend on how sections split into parts.
     """
     result = self.client.delete_by_query(
       index=self.index_name,
@@ -623,10 +570,7 @@ class OpenSearchClient:
     return result.get("deleted", 0)
 
   def delete_by_document_prefix(self, graph_id: str, prefix: str) -> int:
-    """Delete all documents matching a document_id prefix within a graph.
-
-    Used to remove all sections of a document during re-upload.
-    """
+    """Delete all documents matching a document_id prefix within a graph."""
     result = self.client.delete_by_query(
       index=self.index_name,
       body={
@@ -670,11 +614,7 @@ class OpenSearchClient:
     filters: dict[str, Any] | None = None,
     size: int = 10,
   ) -> dict[str, Any]:
-    """Pure kNN vector search with mandatory graph_id filtering.
-
-    Unlike `search_hybrid`, this scores on vector similarity alone (no
-    BM25). Used by recall-text for semantic memory retrieval.
-    """
+    """Pure kNN vector search (no BM25) with mandatory graph_id filtering."""
     filter_clauses = self._build_filter_clauses(graph_id, filters)
 
     search_body: dict[str, Any] = {

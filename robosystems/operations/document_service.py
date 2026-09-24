@@ -1,9 +1,4 @@
-"""Document service — PostgreSQL CRUD with OpenSearch sync.
-
-Source of truth is PostgreSQL. On create/update, content is sectioned,
-embedded, and indexed into OpenSearch for search. On delete, both PG
-and OpenSearch records are removed.
-"""
+"""Document CRUD: PostgreSQL is the source of truth, OpenSearch a derived index."""
 
 from __future__ import annotations
 
@@ -29,9 +24,8 @@ def _apply_frontmatter(
 ) -> tuple[str, str | None, list[str] | None | object, str | None | object]:
   """Strip YAML frontmatter from content and let it fill unset fields.
 
-  An "unset" field is either Ellipsis (used by update_document as a sentinel
-  for "not provided") or None (create path, where callers may not supply
-  metadata). Explicit non-None request values always win over frontmatter.
+  "Unset" is Ellipsis (update_document's not-provided sentinel) or None;
+  explicit request values always win over frontmatter.
   """
   if content is None:
     return content, title, tags, folder
@@ -88,7 +82,7 @@ class DocumentService:
       request.content, request.title, request.tags, request.folder
     )
 
-    # Upsert: if external_id exists, update instead (check before tier limit)
+    # Upserts skip the tier limit.
     if request.external_id:
       existing = Document.get_by_external_id(
         graph_id, request.external_id, self.session
@@ -103,11 +97,9 @@ class DocumentService:
           folder=folder,
         )
 
-    # Check tier limits in PG (only for new documents, not upserts)
     if tier:
       self._check_tier_limit(graph_id, tier)
 
-    # Create PG record
     doc = Document.create(
       graph_id=graph_id,
       user_id=user_id,
@@ -124,7 +116,6 @@ class DocumentService:
     return doc, upload_response
 
   def get_document(self, graph_id: str, document_id: str) -> Document | None:
-    """Get a document by ID with graph verification."""
     return Document.get_by_id_and_graph(document_id, graph_id, self.session)
 
   def list_documents(
@@ -163,19 +154,13 @@ class DocumentService:
     if doc is None:
       raise KeyError(f"Document {document_id} not found in graph {graph_id}")
 
-    # Enforce the 500k content cap in the kernel. Create + the REST paths cap it
-    # via the Pydantic request models, but the MCP `update-document` tool
-    # forwards raw content with no length check — an uncapped multi-MB update
-    # would bloat the PG row and the OpenSearch re-index.
+    # The MCP `update-document` tool bypasses the Pydantic cap, so enforce it here.
     if content is not None and len(content) > 500_000:
       raise ValueError(
         f"Content exceeds 500,000 character limit ({len(content):,} chars)"
       )
 
     if content is not None:
-      # _apply_frontmatter returns the Ellipsis sentinel through as `object`;
-      # the caller intentionally re-accepts it. Narrow types match the
-      # same `type: ignore` pattern on the function signature defaults.
       content, title, tags, folder = _apply_frontmatter(  # type: ignore[assignment]
         content, title, tags, folder
       )
@@ -188,7 +173,6 @@ class DocumentService:
       folder=folder,
     )
 
-    # Re-sync to OpenSearch if content or metadata changed
     upload_response = self.resync_document(doc)
 
     return doc, upload_response
@@ -199,15 +183,12 @@ class DocumentService:
     if doc is None:
       return False
 
-    # Delete from OpenSearch first
     self._delete_from_opensearch(graph_id, doc.id)
 
-    # Delete from PG
     doc.delete(self.session)
     return True
 
   def _check_tier_limit(self, graph_id: str, tier: str) -> None:
-    """Check if document count is within tier limit."""
     from robosystems.config.billing.core import get_tier_max_documents
 
     max_docs = get_tier_max_documents(tier)
@@ -224,10 +205,7 @@ class DocumentService:
   def resync_document(self, doc: Document) -> DocumentUploadResponse:
     """Re-section, re-embed and re-index one document from its PostgreSQL row.
 
-    The row is the source of truth and the index is derived from it, so this is
-    the primitive behind create and update — and the whole of a rebuild: after
-    ``search recreate-index`` empties the index, ``rebuild_documents_job`` walks
-    every row through here.
+    The primitive behind create, update, and ``rebuild_documents_job``.
     """
     upload_response = self._sync_to_opensearch(doc)
     doc.update(self.session, sections_indexed=upload_response.sections_indexed)
@@ -272,6 +250,5 @@ class DocumentService:
     if service is None:
       return
 
-    # The OpenSearch document_id prefix uses "udoc_" + PG document id
     os_doc_id = f"udoc_{document_id}"
     service.delete_document(graph_id, os_doc_id)

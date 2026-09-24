@@ -1,20 +1,9 @@
 """BlockedSourceGraph model — the recipient's deny list for cross-graph shares.
 
-Cross-graph report sharing is capability-style: a company that holds a
-subscriber's ``graph_id`` can share published reports into that subscriber's
-tenant schema, and the handover of the id out-of-band is the handshake. That
-model is only sound if the recipient can refuse — a capability that cannot be
-declined is an obligation.
-
-A row here is the recipient saying "no more from this sender". ``share-report``
-consults it before copying anything in, and a blocked sender is told, rather
-than silently dropped: under the capability model the two parties already had a
-relationship, so a bounce is more honest than a shadow ban and stops the sender
-retrying forever.
-
-The table lives in the **recipient's** tenant schema, not the platform DB — it
-is the recipient's own state about their own graph and needs no cross-tenant
-coordination, mirroring how publish lists live in the sender's schema.
+Sharing is capability-style (holding a graph_id is the handshake), so the
+recipient must be able to refuse. ``share-report`` checks this list first and
+tells a blocked sender rather than silently dropping the share. Lives in the
+recipient's tenant schema.
 """
 
 from datetime import UTC, datetime

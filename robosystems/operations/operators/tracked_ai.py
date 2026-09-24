@@ -1,9 +1,5 @@
-"""TrackedAIClient — AIClient plus automatic credit tracking.
-
-Each `create_message()` calls the model, accumulates the reported token counts,
-and consumes credits through the injected `CreditConsumer`. Operators never
-call consume themselves, so no operator can forget to bill.
-"""
+"""TrackedAIClient — AIClient that bills every call through the injected
+`CreditConsumer`, so no operator can forget to."""
 
 from __future__ import annotations
 
@@ -17,11 +13,7 @@ if TYPE_CHECKING:
 
 
 class UnbilledAICallError(Exception):
-  """Raised when a prior AI call in this run could not be billed.
-
-  Stops a tool-use loop from continuing to spend after billing has broken,
-  which is the difference between one unbilled call and an unbounded number.
-  """
+  """A prior AI call in this run could not be billed; stops further spend."""
 
   def __init__(self, detail: str) -> None:
     super().__init__(
@@ -30,11 +22,7 @@ class UnbilledAICallError(Exception):
 
 
 class TrackedAIClient:
-  """AI client that tracks tokens and consumes credits per call.
-
-  One instance per operator run: the accumulated totals and the unbilled-call
-  latch are both per-run state.
-  """
+  """One instance per operator run: totals and the unbilled latch are per run."""
 
   def __init__(
     self,
@@ -48,9 +36,7 @@ class TrackedAIClient:
     self._user_id = user_id
     self._credit_consumer = credit_consumer
 
-    # Accumulated totals across all calls in this context. "input" is the
-    # uncached input only — cache reads/writes are tracked (and billed)
-    # separately, mirroring how Bedrock reports and prices them.
+    # "input" is uncached input only; cache reads/writes are separate.
     self.total_tokens: dict[str, int] = {
       "input": 0,
       "output": 0,
@@ -73,19 +59,10 @@ class TrackedAIClient:
     tools: list[dict[str, Any]] | None = None,
     cache_conversation: bool = False,
   ) -> AIResponse:
-    """Call the model and consume credits for it.
-
-    `operation_description` is what lands in the credit audit trail. Every call
-    in a tool-use loop flows through here, so tokens and credits accumulate
-    across iterations without the loop doing anything.
-
-    Raises `UnbilledAICallError` if an earlier call in this run went unbilled.
+    """Call the model and bill it; `operation_description` lands in the credit
+    audit trail. Raises `UnbilledAICallError` if an earlier call went unbilled.
+    The response of a call that fails to bill is still returned.
     """
-    # A tool-use loop can make dozens of calls. If one of them could not be
-    # billed, every later call in the same run would be unbilled too, so stop
-    # here rather than after the spend. The already-returned answer from the
-    # failed call is kept — Bedrock has been paid for it either way, and
-    # discarding it would waste the money without recovering it.
     if self._unbilled_call is not None:
       raise UnbilledAICallError(self._unbilled_call)
 
@@ -106,8 +83,6 @@ class TrackedAIClient:
     self.total_tokens["cache_write"] += response.cache_creation_input_tokens
     self.call_count += 1
 
-    # No consumer means no billing at all — tests, and contexts with no
-    # platform DB session to bill against.
     if self._credit_consumer is not None:
       try:
         credits = await self._credit_consumer.consume(
@@ -127,11 +102,7 @@ class TrackedAIClient:
     return response
 
   def _mark_unbilled(self, response: AIResponse, reason: str) -> None:
-    """Latch that a completed AI call could not be billed.
-
-    ERROR, not WARNING: this is real unrecovered spend, not a degraded read,
-    and it must not blend into routine log noise.
-    """
+    """Logged at ERROR: this is real unrecovered spend."""
     detail = (
       f"graph={self._graph_id} user={self._user_id} "
       f"tokens=({response.input_tokens}/{response.output_tokens}"
@@ -143,7 +114,6 @@ class TrackedAIClient:
 
   @property
   def credit_summary(self) -> dict[str, Any]:
-    """Summary of accumulated credit usage."""
     return {
       "total_credits_consumed": self.total_credits,
       "total_tokens": self.total_tokens.copy(),

@@ -75,13 +75,8 @@ class OrgLimits(Model):
     return limits
 
   def _count_org_graphs(self, session: Session) -> int:
-    """Count the org's live top-level graphs.
-
-    Counts graphs owned by the org, not GraphUser access rows — with
-    multi-user graphs, one graph has many access rows and counting them
-    would burn quota on every grant. Subgraphs are governed by per-tier
-    subgraph quotas, not the org graph limit.
-    """
+    """Count the org's live top-level graphs (owned graphs, not access rows;
+    subgraphs have their own per-tier quota)."""
     from robosystems.models.core.graph.graph import Graph, GraphStatus
 
     return (

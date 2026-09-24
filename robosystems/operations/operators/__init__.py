@@ -1,29 +1,7 @@
-"""AI Operators — routing, execution adapters, and credit tracking.
+"""AI Operators — routing, execution adapters, and credit tracking. See the
+README in this directory."""
 
-## Operator protocol
-
-An operator subclasses `Operator`, declares an `OperatorSpec`, implements
-``run(ctx: OperatorContext) -> OperatorResult``, and registers itself with
-``@register_operator("name")``. Credit tracking is automatic: every AI call
-goes through `TrackedAIClient`, so an operator never consumes credits itself.
-
-## Execution adapters
-
-An operator is stateless — the adapter builds the context around it.
-
-- ``run_operator_api()``: API request context (sync/SSE)
-- ``run_operator_worker()``: worker context (background tasks)
-
-`OperatorResult` is the operator-facing return type; `OperatorResponse` is the
-API-facing shape. The orchestrator converts between them at the boundary.
-
-## Naming
-
-"Operator" is the AI-executor concept (Claude/MCP), distinct from REA ``Agent``
-(counterparty) in ``models/extensions/roboledger/agent.py``.
-"""
-
-# Register operator implementations (must import before anything uses the registry)
+# Registers the operators; must precede any registry use.
 from robosystems.operations.operators import implementations  # noqa: F401
 from robosystems.operations.operators.adapters import (
   run_operator_api,
@@ -84,7 +62,6 @@ from robosystems.operations.operators.tracked_ai import TrackedAIClient
 load_adapter_operators()
 
 __all__ = [
-  # Runtime services
   "AIClient",
   "BaseOperator",
   "CallbackProgress",
@@ -97,15 +74,11 @@ __all__ = [
   "NoOpCreditConsumer",
   "NoOpProgress",
   "OperationManagerProgress",
-  # Operator protocol
   "Operator",
-  # Shared enums
   "OperatorCapability",
   "OperatorContext",
-  # API response shape
   "OperatorMetadata",
   "OperatorMode",
-  # Orchestrator
   "OperatorOrchestrator",
   "OperatorResponse",
   "OperatorResult",
@@ -119,14 +92,12 @@ __all__ = [
   "TrackedAIClient",
   "enforce_operator_graph_scope",
   "enforce_operator_write_role",
-  # Registry
   "get_operator",
   "get_operator_class",
   "list_operators",
   "load_adapter_operators",
   "matches_graph_scope",
   "register_operator",
-  # Adapters
   "run_operator_api",
   "run_operator_worker",
 ]

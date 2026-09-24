@@ -1,15 +1,5 @@
-"""EntityTaxonomy join table — entity ↔ taxonomy adoption relationships.
-
-Models the ENTITY_HAS_TAXONOMY graph edge as an OLTP many-to-many
-junction. An entity can adopt multiple taxonomies across different bases
-(reporting, chart_of_accounts, mapping, schedule). Within each basis, at
-most one row is marked `is_primary=true` (enforced by a partial unique
-index).
-
-This is a base ontology concept — entities always have taxonomies,
-regardless of which extension the entity lives in. See schemas/base.py
-INVARIANT 1 (aspirational base).
-"""
+"""EntityTaxonomy: the entity ↔ taxonomy adoption junction (the
+ENTITY_HAS_TAXONOMY graph edge), with at most one primary per basis."""
 
 from datetime import UTC, datetime
 
@@ -34,19 +24,13 @@ class EntityTaxonomy(ExtensionsBase):
   __table_args__ = (
     Index("idx_entity_taxonomies_entity", "entity_id"),
     Index("idx_entity_taxonomies_taxonomy", "taxonomy_id"),
-    # Exactly one row per (entity, taxonomy, basis) combination. If an entity
-    # needs to change its adoption (e.g., switch primary reporting from
-    # us-gaap-2023 to us-gaap-2024), update the existing row in place rather
-    # than creating a second row. Historical adoption tracking, if needed,
-    # belongs in an audit log, not in this current-state table.
+    # Current state only: change an adoption by updating its row in place.
     UniqueConstraint(
       "entity_id",
       "taxonomy_id",
       "basis",
       name="uq_entity_taxonomy_combo",
     ),
-    # At most one is_primary=true row per (entity, basis). An entity can have
-    # one primary reporting taxonomy, one primary CoA, etc.
     Index(
       "idx_entity_taxonomies_primary",
       "entity_id",
@@ -65,34 +49,23 @@ class EntityTaxonomy(ExtensionsBase):
     ),
   )
 
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("et"))
 
-  # Foreign keys
-  # entity_id uses CASCADE because an adoption is meaningless without its
-  # entity — deleting the entity should remove its adoption rows with it.
   entity_id = Column(
     String, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False
   )
-  # taxonomy_id uses RESTRICT because taxonomies are shared infrastructure —
-  # deleting a taxonomy that is still referenced by entity adoptions should
-  # be an explicit operator decision, not a silent cascade.
+  # RESTRICT: taxonomies are shared, so deleting an adopted one must be
+  # deliberate.
   taxonomy_id = Column(
     String, ForeignKey("taxonomies.id", ondelete="RESTRICT"), nullable=False
   )
 
-  # Adoption metadata
   is_primary = Column(Boolean, nullable=False, default=False)
-  basis = Column(
-    String, nullable=False
-  )  # reporting | chart_of_accounts | mapping | schedule
+  basis = Column(String, nullable=False)
   effective_from = Column(Date, nullable=True)
   effective_to = Column(Date, nullable=True)
-  adoption_context = Column(
-    String, nullable=True
-  )  # required_by_regulation | voluntary | contractual
+  adoption_context = Column(String, nullable=True)
 
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

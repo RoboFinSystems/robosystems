@@ -289,10 +289,7 @@ class ScheduleCreatedResponse(BaseModel):
   total_periods: int
   total_facts: int
   rule_summary: dict[str, int] | None = None
-  # Every schedule is backed by an event chain. Callers can use
-  # `schedule_created_event_id` as the obligation-register handle and
-  # `pending_event_count` as a quick sanity check that materialization
-  # produced one event per period.
+  # `pending_event_count` should equal the number of periods materialized.
   schedule_created_event_id: str | None = None
   pending_event_count: int = 0
 
@@ -400,7 +397,5 @@ class RebuildScheduleRequest(BaseModel):
   )
 
 
-# Asset disposal is an event block:
-# `create-event-block(event_type='asset_disposed')`. See
-# operations/event_block/python_handlers/asset_disposed.py for the
-# metadata schema (AssetDisposedMetadata).
+# Asset disposal is `create-event-block(event_type='asset_disposed')`; its
+# metadata schema is AssetDisposedMetadata.

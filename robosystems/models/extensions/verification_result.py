@@ -1,20 +1,8 @@
 """VerificationResult model — persisted outcome of a Rule evaluation.
 
-Each row records a single rule's outcome against a fact set:
-
-- ``rule_id`` FKs the rule being evaluated.
-- ``structure_id`` (nullable) FKs the block the rule was evaluated
-  against — matches the rule's polymorphic target when applicable.
-- ``fact_set_id`` (nullable) loosely references the FactSet the evaluation
-  bound ``$Variable`` values against (no FK constraint — the engine may
-  write results before the FactSet row is committed). Null for rules that
-  run outside a FactSet context (e.g. library-time structural checks).
-- ``status`` IN ('pass','fail','error','skipped') captures the
-  outcome; ``message`` carries the human-readable explanation.
-
-Rows are written by the rule evaluation engine; this model exists so
-engine output has a durable home that MCP tools + the block viewer can
-read.
+``fact_set_id`` has no FK constraint because the engine may write results
+before the FactSet commits; it is NULL for checks run outside a FactSet
+(library-time structural checks).
 """
 
 from datetime import UTC, datetime

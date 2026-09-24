@@ -124,12 +124,9 @@ class BillingSubscription(Base):
     Index("idx_billing_sub_stripe", "stripe_subscription_id"),
     Index("idx_billing_sub_provider", "provider_subscription_id"),
     Index("idx_billing_sub_cancellation_type", "cancellation_type"),
-    # One live subscription per (resource, subscriber). Repository access is
-    # per user, so two concurrent subscribes must not both create a provider
-    # subscription; the router's pre-check is advisory, this is the guarantee
-    # (same shape as `uq_connections_graph_source_name`). Graph rows carry no
-    # user_id, and checkout rows carry no resource_id until provisioning binds
-    # one, so neither is constrained here.
+    # One live subscription per (resource, subscriber); the router's pre-check
+    # is advisory, this is the guarantee. Graph rows (no user_id) and checkout
+    # rows (no resource_id yet) are unconstrained.
     Index(
       "uq_billing_sub_live_user_resource",
       "resource_type",
@@ -159,12 +156,10 @@ class BillingSubscription(Base):
     stripe_subscription_id: str | None = None,
     user_id: str | None = None,
   ) -> "BillingSubscription":
-    """Create a new subscription.
+    """Create a pending subscription.
 
-    Pass `user_id` for per-user resources (repository subscriptions) so access
-    and credits can be provisioned to the right member of the paying org.
-    `resource_id` may be None for pre-provisioning rows (checkout creates the
-    subscription first and binds the resource after payment).
+    Pass `user_id` for per-user resources (repositories). `resource_id` is
+    None for checkout rows, which bind the resource after payment.
     """
     now = datetime.now(UTC)
 
@@ -211,19 +206,11 @@ class BillingSubscription(Base):
     session: Session,
     exclude_statuses: tuple[str, ...] = (),
   ) -> Optional["BillingSubscription"]:
-    """Get subscription for a specific resource and organization.
+    """Get the org's subscription to a resource.
 
-    Scoping by org matters for shared repositories, where several orgs hold
-    separate subscriptions to the same resource.
-
-    Pass `exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES` when checking for
-    a *conflicting* subscription: canceled/failed rows are never deleted, and
-    an unfiltered lookup would treat that history as a live duplicate.
-
-    When several rows exist for the same resource (a canceled subscription
-    followed by a resubscribe), the one still in force wins, then recency —
-    so "the subscription" always resolves to the live row when there is one,
-    and to the most recent terminal row when there is not.
+    Pass `exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES` when checking for a
+    conflict: terminal rows are never deleted. Among several rows the one
+    still in force wins, then recency.
     """
     query = session.query(cls).filter(
       cls.resource_type == resource_type,
@@ -246,13 +233,8 @@ class BillingSubscription(Base):
     session: Session,
     exclude_statuses: tuple[str, ...] = (),
   ) -> Optional["BillingSubscription"]:
-    """Get a specific user's subscription to a resource.
-
-    Keyed on the subscriber, not their org: repository access and credits are
-    granted per user, so one member's subscription must never resolve as
-    another member's. Ordering matches `get_by_resource_and_org` — the row
-    still in force wins, then recency.
-    """
+    """Get a user's own subscription to a resource (access and credits are
+    per user). Ordering matches `get_by_resource_and_org`."""
     query = session.query(cls).filter(
       cls.resource_type == resource_type,
       cls.resource_id == resource_id,
@@ -283,12 +265,8 @@ class BillingSubscription(Base):
   def get_live_subscriptions_for_user(
     cls, user_id: str, session: Session, resource_type: str | None = None
   ) -> list["BillingSubscription"]:
-    """Get a user's own subscriptions that are still in force.
-
-    "In force" is everything outside the terminal statuses — a pending or
-    past-due row still bills and still has to be cleaned up when the member
-    is off-boarded or their account is deleted.
-    """
+    """Get a user's subscriptions in any non-terminal status (pending and
+    past-due rows included)."""
     query = session.query(cls).filter(
       cls.user_id == user_id,
       cls.status.notin_(TERMINAL_SUBSCRIPTION_STATUSES),
@@ -323,11 +301,7 @@ class BillingSubscription(Base):
     )
 
   def _invalidate_access_cache(self) -> None:
-    """Invalidate the subscription access cache for this resource.
-
-    Called on any status change so require_graph_access() re-checks the DB
-    instead of serving a stale cached result for up to 300s.
-    """
+    """Drop the cached graph-access check so a status change applies at once."""
     if self.resource_type == "graph" and self.resource_id:
       try:
         from robosystems.middleware.billing.enforcement import (
@@ -343,36 +317,20 @@ class BillingSubscription(Base):
   ) -> bool:
     """Atomically claim this subscription for a provisioning run.
 
-    Returns True to exactly one caller. Provisioning has more than one
-    trigger — separate provider events, each legitimate on its own — so the
-    guard has to live at the sink rather than at each caller, or adding a
-    trigger later silently re-opens the hole.
-
-    The whole decision is one conditional UPDATE, which makes it a mutex
-    without an advisory lock or a new table:
-
-    * ``resource_id IS NULL`` is the terminal condition. Once a resource
-      exists the subscription is never re-provisioned, whatever its status
-      and however many callers arrive.
-    * ``pending``/``pending_payment`` is the ordinary first entry.
-    * A ``provisioning`` row is re-claimable only once it has gone stale,
-      which is what makes a genuinely dead attempt retryable (a killed
-      worker, a provider redelivery after a timeout) while two concurrent
-      callers still resolve to one winner: the loser re-evaluates the
-      predicate after the winner's row lock clears, sees a freshly stamped
-      row, and matches nothing.
-
-    ``updated_at`` is stamped by the claim itself, so it doubles as the
-    heartbeat the staleness window is measured against.
+    Returns True to exactly one caller. Provisioning has several triggers, so
+    the guard lives here at the sink. The decision is one conditional UPDATE:
+    a row with a resource is never re-provisioned; ``pending`` rows are the
+    first entry; a ``provisioning`` row is re-claimable only once stale, so a
+    dead attempt can retry while concurrent callers still resolve to one
+    winner. ``updated_at`` is stamped by the claim and doubles as the
+    heartbeat for the staleness window.
     """
     from sqlalchemy import and_, or_
 
     now = datetime.now(UTC)
     stale_cutoff = now - timedelta(minutes=stale_after_minutes)
 
-    # Pre-state for observability only — correctness comes from the UPDATE's
-    # predicate. If this still reads "provisioning" when the claim succeeds,
-    # the claim was taken from a stale holder rather than a first entry.
+    # For logging only; the UPDATE predicate decides the claim.
     prior_status = self.status
 
     claimed = (
@@ -430,23 +388,13 @@ class BillingSubscription(Base):
   ) -> bool:
     """Terminally fail a provisioning attempt that is stale *right now*.
 
-    The claim's terminal counterpart, built with the same care: one
-    conditional UPDATE whose predicate re-checks staleness at write time.
-    The reaper's sensor read and this write are minutes apart, and in that
-    gap a provider redelivery may legitimately re-claim the row — which
-    leaves the status at ``provisioning`` but stamps a fresh heartbeat, so a
-    status check alone would write off a live run. Here a concurrent claim
-    either committed first (fresh heartbeat, no match) or blocks on the row
-    lock and then finds ``failed``, which it refuses.
-
-    ``ends_at`` starts the retention clock the lifecycle sensors measure —
-    terminal status plus that timestamp is what makes any infrastructure the
-    attempt created reclaimable on the ordinary schedule.
-
-    The metadata merge reads from ``self``, which is safe under the
-    predicate: any interleaved write stamps ``updated_at`` via ``onupdate``
-    and defeats the staleness check, so a row this method actually updates is
-    one nobody has touched since it was loaded.
+    The predicate re-checks staleness at write time: a redelivery may have
+    re-claimed the row since the reaper read it, leaving status
+    ``provisioning`` with a fresh heartbeat, and a status check alone would
+    write off a live run. ``ends_at`` starts the retention clock the lifecycle
+    sensors use to reclaim any infrastructure the attempt created. Merging
+    metadata from ``self`` is safe: any interleaved write bumps ``updated_at``
+    and defeats the predicate.
     """
     now = datetime.now(UTC)
     stale_cutoff = now - timedelta(minutes=stale_after_minutes)
@@ -516,16 +464,10 @@ class BillingSubscription(Base):
     logger.info(f"Paused subscription {self.id}")
 
   def cancel(self, session: Session, immediate: bool = False) -> None:
-    """Cancel the subscription.
+    """Cancel the subscription, recording ``cancellation_type`` for sensors.
 
-    Sets `cancellation_type` to "immediate" or "period_end" so downstream
-    sensors (e.g. deprovisioning) can branch on the user's intent without
-    re-deriving it from timestamps.
-
-    Raises ValueError if `immediate=False` is requested on a subscription
-    whose `current_period_end` is None — without an `ends_at` value the
-    deprovision sensor's `ends_at.isnot(None)` filter would silently skip
-    the sub forever, leaking infrastructure.
+    Raises ValueError for a period-end cancel with no ``current_period_end``:
+    without ``ends_at`` the deprovision sensor would skip the row forever.
     """
     now = datetime.now(UTC)
 
@@ -598,12 +540,7 @@ class BillingSubscription(Base):
     return timedelta(days=30)
 
   def renew_period(self, session: Session) -> None:
-    """Advance to the next billing period.
-
-    Shifts current_period_start to the old current_period_end and extends
-    current_period_end by the billing interval duration. Used by the invoice
-    billing renewal job.
-    """
+    """Advance to the next billing period. Flushes, does not commit."""
     now = datetime.now(UTC)
     delta = self._get_period_delta()
     self.current_period_start = self.current_period_end

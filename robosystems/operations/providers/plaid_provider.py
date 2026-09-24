@@ -1,24 +1,10 @@
 """Plaid connection provider — the aggregator bank feed.
 
-A bank-feed provider (``BANK_FEED_PROVIDERS``): native accounting, so the
-provider guard requires a chart of accounts and no live QuickBooks before a
-connection is created. One connection is one Plaid Item — one institution
-login for one customer — so a graph can hold several.
-
-The connect flow reuses the OAuth endpoints, because Plaid Link is a consent
-flow with an embedded widget instead of a redirect:
-
-- ``oauth/init`` mints a Link token (``create_link_token``) — for a new Item,
-  or in update mode on the connection's Item when its login needs repair.
-- The app opens Link; Link hands back a ``public_token``.
-- ``oauth/callback/plaid`` takes that token as ``code`` and completes the
-  link (``complete_plaid_link``): exchange it for the Item's access token,
-  refuse an Item the graph already has, store the credential encrypted,
-  record the consent, and start the first sync.
-
-The platform's Plaid client id and secret sit in Secrets Manager; the
-customer's credential is the per-Item access token, never a pasted key.
-Disconnect removes the Item at Plaid and runs ``purge_bank_feed`` on the graph.
+One connection is one Plaid Item (one institution login), so a graph can
+hold several. Link reuses the OAuth endpoints: ``oauth/init`` mints a Link
+token (update mode when the Item's login needs repair), and
+``oauth/callback/plaid`` receives the ``public_token`` as ``code`` and runs
+``complete_plaid_link``.
 """
 
 from __future__ import annotations

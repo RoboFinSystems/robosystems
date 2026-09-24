@@ -97,20 +97,14 @@ class QuickBooksOAuthProvider:
 
   @property
   def revoke_url(self) -> str:
-    """Intuit OAuth2 token revocation endpoint (same host for sandbox/prod)."""
+    """Same host for sandbox and production."""
     return "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"
 
   async def revoke_token(self, token: str) -> bool:
-    """Revoke an Intuit OAuth token at the provider.
+    """Revoke an Intuit OAuth token; revoking the refresh token ends the grant.
 
-    Revoking the **refresh** token invalidates the entire grant (access +
-    refresh), fully tearing the authorization down on Intuit's side — not just
-    locally. Mirrors the Basic-auth shape of ``OAuthHandler.refresh_tokens``.
-
-    Returns True on success (HTTP 200); logs and returns False otherwise so the
-    caller can proceed with local teardown regardless.
+    Returns False (logged) on failure so local teardown can proceed.
     """
-    # Explicit timeout: a slow Intuit endpoint shouldn't stall disconnect.
     async with httpx.AsyncClient(timeout=10.0) as client:
       response = await client.post(
         self.revoke_url,

@@ -1,9 +1,7 @@
 """Generic OAuth2 handler for connection providers.
 
-`OAuthHandler` drives the authorization-code flow against any provider that
-implements `OAuthProviderProtocol` (see `quickbooks_provider.py` for the one
-concrete implementation). Providers supply endpoints, credentials, and the
-handful of vendor-specific parameters; everything else is shared here.
+Providers implement `OAuthProviderProtocol` (endpoints, credentials, vendor
+parameters); `OAuthHandler` runs the shared authorization-code flow.
 """
 
 import hashlib
@@ -64,30 +62,15 @@ _STATE_KEY_PREFIX = "oauth:state:"
 class OAuthState:
   """Single-use, 10-minute CSRF state for an in-flight authorization.
 
-  Held in Valkey rather than process memory: the API runs multiple tasks
-  behind a load balancer with no session affinity, so the callback lands on
-  an arbitrary one. Per-process storage meant a flow only completed when the
-  callback happened to hit the task that started it — a coin flip at two
-  tasks, worse as the service scales out.
-
-  Expiry is the key's TTL, so abandoned flows evict themselves. Redemption
-  is a single ``GETDEL``, which makes single-use atomic *across* tasks; the
-  previous ``del`` on a local dict only held within one process.
-
-  This is defense in depth, not the only guard — the callback route is
-  authenticated and separately checks that the caller matches the user the
-  state was minted for.
+  In Valkey because the callback lands on an arbitrary API task; ``GETDEL``
+  makes single use atomic across tasks. Defense in depth: the callback route
+  also checks the caller is the user the state was minted for.
   """
 
   @staticmethod
   def _key(state: str) -> str:
-    """Storage key for a state token: a SHA-256 of the token, never the token.
-
-    Hashing at rest means a read of the store can't replay an in-flight
-    flow. A KDF would be the wrong tool here for the same reason as in
-    ``UserApiKey._fingerprint_api_key``: the input is a 256-bit
-    ``secrets.token_urlsafe`` value, not a human-chosen secret.
-    """
+    """SHA-256 of the token, so a store read can't replay a flow. No KDF: the
+    input is 256 random bits, not a human secret."""
     return f"{_STATE_KEY_PREFIX}{hashlib.sha256(state.encode()).hexdigest()}"
 
   @classmethod
@@ -100,9 +83,8 @@ class OAuthState:
   ) -> str:
     """Mint a state token and record what the callback should resume.
 
-    Raises if the store is unreachable: a flow whose state was never
-    persisted can only fail later at the callback, so failing here keeps the
-    error next to its cause.
+    Raises 503 if the store is unreachable rather than fail later at the
+    callback.
     """
     state = secrets.token_urlsafe(32)
     now = datetime.now(UTC)
@@ -130,10 +112,7 @@ class OAuthState:
   def validate(cls, state: str) -> dict[str, Any] | None:
     """Consume a state token, returning what it recorded, or None if invalid.
 
-    Consuming is the point: an expired or already-redeemed token is gone, so
-    the same authorization code can't be replayed. Fails closed — an
-    unreachable or unparseable store reads as an invalid state rather than
-    waving the callback through.
+    Fails closed: an unreachable store or malformed payload reads as invalid.
     """
     try:
       client = create_redis_client(ValkeyDatabase.AUTH)
@@ -166,11 +145,8 @@ class OAuthHandler:
   def _validate_redirect_uri(redirect_uri: str) -> None:
     """Reject a client-supplied redirect_uri outside the trusted origins.
 
-    The value is echoed into the provider authorize URL and replayed at
-    token exchange, so an unconstrained value lets a caller redirect the
-    authorization code to an arbitrary host. Allow only the origins we
-    already trust for the frontends (the CORS allowlist); the server-built
-    default is exempt because it isn't caller-controlled.
+    Otherwise a caller could redirect the authorization code to any host.
+    Only the CORS allowlist origins pass.
     """
     parsed = urlparse(redirect_uri)
     origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -214,9 +190,8 @@ class OAuthHandler:
   ) -> dict[str, Any]:
     """Exchange an authorization code for tokens.
 
-    `redirect_uri` must be byte-identical to the one sent to the authorize
-    endpoint or the provider rejects the exchange. An absolute `expires_at`
-    is derived from the returned `expires_in` before the value is stored.
+    `redirect_uri` must be byte-identical to the one sent to authorize.
+    Adds an absolute `expires_at` from `expires_in`.
     """
     token_data = {
       "grant_type": "authorization_code",
@@ -254,8 +229,7 @@ class OAuthHandler:
   async def refresh_tokens(self, refresh_token: str) -> dict[str, Any]:
     """Trade a refresh token for a fresh access token.
 
-    Providers commonly rotate the refresh token too, so store the whole
-    response — keeping the old refresh token strands the connection.
+    Store the whole response: providers rotate the refresh token too.
     """
     refresh_data = {
       "grant_type": "refresh_token",
@@ -300,8 +274,7 @@ class OAuthHandler:
   ):
     """Persist tokens (encrypted at rest by `ConnectionCredentials`).
 
-    Upserts on `connection_id`, so re-authorizing an existing connection
-    replaces its tokens rather than leaving two credential rows behind.
+    Upserts on `connection_id`.
     """
     expires_at = tokens.get("expires_at")
     credential_data = {
@@ -331,10 +304,5 @@ class OAuthHandler:
       logger.info(f"Created OAuth tokens for connection {connection_id}")
 
   async def validate_connection(self, access_token: str) -> bool:
-    """Whether the connection still works.
-
-    This default only checks that a token is present. Providers that can cheaply
-    call an authenticated endpoint should override it — see
-    `QuickBooksOAuthProvider.validate_connection`.
-    """
+    """Only checks that a token is present."""
     return bool(access_token)

@@ -1,16 +1,8 @@
-"""FactSet model — period-specific instantiation of a Structure.
+"""FactSet: a period-specific instantiation of a Structure.
 
-A Structure accumulates many FactSets over time — one per period run.
-Structure = Information Model + Mechanics declaration (persistent);
-FactSet = a period-specific instantiation of that Structure;
-Information Block envelope = Structure + FactSet for a given period.
-
-The table provides one period-scoped grouping concept that statements
-and schedules share. ``create_report`` creates a FactSet row first and
-stamps all facts with ``fact_set_id`` (the FK on ``facts.fact_set_id``
-is NOT NULL ON DELETE CASCADE, so deleting the FactSet cascades to its
-facts). The link to a parent Report lives here, on ``report_id`` — facts
-themselves carry no report reference.
+A Structure accumulates one FactSet per period run; an Information Block
+envelope is Structure + FactSet. Facts reference their FactSet (deleting it
+cascades to them), and only the FactSet points at a parent Report.
 """
 
 from datetime import UTC, datetime
@@ -35,12 +27,8 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 class ProvenanceRequiredError(ValueError):
   """Raised when a FactSet is inserted without a provenance descriptor.
 
-  Every FactSet must record how its facts were constructed (the
-  auditability spine — see ``models/api/fact_provenance``). Stamping is
-  mandatory at emission the way double-entry balance is mandatory: the
-  blessed ``operations/roboledger/fact_set.create_fact_set`` helper sets
-  it, and the ``before_insert`` backstop below makes an unstamped insert
-  fail rather than silently produce an ungrounded fact.
+  ``create_fact_set`` stamps it; the ``before_insert`` backstop below makes
+  any other insert fail rather than produce an ungrounded fact.
   """
 
 
@@ -57,67 +45,47 @@ class FactSet(ExtensionsBase):
       postgresql_where=text("scenario_id IS NOT NULL"),
     ),
     CheckConstraint(
-      # 'disclosure' = a standing text-block binding set: the durable
-      # Document->fact bind that report builds snapshot from.
-      # 'metric' = a standing computed-metric set: one per
-      # (structure, entity, period_end), filled by compute-metrics.
       "factset_type IN ('report', 'schedule', 'custom', 'disclosure', 'metric')",
       name="check_fact_set_type",
     ),
   )
 
-  # Identity — ``fs_``-prefixed ULID, matching the id shape
-  # ``schedules/service.py`` stamps on ``facts.fact_set_id``.
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("fs"))
 
-  # Structure the fact set instantiates. Nullable at the DB level for rows
-  # whose structure linkage is implicit; every write path populates it.
+  # Nullable in the DB, but every write path populates it.
   structure_id = Column(String, ForeignKey("structures.id"), nullable=True)
 
-  # Period coverage — same semantics as ``facts.period_start/period_end``.
   period_start = Column(Date, nullable=True)
   period_end = Column(Date, nullable=False)
 
-  # Kind of FactSet — 'report' for statement renderers, 'schedule' for
-  # closing-entry generators, 'custom' for agent-authored derivative
-  # blocks, 'disclosure' for standing text-block binds, 'metric' for
-  # standing computed-metric time series. Enum closure enforced by the
-  # CHECK constraint above.
+  # report: statement renderers. schedule: closing-entry generators.
+  # custom: agent-authored derivative blocks. disclosure: the standing
+  # Document->fact text-block binds report builds snapshot from. metric: one
+  # standing computed-metric set per (structure, entity, period_end).
   factset_type = Column(String, nullable=False, default="report")
 
-  # Multi-tenant + cross-link fields. ``entity_id`` matches
-  # ``facts.entity_id`` so queries can bound FactSet scans to one entity
-  # without joining facts.
+  # Matches facts.entity_id, so scans bound to one entity skip the join.
   entity_id = Column(String, nullable=False)
 
-  # ``report_id`` back-pointer to the parent Report. Nullable so the
-  # cross-graph share path can mint a FactSet that references a target
-  # Report whose id isn't known until the snapshot is copied; report
-  # facts created via ``create_report`` always populate it.
+  # Nullable for the cross-graph share path, which learns the target Report id
+  # only after copying the snapshot.
   report_id = Column(String, nullable=True)
 
-  # Scenario axis (the forecast engine's parallel universes). NULL =
-  # actuals, so any writer that leaves it unset lands in the actuals
-  # slice. Non-NULL points at the owning ``forecast`` Structure (the block
-  # IS the scenario), and ON DELETE CASCADE removes the whole scenario
-  # slice with its block. Never SET NULL here: an orphaned scenario set
-  # demoted to NULL would masquerade as actuals.
+  # Forecast scenario: NULL is actuals; otherwise the owning ``forecast``
+  # Structure. CASCADE, never SET NULL: an orphaned scenario set demoted to
+  # NULL would masquerade as actuals.
   scenario_id = Column(
     String,
     ForeignKey("structures.id", ondelete="CASCADE"),
     nullable=True,
   )
 
-  # Free-form metadata (render config pins, template id at creation time,
-  # agent prompt, etc.). Typed fact provenance does NOT go in this bag — it
-  # has its own ``provenance`` column below.
+  # Free-form (render pins, template id, agent prompt); provenance has its own
+  # column.
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
 
-  # Typed ``FactProvenance`` descriptor (discriminated on ``origin``) — how
-  # this FactSet's facts were constructed. Nullable at the DB level so rows
-  # predating the descriptor stay readable; new inserts are required to carry
-  # one, enforced at the application boundary (the ``before_insert`` backstop
-  # below plus the ``create_fact_set`` helper).
+  # Typed ``FactProvenance`` (discriminated on ``origin``). Nullable for old
+  # rows; required on insert by the backstop below.
   provenance = Column(JSONB, nullable=True)
 
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
@@ -138,12 +106,8 @@ class FactSet(ExtensionsBase):
 
 @event.listens_for(FactSet, "before_insert")
 def _require_provenance(_mapper, _connection, target: FactSet) -> None:
-  """Mandatory-at-emission backstop: a new FactSet must carry provenance.
-
-  INSERT only, so a row with ``provenance IS NULL`` can still be updated. A
-  presence guard rather than a re-parse — the typed union is already validated
-  in ``create_fact_set`` before the value lands here.
-  """
+  """Reject a FactSet insert without provenance. Insert only, and a presence
+  check only: ``create_fact_set`` already validated the typed union."""
   prov = target.provenance
   if not prov or not isinstance(prov, dict) or "origin" not in prov:
     raise ProvenanceRequiredError(

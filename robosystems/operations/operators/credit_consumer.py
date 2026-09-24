@@ -1,12 +1,5 @@
-"""Credit consumers — one per execution context.
-
-`CreditConsumer` is a protocol; each implementation differs only in how it
-obtains a database session before calling `CreditService.consume_ai_tokens`.
-
-- `SessionCreditConsumer`: API context (reuses the request's db session)
-- `FactoryCreditConsumer`: worker context (creates a session per call)
-- `NoOpCreditConsumer`: tests and any context that must not bill
-"""
+"""Credit consumers — one per execution context; each differs only in how it
+gets the session it passes to `CreditService.consume_ai_tokens`."""
 
 from __future__ import annotations
 
@@ -24,8 +17,6 @@ class CreditConsumptionError(Exception):
 
 @runtime_checkable
 class CreditConsumer(Protocol):
-  """Protocol for credit consumption — adapted per execution context."""
-
   async def consume(
     self,
     graph_id: str,
@@ -37,18 +28,14 @@ class CreditConsumer(Protocol):
     cache_read_input_tokens: int = 0,
     cache_creation_input_tokens: int = 0,
   ) -> float:
-    """Consume credits for an AI call. Returns credits consumed.
-
-    Raises:
-        CreditConsumptionError: if the consumption could not be recorded.
-    """
+    """Return credits consumed; raise `CreditConsumptionError` if not recorded."""
 
 
 class SessionCreditConsumer:
   """API context: bills on the request's own session.
 
-  Sharing the request's transaction scope means consumption commits or rolls
-  back with the rest of the request.
+  The debit commits (or, on failure, rolls back) that session itself, so it
+  does not share the request's transaction and takes any pending work with it.
   """
 
   def __init__(self, db_session) -> None:
@@ -86,12 +73,8 @@ class SessionCreditConsumer:
 
 
 class FactoryCreditConsumer:
-  """Worker context: one short-lived session, and one transaction, per call.
-
-  Independent transactions match the worker's per-batch model, where partial
-  progress is committed — a long run that dies partway is still billed for the
-  calls it actually made.
-  """
+  """Worker context: one short-lived session, and one transaction, per call,
+  so a run that dies partway is still billed for the calls it made."""
 
   async def consume(
     self,

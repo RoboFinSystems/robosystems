@@ -1,23 +1,9 @@
-"""Classification model — structural pattern classification for associations.
+"""Structural pattern classifications attached to associations via
+`association_classifications`: `concept_arrangement`, `member_arrangement`,
+and `named_disclosure` (the SEC disclosure mechanics catalog).
 
-Covers the three association-level categories attached to Associations via
-`association_classifications`:
-
-- `concept_arrangement` — Charlie's 8 canonical Concept Arrangement
-  Patterns + 2 pseudo (Set, RollUp, RollForward, RollForwardInfo,
-  Adjustment, Variance, Arithmetic, TextBlock + Grid, CompoundFact)
-- `member_arrangement`  — Charlie's 5-pattern aggregation spectrum:
-  IsA / WholePart / NestedWholePart / TwoDimensionAggregation /
-  ComplexAggregatingWholePart
-- `named_disclosure`    — SEC disclosure mechanics catalog (AssetsRollUp,
-  CashFlowStatement, …)
-
-Element-level FASB metamodel traits (asset, liability, current, operating,
-etc.) live in :class:`~robosystems.models.extensions.trait.Trait` +
-:class:`~robosystems.models.extensions.element_trait.ElementTrait` instead.
-
-`id` is shared with the graph `Classification` node so an OLTP row and its
-graph counterpart refer to the same classification.
+Element-level traits are :class:`Trait` instead. `id` is shared with the
+graph `Classification` node.
 """
 
 from datetime import UTC, datetime
@@ -56,8 +42,6 @@ class Classification(ExtensionsBase):
       name="check_classification_category",
     ),
   )
-
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("cls"))
 
   # Axis membership
@@ -67,8 +51,6 @@ class Classification(ExtensionsBase):
   # Where this classification comes from: 'fac' | 'sec' (SEC disclosure
   # mechanics) | 'system' (built-in) | 'user'.
   type = Column(String, nullable=False, default="system")
-
-  # Display
   name = Column(String, nullable=True)
   description = Column(String, nullable=True)
 
@@ -77,11 +59,7 @@ class Classification(ExtensionsBase):
 
   # Source provenance (optional free-form: URL, spec section, adapter name)
   source = Column(String, nullable=True)
-
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

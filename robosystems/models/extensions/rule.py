@@ -1,20 +1,9 @@
-"""Verification rules: pattern- and expression-based validations evaluated against fact sets.
+"""Verification rules evaluated against fact sets (Seattle Method taxonomy).
 
-The initial rule corpus is sourced from the Seattle Method linkbases.
-
-Tenant-scoped table. Each row is one rule in the canonical Seattle
-Method taxonomy: ``rule_category`` names the governance axis
-(``FundamentalAccountingConceptRelation``, ``ReportLevelModelStructureRule``,
-etc.) and ``rule_pattern`` names the mechanism (``EqualTo``,
-``RollForward``, ``Exists``, …). ``rule_expression`` carries an
-XPath-flavored predicate whose ``$Variables`` bind to concept qnames via
-``rule_variables``.
-
-The polymorphic target (nullable FKs to ``structures`` / ``elements`` /
-``associations`` + ``target_kind`` discriminator) scopes the rule to an
-atom in the Information Block construct; null target = global report-wide
-rule. CHECK constraints in the migration enforce that exactly one of the
-three target columns is populated when ``target_kind`` is set.
+``rule_category`` is the governance axis, ``rule_pattern`` the mechanism,
+and ``rule_expression`` an XPath-flavored predicate whose ``$Variables``
+bind to concept qnames via ``rule_variables``. ``target_kind`` selects which
+single target column is set; no target means a report-wide rule.
 """
 
 from datetime import UTC, datetime
@@ -73,12 +62,9 @@ class Rule(ExtensionsBase):
       ")",
       name="check_rule_category",
     ),
-    # Arithmetic / logical rule patterns. Evaluated by the AST evaluator
-    # over fact values. Exactly one of rule_pattern / rule_check_kind is
-    # populated (see check_rule_pattern_kind_xor below).
+    # Arithmetic / logical patterns over fact values.
     CheckConstraint(
-      # 'Derive' rules compute a value (compute-metrics) rather than
-      # verify one — same $Var expression grammar, evaluated for the LHS.
+      # 'Derive' computes the LHS (compute-metrics) rather than verifying it.
       "rule_pattern IS NULL OR rule_pattern IN ("
       "'Adjustment', 'CoExists', 'Derive', 'EqualTo', 'Exists', 'GreaterThan', "
       "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
@@ -86,8 +72,7 @@ class Rule(ExtensionsBase):
       ")",
       name="check_rule_pattern",
     ),
-    # Model-structure check kinds. Walk associations / classifications
-    # rather than facts; need a separate evaluator path.
+    # Model-structure checks over associations/classifications, not facts.
     CheckConstraint(
       "rule_check_kind IS NULL OR rule_check_kind IN ("
       "'LeafHasClassification', 'LibraryOriginImmutability', "
@@ -96,7 +81,6 @@ class Rule(ExtensionsBase):
       ")",
       name="check_rule_check_kind",
     ),
-    # XOR: exactly one of rule_pattern / rule_check_kind is non-null.
     CheckConstraint(
       "(rule_pattern IS NOT NULL AND rule_check_kind IS NULL) "
       "OR (rule_pattern IS NULL AND rule_check_kind IS NOT NULL)",
@@ -136,9 +120,7 @@ class Rule(ExtensionsBase):
   taxonomy_id = Column(String, ForeignKey("taxonomies.id"), nullable=False)
 
   rule_category = Column(String, nullable=False)
-  # Exactly one of rule_pattern (arithmetic) or rule_check_kind
-  # (structural) is populated per row; the other is NULL. See the
-  # check_rule_pattern_kind_xor CHECK constraint above.
+  # Exactly one of these two is set (check_rule_pattern_kind_xor).
   rule_pattern = Column(String, nullable=True)
   rule_check_kind = Column(String, nullable=True)
   rule_expression = Column(Text, nullable=False)

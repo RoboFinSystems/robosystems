@@ -1,10 +1,6 @@
-"""Graph deprovisioning service.
+"""Graph teardown, shared by the admin endpoint and the Dagster lifecycle job.
 
-Shared service for tearing down graph infrastructure. Called by both
-the admin endpoint and the Dagster automation job.
-
-Steps are best-effort: individual failures are captured as warnings
-and do not block the overall deprovisioning flow.
+Steps are best-effort: a failure is recorded and does not block later steps.
 """
 
 from dataclasses import dataclass, field
@@ -43,7 +39,6 @@ class DeprovisionResult:
 
   @property
   def message(self) -> str:
-    """Build a human-readable summary message."""
     if self.status == "not_found":
       return f"Graph {self.graph_id} not found"
     if self.status == "already_deprovisioned":
@@ -80,11 +75,8 @@ class DeprovisionResult:
 def find_orphan_tenant_schemas(session: Session) -> list[str]:
   """Tenant schemas in the extensions database that no live graph owns.
 
-  A schema is an orphan when its graph id has no platform ``Graph`` row, or
-  the row is deprovisioned / soft-deleted. Every ``for_each_tenant_schema``
-  migration keeps operating on such a schema, and the data in it belongs to
-  a tenant the platform no longer serves. Read-only; ``purge_orphan_tenant_schemas``
-  drops them.
+  An orphan has no platform ``Graph`` row, or one that is deprovisioned or
+  soft-deleted. Read-only; ``purge_orphan_tenant_schemas`` drops them.
   """
   from ...db.extensions import list_tenant_schemas
   from ...models.core.graph import Graph, GraphStatus
@@ -118,13 +110,7 @@ def purge_orphan_tenant_schemas(session: Session) -> list[str]:
 
 
 class GraphDeprovisionService:
-  """Tear down a graph's infrastructure, in dependency order.
-
-  Backup first (optional), then subgraph databases, the parent database, the
-  DynamoDB routing entry, the PostgreSQL records, the subscription metadata,
-  and finally the soft-delete of the graph row. Later steps assume earlier ones
-  ran, so the order is not arbitrary.
-  """
+  """Tear down a graph's infrastructure. Step order is load-bearing."""
 
   def __init__(self, environment: str):
     self.environment = environment
@@ -149,7 +135,6 @@ class GraphDeprovisionService:
 
     result = DeprovisionResult(graph_id=graph_id, status="success")
 
-    # --- Validate ---
     graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
 
     if not graph:
@@ -157,22 +142,14 @@ class GraphDeprovisionService:
       return result
 
     if graph.status == GraphStatus.DEPROVISIONED.value:
-      # The status flips even when a data-disposal step fails (`partial`), so
-      # this path has to stay re-enterable or a tenant schema, index documents
-      # or report bundles could be left behind with no way to finish the job.
-      # The disposal steps are idempotent — DROP SCHEMA IF EXISTS,
-      # delete-by-graph, prefix delete — so an already-deprovisioned graph
-      # re-runs exactly those and nothing else (no backup, no database, no
-      # registry, no status change).
+      # The status flips even when a disposal step fails, so re-run the
+      # idempotent disposal steps (and nothing else) to finish the job.
       result.status = "already_deprovisioned"
       result.previous_status = graph.status
       self._dispose_residual_data(graph_id, result)
       return result
 
-    # Shared repositories (SEC, etc.) are platform-managed and must never
-    # be deprovisioned through the normal lifecycle.  Their subgraphs
-    # (e.g. sec_historical) would be destroyed, and the instance/volume
-    # freed for reuse which could leak data.
+    # Shared repositories are platform-managed and never deprovisioned here.
     if graph.is_repository:
       result.status = "rejected"
       result.previous_status = graph.status or "active"
@@ -183,40 +160,24 @@ class GraphDeprovisionService:
 
     result.previous_status = graph.status or "active"
 
-    # --- 0. Mark the graph as leaving, and make it visible now ---
-    # `deleted_at` is stamped and committed before anything is dropped, so
-    # a QuickBooks sync already in flight cannot re-provision the tenant
-    # schema between step 3b (drop) and step 7 (status flip): the schema
-    # provisioner refuses a graph with `deleted_at` set. Status stays as it
-    # was until teardown ends, so a partial run still reads as unfinished.
+    # Stamp and commit `deleted_at` before anything is dropped: the schema
+    # provisioner refuses such a graph, so an in-flight sync cannot recreate
+    # the tenant schema mid-teardown. Status is left until the end, so a
+    # partial run still reads as unfinished.
     graph.deleted_at = datetime.now(UTC)
     session.commit()
 
-    # --- 1. Create final backup ---
     if create_backup and not skip_backup_check:
       await self._create_final_backup(graph, session, result)
 
-    # --- 2. Delete subgraphs ---
     await self._delete_subgraphs(graph_id, session, result)
-
-    # --- 3. Delete parent database ---
     await self._delete_database(graph_id, result)
-
-    # --- 3b-3d. Dispose of the tenant's data outside the graph database:
-    # the extensions OLTP schema, the shared search index, and the published
-    # report artifacts. Idempotent, so a re-run on an already-deprovisioned
-    # graph can finish what a partial teardown left behind.
     self._dispose_residual_data(graph_id, result)
 
-    # If the graph database itself could not be deleted, the `.lbug` is still
-    # on the instance. Freeing the registry slot now would strand it: the
-    # instance/volume would read as empty to the allocator while carrying the
-    # departed tenant's file, poisoning the next tenant that lands there (see
-    # `graph_api` on-disk vs registry counting). So leave the registry entry
-    # and the status alone — deleted_at is already stamped, so the graph is
-    # closed to callers, and the teardown sensor re-selects a stranded graph
-    # (deleted_at set, status not yet deprovisioned) to retry the whole
-    # sequence. Every step above is idempotent on re-run.
+    # The .lbug is still on the instance: freeing the registry slot would hand
+    # the next tenant a volume carrying this one's file. Stop here; the
+    # teardown sensor retries graphs with deleted_at set and status not yet
+    # deprovisioned, and every step above is idempotent.
     if not result.database_deleted:
       result.status = "partial"
       logger.warning(
@@ -227,29 +188,17 @@ class GraphDeprovisionService:
       )
       return result
 
-    # --- 4. Deallocate DynamoDB registry ---
     await self._deallocate_registry(graph_id, result)
 
-    # --- 5. Purge staged uploads BEFORE the PG records that index them ---
-    # user-staging/{user_id}/{graph_id}/ is the last customer-data store, and
-    # the GraphUser rows are the only record of which users hold objects there.
-    # _clean_pg_records drops those rows, after which the platform can no longer
-    # enumerate what it still holds — so this must run first.
+    # Before _clean_pg_records: the GraphUser rows are the only way to
+    # enumerate staged uploads.
     self._purge_staged_uploads(graph_id, session, result)
 
-    # --- 5b. Revoke provider-side grants BEFORE the credentials they need ---
-    # Deleting our copy of a refresh token stops sync; it does not end the
-    # authorization at the provider. The provider cleanup reads the stored
-    # token to revoke it, so it has to run while the credential row exists.
+    # Before _clean_pg_records: revocation reads the stored credential.
     await self._revoke_provider_grants(graph_id, session, result)
 
-    # --- 6. Clean PostgreSQL records ---
     self._clean_pg_records(graph_id, session, result)
-
-    # --- 7. Update subscription metadata ---
     self._update_subscription_metadata(graph_id, session, result)
-
-    # --- 8. Transition status (soft-delete stamp landed in step 0) ---
     graph.transition_status(GraphStatus.DEPROVISIONED, session)
 
     if result.errors:
@@ -285,12 +234,8 @@ class GraphDeprovisionService:
         GraphBackup,
       )
 
-      # Idempotency for the stranded-graph retry: the sensor re-selects a graph
-      # whose database delete keeps failing every cycle, and a fresh full S3
-      # dump on each pass buys nothing. If THIS teardown already produced a
-      # completed final backup — one created since `deleted_at` was stamped at
-      # step 0 (an older backup would be a nightly/on-demand one, not the final
-      # snapshot) — reuse it and skip the re-dump.
+      # On a sensor retry, reuse a completed full backup taken since
+      # `deleted_at` was stamped (i.e. by this teardown) instead of re-dumping.
       if graph.deleted_at is not None:
         deleted_at = graph.deleted_at
         if deleted_at.tzinfo is None:
@@ -357,37 +302,13 @@ class GraphDeprovisionService:
     retention_days: int,
     result: DeprovisionResult,
   ) -> None:
-    """Record the final backup as a GraphBackup row.
+    """Record the final backup as a GraphBackup row, so the customer can list
+    and download it during the export grace period.
 
-    Without a row the object is unreachable: both the listing and the download
-    URL resolve through GraphBackup, so a final backup that exists only in S3
-    is invisible to the customer it was taken for — which is the export grace
-    period the privacy policy publishes. Only the user-initiated path created
-    rows, and deprovisioning does not go through it.
-
-    ``expires_at`` matches the tier's backup hosting window rather than the
-    shorter export window, so the retention sweep keeps treating this object
-    exactly as long as it did while untracked. Shortening it here would delete
-    the archive early, which is a different promise from the export one.
-
-    Built and flushed rather than going through ``GraphBackup.create`` /
-    ``complete_backup``: those commit, and this runs inside a best-effort step
-    of a caller-owned transaction, where an early commit would persist a
-    partial teardown if a later step failed.
-
-    The write goes inside a SAVEPOINT because it is the *first* database
-    statement of the teardown, and on PostgreSQL a failed statement aborts the
-    whole transaction — every later step would then fail against a dead
-    session, turning one best-effort miss into total failure and breaking this
-    module's contract that steps do not block each other.
-
-    A plain ``session.rollback()`` would be worse than the problem. The batch
-    job (``dagster/jobs/graph_lifecycle.py``) runs every graph through one
-    session that commits only after the loop, so rolling back here would
-    discard the completed teardowns of every graph already processed in that
-    run — graphs whose databases, extensions schemas and registry slots are
-    already gone, leaving their records looking live. The savepoint contains
-    the failure to this row alone.
+    ``expires_at`` follows the tier's backup hosting window, not the shorter
+    export window. Not ``GraphBackup.create``, which commits. The SAVEPOINT
+    keeps a failed insert from aborting the transaction every later step runs
+    in.
     """
     from ...models.core.graph.graph_backup import BackupInitiator, GraphBackup
 
@@ -427,16 +348,14 @@ class GraphDeprovisionService:
         result.errors.append(error_msg)
         logger.warning(error_msg)
 
-      # Same ordering as the parent path: purge staged uploads before the PG
-      # records that index them, revoke provider grants before the credentials
-      # they read (a connection may be scoped directly to a subgraph), then
-      # clean the subgraph's PG records.
+      # Same ordering as the parent path; a connection may be scoped directly
+      # to a subgraph.
       self._purge_staged_uploads(subgraph.graph_id, session, result)
       await self._revoke_provider_grants(subgraph.graph_id, session, result)
       self._clean_pg_records(subgraph.graph_id, session, result)
       self._purge_search_index(subgraph.graph_id, result)
 
-      # Mark subgraph as deprovisioned regardless of DB deletion outcome
+      # Regardless of the database deletion outcome.
       try:
         subgraph.deleted_at = datetime.now(UTC)
         subgraph.transition_status(GraphStatus.DEPROVISIONED, session)
@@ -448,15 +367,10 @@ class GraphDeprovisionService:
   async def _delete_database(self, graph_id: str, result: DeprovisionResult) -> None:
     """Delete the parent graph database.
 
-    The invariant that gates the rest of teardown is *the file is not on the
-    instance*, not *we were the one who removed it*: run #1 can delete the
-    file and the Dagster daemon can restart before the status flip, so every
-    retry must converge rather than strand the graph forever. The node now
-    treats a missing .lbug as "continue disposing" — WAL, Lance, DuckDB
-    staging and the blue-green temporaries — and reports `existed=False`,
-    so a retry finishes the side stores the first run did not reach. A 404
-    can still come from a node on an AMI that predates that; it is counted as
-    success for convergence, with the residue left to storage reclaim.
+    Success means the file is not on the instance, not that this run removed
+    it, so retries converge. A missing .lbug still has its side stores
+    disposed (``existed=False``); a 404 from an older node also counts as
+    success, leaving any residue to storage reclaim.
     """
     from ...graph_api.client.exceptions import GraphAPIError
 
@@ -502,13 +416,8 @@ class GraphDeprovisionService:
     self._purge_report_bundles(graph_id, result)
 
   def _drop_extensions_schema(self, graph_id: str, result: DeprovisionResult) -> None:
-    """Drop the tenant's extensions OLTP schema (financial-data removal).
-
-    Counterpart to ``provision_tenant_schema``. Without this, a deprovisioned
-    tenant's transactions/entries/facts persist in the extensions database.
-    No-op for subgraphs and extensions-disabled deployments (drop returns
-    False). Best-effort: a failure is recorded but does not block teardown.
-    """
+    """Drop the tenant's extensions OLTP schema; a no-op for subgraphs and
+    extensions-disabled deployments."""
     try:
       from ...db.extensions import drop_tenant_schema
 
@@ -521,14 +430,7 @@ class GraphDeprovisionService:
       logger.warning(error_msg, extra={"graph_id": graph_id})
 
   def _purge_search_index(self, graph_id: str, result: DeprovisionResult) -> None:
-    """Purge the tenant's documents from the shared OpenSearch index.
-
-    The document index is shared across all tenants (an application-level
-    graph_id filter is the only boundary), so a departed tenant's content
-    persisting in it is real over-retention. Guarded on SEMANTIC_SEARCH_ENABLED
-    so a search-disabled deployment is a clean no-op, and best-effort so an
-    index failure records a warning without stranding the teardown.
-    """
+    """Purge the tenant's documents from the shared, cross-tenant OpenSearch index."""
     from ...config import env
 
     if not env.SEMANTIC_SEARCH_ENABLED:
@@ -546,25 +448,11 @@ class GraphDeprovisionService:
       logger.warning(error_msg, extra={"graph_id": graph_id})
 
   def _purge_report_bundles(self, graph_id: str, result: DeprovisionResult) -> None:
-    """Delete the tenant's published report artifacts from object storage.
+    """Delete the tenant's whole ``report-bundles/{graph_id}/`` prefix.
 
-    Report bundles are the serialized publications of a customer's reports —
-    financial statements in JSON-LD and XBRL — and they were the last customer
-    data store teardown never reached. Their prefix deliberately carries no
-    lifecycle rule: a clock there would destroy the artifact of a live report
-    whose row still exists, which is why `delete_report_artifacts` deletes them
-    on withdrawal instead. Absence of a clock was correct; absence of a teardown
-    delete was not, and it left a departed tenant's statements in the bucket
-    indefinitely.
-
-    Deletes the whole `report-bundles/{graph_id}/` prefix, so every report,
-    generation and flavor goes together. The final backup lives under a
-    different prefix and is untouched.
-
-    Best-effort like its siblings — a storage failure records a warning rather
-    than stranding the capacity release — but an object that fails to delete is
-    recorded as an error, because incomplete disposal is the one outcome this
-    step exists to prevent.
+    The prefix has no lifecycle rule (it would expire live reports), so
+    teardown is the only thing that removes it. An object that fails to delete
+    is recorded as an error.
     """
     try:
       from ...config import env
@@ -577,10 +465,8 @@ class GraphDeprovisionService:
 
       deleted = 0
       failed = 0
-      # ``iter_object_keys`` paginates and raises on list failure. The
-      # single-page ``list_objects`` treats both an S3 error and a
-      # truncated listing as "prefix empty", which is the one outcome
-      # this step exists to prevent.
+      # Not ``list_objects``: it reads an S3 error or a truncated listing as
+      # an empty prefix. ``iter_object_keys`` paginates and raises.
       for key in s3.iter_object_keys(bucket, prefix=prefix):
         if s3.delete_object(bucket, key):
           deleted += 1
@@ -633,15 +519,10 @@ class GraphDeprovisionService:
   def _purge_staged_uploads(
     self, graph_id: str, session: Session, result: DeprovisionResult
   ) -> None:
-    """Delete the graph's staged uploads from the user-data bucket.
+    """Delete ``user-staging/{user_id}/{graph_id}/`` for every member.
 
-    The prefix is ``user-staging/{user_id}/{graph_id}/`` — raw source files a
-    customer uploaded before ingestion, held only by a bucket lifecycle rule.
-    Must run before ``_clean_pg_records`` drops the GraphUser rows: those rows
-    are the only record of which users have objects under this graph, so once
-    they are gone the objects can no longer be enumerated. Best-effort — a
-    failure records a warning without stranding teardown, and the lifecycle
-    rule remains the backstop.
+    Must run before ``_clean_pg_records`` drops the GraphUser rows that
+    enumerate the members. The bucket lifecycle rule is the backstop.
     """
     try:
       from ...config import env
@@ -654,11 +535,8 @@ class GraphDeprovisionService:
       if not bucket:
         return
 
-      # Members are recorded on the PARENT graph — a subgraph carries no
-      # GraphUser row of its own (access to a subgraph is the parent's grant).
-      # So resolve the parent id for the membership lookup, but key the S3
-      # prefix on the graph_id we were handed: a file uploaded directly against
-      # a subgraph lives under user-staging/{user_id}/{subgraph_id}/.
+      # Membership lives on the parent graph, but the prefix is keyed on the
+      # graph_id given: a subgraph's uploads sit under its own id.
       parent_id, _ = parse_graph_id(graph_id)
       user_ids = [
         row[0]
@@ -688,18 +566,10 @@ class GraphDeprovisionService:
   async def _revoke_provider_grants(
     self, graph_id: str, session: Session, result: DeprovisionResult
   ) -> None:
-    """Revoke each connection's provider-side grant before teardown deletes it.
+    """Revoke each connection's grant at the provider, as disconnect does.
 
-    The user-initiated disconnect revokes at the provider and then deletes
-    the local rows; teardown deleted the rows and never revoked, so a departed
-    customer's authorization stayed live at the provider until it expired on
-    its own. Same provider hook as the disconnect path, per connection.
-
-    Best-effort per connection: the provider cleanup logs its own failures
-    and does not raise, and a provider disabled by flag has nothing to call.
-    Anything that does raise is recorded and the teardown continues — the
-    credential row is deleted either way, and a stranded grant is an operator
-    follow-up, not a reason to leave the tenant's data in place.
+    Deleting our token does not end the authorization upstream. Best-effort
+    per connection: a failure is recorded and the credential is deleted anyway.
     """
     try:
       from ...models.core.connection.connection import Connection
@@ -784,11 +654,8 @@ class GraphDeprovisionService:
         synchronize_session=False
       )
 
-      # Drop the members' cached access decisions with their rows: a warm
-      # positive entry would otherwise let a member's request past the auth
-      # dependency for up to the cache TTL, onto a graph whose schema and
-      # database are being dropped underneath it. Best-effort — the cache
-      # helpers log and swallow their own failures.
+      # Drop cached access decisions with the rows, or a warm entry admits a
+      # member for up to the cache TTL.
       member_ids = [
         row[0]
         for row in session.query(GraphUser.user_id)
@@ -825,9 +692,7 @@ class GraphDeprovisionService:
         synchronize_session=False
       )
 
-      # documents.graph_id cascades on the graphs row, but step 7 is a soft
-      # delete so the cascade never fires — delete explicitly here. The shared
-      # OpenSearch content is purged separately in _purge_search_index.
+      # The FK cascade never fires: the graph row is only soft-deleted.
       documents_deleted = (
         session.query(Document)
         .filter(Document.graph_id == graph_id)
@@ -835,15 +700,9 @@ class GraphDeprovisionService:
       )
       result.documents_deleted += documents_deleted
 
-      # Connections are a graph asset, not the creating member's: graph_id is
-      # the scoping FK and the delete endpoint gates on graph admin rather than
-      # the creator. So the graph's teardown is what removes them — nothing
-      # else does. Credentials go first and by id, because
-      # connection_credentials.connection_id carries no foreign key, so no
-      # cascade can ever reach it, and the connection row is the only way to
-      # enumerate its credentials. Order is therefore load-bearing.
-      # Soft-deleted connections are included — deleted_at is unset here on
-      # purpose, since the graph is going away either way.
+      # Connections belong to the graph, so teardown removes them, soft-deleted
+      # ones included. Credentials first: connection_credentials.connection_id
+      # has no FK, so the connection rows are the only way to find them.
       connection_ids = [
         row.id
         for row in session.query(Connection.id).filter(Connection.graph_id == graph_id)
@@ -880,7 +739,6 @@ class GraphDeprovisionService:
       if not sub:
         return
 
-      # Get tier for hosting duration
       from ...models.core.graph import Graph
 
       graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()

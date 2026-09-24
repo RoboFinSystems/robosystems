@@ -1,9 +1,5 @@
-"""Registry of operator implementations, keyed by type string.
-
-Registration is an import side effect of `@register_operator`, so a module
-defining an operator has to be imported before the registry can find it — see
-`implementations/__init__.py`.
-"""
+"""Operator registry keyed by type string. Registration is an import side
+effect of `@register_operator` (see `implementations/__init__.py`)."""
 
 from __future__ import annotations
 
@@ -15,11 +11,8 @@ from robosystems.operations.operators.base import Operator
 _OPERATORS: dict[str, type[Operator]] = {}
 _adapter_operators_loaded: list[bool] = []
 
-# Former names. An operator's registry key is public surface — the URL
-# segment, the `operator_type` in queued tasks and stored operations, and
-# whatever client code hardcoded — so a rename keeps the old key resolving
-# here rather than breaking those. A direct registration always beats an
-# alias, and the listing shows canonical names only.
+# Former names. A registry key is public surface (URL segment, queued and
+# stored `operator_type`), so a rename keeps the old key resolving here.
 _ALIASES: dict[str, str] = {
   # The analyst shipped as `cypher` when Cypher was its only tool.
   "cypher": "analyst",
@@ -27,17 +20,7 @@ _ALIASES: dict[str, str] = {
 
 
 def register_operator(operator_type: str):
-  """Register an Operator class under `operator_type`.
-
-  Re-registering a type replaces the previous class and logs a warning.
-
-  Example::
-
-      @register_operator("analyst")
-      class AnalystOperator(Operator):
-          spec = OperatorSpec(...)
-          async def run(self, ctx): ...
-  """
+  """Re-registering a type replaces the previous class (with a warning)."""
 
   def decorator(cls: type[Operator]) -> type[Operator]:
     if operator_type in _OPERATORS:
@@ -60,11 +43,7 @@ def resolve_operator_type(operator_type: str) -> str:
 
 
 def get_operator(operator_type: str) -> Operator:
-  """Instantiate a registered operator (by canonical name or alias), or raise KeyError.
-
-  A fresh instance per call — operators are stateless, and their per-run state
-  lives on the `OperatorContext` the adapter injects.
-  """
+  """Fresh instance of a registered operator (name or alias); KeyError if none."""
   cls = _OPERATORS.get(resolve_operator_type(operator_type))
   if cls is None:
     registered = ", ".join(_OPERATORS.keys()) or "(none)"
@@ -75,12 +54,10 @@ def get_operator(operator_type: str) -> Operator:
 
 
 def get_operator_class(operator_type: str) -> type[Operator] | None:
-  """Get the operator class without instantiation."""
   return _OPERATORS.get(resolve_operator_type(operator_type))
 
 
 def list_operators() -> dict[str, dict[str, Any]]:
-  """List all registered operators with their spec metadata."""
   return {
     operator_type: {
       "name": cls.spec.name,
@@ -96,7 +73,6 @@ def list_operators() -> dict[str, dict[str, Any]]:
 
 
 def _serialize_scope(scope: Any) -> dict[str, str] | None:
-  """Serialize a GraphScope for API responses."""
   if scope is None:
     return None
   result: dict[str, str] = {}
@@ -108,31 +84,19 @@ def _serialize_scope(scope: Any) -> dict[str, str] | None:
 
 
 def is_registered(operator_type: str) -> bool:
-  """Check if an operator type (canonical or alias) is registered."""
   return resolve_operator_type(operator_type) in _OPERATORS
 
 
 def load_adapter_operators() -> None:
-  """Import operator modules contributed by enabled adapters.
-
-  Each adapter exposes a `get_operator_components()` that imports its operator
-  modules, which is what fires their `@register_operator` side effects. Called
-  once from `operations/operators/__init__.py`; idempotent thereafter.
-  """
+  """Import operator modules contributed by enabled adapters. Idempotent."""
   if _adapter_operators_loaded:
     return
   _adapter_operators_loaded.append(True)
-
-  # Future adapters register operators here:
-  #
-  # from robosystems.config import env
-  #
-  # if env.SEC_PIPELINE_ENABLED:
-  #   from robosystems.adapters.sec.operators import get_operator_components
-  #   get_operator_components()  # triggers @register_operator side effects
+  # Adapters call their `get_operator_components()` here to fire their
+  # `@register_operator` side effects; none contribute operators today.
 
 
 def clear_registry() -> None:
-  """Clear all registrations. For testing only."""
+  """For testing only."""
   _OPERATORS.clear()
   _adapter_operators_loaded.clear()

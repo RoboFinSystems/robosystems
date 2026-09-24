@@ -43,10 +43,8 @@ def update_graph_metadata_cmd(
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.models.core.graph.graph_user import GraphUser
 
-  # Shared repositories (SEC, etc.) are platform-managed and shown to every
-  # subscriber under the same name — one tenant must not be able to relabel
-  # them for everyone. Checked before the role lookup so the error names the
-  # real reason rather than "admin access required".
+  # One tenant must not relabel a shared repository for every subscriber.
+  # Checked before the role lookup so the error names the real reason.
   if is_shared_repository_or_subgraph(graph_id):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
@@ -86,9 +84,7 @@ def update_graph_metadata_cmd(
     updated_fields.append("tags")
 
   if updated_fields:
-    # Reassign rather than mutate in place: SQLAlchemy does not track
-    # mutations inside a plain JSONB dict, so an in-place edit would be
-    # silently dropped at flush.
+    # Reassign: SQLAlchemy does not track in-place JSONB mutations.
     graph.graph_metadata = metadata
     graph.updated_at = datetime.now(UTC)
     db.commit()

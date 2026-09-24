@@ -1,11 +1,8 @@
 """Activate or deactivate a user account.
 
-Deactivation is the support-plane response to a compromised or suspended
-account, and the only one short of deletion. It is deliberately heavier than a
-credential rotation: a password change invalidates sessions but leaves API keys
-alone, because rotation is routine and revoking keys on it would break
-integrations. Deactivation is the escalation — it invalidates sessions *and*
-revokes every key.
+Deactivation invalidates sessions *and* revokes every API key, unlike a
+password change, which leaves keys alone so routine rotation doesn't break
+integrations.
 """
 
 from dataclasses import dataclass
@@ -29,8 +26,8 @@ class UserStatusChange:
   changed: bool
   api_keys_revoked: int
   api_keys_failed: int = 0
-  # False when any revocation side effect did not take — a session/key cache
-  # entry may keep authenticating until its TTL. Re-run the deactivation.
+  # False when a revocation did not take; a cached credential may work until
+  # its TTL. Re-run the deactivation.
   fully_applied: bool = True
 
 
@@ -43,19 +40,9 @@ def set_user_active(
 ) -> UserStatusChange:
   """Set a user's active flag, revoking access when deactivating.
 
-  The underlying model call is always performed rather than skipped when the
-  user is already in the target state. Key revocation is best-effort per key, so
-  a re-run after a partial failure must be able to finish the job — a no-op
-  short-circuit would leave keys live on exactly the retry an operator reaches
-  for during an incident.
-
-  Reactivation does **not** restore revoked keys: `UserAPIKey.deactivate` flips
-  each key's own flag, and nothing flips it back. The user must issue new ones.
-
-  ``api_keys_revoked`` counts keys that were actually revoked, and
-  ``api_keys_failed`` the ones that were not. It used to report the number
-  found before the attempt, so a partial revocation — the case an operator
-  most needs to see, mid-incident — was indistinguishable from a clean one.
+  Never short-circuits when already in the target state: revocation is
+  best-effort per key, so a re-run must be able to finish a partial one.
+  Reactivation does not restore revoked keys.
   """
   user = User.get_by_id(user_id, session)
   if not user:
@@ -74,8 +61,7 @@ def set_user_active(
     revoked = result.keys_revoked
     fully_applied = result.fully_applied
 
-  # found == -1 means the key list could not be loaded at all; report one
-  # failure rather than a negative count so the operator still sees red.
+  # found == -1: the key list could not be loaded; report one failure.
   failed = (found - revoked) if found >= 0 else 1
 
   logger.info(

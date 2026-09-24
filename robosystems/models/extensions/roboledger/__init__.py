@@ -1,18 +1,7 @@
-"""RoboLedger-specific OLTP models (accounting domain).
+"""RoboLedger OLTP models (accounting domain).
 
-Report, Fact, FactSet, Transaction, Entry, LineItem, FiscalCalendar,
-FiscalPeriod, PublishList, PublishListMember, ReportShare, and the three
-dimensional junction tables (transaction_dimensions, entry_dimensions,
-line_item_dimensions) are declared here.
-
-Base ontology concepts (Taxonomy, Element, Account, Dimension, Association,
-Structure) are declared at `robosystems.models.extensions.*` and re-exported
-here so roboledger code can reach them as neighbours. Prefer the top-level
-path — `from robosystems.models.extensions import X` — in new code; both
-work.
-
-See schemas/base.py for the authoritative list of base ontology concepts
-and the two invariants governing the base-vs-extension split.
+Base ontology concepts are re-exported here for convenience; prefer
+`from robosystems.models.extensions import X` in new code.
 """
 
 # Base ontology concepts (live in models/extensions/ root)

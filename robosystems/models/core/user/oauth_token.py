@@ -1,14 +1,8 @@
 """Opaque OAuth access and refresh tokens, stored as SHA-256 digests.
 
-Both token kinds are generated at full entropy (256 bits), so the digest is
-a lookup key, not a password hash — the ``UserToken`` precedent, and the
-reason ``UserAPIKey``'s own docstring gives for why a KDF is the wrong tool
-for machine secrets. The plaintext exists once, in the token response.
-
-Refresh tokens rotate: every use marks the presented token consumed and
-mints a successor in the same ``family_id``. A consumed refresh token
-presented again is a replay — the whole family is revoked, which is what
-lets a stolen-and-used refresh token be detected at all.
+Tokens are 256-bit random, so the digest is a lookup key, not a password hash.
+Refresh tokens rotate within a ``family_id``; presenting a consumed one is a
+replay and revokes the whole family.
 """
 
 import hashlib
@@ -32,10 +26,9 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 TOKEN_TYPE_ACCESS = "access"
 TOKEN_TYPE_REFRESH = "refresh"
 
-# Plaintext prefixes. The access prefix is what the MCP auth dependency keys
-# on to tell an opaque OAuth bearer apart from the app's JWT before any
-# parsing; the refresh prefix keeps a refresh token from ever validating as
-# an access token even if the type column were mishandled.
+# The MCP auth dependency uses the access prefix to tell an OAuth bearer from a
+# JWT before parsing; the distinct refresh prefix keeps a refresh token from
+# ever validating as an access token.
 ACCESS_TOKEN_PREFIX = "rfso"
 REFRESH_TOKEN_PREFIX = "rfsr"
 # Length of the stored identification prefix (mirrors UserAPIKey.prefix).
@@ -112,9 +105,7 @@ class OAuthToken(Model):
     """Mint an access + refresh token for a grant.
 
     Returns ``(access_row, access_plain, refresh_row, refresh_plain,
-    access_ttl_seconds)``. A new family starts on code exchange; a refresh
-    rotation passes the existing ``family_id`` so replay detection spans the
-    whole chain.
+    access_ttl_seconds)``. Rotation passes the existing ``family_id``.
     """
     family = family_id or generate_prefixed_ulid("oaf")
     now = datetime.now(UTC)
@@ -288,11 +279,8 @@ class OAuthToken(Model):
 
   @classmethod
   def cleanup_expired(cls, session: Session, *, older_than_days: int = 30) -> int:
-    """Delete tokens that expired, or were revoked, more than
-    ``older_than_days`` ago. Recently dead rows are kept so a late refresh
-    replay is still detectable — rotation revokes the previous access token
-    and a replay revokes a whole family, so revoked rows accrue as fast as
-    expired ones."""
+    """Delete tokens expired or revoked more than ``older_than_days`` ago.
+    Recently dead rows are kept so a late refresh replay is still detected."""
     cutoff = datetime.now(UTC) - timedelta(days=older_than_days)
     try:
       count = (

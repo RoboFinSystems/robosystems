@@ -1,24 +1,8 @@
-"""Event model — the real-world business event layer above the GL.
+"""Event model: the real-world business event layer above the GL.
 
 Status lifecycle: captured → classified → committed → pending → fulfilled,
-with voided and superseded as terminal off-ramps. The triggered_by_event_id
-column on transactions and entries links GL rows back to the originating
-event for the audit chain.
-
-Two REA duality links — economic relationships expressing obligation origin
-(``obligated_by_event_id``) and obligation discharge (``discharges_event_id``)
-— let events express duality at the event layer rather than only at the GL:
-``obligated_by_event_id`` points at the event that scheduled this one
-(forward materialization — e.g. a depreciation schedule entry pointing back
-at the asset_acquired event); ``discharges_event_id`` points at the
-obligation this event settles (e.g. cash_received pointing at the originating
-sale_invoiced). Both are nullable, application-validated self-references,
-matching the existing pattern for ``replaced_by_event_id``.
-
-``event_class`` (``'economic' | 'support'``) is orthogonal to ``event_category``.
-Economic events change resources; support events (control, approval,
-reconciliation, inquiry) are audit-trail / value-chain primitives that
-don't move resources.
+with voided and superseded as terminal off-ramps. GL transactions and entries
+link back via ``triggered_by_event_id``.
 """
 
 from datetime import UTC, datetime
@@ -38,19 +22,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
-# Canonical 19-verb action vocabulary refining `event_category`.
-# Vocabulary converges with Valueflows
-# (Foster / Pavlik / Haugen v1.0) — we treat that as inspiration, not
-# provenance. Canonical home is here. The 19 verbs disambiguate
-# concepts ERPs typically conflate (custody-only vs. rights-transfer
-# is the load-bearing distinction for consignment, drop-shipping,
-# marketplace settlement, escrow).
-#
-# MUST stay in sync with:
-#   - the CHECK constraint in
-#     `migrations/extensions/versions/0012_event_action.py`
-#   - the Pydantic `EventAction` Literal in
-#     `robosystems/models/api/event_block.py`
+# Canonical action vocabulary refining `event_category`, modelled on
+# Valueflows. Custody-only vs rights-transfer is the load-bearing distinction
+# (consignment, drop-shipping, escrow). Keep in sync with the `EventAction`
+# Literal in models/api/event_block.py.
 EVENT_ACTIONS: frozenset[str] = frozenset(
   {
     # Resource creation
@@ -84,10 +59,8 @@ EVENT_ACTIONS: frozenset[str] = frozenset(
   }
 )
 
-# sorted() is load-bearing: the migration's hardcoded IN clause is in
-# alphabetical order, and Alembic's autogenerate compares constraint
-# expressions textually. Any reordering here produces spurious "alter
-# check_event_action" diffs on every `just migrate-create`. Keep sorted.
+# sorted() matches the migration's IN clause; autogenerate compares the text,
+# so any other order produces spurious diffs.
 _EVENT_ACTION_CHECK = (
   "event_action IS NULL OR event_action IN ("
   + ", ".join(f"'{v}'" for v in sorted(EVENT_ACTIONS))
@@ -112,12 +85,8 @@ class Event(ExtensionsBase):
       unique=True,
       postgresql_where="external_id IS NOT NULL",
     ),
-    # QuickBooks writeback marker lookups (`loader.py`, `qb_writeback.py`)
-    # filter on `metadata->>'qb_external_id'`. Migration 0014 fanned this
-    # index out to the tenants that existed then (under a schema-prefixed
-    # name); tenants provisioned by `create_all` afterwards had no index at
-    # all — every marker lookup was a sequential scan of `events`. Declared
-    # here so a fresh tenant gets it; 0033 backfills the ones in between.
+    # QuickBooks writeback marker lookups. Declared here so tenants
+    # provisioned by `create_all` get it too.
     Index(
       "idx_events_qb_external_id",
       text("(metadata->>'qb_external_id')"),
@@ -145,22 +114,16 @@ class Event(ExtensionsBase):
       "resource_type IN ('goods', 'services', 'money', 'right', 'obligation', 'information', 'labor') OR resource_type IS NULL",
       name="check_event_resource_type",
     ),
-    # `source` deliberately carries NO CHECK constraint. Platform-emitted
-    # values (manual, system, schedule) are always valid; adapter and external
-    # sources are validated at the ops layer against the graph's registered
-    # platform Connections (create_event_block's `_validate_event_source`), so
-    # registering a connection opens a source name without a schema change.
-    # New tenant schemas provision from this metadata — adding a constraint
-    # here would close the list again.
+    # `source` deliberately has no CHECK: adapter and external sources are
+    # validated against the graph's registered Connections at the ops layer,
+    # so registering a connection opens a source without a schema change.
     CheckConstraint(_EVENT_ACTION_CHECK, name="check_event_action"),
     Index(
       "idx_events_action",
       "event_action",
       postgresql_where="event_action IS NOT NULL",
     ),
-    # Reconciliation queue read path — surfaces committed/fulfilled events
-    # whose adapter-side payload changed under us. Partial because the
-    # vast majority of rows have drift=false at all times.
+    # Reconciliation queue read path; nearly all rows are drift=false.
     Index(
       "idx_events_payload_drift",
       "payload_drift",
@@ -168,74 +131,55 @@ class Event(ExtensionsBase):
     ),
   )
 
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("evt"))
 
-  # Event identity
   event_type = Column(String, nullable=False)
   event_category = Column(String, nullable=False)
-  # economic  — a resource flows (REA economic event); drives the GL.
-  # support   — supports an economic event: controls, approvals,
-  #             reconciliations, inquiries. Audit-side, non-posting.
-  # operational — a business occurrence that is neither. It precedes or
-  #             surrounds economic activity without being it: a lead, a
-  #             lifecycle change, an outreach, a schedule being set up.
-  #             Added 2026-09-05 because there was nowhere honest to put
-  #             one — `schedule_created` had been filed as economic/other
-  #             despite producing no GL at all, and a CRM lead had no legal
-  #             category under either existing class. Filing a non-economic
-  #             occurrence as `economic` asserts a resource flow that did
-  #             not happen, which is the thing this column exists to say.
+  # economic    — a resource flows (REA economic event); drives the GL.
+  # support     — controls, approvals, reconciliations, inquiries; non-posting.
+  # operational — neither: a lead, a lifecycle change, a schedule set up.
+  #               Filing these as economic would assert a resource flow.
   event_class = Column(String, nullable=False, default="economic")
 
-  # Canonical action verb — finer-grained than event_category. See EVENT_ACTIONS.
   event_action = Column(String, nullable=True)
 
-  # REA primitives. agent_id FK to agents(id) enforced at the DB level.
+  # agent_id FKs agents(id) in the DB only.
   agent_id = Column(String, nullable=True)
   resource_type = Column(String, nullable=True)
   resource_element_id = Column(String, nullable=True)
 
-  # Occurrence
   occurred_at = Column(DateTime, nullable=False)
   effective_at = Column(DateTime, nullable=True)
 
-  # Lifecycle
   status = Column(String, nullable=False, default="captured")
 
-  # Provenance
   source = Column(String, nullable=False)
   external_id = Column(String, nullable=True)
   external_url = Column(String, nullable=True)
 
-  # Correction chain (self-referential FKs — enforced via migration, not ORM relationship)
+  # Self-references below are application-validated, with no FK constraint.
+  # Correction chain.
   replaced_by_event_id = Column(String, nullable=True)
   replaces_event_id = Column(String, nullable=True)
 
-  # Duality chain (REA): forward-materialization + settlement links.
-  # Both are application-validated self-references; same pattern as the
-  # correction chain above.
+  # REA duality: the event that scheduled this one (e.g. a depreciation entry
+  # pointing at asset_acquired), and the obligation this one settles (e.g.
+  # cash_received pointing at sale_invoiced).
   obligated_by_event_id = Column(String, nullable=True)
   discharges_event_id = Column(String, nullable=True)
 
-  # Economic value (minor currency units — cents, signed)
-  amount = Column(BigInteger, nullable=True)
+  amount = Column(BigInteger, nullable=True)  # signed cents
   currency = Column(String, nullable=False, default="USD")
 
-  # Narrative
   description = Column(String, nullable=True)
 
-  # Event-type-specific payload
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
 
-  # Drift flag: set true when an adapter re-sync surfaces a payload diff
-  # against a `committed`/`fulfilled` event. The live `metadata_` payload
-  # stays unchanged (committed entries are immutable to re-sync); the
-  # incoming payload is stashed at
-  # `metadata_['drift_payload']` for the reconciliation queue.
+  # Set when a re-sync finds a changed payload for a committed/fulfilled
+  # event; the live metadata stays immutable and the incoming payload is
+  # stashed at metadata_['drift_payload'].
   payload_drift = Column(Boolean, nullable=False, default=False, server_default="false")
 
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   created_by = Column(String, nullable=False)
 

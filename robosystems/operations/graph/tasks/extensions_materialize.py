@@ -46,11 +46,8 @@ class ExtensionsMaterializeTask(BaseTask):
       )
 
       if result.status != "success":
-        # 'partial' is as disqualifying as 'error', the same rule the Dagster
-        # path applies: blue/green refused to swap the incomplete build, so the
-        # previous graph generation is still serving. Marking the graph fresh
-        # would both stop the staleness sensor from retrying and report
-        # 'fresh' for a swap that never happened.
+        # 'partial' counts as failure: blue/green did not swap, so the old
+        # generation still serves and the graph must stay stale for a retry.
         logger.error(
           f"Extensions materialization {result.status} for "
           f"{self.graph_id}: {result.errors}"
@@ -66,7 +63,6 @@ class ExtensionsMaterializeTask(BaseTask):
 
       await self.report_progress("Marking graph fresh...", percent=95)
 
-      # Clear staleness so the Dagster sensor does not re-submit for this event
       graph = db.query(Graph).filter(Graph.graph_id == self.graph_id).first()
       if graph and not graph.mark_fresh(session=db, started_at=started_at):
         logger.info(
@@ -81,7 +77,6 @@ class ExtensionsMaterializeTask(BaseTask):
         f"{result.duration_ms:.0f}ms"
       )
 
-      # Report to Dagster asset catalog for observability (fire-and-forget)
       from robosystems.dagster.reporting import report_asset_materialization
 
       await report_asset_materialization(
@@ -106,9 +101,7 @@ class ExtensionsMaterializeTask(BaseTask):
         "tables_materialized": result.tables_materialized,
         "total_rows": result.total_rows,
         "duration_ms": result.duration_ms,
-        # Aliased so older SDK clients (graph_client.py < the field-rename
-        # commit) still see a non-zero elapsed time in the SSE progress
-        # message instead of "0.00ms".
+        # Alias read by older SDK clients.
         "execution_time_ms": result.duration_ms,
         "errors": result.errors,
       }

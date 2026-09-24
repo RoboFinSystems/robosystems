@@ -23,22 +23,13 @@ from robosystems.middleware.graph.allocation_manager import (
 
 logger = get_logger(__name__)
 
-# Budget for the rollback itself, not for the pipeline it rolls back. Sized
-# above the one Graph API call teardown makes (``delete_database``, which
-# carries the client's own 30s timeout and three retries with backoff — ~127s
-# worst case) plus the registry deallocation and PostgreSQL cleanup after it.
-# The worker's per-task budget must exceed the pipeline's waits *and* this.
+# Budget for the rollback alone: above ``delete_database``'s worst case with
+# retries (~127s) plus deallocation and PostgreSQL cleanup. The worker's
+# per-task budget must exceed the pipeline's waits plus this.
 CLEANUP_TIMEOUT_SECONDS = 180
 
-# Base backoff between credit-pool creation retries (multiplied by the attempt).
-# A module constant so a test exercising the transient-retry path can zero it
-# instead of paying real wall-clock.
+# Multiplied by the attempt number; a constant so tests can zero it.
 CREDIT_POOL_RETRY_BACKOFF_SECONDS = 1.0
-
-
-# ---------------------------------------------------------------------------
-# Config / Result dataclasses
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -107,30 +98,10 @@ class GraphCreationResult:
     }
 
 
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
-
-
 class GraphCreationService:
-  """Unified graph creation pipeline for all graph types.
-
-  Pipeline steps:
-    1. validate_org      — check org limits
-    2. generate_graph_id — ULID-based
-    3. allocate          — DynamoDB allocation via LadybugAllocationManager
-    4. create_database   — Graph API create_database call
-    5. install_schema    — resolve DDL + install via Graph API
-    6. persist_metadata  — Graph, GraphSchema, staging tables, GraphUser (one txn)
-    7. provision_entity  — [entity only] extensions OLTP tenant + LedgerEntity
-    8. create_credits    — non-blocking credit pool setup
-    9. cleanup           — deallocate on failure
-  """
-
-  # ---- Public entry point ------------------------------------------------
+  """Graph creation pipeline for all graph types; a failure rolls back what was built."""
 
   async def create(self, config: GraphCreationConfig) -> GraphCreationResult:
-    """Run the full graph creation pipeline."""
     logger.info(f"Starting graph creation for user {config.user_id}")
 
     org_id = self._validate_org(config)
@@ -154,12 +125,8 @@ class GraphCreationService:
         graph_id, org_id, location, config, schema_ddl, schema_info
       )
 
-      # The tenant schema is provisioned whenever the graph carries an
-      # extension that has one — independent of whether an entity is created
-      # up front. An extensions-flagged graph with no schema passes the
-      # extension gate and then has nowhere to land (db/extensions.py,
-      # `_bind_statement`), so "empty entity graph" means an empty *schema*,
-      # not a missing one.
+      # Provisioned for any graph whose extensions need one, entity or not: an
+      # extensions-flagged graph without a schema has nowhere for writes to land.
       from robosystems.db.extensions import (
         needs_tenant_schema,
         provision_tenant_schema,
@@ -196,16 +163,12 @@ class GraphCreationService:
       return result
 
     except BaseException as e:
-      # BaseException, not Exception: the worker runs this handler under
-      # ``asyncio.wait_for``, and an expired budget delivers ``CancelledError``,
-      # which is a BaseException in 3.13. Catching only Exception let a timeout
-      # skip the rollback entirely and strand the allocation on a
-      # one-graph-per-instance writer.
+      # BaseException: a worker timeout arrives as CancelledError, and it must
+      # still roll back the allocation.
       logger.error(f"Graph creation failed: {type(e).__name__}: {e}")
       await self._cleanup_within_budget(graph_id, location, graph_client)
-      # Re-raise the original, untranslated: ``wait_for`` turns a propagating
-      # CancelledError into TimeoutError, which is what the consumer's timeout
-      # branch records the operation from.
+      # Re-raise untranslated; ``wait_for`` turns CancelledError into the
+      # TimeoutError the consumer records.
       raise
 
     finally:
@@ -215,10 +178,8 @@ class GraphCreationService:
         except Exception:
           pass
 
-  # ---- Pipeline steps ----------------------------------------------------
-
   def _validate_org(self, config: GraphCreationConfig) -> str:
-    """Validate user has an org and org can create graphs. Returns org_id."""
+    """Return the user's org_id, raising ValueError if it may not create a graph."""
     from robosystems.database import get_db_session
     from robosystems.models.core import OrgLimits, OrgUser
 
@@ -234,10 +195,7 @@ class GraphCreationService:
       membership = user_orgs[0]
       org_id = membership.org_id
 
-      # Re-checked here as well as at the API boundary for the same reason the
-      # quota is: creation can be queued and retried, so the role is
-      # re-evaluated when the work actually runs rather than trusted from
-      # whenever it was requested.
+      # Re-checked at run time: creation can be queued and retried.
       if not membership.can_create_graphs():
         raise ValueError("Only organization owners and admins can create graphs")
 
@@ -254,7 +212,6 @@ class GraphCreationService:
         pass
 
   def _generate_graph_id(self) -> str:
-    """Generate a ULID-based graph ID."""
     from robosystems.utils.ulid import generate_ulid_hex
 
     graph_id = f"kg{generate_ulid_hex(20)}"
@@ -266,7 +223,6 @@ class GraphCreationService:
     graph_id: str,
     config: GraphCreationConfig,
   ) -> DatabaseLocation:
-    """Allocate database on a LadybugDB instance."""
     manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
     location = await manager.allocate_database(
       entity_id=config.user_id,
@@ -288,11 +244,8 @@ class GraphCreationService:
     location: DatabaseLocation,
     config: GraphCreationConfig,
   ) -> tuple[Any, str | None]:
-    """Create the LadybugDB database via Graph API.
-
-    Returns (graph_client, custom_ddl). custom_ddl is non-None only for
-    custom schema graphs so _install_schema can reuse it without re-parsing.
-    """
+    """Create the database; ``custom_ddl`` is returned for custom schemas only,
+    so ``_install_schema`` need not re-parse it."""
     from robosystems.graph_api.client import get_graph_client_for_instance
 
     graph_client = await get_graph_client_for_instance(location.private_ip)
@@ -317,10 +270,10 @@ class GraphCreationService:
     config: GraphCreationConfig,
     custom_ddl: str | None = None,
   ) -> tuple[str, dict[str, Any]]:
-    """Resolve and install schema. Returns (ddl, persistence_info).
+    """Install the extensions schema, returning (ddl, persistence_info).
 
-    For custom schemas, pass custom_ddl from _create_database to avoid
-    re-parsing. DDL was already applied during create_database.
+    A custom schema was already applied by create_database; only its info is
+    built here.
     """
     if config.has_custom_schema:
       ddl = custom_ddl or self._resolve_custom_schema_ddl(config.custom_schema)
@@ -333,7 +286,6 @@ class GraphCreationService:
       }
       return ddl, info
 
-    # Extensions schema — generate DDL and install
     from robosystems.schemas.runtime.manager import SchemaManager
 
     manager = SchemaManager()
@@ -376,7 +328,6 @@ class GraphCreationService:
     db_gen = get_db_session()
     db = next(db_gen)
     try:
-      # Create new Graph + GraphUser
       Graph.create(
         graph_id=graph_id,
         graph_name=config.graph_name,
@@ -406,14 +357,12 @@ class GraphCreationService:
       )
       db.add(user_graph)
 
-      # Deselect other graphs for this user
       db.query(GraphUser).filter(
         GraphUser.user_id == config.user_id, GraphUser.graph_id != graph_id
       ).update({"is_selected": False})
 
       db.flush()
 
-      # Schema record
       GraphSchema.create(
         graph_id=graph_id,
         schema_type=schema_info["schema_type"],
@@ -425,7 +374,6 @@ class GraphCreationService:
         commit=False,
       )
 
-      # Staging tables
       table_service = TableService(db)
       created_tables = table_service.create_tables_from_schema(
         graph_id=graph_id,
@@ -450,11 +398,7 @@ class GraphCreationService:
     graph_id: str,
     config: GraphCreationConfig,
   ) -> dict[str, Any]:
-    """Create the entity row in the (already provisioned) tenant schema.
-
-    Only called for entity graphs with create_entity=True; the schema itself
-    is provisioned by the pipeline for every extensions-flagged graph.
-    """
+    """Create the entity row in the already-provisioned tenant schema."""
     from robosystems.db.extensions import extensions_session
     from robosystems.models.api import EntityCreate
     from robosystems.models.extensions.entity import Entity as LedgerEntity
@@ -464,21 +408,18 @@ class GraphCreationService:
     entity_data = EntityCreate(**config.entity_data)
     current_time = datetime.now(UTC)
 
-    # Derive the entity's Reporting Style from its legal form (an explicit
-    # reporting_style_id on the create request overrides it). The Style lives
-    # on the entity, not the graph, so one graph can hold entities of
-    # different legal forms.
+    # From the legal form, unless the request names one. Lives on the entity,
+    # not the graph.
     reporting_style_id = resolve_reporting_style_id(config.entity_data)
 
     entity_identifier = f"entity_{graph_id}"
     entity_uri = entity_data.uri or f"https://robosystems.ai/entities#{graph_id}"
 
-    # Auto-generate ticker from entity name if not provided
     ticker = getattr(entity_data, "ticker", None)
     if not ticker:
       import re
 
-      # Extract uppercase letters/first chars of words, max 6 chars
+      # Initials of the name's words, max 6.
       words = re.sub(r"[^a-zA-Z0-9\s]", "", entity_data.name).split()
       if len(words) >= 2:
         ticker = "".join(w[0].upper() for w in words if w)[:6]
@@ -523,12 +464,10 @@ class GraphCreationService:
     }
 
   async def _create_credits(self, graph_id: str, config: GraphCreationConfig) -> None:
-    """Create credit pool. Non-blocking — failures are logged, not raised.
+    """Create the credit pool; failures are logged, not raised.
 
-    Retried, because a graph without a pool has every AI run denied by the
-    unconditional pre-flight, admin add-bonus/reset both 404 on the missing
-    row, and the monthly allocation iterates existing pools only, so a single
-    transient failure here would be a permanent, invisible gap.
+    Retried because a missing pool is permanent and silent: every AI run is
+    denied, and nothing later creates it.
     """
     import asyncio
 
@@ -558,8 +497,7 @@ class GraphCreationService:
           except StopIteration:
             pass
       except ValueError as e:
-        # Deterministic config error (unknown tier, disallowed graph-tier combo)
-        # — retrying cannot help, so log and stop rather than burn the backoff.
+        # A config error; retrying cannot help.
         logger.error(f"Failed to create credit pool for {graph_id}: {e}")
         return
       except Exception as e:
@@ -580,12 +518,9 @@ class GraphCreationService:
   ) -> None:
     """Run the rollback under its own timeout.
 
-    The bound is what makes the cancellation path safe. ``asyncio.wait_for``
-    cancels the handler exactly once, so once that cancellation has been caught
-    an unbounded rollback is never interrupted again and holds the worker for
-    however long teardown takes. Overrunning the budget is logged and
-    abandoned — the caller is already failing, and delaying its failure further
-    helps nobody.
+    ``wait_for`` cancels only once, so after that cancellation is caught an
+    unbounded rollback could hold the worker indefinitely. An overrun is logged
+    and abandoned.
     """
     try:
       await asyncio.wait_for(
@@ -606,19 +541,11 @@ class GraphCreationService:
     location: DatabaseLocation | None,
     graph_client=None,
   ) -> None:
-    """Undo a partially built graph.
+    """Undo a partially built graph, best-effort.
 
-    Which resources exist depends on how far the pipeline got, and the two
-    cases need different treatment. ``_persist_metadata`` **commits**, so a
-    failure after it leaves a `Graph` row, its `GraphUser` / `GraphSchema` /
-    staging rows, and possibly an extensions tenant schema — teardown for all
-    of that already exists in ``GraphDeprovisionService`` and is what runs.
-    A failure before it leaves only the allocation, which that service would
-    decline to touch (no row to find, so it returns ``not_found``), so the
-    allocation is released directly instead.
-
-    Best-effort throughout: a failure here must not replace the exception that
-    caused the rollback.
+    After ``_persist_metadata`` commits there is a Graph row, and
+    ``GraphDeprovisionService`` tears everything down. Before it, only the
+    database file and the allocation exist, and are released directly.
     """
     try:
       if graph_client:
@@ -650,16 +577,10 @@ class GraphCreationService:
           return
 
       if location:
-        # Pre-persist failure (no Graph row above): `_create_database` may
-        # already have written the `.lbug` to the instance, and there is no
-        # Graph row to drive teardown. Delete the file BEFORE releasing the
-        # allocation — a freed registry slot whose `.lbug` is still on disk
-        # poisons that instance, because the graph_api counts on-disk
-        # databases against `max_databases` (=1 on every tier) while the
-        # allocator counts registry rows, so the instance reports full to
-        # `create_database` (507) yet empty to `_find_best_instance`, which
-        # keeps re-picking it. Best-effort: if the delete fails the daily
-        # reclaim reconciliation is the backstop.
+        # Delete the `.lbug` before releasing the allocation: the node counts
+        # on-disk databases while the allocator counts registry rows, so a
+        # freed slot with a file still on it reads full to one and empty to
+        # the other. Reclaim reconciliation is the backstop.
         try:
           from robosystems.graph_api.client.factory import get_graph_client
 
@@ -683,10 +604,7 @@ class GraphCreationService:
     except Exception as e:
       logger.error(f"Cleanup failed for {graph_id}: {e}", exc_info=True)
 
-  # ---- Helpers -----------------------------------------------------------
-
   def _resolve_custom_schema_ddl(self, custom_schema: dict[str, Any]) -> str:
-    """Parse and validate a custom schema definition, returning DDL."""
     from robosystems.schemas.runtime.custom import CustomSchemaManager
 
     manager = CustomSchemaManager()
@@ -696,6 +614,5 @@ class GraphCreationService:
     return parsed.to_cypher()
 
   def _emit(self, config: GraphCreationConfig, message: str, percent: float) -> None:
-    """Emit progress if callback is set."""
     if config.progress:
       config.progress(message, percent)

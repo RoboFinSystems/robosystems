@@ -298,21 +298,18 @@ class BackupManager:
     s3_adapter: S3BackupAdapter | None = None,
     graph_router=None,
   ):
-    """Both collaborators are optional and built lazily on first use."""
     self._s3_adapter = s3_adapter
     self._graph_router = graph_router
     logger.info("BackupManager initialized")
 
   @property
   def s3_adapter(self):
-    """Lazy initialization of S3 adapter."""
     if self._s3_adapter is None:
       self._s3_adapter = S3BackupAdapter()
     return self._s3_adapter
 
   @property
   def graph_router(self):
-    """Lazy initialization of graph router."""
     if self._graph_router is None:
       from robosystems.middleware.graph.router import get_graph_router
 
@@ -346,9 +343,8 @@ class BackupManager:
           )
           return None
 
-        # Use completed_at for filename timestamp — for shared repos the record
-        # is upserted so created_at stays fixed while completed_at reflects
-        # the actual publish date
+        # completed_at, not created_at: shared-repo records are upserted, so
+        # only completed_at reflects the publish date.
         timestamp = backup.completed_at or backup.created_at
         timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
         is_r2 = (
@@ -558,13 +554,10 @@ class BackupManager:
 
       backup_duration = asyncio.get_event_loop().time() - start_time
 
-      # The record describes the ARCHIVE, not the live database, whenever the
-      # archive was measured. This matters because reconciliation deliberately
-      # tolerates drift: a backup taken while writes land records live=100 over
-      # an archive holding 98, and `_verify_restore` compares a restored
-      # database against these numbers. Recording the live count would make
-      # every drifted backup fail verification *after* overwriting the target.
-      # The live counts are not lost — they ride in `payload_delta` below.
+      # Record the archive's counts, not the live ones: `_verify_restore`
+      # checks a restored database against these, and a backup taken during
+      # writes would otherwise fail verification after overwriting the target.
+      # The live counts ride in `payload_delta`.
       measured_nodes = (payload or {}).get("node_count")
       measured_rels = (payload or {}).get("relationship_count")
 

@@ -42,8 +42,6 @@ class ElementReference(ExtensionsBase):
   # Paragraph, etc.). Stored as a string for flexibility; structured as JSON
   # if the ingest pipeline chooses.
   attributes = Column(String, nullable=True)
-
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   created_by = Column(String, nullable=False, default="system")
 

@@ -166,11 +166,9 @@ class CreditService:
 
     parent_graph_id = self._get_parent_graph_id(graph_id)
 
-    # No cached pre-reject here, deliberately. When called with
-    # drain_on_shortfall (the post-hoc AI path), an early return on a stale
-    # cached balance would skip the drain the atomic consume below performs.
-    # The cheap balance check belongs in the pre-flight (`check_credit_balance`),
-    # not on this post-charge path.
+    # No cached pre-reject: on the post-hoc AI path (drain_on_shortfall) a
+    # stale cached balance would skip the drain. The cheap check belongs in
+    # `check_credit_balance`.
     credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {
@@ -229,11 +227,8 @@ class CreditService:
       except Exception:
         pass  # Metrics are best-effort, never break credit consumption
 
-      # Usage-ledger row, a *different* table from the credit ledger the
-      # atomic consume just wrote: `graph_credit_transactions` is
-      # authoritative for billing, while `graph_usage` is what
-      # `/orgs/{org_id}/usage` and the per-graph usage views read. Both have
-      # to be written or the dashboards under-report real spend.
+      # `graph_usage` is separate from the billing ledger the atomic consume
+      # wrote; the usage dashboards read it, so both must be written.
       try:
         if user_id:
           GraphUsage.record_credit_consumption(
@@ -615,10 +610,8 @@ class CreditService:
         "error": "No credit pool found for graph",
       }
 
-    # Must be `current_balance`: that is the column `consume_credits_atomic`
-    # decrements and gates its UPDATE on, so it is the only figure that decides
-    # whether a spend succeeds. Any derived alternative would also collide with
-    # the consume path in the shared cache key below.
+    # Must be `current_balance`: the column `consume_credits_atomic` gates on,
+    # and the figure the consume path writes to the same cache key.
     actual_balance = float(credits.current_balance)
 
     has_sufficient = Decimal(str(actual_balance)) >= required_credits
@@ -770,7 +763,6 @@ class CreditService:
 
     self.session.commit()
 
-    # Invalidate all credit caches after bulk allocation
     try:
       from ...middleware.billing.cache import credit_cache
 
@@ -786,7 +778,6 @@ class CreditService:
 
   def get_all_credit_summaries(self, user_id: str) -> list[dict[str, Any]]:
     """Get credit summaries for all graphs owned by a user."""
-    # Get all graphs for the user
     user_graphs = (
       self.session.query(GraphUser).filter(GraphUser.user_id == user_id).all()
     )

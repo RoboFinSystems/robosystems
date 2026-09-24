@@ -44,7 +44,6 @@ __all__ = [
   "CreditService",
   "DatabaseLocation",
   "DatabaseStatus",
-  # Graph operations
   "GraphCreationConfig",
   "GraphCreationResult",
   "GraphCreationService",
@@ -52,10 +51,8 @@ __all__ = [
   "GraphSubscriptionService",
   "InstanceInfo",
   "InstanceStatus",
-  # LadybugDB operations
   "LadybugAllocationManager",
   "MultiTenantUtils",
-  # Providers
   "ProviderRegistry",
   "RepositorySubscriptionService",
   "RestoreJob",

@@ -1,24 +1,15 @@
-"""Platform-level text embedding service using fastembed.
-
-Provides embedding generation for document indexing and semantic search.
-Uses BAAI/bge-small-en-v1.5 (384 dimensions) which is included in the
-Docker image at no cost — no external API calls or credits consumed.
-"""
+"""Local fastembed text embeddings (bge-small, 384-dim): no API calls or credits."""
 
 from __future__ import annotations
 
 from robosystems.logger import logger
 
-# Model constants
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIMENSIONS = 384
 EMBEDDING_MODEL_ID = "fastembed"
 
-# onnxruntime intra-op thread count. Pinned to 1 on purpose: in CPU-limited
-# containers (ECS Fargate), letting onnxruntime auto-size its thread pool
-# oversubscribes the CFS quota — the spin-wait threads contend instead of
-# compute, making embedding ~5x SLOWER. Benchmarked on this workload:
-# threads=None ~1280ms/section vs threads=1 ~240ms/section.
+# Auto-sized onnxruntime threads oversubscribe a CPU-limited container's CFS
+# quota and run ~5x slower (measured ~1280 vs ~240 ms/section).
 EMBEDDING_THREADS = 1
 
 
@@ -50,7 +41,6 @@ class EmbeddingService:
     return self.embed_batch([text])[0]
 
 
-# Lazy singleton
 _service: EmbeddingService | None = None
 
 

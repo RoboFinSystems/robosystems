@@ -1,26 +1,11 @@
-"""Report model — the package-mode container and unit of materialization.
+"""Report: a named, period-scoped, lockable package of FactSets (one per
+Structure), and the unit that materializes to the graph.
 
-A Report is a named, period-scoped, lockable container for the FactSets
-generated for one reporting period. It is the digital equivalent of a
-signed financial-report package ("Q1 2026 Financial Statements") and
-the atomic unit that materialises to the graph (one graph Report node
-+ its FactSet/Fact nodes per Report row).
-
-The Report has two orthogonal lifecycles:
-
-* ``generation_status`` (pending → generating → complete → published) —
-  the *computation* lifecycle. Tracks whether facts have been generated.
-* ``filing_status`` (draft → under_review → filed → archived) — the
-  *business* lifecycle. Tracks whether the package has been reviewed and
-  filed. ``filed`` is the immutable, locked state.
-
-Restatements create a new Report with ``supersedes_id`` pointing at the
-prior filed version; the prior row's ``superseded_by_id`` closes the
-link. The graph version chain follows the OLTP chain 1:1.
-
-The package-mode viewer renders a Report by loading its attached
-FactSets (one per Structure on the Report) and rehydrating each as an
-``InformationBlockEnvelope`` via ``get_information_block_for_fact_set``.
+Two orthogonal lifecycles: ``generation_status`` (pending → generating →
+complete → published) tracks computation; ``filing_status`` (draft →
+under_review → filed → archived) tracks review, and ``filed`` is immutable.
+A restatement is a new Report linked by ``supersedes_id`` /
+``superseded_by_id``.
 """
 
 from datetime import UTC, datetime
@@ -56,63 +41,52 @@ class Report(ExtensionsBase):
     ),
   )
 
-  # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("rpt"))
   name = Column(String, nullable=False)
   description = Column(String, nullable=True)
 
-  # Taxonomy — determines which structures (IS, BS, CF) are available
+  # Determines which structures (IS, BS, CF) are available.
   taxonomy_id = Column(String, nullable=False)
 
-  # Configuration
   mapping_id = Column(String, nullable=True)
   period_type = Column(String, nullable=False, default="monthly")
   period_start = Column(Date, nullable=True)
   period_end = Column(Date, nullable=True)
   comparative = Column(Boolean, nullable=False, default=True)
 
-  # Multi-period support — ordered list of period specs for N-column reports
-  # Each entry: {"start": "2026-01-01", "end": "2026-01-31", "label": "Jan 2026"}
-  # When set, overrides period_start/period_end/comparative for fact generation.
+  # Ordered N-column period specs, e.g. {"start": "2026-01-01", "end":
+  # "2026-01-31", "label": "Jan 2026"}; overrides period_start/period_end/
+  # comparative when set.
   periods = Column(JSONB, nullable=True)
 
-  # Generated output references. ``generation_count`` monotonically
-  # increments on each (re)generation so the exported bundle in object
-  # storage stays addressable per-version; ``bundle_url`` points at the
-  # latest exported JSON-LD artifact (null pre-serialization-feature).
+  # ``generation_count`` increments per (re)generation so each exported bundle
+  # stays addressable; ``bundle_url`` is the latest JSON-LD export.
   graph_report_id = Column(String, nullable=True)
   last_generated = Column(DateTime, nullable=True)
   generation_status = Column(String, nullable=False, default="pending")
   generation_count = Column(Integer, nullable=False, default=0, server_default="0")
   bundle_url = Column(String, nullable=True)
 
-  # Filing lifecycle — orthogonal to generation_status. ``filed`` is
-  # the immutable locked state; ``archived`` is for superseded versions.
+  # ``archived`` is for superseded versions.
   filing_status = Column(String, nullable=False, default="draft")
   filed_at = Column(DateTime(timezone=True), nullable=True)
   filed_by = Column(String, nullable=True)
 
-  # Restatement chain — restating a filed Report creates a new row with
-  # ``supersedes_id`` pointing at the prior version; the prior row's
-  # ``superseded_by_id`` closes the link.
   supersedes_id = Column(String, ForeignKey("reports.id"), nullable=True)
   superseded_by_id = Column(String, ForeignKey("reports.id"), nullable=True)
 
-  # AI provenance
   ai_generated = Column(Boolean, nullable=False, default=False)
   ai_intent = Column(String, nullable=True)
   ai_workspace_id = Column(String, nullable=True)
   ai_confidence = Column(Float, nullable=True)
 
-  # Sharing provenance (populated on received/shared reports, null for local)
+  # Set on reports received from another graph.
   source_graph_id = Column(String, nullable=True)
   source_report_id = Column(String, nullable=True)
   shared_at = Column(DateTime, nullable=True)
 
-  # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
 
-  # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,
