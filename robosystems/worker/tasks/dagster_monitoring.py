@@ -90,7 +90,8 @@ class DagsterJobMonitorTask(BaseTask):
   async def _stop_run(self, monitor: Any, run_id: str) -> bool:
     """Terminate the run and wait for Dagster to report it stopped.
 
-    True once it has; False if it is still running after the settle window.
+    True once it has; False if it is still running, or its state could not be
+    read, after the settle window.
     """
     import asyncio
 
@@ -100,7 +101,11 @@ class DagsterJobMonitorTask(BaseTask):
       logger.warning(f"Terminating Dagster run {run_id} failed: {e}")
     waited = 0.0
     while waited < self.CANCEL_SETTLE_SECONDS:
-      status = (await asyncio.to_thread(monitor.get_run_status, run_id))["status"]
+      try:
+        status = (await asyncio.to_thread(monitor.get_run_status, run_id))["status"]
+      except Exception as e:
+        logger.warning(f"Reading Dagster run {run_id} status failed: {e}")
+        status = None
       if status in ("completed", "failed", "cancelled"):
         return True
       await asyncio.sleep(monitor.poll_interval)

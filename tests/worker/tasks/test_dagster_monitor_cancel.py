@@ -62,3 +62,38 @@ async def test_a_run_still_writing_keeps_its_lock():
 
   monitor.terminate_run.assert_called_once_with("run_1")
   task.release_lock.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_run_whose_state_cannot_be_read_keeps_its_lock():
+  task = _task()
+  task.CANCEL_SETTLE_SECONDS = 0.05
+  monitor = _monitor([])
+  monitor.get_run_status.side_effect = ConnectionError("webserver unreachable")
+  with patch(
+    "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor",
+    return_value=monitor,
+  ):
+    result = await task.execute()
+
+  assert result["status"] == "cancelled"
+  task.release_lock.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_status_read_that_recovers_still_releases_the_lock():
+  task = _task()
+  monitor = _monitor([])
+  monitor.get_run_status.side_effect = [
+    ConnectionError("blip"),
+    {"status": "cancelled"},
+  ]
+  with patch(
+    "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor",
+    return_value=monitor,
+  ):
+    await task.execute()
+
+  task.release_lock.assert_called_once()
