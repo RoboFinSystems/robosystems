@@ -1,14 +1,7 @@
-"""RoboLedger OLTP-backed analytical reads.
+"""RoboLedger OLTP-backed analytical reads (``live-financial-statement``).
 
-Sibling to `views.py` (graph-backed). Both surfaces live under
-`/extensions/roboledger/{graph_id}/operations/*`; this file hosts
-reads whose source of truth is the extensions OLTP database rather
-than the materialized graph.
-
-``live-financial-statement`` is the entity-graph companion to
-``financial-statement-analysis``. This router is gated by
-``ROBOLEDGER_ENABLED``, unlike `views.py`, which stays mounted for
-SEC-only deployments.
+Sibling to the graph-backed `views.py`, but gated by ``ROBOLEDGER_ENABLED``
+rather than staying mounted for SEC-only deployments.
 """
 
 from __future__ import annotations

@@ -1,27 +1,15 @@
-"""Per-graph MCP instructions generator.
+"""The MCP `instructions` handshake text for a graph.
 
-Produces the routing guidance handed to MCP clients via the server's
-`instructions` handshake field. The string sits in the connected agent's
-context for the whole session, so it stays short and points at live tool
-*families* rather than restating each tool's schema — it is the discovery
-layer that tells an agent which tool to reach for, given an intent.
-
-Two content sources, split by graph stability:
-
-- Shared repositories pass an authored string (`manifest.agent_instructions`),
-  used verbatim — their tool set is fixed and curated, so hand-authored copy is
-  lowest-risk and gives full editorial control.
-- Entity and generic graphs are generated here from the resolved tool-name set.
-  Branching on the names that actually came back means the guidance can never
-  reference a tool the graph doesn't expose, and stays consistent-by-
-  construction with the gating in ``GraphMCPTools``.
+It sits in the agent's context all session, so it stays short and routes by
+tool family. Shared repositories supply authored text; other graphs are
+generated from the exposed tool names, so the text never names a tool the
+graph lacks.
 """
 
 from __future__ import annotations
 
 
 def _block(*lines: str) -> str:
-  """Join non-empty lines with newlines into a single section block."""
   return "\n".join(line for line in lines if line)
 
 
@@ -33,18 +21,7 @@ def build_instructions(
   read_only: bool,
   authored_override: str | None = None,
 ) -> str | None:
-  """Build the per-graph instructions string for an MCP client.
-
-  Args:
-      graph_id: The active graph identifier.
-      tool_names: Names of the tools actually exposed for this graph.
-      is_shared_repo: Whether this is a shared repository (or subgraph of one).
-      read_only: Whether write operations are disabled for this graph.
-      authored_override: Curated text (shared-repo manifest); used verbatim.
-
-  Returns:
-      The instructions string, or None if there is nothing useful to say.
-  """
+  """`authored_override` is used verbatim. None when there is nothing to say."""
   if authored_override and authored_override.strip():
     return authored_override.strip()
 
@@ -54,7 +31,7 @@ def build_instructions(
   )
   has_portfolio = has("create-portfolio-block") or has("create-security")
 
-  # Header — adapt to the graph's category.
+  # Header by graph category.
   if is_shared_repo:
     header = (
       f"Connected to shared repository `{graph_id}` — curated, READ-ONLY data "
@@ -226,8 +203,7 @@ def build_instructions(
     if len(mem_lines) > 1:
       sections.append(_block(*mem_lines))
 
-  # Tenant-specific procedure docs (the per-graph layer the generic playbooks
-  # defer to) — only meaningful on a writable entity graph.
+  # Tenant procedure docs, which the generic playbooks defer to.
   if has("search-documents") and not is_shared_repo:
     sections.append(
       "ALSO run `search-documents` for this company's own procedure and policy "
@@ -241,14 +217,10 @@ def build_instructions(
       "operations are unavailable here."
     )
 
-  # Public documentation, as URLs rather than prose: a model that has read a
-  # page can cite it, and a person asking "where is this written down?" gets an
-  # address instead of a paraphrase. One line, the pages that match this graph.
+  # Docs as URLs, so a model can cite them.
   if is_shared_repo:
-    # `sec` is the only shared repository today, and its manifest authors its
-    # own instructions, so this branch is the fallback for a future one. Name
-    # the SEC guide only for `sec`; any other repository gets the platform
-    # guides rather than a page about filings it does not hold.
+    # Only reached by a future repository without authored instructions;
+    # the SEC guide is named for `sec` alone.
     doc_lines = (
       [
         "- https://robosystems.ai/docs/guides/sec-filings — what to ask of the "

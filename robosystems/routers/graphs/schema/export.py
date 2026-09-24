@@ -76,19 +76,17 @@ async def export_graph_schema(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ):
-  # Enforce graph lifecycle and subscription status (read operation)
   from robosystems.middleware.billing.enforcement import require_graph_access
 
   require_graph_access(graph_id, db, require_write=False)
 
   try:
-    # Get declared schema from PostgreSQL GraphSchema table
     from robosystems.models.core import Graph, GraphSchema
 
     schema_record = GraphSchema.get_active_schema(graph_id, db)
 
     if not schema_record:
-      # Try to reconstruct from Graph metadata if no schema record exists
+      # No schema record: reconstruct from Graph metadata.
       logger.info(
         f"No GraphSchema record found for {graph_id}, falling back to Graph metadata"
       )
@@ -99,7 +97,6 @@ async def export_graph_schema(
           detail=f"No schema found for graph {graph_id}",
         )
 
-      # Use graph metadata as fallback
       logger.debug(
         f"Reconstructing schema from Graph metadata for {graph_id}: "
         f"type={graph.graph_type}, extensions={graph.schema_extensions}"
@@ -120,15 +117,12 @@ async def export_graph_schema(
         },
       }
     else:
-      # Use stored schema from GraphSchema table
       schema_name = schema_record.custom_schema_name or f"{graph_id}_schema"
       schema_version = str(schema_record.schema_version)
       schema_type = schema_record.schema_type
 
-      # Use stored schema_json if available
       if schema_record.schema_json:
         schema_def = schema_record.schema_json
-        # Ensure it has required fields
         if "name" not in schema_def:
           schema_def["name"] = schema_name  # type: ignore[index]
         if "version" not in schema_def:
@@ -136,7 +130,7 @@ async def export_graph_schema(
         if "type" not in schema_def:
           schema_def["type"] = schema_type  # type: ignore[index]
 
-        # For extension-based schemas, reconstruct full schema from Python definitions
+        # Extension-based schemas: rebuild the full schema from the Python definitions.
         if schema_type == "extensions" and "nodes" not in schema_def:
           logger.info(
             f"Extension-based schema for {graph_id} missing nodes, "
@@ -144,15 +138,12 @@ async def export_graph_schema(
           )
           from robosystems.schemas.loader import get_schema_loader
 
-          # Get extensions list from schema_json
           extensions_list = schema_def.get("extensions", [])
           logger.debug(f"Loading schema extensions for {graph_id}: {extensions_list}")
           base_schema = schema_def.get("base", "entity")
 
-          # Load the combined schema (base + extensions)
           loader = get_schema_loader(extensions=extensions_list)
 
-          # Convert to reusable format
           nodes = []
           for node in loader.nodes.values():
             node_dict = {
@@ -166,7 +157,6 @@ async def export_graph_schema(
                 for prop in node.properties
               ],
             }
-            # Add is_required flag if property is not nullable
             for i, prop in enumerate(node.properties):
               if not prop.nullable and not prop.is_primary_key:
                 node_dict["properties"][i]["is_required"] = True
@@ -191,11 +181,9 @@ async def export_graph_schema(
             }
             relationships.append(rel_dict)
 
-          # Update schema_def with full details
           schema_def["nodes"] = nodes  # type: ignore[index]
           schema_def["relationships"] = relationships  # type: ignore[index]
           schema_def["extends"] = base_schema  # type: ignore[index]
-          # Remove internal 'base' field, use 'extends' instead
           if "base" in schema_def:
             del schema_def["base"]  # type: ignore[index]
       else:
@@ -218,16 +206,13 @@ async def export_graph_schema(
           },
         }
 
-    # Get data statistics if requested
     data_stats = None
     if include_data_stats:
-      # Get runtime statistics from the graph
       try:
         from robosystems.middleware.graph.router import get_universal_repository
 
         from .utils import get_schema_info
 
-        # Use existing session parameter for repository auth
         repository = await get_universal_repository(graph_id, "read")
         runtime_schema = await get_schema_info(repository)
 
@@ -244,7 +229,6 @@ async def export_graph_schema(
           "message": "Data statistics unavailable",
         }
 
-    # Format output based on requested format
     if format == "yaml":
       schema_output = yaml.dump(schema_def, default_flow_style=False)
     elif format == "cypher":

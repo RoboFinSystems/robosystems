@@ -131,12 +131,7 @@ _OP_TAG = "RoboLedger: Ledger & Events"
 _registrar = make_registrar(router, _OP_TAG)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Agents
-#
-# Counterparty records (customers, vendors, employees, etc.).
-# events.agent_id references this table.
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Agents: counterparty records (events.agent_id references them) ────────────
 
 create_agent_op = _registrar.register(
   OperationSpec(
@@ -173,14 +168,7 @@ update_agent_op = _registrar.register(
 )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Event Blocks
-#
-# Real-world business event layer. Two write modes:
-# apply_handlers=False captures the event without firing GL postings;
-# apply_handlers=True resolves an event_handler and fires its
-# transaction template atomically with the event row.
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Event Blocks ─────────────────────────────────────────────────────────────
 
 create_event_block_op = _registrar.register(
   OperationSpec(
@@ -202,8 +190,7 @@ create_event_block_op = _registrar.register(
     request_model=CreateEventBlockRequest,
     result_type=EventBlockEnvelope,
     error_map={
-      # Ahead of the broad `ValueError: 422` below so a repeat delivery is
-      # reported as a conflict rather than a validation failure.
+      # Ahead of the broad `ValueError: 422` so a repeat delivery is a conflict.
       DuplicateEventError: (
         409,
         lambda _e: "Event already ingested for this source and external_id",
@@ -213,11 +200,9 @@ create_event_block_op = _registrar.register(
       TemplateInterpolationError: 422,
       EngineValidationError: 422,
       HandlerMetadataValidationError: 422,
-      # Handlers reach locked rows — `journal_entry_reversed` locks the entry
-      # it reverses. Retryable, like every other lock conflict.
+      # e.g. `journal_entry_reversed` locks the entry it reverses. Retryable.
       RowLockedError: 409,
-      # An entry is reversed at most once; a second attempt is a fixable
-      # request, not a retryable conflict.
+      # Reversed at most once: a fixable request, not a retryable conflict.
       JournalEntryAlreadyReversedError: 422,
       DisposalScheduleNotFoundError: 404,
       JournalEntryNotFoundError: 404,
@@ -226,8 +211,7 @@ create_event_block_op = _registrar.register(
       UnbalancedJournalEntryError: 422,
       ValueError: 422,
     },
-    # Source validation resolves the graph's registered Connections
-    # (platform DB) — the tenant session alone doesn't carry the graph id.
+    # Source validation reads the graph's Connections (platform DB).
     requires_graph_id=True,
     mark_stale_reason="event_block_created",
   )
@@ -255,54 +239,34 @@ update_event_block_op = _registrar.register(
     command=cmd_update_event_block,
     request_model=UpdateEventBlockRequest,
     result_type=EventBlockEnvelope,
-    # Error map covers both update-only failures (top two) and the
-    # handler-firing path that runs on captured/classified → committed.
     error_map={
       EventNotFoundError: 404,
       InvalidEventTransitionError: 422,
-      # A retraction, from any status, of an event whose rows already posted
-      # (or which already published to QuickBooks). The caller has to
-      # reverse instead, so this is a 422 they can act on, not a 500.
+      # The event's rows already posted (or published to QB): reverse instead.
       EventEffectsAlreadyLandedError: 422,
       HandlerMetadataValidationError: 422,
       ElementResolutionError: 422,
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
-      # Approving a captured reversal fires the same handler create does, so
-      # this reaches the already-reversed guard too. Registered explicitly
-      # because it subclasses ValueError and would otherwise fall through to
-      # the generic handler and be reported as a 404.
+      # Subclasses ValueError; registered explicitly so it isn't mapped to 404.
       JournalEntryAlreadyReversedError: 422,
-      # A running sync holds the event's row lock. Retryable, and the only
-      # error here the caller should try again rather than fix.
+      # A running sync holds the row lock: the one retryable error here.
       RowLockedError: 409,
-      # The rest of what the handler fired on approve can raise — the same
-      # set create-event-block maps, since it fires the same handler over the
-      # captured metadata: a reversal naming an entry that is not posted (or
-      # gone), a disposal whose schedule is gone, and the handlers' own
-      # bare-ValueError validation.
+      # The rest mirrors create-event-block: approve fires the same handler.
       DisposalScheduleNotFoundError: 404,
       JournalEntryNotFoundError: 404,
       JournalEntryNotPostedError: 422,
       ValueError: 422,
     },
-    # A `metadata_patch.connection_id` must name one of this graph's
-    # connections; the tenant session alone doesn't carry the graph id.
+    # `metadata_patch.connection_id` must name one of this graph's connections.
     requires_graph_id=True,
     mark_stale_reason="event_block_updated",
   )
 )
 
 
-# `execute-event-block` publishes an event to the source-of-truth
-# system (QuickBooks). For events on a connection with
-# `write_policy='qb_authoritative'` / `'hybrid'`, this posts a JE to QB
-# via the QB API with `request_id=event.id` for idempotency, captures
-# the returned `qb_txn_id` on `event.metadata.qb_external_id`,
-# transitions status to `'fulfilled'` (or `'pending'` on QB rejection),
-# and promotes linked draft GL rows to `'posted'`. The cross-source
-# matcher in the loader recognises the round-tripped entry on the next
-# sync.
+# QB publish uses `request_id=event.id` for idempotency; the loader's
+# cross-source matcher recognises the round-tripped entry on the next sync.
 execute_event_block_op = _registrar.register(
   OperationSpec(
     name="execute-event-block",
@@ -321,33 +285,24 @@ execute_event_block_op = _registrar.register(
     result_type=ExecuteEventBlockResponse,
     error_map={
       EventNotFoundError: 404,
-      # AuthClientError from Intuit (revoked / scope-insufficient /
-      # rotated past grace) surfaces as QBAuthFailedError. The
-      # connection has already been flipped to needs_reauth by the
-      # QBClient itself; 401 signals to the UI that the operator must
-      # reconnect via OAuth.
+      # The QBClient has already flipped the connection to needs_reauth; 401
+      # tells the UI the operator must reconnect.
       QBAuthFailedError: 401,
-      # Another writer holds the event's row lock. Retryable, and the publish
-      # deliberately did not reach QuickBooks.
+      # Retryable; the publish did not reach QuickBooks.
       RowLockedError: 409,
-      # Voided / superseded — publishing would un-retract the event.
+      # Voided / superseded: publishing would un-retract the event.
       EventNotPublishableError: 409,
       ClosedPeriodError: 422,
       ValueError: 422,
     },
-    # The connection published to must be one of this graph's; the override
-    # in the body and the routing id in event metadata are both caller-set.
+    # Both the body override and the event-metadata routing id are caller-set.
     requires_graph_id=True,
     mark_stale_reason="event_published",
   )
 )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Event Handlers
-#
-# Dynamic rule registry that drives event → GL transformation.
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Event Handlers: the rule registry that drives event → GL ─────────────────
 
 create_event_handler_op = _registrar.register(
   OperationSpec(
@@ -406,15 +361,10 @@ preview_event_block_op = _registrar.register(
   )
 )
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Reconciling Items
-#
-# A posted event whose source payload changed afterwards. The sync flags it
-# rather than overwriting approved books; these two operations read the
-# difference and dispose of it. Preview first — the disposition is an
-# accounting judgement about the affected periods, so the operator should
-# see the delta and agree the treatment before anything is written.
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Reconciling Items ────────────────────────────────────────────────────────
+# A posted event whose source payload changed afterwards; the sync flags it
+# rather than overwriting approved books. Preview first: the disposition is an
+# accounting judgement the operator should agree before anything is written.
 
 preview_reconciling_item_op = _registrar.register(
   OperationSpec(
@@ -479,16 +429,9 @@ resolve_reconciling_item_op = _registrar.register(
   )
 )
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Journal Entries
-#
-# Update / delete / reverse operations on existing journal entries. All
-# creation (manual entries, closing entries, adjusting entries, posted
-# imports) is handled through
-# `create-event-block(event_type='journal_entry_recorded')` — the single
-# write surface for GL entries the user originates. See the Python handler
-# registry.
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Journal Entries ──────────────────────────────────────────────────────────
+# Update/delete only: all creation goes through
+# `create-event-block(event_type='journal_entry_recorded')`.
 
 update_journal_entry_op = _registrar.register(
   OperationSpec(

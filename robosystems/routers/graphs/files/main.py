@@ -1,4 +1,4 @@
-"""Graph file listing, retrieval, and deletion endpoints."""
+"""Graph file listing and retrieval endpoints."""
 
 from datetime import UTC, datetime
 
@@ -58,7 +58,6 @@ async def list_files(
 ) -> ListTableFilesResponse:
   start_time = datetime.now(UTC)
 
-  # Enforce graph lifecycle and subscription status (read operation)
   from robosystems.middleware.billing.enforcement import require_graph_access
 
   require_graph_access(graph_id, db, require_write=False)

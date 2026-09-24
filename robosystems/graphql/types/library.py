@@ -1,13 +1,6 @@
-"""Strawberry types for the taxonomy library GraphQL surface.
-
-Library types mirror the `robosystems.models.api.library` Pydantic
-models via `strawberry.experimental.pydantic.type(model=...,
-all_fields=True)`, same pattern as the ledger/investor types. When a
-Pydantic field is added to a response model the GraphQL field appears
-automatically without hand-written plumbing.
-
-**Recursive types** (`LibraryElementTreeNode`) are hand-written because
-Strawberry's pydantic decorator cannot resolve self-references.
+"""Strawberry types for the taxonomy library, derived from the Pydantic models.
+Recursive `LibraryElementTreeNode` is hand-written (no self-references in
+the pydantic decorator).
 """
 
 from __future__ import annotations

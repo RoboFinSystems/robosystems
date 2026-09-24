@@ -1,10 +1,6 @@
-"""Information Blocks — the authoring unit of a report.
-
-The generic construction envelope for schedules, statement blocks, metric
-blocks, forecast blocks and text blocks, plus the operations that compute
-over one: the rule engine, metric computation and assertion, and the
-forecast compiler.
-"""
+"""Information Blocks, the authoring unit of a report: the generic construction
+envelope plus the rule engine, metric computation/assertion and the forecast
+compiler."""
 
 from __future__ import annotations
 
@@ -82,13 +78,7 @@ _OP_TAG = "RoboLedger: Information Blocks"
 _registrar = make_registrar(router, _OP_TAG)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Information Blocks
-#
-# Generic construction envelope for schedules, statement blocks, metrics,
-# and future block types. `evaluate-rules` runs the rule engine against a
-# block's materialized facts (decoding mode, 6 patterns).
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Information Blocks ───────────────────────────────────────────────────────
 
 create_information_block_op = _registrar.register(
   OperationSpec(
@@ -133,8 +123,7 @@ update_information_block_op = _registrar.register(
       ValueError: 422,
       NotImplementedError: 501,
       ScheduleNotFoundError: 404,
-      # A schedule template change supersedes its pending obligations, which
-      # the promotion sweep may be holding. Retryable.
+      # Supersedes pending obligations the promotion sweep may hold. Retryable.
       RowLockedError: 409,
     },
     mark_stale_reason="information_block_updated",
@@ -155,8 +144,7 @@ delete_information_block_op = _registrar.register(
     request_model=DeleteInformationBlockRequest,
     result_type=DeleteInformationBlockResponse,
     error_map={
-      # Deleting a schedule voids its pending obligations, which the
-      # promotion sweep may be holding. Retryable.
+      # Voids pending obligations the promotion sweep may hold. Retryable.
       RowLockedError: 409,
       ValueError: 422,
       NotImplementedError: 501,

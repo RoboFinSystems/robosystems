@@ -18,14 +18,9 @@ from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Observation
 from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
 
-# Defense-in-depth against unbounded `endpoint` label cardinality. Callers are
-# expected to pass the *templated* route (e.g. "/v1/graphs/{graph_id}/query"),
-# but a stray f-string can interpolate a real graph_id into the label, minting a
-# new active series per graph and driving AMP ingestion cost up over time. This
-# collapses any raw graph_id (kg + >=16 hex, optional subgraph suffix) back to
-# the {graph_id} placeholder so a labeling mistake can't leak cardinality.
-# NOTE: this is only for the `endpoint` label — per-graph gauges that legitimately
-# dimension by graph_id (record_graph_metrics) are intentionally left untouched.
+# Collapses a raw graph_id in an `endpoint` label back to {graph_id}, so a
+# caller that passes a real path instead of the templated route can't mint a
+# series per graph. Not applied to per-graph gauges, which dimension by it.
 _GRAPH_ID_IN_PATH_RE = re.compile(r"kg[a-f0-9]{16,}(?:_[a-zA-Z0-9]{1,20})?")
 
 
@@ -36,9 +31,7 @@ def _sanitize_endpoint(endpoint: str) -> str:
   return _GRAPH_ID_IN_PATH_RE.sub("{graph_id}", endpoint)
 
 
-# Custom histogram buckets tuned for API latency distribution:
-# Dense coverage in 10ms-500ms range where most graph queries land,
-# sparse coverage at sub-ms (health checks excluded) and multi-second (agent/AI ops)
+# Dense in the 10ms-500ms range where most graph queries land.
 API_DURATION_BUCKETS = (
   0.005,
   0.01,
@@ -92,13 +85,9 @@ GRAPH_API_DURATION_BUCKETS = (
 )
 
 
-# FastAPIInstrumentor's http.server.* metrics default to recording the
-# client-supplied Host header as http.server_name / http.host attributes. Internet
-# scanners hit the public ALB with unbounded junk Host values (e.g.
-# "ssrf.cve-2024-34351.detect"), and each unique value mints ~48 new series across
-# the three histogram-bucket metrics — exploding Amazon Managed Prometheus sample
-# count (and cost) with no bound. Restrict these instruments to a bounded,
-# server-controlled attribute allowlist so client-controlled labels are dropped.
+# FastAPIInstrumentor records the client-supplied Host header as an attribute,
+# so junk Host values would mint unbounded series. Keep only server-controlled
+# attributes on the http.server.* instruments.
 _HTTP_SERVER_ATTRIBUTE_ALLOWLIST = frozenset(
   {
     "http.method",
@@ -132,8 +121,6 @@ def get_metric_views() -> list[View]:
       ),
     ),
   ]
-  # Strip client-controlled (Host-header-derived) attributes from the auto-generated
-  # HTTP server metrics to cap their cardinality.
   for instrument in (
     "http.server.duration",
     "http.server.request.size",
@@ -150,8 +137,6 @@ def get_metric_views() -> list[View]:
 
 
 class MetricType(Enum):
-  """Standard metric types for API endpoints."""
-
   REQUEST = "request"
   AUTH = "auth"
   ERROR = "error"
@@ -159,8 +144,6 @@ class MetricType(Enum):
 
 
 class EndpointMetrics:
-  """Container for endpoint-specific metrics instruments."""
-
   def __init__(self, meter_name: str):
     self.meter = metrics.get_meter(meter_name)
     self._request_counter = None
@@ -179,7 +162,6 @@ class EndpointMetrics:
     self._graph_api_errors = None
 
   def _ensure_instruments(self):
-    """Lazy initialization of metric instruments."""
     if self._request_counter is None:
       self._request_counter = self.meter.create_counter(
         "robosystems_api_requests_total",
@@ -228,7 +210,6 @@ class EndpointMetrics:
         unit="By",
       )
 
-      # Query queue metrics
       self._query_queue_size = self.meter.create_observable_gauge(
         "robosystems_query_queue_size",
         callbacks=[self._observe_queue_size],
@@ -236,7 +217,6 @@ class EndpointMetrics:
         unit="queries",
       )
 
-      # Database connection pool metrics
       self._db_pool_gauge = self.meter.create_observable_gauge(
         "robosystems_db_pool_connections",
         callbacks=[self._observe_db_pool],
@@ -323,19 +303,16 @@ class EndpointMetrics:
         description="Queries rejected due to per-user limits",
       )
 
-      # Rate limit metrics
       self._rate_limit_counter = self.meter.create_counter(
         "robosystems_rate_limit_rejections_total",
         description="Total rate limit rejections by endpoint and limit type",
       )
 
-      # Credit consumption metrics
       self._credit_consumption = self.meter.create_counter(
         "robosystems_credits_consumed_total",
         description="Total credits consumed by operation type",
       )
 
-      # Graph API proxy metrics — indirect observability of LadybugDB from the API side
       self._graph_api_duration = self.meter.create_histogram(
         "robosystems_graph_api_duration_seconds",
         description="Duration of HTTP calls from API to Graph API (LadybugDB)",
@@ -361,7 +338,6 @@ class EndpointMetrics:
     user_id: str | None = None,
     additional_attributes: dict[str, Any] | None = None,
   ):
-    """Record standard request metrics."""
     self._ensure_instruments()
     endpoint = _sanitize_endpoint(endpoint)
 
@@ -393,12 +369,10 @@ class EndpointMetrics:
     duration: float,
     user_id: str | None = None,
   ):
-    """Record request duration metrics only.
+    """Record request duration only.
 
-    Note: `status_code` is serialized to `str` to match the attribute
-    shape used by `record_request`. OTel histogram attributes must be
-    type-consistent across recordings of the same instrument, otherwise
-    Prometheus will silently split the series by attribute type.
+    `status_code` is a str, as in `record_request`: attribute types must match
+    across recordings or the series splits.
     """
     self._ensure_instruments()
     endpoint = _sanitize_endpoint(endpoint)
@@ -407,8 +381,7 @@ class EndpointMetrics:
       "endpoint": endpoint,
       "method": method,
       "status_code": str(status_code),
-      # Bounded flag instead of the raw user_id, which is unbounded and would
-      # multiply series by the user count (see record_query_submission).
+      # Never a raw user_id in a label: unbounded cardinality.
       "user_authenticated": "true" if user_id else "false",
     }
 
@@ -424,7 +397,6 @@ class EndpointMetrics:
     failure_reason: str | None = None,
     user_id: str | None = None,
   ):
-    """Record authentication attempt metrics."""
     self._ensure_instruments()
     endpoint = _sanitize_endpoint(endpoint)
 
@@ -433,14 +405,12 @@ class EndpointMetrics:
       "method": method,
       "auth_type": auth_type,
       "success": success,
-      # Bounded flag instead of the raw user_id (unbounded, grows with users).
       "user_authenticated": "true" if user_id else "false",
     }
 
     if self._auth_attempts is not None:
       self._auth_attempts.add(1, base_attributes)
 
-    # Record failure if applicable
     if not success:
       failure_attributes = base_attributes.copy()
       failure_attributes["failure_reason"] = failure_reason or "unknown"
@@ -455,7 +425,6 @@ class EndpointMetrics:
     error_code: str | None = None,
     user_id: str | None = None,
   ):
-    """Record error metrics."""
     self._ensure_instruments()
     endpoint = _sanitize_endpoint(endpoint)
 
@@ -484,8 +453,6 @@ class EndpointMetrics:
     event_data: dict[str, Any] | None = None,
     user_id: str | None = None,
   ):
-    """Record business logic events."""
-    # Skip business events for high-frequency health check endpoints to reduce costs
     if endpoint in ["/v1/status", "/status"] and event_type in [
       "health_check",
       "metrics_access",
@@ -495,16 +462,11 @@ class EndpointMetrics:
     self._ensure_instruments()
     endpoint = _sanitize_endpoint(endpoint)
 
-    # event_data is intentionally NOT flattened into metric labels. Arbitrary
-    # payloads (execution times, row counts, ids, byte sizes) are unbounded
-    # cardinality values; emitting them as labels explodes the active-series
-    # count and AMP ingestion cost. event_data stays for logs/traces only;
-    # the metric is dimensioned solely by the bounded fields below.
+    # event_data is deliberately not a label: its values are unbounded.
     attributes = {
       "endpoint": endpoint,
       "method": method,
       "event_type": event_type,
-      # Bounded flag instead of the raw user_id (unbounded, grows with users).
       "user_authenticated": "true" if user_id else "false",
     }
 
@@ -520,12 +482,8 @@ class EndpointMetrics:
     user_id: str | None = None,
     additional_attributes: dict[str, Any] | None = None,
   ):
-    """Record graph database metrics."""
     self._ensure_instruments()
 
-    # graph_id is the intrinsic dimension of these per-graph gauges and is
-    # bounded by the operator-controlled graph count, so it stays. user_id is
-    # dropped: it adds no useful gauge dimension and is unbounded.
     base_attributes = {
       "graph_id": graph_id,
     }
@@ -533,7 +491,6 @@ class EndpointMetrics:
     if additional_attributes:
       base_attributes.update(additional_attributes)
 
-    # Record the current values (up-down counters will track changes)
     if self._graph_node_count is not None:
       self._graph_node_count.add(node_count, base_attributes)
     if self._graph_relationship_count is not None:
@@ -549,11 +506,7 @@ class EndpointMetrics:
     success: bool,
     rejection_reason: str | None = None,
   ):
-    """Record query submission to queue.
-
-    Note: graph_id/user_id are NOT used as metric attributes to avoid
-    unbounded cardinality. Only priority and success are dimensions.
-    """
+    """graph_id/user_id are accepted but never labels (unbounded)."""
     self._ensure_instruments()
 
     attributes = {
@@ -582,7 +535,6 @@ class EndpointMetrics:
     priority: int,
     wait_time_seconds: float,
   ):
-    """Record time query spent waiting in queue."""
     self._ensure_instruments()
 
     attributes = {
@@ -600,7 +552,6 @@ class EndpointMetrics:
     status: str,  # completed, failed, cancelled, timeout
     error_type: str | None = None,
   ):
-    """Record query execution metrics."""
     self._ensure_instruments()
 
     attributes = {
@@ -616,19 +567,11 @@ class EndpointMetrics:
       self._query_completions.add(1, attributes)
 
   def update_concurrent_executions(self, delta: int):
-    """Update the count of concurrent query executions."""
     self._ensure_instruments()
     if self._query_concurrent_executions is not None:
       self._query_concurrent_executions.add(delta, {})
 
-  # SSE Monitoring Methods
-
   def record_sse_connection_opened(self, user_id: str, operation_id: str):
-    """Record an SSE connection being opened.
-
-    Note: user_id/operation_id are NOT used as metric attributes to avoid
-    unbounded cardinality. They are kept in the method signature for logging context.
-    """
     self._ensure_instruments()
     if self._sse_connections_opened is not None:
       self._sse_connections_opened.add(1, {})
@@ -636,7 +579,6 @@ class EndpointMetrics:
       self._sse_connections_active.add(1, {})
 
   def record_sse_connection_closed(self, user_id: str, operation_id: str):
-    """Record an SSE connection being closed."""
     self._ensure_instruments()
     if self._sse_connections_closed is not None:
       self._sse_connections_closed.add(1, {})
@@ -644,7 +586,6 @@ class EndpointMetrics:
       self._sse_connections_active.add(-1, {})
 
   def record_sse_connection_rejected(self, user_id: str, reason: str):
-    """Record an SSE connection being rejected."""
     self._ensure_instruments()
     attributes = {
       "reason": reason,
@@ -653,7 +594,6 @@ class EndpointMetrics:
       self._sse_connections_rejected.add(1, attributes)
 
   def record_sse_event_emitted(self, operation_id: str, event_type: str):
-    """Record a successful SSE event emission."""
     self._ensure_instruments()
     attributes = {
       "event_type": event_type,
@@ -662,7 +602,6 @@ class EndpointMetrics:
       self._sse_events_emitted.add(1, attributes)
 
   def record_sse_event_failed(self, operation_id: str, failure_reason: str):
-    """Record a failed SSE event emission."""
     self._ensure_instruments()
     attributes = {
       "failure_reason": failure_reason,
@@ -670,7 +609,6 @@ class EndpointMetrics:
     if self._sse_events_failed is not None:
       self._sse_events_failed.add(1, attributes)
 
-    # Check if this is a Redis failure that opened the circuit breaker
     if (
       failure_reason == "redis_error"
       and self._sse_redis_circuit_breaker_opens is not None
@@ -678,7 +616,6 @@ class EndpointMetrics:
       self._sse_redis_circuit_breaker_opens.add(1, {})
 
   def record_sse_queue_overflow(self, operation_id: str, connection_id: str):
-    """Record an SSE connection queue overflow event."""
     self._ensure_instruments()
     if self._sse_connection_queue_overflows is not None:
       self._sse_connection_queue_overflows.add(1, {})
@@ -689,7 +626,6 @@ class EndpointMetrics:
     limit_type: str,
     identifier_type: str,
   ):
-    """Record a rate limit rejection."""
     self._ensure_instruments()
     attributes = {
       "endpoint": endpoint,
@@ -724,11 +660,7 @@ class EndpointMetrics:
     error: bool = False,
     error_type: str | None = None,
   ):
-    """Record an HTTP call from the API to the Graph API (LadybugDB).
-
-    This provides indirect observability of the Graph API from the API side,
-    since the Graph API runs on EC2 without an OTel sidecar.
-    """
+    """Record an API -> Graph API call; the Graph API has no OTel of its own."""
     self._ensure_instruments()
 
     attributes = {
@@ -753,9 +685,7 @@ class EndpointMetrics:
       self._graph_api_errors.add(1, error_attributes)
 
   def _observe_queue_size(self, options: CallbackOptions) -> list[Observation]:
-    """Observable callback for queue size metrics."""
     try:
-      # Import here to avoid circular dependency
       from robosystems.middleware.graph.query_queue import get_query_queue
 
       queue_manager = get_query_queue()
@@ -767,17 +697,11 @@ class EndpointMetrics:
 
       return observations
     except Exception:
-      # Return empty list if queue not initialized
       return []
 
   def _observe_db_pool(self, options: CallbackOptions) -> list[Observation]:
-    """Observable callback for SQLAlchemy connection pool metrics.
-
-    Note: pool.overflow() returns negative values when overflow slots are
-    available (e.g., -5 means 5 unused overflow slots). We clamp to 0 for
-    the "overflow" observation since negative connections don't make sense
-    in dashboards.
-    """
+    """SQLAlchemy pool state; `overflow()` is negative while overflow slots are
+    unused, so it's clamped to 0."""
     try:
       from robosystems.database import engine
 
@@ -792,12 +716,10 @@ class EndpointMetrics:
       return []
 
 
-# Global metrics instance
 _global_metrics: EndpointMetrics | None = None
 
 
 def get_endpoint_metrics() -> EndpointMetrics:
-  """Get or create the global endpoint metrics instance."""
   global _global_metrics
   if _global_metrics is None:
     _global_metrics = EndpointMetrics("robosystems.api")
@@ -812,8 +734,6 @@ def record_request_metrics(
   user_id: str | None = None,
   **kwargs,
 ):
-  """Convenience function to record request metrics."""
-  # Skip recording for high-frequency health check endpoints to reduce costs
   if endpoint in ["/v1/status", "/status"] and method == "GET":
     return
 
@@ -831,7 +751,6 @@ def record_auth_metrics(
   failure_reason: str | None = None,
   user_id: str | None = None,
 ):
-  """Convenience function to record auth metrics."""
   metrics_instance = get_endpoint_metrics()
   metrics_instance.record_auth_attempt(
     endpoint, method, auth_type, success, failure_reason, user_id
@@ -845,7 +764,6 @@ def record_error_metrics(
   error_code: str | None = None,
   user_id: str | None = None,
 ):
-  """Convenience function to record error metrics."""
   metrics_instance = get_endpoint_metrics()
   metrics_instance.record_error(endpoint, method, error_type, error_code, user_id)
 
@@ -856,7 +774,6 @@ def record_query_queue_metrics(
   user_id: str,
   **kwargs,
 ):
-  """Convenience function to record query queue metrics."""
   metrics_instance = get_endpoint_metrics()
 
   if metric_type == "submission":
@@ -892,27 +809,10 @@ def endpoint_metrics_decorator(
   business_event_type: str | None = None,
   method: str | None = None,
 ):
-  """Enhanced decorator to automatically collect standard metrics for FastAPI endpoints.
+  """Record request, error and business-event metrics for a route.
 
-  Idempotent replays:
-      If the decorated function returns an object with a truthy
-      `idempotent_replay` attribute (duck-typed — no import of
-      `OperationEnvelope`), the `business_event_type` counter is NOT
-      incremented for that call. The request count and latency histogram
-      still fire because the HTTP call genuinely happened; only the
-      business-event counter is suppressed so "how many times did this
-      operation actually execute" stays meaningful on dashboards.
-
-  Usage:
-      @router.post("/login")
-      @endpoint_metrics_decorator(
-          "/v1/auth/login",
-          method="POST",
-          business_event_type="user_login",
-      )
-      async def login_endpoint(request: LoginRequest):
-          # endpoint logic - metrics recorded automatically
-          return response
+  A result with a truthy `idempotent_replay` skips the business-event counter
+  (the operation did not execute again); request metrics still fire.
   """
 
   def decorator(func: Callable) -> Callable:
@@ -920,9 +820,7 @@ def endpoint_metrics_decorator(
     async def async_wrapper(*args, **kwargs):
       start_time = time.time()
       endpoint = endpoint_name or f"/{func.__name__}"
-      # An explicit `method` is trusted; otherwise it is recovered below from
-      # the request object, which only works for routes that declare
-      # `request: Request` in their signature.
+      # Without an explicit `method`, recovered only from a `request: Request`.
       resolved_method = method or "UNKNOWN"
       status_code = 200
       user_id = None
@@ -930,12 +828,10 @@ def endpoint_metrics_decorator(
       graph_id = None
 
       try:
-        # Enhanced context extraction from FastAPI
         from fastapi import Request
 
         request_obj = None
 
-        # Find Request object in args
         for arg in args:
           if isinstance(arg, Request):
             request_obj = arg
@@ -943,7 +839,6 @@ def endpoint_metrics_decorator(
               resolved_method = arg.method
             break
 
-        # Try to extract from kwargs if not found in args
         if not request_obj:
           for key, value in kwargs.items():
             if isinstance(value, Request):
@@ -952,9 +847,7 @@ def endpoint_metrics_decorator(
                 resolved_method = value.method
               break
 
-        # Extract user_id and graph_id from path parameters or headers
         if extract_user_id and request_obj:
-          # Try to get user_id from various sources
           user_id = (
             request_obj.path_params.get("user_id")
             or request_obj.headers.get("X-User-Id")
@@ -963,21 +856,14 @@ def endpoint_metrics_decorator(
 
           graph_id = request_obj.path_params.get("graph_id")
 
-        # Fallback: FastAPI injects path parameters as typed kwargs on the
-        # route handler, so `graph_id` is available even when no `Request`
-        # object is declared. Only use this if we didn't already pull it
-        # from `request_obj.path_params` above.
+        # FastAPI also injects path params as handler kwargs.
         if graph_id is None:
           kw_graph = kwargs.get("graph_id")
           if isinstance(kw_graph, str):
             graph_id = kw_graph
 
-        # Execute the endpoint function
         result = await func(*args, **kwargs)
 
-        # Record business event on success if specified.
-        # Suppress for idempotent replays so retry traffic doesn't inflate
-        # the counter — the underlying operation did not execute again.
         if business_event_type and not getattr(result, "idempotent_replay", False):
           metrics_instance = get_endpoint_metrics()
           event_data = {"graph_id": graph_id} if graph_id else {}
@@ -1003,10 +889,9 @@ def endpoint_metrics_decorator(
           user_id=user_id,
         )
 
-        raise  # Re-raise the exception
+        raise
 
       finally:
-        # Record request metrics
         duration = time.time() - start_time
         record_request_metrics(
           endpoint=endpoint,
@@ -1027,12 +912,9 @@ def endpoint_metrics_decorator(
       error_occurred = False
 
       try:
-        # Try to extract request info from FastAPI context (only if the
-        # caller didn't supply an explicit method label).
         if method is None and len(args) > 0 and hasattr(args[0], "method"):
           resolved_method = args[0].method
 
-        # Execute the endpoint function
         result = func(*args, **kwargs)
         return result
 
@@ -1048,10 +930,9 @@ def endpoint_metrics_decorator(
           user_id=user_id,
         )
 
-        raise  # Re-raise the exception
+        raise
 
       finally:
-        # Record request metrics
         duration = time.time() - start_time
         record_request_metrics(
           endpoint=endpoint,
@@ -1062,7 +943,6 @@ def endpoint_metrics_decorator(
           error_occurred=error_occurred,
         )
 
-    # Return appropriate wrapper based on function type
     if inspect.iscoroutinefunction(func):
       return async_wrapper
     else:
@@ -1079,19 +959,8 @@ def endpoint_metrics_context(
   business_event_type: str | None = None,
   event_data: dict[str, Any] | None = None,
 ):
-  """Context manager for manual metrics collection with automatic timing and error handling.
-
-  Usage:
-      async def my_endpoint():
-          with endpoint_metrics_context("/v1/auth/login", "POST", user_id="123") as ctx:
-              # endpoint logic here
-              result = await some_operation()
-
-              # Optionally record business events
-              ctx.record_business_event("user_authenticated", {"success": True})
-
-              return result
-  """
+  """Time a block and record its request/error metrics; the yielded context's
+  `record_business_event` queues events recorded on success."""
   start_time = time.time()
   status_code = 200
   error_occurred = False
@@ -1103,7 +972,6 @@ def endpoint_metrics_context(
     def record_business_event(
       self, event_type: str, data: dict[str, Any] | None = None
     ):
-      """Record a business event within the context."""
       self.business_events.append((event_type, data or {}))
 
   ctx = MetricsContext()
@@ -1111,7 +979,6 @@ def endpoint_metrics_context(
   try:
     yield ctx
 
-    # Record any business events that were added during execution
     if business_event_type or ctx.business_events:
       metrics_instance = get_endpoint_metrics()
 
@@ -1145,10 +1012,9 @@ def endpoint_metrics_context(
       user_id=user_id,
     )
 
-    raise  # Re-raise the exception
+    raise
 
   finally:
-    # Record request metrics
     duration = time.time() - start_time
     record_request_metrics(
       endpoint=endpoint,

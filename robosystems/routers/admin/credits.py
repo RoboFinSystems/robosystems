@@ -425,10 +425,8 @@ async def add_bonus_credits_to_repository(
       }
     )
 
-    # Server-side increment (not `+= amount`, a read-modify-write): the ORM
-    # read-modify-write flushes an absolute value that would revert a debit
-    # landing concurrently — the same lost-update this release closed on the
-    # graph pool's add_bonus_credits and the consume/reserve paths.
+    # Server-side increment: an ORM read-modify-write would flush an absolute
+    # value and revert a concurrent debit.
     pool.current_balance = UserRepositoryCredits.current_balance + Decimal(
       str(data.amount)
     )
@@ -635,11 +633,9 @@ async def check_credit_health(request: Request):
     graph_pools = session.query(GraphCredits).all()
     repo_pools = session.query(UserRepositoryCredits).all()
 
-    # Active parent graphs with NO credit pool at all. Iterating pools can
-    # never see these — yet the AI pre-flight denies every run on them, and
-    # admin add-bonus/reset both 404 on the missing row. Subgraphs share the
-    # parent's pool and shared repositories have none by design, so both are
-    # excluded.
+    # Active parent graphs with no pool at all: invisible to a pool scan, yet
+    # AI pre-flight denies them and add-bonus/reset 404. Subgraphs share the
+    # parent's pool and shared repositories have none by design.
     graph_missing_pools = [
       {"graph_id": g.graph_id, "org_id": g.org_id, "tier": g.graph_tier}
       for g in (

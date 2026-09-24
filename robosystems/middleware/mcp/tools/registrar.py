@@ -1,32 +1,8 @@
-"""MCP tool auto-generation from `OperationSpec` declarations.
+"""MCP tools generated from `OperationSpec` declarations.
 
-The REST registrar (`middleware/extensions.py:OperationRegistrar`) mounts
-write operations as FastAPI routes. This module mirrors that pipeline for
-MCP: a `_RegistrarMCPTool` reads the same `OperationSpec` and exposes it
-through the MCP wire format.
-
-A tool generated this way:
-
-  1. Derives its `name`/`description`/`inputSchema` from the spec's
-     `name`, `summary`/`description`, and `request_model`.
-  2. On execute:
-     a. Fires the call-time extension gate (`require_graph_extension_mcp`)
-        so writes are rejected on repository graphs and on graphs missing
-        the extension.
-     b. Builds the request model via `model_validate(arguments)` — Pydantic
-        handles type coercion, nested models, date parsing, and field
-        validation at the boundary.
-     c. Calls the spec's command in an `extensions_session(graph_id)`,
-        passing `created_by=<mcp user id>` when `requires_created_by=True`.
-     d. Translates domain exceptions through the spec's `error_map` into
-        MCP-native `{"error": code, "message": ...}` envelopes.
-
-The result is a tool that's behaviorally identical to the REST handler
-built from the same spec, without the FastAPI transport.
-
-Tools generated here plug into `GraphMCPTools` via a dispatch dict so the
-manager's `call_tool` can look them up by name without knowing about
-registrar internals.
+Mirrors the REST `OperationRegistrar`: the same spec drives the extension
+gate, request validation, the command call and the `error_map`, so a tool
+behaves like the REST handler built from that spec, without FastAPI.
 """
 
 from __future__ import annotations
@@ -65,83 +41,45 @@ if TYPE_CHECKING:
 # ── Input schema derivation ─────────────────────────────────────────────────
 
 
-# Prefix of the reservation slot MCP calls claim in the idempotency cache. REST
-# requests reserve under their caller-supplied Idempotency-Key; MCP has none,
-# so a call claims `<prefix>:<argument fingerprint>` per (user, graph, tool) —
-# two calls are "identical" when their arguments fingerprint the same.
+# MCP has no Idempotency-Key, so a call reserves `<prefix>:<argument
+# fingerprint>` per (user, graph, tool) in the idempotency cache instead.
 _MCP_INFLIGHT_KEY = "mcp-inflight"
 
 
 def derive_input_schema(request_model: type[BaseModel]) -> dict[str, Any]:
-  """Convert a Pydantic request model to MCP `inputSchema` shape.
+  """Convert a Pydantic request model to a self-contained MCP `inputSchema`.
 
-  Pydantic's `model_json_schema()` returns OpenAPI-flavored JSON Schema with
-  `$defs` for nested models. MCP clients read plain JSON Schema, so the
-  `$ref` pointers are inlined and Pydantic-specific metadata (`title` on
-  leaf fields) is dropped for readability.
-
-  Discriminated-union ``RootModel`` request bodies (e.g.
-  ``CreateInformationBlockRequest``) emit a top-level ``oneOf`` / ``anyOf``,
-  which Anthropic's tool-call API rejects in a tool ``input_schema``. Those
-  are flattened into an object envelope — see ``_flatten_top_level_union``
-  for the shape. Only the *top level* is forbidden: nested ``anyOf`` from
-  Pydantic ``Optional[...]`` fields flows through unchanged. Dispatch
-  re-parses the payload through the original ``request_model``, so
-  flattening the advertised schema never loosens the wire contract.
+  Anthropic's tool API rejects a top-level ``oneOf`` / ``anyOf`` /
+  ``allOf``, which discriminated-union ``RootModel`` bodies emit, so those
+  are flattened (``_flatten_top_level_union``). Nested unions pass through.
+  Dispatch re-validates against ``request_model``, so flattening never
+  loosens the wire contract.
   """
   schema = request_model.model_json_schema(mode="serialization")
   defs = schema.pop("$defs", {}) or schema.pop("definitions", {}) or {}
 
-  # Recursively resolve any `$ref` references against the popped `$defs`
-  # block. After this walk the tree is self-contained.
   resolved = _inline_refs(schema, defs)
 
-  # Drop top-level "title" (Pydantic adds the class name; MCP clients get
-  # the tool name from the surrounding envelope).
+  # Pydantic's class name; the tool name comes from the envelope.
   resolved.pop("title", None)
 
-  # Anthropic's tool-call API forbids ``oneOf`` / ``anyOf`` / ``allOf`` at
-  # the top level of a tool's ``input_schema``. Pydantic discriminated-union
-  # ``RootModel`` bodies emit exactly that shape, so flatten before
-  # returning. The fallback envelope keeps the discriminator visible while
-  # leaving the payload open — dispatch-time Pydantic validation enforces
-  # the real contract.
   if any(key in resolved for key in ("oneOf", "anyOf", "allOf")):
     return _flatten_top_level_union(resolved)
 
   resolved.setdefault("type", "object")
-  # MCP tools are strict — reject arguments not in the schema. This matches
-  # the REST handler's FastAPI behavior where unknown body fields are
-  # silently discarded by Pydantic's `extra="ignore"` default but still
-  # don't mutate the command's view of the world.
   resolved.setdefault("additionalProperties", False)
   return resolved
 
 
 def _flatten_top_level_union(schema: dict[str, Any]) -> dict[str, Any]:
-  """Collapse a top-level ``oneOf`` / ``anyOf`` / ``allOf`` schema into
-  an object envelope that Anthropic's tool API accepts.
+  """Collapse a top-level union into an object envelope the tool API accepts.
 
-  The output shape:
-
-  - **Typed arms** (at least one arm exposes a structured ``payload``):
-    ``{type: object, properties: {<discriminator>: {type: string,
-    enum: [...]}, payload: {anyOf: [<per-arm payload schema>, …]}},
-    required: [<discriminator>, payload], examples: [...],
-    additionalProperties: True}``. The per-arm payload schemas carry the
-    real field names, so a caller can construct a valid call without
-    reading the codebase; ``examples`` holds copy-pasteable request bodies.
-
-  - **Untyped arms** (every arm's payload is a freeform ``dict``):
-    ``{type: object, properties: {<discriminator>: {type: string,
-    enum: [...]}, payload: {type: object, additionalProperties: True}},
-    required: [<discriminator>], additionalProperties: True}`` — the
-    permissive shape, since there is nothing structured to advertise.
-
-  - When no discriminator is declared, or the arms don't follow the
-    standard ``{<discriminator>, payload}`` shape: a permissive object
-    envelope (``additionalProperties: True``) with the original
-    ``description`` preserved.
+  - Some arm has a typed ``payload``: ``{<discriminator>: enum, payload:
+    anyOf[<per-arm payload>]}``, both required, plus the arms' examples.
+  - Every payload is a freeform dict: a permissive ``payload`` object and
+    only the discriminator required.
+  - No discriminator, or arms not shaped ``{<discriminator>, payload}``: a
+    permissive envelope (a discriminator enum when a mapping exists).
   """
   description = schema.get("description")
   flattened: dict[str, Any] = {
@@ -162,8 +100,6 @@ def _flatten_top_level_union(schema: dict[str, Any]) -> dict[str, Any]:
   parsed = _parse_union_arms(arms, prop_name)
 
   if parsed is None:
-    # Arms don't follow the standard ``{<discriminator>, payload}`` shape.
-    # Fall back to a discriminator-only envelope using the mapping keys.
     mapping = discriminator.get("mapping") or {}
     enum_values = sorted(mapping.keys()) if mapping else None
     flattened["properties"] = {
@@ -185,7 +121,6 @@ def _flatten_top_level_union(schema: dict[str, Any]) -> dict[str, Any]:
     if examples:
       flattened["examples"] = examples
   else:
-    # Nothing structured to advertise — keep the permissive payload.
     flattened["properties"]["payload"] = {
       "type": "object",
       "description": (
@@ -199,7 +134,6 @@ def _flatten_top_level_union(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _discriminator_schema(enum_values: list[str] | None) -> dict[str, Any]:
-  """Build the JSON-schema fragment for the discriminator property."""
   out: dict[str, Any] = {
     "type": "string",
     "description": (
@@ -216,14 +150,8 @@ def _discriminator_schema(enum_values: list[str] | None) -> dict[str, Any]:
 def _parse_union_arms(
   arms: list[Any], prop_name: str
 ) -> tuple[list[str], list[tuple[list[str], dict[str, Any]]], list[Any]] | None:
-  """Correlate each union arm to its discriminator value(s) + payload schema.
-
-  Returns ``(enum_values, payload_options, examples)`` where
-  ``payload_options`` is ``[(discriminator_values, payload_schema), …]``,
-  or ``None`` when any arm doesn't follow the standard
-  ``{<discriminator>, payload}`` object shape (signalling the caller to
-  fall back to a discriminator-only envelope).
-  """
+  """Return ``(enum_values, [(discriminator_values, payload_schema)], examples)``,
+  or ``None`` when any arm isn't shaped ``{<discriminator>, payload}``."""
   if not arms:
     return None
   enum_values: list[str] = []
@@ -242,23 +170,17 @@ def _parse_union_arms(
     enum_values.extend(values)
     payload_options.append((values, payload_schema))
     for example in arm.get("examples") or []:
-      # Pydantic's ``json_schema_extra`` examples are OpenAPI-style
-      # ``{summary, description, value}`` objects; surface the raw value
-      # so the example is a copy-pasteable request body.
+      # OpenAPI-style ``{summary, description, value}``: keep the raw body.
       if isinstance(example, dict) and "value" in example:
         examples.append(example["value"])
       else:
         examples.append(example)
-  # Dedupe + stabilise the enum for deterministic schemas.
   enum_values = sorted(dict.fromkeys(enum_values))
   return enum_values, payload_options, examples
 
 
 def _discriminator_values(disc_prop: Any) -> list[str]:
-  """Extract the discriminator value(s) an arm matches from its property
-  schema — Pydantic emits ``{"const": "x"}`` for a single ``Literal`` and
-  ``{"enum": [...]}`` for a multi-value one.
-  """
+  """Pydantic emits ``const`` for a single ``Literal``, ``enum`` for several."""
   if not isinstance(disc_prop, dict):
     return []
   if "const" in disc_prop:
@@ -270,17 +192,12 @@ def _discriminator_values(disc_prop: Any) -> list[str]:
 
 
 def _is_typed_object(payload_schema: dict[str, Any]) -> bool:
-  """True when the payload advertises structured fields worth exposing
-  (an untyped ``dict`` payload renders with no ``properties``)."""
   return bool(payload_schema.get("properties"))
 
 
 def _payload_anyof_schema(
   payload_options: list[tuple[list[str], dict[str, Any]]], prop_name: str
 ) -> dict[str, Any]:
-  """Build the ``payload`` schema as an ``anyOf`` over each arm's payload,
-  each option annotated with the discriminator value(s) it applies to.
-  """
   options: list[dict[str, Any]] = []
   for values, payload_schema in payload_options:
     option = dict(payload_schema)
@@ -298,24 +215,20 @@ def _payload_anyof_schema(
 
 
 def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:
-  """Walk a JSON Schema tree, replacing `$ref` nodes with their definition."""
   if isinstance(node, dict):
     ref = node.get("$ref")
     if isinstance(ref, str) and ref.startswith("#/$defs/"):
       key = ref.rsplit("/", 1)[-1]
       target = defs.get(key)
       if target is not None:
-        # Recurse into the referenced subtree too.
         inlined = _inline_refs(target, defs)
-        # Merge any sibling keys on the $ref node (e.g. overrides) —
-        # Pydantic sometimes emits `{"$ref": "...", "description": "..."}`.
+        # Sibling keys override: `{"$ref": "...", "description": "..."}`.
         merged = dict(inlined) if isinstance(inlined, dict) else inlined
         for k, v in node.items():
           if k != "$ref":
             merged[k] = v
         return merged
-      # Unknown ref — fall through and return the node as-is so the tree
-      # still serializes (the schema will be imperfect but present).
+      # Unknown ref: leave it; the schema is imperfect but still serializes.
     return {k: _inline_refs(v, defs) for k, v in node.items()}
   if isinstance(node, list):
     return [_inline_refs(item, defs) for item in node]
@@ -326,13 +239,9 @@ def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:
 
 
 def translate_error(exc: Exception, error_map: ErrorMap) -> dict[str, Any]:
-  """Mirror `OperationRegistrar._raise_mapped` but return an MCP error dict.
+  """Mirror `OperationRegistrar._raise_mapped` as an MCP error dict.
 
-  MCP tools surface errors as `{"error": code, "message": ...}` rather than
-  raising `HTTPException`. The REST registrar's `error_map` maps domain
-  exception classes to `(status_code, detail_factory)` tuples or a bare
-  status code; the MCP translation ignores the HTTP status and uses the
-  exception class name as the stable error code.
+  The HTTP status is ignored; the exception class name becomes the code.
   """
   for exc_type, mapping in error_map.items():
     if isinstance(exc, exc_type):
@@ -341,16 +250,13 @@ def translate_error(exc: Exception, error_map: ErrorMap) -> dict[str, Any]:
         return {"error": code, "message": str(exc)}
       _status_code, detail_factory = mapping
       return {"error": code, "message": detail_factory(exc)}
-  # No mapping — surface the raw message under a generic code.
   return {"error": "command_failed", "message": str(exc)}
 
 
 def _exception_code(exc_type: type[Exception]) -> str:
-  """Derive a snake_case error code from an exception class name."""
   name = exc_type.__name__
   if name.endswith("Error"):
     name = name[:-5]
-  # Convert CamelCase → snake_case.
   out: list[str] = []
   for i, ch in enumerate(name):
     if ch.isupper() and i > 0 and not name[i - 1].isupper():
@@ -363,14 +269,7 @@ def _exception_code(exc_type: type[Exception]) -> str:
 
 
 class _RegistrarMCPTool(BaseTool):
-  """MCP tool auto-generated from an OperationSpec.
-
-  Not exported directly; instantiated by `build_tools_for_extension` when
-  GraphMCPTools wires up the dispatch dict for a given graph's enabled
-  extensions. The tool owns a reference to its originating spec and the
-  registrar (for session_factory and schema_missing_404) so it can invoke
-  the same command the REST handler calls.
-  """
+  """MCP tool generated from an OperationSpec by `build_tools_for_extension`."""
 
   def __init__(
     self,
@@ -383,18 +282,11 @@ class _RegistrarMCPTool(BaseTool):
     self.spec = spec
     self.registrar = registrar
     self.extension = registrar.extension
-    # Optional callback that the manager uses to supply pre-loaded graph
-    # metadata so tools don't each do their own DB lookup. Accepts no
-    # arguments and returns `GraphExtensionContext | None`.
+    # Zero-arg callback returning pre-loaded `GraphExtensionContext | None`,
+    # so each tool skips its own metadata lookup.
     self._meta_getter = meta_getter
 
   def get_tool_definition(self) -> dict[str, Any]:
-    """Build the MCP tool definition.
-
-    Name comes straight from the spec. Description prefers the explicit
-    spec.description, falls back to the command's docstring (most commands
-    already have terse one-line docstrings), then spec.summary.
-    """
     description = (
       self.spec.description
       or (self.spec.command.__doc__ or "").strip()
@@ -407,21 +299,13 @@ class _RegistrarMCPTool(BaseTool):
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    """Run the spec's command end-to-end, with gate + validation + error map.
-
-    Returns a plain dict (`.model_dump(mode="json")` of the command's
-    response on success; `{"error": code, "message": ...}` on gate
-    rejection or mapped domain failure). The manager's `call_tool` wraps
-    the dict with `json.dumps(..., indent=2)` when `return_raw=False`.
-    """
+    """Return the dumped response, or `{"error": code, "message": ...}`."""
     self._log_tool_execution(self.spec.name, arguments)
     graph_id = self.client.graph_id
 
-    # Write-role authorization (member/admin, fail-closed) is enforced upstream
-    # at the MCP dispatch boundary in `execute.py`'s `validate_mcp_access`:
-    # every registrar op is a write, so it is absent from `READ_ONLY_MCP_TOOLS`
-    # and classified as a write there. This layer has no `current_user`, so the
-    # check cannot be repeated here — it is a single enforcement point by design.
+    # Write-role authorization (fail-closed) is enforced once, upstream, in
+    # `validate_mcp_access`: registrar ops are writes, absent from
+    # `READ_ONLY_MCP_TOOLS`. This layer has no `current_user` to recheck.
 
     # ── 1. Feature gate ─────────────────────────────────────────────────
     try:
@@ -444,22 +328,14 @@ class _RegistrarMCPTool(BaseTool):
       try:
         self.spec.pre_validate(body)
       except Exception as exc:
-        # pre_validate raises HTTPException(400) on format errors (e.g. bad
-        # period). Translate to MCP error without swallowing the message.
+        # pre_validate raises HTTPException(400); keep its detail.
         detail = getattr(exc, "detail", None) or str(exc)
         return {"error": "invalid_arguments", "message": str(detail)}
 
     # ── 4. Resolve command, call it inside the session ─────────────────
-    # The command is synchronous database work; it runs in a worker thread
-    # (like every REST operation runner) so the MCP server's event loop keeps
-    # serving other tools — and `/v1/status` — while it executes.
-    #
-    # MCP carries no Idempotency-Key, so there is no replay. What can be
-    # prevented is the concurrent duplicate: an identical call (same user,
-    # graph, tool, arguments) that arrives while the first is still running
-    # is refused rather than executed alongside it. The claim is keyed by
-    # the argument fingerprint and released when the run ends, so a later
-    # identical call — a deliberate repeat — executes normally.
+    # Synchronous DB work runs off the event loop. With no Idempotency-Key
+    # there is no replay; an identical call arriving while one is still
+    # running is refused, and the claim is released when the run ends.
     created_by = self._resolve_created_by(graph_id)
     fingerprint = fingerprint_body(body)
     inflight_key = f"{_MCP_INFLIGHT_KEY}:{fingerprint}"
@@ -493,9 +369,7 @@ class _RegistrarMCPTool(BaseTool):
       await cache.release(created_by, graph_id, self.spec.name, inflight_key)
     duration_ms = (time.monotonic() - start) * 1000
 
-    # One audit line per tool call, the same shape and stream as the REST
-    # operation routes, so a write is attributable regardless of which surface
-    # carried it.
+    # Same audit shape and stream as the REST operation routes.
     failed = isinstance(result, dict) and "error" in result
     log_operation_audit(
       operation_name=self.spec.name,
@@ -526,11 +400,8 @@ class _RegistrarMCPTool(BaseTool):
     except tuple(self.spec.error_map.keys()) as exc:
       return translate_error(exc, self.spec.error_map)
     except ProgrammingError as exc:
-      # A missing schema/relation is "not initialized" — the same answer REST
-      # gives. Any other programming error is a database fault: log the
-      # detail server-side and hand the caller a fixed message; a DBAPI
-      # error's string carries the SQL and its bound parameters, which is
-      # not something to put in front of the LLM.
+      # Missing schema = not initialized, as on REST. Anything else gets a
+      # fixed message: DBAPI error text carries SQL and bound parameters.
       if is_schema_missing(exc):
         return {
           "error": "not_initialized",
@@ -561,9 +432,7 @@ class _RegistrarMCPTool(BaseTool):
       )
       return {"error": "invalid_request", "message": str(exc)}
     except Exception as exc:
-      # Anything else is a fault, not a message for the caller: log it with
-      # the traceback and return a fixed string. Raw exception text can carry
-      # SQL, parameters and internal paths.
+      # Raw exception text can carry SQL, parameters and internal paths.
       logger.warning(
         "MCP tool %s failed unexpectedly: %s", self.spec.name, exc, exc_info=True
       )
@@ -579,10 +448,7 @@ class _RegistrarMCPTool(BaseTool):
     return _dump_response(result)
 
   def _resolve_created_by(self, graph_id: str) -> str:
-    """MCP clients attach the authenticated user's ID to the client where
-    possible. Fall back to `mcp:{graph_id}` when the user context isn't
-    threaded through — matches the hand-written tool convention.
-    """
+    """The client's user ID, else `mcp:{graph_id}` as the hand-written tools do."""
     user_id = getattr(self.client, "user_id", None)
     if user_id:
       return str(user_id)
@@ -590,12 +456,6 @@ class _RegistrarMCPTool(BaseTool):
 
 
 def _dump_response(result: Any) -> Any:
-  """Normalize a command response into a JSON-safe dict.
-
-  Commands return Pydantic response models. `model_dump(mode="json")`
-  handles date/datetime serialization, nested models, and enums. Non-model
-  responses (rare; usually `list[Model]` or `dict`) are returned as-is.
-  """
   if isinstance(result, BaseModel):
     return result.model_dump(mode="json")
   if isinstance(result, list) and result and isinstance(result[0], BaseModel):
@@ -611,12 +471,6 @@ def build_tools_for_extension(
   client: GraphMCPClient,
   meta_getter: Any | None = None,
 ) -> dict[str, _RegistrarMCPTool]:
-  """Return `{tool_name: tool_instance}` for every OperationSpec on the
-  given extension.
-
-  Called from `GraphMCPTools.__init__` after the core tool layer is wired
-  up. The caller merges the returned dict into its dispatch table.
-  """
   tools: dict[str, _RegistrarMCPTool] = {}
   for registrar, spec in OperationRegistrar.specs_for_extension(extension):
     tool = _RegistrarMCPTool(

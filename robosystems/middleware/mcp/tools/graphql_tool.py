@@ -1,20 +1,8 @@
-"""
-GraphQL Tools — read-only escape hatch for typed OLTP queries via MCP.
+"""Read-only MCP access to the extensions GraphQL schema.
 
-Two Layer 1 tools exposing the extensions GraphQL surface to agents:
-
-- ``get-graphql-schema`` — returns the schema SDL (or JSON introspection) so
-  agents can discover types and fields before writing queries.
-- ``query-graphql``       — executes a parameterized read-only GraphQL query
-  against the same schema served at ``/extensions/{graph_id}/graphql``.
-
-Both tools reuse the existing Strawberry schema, auth model, and per-extension
-gating. The key difference from the HTTP path is that ``get_context`` is
-bypassed — the MCP layer has already authenticated the request, so the context
-is constructed directly from the client's graph_id / user_id / schema_extensions.
-
-Mutations and subscriptions are rejected before execution. A simple depth /
-field / alias complexity gate prevents runaway queries.
+The context is built from the MCP client rather than `get_context`, since the
+MCP layer has already authenticated. Mutations and subscriptions are refused,
+and a depth / field / alias gate bounds query cost.
 """
 
 from __future__ import annotations
@@ -37,10 +25,8 @@ from robosystems.logger import logger
 
 from .base_tool import BaseTool
 
-# Lazy module-level reference populated on first access. Kept at module scope
-# so tests can patch ``robosystems.middleware.mcp.tools.graphql_tool.gql_schema``.
-# The import is deferred to avoid pulling in Strawberry/resolvers during the
-# MCP module import phase (which happens before the FastAPI app is fully wired).
+# Imported lazily (MCP loads before the app is wired); module-level so tests
+# can patch it.
 gql_schema: Any = None
 
 
@@ -53,18 +39,15 @@ def _ensure_gql_schema() -> Any:
   return gql_schema
 
 
-# Process-lifetime cache — the Strawberry schema is built once at startup and
-# never changes without a restart, so TTL is not needed here.
+# The schema is fixed for the process lifetime, so no TTL.
 _SCHEMA_CACHE: dict[str, str] = {}
 
-# Complexity limits (tunable via SSM in the future)
 _MAX_DEPTH = 10
 _MAX_FIELDS = 200
 _MAX_ALIASES = 20
 
 
 def _anon_ctx(graph_id: str = "") -> dict[str, Any]:
-  """Minimal context for introspection queries (user=None is acceptable)."""
   return {
     "request": SimpleNamespace(),
     "user": None,
@@ -75,7 +58,6 @@ def _anon_ctx(graph_id: str = "") -> dict[str, Any]:
 
 
 def _reject_non_query(doc: DocumentNode) -> str | None:
-  """Return the offending operation kind if a mutation/subscription is found."""
   for defn in doc.definitions:
     if hasattr(defn, "operation"):
       if defn.operation in (OperationType.MUTATION, OperationType.SUBSCRIPTION):
@@ -89,15 +71,10 @@ def _walk_complexity(
   fragments: dict[str, Any],
   visited: set[str],
 ) -> tuple[int, int, int]:
-  """Recursively walk a selection set, returning (max_depth, fields, aliases).
+  """Return (max_depth, fields, aliases).
 
-  ``fragments`` maps fragment name → ``FragmentDefinitionNode`` so that
-  ``FragmentSpreadNode``s can be expanded inline — counting their fields the
-  same way they would actually execute. Without this expansion, agents could
-  bypass the field-count limit by hiding fields behind named fragments.
-
-  ``visited`` tracks fragment names currently being expanded, providing
-  cycle protection on top of GraphQL's own cyclic-spread prohibition.
+  Fragment spreads are expanded inline, or fields could hide behind named
+  fragments; ``visited`` guards against spread cycles.
   """
   max_depth = depth
   total_fields = 0
@@ -127,7 +104,6 @@ def _walk_complexity(
     elif sel_kind == "FragmentSpreadNode":
       name = sel.name.value
       if name in visited:
-        # Cycle — GraphQL spec already forbids this; defense in depth.
         continue
       fragment = fragments.get(name)
       if fragment is None or not fragment.selection_set:
@@ -147,12 +123,7 @@ def _walk_complexity(
 
 
 def _check_complexity(doc: DocumentNode) -> str | None:
-  """Return an error string if the document exceeds complexity limits.
-
-  Only ``OperationDefinitionNode``s are walked; ``FragmentDefinitionNode``s
-  are inlined into operations via spread expansion. An unused fragment
-  contributes zero cost, which is correct — it never executes.
-  """
+  """Error string when an operation exceeds a limit; unused fragments cost nothing."""
   fragments: dict[str, Any] = {}
   for defn in doc.definitions:
     if type(defn).__name__ == "FragmentDefinitionNode":
@@ -176,11 +147,7 @@ def _check_complexity(doc: DocumentNode) -> str | None:
 
 
 class GraphqlSchemaTool(BaseTool):
-  """Return the extensions GraphQL schema SDL or JSON introspection document.
-
-  Agents should call this once per conversation to discover available types
-  and fields before calling ``query-graphql``.
-  """
+  """Return the extensions GraphQL schema as SDL or introspection JSON."""
 
   def get_tool_definition(self) -> dict[str, Any]:
     return {
@@ -235,8 +202,7 @@ class GraphqlSchemaTool(BaseTool):
         context_value=_anon_ctx(),
       )
       if r.errors or r.data is None:
-        # Don't cache failure — let the next call retry. Caching ``"null"``
-        # would be a permanent process-lifetime poison pill until restart.
+        # Not cached, or the failure would stick until restart.
         logger.warning(f"Introspection query failed: {r.errors}")
         return {
           "error": "introspection_failed",
@@ -250,11 +216,7 @@ class GraphqlSchemaTool(BaseTool):
 
 
 class GraphqlQueryTool(BaseTool):
-  """Execute a read-only GraphQL query against the extensions endpoint.
-
-  Call ``get-graphql-schema`` first to discover available fields.
-  Mutations and subscriptions are rejected before execution.
-  """
+  """Execute a read-only GraphQL query against the extensions endpoint."""
 
   def __init__(self, client: Any, schema_extensions: tuple[str, ...] = ()) -> None:
     super().__init__(client)
@@ -304,10 +266,8 @@ class GraphqlQueryTool(BaseTool):
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     self._log_tool_execution("query-graphql", arguments)
 
-    # Subgraph guard — mirrors the HTTP surface (`graphql/context.py`):
-    # a subgraph is a modality container, not an extensions domain target,
-    # and has no extensions schema. Reject up front instead of letting
-    # resolvers dead-end (or silently resolve to the parent) downstream.
+    # As on HTTP (`graphql/context.py`): a subgraph has no extensions schema,
+    # and resolvers would otherwise dead-end or resolve to the parent.
     from robosystems.middleware.graph.utils.subgraph import is_subgraph
 
     if is_subgraph(getattr(self.client, "graph_id", "") or ""):
@@ -323,17 +283,12 @@ class GraphqlQueryTool(BaseTool):
     if not query:
       return {"error": "invalid_query", "message": "query is required"}
 
-    # Parse first — surface syntax errors before mutation check.
-    # ``GraphQLSyntaxError`` is the typical case, but graphql-core can raise
-    # other ``GraphQLError`` subclasses for malformed documents (e.g. unicode
-    # issues), so catch them all uniformly.
+    # graphql-core raises more than GraphQLSyntaxError on malformed input.
     try:
       doc = gql_parse(query)
     except Exception as e:
       return {"error": "parse_error", "message": str(e)}
 
-    # Mutation / subscription gate — checked before schema execution so
-    # this is authoritative regardless of schema configuration.
     op_kind = _reject_non_query(doc)
     if op_kind:
       return {
@@ -372,26 +327,18 @@ class GraphqlQueryTool(BaseTool):
     return response
 
   async def _build_context(self) -> dict[str, Any]:
-    # ``_fetch_user`` is sync (uses the platform DB sync session). Run it on
-    # a worker thread so the event loop isn't blocked while the DB query
-    # is in flight.
     user = await asyncio.to_thread(self._fetch_user)
     return {
       "request": SimpleNamespace(),
       "user": user,
       "graph_id": self.client.graph_id,
       "schema_extensions": self._schema_extensions,
-      # Hardcoded — the GraphQL MCP tools are intentionally scoped to user
-      # entity graphs. Shared repositories (SEC, library) are read-only and
-      # exercise different MCP paths; if a resolver ever branches on
-      # graph_type for a shared-repo MCP call, that's a bug to surface.
+      # These tools serve user entity graphs only; shared repos never get them.
       "graph_type": "entity",
     }
 
   def _fetch_user(self) -> Any:
-    # The MCP handler attaches the authenticated User object to the client
-    # (`client.user`); use it directly rather than re-fetching by id. Fall
-    # back to a by-id lookup for callers that only thread `user_id`.
+    # By-id lookup only for callers that thread `user_id` without `user`.
     user = getattr(self.client, "user", None)
     if user is not None:
       return user

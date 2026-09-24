@@ -1,7 +1,4 @@
-"""Helper dependency functions.
-
-Common FastAPI dependencies for entity and graph requirements.
-"""
+"""FastAPI dependencies for entity and graph requirements."""
 
 from fastapi import Depends, HTTPException, status
 

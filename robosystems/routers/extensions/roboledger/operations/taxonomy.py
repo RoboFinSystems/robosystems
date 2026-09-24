@@ -1,10 +1,8 @@
 """Taxonomy curation and account mapping.
 
-Two halves that share a subject. Taxonomy Blocks are the only tenant-facing
-path for ontology curation — raw element/structure CRUD is not on the public
-surface. Mapping associations bind the chart of accounts to taxonomy
-elements, and stay direct because mapping is iterative AI-assisted craft
-rather than a curation envelope.
+Taxonomy Blocks are the only tenant-facing path for ontology curation (raw
+element/structure CRUD is not exposed). Mapping associations stay direct:
+mapping is iterative AI-assisted craft, not a curation envelope.
 """
 
 from __future__ import annotations
@@ -87,13 +85,7 @@ _OP_TAG = "RoboLedger: Taxonomy & Mapping"
 _registrar = make_registrar(router, _OP_TAG)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Ontology / Taxonomy Blocks
-#
-# Taxonomy Block is the only tenant-facing path for ontology curation.
-# Raw CRUD (create-taxonomy, create-structure, create/update/delete-element,
-# create-associations) is not exposed on the public surface.
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Ontology / Taxonomy Blocks ───────────────────────────────────────────────
 
 create_taxonomy_block_op = _registrar.register(
   OperationSpec(
@@ -156,8 +148,7 @@ update_taxonomy_block_op = _registrar.register(
       TaxonomyAuthoringDisabledError: 403,
       # Another update holds the taxonomy row; retryable.
       RowLockedError: 409,
-      # The apply-side backstop for a closed month's stamps; the validator
-      # reports the same condition as a `protected_facts` issue first.
+      # Apply-side backstop; the validator reports a `protected_facts` issue first.
       ProtectedFactsError: 422,
       ValueError: 422,
       NotImplementedError: 501,
@@ -214,13 +205,8 @@ link_entity_taxonomy_op = _registrar.register(
 )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Mapping (craft, not curation)
-#
-# Mapping associations stay direct — mapping is iterative AI-assisted craft,
-# not a curation envelope. `auto-map-elements` dispatches to the background
-# worker and returns a `pending` envelope immediately.
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Mapping ──────────────────────────────────────────────────────────────────
+# `auto-map-elements` dispatches to the background worker and returns `pending`.
 
 create_mapping_association_op = _registrar.register(
   OperationSpec(

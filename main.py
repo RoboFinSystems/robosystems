@@ -97,10 +97,8 @@ from robosystems.utils.docs_template import (
 
 logger = get_logger("robosystems.api")
 
-# Path prefixes whose responses may contain per-user secrets (tokens,
-# API keys, billing details, org membership). These get `Cache-Control:
-# no-store` applied in the security-headers middleware. `/admin` is here for
-# the SCIM bootstrap response, which carries a raw bearer token.
+# Responses under these may carry per-user secrets, so they get
+# `Cache-Control: no-store` (`/admin` for the SCIM bootstrap bearer token).
 _SENSITIVE_PATH_PREFIXES = (
   "/v1/auth",
   "/v1/user",
@@ -114,19 +112,10 @@ _SENSITIVE_PATH_PREFIXES = (
 def csp_variant_for_path(path: str, *, graphiql_enabled: bool = False) -> str:
   """Which CSP variant a path gets.
 
-  - "docs": the Swagger UI page at ``/`` and its assets under ``/static``,
-    self-hosted — no third-party script origins and no 'unsafe-inline'
-    script. Swagger sets inline style attributes at runtime, so this variant
-    keeps ``style-src 'unsafe-inline'``; it is the reason the page is kept
-    as a tool rather than a document.
-  - "graphiql": the GraphiQL playground, which loads React/GraphiQL from
-    CDNs and needs the historical relaxed policy. Returned only while the
-    playground is actually served (``graphiql_enabled`` — development
-    only); elsewhere the graph-scoped GraphQL path answers with JSON and
-    gets the strict policy like every other API route. The default is
-    closed, so a caller that omits it can never relax production.
-  - "api": everything else — strict policy. ``/docs`` is now a redirect and
-    is in this group: nothing it returns needs a relaxed policy.
+  - "docs": the self-hosted Swagger page at ``/`` and ``/static``.
+  - "graphiql": the CDN-loaded playground, only while it is served
+    (development). Defaults closed, so an omitted flag cannot relax prod.
+  - "api": everything else, strict.
   """
   if path == "/" or path.startswith("/static"):
     return "docs"
@@ -144,7 +133,6 @@ async def lifespan(app: FastAPI):
   """
   logger.info("Starting RoboSystems API...")
 
-  # Validate environment configuration
   try:
     EnvValidator.validate_required_vars(env)
     config_summary = EnvValidator.get_config_summary(env)
@@ -152,12 +140,9 @@ async def lifespan(app: FastAPI):
   except Exception as e:
     logger.error(f"Configuration validation failed: {e}")
     if env.ENVIRONMENT in ("prod", "staging"):
-      # Fail fast in prod and staging; continue in dev/test so local iteration
-      # isn't blocked.
       raise
     logger.warning("Continuing with invalid configuration (development mode)")
 
-  # Initialize query queue executor
   try:
     from robosystems.routers.graphs.query.setup import setup_query_executor
 
@@ -165,7 +150,7 @@ async def lifespan(app: FastAPI):
   except Exception as e:
     logger.error(f"Failed to initialize query queue: {e}")
 
-  # Start Redis SSE event subscriber for worker → API communication
+  # Worker → API SSE events
   try:
     from robosystems.middleware.sse.redis_subscriber import start_redis_subscriber
 
@@ -193,12 +178,10 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
   """Build the configured FastAPI application."""
-  # Before anything can serve a request: Uvicorn's own access log writes the
-  # raw query string, which the application's redaction never reaches, and the
-  # MCP connector auth deliberately carries a graph-scoped key there.
+  # Before anything serves: Uvicorn's access log writes the raw query string,
+  # where MCP connector auth carries a graph-scoped key.
   install_uvicorn_log_redaction()
 
-  # Load description from markdown file in static folder
   description_file = Path(__file__).parent / "static" / "description.md"
   api_description = (
     description_file.read_text()
@@ -210,8 +193,8 @@ def create_app() -> FastAPI:
     title="RoboSystems API",
     version=pkg_version("robosystems"),
     description=api_description,
-    docs_url=None,  # custom docs route below
-    redoc_url=None,  # custom redoc route below
+    docs_url=None,  # custom routes below
+    redoc_url=None,
     openapi_url="/openapi.json",
     openapi_tags=MAIN_API_TAGS,
     lifespan=lifespan,
@@ -220,12 +203,11 @@ def create_app() -> FastAPI:
   setup_telemetry(app)
   app.state.current_time = datetime.now(UTC)
 
-  # The /static mount serves the Swagger page's vendored bundle. The
-  # well-known routes below read their files at startup rather than through it.
+  # Serves the Swagger page's vendored bundle.
   if Path("static").exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-  # RFC 9116 vulnerability disclosure pointer (mirrors the frontend apps).
+  # RFC 9116 vulnerability disclosure pointer.
   security_txt_file = Path("static") / "security.txt"
   if security_txt_file.exists():
     security_txt_content = security_txt_file.read_text(encoding="utf-8")
@@ -234,9 +216,7 @@ def create_app() -> FastAPI:
     async def security_txt() -> PlainTextResponse:
       return PlainTextResponse(security_txt_content)
 
-  # Glama connector-ownership claim (mirrors security.txt): the MCP endpoint's
-  # origin publishes the maintainers' role address and Glama matches it
-  # against its accounts.
+  # Glama connector-ownership claim.
   glama_file = Path("static") / "glama.json"
   if glama_file.exists():
     glama_content = json.loads(glama_file.read_text(encoding="utf-8"))
@@ -245,9 +225,7 @@ def create_app() -> FastAPI:
     async def glama_json() -> JSONResponse:
       return JSONResponse(glama_content)
 
-  # ChatGPT app-directory domain verification (same pattern): the portal
-  # issues a token per submission and checks for exactly that token, as
-  # plain text, at the MCP origin's well-known URL.
+  # ChatGPT app-directory domain verification token, served as plain text.
   openai_challenge_file = Path("static") / "openai-apps-challenge"
   if openai_challenge_file.exists():
     openai_challenge_token = openai_challenge_file.read_text(encoding="utf-8").strip()
@@ -256,41 +234,29 @@ def create_app() -> FastAPI:
     async def openai_apps_challenge() -> PlainTextResponse:
       return PlainTextResponse(openai_challenge_token)
 
-  # Two surfaces, split by what they are for.
-  #
-  # `/` keeps Swagger UI everywhere, because its try-it panel is a tool and
-  # there is no other way to run a call against a deployed API from a
-  # browser. It is marked noindex below: a tool, not a document.
-  #
-  # `/docs` was ReDoc — a read-only renderer of the same spec, which the
-  # per-operation pages on the app's domain now do far better, and which a
-  # crawler could never read because it renders in the browser from a
-  # ~950 KB file. It redirects, so every README, CONTRIBUTING file and
-  # outside link keeps working and its link equity moves with it.
+  # `/` is Swagger UI, kept for its try-it panel (noindex: a tool, not a
+  # document). `/docs` redirects to the published per-operation reference so
+  # existing links keep working.
   @app.get("/", response_class=HTMLResponse, include_in_schema=False)
   async def custom_docs():
     return HTMLResponse(content=generate_robosystems_docs())
 
   published_reference = f"{env.ROBOSYSTEMS_URL}/docs/api"
 
-  # HEAD as well as GET: this path exists to be followed, and the link
-  # checkers and crawlers that probe with HEAD would otherwise be answered
-  # 405 and never see the redirect. FastAPI does not imply HEAD from GET.
+  # HEAD too: FastAPI does not imply it, and crawlers probing with HEAD would
+  # get a 405 instead of the redirect.
   @app.api_route("/docs", methods=["GET", "HEAD"], include_in_schema=False)
   async def docs_redirect() -> RedirectResponse:
     return RedirectResponse(published_reference, status_code=301)
 
-  # Configure CORS with specific domains for security
   main_cors_origins = env.get_main_cors_origins()
   logger.info(f"Main API CORS origins: {main_cors_origins}")
 
   app.add_middleware(
     CORSMiddleware,
     allow_origins=main_cors_origins,
-    allow_credentials=True,  # Always enabled for cookie-based auth
-    # Grant Chrome Private Network Access preflight in dev so a public-origin
-    # tunnel (e.g. ngrok) can call back to localhost. Production never needs
-    # this — no localhost endpoints are exposed.
+    allow_credentials=True,  # cookie-based auth
+    # Chrome Private Network Access, so a dev tunnel (ngrok) can reach localhost.
     allow_private_network=env.is_development(),
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=[
@@ -300,27 +266,18 @@ def create_app() -> FastAPI:
       "Authorization",
       "X-API-Key",
       "X-Requested-With",
-      # Operation endpoints under /extensions/{domain}/{graph_id}/operations/*
-      # accept Idempotency-Key for safe retries — must be in allow_headers
-      # or browser preflight will reject it for cross-origin requests.
-      "Idempotency-Key",
-      # Auth endpoints read X-App-Source for email branding when Referer-based
-      # detection can't identify the originating product app.
-      "X-App-Source",
-      # Browser MCP clients (the Holon viewer) echo the negotiated revision on
-      # every request after initialize, per Streamable HTTP — without this the
-      # preflight for POST /v1/graphs/{graph_id}/mcp fails cross-origin.
+      "Idempotency-Key",  # operation retries
+      "X-App-Source",  # email branding when Referer can't identify the app
+      # Browser MCP clients echo it on every request after initialize.
       "MCP-Protocol-Version",
     ],
     expose_headers=["X-Request-ID", "X-Rate-Limit-Remaining", "X-Rate-Limit-Reset"],
-    max_age=3600,  # Cache preflight requests for 1 hour
+    max_age=3600,
   )
 
-  # Bound request-body size on the internet-facing surface, inside CORS but
-  # outside logging/db/rate-limit — FastAPI reads the body before dependencies
-  # run, so an unbounded body is a pre-auth allocation nothing downstream can
-  # cap. The Stripe webhook reads its body before verifying the signature, so
-  # it carries a tighter limit.
+  # Body-size cap inside CORS but outside everything else: FastAPI reads the
+  # body before dependencies run, so nothing downstream can bound it. The
+  # Stripe webhook reads its body before verifying the signature, hence tighter.
   from robosystems.config.constants import (
     PUBLIC_MAX_REQUEST_SIZE,
     WEBHOOK_MAX_REQUEST_SIZE,
@@ -332,19 +289,14 @@ def create_app() -> FastAPI:
     path_limits=[("/admin/v1/webhooks/", WEBHOOK_MAX_REQUEST_SIZE)],
   )
 
-  # Add logging middleware (order matters - first added = outermost layer)
+  # Order matters: the last middleware added is the outermost.
   app.add_middleware(StructuredLoggingMiddleware)
   app.add_middleware(SecurityLoggingMiddleware)
-
-  # Add database session cleanup middleware
   app.add_middleware(DatabaseSessionMiddleware)
-
-  # Add rate limit header middleware
   app.add_middleware(RateLimitHeaderMiddleware)
 
-  # Request-level metrics for /extensions/{graph_id}/graphql.
-  # Per-resolver spans come from Strawberry's OpenTelemetryExtensionSync
-  # (wired in graphql/schema.py); this covers the request envelope.
+  # Request-level metrics for /extensions/{graph_id}/graphql (resolver spans
+  # come from the Strawberry OTel extension).
   @app.middleware("http")
   async def extensions_graphql_metrics_middleware(request: Request, call_next):
     path = request.url.path
@@ -356,8 +308,7 @@ def create_app() -> FastAPI:
     except IndexError:  # pragma: no cover - path matcher already checked shape
       graph_id = None
 
-    # Normalized label keeps Prometheus cardinality bounded; tenant goes
-    # on the business event instead.
+    # Normalized label bounds Prometheus cardinality; the tenant goes on the event.
     endpoint_label = "/extensions/{graph_id}/graphql"
     start = time.time()
     error_occurred = False
@@ -399,43 +350,29 @@ def create_app() -> FastAPI:
         error_occurred=error_occurred,
       )
 
-  # Add security headers middleware
   @app.middleware("http")
   async def security_headers_middleware(request: Request, call_next):
     """Add security headers to all responses."""
     response = await call_next(request)
 
-    # Core security headers
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
-    # Nothing on this origin is the reference any more: the rendered pages
-    # live on the app's domain. The raw specification stays served (both SDK
-    # generators read it) and Swagger stays as a tool, but neither should
-    # compete with those pages in an index, and a browser-rendered shell over
-    # a ~950 KB file is what left these URLs crawled-not-indexed to begin with.
+    # The reference is published on the app's domain; the spec (read by SDK
+    # generators) and Swagger must not compete with it in search indexes.
     path = request.url.path
     if path in ("/", "/openapi.json") or path.startswith("/static"):
       response.headers["X-Robots-Tag"] = "noindex"
 
-    # HSTS for production/staging
     if env.ENVIRONMENT in ["prod", "staging"]:
       response.headers["Strict-Transport-Security"] = (
         "max-age=31536000; includeSubDomains"
       )
 
-    # Path-based CSP — strict for API, self-hosted policy for the Swagger
-    # page and its assets, relaxed (CDN) policy only for the GraphiQL
-    # playground, and only where it is served (development — see the
-    # GraphQLRouter mount).
     csp_variant = csp_variant_for_path(path, graphiql_enabled=env.is_development())
     if csp_variant == "docs":
-      # Swagger UI served entirely from this origin (/static/vendor). It
-      # injects inline <style> at runtime, so style-src keeps 'unsafe-inline';
-      # script-src does not need it (init lives in /static/swagger-init.js)
-      # and no third-party origin is allowed. ReDoc's blob worker is gone
-      # with ReDoc itself.
+      # Swagger injects inline <style> at runtime; scripts need no inline.
       csp_directives = [
         "default-src 'self'",
         "script-src 'self'",
@@ -465,10 +402,9 @@ def create_app() -> FastAPI:
       ]
 
     else:
-      # Strict CSP for API endpoints
       csp_directives = [
         "default-src 'self'",
-        "script-src 'self'",  # NO unsafe-inline for API
+        "script-src 'self'",
         "style-src 'self'",
         "img-src 'self' data:",
         "connect-src 'self'",
@@ -480,25 +416,15 @@ def create_app() -> FastAPI:
 
     response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
 
-    # Cache-Control: no-store for routes that may return per-user secrets.
-    # (Path-prefix allowlist — StreamingResponse has no .body to scan.)
+    # By path prefix: a StreamingResponse has no body to scan.
     if any(path.startswith(p) for p in _SENSITIVE_PATH_PREFIXES):
       response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
       response.headers["Pragma"] = "no-cache"
 
-    # Permissions Policy
     response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
 
     return response
 
-  # 422 / RequestValidationError handler — normalize FastAPI's default
-  # pydantic-validation error shape (`{"detail": [{"loc": ..., "msg": ..., "type": ...}]}`)
-  # into our standard `ErrorResponse` shape (`{"detail": str, "code": str, ...}`).
-  # Without this, the OpenAPI spec advertises 422 = HTTPValidationError,
-  # but our manual `HTTPException(status_code=422, detail="...")` raises
-  # produce a string-detail response. Two shapes for one status code
-  # break SDK response parsers (e.g., openapi-python-client). This handler
-  # makes 422 consistently use the `ErrorResponse` shape.
   def _scim_envelope(detail: Any, status_code: int) -> dict[str, Any]:
     """RFC 7644 §3.12 error body. A dict that already carries ``schemas``
     passes through verbatim; anything else is wrapped."""
@@ -512,12 +438,13 @@ def create_app() -> FastAPI:
       "status": str(status_code),
     }
 
+  # 422s use the ErrorResponse shape, not FastAPI's list-detail shape: two
+  # shapes for one status code break SDK response parsers.
   @app.exception_handler(RequestValidationError)
   async def request_validation_handler(
     request: Request, exc: RequestValidationError
   ) -> JSONResponse:
     request_id = getattr(request.state, "request_id", None)
-    # Compress the pydantic error list into a readable summary string.
     parts = []
     for err in exc.errors():
       loc = ".".join(str(p) for p in err.get("loc", []) if p != "body")
@@ -539,13 +466,9 @@ def create_app() -> FastAPI:
       },
     )
 
-  # HTTPException pass-through (any status code) — match Starlette's default
-  # `{"detail": <whatever-was-passed>}` shape and add `request_id` for
-  # correlation. Detail may be a string (most common) or a dict (close-period
-  # blockers, graph_limit, etc.); callers parse it as `response["detail"]`
-  # in both cases, so always wrap — never spread. The one exception is the
-  # SCIM surface: IdPs parse the RFC 7644 envelope at the top level, so
-  # nesting it under "detail" makes every error unreadable to them.
+  # Starlette's `{"detail": ...}` plus request_id. A dict detail is wrapped,
+  # never spread (callers read response["detail"]). SCIM is the exception:
+  # IdPs parse the RFC 7644 envelope at the top level.
   @app.exception_handler(StarletteHTTPException)
   async def http_exception_handler(
     request: Request, exc: StarletteHTTPException
@@ -563,24 +486,19 @@ def create_app() -> FastAPI:
       headers=getattr(exc, "headers", None),
     )
 
-  # Exception handler for application-wide error handling
   @app.exception_handler(Exception)
   async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Global exception handler returning generic error and request ID.
-
-    Internal exception details are logged server-side; clients receive a generic
-    message with a correlation identifier.
+    """Log the details server-side; the client gets a generic message and the
+    request id.
     """
     request_id = getattr(request.state, "request_id", None)
 
-    # Log full details with correlation ID
     try:
       logger.error(
         "Unhandled exception", extra={"request_id": request_id}, exc_info=True
       )
     except Exception:
-      # Ensure handler never fails
-      pass
+      pass  # the handler must never fail
 
     return JSONResponse(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -598,20 +516,18 @@ def create_app() -> FastAPI:
   app.include_router(offering_router_v1)
   app.include_router(operations_router_v1)
   app.include_router(billing_router_v1)
-  # Graph-agnostic MCP transport (OAuth-only) and the OAuth 2.1 authorization
-  # server + discovery documents. Both are runtime-gated on MCP_OAUTH_ENABLED
-  # (404 when off) rather than import-gated, so the posture is testable.
+  # Runtime-gated on MCP_OAUTH_ENABLED (404 when off), not import-gated, so the
+  # posture is testable.
   app.include_router(mcp_agnostic_router_v1)
   app.include_router(oauth_router)
 
-  # SCIM 2.0 provisioning — flag-gated (the managed platform never mounts it).
+  # SCIM 2.0 provisioning
   if env.SCIM_ENABLED:
     from robosystems.routers.scim import router as scim_router
 
     app.include_router(scim_router)
 
-  # Extensions GraphQL endpoint (Strawberry). Graph-scoped at
-  # /extensions/{graph_id}/graphql — see robosystems/graphql/README.md.
+  # Extensions GraphQL endpoint; see robosystems/graphql/README.md.
   if env.EXTENSIONS_GRAPHQL_ENABLED and (
     env.ROBOLEDGER_ENABLED or env.ROBOINVESTOR_ENABLED
   ):
@@ -638,13 +554,8 @@ def create_app() -> FastAPI:
       dependencies=[_Depends(subscription_aware_rate_limit_dependency)],
     )
 
-  # Extensions REST operation surface: POST /extensions/{domain}/{graph_id}/operations/{op}
-  #
-  # Three routers share the roboledger prefix, and the order they mount in is
-  # the order the published reference lists them in — operations are grouped
-  # by tag, and within a tag by route registration. Commands first, then the
-  # two analytical-view routers that share the `RoboLedger: Analytical Views`
-  # tag between them.
+  # Extensions operations. Mount order is the published reference's order
+  # within a tag: commands, then the two routers sharing the Analytical Views tag.
   if env.ROBOLEDGER_ENABLED:
     from robosystems.routers.extensions.roboledger.operations import (
       router as roboledger_operations_router,
@@ -655,12 +566,8 @@ def create_app() -> FastAPI:
       prefix="/extensions/roboledger/{graph_id}/operations",
       include_in_schema=True,
     )
-    # Serialization-bundle downloads are a READ — they live on the
-    # GraphQL surface as `reportDownloadUrl(reportId, format)` on the
-    # Report type, not as a REST resource.
 
-  # build-fact-grid mounts independently of ROBOLEDGER_ENABLED so SEC-only
-  # deployments still get it. Rationale in routers/extensions/roboledger/views.py.
+  # Independent of ROBOLEDGER_ENABLED so SEC-only deployments get the views.
   if env.FACT_GRID_ENABLED:
     from robosystems.routers.extensions.roboledger.views import (
       router as roboledger_views_router,
@@ -672,10 +579,8 @@ def create_app() -> FastAPI:
       include_in_schema=True,
     )
 
-  # The OLTP-backed analytical read carries the same tag as the graph-backed
-  # views and mounts after them, so the tag leads with `build-fact-grid`
-  # rather than with this one endpoint. It needs a provisioned ledger, so it
-  # stays on ROBOLEDGER_ENABLED and cannot simply join views.py.
+  # The OLTP-backed analytical read: same tag, mounted after the views, and
+  # needs a ledger, so it stays on ROBOLEDGER_ENABLED.
   if env.ROBOLEDGER_ENABLED:
     from robosystems.routers.extensions.roboledger.reads import (
       router as roboledger_reads_router,
@@ -728,11 +633,9 @@ def create_app() -> FastAPI:
       routes=app.routes,
     )
 
-    # Set up components structure if it doesn't exist
     if "components" not in openapi_schema:
       openapi_schema["components"] = {}
 
-    # Set up security schemes (API key and Bearer JWT)
     openapi_schema["components"]["securitySchemes"] = {
       "APIKeyHeader": {
         "type": "apiKey",
@@ -748,13 +651,11 @@ def create_app() -> FastAPI:
       },
     }
 
-    # Ensure schemas section exists
     if "schemas" not in openapi_schema["components"]:
       openapi_schema["components"]["schemas"] = {}
 
-    # Shared error shape for every /extensions/*/operations/* route. SDK
-    # codegen tools use this to produce a typed error union so clients
-    # can branch on 409 / 422 / 4xx without unstructured `detail` reads.
+    # Shared error shape for operation routes, so SDK codegen emits a typed
+    # error union.
     openapi_schema["components"]["schemas"]["OperationError"] = {
       "type": "object",
       "description": (
@@ -780,9 +681,7 @@ def create_app() -> FastAPI:
       },
     }
 
-    # Shared error responses / Idempotency-Key header / rate-limit header
-    # specs, injected below into every extensions operation route so the
-    # router files stay thin and the wire shape stays consistent.
+    # Injected into every operation route below.
     _op_error_ref = {
       "application/json": {"schema": {"$ref": "#/components/schemas/OperationError"}}
     }
@@ -1005,11 +904,8 @@ def create_app() -> FastAPI:
           )
           existing_responses.setdefault("429", {"description": "Rate limit exceeded"})
 
-          # Strawberry registers its ASGI handlers as plain routes, so FastAPI
-          # names the operations after the handler methods and emits no request
-          # body. Left alone the reference publishes a page titled "Handle Http
-          # Post" with nothing to say what to send — see the docstrings at the
-          # top of this block for what each method actually is.
+          # Strawberry's handlers are plain routes, so FastAPI would publish them
+          # as "Handle Http Post" with no request body.
           if _method_name == "post":
             _operation["summary"] = "Run a GraphQL query"
             _operation["description"] = _GRAPHQL_POST_DESCRIPTION
@@ -1023,8 +919,6 @@ def create_app() -> FastAPI:
             _operation["summary"] = "GraphQL explorer (development only)"
             _operation["description"] = _GRAPHQL_GET_DESCRIPTION
 
-    # Declare API key + Bearer as accepted security schemes on every
-    # non-public endpoint.
     public_exact_paths = {"/v1/status"}
     public_prefixes = ("/v1/auth", "/v1/offering")
 
@@ -1034,8 +928,7 @@ def create_app() -> FastAPI:
       for _method_name, operation in methods.items():
         operation["security"] = [{"APIKeyHeader": []}, {"BearerAuth": []}]
 
-    # Apply the custom tag ordering from openapi_tags, only emitting
-    # tags that are actually in use.
+    # openapi_tags order, emitting only tags in use.
     tag_order = [tag_info["name"] for tag_info in app.openapi_tags or []]
     existing_tags = {
       tag

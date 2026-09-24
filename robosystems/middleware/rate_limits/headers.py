@@ -1,14 +1,11 @@
-"""Middleware to add rate limit headers to responses."""
+"""Copies rate-limit state from ``request.state`` onto response headers."""
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 
 class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
-  """Middleware that adds rate limit headers to responses."""
-
   async def dispatch(self, request: Request, call_next):
-    """Add rate limit headers to the response if they exist in request state."""
     response = await call_next(request)
 
     if hasattr(request.state, "rate_limit_remaining"):
@@ -19,7 +16,6 @@ class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
     if hasattr(request.state, "rate_limit_limit"):
       response.headers["X-RateLimit-Limit"] = str(request.state.rate_limit_limit)
 
-    # Add subscription-specific headers
     if hasattr(request.state, "rate_limit_tier"):
       response.headers["X-RateLimit-Tier"] = request.state.rate_limit_tier
 
@@ -36,7 +32,6 @@ class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
         request.state.auth_rate_limit_limit
       )
 
-    # Add MCP/Agent specific headers
     if hasattr(request.state, "mcp_rate_limit_remaining"):
       response.headers["X-MCP-RateLimit-Remaining"] = str(
         request.state.mcp_rate_limit_remaining

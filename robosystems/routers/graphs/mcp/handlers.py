@@ -1,8 +1,5 @@
-"""MCP handler implementation and helper functions.
-
-Holds the `MCPHandler` class, which owns the Graph API MCP client lifecycle,
-plus the access check and result helpers the MCP routes share.
-"""
+"""`MCPHandler` (Graph API MCP client lifecycle) plus the access check and
+result helpers the MCP routes share."""
 
 import asyncio
 import json
@@ -23,23 +20,17 @@ from robosystems.middleware.mcp import (
 )
 from robosystems.middleware.robustness.timeout_coordinator import TimeoutCoordinator
 
-# Tool execution always runs through the Graph API adapter.
 MCP_AVAILABLE = False
 
 timeout_coordinator = TimeoutCoordinator()
 
 
 def tool_error_result(text: str, kind: str) -> dict[str, Any]:
-  """A tool-execution failure in the handler's text-result shape, marked so
-  transports can surface it as an MCP ``isError`` result and the circuit
-  breaker can count it — instead of both reading it as a success.
+  """A tool failure in the handler's text-result shape, marked so transports
+  surface it as MCP ``isError`` and the circuit breaker counts it.
 
-  ``kind`` is one of:
-    - ``timeout``: the tool or backend query ran out of time (breaker-relevant)
-    - ``backend``: the graph API failed or an unexpected error occurred
-      (breaker-relevant)
-    - ``constraint``: the caller's query violated a policy/complexity limit —
-      a caller error, not a backend-health signal
+  ``kind``: ``timeout`` and ``backend`` are breaker-relevant; ``constraint``
+  is a caller policy/complexity violation, not a backend-health signal.
   """
   return {"type": "text", "text": text, "is_error": True, "error_kind": kind}
 
@@ -60,20 +51,16 @@ def tool_error_kind(result: Any) -> str | None:
 async def validate_mcp_access(
   graph_id: str, current_user: Any, db: Session, operation_type: str = "read"
 ) -> None:
-  """Validate user access for MCP operations, raising 403 on denial.
+  """Raise 403 unless the user may perform ``operation_type`` on the graph.
 
-  Shared repositories resolve through repository access (subgraphs resolve to
-  their parent); other graphs check per-graph membership and role, then the
-  graph's lifecycle/subscription state (``require_graph_access``) — the same
-  pair the REST command surfaces enforce through ``require_graph_write_role``
-  — so a suspended, mid-teardown or grace-period graph is no more writable
-  through an MCP tool than through an operation endpoint.
+  Shared repositories check repository access (subgraphs resolve to their
+  parent). Other graphs check membership and role, then lifecycle and
+  subscription state via ``require_graph_access``, the same pair the REST
+  command surfaces enforce.
   """
-  # Check shared repositories (including subgraphs like "sec_historical")
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 
   if is_shared_repository_or_subgraph(graph_id):
-    # Shared repository - validate repository access (resolves subgraph to parent)
     from robosystems.middleware.auth.utils import validate_repository_access
 
     if not validate_repository_access(current_user, graph_id, operation_type):
@@ -82,16 +69,13 @@ async def validate_mcp_access(
         detail=f"{graph_id.upper()} repository {operation_type} access denied",
       )
   else:
-    # User graph - validate graph access
     from robosystems.models.core import GraphUser
 
     if operation_type in ("write", "admin"):
-      # Write/admin tools require the 'member' or 'admin' role; 'viewer' is
-      # read-only. Bare membership is not sufficient for mutations.
+      # 'viewer' is read-only.
       if not GraphUser.user_has_write_access(current_user.id, graph_id, db):
-        # Same detective-control audit the REST write gate emits
-        # (`require_graph_write_role`), so an under-privileged MCP write
-        # attempt is visible in the security stream, not only in a 403.
+        # Audited like the REST write gate so the attempt shows in the
+        # security stream, not only as a 403.
         from robosystems.security import SecurityAuditLogger
 
         SecurityAuditLogger.log_authorization_denied(
@@ -105,9 +89,7 @@ async def validate_mcp_access(
           detail=f"Write access denied to graph {graph_id}; your role is read-only.",
         )
     elif not GraphUser.user_has_access(current_user.id, graph_id, db):
-      # A read attempt on a graph the caller is not a member of is the
-      # enumeration signal — audited like the write gate above, so a probe
-      # trips the same detective control rather than only a 403.
+      # Non-member read is the enumeration signal; audited like the write gate.
       from robosystems.security import SecurityAuditLogger
 
       SecurityAuditLogger.log_authorization_denied(
@@ -165,7 +147,6 @@ class MCPHandler:
     self.user = user
     self._closed = False
 
-    # Resolve the Graph API URL from the repository.
     repository_url = None
     if hasattr(repository, "config") and hasattr(repository.config, "base_url"):
       repository_url = repository.config.base_url
@@ -174,7 +155,6 @@ class MCPHandler:
     elif hasattr(repository, "api_base_url"):
       repository_url = repository.api_base_url
 
-    # Initialize client asynchronously with lock to prevent race conditions
     self.graph_client = None
     self.mcp_tools: AdapterGraphMCPTools | None = None
     self.database = None
@@ -187,12 +167,9 @@ class MCPHandler:
       self.graph_client = await create_graph_mcp_client(
         self.graph_id, api_base_url=repository_url
       )
-      # Attach the authenticated user to the client so tools can resolve it.
-      # Set both the User object (workspace + GraphQL query tools) and the id
-      # string: the GraphQL tool builds its auth context from the user, and
-      # the registrar's `created_by` resolution reads `user_id` — without it,
-      # GraphQL resolvers reject as UNAUTHENTICATED and writes are audited as
-      # `mcp:{graph_id}` instead of the real user.
+      # Both are needed: GraphQL tools build their auth context from the user,
+      # and the registrar's `created_by` reads `user_id` (else writes audit as
+      # `mcp:{graph_id}`).
       self.graph_client.user = self.user
       if self.user is not None:
         self.graph_client.user_id = str(self.user.id)
@@ -201,7 +178,6 @@ class MCPHandler:
 
       schema_extensions = resolve_schema_extensions(self.graph_id)
 
-      # Shared repositories are read-only (no workspace mutations or write tools)
       from robosystems.config.shared_repositories import (
         is_shared_repository_or_subgraph,
       )
@@ -236,11 +212,9 @@ class MCPHandler:
   async def get_tools(self) -> list[dict[str, Any]]:
     """Get available MCP tools, scoped to this graph.
 
-    The authored descriptions are kept whole: the core tools get a one-line
-    graph scope prepended, and a shared repository's manifest can append
-    query guidance to ``read-graph-cypher``. Replacing the description with
-    the scope sentence deletes the prompt every MCP client writes its query
-    from — on the SEC graph that produced plausible, wrong revenue series.
+    Authored descriptions are kept whole, with the graph scope prepended and a
+    shared repository's query guidance appended. Replacing them loses the
+    prompt clients write queries from (on SEC it produced wrong revenue series).
     """
     self._ensure_not_closed()
     await self._ensure_initialized()
@@ -274,13 +248,11 @@ class MCPHandler:
     return tools
 
   def get_instructions(self, tools: list[dict[str, Any]]) -> str | None:
-    """Build per-graph routing guidance for the MCP client handshake.
+    """Per-graph routing guidance for the MCP handshake.
 
-    Derived from the SAME signals that gate the tool list — the resolved
-    tool-name set, shared-repo status, and read-only — so the instructions can
-    never reference a tool this graph doesn't expose. Shared repositories use
-    their manifest's authored ``agent_instructions`` verbatim; entity and
-    generic graphs are generated from the live tool surface.
+    Derived from the same signals that gate the tool list, so it never names a
+    tool this graph doesn't expose. Shared repositories use their manifest's
+    ``agent_instructions`` verbatim.
     """
     from robosystems.config.shared_repositories import (
       get_manifest,
@@ -319,17 +291,15 @@ class MCPHandler:
 
     if name == "read-graph-cypher":
       requested = arguments.get("timeout")
-      # A caller's timeout must not be able to fail the call on its own: that
-      # failure counts against the shared per-graph breaker.
+      # A caller's timeout must not fail the call on its own: that failure
+      # counts against the shared per-graph breaker.
       if isinstance(requested, int | float) and not isinstance(requested, bool):
         tool_timeout = min(max(requested, _MIN_USER_TIMEOUT_S), _MAX_USER_TIMEOUT_S)
 
     try:
       if name == "get-graph-info":
-        # Custom graph info tool - use standard timeout
         return await asyncio.wait_for(self._get_graph_info(), timeout=tool_timeout)
       else:
-        # Use coordinated timeout for tools with proper instance timeout
         instance_timeout = timeout_coordinator.get_instance_timeout(name)
         results = await execute_mcp_query_with_timeout(
           self.mcp_tools,
@@ -352,13 +322,10 @@ class MCPHandler:
       return tool_error_result(f"Query Error: {e!s}", "timeout")
 
     except GraphQueryComplexityError as e:
-      # Caller's query exceeded policy limits — an error result, but not a
-      # backend-health signal.
       logger.warning(f"Query constraint violation for {name}: {e}")
       return tool_error_result(f"Query Error: {e!s}", "constraint")
 
     except GraphAPIError as e:
-      # Graph API errors already carry adapter-supplied context.
       logger.error(f"Graph API error in tool '{name}': {e}")
       return tool_error_result(str(e), "backend")
 
@@ -389,8 +356,7 @@ class MCPHandler:
       ):
         yield chunk
     else:
-      # Non-streaming fallback: call the MCP tools directly rather than
-      # recursing through call_tool.
+      # Non-streaming fallback: call the tools directly, not via call_tool.
       try:
         logger.debug(f"Using streaming fallback for query: {query[:100]}")
 
@@ -409,7 +375,6 @@ class MCPHandler:
           f"Fallback query returned {len(results) if isinstance(results, list) else 'non-list'} results"
         )
 
-        # Extract columns if possible (from first result row)
         columns = []
         if results and len(results) > 0 and isinstance(results[0], dict):
           columns = list(results[0].keys())
@@ -443,7 +408,6 @@ class MCPHandler:
           "get-graph-schema", {}, return_raw=True
         )
 
-        # Extract basic info from schema
         node_count = len(
           [t for t in schema_result if t.get("category") == "Node Tables"]
         )
@@ -494,7 +458,6 @@ class MCPHandler:
     finally:
       self._closed = True
 
-    # Re-raise if there were critical errors
     if errors:
       raise RuntimeError(f"Errors during MCP handler cleanup: {'; '.join(errors)}")
 

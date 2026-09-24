@@ -1,32 +1,7 @@
 """Strawberry context builder for the extensions GraphQL endpoint.
 
-The endpoint is graph-scoped at `/extensions/{graph_id}/graphql`, so
-`graph_id` comes from the URL path and lands on the context dict alongside
-the authenticated user. Resolvers read both from `info.context` instead of
-taking `graph_id` as a query argument.
-
-Auth model:
-
-- `get_current_user` runs eagerly. When no credentials are presented at
-  all, the user is left as `None` so unauthenticated introspection still
-  works.
-- When credentials are presented but fail to validate, the underlying
-  `HTTPException(401)` is re-raised — an expired token must not silently
-  downgrade to anonymous.
-- With a valid user, `check_graph_access` runs before Strawberry parses
-  the query, so resolvers never call it themselves.
-- Data resolvers call `require_user(info)`, which raises an
-  `UNAUTHENTICATED` GraphQL error when the request was anonymous.
-
-Introspection is open in every environment, production included: schema
-shape is public, data is private. That keeps SDK codegen and
-schema-walking tooling working against any deployment URL without
-provisioning build-pipeline credentials, so don't encode secrets in type
-or field names. Per-domain feature flags gate schema composition, so
-introspection reflects only what a given deployment has enabled. To close
-introspection off, either set `EXTENSIONS_GRAPHQL_ENABLED=false` to drop
-the endpoint entirely, or add a validator extension in `schema.py` that
-rejects `__schema` / `__type` for unauthenticated requests.
+Introspection is open in every environment (schema shape is public, data is
+private), so never encode secrets in type or field names.
 """
 
 from __future__ import annotations
@@ -55,17 +30,10 @@ from robosystems.models.core import User
 
 
 class GraphQLContext(TypedDict):
-  """Typed context passed to every Strawberry resolver.
+  """Per-request resolver context.
 
-  `user` is `None` for unauthenticated requests (introspection only); data
-  resolvers must call `require_user` before reading it. `graph_id` always
-  matches the URL path parameter, and access is enforced before the context
-  is built, so resolvers can trust it.
-
-  `schema_extensions` and `graph_type` are loaded from the platform DB once
-  per request after auth passes, and stay empty for anonymous introspection
-  traffic. Resolvers gate on them through `require_extension(info, ...)`,
-  which raises `EXTENSION_NOT_PROVISIONED`.
+  `user` is None for anonymous introspection, where `schema_extensions` and
+  `graph_type` are also empty. Graph access is enforced before it is built.
   """
 
   request: Request
@@ -81,23 +49,11 @@ async def get_context(
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   db: Session = Depends(get_db_session),
 ) -> GraphQLContext:
-  """Strawberry `context_getter`, passed directly to `GraphQLRouter`.
+  """Strawberry `context_getter`.
 
-  Auth contract:
-
-  1. No credentials (neither `X-API-Key` nor `Authorization`) → `user=None`.
-     Introspection works; data resolvers fail at `require_user(info)` with
-     an `UNAUTHENTICATED` GraphQL error.
-  2. Credentials present but invalid → re-raise `HTTPException(401)` so the
-     caller sees a transport-level 401 rather than a 200 carrying a GraphQL
-     error. Downgrading invalid credentials to anonymous would let expired
-     tokens lose access while still appearing to work.
-  3. Valid credentials → `check_graph_access` short-circuits with 403 on
-     denial, then the graph row is loaded once so resolvers can gate on
-     `schema_extensions` / `graph_type` without a second lookup.
-
-  Subgraph IDs are rejected with 403 regardless of auth: this is the
-  extensions domain-app surface, not a subgraph modality.
+  No credentials → `user=None` (introspection only). Invalid credentials →
+  a real 401, never a downgrade to anonymous. Valid → graph access checked
+  (403) and graph metadata loaded once. Subgraph IDs are always 403.
   """
   has_credentials = bool(api_key) or bool(request.headers.get("Authorization"))
 
@@ -105,38 +61,23 @@ async def get_context(
     user = await get_current_user(request, api_key or "")
   except HTTPException:
     if not has_credentials:
-      # No credentials at all → anonymous fallthrough for introspection.
       user = None
     elif api_key and not request.headers.get("Authorization"):
-      # Pure API-key auth that the account-wide validator rejected. A
-      # graph-scoped key (the `rfsc…` kind the repository / MCP-connector flow
-      # mints) is refused by `get_current_user` by design — without a graph
-      # context it could otherwise reach account-level surfaces. But this
-      # endpoint's URL already scopes us to a single graph, so re-validate the
-      # key against that graph the same way the REST operations and MCP
-      # surfaces do. This is purely additive: account-wide keys never reach
-      # here (they pass `get_current_user`), and JWT/Bearer auth is guarded out
-      # by the Authorization-header check, so neither path changes.
+      # A graph-scoped key is refused by `get_current_user` by design; the URL
+      # scopes this endpoint to one graph, so validate it against that graph
+      # as the REST operations and MCP surfaces do.
       user = validate_api_key_with_graph(api_key, graph_id, db)
       if user is None:
-        # Genuinely invalid, or a key scoped to a different graph → real 401.
         raise
-      # `get_current_user` publishes the principal on its own success path;
-      # this rescue path authenticated outside it, so publish here or the
-      # request stays unattributed downstream.
+      # Publish the principal, which `get_current_user` would have done.
       _stash_api_key_identity(request, api_key, user)
     else:
-      # Bad/expired Bearer token → real transport-layer auth failure.
       raise
 
-  # Subgraph guard: a subgraph is a modality container (scratch/knowledge),
-  # not an extensions domain target — a `{parent}_{name}` graph_id has no
-  # extensions schema, so reject it outright rather than resolve
-  # subgraph→parent and dead-end in schema resolution. Runs after auth (bad
-  # credentials still 401, and denials stay attributable) and before
-  # `check_graph_access`, which would resolve to the parent. Uses
-  # `is_subgraph` rather than a non-`kg` prefix test, which would break the
-  # `library` sentinel and shared repositories.
+  # A subgraph has no extensions schema. Checked after auth (bad credentials
+  # still 401) and before `check_graph_access`, which would resolve to the
+  # parent. A non-`kg` prefix test would wrongly catch `library` and shared
+  # repositories.
   if is_subgraph(graph_id):
     if user is not None:
       from robosystems.security import SecurityAuditLogger
@@ -160,21 +101,16 @@ async def get_context(
   graph_type: str = ""
   if user is not None:
     check_graph_access(user, graph_id, request)
-    # Library sentinel — no graph row to load, no per-graph metadata.
-    # The `library` extension is always "enabled" for this sentinel.
+    # Library sentinel: no graph row to load.
     if graph_id == LIBRARY_GRAPH_ID:
       schema_extensions = (LIBRARY_GRAPH_ID,)
       graph_type = LIBRARY_GRAPH_ID
     else:
-      # Load once per request; resolvers read from context, never re-hit the
-      # DB. Same 403 semantics as check_graph_access: missing graph rows
-      # surface as "access denied" to avoid enumeration.
+      # A missing graph row surfaces as access denied, to avoid enumeration.
       meta = load_graph_metadata(graph_id, db)
       schema_extensions = meta.schema_extensions
       graph_type = meta.graph_type
-      # Lifecycle/subscription gate (reads): a suspended or expired graph is
-      # not readable through GraphQL any more than through /query. Same
-      # gate the REST reads run; raises 403/404 like the rest of the getter.
+      # Suspended or expired graphs are unreadable here too, as on REST.
       require_graph_access(graph_id, db, require_write=False)
 
   return {
@@ -187,12 +123,8 @@ async def get_context(
 
 
 def require_user(info: Info[GraphQLContext, None]) -> User:
-  """Return the authenticated user, or raise a GraphQL error.
-
-  Call this at the top of any resolver that returns real data.
-  Unauthenticated errors surface in the GraphQL `errors[]` array rather
-  than as an HTTP 401; 401 is reserved for invalid credentials at the
-  context-getter layer.
+  """Return the user or raise `UNAUTHENTICATED` in `errors[]` (HTTP 401 is
+  reserved for invalid credentials).
   """
   user = info.context["user"]
   if user is None:
@@ -204,9 +136,5 @@ def require_user(info: Info[GraphQLContext, None]) -> User:
 
 
 def require_graph_id(info: Info[GraphQLContext, None]) -> str:
-  """Return the `graph_id` from the request URL.
-
-  Always set by `get_context` from the path parameter; this helper keeps
-  `info.context["graph_id"]` literals out of resolvers.
-  """
+  """Return the `graph_id` from the request URL."""
   return info.context["graph_id"]

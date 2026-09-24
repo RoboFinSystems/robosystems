@@ -1,15 +1,7 @@
 """Ledger (roboledger) GraphQL resolvers.
 
-The endpoint is graph-scoped at `/extensions/{graph_id}/graphql`, so:
-
-1. Auth + per-graph access are validated by `get_context` before any
-   resolver runs. Resolvers don't need to call `check_graph_access`.
-2. `graph_id` lives on `info.context` — resolvers read it via the
-   `require_graph_id(info)` helper instead of taking it as a query
-   argument.
-3. Each field opens `extensions_session(graph_id)` and delegates to
-   `operations/roboledger/reads/*.py`. No business logic here — the
-   ops layer is the single source of truth.
+Auth and graph access are checked in `get_context`; each field opens an
+extensions session and delegates to `operations/roboledger/reads/`.
 """
 
 from __future__ import annotations
@@ -133,36 +125,22 @@ from robosystems.operations.taxonomy_block.chart_templates import (
   list_templates as list_chart_templates,
 )
 
-# Services are stateless and cheap to keep as module-level singletons —
-# matches the router-level `_svc` pattern already in place.
 _fiscal_svc = FiscalCalendarService()
 _schedule_svc = ScheduleService()
 
-# Reports can arrive on a graph that never provisioned `roboledger` — a
-# cross-graph share writes them there — so the report *reads* accept either
-# extension. Entity reads do too: an investor-only graph is created around its
-# own fund's entity row, and a share adds the sending company as a linked
-# entity, so Entity Info, the entity selector and the issuer picker all read
-# them. Everything else on this resolver stays `roboledger`-only.
+# A cross-graph share writes reports (and the sender's entity) into a graph
+# that may never have provisioned `roboledger`, and an investor-only graph has
+# its own entity row, so report and entity reads accept either extension.
+# Everything else here stays `roboledger`-only.
 _REPORT_EXTENSIONS = ("roboledger", "roboinvestor")
 _ENTITY_EXTENSIONS = _REPORT_EXTENSIONS
 
 
 def _raise_ledger_not_initialized() -> NoReturn:
-  """Raise a typed GraphQL error for an uninitialized ledger.
+  """Raise `LEDGER_NOT_INITIALIZED`.
 
-  Replaces the previous "swallow ValueError/ProgrammingError → return
-  null" pattern. The retired REST endpoints raised HTTP 404 with
-  `"Ledger not initialized. Connect a data source first."`; the
-  GraphQL equivalent is a structured error with code
-  `LEDGER_NOT_INITIALIZED`. Frontends can branch on the code; agents
-  see a clear failure instead of an empty result.
-
-  Uses `raise ... from None` so that when called from inside an
-  `except (ValueError, ProgrammingError):` block, Python doesn't set
-  `__context__` on the new exception. Strawberry's error serializer
-  surfaces a chained cause through the `extensions` field, and driver
-  output must not reach a client response.
+  `from None` drops the chained driver exception, which Strawberry would
+  otherwise surface in the client-facing `extensions`.
   """
   raise strawberry.exceptions.StrawberryGraphQLError(
     message="Ledger not initialized. Connect a data source first.",
@@ -398,9 +376,7 @@ class LedgerQuery:
     read the field still resolves, reporting a zero count and a null
     timestamp rather than failing the whole query.
     """
-    # Wire-compatible with the retired `GET /v1/ledger/{g}/summary`. Opens an
-    # extensions session (counts/dates) and a platform DB session (QB
-    # connection metadata) and merges them.
+    # Merges extensions counts with platform-DB connection metadata.
     import logging
 
     from sqlalchemy import func, select
@@ -417,7 +393,6 @@ class LedgerQuery:
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
 
-    # Connection metadata from platform DB. Failures are non-fatal.
     connection_count = 0
     last_sync_at = None
     try:
@@ -763,11 +738,8 @@ class LedgerQuery:
       classification: The CoA element's EFS classification - asset, liability, equity,
         revenue, expense, gain or loss - whose eligible rs-gaap targets to return.
     """
-    # Narrow candidates to what the entity's Reporting Style actually renders,
-    # keeping the picker in sync with the renderer. Resolved from the same
-    # extensions session as the query. When the tenant has no entity yet,
-    # suggest_mapping_candidates falls back to the rs-gaap-presentation set —
-    # still far narrower than the full vocab.
+    # Narrow to what the entity's Reporting Style renders, so the picker matches
+    # the renderer; with no entity, the rs-gaap-presentation set is used.
     try:
       with _open_session(info, "roboledger") as session:
         try:
@@ -1020,13 +992,7 @@ class LedgerQuery:
     return ClosingBookStructures.from_pydantic(response)
 
   # ── Reports ─────────────────────────────────────────────────────────────
-  #
-  # The report reads gate on `_REPORT_EXTENSIONS` rather than `roboledger`
-  # alone: a cross-graph share writes report rows into the recipient's schema,
-  # so an investor-only tenant holds reports it could never author. Gating
-  # these on `roboledger` would hide data the platform delivered on purpose,
-  # and force every recipient to provision a ledger they will never post to.
-  # The write paths below stay `roboledger`-only — receiving is not authoring.
+  # Reads gate on `_REPORT_EXTENSIONS` (see its definition).
 
   @strawberry.field
   def reports(self, info: Info[GraphQLContext, None]) -> ReportList | None:
@@ -1108,8 +1074,6 @@ class LedgerQuery:
       expires_in: URL lifetime in seconds, 60-3600. Out of range raises
         `INVALID_EXPIRES_IN`.
     """
-    # Replaces the retired `GET .../reports/{id}/download`: a download is a
-    # read of stored state, so it belongs on the read surface.
     if format is None:
       format = ReportDownloadFormat.JSONLD
     if expires_in is None:

@@ -1,12 +1,10 @@
 """Passkey lifecycle and passwordless login endpoints.
 
 Enrollment accepts two principals: a JWT session plus a fresh re-auth proof
-(the settings flow — API keys are refused, and the session alone is not
-enough to mint a new sign-in credential), or an ``enroll``-purpose MFA token
-(the forced-enrollment lane, where the login refused to mint a session until
-a passkey exists — the token itself is the freshness proof). Purpose scoping
-keeps the lanes disjoint — an enroll token can never satisfy ``/mfa/verify``
-and a login token can never authorize enrollment.
+(settings flow; API keys refused), or an ``enroll``-purpose MFA token (forced
+enrollment, where the token is itself the freshness proof). Purpose scoping
+keeps the lanes disjoint: an enroll token never satisfies ``/mfa/verify`` and
+a login token never authorizes enrollment.
 """
 
 import json
@@ -123,9 +121,9 @@ async def get_registration_options(
 ) -> CeremonyOptionsResponse:
   user, jti = _resolve_enrollment_principal(session_user, request.mfa_token, session)
   if jti is None:
-    # Settings lane: a session alone must not mint a new sign-in credential —
-    # demand a fresh proof, exactly as passkey removal does. The forced lane
-    # needs none; its token was minted seconds after a password verify.
+    # Settings lane: a session alone must not mint a new sign-in credential;
+    # demand a fresh proof. The forced lane's token was minted seconds after a
+    # password verify.
     try:
       passkey_ops.verify_reauth(
         session, user, password=request.password, assertion=request.assertion
@@ -209,8 +207,7 @@ async def verify_registration(
     risk_level="medium",
   )
 
-  # Security notification: a new sign-in credential exists. The standard
-  # mitigation for a stolen first factor enrolling its own second factor.
+  # Notify: mitigates a stolen first factor enrolling its own second factor.
   background_tasks.add_task(
     run_and_monitor_dagster_job,
     job_name="send_email_job",

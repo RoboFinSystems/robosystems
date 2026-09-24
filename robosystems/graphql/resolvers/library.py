@@ -1,33 +1,8 @@
-"""Library (taxonomy library) GraphQL resolvers.
+"""Taxonomy library GraphQL resolvers.
 
-The library is the shared reference material in the extensions DB
-public schema. Two access modes are supported:
-
-1. Canonical browse via the `graph_id="library"` sentinel:
-
-       POST /extensions/library/graphql
-
-   `search_path = public` → returns the canonical library only.
-
-2. Tenant-scope via an entity graph_id:
-
-       POST /extensions/kg…/graphql
-
-   `search_path = {schema}, public` → returns the tenant's library
-   copy plus any tenant extensions of library tables (CoA elements,
-   anchor associations, etc). This is how the roboledger-app `/library`
-   surface reads library + tenant data in a single unified view.
-
-Access contract — handled by `get_context`:
-
-- Any authenticated user with graph access may read. `check_graph_access`
-  already enforces per-graph ACLs before the resolver runs.
-- Library fields are NOT gated by a per-graph extension flag. Data
-  visibility is driven entirely by the session's search_path, which
-  is implicit in the graph_id.
-
-Each resolver opens `open_library_session(info)` and delegates to
-`operations/library/reads/*`. No business logic lives here.
+`graph_id="library"` reads the canonical library (`public`); a tenant
+graph_id reads its own schema then `public`, i.e. library plus the tenant's
+extensions of it. Not gated by an extension flag.
 """
 
 from __future__ import annotations

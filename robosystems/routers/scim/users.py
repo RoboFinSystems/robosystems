@@ -1,10 +1,9 @@
 """SCIM 2.0 Users endpoints, scoped to the bearer token's org.
 
-Create/Read/Update/Deactivate plus the one filter Okta sends before creating
-(``userName eq``), which is the brownfield dedupe path. Everything delegates
-to ``operations/user_provisioning`` for create and to ``User.deactivate`` /
-``User.activate`` for the active toggle — the latter is the offboarding
-kill-switch (session_version bump + API-key revocation) auditors buy.
+Create/Read/Update/Deactivate plus the ``userName eq`` filter Okta sends
+before creating (the brownfield dedupe path). The active toggle delegates to
+``User.deactivate`` / ``User.activate``, the offboarding kill switch
+(session_version bump + API-key revocation).
 """
 
 import re
@@ -147,18 +146,14 @@ def _set_active(user: User, active: bool, org_id: str, session: Session) -> None
     _audit_active_change(user, org_id, SecurityEventType.SCIM_USER_REACTIVATED)
     return
 
-  # Deactivation runs even when the DB flag is already false: the flag flip
-  # is only part of the kill switch — an IdP retry after a 503 below is
-  # retrying the session-cache invalidation and API-key revocation, not the
-  # column write, so a short-circuit here would make the retry a no-op.
+  # Runs even when the flag is already false: an IdP retry after a 503 below
+  # is retrying the cache invalidation and key revocation, not the column.
   result = user.deactivate(session)
   if transition:
     _audit_active_change(user, org_id, SecurityEventType.SCIM_USER_DEACTIVATED)
   if not result.fully_applied:
-    # The account is inactive in the DB, but revocation side effects did not
-    # all take. Fail the request so the IdP retries — deactivate is
-    # idempotent and re-asserts them — instead of reporting an offboarding
-    # complete that isn't.
+    # Revocation side effects didn't all take: fail so the IdP retries
+    # (deactivate is idempotent) rather than report an incomplete offboarding.
     raise _scim_error(
       status.HTTP_503_SERVICE_UNAVAILABLE,
       "Deactivation incompletely applied; retry",
@@ -214,9 +209,8 @@ async def create_user(
     if org is None:
       raise _scim_error(status.HTTP_404_NOT_FOUND, "Provisioning org not found")
 
-    # externalId is the OIDC link predicate — a user provisioned without it
-    # can never SSO in, silently. Okta always sends it (POC-verified);
-    # refusing here turns a misconfigured IdP mapping into a visible error.
+    # externalId is the OIDC link predicate: a user without it can never SSO
+    # in, so refuse and surface the misconfigured IdP mapping.
     external_id = (body.external_id or "").strip()
     if not external_id:
       raise _scim_error(
@@ -368,9 +362,8 @@ async def patch_user(
 
     desired_active = _coerce_active(body)
     if desired_active is None:
-      # Nothing recognized means nothing applied — say so. A 200 here would
-      # tell the IdP an update (possibly a deactivation in a shape we don't
-      # parse) succeeded when the account is unchanged.
+      # Nothing recognized, nothing applied: a 200 would tell the IdP an
+      # unparsed update (possibly a deactivation) succeeded.
       raise _scim_error(
         status.HTTP_400_BAD_REQUEST,
         "PATCH contained no supported operation (only 'active' is supported)",

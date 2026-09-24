@@ -1,14 +1,5 @@
-"""Semantic memory MCP tools (LanceDB vector store).
-
-Gives AI Operators a stateful memory layer: `remember` (write), `recall` (ranked
-semantic read), `update-memory` (edit in place), `forget` (delete). Thin adapters
-over the transport-independent ``MemoryService`` kernel — no business logic here.
-
-Distinct from ``subgraph_write_tools.py`` (write-graph-cypher / add-node-table),
-which builds structural knowledge graphs on subgraphs. This is the per-graph
-semantic-vector store, gated by SEMANTIC_MEMORY_ENABLED plus the MCP sub-gate
-MCP_SEMANTIC_MEMORY_ENABLED at registration.
-"""
+"""Semantic memory tools (remember, recall, update-memory, forget): thin
+adapters over ``MemoryService``, the per-graph LanceDB vector store."""
 
 from typing import Any
 
@@ -17,7 +8,7 @@ from robosystems.logger import logger
 from ..exceptions import GraphAPIError
 from .base_tool import BaseTool
 
-# Lazy import to avoid circular imports with the adapter chain
+# Imported lazily: the adapter chain imports back into this package.
 _is_shared_repository_or_subgraph = None
 
 
@@ -253,9 +244,8 @@ class SemanticUpdateMemoryTool(_SemanticMemoryToolMixin, BaseTool):
 
     from robosystems.models.api.memory import MemoryUpdateRequest
 
-    # Forward only the fields the caller actually set, so the service (which
-    # keys on model_fields_set) does a true partial update instead of wiping
-    # the omitted fields to NULL.
+    # Only the fields the caller set: the service keys on model_fields_set,
+    # and an omitted field passed as None would be wiped.
     update_fields: dict[str, Any] = {}
     for field in ("text", "memory_type", "tags"):
       if field in arguments:

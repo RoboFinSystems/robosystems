@@ -1,11 +1,9 @@
 """JWT minting, verification, and revocation.
 
-Lives here rather than in the routers so middleware can import it without a
-circular dependency.
-
-Two token kinds share this secret: session bearers (``type: "access"``, with a
-``jti`` so they can be revoked) and single-use SSO handoff tokens
-(``sso: true``, no ``jti``). `verify_jwt_claims` accepts only the former.
+Several token kinds share one secret: session bearers (``type: "access"``,
+revocable by ``jti``), single-use SSO handoff tokens (``sso: true``, no
+``jti``) and MFA challenge tokens (``type: "mfa"``). `verify_jwt_claims`
+accepts only session bearers.
 """
 
 import uuid
@@ -34,8 +32,6 @@ logger = get_logger("robosystems.auth.jwt")
 
 
 class JWTConfig:
-  """JWT configuration management."""
-
   @staticmethod
   def get_jwt_secret() -> str:
     """Return the signing secret, raising 500 when it is unset."""
@@ -61,13 +57,9 @@ async def get_async_redis_client():
 def is_jwt_token_revoked(token: str) -> bool:
   """Whether a token's `jti` is in the revocation list.
 
-  Fails closed: an unreadable token or an unreachable Redis both count as
-  revoked, so a revocation list outage cannot be used to keep using a
-  revoked token.
-
-  Tokens revoked with reason ``session_refresh`` stay usable for a short
-  grace period, so requests already in flight when a session refreshes
-  don't fail.
+  Fails closed: an unreadable token or an unreachable Redis counts as
+  revoked. A ``session_refresh`` revocation has a short grace period for
+  requests already in flight.
   """
   REFRESH_GRACE_PERIOD = timedelta(seconds=JWT_REVOCATION_GRACE_SECONDS)
 
@@ -86,7 +78,6 @@ def is_jwt_token_revoked(token: str) -> bool:
 
     jti = payload.get("jti")
     if not jti:
-      # A token with no jti has nothing to look up in the revocation list.
       return False
 
     try:
@@ -96,9 +87,8 @@ def is_jwt_token_revoked(token: str) -> bool:
       revocation_data = redis_client.hgetall(revocation_key)
 
       if not revocation_data:
-        return False  # Not revoked
+        return False
 
-      # `decode_responses=True`, so these keys are str, not bytes.
       reason = revocation_data.get("reason", "")
       if reason == "session_refresh":
         revoked_at_str = revocation_data.get("revoked_at", "")
@@ -110,7 +100,7 @@ def is_jwt_token_revoked(token: str) -> bool:
             )
             return False
 
-      return True  # Revoked (or grace period expired)
+      return True
 
     except redis.ConnectionError as conn_err:
       logger.error(f"Redis connection error during token revocation check: {conn_err}")
@@ -127,10 +117,8 @@ def is_jwt_token_revoked(token: str) -> bool:
 def _get_user_session_version(user_id: str, session: Any = None) -> int | None:
   """Look up a user's current session_version.
 
-  If ``session`` is provided, queries on it without closing — caller owns the
-  lifecycle. Otherwise opens a short-lived session.
-
-  Returns None if the user does not exist (caller treats this as auth failure).
+  Uses ``session`` without closing it, else a short-lived one. None means
+  the user does not exist.
   """
   from ...models.core import User
 
@@ -155,11 +143,8 @@ def _get_user_session_version(user_id: str, session: Any = None) -> int | None:
 def is_session_access_token(payload: dict[str, Any]) -> bool:
   """Whether this JWT is a session bearer, not a purpose-scoped token.
 
-  Session tokens carry ``type: "access"``. Tokens with no ``type`` at all are
-  grandfathered (pre-type-claim sessions). SSO handoff tokens (``sso: true``)
-  and any other ``type`` (``mfa``, ``stream``, …) are not session bearers.
-  Shared by ``verify_jwt_claims`` and the ``/refresh`` grace path so a
-  purpose-scoped token cannot mint a session after it expires.
+  ``type: "access"``, or no ``type`` at all (older sessions). Shared with the
+  ``/refresh`` grace path so a purpose-scoped token can't mint a session.
   """
   if payload.get("sso"):
     return False
@@ -172,14 +157,9 @@ def verify_jwt_claims(
 ) -> tuple[str, int] | None:
   """Verify a JWT token's claims and return (user_id, session_version) if valid.
 
-  Validates: signature, expiry, issuer, audience, jti revocation, and
-  optional device fingerprint binding.
-
-  Does NOT compare session_version against the User row — that needs DB
-  access and is the caller's job. Compare the returned session_version
-  against ``User.session_version`` before treating the token as
-  authenticated; the auth dependency layer does this via
-  ``_get_user_for_verified_jwt``.
+  Validates signature, expiry, issuer, audience, revocation, token type and
+  the optional device binding. Does NOT compare session_version against the
+  User row; the caller must before treating the token as authenticated.
   """
   try:
     if is_jwt_token_revoked(token):
@@ -195,17 +175,10 @@ def verify_jwt_claims(
       audience=env.JWT_AUDIENCE,
     )
 
-    # Single-use SSO handoff tokens (`create_sso_token`: {"sso": true}, no
-    # jti, unrevocable) must never authenticate as a session bearer. They are
-    # consumed only at /sso-exchange, which decodes them directly rather than
-    # through this function. Rejecting every non-`access` type also stops a
-    # future purpose-scoped token (an SSE stream token, say) from being
-    # replayed as a bearer. Tokens with no `type` claim at all are accepted.
+    # Purpose-scoped tokens (SSO handoff, MFA) never authenticate as bearers.
     if not is_session_access_token(payload):
       logger.info("JWT token verification failed: non-access token presented as bearer")
-      # A signature-valid but wrong-purpose token used as a bearer is a distinct
-      # signal (possible replay of a leaked single-use SSO handoff) that the
-      # generic AUTH_TOKEN_INVALID at the caller would otherwise bury.
+      # Its own event, distinct from the caller's generic AUTH_TOKEN_INVALID.
       from ...security import SecurityAuditLogger, SecurityEventType
 
       SecurityAuditLogger.log_security_event(
@@ -272,8 +245,8 @@ def create_jwt_token(
 
   payload = {
     "user_id": user_id,
-    "jti": jti,  # JWT ID for revocation tracking
-    "type": "access",  # Session bearer — distinguishes from single-use `sso` tokens
+    "jti": jti,
+    "type": "access",
     "session_version": _get_user_session_version(user_id, session=session) or 0,
     "exp": datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS),
     "iat": datetime.now(UTC),
@@ -302,10 +275,10 @@ def create_sso_token(user_id: str, session: Any = None) -> tuple[str, str]:
     "sso": True,
     "token_id": token_id,
     "session_version": _get_user_session_version(user_id, session=session) or 0,
-    "exp": datetime.now(UTC) + timedelta(seconds=300),  # 5 minutes for better UX
+    "exp": datetime.now(UTC) + timedelta(seconds=300),
     "iat": datetime.now(UTC),
-    "iss": env.JWT_ISSUER,  # Issuer claim - must match env for all environments
-    "aud": env.JWT_AUDIENCE,  # Audience claim - must match env for all environments
+    "iss": env.JWT_ISSUER,
+    "aud": env.JWT_AUDIENCE,
   }
   token = jwt.encode(payload, secret_key, algorithm="HS256")
   return token, token_id
@@ -319,13 +292,9 @@ def create_mfa_token(
 ) -> tuple[str, str]:
   """Mint a short-lived MFA challenge token; returns ``(token, jti)``.
 
-  Issued by login after password verification when the flow cannot complete
-  in one step: ``purpose="login"`` authorizes the second-factor handshake
-  (/mfa/options + /mfa/verify), ``purpose="enroll"`` authorizes the forced
-  first-enrollment ceremony. The purposes are mutually exclusive by claim
-  check, and ``type: "mfa"`` means ``verify_jwt_claims`` refuses the token
-  as a session bearer. Carries ``session_version`` so redemption can re-check
-  against the live user row, mirroring the SSO completion path.
+  ``purpose="login"`` authorizes the second-factor handshake, ``"enroll"``
+  the forced first enrollment; the two are mutually exclusive. Carries
+  ``session_version`` so redemption can re-check the live user row.
   """
   if purpose not in ("login", "enroll"):
     raise ValueError(f"Invalid MFA token purpose: {purpose}")
@@ -350,9 +319,7 @@ def create_mfa_token(
 def decode_mfa_token(token: str, expected_purpose: str) -> dict[str, Any] | None:
   """Decode and validate an MFA challenge token; None on any mismatch.
 
-  Direct decode (the /sso-exchange pattern) rather than ``verify_jwt_claims``
-  — these tokens are deliberately refused there. Validates signature, expiry,
-  issuer, audience, ``type: "mfa"``, and the purpose scope.
+  Decoded directly, since ``verify_jwt_claims`` refuses these by design.
   """
   try:
     payload = jwt.decode(
@@ -387,7 +354,7 @@ def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
         "verify_exp": False,
         "verify_aud": False,
         "verify_iss": False,
-      },  # Don't verify claims for revocation
+      },
     )
 
     jti = payload.get("jti")

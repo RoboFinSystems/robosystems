@@ -1,33 +1,7 @@
-"""Taxonomy mapping read tools for CoA → GAAP mapping workflows.
+"""CoA → GAAP mapping tools.
 
-Four read-side tools, all registered in `manager.py`:
-
-1. list-mapping-structures: List `coa_mapping` structures with their OLTP ids
-2. get-unmapped-elements: List CoA elements not yet mapped to reporting taxonomy
-3. suggest-mapping: Query reporting taxonomy for matching concepts by classification
-4. get-mapping-summary: Get mapping coverage stats
-
-All four route through `operations/roboledger/reads/taxonomies.py` so
-MCP, GraphQL, and the REST read surface share one source of truth.
-
-Mapping **writes** are registrar-generated from the roboledger
-`OperationSpec` declarations (`create-mapping-association`,
-`delete-mapping-association`, …) — one registration mounts both the REST
-route and the MCP tool.
-
-`CreateMappingAssociationTool` below shares a name with one of those
-operations anyway, and that is load-bearing rather than duplication.
-**There are two dispatchers, and only one of them knows about the
-registrar.** `GraphMCPTools.call_tool` resolves registrar tools first
-(Layer 0), so a remote MCP client never reaches the class. But
-`DirectToolAccess` — the in-process dispatcher (tests and any caller that
-instantiates tool classes by hand; the worker adapter no longer does, it
-dispatches through `GraphMCPTools` like the API path) — calls `.execute()`
-on tool classes directly, never consulting the registrar at all.
-
-So "the registrar publishes this name" does **not** imply "this class is
-dead". Check `operations/operators/tool_access.py` before deleting a tool
-class on that reasoning; deleting this one broke the worker mapping path.
+The reads are hand-written; mapping writes are registrar-generated, except
+`CreateMappingAssociationTool` (see its docstring).
 """
 
 from typing import Any
@@ -58,16 +32,7 @@ from ._errors import database_failure
 
 
 class ListMappingStructuresTool:
-  """List the `coa_mapping` Structure rows on the tenant graph.
-
-  Solves the discoverability gap surfaced during the 2026-05-12 demo
-  walk: the OLTP `coa_mapping` Structure isn't materialized to the
-  Cypher graph, so an MCP-only agent had no way to find its id without
-  dropping to direct psql access. With this tool, the standard mapping
-  workflow (`get-mapping-summary`, `get-unmapped-elements`,
-  `suggest-mapping`, `create-mapping-association`) can be driven
-  entirely through MCP.
-  """
+  """List `coa_mapping` Structures, which are not materialized to the graph."""
 
   def __init__(self, graph_client):
     self.client = graph_client
@@ -249,10 +214,8 @@ BS / IS / CF / SE reports under the active Reporting Style.
 
     try:
       with extensions_session(graph_id) as session:
-        # Resolve the entity's active Reporting Style so candidate filtering
-        # matches what the renderer walks (not the wider rs-gaap-presentation
-        # taxonomy). Resolved from this same session; soft-fail to the wider
-        # filter when the tenant has no entity yet.
+        # Filter candidates by the active Reporting Style, as the renderer
+        # walks; the wider taxonomy when the tenant has no entity yet.
         try:
           reporting_style_id = load_primary_reporting_style(session)
         except LookupError:
@@ -263,9 +226,7 @@ BS / IS / CF / SE reports under the active Reporting Style.
           return {"error": f"Element {element_id} not found"}
 
         classification = classification_override or source.trait
-        # Liquidity: explicit override (the auto-map agent passes the CoA
-        # element's liquidity) else derive from the element's own trait so
-        # manual MCP calls narrow too. None → EFS-only (backward compatible).
+        # Default to the element's own liquidity; None narrows by EFS only.
         liquidity = arguments.get("liquidity")
         if liquidity is None:
           from robosystems.operations.library.reads import liquidity_by_element
@@ -399,20 +360,10 @@ class GetMappingSummaryTool:
 class CreateMappingAssociationTool:
   """Write a CoA → rs-gaap mapping association.
 
-  Shares its name with the ``create-mapping-association`` registrar
-  operation, and that is deliberate rather than duplication: the two serve
-  different dispatchers. On the MCP wire, ``GraphMCPTools.call_tool``
-  resolves registrar tools at Layer 0, so *this* class is not what a remote
-  client reaches — and since the worker adapter dispatches through
-  ``GraphMCPTools`` too (``HttpToolAccess``, on both the API and worker
-  paths), neither is it what a MappingOperator run reaches. It is the live
-  write path only for ``DirectToolAccess``, which instantiates tool classes
-  in process and executes them directly without consulting the registrar.
-
-  Consequence worth keeping: the ``mark_graph_stale`` call below is not
-  redundant with the spec's ``mark_stale_reason``. That only fires on the
-  registrar path; without the call here a worker mapping run would never
-  reach LadybugDB.
+  Shadowed on the MCP wire by the registrar op of the same name, but not
+  dead: ``DirectToolAccess`` executes tool classes directly, and
+  ``HttpToolAccess`` instantiates it to read the name. Check
+  ``operations/operators/tool_access.py`` before deleting.
   """
 
   def __init__(self, graph_client):
@@ -478,17 +429,12 @@ class CreateMappingAssociationTool:
         association_type=arguments.get("association_type", "mapping"),
         suggested_by="mapping-agent",
       )
-      # `suggested_by` names the suggester (the mapping operator); `created_by`
-      # is the accountable user — the caller when one is threaded through,
-      # otherwise the operator's own tag.
+      # `created_by` is the accountable user, else the operator's own tag.
       created_by = str(getattr(self.client, "user_id", None) or "mapping-agent")
       with extensions_session(graph_id) as session:
         result = create_mapping_association(session, body, created_by=created_by)
-      # The registrar-published tools get this from `OperationSpec`; this one
-      # is hand-written and reaches the command directly, so it has to mark
-      # the graph itself. Associations are materialized, and `auto-map-elements`
-      # writes its whole mapping run through this tool — without the mark the
-      # operator's work never reaches LadybugDB.
+      # The registrar path marks stale via `OperationSpec`; this one must
+      # do it itself or the association never reaches LadybugDB.
       mark_graph_stale(graph_id, "mapping_association_created")
       return {
         "association_id": result.id,
@@ -497,8 +443,7 @@ class CreateMappingAssociationTool:
         "confidence": result.confidence,
       }
     except ProtectedFactsError as exc:
-      # The account already has landed history in a closed month, so the
-      # arc would restate stamped statements. Typed so the mapping operator
+      # The arc would restate a closed month. Typed so the mapping operator
       # can count it apart from an ordinary rejection.
       return {
         "error": "protected_history",

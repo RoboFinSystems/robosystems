@@ -21,16 +21,12 @@ from ...security import SecurityAuditLogger, SecurityEventType
 
 @dataclass
 class LockAcquisitionResult:
-  """Result of lock acquisition attempt."""
-
   acquired: bool
   lock_id: str | None
   holder_id: str | None
   ttl_remaining: int | None
   error_message: str | None = None
-  # True when the attempt never got an answer from Redis, so "not acquired"
-  # says nothing about whether the lock is held. Callers that fail closed use
-  # this to report "lock service unavailable" rather than "already in progress".
+  # Redis never answered, so "not acquired" says nothing about the holder.
   backend_error: bool = False
 
 
@@ -63,8 +59,7 @@ class DistributedLock:
 
     while retry_count < max_retries:
       try:
-        # NX + EX in one call: acquisition and expiry are set atomically, so a
-        # crash between the two can never leave an immortal lock.
+        # Atomic NX + EX: a crash can never leave an immortal lock.
         result = self.redis.set(
           self.lock_key,
           self.lock_id,
@@ -96,8 +91,7 @@ class DistributedLock:
           )
 
         if not blocking:
-          # `redis.get()` returns bytes or str depending on the client's
-          # `decode_responses` setting; `.decode()` on a str would raise.
+          # bytes or str, depending on `decode_responses`.
           raw_holder = self.redis.get(self.lock_key)
           if isinstance(raw_holder, bytes):
             holder = raw_holder.decode("utf-8")
@@ -135,7 +129,7 @@ class DistributedLock:
           )
 
         retry_count += 1
-        wait_time = min(0.01 * (2**retry_count), 0.5)  # Max 500ms
+        wait_time = min(0.01 * (2**retry_count), 0.5)
         time.sleep(wait_time)
 
       except RedisError as e:
@@ -178,11 +172,8 @@ class DistributedLock:
     )
 
   def release(self) -> bool:
-    """Release the lock, but only if this instance is still the holder.
-
-    The Lua compare-and-delete is what makes that safe: without it, a lock
-    that expired and was re-acquired by someone else would be deleted here.
-    """
+    """Release the lock only if this instance still holds it (atomic
+    compare-and-delete)."""
     if not self.acquired:
       return False
 
@@ -294,17 +285,9 @@ def release_lock_by_id(
 ) -> bool:
   """Release a lock acquired in a different process.
 
-  `DistributedLock.release()` needs the acquiring object — its `acquired`
-  flag doesn't cross process boundaries. When one process acquires and
-  another releases (an API endpoint and the Dagster job it launched), pass
-  the `lock_id` from the acquirer's `LockAcquisitionResult` here.
-
-  Returns True if released, False if the lock was already gone or is held
-  by a different lock_id — the same compare-and-delete guarantee as
-  `DistributedLock.release()`.
-
-  `lock_key` is the unprefixed key; the `lock:` prefix is applied here to
-  match `DistributedLock.__init__`.
+  For an acquirer in another process (an API endpoint and the Dagster job it
+  launched): pass the acquirer's `lock_id`. Same compare-and-delete as
+  `DistributedLock.release()`. `lock_key` is unprefixed.
   """
   full_key = f"lock:{lock_key}"
   lua_script = """
@@ -336,10 +319,10 @@ class SSOTokenLockManager:
     self.redis = redis_client
 
     self.lock_configs = {
-      "token_verification": {"ttl": 10, "timeout": 5},  # Quick verification
-      "token_exchange": {"ttl": 30, "timeout": 10},  # Exchange operations
-      "session_creation": {"ttl": 15, "timeout": 8},  # Session management
-      "cleanup": {"ttl": 60, "timeout": 30},  # Cleanup operations
+      "token_verification": {"ttl": 10, "timeout": 5},
+      "token_exchange": {"ttl": 30, "timeout": 10},
+      "session_creation": {"ttl": 15, "timeout": 8},
+      "cleanup": {"ttl": 60, "timeout": 30},
     }
 
   @asynccontextmanager
@@ -442,10 +425,10 @@ class SSOTokenLockManager:
         for lock_key in lock_keys:
           try:
             ttl = cast(int, self.redis.ttl(lock_key))
-            if ttl == -1:  # Exists with no expiry
+            if ttl == -1:  # no expiry
               self.redis.delete(lock_key)
               stats[stat_key] += 1
-            elif ttl == -2:  # Already gone
+            elif ttl == -2:  # already gone
               continue
           except RedisError:
             continue

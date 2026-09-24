@@ -1,28 +1,9 @@
-"""Period-workflow MCP read tools.
+"""Period-close reads that span Information Blocks: get-period-close-status
+and list-period-drafts.
 
-Two read-side tools covering the period-close workflow that spans
-multiple Information Blocks:
-
-1. get-period-close-status: Overview of what's done vs pending for a period
-2. list-period-drafts: Review all draft entries for a period before close
-
-This module stays scoped to tools that operate across blocks rather than
-within one. Where the per-schedule operations live:
-
-- Reads → ``list-information-blocks`` with ``blockType="schedule"`` and
-  ``get-information-block`` (see ``information_block_tools.py``).
-- Writes → the unified ``create-`` / ``update-`` / ``delete-information-block``
-  operations with ``block_type='schedule'``, which dispatch to the schedule
-  commands through the block-type registry.
-- Closing-entry drafting → ``create-event-block``, with
-  ``event_type='schedule_entry_due'`` for schedule-derived drafts and
-  ``event_type='journal_entry_recorded'`` for free-form manual entries.
-- Schedule termination → ``terminate-schedule`` (no-entry: truncate
-  forward facts + void remaining obligations), or
-  ``create-event-block(event_type='asset_disposed')`` when the
-  derecognition entry still needs to be booked (the handler voids the
-  remaining obligations and posts the disposal entry atomically;
-  facts stay as history).
+Single schedules are read and written through the information-block tools
+with ``block_type='schedule'``; closing entries are drafted with
+``create-event-block``.
 """
 
 from datetime import date
@@ -107,10 +88,8 @@ class GetPeriodCloseStatusTool:
           "fiscal_period_start": response.fiscal_period_start.isoformat(),
           "fiscal_period_end": response.fiscal_period_end.isoformat(),
           "period_status": response.period_status,
-          # The record the close wrote about itself. Null while the period
-          # is open, and for months closed before receipts were persisted —
-          # both are real states, not failures. This is what an operator
-          # reads when the close outlived their client's patience.
+          # Null while open, and for months closed before receipts were
+          # persisted; neither is a failure.
           "close_receipt": response.close_receipt.model_dump(mode="json")
           if response.close_receipt
           else None,

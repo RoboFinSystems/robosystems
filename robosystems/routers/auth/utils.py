@@ -9,23 +9,18 @@ from ...config.logging import get_logger
 from ...config.valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 from ...security.password import PasswordSecurity
 
-# Import JWT functions from middleware to avoid duplication
-
 logger = get_logger("robosystems.auth.utils")
 
-# Constants
 SSO_TOKEN_EXPIRY_SECONDS = 300  # 5 minutes for better UX
 SSO_SESSION_EXPIRY_SECONDS = 30
 AVAILABLE_APPS = ["roboledger", "roboinvestor", "robosystems"]
 
 
-# Configuration
 class Config:
   """Configuration management for environment variables."""
 
   @staticmethod
   def get_valkey_url() -> str:
-    # Use auth cache database from registry with authentication in prod/staging
     return ValkeyURLBuilder.build_authenticated_url(ValkeyDatabase.AUTH)
 
   @staticmethod
@@ -51,10 +46,8 @@ def require_password_auth() -> None:
   """Dependency guard for every password-credential endpoint.
 
   ``PASSWORD_AUTH_ENABLED=false`` (SSO-primary deployments) must disable the
-  whole credential surface — login, registration, reset, change — not just
-  its advertisement in ``/auth/providers``. The IdP is the authority in that
-  configuration, so every credential path has to defer to it, not merely be
-  hidden from the UI.
+  whole credential surface, not just its advertisement in ``/auth/providers``:
+  the IdP is the authority.
   """
   if not env.PASSWORD_AUTH_ENABLED:
     raise HTTPException(
@@ -66,10 +59,8 @@ def require_password_auth() -> None:
 def require_passkeys_enabled() -> None:
   """Dependency guard for every passkey/MFA endpoint.
 
-  Same posture rule as ``require_password_auth``: the routers mount
-  unconditionally (so the posture-drift test table can prove the 403s) and
-  this runtime guard is what makes ``PASSKEYS_ENABLED=false`` a real off
-  switch rather than an advertisement.
+  The routers mount unconditionally; this guard is what makes
+  ``PASSKEYS_ENABLED=false`` a real off switch.
   """
   if not env.PASSKEYS_ENABLED:
     raise HTTPException(
@@ -96,9 +87,6 @@ def may_issue_session_without_login(session, user) -> bool:
   return not user_requires_mfa_enrollment(session, user)
 
 
-# Redis clients are now imported from middleware.auth.jwt
-
-
 def hash_password(password: str) -> str:
   """Hash a password using secure bcrypt settings."""
   return PasswordSecurity.hash_password(password)
@@ -119,16 +107,11 @@ async def verify_password_async(password: str, hashed: str) -> bool:
   return await PasswordSecurity.verify_password_async(password, hashed)
 
 
-# JWT token functions are now imported from middleware.auth.jwt
-
-
 def is_safe_relative_path(path: str) -> bool:
   """True when path is a same-app relative path.
 
-  Rejects scheme-relative URLs ("//host"), absolute URLs, backslashes
-  (browsers normalize "/\\host" to "//host"), and ASCII tab/newline
-  characters (browsers strip those before URL parsing, so "/<TAB>/host"
-  would normalize to "//host").
+  Rejects "//host", absolute URLs, backslashes, and tab/newline characters,
+  all of which browsers can normalize into "//host".
   """
   if not path.startswith("/") or path.startswith("//"):
     return False
@@ -136,11 +119,7 @@ def is_safe_relative_path(path: str) -> bool:
 
 
 def detect_app_source(request) -> str:
-  """Detect the calling app from the Referer and Origin headers.
-
-  Returns one of `roboledger`, `roboinvestor`, or `robosystems`.
-  """
-  # Check referer header
+  """Calling app from Referer, then Origin, then X-App-Source; else robosystems."""
   referer = request.headers.get("referer", "").lower()
 
   if "roboinvestor" in referer:
@@ -150,7 +129,6 @@ def detect_app_source(request) -> str:
   elif "roboledger" in referer:
     return "roboledger"
 
-  # Check origin header
   origin = request.headers.get("origin", "").lower()
 
   if "roboinvestor" in origin:
@@ -160,21 +138,13 @@ def detect_app_source(request) -> str:
   elif "roboledger" in origin:
     return "roboledger"
 
-  # Check custom header if frontend sets it
   app_header = request.headers.get("x-app-source", "").lower()
   if app_header in ["roboledger", "roboinvestor", "robosystems"]:
     return app_header
 
-  # Default to robosystems (main hub)
   return "robosystems"
 
 
 def get_token_hash(token: str) -> str:
-  """Generate a hash of the token for revocation list storage.
-
-  We hash the token to avoid storing the actual JWT in Redis.
-  """
+  """SHA-256 of the token, so the revocation list never stores the JWT itself."""
   return hashlib.sha256(token.encode()).hexdigest()
-
-
-# JWT verification functions are now imported from middleware.auth.jwt

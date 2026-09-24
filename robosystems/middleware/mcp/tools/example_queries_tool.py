@@ -1,6 +1,4 @@
-"""
-Example Queries Tool - Provides example Cypher queries for graph exploration.
-"""
+"""get-example-queries: Cypher examples built from the graph's actual schema."""
 
 from typing import Any
 
@@ -18,12 +16,7 @@ from .constants import (
 
 
 class ExampleQueriesTool(BaseTool):
-  """
-  Tool for generating example Cypher queries based on the graph schema.
-  """
-
   def _is_shared_financial_repo(self) -> bool:
-    """Check if this graph is a shared repository with financial reporting schema."""
     try:
       from robosystems.config.shared_repositories import (
         get_manifest,
@@ -42,7 +35,6 @@ class ExampleQueriesTool(BaseTool):
     return False
 
   def get_tool_definition(self) -> dict[str, Any]:
-    """Get the tool definition for example queries."""
     return {
       "name": "get-example-queries",
       "description": """Get example Cypher queries for this graph database.
@@ -78,7 +70,6 @@ List of example queries with explanations, tailored to the actual schema present
     }
 
   async def execute(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
-    """Execute the example queries tool."""
     self._log_tool_execution("get-example-queries", arguments)
     category = arguments.get("category")
     return await self._get_example_queries(category)
@@ -86,29 +77,15 @@ List of example queries with explanations, tailored to the actual schema present
   async def _get_example_queries(
     self, category: str | None = None
   ) -> list[dict[str, Any]]:
-    """
-    Generate example queries based on the actual graph schema.
-
-    Args:
-        category: Optional filter for query category
-
-    Returns:
-        List of example queries with descriptions
-    """
     examples = []
     try:
-      # Get schema to understand what's available
       schema = await self.client.get_schema()
 
-      # Find available node types
       node_types = [item["label"] for item in schema if item["type"] == "node"]
       rel_types = [item["label"] for item in schema if item["type"] == "relationship"]
 
-      # Basic exploration queries (always include)
       if not category or category == "exploration":
-        # Derive the count-by-type query from the labels actually present so we
-        # don't assume an XBRL/SEC shape (Fact/Element/Entity) on a graph that
-        # may not have it.
+        # From labels actually present; the graph may not be XBRL-shaped.
         count_labels = node_types[:4] or ["Node"]
         count_query = " UNION ALL ".join(
           f"MATCH (n:{lbl}) RETURN '{lbl}' AS node_type, count(n) AS count"
@@ -203,12 +180,9 @@ LIMIT 10""",
           ]
         )
 
-      # Ledger-spine queries (tenant roboledger graphs that materialize the
-      # OLTP general ledger). These nodes carry lifecycle status and the graph
-      # keeps voided/superseded rows, so every example MUST show the live filter.
-      # Key on Entry/Transaction/LineItem — NOT Event: the base REA Event table
-      # exists (empty) on the SEC shared repo, so including it would surface
-      # these tenant-only examples there.
+      # The graph keeps voided/superseded rows, so every ledger example must
+      # show the live filter. Keyed on the spine, not Event: an empty Event
+      # table exists on the SEC repo too.
       has_ledger_spine = any(
         n in node_types for n in ("Entry", "Transaction", "LineItem")
       )
@@ -263,8 +237,7 @@ ORDER BY t.date DESC LIMIT 25""",
           ]
         )
 
-      # Investor positions (tenant graphs with the roboinvestor extension; the
-      # SEC shared repository does not load it, so Position is tenant-only).
+      # Position exists only on roboinvestor tenant graphs.
       if "Position" in node_types and (not category or category == "investor"):
         examples.append(
           {
@@ -275,7 +248,6 @@ ORDER BY t.date DESC LIMIT 25""",
           }
         )
 
-      # Entity-based queries (common pattern)
       if "Entity" in node_types and (not category or category == "entity"):
         examples.extend(
           [
@@ -294,7 +266,6 @@ ORDER BY t.date DESC LIMIT 25""",
           ]
         )
 
-      # Relationship queries
       if rel_types and (not category or category == "relationships"):
         examples.extend(
           [
@@ -313,9 +284,8 @@ ORDER BY t.date DESC LIMIT 25""",
           ]
         )
 
-      # Aggregation examples — kept anchored on a single labelled set so they
-      # never model the `MATCH (n)` / unfiltered-Fact global scan the operator
-      # is told to avoid (it scans every node and times out on a large graph).
+      # Anchored on one labelled set, never a `MATCH (n)` global scan, which
+      # times out on a large graph.
       if not category or category == "aggregations":
         agg_label = node_types[0] if node_types else "Node"
         examples.append(
@@ -327,7 +297,6 @@ ORDER BY t.date DESC LIMIT 25""",
           }
         )
 
-      # Add note about available nodes and relationships
       examples.append(
         {
           "category": "reference",
@@ -348,7 +317,6 @@ ORDER BY t.date DESC LIMIT 25""",
 
     except Exception as e:
       logger.warning(f"Error generating examples: {e}")
-      # Return basic examples even if schema fetch fails
       examples = [
         {
           "category": "basic",

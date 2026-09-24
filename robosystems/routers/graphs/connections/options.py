@@ -1,6 +1,4 @@
-"""
-Connection options endpoint.
-"""
+"""Connection options endpoint."""
 
 from fastapi import APIRouter, Depends, Path
 
@@ -17,9 +15,7 @@ from robosystems.models.core import User
 
 router = APIRouter()
 
-# RoboSystems' Mercury partner page — the referral link that came with the
-# OAuth partnership. The customer-facing front door for "open a Mercury
-# account", so it is what the catalog links to.
+# Mercury's partner referral link: the catalog's "open a Mercury account" link.
 MERCURY_PARTNER_URL = "https://mercury.com/partner/robosystems"
 
 
@@ -40,7 +36,6 @@ async def get_connection_options(
 ) -> ConnectionOptionsResponse:
   providers = []
 
-  # QuickBooks provider
   if env.CONNECTION_QUICKBOOKS_ENABLED:
     providers.append(
       ConnectionProviderInfo(
@@ -72,9 +67,8 @@ async def get_connection_options(
       )
     )
 
-  # Mercury bank feed — native accounting's first feed. The api_key credential
-  # mode is advertised only where the deployment allows it (self-hosted /
-  # local); the hosted catalogue shows OAuth alone.
+  # Mercury: the api_key credential mode is advertised only where the
+  # deployment allows it (self-hosted / local); hosted shows OAuth alone.
   if env.CONNECTION_MERCURY_ENABLED:
     api_key_mode = bool(env.MERCURY_API_KEY_CONNECTIONS_ENABLED)
     providers.append(
@@ -121,7 +115,7 @@ async def get_connection_options(
       )
     )
 
-  # Plaid bank feed — the aggregator feed, one connection per bank login.
+  # Plaid: one connection per bank login.
   if env.CONNECTION_PLAID_ENABLED:
     providers.append(
       ConnectionProviderInfo(

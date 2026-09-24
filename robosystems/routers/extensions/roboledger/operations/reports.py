@@ -1,10 +1,5 @@
-"""Report lifecycle — build one, rebuild it, file it.
-
-Creating a report compiles its blocks over a reporting window;
-`regenerate-report` recompiles in place. `file-report` and
-`transition-filing-status` move a finished report through its filing
-states. Sharing a report with anyone else is `distribution.py`.
-"""
+"""Report lifecycle: create, regenerate, file, and filing-status transitions.
+Sharing is in `distribution.py`."""
 
 from __future__ import annotations
 
@@ -110,9 +105,7 @@ class DeleteReportOperation(BaseModel):
   )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Reports
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Reports ──────────────────────────────────────────────────────────────────
 
 
 def _validate_report_window(body: CreateReportRequest) -> None:
@@ -136,10 +129,8 @@ create_report_op = _registrar.register(
     error_map={
       TaxonomyNotFoundError: (422, lambda e: f"Taxonomy '{e}' not found."),
       NoEntityError: 422,
-      # S3 unavailable during the publish-time bundle stamp. Publish aborted
-      # by ``_stamp_report_bundle`` to keep the invariant "every published
-      # Report has a stored bundle artifact"; surface as 502 (upstream
-      # failure) so the client can retry.
+      # `_stamp_report_bundle` aborted the publish (S3 unavailable) to keep
+      # "every published Report has a stored bundle"; 502 so the client retries.
       BundleUploadError: 502,
     },
     mark_stale_reason="report_generated",
@@ -162,15 +153,12 @@ regenerate_report_op = _registrar.register(
     business_event_type="ledger_regenerate_report",
     requires_graph_id=True,
     error_map={
-      # A concurrent writer holds the rows this needs. Retryable, and the
-      # same 409 the registrar-driven operations return.
+      # A concurrent writer holds the rows; retryable, same 409 as the registrar.
       RowLockedError: 409,
       ReportNotFoundError: (404, lambda e: f"Report '{e}' not found."),
       NotAuthorizedError: (403, lambda _e: "Not authorized to modify this report."),
       InvalidFilingTransitionError: 422,
-      # Same fail-loud semantics as create-report: a regenerate without a
-      # stamped bundle would publish a Report whose ``bundle_url`` lags the
-      # regenerated facts.
+      # Fail loud like create-report, or ``bundle_url`` would lag the facts.
       BundleUploadError: 502,
     },
     mark_stale_reason="report_generated",
@@ -240,12 +228,9 @@ async def delete_report_op(
       )
     return DeleteResult(deleted=True)
 
-  # The OLAP projection is a full rebuild from OLTP, so a deleted report leaves
-  # the graph only once the graph is marked stale. Without this the recipient's
-  # delete is cosmetic — the report stays queryable by their AI operators.
-  # The report's published artifacts go after the rows commit, never before
-  # (see `delete_report_artifacts`); a native report's bundles were the one
-  # withdrawal that used to leave them in the bucket.
+  # The OLAP projection rebuilds from OLTP, so the report leaves the graph only
+  # once it's marked stale. Published artifacts are deleted after the rows
+  # commit, never before (see `delete_report_artifacts`).
   def _finish_delete(_env) -> None:
     mark_graph_stale(graph_id, "report_deleted")
     delete_report_artifacts(graph_id, [body.report_id])
@@ -296,8 +281,7 @@ async def file_report_op(
       try:
         return cmd_file_report(session, body.report_id, filed_by=str(user.id))
       except RowLockedError as e:
-        # Another lifecycle write holds the report. Retryable, same 409 the
-        # registrar-driven operations return.
+        # Another lifecycle write holds the report. Retryable.
         raise HTTPException(status_code=409, detail=str(e))
       except ReportNotFoundError:
         raise HTTPException(

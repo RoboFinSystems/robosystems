@@ -19,7 +19,7 @@ class AdmissionDecision(str, Enum):
   """Admission control decisions."""
 
   ACCEPT = "accept"
-  ADMIT = "accept"  # Alias for tool queue compatibility
+  ADMIT = "accept"  # alias
   REJECT_MEMORY = "reject_memory"
   REJECT_CPU = "reject_cpu"
   REJECT_QUEUE = "reject_queue"
@@ -45,14 +45,7 @@ class SystemResources:
 
 
 class AdmissionController:
-  """Controls admission of new queries based on system resources.
-
-  Features:
-  - CPU and memory threshold checks
-  - Probabilistic load shedding
-  - Gradual backpressure
-  - Resource monitoring
-  """
+  """Hard memory/CPU limits plus probabilistic, priority-weighted shedding."""
 
   def __init__(
     self,
@@ -64,21 +57,18 @@ class AdmissionController:
     shed_start_pressure: float = 80.0,
     shed_stop_pressure: float = 60.0,
   ):
-    """Initialize admission controller."""
     self.memory_threshold = memory_threshold
     self.cpu_threshold = cpu_threshold
-    # Normalize percentage inputs to decimals for internal comparisons
+    # Percentages in, fractions internally.
     self.queue_threshold = queue_threshold / 100.0
     self.check_interval = check_interval
     self.load_shedding_enabled = load_shedding_enabled
     self.shed_start_pressure = shed_start_pressure / 100.0
     self.shed_stop_pressure = shed_stop_pressure / 100.0
 
-    # Cached resource data
     self._last_check = 0.0
     self._cached_resources: SystemResources | None = None
 
-    # Load shedding state
     self._rejection_rate = 0.0
     self._shed_start_time: float | None = None
 
@@ -90,13 +80,11 @@ class AdmissionController:
     priority: int = 5,
   ) -> tuple[AdmissionDecision, str | None]:
     """Check if a new query should be admitted."""
-    # If load shedding is disabled, always accept
     if not self.load_shedding_enabled:
       return AdmissionDecision.ACCEPT, None
 
     resources = self._get_system_resources(queue_depth, active_queries)
 
-    # Check hard limits first
     if resources.memory_percent > self.memory_threshold:
       logger.warning(
         f"Rejecting query: memory usage {resources.memory_percent:.1f}% "
@@ -119,15 +107,14 @@ class AdmissionController:
 
     queue_ratio = queue_depth / max_queue_size if max_queue_size > 0 else 0
     if queue_ratio > self.queue_threshold:
-      # Apply probabilistic rejection based on how full the queue is
       if queue_ratio > 0.95:
-        rejection_prob = 0.9  # Reject 90% when almost full
+        rejection_prob = 0.9
       elif queue_ratio > 0.9:
-        rejection_prob = 0.7  # Reject 70% when very full
+        rejection_prob = 0.7
       else:
-        rejection_prob = 0.5  # Reject 50% when above threshold
+        rejection_prob = 0.5
 
-      # Higher priority queries have lower rejection probability
+      # Higher priority (up to 10) is shed less.
       rejection_prob *= (11 - priority) / 10
 
       if random.random() < rejection_prob:
@@ -140,12 +127,10 @@ class AdmissionController:
           f"System under heavy load. Queue {queue_ratio:.0%} full.",
         )
 
-    # Check gradual degradation based on resource pressure
     pressure_score = self._calculate_pressure_score(resources, queue_ratio)
     if pressure_score > 0.7:
-      # Probabilistic rejection based on pressure
       rejection_prob = (pressure_score - 0.7) * 2  # 0-60% rejection
-      rejection_prob *= (11 - priority) / 10  # Priority adjustment
+      rejection_prob *= (11 - priority) / 10
 
       if random.random() < rejection_prob:
         logger.info(
@@ -157,7 +142,6 @@ class AdmissionController:
           "System under resource pressure. Please retry.",
         )
 
-    # Update load shedding state
     if pressure_score > self.shed_start_pressure and self._shed_start_time is None:
       self._shed_start_time = time.time()
       logger.warning(f"Entering load shedding mode: pressure {pressure_score:.2f}")
@@ -169,18 +153,15 @@ class AdmissionController:
     return (AdmissionDecision.ACCEPT, None)
 
   async def should_admit_request(self) -> AdmissionDecision:
-    """Simple admission check for tool queue (async version)."""
-    # Use cached resources for quick check
-    resources = self._get_system_resources(0, 0)  # No queue info available
+    """Resource-only check, without queue information."""
+    resources = self._get_system_resources(0, 0)
 
-    # Check resource thresholds only
     if resources.memory_percent > self.memory_threshold:
       return AdmissionDecision.REJECT_MEMORY
 
     if resources.cpu_percent > self.cpu_threshold:
       return AdmissionDecision.REJECT_CPU
 
-    # Check general system pressure
     pressure_score = self._calculate_pressure_score(resources, 0.0)
     if pressure_score > self.shed_start_pressure:
       return AdmissionDecision.REJECT_LOAD_SHED
@@ -190,31 +171,25 @@ class AdmissionController:
   def _get_system_resources(
     self, queue_depth: int, active_queries: int
   ) -> SystemResources:
-    """Get current system resources with caching."""
+    """Resource readings cached for `check_interval`; queue figures always fresh."""
     now = time.time()
 
-    # Use cached data if recent
     if self._cached_resources and now - self._last_check < self.check_interval:
-      # Update queue metrics (always current)
       self._cached_resources.queue_depth = queue_depth
       self._cached_resources.active_queries = active_queries
       return self._cached_resources
 
-    # Collect fresh resource data
     try:
-      # Memory usage
       memory = psutil.virtual_memory()
       memory_percent = memory.percent
 
-      # CPU usage (interval=0.1 for quick check)
       cpu_percent = psutil.cpu_percent(interval=0.1)
 
-      # Load average (1 minute)
       load_avg = psutil.getloadavg()[0]
 
     except Exception as e:
       logger.error(f"Failed to get system resources: {e}")
-      # Use conservative defaults on error
+      # Mid-range defaults when psutil fails.
       memory_percent = 50.0
       cpu_percent = 50.0
       load_avg = 1.0
@@ -233,17 +208,12 @@ class AdmissionController:
   def _calculate_pressure_score(
     self, resources: SystemResources, queue_ratio: float
   ) -> float:
-    """Calculate overall system pressure score (0-1).
-
-    Combines multiple factors into a single pressure metric.
-    """
-    # Normalize each metric to 0-1 range
+    """Weighted 0-1 pressure: memory 0.4, CPU 0.3, queue 0.2, load 0.1."""
     memory_pressure = min(resources.memory_percent / 100, 1.0)
     cpu_pressure = min(resources.cpu_percent / 100, 1.0)
     queue_pressure = queue_ratio
-    load_pressure = min(resources.load_average / 4.0, 1.0)  # 4 cores assumed
+    load_pressure = min(resources.load_average / 4.0, 1.0)  # assumes 4 cores
 
-    # Weighted average (memory most important)
     pressure = (
       memory_pressure * 0.4
       + cpu_pressure * 0.3
@@ -264,7 +234,6 @@ class AdmissionController:
     queue_ratio = queue_depth / max_queue_size if max_queue_size > 0 else 0
     pressure_score = self._calculate_pressure_score(resources, queue_ratio)
 
-    # Determine health state
     if resources.is_healthy and pressure_score < 0.5:
       health_state = "healthy"
     elif pressure_score < 0.7:
@@ -294,20 +263,17 @@ class AdmissionController:
       "thresholds": {
         "memory": self.memory_threshold,
         "cpu": self.cpu_threshold,
-        "queue": self.queue_threshold * 100,  # Convert back to percentage for display
+        "queue": self.queue_threshold * 100,
       },
     }
 
 
-# Global admission controller instance
 _admission_controller: AdmissionController | None = None
 
 
 def get_admission_controller() -> AdmissionController:
-  """Get the global admission controller instance."""
   global _admission_controller
   if _admission_controller is None:
-    # Load configuration
     from robosystems.config.query_queue import QueryQueueConfig
 
     _admission_controller = AdmissionController(

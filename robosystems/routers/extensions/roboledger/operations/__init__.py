@@ -1,42 +1,11 @@
 """RoboLedger operation routes — `POST /extensions/roboledger/{graph_id}/operations/{op}`.
 
-Every route follows the same pattern:
+One module per OpenAPI tag; shared plumbing is in `.._common`. Within a tag the
+reference lists operations in registration order, so `_MODULES` below is the
+order a reader sees. `views.py` and `reads.py` (tag `RoboLedger: Analytical
+Views`) are mounted after this router.
 
-1. `POST /extensions/roboledger/{graph_id}/operations/{op_name}`
-2. Typed request body (path params embedded in the body for
-   update/delete commands)
-3. A `_runner()` closure that opens an extensions session, calls the ops
-   layer, and translates domain errors into HTTPExceptions
-4. `execute_operation(ctx, runner, cache)` handles envelope + idempotency
-   + audit
-
-One module per OpenAPI tag, and the tag is the only thing that differs
-between them — the shared plumbing is `.._common`. The surface was a single
-3,200-line module until it reached 52 operations under one tag, which is
-also what the published reference rendered: one undifferentiated list. The
-split is therefore load-bearing twice over, in the source and on the page.
-
-Order matters here. Within a tag, the reference lists operations in route
-registration order, so the sequence below is the sequence a reader sees:
-
-| Module                 | Tag                             |
-| ---------------------- | ------------------------------- |
-| `setup`                | RoboLedger: Setup               |
-| `taxonomy`             | RoboLedger: Taxonomy & Mapping  |
-| `information_blocks`   | RoboLedger: Information Blocks  |
-| `ledger`               | RoboLedger: Ledger & Events     |
-| `close`                | RoboLedger: Fiscal Close        |
-| `reports`              | RoboLedger: Reports             |
-| `distribution`         | RoboLedger: Report Distribution |
-
-Two more routers serve the same URL prefix from outside this package and
-share the eighth tag, `RoboLedger: Analytical Views`: `views.py` (graph-backed,
-mounted on `FACT_GRID_ENABLED` so SEC-only deployments get it) and `reads.py`
-(OLTP-backed). `main.py` mounts them after this router, so the views land
-after the commands.
-
-Raw ontology CRUD (taxonomies, structures, elements, non-mapping
-associations) is deliberately not exposed: the Taxonomy Block envelope is
+Raw ontology CRUD is deliberately not exposed: the Taxonomy Block envelope is
 the only tenant-facing construction path.
 """
 
@@ -219,9 +188,8 @@ from robosystems.routers.extensions.roboledger.operations.reports import (
   transition_filing_status_op as transition_filing_status_op,
 )
 
-# Handlers and request bodies are re-exported so the surface can still be
-# reached as `...roboledger.operations.<name>`, the path it had before the
-# split. Tests and tool adapters bind to these names.
+# Re-exported so `...roboledger.operations.<name>` still resolves; tests and
+# tool adapters bind to these names.
 from robosystems.routers.extensions.roboledger.operations.setup import (
   change_reporting_style_op as change_reporting_style_op,
 )
@@ -261,8 +229,6 @@ from robosystems.routers.extensions.roboledger.operations.taxonomy import (
 
 router = APIRouter()
 
-# Order is the reference's reading order within each tag: operations are
-# grouped by tag, and within a tag by the order they were registered.
 _MODULES = (
   setup,
   taxonomy,
@@ -273,15 +239,10 @@ _MODULES = (
   distribution,
 )
 
-# Routes are copied onto this router rather than composed with
-# `include_router`. As of FastAPI 0.113 an included router is kept as an
-# `_IncludedRouter` marker and flattened only when the app mounts it, which
-# would leave `router.routes` holding seven markers and no operations. Two
-# structural tests walk exactly that list — every hand-written write op
-# carries the write-role gate, every op that writes materialized content
-# marks its graph stale — and both would have gone quietly vacuous. Copying
-# is equivalent here because nothing is layered on at this level: no prefix,
-# no tags, no dependencies. Add any of those and use `include_router`
-# instead, then give those tests a way to see through it.
+# Routes are copied rather than `include_router`-ed: since FastAPI 0.113 an
+# included router stays an `_IncludedRouter` marker until app mount, which
+# would make the structural tests walking `router.routes` (write-role gate,
+# stale marking) silently vacuous. Equivalent only while this level adds no
+# prefix, tags or dependencies.
 for _module in _MODULES:
   router.routes.extend(_module.router.routes)

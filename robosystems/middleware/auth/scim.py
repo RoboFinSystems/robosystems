@@ -71,9 +71,8 @@ def require_scim_org(
     raise _scim_unauthorized()
 
   org_id = str(token.org_id)
-  # One-org boundary: once the deployment pins its enterprise org, a valid
-  # token for any other org is refused with the same generic 401 as an
-  # invalid token (no reason leak).
+  # A deployment pinned to one enterprise org refuses other orgs' tokens,
+  # with the same generic 401.
   if env.ENTERPRISE_ORG_ID and org_id != env.ENTERPRISE_ORG_ID:
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.SCIM_AUTH_FAILURE,

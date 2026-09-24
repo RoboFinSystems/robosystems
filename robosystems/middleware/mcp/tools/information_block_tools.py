@@ -1,19 +1,5 @@
-"""Information Block MCP read tools for agents.
-
-Hand-written reads that agents use to consume the molecular-layer
-envelope for any registered block type. Two tools:
-
-1. ``get-information-block`` — fetch one block envelope by id.
-2. ``list-information-blocks`` — list blocks, optionally filtered by
-   block_type + category.
-
-These are the only block reads: schedule envelopes surface here via
-``block_type='schedule'`` rather than through block-type-specific tools.
-
-The ``create-information-block`` **write** tool is NOT in this module —
-it's auto-generated from the OperationSpec via
-``build_tools_for_extension`` in the registrar pipeline.
-"""
+"""Information Block reads for every block type (schedules included, via
+``block_type='schedule'``). The writes are registrar-generated."""
 
 from __future__ import annotations
 
@@ -265,11 +251,8 @@ class ListInformationBlocksTool:
     include_atoms = bool(arguments.get("include_atoms", False))
     scenario_id = arguments.get("scenario_id")
 
-    # MCP inputSchema declares minimum/maximum bounds for limit + offset,
-    # but the stdio server doesn't enforce them — some clients (and
-    # direct HTTP callers) pass out-of-range values. Reassert the bounds
-    # here so we match the declared contract instead of silently
-    # clamping.
+    # The schema's bounds aren't enforced by every transport; refuse rather
+    # than clamp.
     if not 1 <= limit <= 1000:
       return {
         "error": "invalid_arguments",
@@ -304,7 +287,7 @@ class ListInformationBlocksTool:
           "blocks": blocks,
         }
     except ValueError as exc:
-      # Raised on unknown block_type — surface as an argument-level error.
+      # Unknown block_type.
       return {"error": "invalid_arguments", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("list-information-blocks", exc)
@@ -314,14 +297,7 @@ class ListInformationBlocksTool:
 
 
 def _summarize_information_block(envelope) -> dict[str, Any]:
-  """Project a full Information Block envelope to a lean summary shape.
-
-  Drops the heavy atoms (elements, connections, facts, rules, dimensions,
-  fact_set, verification_results) and the view-projection block, replacing
-  them with counts so the caller can decide whether to fetch the full
-  envelope via ``get-information-block``. Identity, type, category, and
-  taxonomy linkage are preserved.
-  """
+  """Identity and taxonomy linkage, with counts in place of the heavy atoms."""
   return {
     "id": envelope.id,
     "block_type": envelope.block_type,

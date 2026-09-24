@@ -1,4 +1,4 @@
-"""Subscription enforcement middleware for graph operations."""
+"""Graph lifecycle and subscription enforcement."""
 
 import threading
 import time
@@ -20,8 +20,8 @@ from ...models.core.billing import (
 
 logger = get_logger(__name__)
 
-# In-memory cache: graph_id -> (subscription_result, expires_at)
-# subscription_result is one of: "active", "no_subscription", "canceled_grace", "canceled_expired"
+# graph_id -> (result, expires_at); result is "active", "upgrading",
+# "no_subscription", "canceled_grace" or "canceled_expired".
 _subscription_cache: dict[str, tuple[str, float]] = {}
 _subscription_lock = threading.Lock()
 
@@ -52,8 +52,7 @@ def check_can_provision_graph(
   requested_tier: GraphTier,
   session: Session,
 ) -> tuple[bool, str | None]:
-  """Check if a user can provision a new graph."""
-  # Get user's organization - billing is org-level, not user-level
+  """Check if a user's organization can provision a new graph."""
   org_user = session.query(OrgUser).filter(OrgUser.user_id == user_id).first()
 
   if not org_user:
@@ -95,7 +94,6 @@ def check_graph_subscription_active(
   graph_id: str,
   session: Session,
 ) -> tuple[bool, str | None]:
-  """Check if a graph has an active subscription."""
   subscription = BillingSubscription.get_by_resource(
     resource_type="graph", resource_id=graph_id, session=session
   )
@@ -154,17 +152,12 @@ def _assert_graph_live(graph: Graph | None) -> Graph:
 def require_graph_access(
   graph_id: str, session: Session, require_write: bool = False
 ) -> Graph:
-  """Validate graph is accessible for the requested operation type.
+  """Validate the graph is accessible for the requested operation type.
 
-  Checks two layers:
-  1. Graph lifecycle (deleted/deprovisioned -> 404, suspended -> 403)
-  2. Subscription status (grace period: reads OK, writes blocked)
-
-  A subgraph carries no subscription of its own and lives on its parent's
-  infrastructure, so it is held to its parent's lifecycle *and* billed
-  through the parent: both rows must be live, and the subscription lookup
-  (and its cache entry) is keyed on the parent graph. Returns the row for
-  ``graph_id`` itself.
+  Layer 1 is lifecycle (gone -> 404, suspended -> 403); layer 2 is the
+  subscription (a canceled grace period or an upgrade allows reads only). A
+  subgraph is held to its parent's lifecycle and subscription as well as its
+  own. Returns the row for ``graph_id`` itself.
   """
   graph = _assert_graph_live(
     Graph.get_by_id(graph_id, session, include_deprovisioned=True)
@@ -177,11 +170,9 @@ def require_graph_access(
     )
   billing_graph_id = str(billing_graph.graph_id)
 
-  # Layer 2: Subscription check (only when billing is enabled)
   if not env.BILLING_ENABLED:
     return graph
 
-  # Skip subscription check for shared repositories
   if billing_graph.is_repository:
     return graph
 
@@ -213,7 +204,6 @@ def require_graph_access(
       detail="No active subscription for this graph.",
     )
 
-  # Cache miss — query DB
   subscription = BillingSubscription.get_by_resource(
     resource_type="graph", resource_id=billing_graph_id, session=session
   )
@@ -227,7 +217,6 @@ def require_graph_access(
     )
 
   if subscription.status == "upgrading":
-    # Tier migration in progress: reads OK, writes blocked
     _cache_subscription(billing_graph_id, "upgrading")
     if require_write:
       raise HTTPException(
@@ -239,13 +228,11 @@ def require_graph_access(
   if subscription.status == "canceled":
     now = datetime.now(UTC)
     ends_at = subscription.ends_at
-    # The DateTime column is timezone-naive; comparing naive against aware
-    # raises TypeError. Normalize like OrgInvitation.is_expired does.
+    # The column is timezone-naive.
     if ends_at is not None and ends_at.tzinfo is None:
       ends_at = ends_at.replace(tzinfo=UTC)
 
     if ends_at and ends_at > now:
-      # Grace period: reads OK, writes blocked
       _cache_subscription(billing_graph_id, "canceled_grace")
       if require_write:
         raise HTTPException(
@@ -254,19 +241,16 @@ def require_graph_access(
         )
       return graph
 
-    # Past grace period
     _cache_subscription(billing_graph_id, "canceled_expired")
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Subscription has ended. Resubscribe to access this graph.",
     )
 
-  # Only explicitly active subscriptions get full access
   if subscription.status == SubscriptionStatus.ACTIVE.value:
     _cache_subscription(billing_graph_id, "active")
     return graph
 
-  # All other statuses (past_due, unpaid, paused, pending, etc.) are blocked
   error_messages: dict[str, str] = {
     SubscriptionStatus.PENDING.value: "Subscription is pending activation.",
     SubscriptionStatus.PAUSED.value: "Subscription is paused. Please reactivate.",

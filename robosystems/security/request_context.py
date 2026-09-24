@@ -1,25 +1,10 @@
 """Request-scoped identity, readable anywhere below the route handler.
 
-Authentication resolves the caller in a FastAPI dependency and returns a
-`User`; nothing below that layer — the operation audit line, the security
-event writer, a runner thread — is handed the request. So the audit trail
-recorded *who* as a bare ``user_id`` and could not say which credential
-acted, and the request id minted by the logging middleware never reached
-the events written during that request.
-
-Two `ContextVar`s close that gap without threading a request object through
-every signature: the logging middleware binds the request id before the
-route runs, and every successful authentication publishes a
-:class:`RequestPrincipal`. Both survive ``await`` without leaking across
-concurrent requests, follow the request into `anyio.to_thread` runner
-threads (which copy the context), and are absent — ``None`` — outside a
-request, which callers must treat as "unknown", never as "anonymous".
-
-`publish_principal` also mirrors the identity onto ``request.state``
-(``user_id`` / ``auth_user_id`` / ``auth_method`` / ``api_key_prefix``), the
-channel the access-log middleware reads after the response, since a value
-set inside the route's task is not visible back in the middleware's own
-context.
+Two `ContextVar`s carry the request id (bound by the logging middleware) and
+the authenticated :class:`RequestPrincipal`, so audit and security events can
+name the request and credential without being handed the request. Both
+follow the request into runner threads. ``None`` outside a request means
+"unknown", never "anonymous".
 """
 
 from __future__ import annotations
@@ -28,9 +13,8 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any
 
-# The first 8 characters of an API key are its stored identification prefix
-# (``UserAPIKey.prefix``): enough to name the credential in an incident
-# without ever writing the secret.
+# The key's stored identification prefix (``UserAPIKey.prefix``): names the
+# credential without writing the secret.
 API_KEY_PREFIX_LENGTH = 8
 
 
@@ -87,9 +71,9 @@ def publish_principal(
 ) -> RequestPrincipal:
   """Record the authenticated caller for the rest of this request.
 
-  Called from every authentication success branch. ``request`` is the
-  Starlette request (typed loosely so this module stays import-free of the
-  web layer); its ``state`` receives the same fields the ContextVar carries.
+  Called from every authentication success branch. Also mirrored onto
+  ``request.state``, which the access-log middleware reads after the
+  response (a ContextVar set inside the route isn't visible there).
   """
   prefix = api_key[:API_KEY_PREFIX_LENGTH] if api_key else None
   principal = RequestPrincipal(

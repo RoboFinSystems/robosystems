@@ -1,6 +1,4 @@
-"""
-Shared utilities for subgraph operations.
-"""
+"""Shared utilities for subgraph operations."""
 
 from datetime import UTC, datetime
 
@@ -22,7 +20,6 @@ from robosystems.models.core.graph.graph_user import GraphUser
 from robosystems.models.core.user import User
 from robosystems.operations.graph.subgraph_service import SubgraphService
 
-# Initialize shared circuit breaker for subgraph operations
 circuit_breaker = CircuitBreakerManager()
 
 
@@ -36,12 +33,10 @@ def verify_parent_graph_access(
 ) -> Graph:
   """Return the parent graph after checking the user holds `required_role`
   ('read' or 'admin') on it. Raises 403 on denial, 404 when it is missing."""
-  # Enforce graph lifecycle and subscription status (write: creating a subgraph)
   from robosystems.middleware.billing.enforcement import require_graph_access
 
   parent_graph = require_graph_access(graph_id, session, require_write=True)
 
-  # Block shared repositories from having subgraphs
   if is_shared_repository_or_subgraph(graph_id.lower()):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
@@ -87,12 +82,8 @@ def verify_subgraph_tier_support(parent_graph: Graph):
 
 
 def verify_parent_graph_active(parent_graph: Graph):
-  """Verify the parent graph is active, raising 403 if it is not.
-
-  A suspended parent has its access blocked while the infrastructure stays
-  in place, and a deprovisioned one has no infrastructure left to host a
-  subgraph — creating one under either would strand it.
-  """
+  """Raise 403 unless the parent is active: a suspended or deprovisioned
+  parent would strand a new subgraph."""
   if not parent_graph.is_active:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
@@ -104,15 +95,11 @@ def verify_parent_graph_active(parent_graph: Graph):
 
 
 def check_subgraph_quota(parent_graph: Graph, session: Session):
-  """Check the parent graph's remaining subgraph quota.
-
-  Returns `(current_count, max_allowed, existing_subgraphs)`, raising 403 once
-  the quota is exhausted.
-  """
+  """Returns `(current_count, max_allowed, existing_subgraphs)`; raises 403
+  once the quota is exhausted."""
   existing_subgraphs = Graph.get_subgraphs(parent_graph.graph_id, session)
   current_count = len(existing_subgraphs)
 
-  # Get max subgraphs from tier configuration
   max_subgraphs = get_tier_max_subgraphs(parent_graph.graph_tier)
 
   if max_subgraphs is not None and current_count >= max_subgraphs:
@@ -129,19 +116,15 @@ def check_subgraph_quota(parent_graph: Graph, session: Session):
 def validate_subgraph_name_unique(
   name: str, existing_subgraphs: list, parent_graph_id: str
 ):
-  """Validate the proposed subgraph name's format and uniqueness, raising 400
-  if it is malformed or already taken."""
-  # Validate name format
+  """Raise 400 if the name is malformed, 409 (with a suggestion) if taken."""
   if not validate_subgraph_name(name):
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
       detail="Subgraph name must be alphanumeric and 1-20 characters",
     )
 
-  # Check uniqueness
   existing_names = [sg.subgraph_name for sg in existing_subgraphs]
   if name in existing_names:
-    # Try to generate a unique name
     suggested_name = generate_unique_subgraph_name(
       parent_graph_id, name, existing_names
     )
@@ -157,10 +140,8 @@ def get_subgraph_by_name(
 ) -> Graph:
   """Look up a subgraph by parent graph ID and name, raising 404 when it does
   not exist and 400 when the name is malformed."""
-  # Construct full subgraph ID
   subgraph_id = construct_subgraph_id(graph_id, subgraph_name)
 
-  # Parse subgraph ID to validate format
   subgraph_info = parse_subgraph_id(subgraph_id)
   if not subgraph_info:
     raise HTTPException(

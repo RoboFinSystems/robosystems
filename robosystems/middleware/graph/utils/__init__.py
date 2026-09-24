@@ -93,7 +93,6 @@ __all__ = [
   "GraphTypeRegistry",
   "MultiTenantUtils",
   "SubgraphInfo",
-  # Subgraph functions
   "SubgraphType",
   "construct_subgraph_id",
   "ensure_database_with_schema",
@@ -103,14 +102,12 @@ __all__ = [
   "get_database_name",
   "get_database_path_for_graph",
   "get_graph_cluster_type",
-  # Identity functions
   "get_graph_identity",
   "get_graph_routing",
   "get_max_databases_per_node",
   "get_migration_status",
   "get_repository_database_name",
   "get_repository_type_from_graph_id",
-  # Database functions
   "is_multitenant_mode",
   "is_parent_graph",
   "is_shared_repository",
@@ -124,7 +121,6 @@ __all__ = [
   "split_graph_hierarchy",
   "validate_database_creation",
   "validate_graph_access",
-  # Validation functions
   "validate_graph_id",
   "validate_parent_graph_id",
   "validate_repository_access",

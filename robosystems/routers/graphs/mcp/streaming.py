@@ -1,11 +1,5 @@
-"""MCP streaming generators and the aggregator that folds them back into a
-single result.
-
-Each generator yields event dicts that a transport turns into SSE or NDJSON.
-`aggregate_streamed_results` collapses a whole event list into one result,
-which is how the JSON-RPC transport answers a `tools/call` that ran on a
-streaming strategy.
-"""
+"""MCP streaming generators, plus `aggregate_streamed_results`, which folds an
+event list into the single result a JSON-RPC `tools/call` returns."""
 
 import json
 from collections.abc import AsyncGenerator
@@ -25,15 +19,10 @@ async def stream_mcp_tool_execution(
   strategy: str,
   chunk_size: int = 1000,
 ) -> AsyncGenerator[dict[str, Any]]:
-  """Stream an MCP tool execution as progress and result events.
-
-  Yields event dicts that a transport can deliver as SSE or NDJSON, or that
-  `aggregate_streamed_results` can fold into a single result.
-  """
+  """Stream an MCP tool execution as progress and result events."""
   start_time = datetime.now(UTC)
 
   try:
-    # Send start event
     yield {
       "event": "start",
       "data": {
@@ -44,19 +33,15 @@ async def stream_mcp_tool_execution(
       },
     }
 
-    # Tool-specific streaming logic
     if tool_name in ["read-graph-cypher", "read-neo4j-cypher", "read-ladybug-cypher"]:
-      # Stream query results
       async for event in stream_cypher_query(handler, arguments, chunk_size):
         yield event
 
     elif tool_name in ["get-graph-schema", "get-neo4j-schema", "get-ladybug-schema"]:
-      # Stream schema in parts
       async for event in stream_schema_retrieval(handler, tool_name, arguments):
         yield event
 
     else:
-      # Generic tool execution with single result
       yield {
         "event": "progress",
         "data": {
@@ -68,8 +53,7 @@ async def stream_mcp_tool_execution(
 
       result = await handler.call_tool(tool_name, arguments)
 
-      # The handler encodes execution failures as marked text results; emit
-      # them as error events so aggregation yields a failure, not a success.
+      # Marked failure results become error events so aggregation fails.
       if is_tool_error_result(result):
         yield {
           "event": "error",
@@ -89,7 +73,6 @@ async def stream_mcp_tool_execution(
         },
       }
 
-    # Send completion event
     execution_time = (datetime.now(UTC) - start_time).total_seconds()
     yield {
       "event": "complete",
@@ -158,9 +141,8 @@ async def stream_cypher_query(
         yield rest
 
     async for chunk in _chunks():
-      # A failed backend query arrives as an error chunk (see
-      # StreamingRepositoryWrapper): surface it as an error event, or the
-      # stream completes normally and aggregates to a successful empty result.
+      # A failed backend query arrives as an error chunk; without an error
+      # event the stream would aggregate to a successful empty result.
       if isinstance(chunk, dict) and chunk.get("error"):
         error_type = str(chunk.get("error_type", ""))
         yield {
@@ -178,11 +160,9 @@ async def stream_cypher_query(
       rows_in_chunk = len(chunk.get("data", []))
       total_rows += rows_in_chunk
 
-      # Capture columns from first chunk
       if all_columns is None and "columns" in chunk:
         all_columns = chunk["columns"]
 
-      # Send progress event
       yield {
         "event": "query_chunk",
         "data": {
@@ -194,7 +174,6 @@ async def stream_cypher_query(
         },
       }
 
-      # Send progress update every 5 chunks
       if chunk_count % 5 == 0:
         yield {
           "event": "progress",
@@ -204,7 +183,6 @@ async def stream_cypher_query(
           },
         }
 
-    # Send final summary
     yield {
       "event": "query_complete",
       "data": {
@@ -214,7 +192,6 @@ async def stream_cypher_query(
       },
     }
   else:
-    # Non-streaming execution
     yield {
       "event": "progress",
       "data": {
@@ -236,7 +213,6 @@ async def stream_cypher_query(
       }
       return
 
-    # Parse result if it's in the expected format
     if isinstance(result, dict) and "text" in result:
       try:
         parsed = json.loads(result["text"])
@@ -270,8 +246,7 @@ async def stream_schema_retrieval(
   tool_name: str,
   arguments: dict[str, Any],
 ) -> AsyncGenerator[dict[str, Any]]:
-  """Stream schema information in parts, so large schemas arrive
-  incrementally."""
+  """Stream schema information in parts, so large schemas arrive incrementally."""
   yield {
     "event": "progress",
     "data": {
@@ -293,7 +268,6 @@ async def stream_schema_retrieval(
     }
     return
 
-  # Parse schema result
   if isinstance(schema_result, dict) and "text" in schema_result:
     try:
       schema = json.loads(schema_result["text"])
@@ -302,9 +276,7 @@ async def stream_schema_retrieval(
   else:
     schema = schema_result
 
-  # Stream node types
   if isinstance(schema, list):
-    # Schema is a list of tables
     node_tables = [t for t in schema if t.get("category") == "Node Tables"]
     rel_tables = [t for t in schema if t.get("category") == "Relationship Tables"]
 
@@ -334,7 +306,6 @@ async def stream_schema_retrieval(
         },
       }
   else:
-    # Schema in different format
     yield {
       "event": "schema_complete",
       "data": {
@@ -370,17 +341,13 @@ def aggregate_streamed_results(events: list[dict[str, Any]]) -> dict[str, Any]:
         "error": event["data"].get("error", "Unknown error"),
         "tool": tool_name,
       }
-      # Preserve the handler's failure classification so transports can
-      # separate breaker-relevant failures (timeout/backend) from caller
-      # errors (constraint).
+      # Keep the kind: timeout/backend count against the breaker, constraint doesn't.
       kind = event["data"].get("error_kind")
       if isinstance(kind, str):
         failure["error_kind"] = kind
       return failure
 
-  # Aggregate based on event types
   if any(e.get("event") == "query_chunk" for e in events):
-    # Aggregate query chunks
     all_rows = []
     columns = None
 
@@ -402,7 +369,6 @@ def aggregate_streamed_results(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
   elif any(e.get("event") == "schema_nodes" for e in events):
-    # Aggregate schema parts
     schema = {
       "node_tables": [],
       "relationship_tables": [],
@@ -421,7 +387,6 @@ def aggregate_streamed_results(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
   else:
-    # Look for a simple result event
     for event in events:
       if event.get("event") == "result":
         return {
@@ -430,7 +395,6 @@ def aggregate_streamed_results(events: list[dict[str, Any]]) -> dict[str, Any]:
           "result": event["data"].get("result"),
         }
 
-    # No recognizable pattern
     return {
       "success": False,
       "error": "Unable to aggregate results",

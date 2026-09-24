@@ -18,8 +18,6 @@ from robosystems.logger import logger
 
 @dataclass
 class CircuitState:
-  """Circuit breaker state tracking."""
-
   failure_count: int = 0
   last_failure_time: float | None = None
   is_open: bool = False
@@ -27,7 +25,7 @@ class CircuitState:
 
 
 class CircuitBreakerManager:
-  """Circuit breaker for operations to prevent cascade failures."""
+  """Per-(graph, operation) circuit breakers."""
 
   def __init__(
     self,
@@ -35,8 +33,6 @@ class CircuitBreakerManager:
     recovery_timeout: int | None = None,
     half_open_max_calls: int = 3,
   ):
-    """Initialize circuit breaker manager."""
-    # Use TuningConfig for runtime tunability via SSM
     self.failure_threshold = (
       failure_threshold
       if failure_threshold is not None
@@ -49,9 +45,8 @@ class CircuitBreakerManager:
     )
     self.half_open_max_calls = half_open_max_calls
 
-    # Only circuits that have recorded a failure are stored: a closed circuit
-    # with no failures is the default, so caller-supplied operation names
-    # cannot grow this map.
+    # Only circuits with a recorded failure are stored, so caller-supplied
+    # operation names can't grow this map.
     self.circuits: dict[str, CircuitState] = {}
 
     logger.debug(
@@ -60,33 +55,27 @@ class CircuitBreakerManager:
     )
 
   def _get_circuit_key(self, graph_id: str, operation: str) -> str:
-    """Generate circuit key for tracking."""
     return f"{graph_id}:{operation}"
 
   def _should_allow_request(self, circuit_key: str) -> bool:
-    """Check if request should be allowed through circuit."""
     circuit = self.circuits.get(circuit_key)
     current_time = time.time()
 
-    # If circuit is closed, allow request
     if circuit is None or not circuit.is_open:
       return True
 
-    # If circuit is open, check if we should attempt recovery
     if circuit.last_failure_time and (
       current_time - circuit.last_failure_time >= self.recovery_timeout
     ):
-      # Move to half-open state
       circuit.is_open = False
       circuit.failure_count = 0
       logger.info(f"Circuit {circuit_key} moving to half-open state")
       return True
 
-    # Circuit is open and not ready for recovery
     return False
 
   def check_circuit(self, graph_id: str, operation: str) -> bool:
-    """Check circuit breaker before operation."""
+    """Raise 503 with Retry-After while the circuit is open."""
     circuit_key = self._get_circuit_key(graph_id, operation)
 
     if not self._should_allow_request(circuit_key):
@@ -104,7 +93,6 @@ class CircuitBreakerManager:
     return True
 
   def record_success(self, graph_id: str, operation: str) -> None:
-    """Record successful operation."""
     circuit_key = self._get_circuit_key(graph_id, operation)
     circuit = self.circuits.pop(circuit_key, None)
     if circuit is None:
@@ -122,13 +110,8 @@ class CircuitBreakerManager:
   def record_failure(
     self, graph_id: str, operation: str, error: Exception | None = None
   ) -> None:
-    """Record failed operation and potentially open circuit.
-
-    Only infrastructure errors (timeouts, server errors, connection failures)
-    count toward the circuit breaker threshold. Client errors like bad Cypher
-    syntax are the caller's fault and should not trip the breaker.
-    """
-    # Skip client errors — bad queries shouldn't trip the breaker
+    """Record a failure, opening the circuit at the threshold. Client errors
+    (bad Cypher) don't count: only infrastructure failures trip the breaker."""
     if error is not None and isinstance(error, GraphClientError):
       logger.debug(
         f"Circuit {graph_id}:{operation} ignoring client error: {type(error).__name__}"
@@ -141,7 +124,6 @@ class CircuitBreakerManager:
     circuit.failure_count += 1
     circuit.last_failure_time = time.time()
 
-    # Open circuit if threshold exceeded
     if circuit.failure_count >= self.failure_threshold and not circuit.is_open:
       circuit.is_open = True
       logger.warning(
@@ -151,7 +133,6 @@ class CircuitBreakerManager:
     self._update_metrics(graph_id, operation, circuit)
 
   def get_circuit_status(self, graph_id: str, operation: str) -> dict[str, Any]:
-    """Get current circuit status for monitoring."""
     circuit_key = self._get_circuit_key(graph_id, operation)
     circuit = self.circuits.get(circuit_key, CircuitState())
 
@@ -164,7 +145,6 @@ class CircuitBreakerManager:
     }
 
   def get_all_circuit_status(self) -> dict[str, dict[str, Any]]:
-    """Get status of all circuits for monitoring."""
     status = {}
     for circuit_key, circuit in self.circuits.items():
       graph_id, operation = circuit_key.split(":", 1)
@@ -184,9 +164,7 @@ class CircuitBreakerManager:
   def _update_metrics(
     self, graph_id: str, operation: str, circuit: CircuitState
   ) -> None:
-    """Update metrics collector with circuit breaker status."""
     try:
-      # Import here to avoid circular imports
       from .operation_metrics import get_operation_metrics_collector
 
       collector = get_operation_metrics_collector()
@@ -205,5 +183,4 @@ class CircuitBreakerManager:
         ),
       )
     except Exception as e:
-      # Don't let metrics failures break circuit breaker functionality
       logger.warning(f"Failed to update circuit breaker metrics: {e}")

@@ -4,12 +4,8 @@ from typing import Any
 
 
 def get_query_operation_type(graph_id: str) -> str:
-  """Determine the operation type that drives LadybugDB cluster routing.
-
-  User graphs always resolve to `write` so they land on the writer cluster;
-  shared repositories and their subgraphs resolve to `read` for the reader
-  cluster.
-  """
+  """User graphs route to the writer ('write'); shared repositories and their
+  subgraphs to readers ('read')."""
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 
   if is_shared_repository_or_subgraph(graph_id):

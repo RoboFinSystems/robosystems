@@ -1,16 +1,5 @@
-"""Fact grid MCP tool — thin wrapper over the ops-layer ``query_fact_grid``.
-
-Mirrors the REST ``build-fact-grid`` operation (see
-``routers/extensions/roboledger/views.py``). Both surfaces delegate to
-``operations/roboledger/views/fact_query.py`` so the Cypher, LadybugDB
-optimizations, and dedup logic stay in one place.
-
-The tool's job is:
-
-1. Parse MCP arguments (array-friendly, AI-centric input)
-2. Call ``query_fact_grid`` + ``FactGridBuilder`` from the ops layer
-3. Format the response in the flat shape MCP callers expect
-"""
+"""build-fact-grid: MCP argument parsing and response shaping over the same
+``query_fact_grid`` the REST operation uses."""
 
 from __future__ import annotations
 
@@ -168,9 +157,8 @@ For income statement items (revenue, net income), always specify period_type='an
         "message": "Provide periods, period_type, or fiscal_year to scope the query",
       }
 
-    # Shared repos host thousands of filers; an entity-less query there
-    # returns an arbitrary slice of arbitrary companies. Tenant graphs are
-    # already entity-scoped by the graph itself. Mirrors the REST route.
+    # As on REST: an entity-less query on a shared repo returns an arbitrary
+    # slice of thousands of filers. Tenant graphs are entity-scoped already.
     if (
       is_shared_repository_or_subgraph(self.client.graph_id)
       and not entity
@@ -233,8 +221,7 @@ For income statement items (revenue, net income), always specify period_type='an
       fact_data=fact_data, view_config=view_config, source="mcp_tool"
     )
 
-    # Query time dominates; timing only the in-memory build reported ~1ms
-    # regardless of how long the graph took.
+    # start_time predates the query, which dominates the elapsed time.
     elapsed_ms = (time.time() - start_time) * 1000
 
     logger.info(

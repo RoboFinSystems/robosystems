@@ -1,13 +1,9 @@
 """FastAPI authentication dependencies.
 
-Every dependency here accepts either a JWT bearer token or an ``X-API-Key``
-header, with JWT taking precedence. Two variants also read a credential from
-a query parameter, because EventSource (SSE) and MCP connector clients cannot
-send custom headers.
-
-Query-parameter credentials are redacted from logs by the sensitive-params
-list in ``middleware/logging.py`` — log ``request.url.path``, never the full
-URL, or the credential leaks.
+Dependencies accept a JWT bearer or an ``X-API-Key`` header, JWT first; the MCP
+routes also take an OAuth bearer. Only ``get_current_user_sse`` reads a
+credential from the query string (EventSource cannot send headers); log
+``request.url.path``, never the full URL.
 """
 
 from typing import Any
@@ -21,8 +17,6 @@ from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.device_fingerprinting import extract_device_fingerprint
 from ...security.request_context import API_KEY_PREFIX_LENGTH, publish_principal
 from .cache import api_key_cache
-
-# Import JWT helpers from local jwt module to avoid circular imports
 from .jwt import (
   verify_jwt_claims as verify_jwt_claims_from_auth,
 )
@@ -94,12 +88,10 @@ def _create_user_from_cache(user_data: dict) -> User | None:
 
 
 def _db_get_user_by_id(user_id: str) -> User | None:
-  """Look up a user by ID using a short-lived session.
+  """Look up a user in a short-lived session and return it detached.
 
-  Returns a detached User object so no pool connection is held after
-  this function returns.  The scoped ``session`` proxy would keep the
-  connection checked out until the DatabaseSessionMiddleware cleanup at
-  end-of-request — disastrous for long-running endpoints (MCP, SSE).
+  The scoped ``session`` proxy would hold a pool connection until end of
+  request, which long-running endpoints (MCP, SSE) can't afford.
   """
   from ...database import SessionFactory
 
@@ -108,7 +100,6 @@ def _db_get_user_by_id(user_id: str) -> User | None:
     user = User.get_by_id(user_id, sess)
     if not user:
       return None
-    # Detach so the pool connection is returned immediately.
     sess.expunge(user)
     return user
   finally:
@@ -118,11 +109,9 @@ def _db_get_user_by_id(user_id: str) -> User | None:
 def _db_check_graph_access(
   user_id: str, graph_id: str, *, allow_deprovisioned: bool = False
 ) -> bool:
-  """Check graph access using a short-lived session.
+  """Check graph access in a short-lived session (see ``_db_get_user_by_id``).
 
-  Same rationale as ``_db_get_user_by_id`` — avoid holding a pool
-  connection for the entire request duration. ``allow_deprovisioned`` is
-  threaded only from the backup export path (see ``get_effective_role``).
+  ``allow_deprovisioned`` is threaded only from the backup export path.
   """
   from ...database import SessionFactory
   from ...models.core import GraphUser
@@ -201,18 +190,11 @@ def _stash_api_key_identity(
   user: "User | None" = None,
   auth_method: str = "api_key",
 ) -> None:
-  """Record which API key authenticated this request on request.state.
+  """Record which API key authenticated this request.
 
-  The first 8 characters are the key's stored identification prefix
-  (``UserAPIKey.prefix``), so downstream telemetry can attribute activity
-  to a specific key without access to the raw header.
-
-  When the resolved ``user`` is passed, the principal is published through
-  `security.request_context.publish_principal`: onto ``request.state``
-  (``user_id`` / ``auth_user_id`` / ``auth_method`` / ``api_key_prefix``)
-  for the access log and the rate limiter, and into the request context so
-  the operation audit and security events below the route can name the
-  credential that acted.
+  Without a ``user`` only the key's stored prefix is set on ``request.state``;
+  with one, the full principal is published for the access log, rate limiter
+  and audit trail.
   """
   if user is None:
     request.state.api_key_prefix = api_key[:API_KEY_PREFIX_LENGTH]
@@ -227,12 +209,10 @@ def _publish_jwt_identity(request: Request, user_id: str) -> None:
 
 
 def _publish_graph_authorization(request: Request, graph_id: str) -> None:
-  """Record that the caller was authorized on ``graph_id`` for this request.
+  """Record that the caller was authorized on ``graph_id``.
 
-  Read by the subscription-aware rate limiter: a graph's own budget may only
-  be charged by a caller authorized on that graph, and this attribute is the
-  cheap, in-request evidence. It is set after the access check passes and
-  never before.
+  The rate limiter charges a graph's budget only on this evidence, so set it
+  after the access check passes, never before.
   """
   request.state.auth_graph_id = graph_id
 
@@ -240,12 +220,10 @@ def _publish_graph_authorization(request: Request, graph_id: str) -> None:
 def verify_jwt_claims(
   token: str, device_fingerprint: dict[str, Any] | None = None
 ) -> tuple[str, int] | None:
-  """Verify a JWT token's claims and return (user_id, session_version) if valid.
+  """Return (user_id, session_version) for a valid JWT, else None.
 
-  See ``robosystems.middleware.auth.jwt.verify_jwt_claims`` for full semantics.
-  Notably, this does NOT compare session_version against the User row; the
-  caller must do that (the dependency wrappers in this module use
-  ``_get_user_for_verified_jwt`` which handles it via the user-data cache).
+  Does NOT compare session_version against the User row; callers must (see
+  ``_get_user_for_verified_jwt``).
   """
   return verify_jwt_claims_from_auth(token, device_fingerprint)
 
@@ -407,10 +385,9 @@ async def _resolve_user_with_graph(
   `require_graph_write_role`, since a viewer passes this check.
 
   Raises 401 when authentication fails and 403 when the graph is not the
-  caller's. ``allow_deprovisioned`` is set only by the backup export routes so
-  a departing customer's org OWNER/ADMIN can still reach a torn-down graph's
-  backups during the grace period; it bypasses the cached access decision and
-  is not persisted back into the cache, so it can never leak to another route.
+  caller's. ``allow_deprovisioned`` (backup export routes only) bypasses the
+  cached access decision and is never written back, so it can't leak to
+  another route.
   """
   client_ip = request.client.host if request.client else None
   user_agent = request.headers.get("user-agent")
@@ -432,9 +409,6 @@ async def _resolve_user_with_graph(
       user = _get_user_for_verified_jwt(user_id, token_session_version)
 
       if user and bool(user.is_active):
-        # The deprovisioned-allowed path computes fresh: a cached decision was
-        # made under the default (gone → denied), and the result must not be
-        # written back or a later default-path request would see it.
         has_access = (
           None
           if allow_deprovisioned
@@ -449,8 +423,7 @@ async def _resolve_user_with_graph(
           from ..graph.utils import MultiTenantUtils
 
           if is_shared_repository_or_subgraph(graph_id):
-            # Resolves a subgraph to its parent repository before checking.
-            # Shared repositories are never deprovisioned, so the flag is moot.
+            # Shared repositories are never deprovisioned; the flag is moot.
             has_access = MultiTenantUtils.validate_repository_access(
               graph_id,
               user_id,
@@ -549,13 +522,9 @@ async def _resolve_user_with_graph(
 def graph_access_dependency(allow_deprovisioned: bool = False):
   """Build the graph-membership dependency.
 
-  Named to avoid colliding with ``billing.enforcement.require_graph_access``
-  (a different check with a different signature). The default instance
-  (``get_current_user_with_graph``) denies a torn-down graph.
-  ``allow_deprovisioned=True`` is used by exactly the backup-list and
-  backup-download routes so a departing org's OWNER/ADMIN can export during the
-  grace period; it must not be applied to any other route (see
-  ``GraphUser.get_effective_role``).
+  ``allow_deprovisioned=True`` is for the backup-list and backup-download
+  routes only, so a departing org's OWNER/ADMIN can export during the grace
+  period.
   """
 
   async def dependency(
@@ -570,14 +539,9 @@ def graph_access_dependency(allow_deprovisioned: bool = False):
   return dependency
 
 
-# Default graph-membership dependency: denies deprovisioned graphs. Every
-# existing `Depends(get_current_user_with_graph)` keeps its behavior.
 get_current_user_with_graph = graph_access_dependency()
 
-# The one sanctioned deprovisioned-tolerant variant, used by exactly the
-# backup-list and backup-download routes so a departing org's OWNER/ADMIN can
-# export during the grace period. A named singleton (not an inline
-# `graph_access_dependency(True)`) so it is a stable, overridable dependency.
+# A named singleton so it is a stable, overridable dependency.
 get_current_user_with_deprovisioned_graph = graph_access_dependency(
   allow_deprovisioned=True
 )
@@ -603,10 +567,9 @@ def _mcp_challenge_headers(
   error: str | None = None,
   description: str | None = None,
 ) -> dict[str, str]:
-  """``WWW-Authenticate`` for an MCP route naming its resource metadata —
-  how an OAuth client discovers the authorization server. Only emitted
-  while the OAuth surface is on; off, the challenge is the plain header
-  the API-key carriages have always sent."""
+  """``WWW-Authenticate`` naming the route's resource metadata, which is how
+  an OAuth client discovers the authorization server. Plain challenge when
+  the OAuth surface is off."""
   from robosystems.config import env
 
   if not env.MCP_OAUTH_ENABLED:
@@ -633,13 +596,9 @@ def _oauth_principal_graph_access(
   route_graph_id: str | None,
   product: str | None = None,
 ) -> None:
-  """Live access check for an OAuth principal on ``graph_id`` — the same
-  evidence the JWT branch gathers (per-user graph-access cache, capped at
-  ten minutes, so a revoked membership stops the token quickly). Raises
-  403 ``insufficient_scope`` on denial: the token is valid, the user is
-  not (or no longer) a member. The challenge names the route's resource
-  (``route_graph_id`` is the URL's graph, ``None`` on the agnostic routes),
-  not the grant's graph.
+  """Live membership check for an OAuth principal, so a revoked membership
+  stops a still-valid token. Raises 403 ``insufficient_scope``; the challenge
+  names the route's resource (``route_graph_id``), not the grant's graph.
   """
   client_ip = request.client.host if request.client else None
   endpoint = str(request.url.path)
@@ -684,14 +643,11 @@ def _oauth_principal_graph_access(
 def _resolve_oauth_principal(
   request: Request, token: str, graph_id: str | None, product: str | None = None
 ) -> OAuthPrincipal:
-  """Validate an OAuth bearer for an MCP route and bind it to the route.
+  """Validate an OAuth bearer and bind it to this MCP route.
 
-  ``graph_id`` is the URL's graph on the per-graph route, ``None`` on the
-  graph-agnostic routes; ``product`` names the product route
-  (``/v1/mcp/roboledger``). The token's audience (the grant's canonical
-  resource) must be exactly this route's resource; the grant's graph must
-  be the URL's graph where the URL names one. Invalid, expired and revoked
-  tokens answer 401 ``invalid_token`` so clients refresh.
+  ``graph_id`` is ``None`` on the graph-agnostic routes. The token's audience
+  must be exactly this route's resource, and its graph the URL's graph where
+  the URL names one. Failures answer 401 ``invalid_token`` so clients refresh.
   """
   from robosystems.operations.oauth_server.resources import route_target
 
@@ -752,22 +708,11 @@ async def get_current_user_with_graph_or_oauth(
   graph_id: str,
   api_key: str = Security(API_KEY_HEADER),
 ) -> User:
-  """Graph authentication for the per-graph MCP route: bearer or header.
+  """Graph authentication for the per-graph MCP route.
 
-  ``Authorization: Bearer <opaque OAuth token>`` (when the OAuth surface is
-  on) resolves through the grant bound to this exact route — the URL fixes
-  the graph, and the token's audience must name it. Otherwise header and
-  JWT authentication behave exactly like ``get_current_user_with_graph``.
-
-  Nothing is read from the query string. The ``?token=`` door that once
-  carried a graph-scoped key for connector clients that could not send
-  headers was retired when OAuth covered those clients; a URL that still
-  carries one is treated as unauthenticated and gets the discovery
-  challenge, which is exactly what moves such a client onto OAuth.
-
-  A missing credential answers 401 with a ``WWW-Authenticate`` challenge
-  that names the route's protected-resource metadata; that header is what
-  lets an OAuth client find the authorization server.
+  An OAuth bearer (when enabled) must be bound to this route; otherwise this is
+  ``get_current_user_with_graph``. Nothing is read from the query string. A 401
+  carries the OAuth discovery challenge.
   """
   from robosystems.config import env
 
@@ -790,12 +735,9 @@ async def get_oauth_mcp_principal(
 ) -> OAuthPrincipal:
   """The graph-agnostic MCP route's only credential: an OAuth bearer.
 
-  No header key, no URL token, no JWT — the route's contract is that the
-  credential carries the grant, and only an OAuth token has one. Every
-  other carriage answers 401 with the discovery challenge (not 403: there
-  is no valid non-OAuth credential here, so the client should start the
-  flow). The returned principal names the grant's graph, which the
-  transport uses as the resolved ``graph_id`` for every isolation key.
+  Only an OAuth token carries the grant, so any other credential answers 401
+  with the discovery challenge. ``token`` is read only to audit it. The
+  principal's graph becomes the transport's ``graph_id``.
   """
   return _require_agnostic_oauth_principal(request, api_key, token, product=None)
 
@@ -805,9 +747,7 @@ async def get_oauth_roboledger_mcp_principal(
   api_key: str = Security(API_KEY_HEADER),
   token: str | None = Query(None, include_in_schema=False),
 ) -> OAuthPrincipal:
-  """The RoboLedger MCP route's credential: an OAuth bearer bound to
-  ``/v1/mcp/roboledger``. Same contract as the graph-agnostic route; the
-  consent decision already restricted the grant to a RoboLedger graph."""
+  """As ``get_oauth_mcp_principal``, bound to ``/v1/mcp/roboledger``."""
   from robosystems.operations.oauth_server.resources import PRODUCT_ROBOLEDGER
 
   return _require_agnostic_oauth_principal(
@@ -855,25 +795,12 @@ def _require_agnostic_oauth_principal(
 
 
 def require_graph_write_role(user_id: str, graph_id: str) -> None:
-  """Assert the user may write to the graph right now.
+  """Assert the user may write to the graph right now; raises 403 otherwise.
 
-  Two checks, one gate:
-
-  1. Role — ``viewer`` is read-only; bare graph *membership* (which
-     ``get_current_user_with_graph`` proves) is not sufficient to mutate a
-     graph. Raises 403 for a read-only role.
-  2. Lifecycle — the graph must be writable: not suspended, deleted or
-     deprovisioned, and (billing on) not in a canceled grace period or a tier
-     upgrade. This is ``require_graph_access(require_write=True)``.
-
-  It is the single write gate the command surfaces share — the extensions
-  registrar, content-ops, the lifecycle ops, connections and write-capable
-  operators call it before dispatching, and the MCP surface enforces the same
-  pair via ``validate_mcp_access(..., "write")`` — so a state that blocks
-  writes on one surface blocks them on all of them.
-
-  Opens a short-lived platform session — ``GraphUser`` lives in the platform
-  DB, not the per-graph OLTP DB.
+  Checks role (membership alone is not enough; ``viewer`` is read-only) and
+  lifecycle (``require_graph_access(require_write=True)``). The shared write
+  gate for every command surface, so a state that blocks writes on one blocks
+  them on all.
   """
   from robosystems.database import SessionFactory
   from robosystems.middleware.billing.enforcement import require_graph_access
@@ -882,10 +809,7 @@ def require_graph_write_role(user_id: str, graph_id: str) -> None:
   session = SessionFactory()
   try:
     if not GraphUser.user_has_write_access(user_id, graph_id, session):
-      # Audit every under-privileged write attempt from the one shared gate:
-      # this covers MCP, the REST registrar, content-ops, and the hand-written
-      # lifecycle ops, and emits the `AuthorizationDenied` detective-control
-      # metric. (No request context here — this is a plain helper, not a dep.)
+      # Emits the `AuthorizationDenied` detective-control metric.
       from robosystems.security import SecurityAuditLogger
 
       SecurityAuditLogger.log_authorization_denied(
@@ -903,15 +827,7 @@ def require_graph_write_role(user_id: str, graph_id: str) -> None:
 def user_is_graph_admin(user_id: str, graph_id: str) -> bool:
   """Whether the user holds the admin role on the graph.
 
-  A predicate, not a gate — unlike ``require_graph_write_role`` this returns a
-  bool rather than raising, because callers use it to *widen* an authorization
-  rule rather than to deny. The cross-graph share surface is the first such
-  caller: a report copied in from another graph carries the *sender's* user id
-  in ``created_by``, so the receiving graph's owner rule can never match, and a
-  graph admin is who gets to remove it.
-
-  Opens a short-lived platform session — ``GraphUser`` lives in the platform DB,
-  not the per-graph OLTP DB.
+  A predicate, not a gate: callers use it to widen an authorization rule.
   """
   from robosystems.database import SessionFactory
   from robosystems.models.core import GraphUser
@@ -963,10 +879,8 @@ async def get_current_user_sse(
   authorization: str | None = Header(None),
   token: str | None = Query(None, description="JWT token for SSE authentication"),
 ) -> User:
-  """Authenticate an SSE caller, accepting the JWT in a `token` query param.
-
-  The EventSource API cannot send custom headers, so the browser passes the
-  token in the URL. `middleware/logging.py` redacts it from logged URLs.
+  """Authenticate an SSE caller, also accepting the JWT in a `token` query
+  param (EventSource cannot send headers; `middleware/logging.py` redacts it).
   """
   client_ip = request.client.host if request.client else None
   user_agent = request.headers.get("user-agent")

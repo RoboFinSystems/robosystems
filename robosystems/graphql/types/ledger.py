@@ -1,19 +1,6 @@
-"""Strawberry types for ledger (roboledger) extensions queries.
-
-Most types wrap an existing Pydantic response model from
-`robosystems.models.api.extensions.*` using
-`strawberry.experimental.pydantic.type(model=..., all_fields=True)` so the
-GraphQL schema is derived from the REST surface. When a Pydantic field is
-added to a response model, the GraphQL field appears automatically.
-
-**Recursive types** (currently just `AccountTreeNode`) are hand-written
-with a `from_pydantic` classmethod because Strawberry's pydantic decorator
-cannot resolve self-references. If a future recursive response model
-appears, follow the same pattern.
-
-Strawberry's default `auto_camel_case=True` converts Python snake_case
-fields to camelCase on the wire — `legal_name` → `legalName` with no
-manual reshape.
+"""Strawberry types for roboledger queries, derived from the REST Pydantic
+models. Recursive types (`AccountTreeNode`) are hand-written because the
+pydantic decorator cannot resolve self-references.
 """
 
 from __future__ import annotations
@@ -26,9 +13,8 @@ from strawberry.scalars import JSON
 
 from robosystems.graphql.types._pydantic import pydantic_type
 
-# Register PaginationInfo first — many list-returning types reference it via
-# the Pydantic decorator, which fails if the Strawberry wrapper isn't yet
-# known to the registry.
+# Must import first: the pydantic decorator fails on types referencing an
+# unregistered PaginationInfo.
 from robosystems.graphql.types.common import PaginationInfo  # noqa: F401
 from robosystems.models.api.event_block import (
   EventBlockEnvelope as PydanticEventBlockEnvelope,
@@ -640,9 +626,7 @@ class PeriodCloseItem:
 class CloseReceipt:
   """What a close did, stamped on the period it locked."""
 
-  # The three dict-typed fields need the JSON scalar — Strawberry's pydantic
-  # derivation can't map dict[str, ...] to a GraphQL type (same reason as
-  # Report.rule_summary below).
+  # dict-typed fields need the JSON scalar; the pydantic derivation can't map them.
   rule_summary: strawberry.scalars.JSON | None
   stamped_statement_sets: strawberry.scalars.JSON
   statement_rule_summary: strawberry.scalars.JSON | None
@@ -688,9 +672,7 @@ class StructureSummary:
 class Report:
   """Report definition summary — structures + entity + sharing provenance."""
 
-  # rule_summary is dict[str, int] in Pydantic — must be declared as JSON
-  # here because Strawberry's pydantic derivation can't map dict[str, int]
-  # to a GraphQL type automatically.
+  # dict[str, int] needs the JSON scalar.
   rule_summary: strawberry.scalars.JSON | None
 
 

@@ -1,27 +1,8 @@
-"""Common types and enums for the graph middleware.
+"""Graph categories, types and ID formats.
 
-This module defines the type system for distinguishing between different categories
-and types of graphs in the system, providing clear separation between user-created
-graphs and shared repository graphs.
-
-Graph ID Formats:
-    - Parent graphs: kg[a-f0-9]{16,} (e.g., kg1234567890abcdef)
-    - Subgraph IDs: {parent_id}_{subgraph_name} (e.g., kg1234567890abcdef_dev)
-    - Shared repositories: Fixed names (sec, industry, economic)
-
-Subgraph Naming Rules:
-    - Alphanumeric characters only: [a-zA-Z0-9]
-    - Length: 1-20 characters
-    - No special characters, hyphens, or underscores
-    - Case-sensitive
-
-Examples:
-    >>> is_subgraph_id("kg1234567890abcdef_dev")
-    True
-    >>> parse_graph_id("kg1234567890abcdef_staging")
-    ("kg1234567890abcdef", "staging")
-    >>> construct_subgraph_id("kg1234567890abcdef", "prod")
-    "kg1234567890abcdef_prod"
+Graph IDs: `kg[a-f0-9]{16,}` for user graphs, a registry name (`sec`, …) for
+shared repositories, and `{parent}_{name}` for subgraphs, where the name is
+1-20 ASCII alphanumerics.
 """
 
 import re
@@ -50,48 +31,46 @@ SHARED_REPO_DELETE_ERROR_MESSAGE = (
 class GraphCategory(str, Enum):
   """High-level graph categories."""
 
-  USER = "user"  # User-created graphs (customer data)
-  SHARED = "shared"  # Shared repository graphs (public/reference data)
-  SYSTEM = "system"  # System internal graphs (metadata, config)
+  USER = "user"
+  SHARED = "shared"
+  SYSTEM = "system"
 
 
 class UserGraphType(str, Enum):
-  """Types of user-created graphs."""
-
-  ENTITY = "entity"  # Business entity graphs using RoboSystems schema
-  CUSTOM = "custom"  # Custom schema graphs
+  ENTITY = "entity"  # RoboSystems schema
+  CUSTOM = "custom"
 
 
 class AccessPattern(str, Enum):
   """Graph database access patterns (authorization level)."""
 
-  READ_WRITE = "read_write"  # Full read/write access (user graphs)
-  READ_ONLY = "read_only"  # Read-only access (shared repositories)
-  RESTRICTED = "restricted"  # Restricted access (system graphs)
+  READ_WRITE = "read_write"  # user graphs
+  READ_ONLY = "read_only"  # shared repositories
+  RESTRICTED = "restricted"  # system graphs
 
 
 class ConnectionPattern(str, Enum):
-  """Database connection patterns (how to connect to the database)."""
+  """How to connect to the database."""
 
-  DIRECT_FILE = "direct_file"  # Direct file access (local development only)
-  API_WRITER = "api_writer"  # API access to writer node
-  API_READER = "api_reader"  # API access to reader node (via ALB)
-  API_AUTO = "api_auto"  # API access with automatic routing
+  DIRECT_FILE = "direct_file"  # local development only
+  API_WRITER = "api_writer"
+  API_READER = "api_reader"  # via ALB
+  API_AUTO = "api_auto"
 
 
 class NodeType(str, Enum):
   """Node types in the cluster architecture."""
 
-  WRITER = "writer"  # Writer for all graphs (entity and shared repositories)
-  SHARED_MASTER = "shared_master"  # Shared repository master writer
-  SHARED_REPLICA = "shared_replica"  # Shared repository read-only replica
+  WRITER = "writer"
+  SHARED_MASTER = "shared_master"
+  SHARED_REPLICA = "shared_replica"
 
 
 class RepositoryType(str, Enum):
-  """Types of repositories (infrastructure-level classification)."""
+  """Infrastructure-level classification."""
 
-  ENTITY = "entity"  # User/entity-specific graphs
-  SHARED = "shared"  # Shared repositories (SEC, industry, etc.)
+  ENTITY = "entity"
+  SHARED = "shared"
 
 
 class GraphIdentity(BaseModel):
@@ -141,7 +120,7 @@ class GraphIdentity(BaseModel):
         "cluster_type": "shared_writer",
         "access_mode": access.value,
         "cache_enabled": True,
-        "ttl_seconds": 3600,  # Cache for 1 hour
+        "ttl_seconds": 3600,
         "graph_tier": GraphTier.LADYBUG_STANDARD,
       }
     elif self.is_user_graph:
@@ -166,28 +145,24 @@ class GraphTypeRegistry:
 
   @classmethod
   def _get_shared_repo_ids(cls) -> list[str]:
-    """Get shared repository IDs from the registry."""
     from ...config.shared_repositories import get_all_repository_ids
 
     return get_all_repository_ids()
 
   @classmethod
   def get_graph_id_pattern(cls) -> str:
-    """Build graph ID validation pattern for API endpoints.
+    """`kg` + lowercase hex, or a shared repository name.
 
-    Format: kg + 20 hex characters (lowercase hex from ULID generation)
-    Special cases: Shared repository names from registry
-    Regex accepts 16+ chars to remain compatible with older graph IDs.
+    New IDs carry 20 hex characters; 16+ is accepted for older graphs.
     """
     repo_names = "|".join(cls._get_shared_repo_ids())
     return f"^(kg[a-f0-9]{{16,}}|{repo_names})$"
 
-  # Patterns for identifying graph types
   USER_GRAPH_PATTERNS = [
     (
       re.compile(r"^kg[a-f0-9]{16,}$"),
-      None,  # Type determined by metadata, not ID pattern
-    ),  # All user graphs use kg prefix with ULID hex
+      None,  # Type comes from metadata, not the ID.
+    ),
   ]
 
   @classmethod
@@ -197,21 +172,18 @@ class GraphTypeRegistry:
     session: Any | None = None,
     graph_tier: GraphTier | None = None,
   ) -> GraphIdentity:
-    """Identify a graph from its ID using database lookup."""
-    # The registry is authoritative for what is shared. Shared-repo subgraph
-    # rows are created with is_repository=False (subgraph_service), so trusting
-    # the row alone classified sec_historical as a READ_WRITE user graph.
+    """Identify a graph from its database row, else from its ID."""
+    # The registry is authoritative for what is shared: shared-repo subgraph
+    # rows carry is_repository=False.
     from ...config.shared_repositories import (
       is_shared_repository_or_subgraph as _is_shared_repo_or_sub,
     )
 
-    # Try database lookup first if session provided
     if session:
       from ...models.core import Graph
 
       graph = Graph.get_by_id(graph_id, session)
       if graph:
-        # Found in database - use actual metadata
         if graph.is_repository or _is_shared_repo_or_sub(graph_id):
           try:
             tier = (
@@ -235,7 +207,6 @@ class GraphTypeRegistry:
             access_pattern=AccessPattern.READ_ONLY,
           )
         else:
-          # User graph
           try:
             tier = (
               GraphTier(graph.graph_tier)
@@ -258,8 +229,6 @@ class GraphTypeRegistry:
             access_pattern=AccessPattern.READ_WRITE,
           )
 
-    # Fallback: pattern-based detection (for cases without session)
-    # Check if it's a known shared repository
     if _is_shared_repo_or_sub(graph_id):
       return GraphIdentity(
         graph_id=graph_id,
@@ -278,7 +247,6 @@ class GraphTypeRegistry:
         access_pattern=AccessPattern.RESTRICTED,
       )
 
-    # Default to user graph
     return GraphIdentity(
       graph_id=graph_id,
       category=GraphCategory.USER,
@@ -293,48 +261,35 @@ class GraphTypeRegistry:
     if category == GraphCategory.SHARED:
       return graph_id in cls._get_shared_repo_ids()
     elif category == GraphCategory.USER:
-      # User graphs must follow naming conventions
       return bool(re.match(r"^[a-zA-Z0-9_-]+$", graph_id)) and len(graph_id) <= 64
     else:
       return graph_id in ["system", "metadata", "config"]
 
   @classmethod
   def list_shared_repositories(cls) -> list[str]:
-    """Get list of all available shared repositories."""
     return cls._get_shared_repo_ids()
 
 
 def _build_graph_id_pattern() -> str:
-  """Build graph ID pattern from registry (called lazily on first access)."""
   return GraphTypeRegistry.get_graph_id_pattern()
 
 
 def _build_graph_or_subgraph_id_pattern() -> str:
-  """Build graph-or-subgraph ID pattern from registry (called lazily on first access).
+  """User graphs, shared repos, either with a subgraph suffix, or `library`.
 
-  Supports:
-  - User graphs: kg[hex]{16,}
-  - User subgraphs: kg[hex]{16,}_[alnum]{1,20}
-  - Shared repos: sec, industry, etc.
-  - Shared repo subgraphs: sec_historical, etc.
-  - Taxonomy library sentinel: `library` — routes to the shared taxonomy
-    library. Read-only, accessible to any authenticated user. Currently
-    backed by the extensions DB `public` schema; schema name is an
-    implementation detail, not part of the API identity.
+  `library` is the read-only shared taxonomy library, open to any
+  authenticated user.
   """
   repo_names = GraphTypeRegistry._get_shared_repo_ids()
-  # Build pattern for shared repos with optional subgraph suffix
   repo_patterns = "|".join(rf"{name}(?:_[a-zA-Z0-9]{{1,20}})?" for name in repo_names)
   return r"^(kg[a-f0-9]{16,}(?:_[a-zA-Z0-9]{1,20})?|" + repo_patterns + r"|library)$"
 
 
-# Lazy pattern cache — patterns are computed on first access to avoid circular
-# imports (the registry triggers adapter imports that circle back here).
+# Computed on first access: the registry's adapter imports circle back here.
 _lazy_patterns: dict[str, str] = {}
 
 
 def __getattr__(name: str) -> str:
-  """PEP 562 module-level __getattr__ for lazy pattern computation."""
   if name == "GRAPH_ID_PATTERN":
     if "GRAPH_ID_PATTERN" not in _lazy_patterns:
       _lazy_patterns["GRAPH_ID_PATTERN"] = _build_graph_id_pattern()
@@ -348,29 +303,12 @@ def __getattr__(name: str) -> str:
   raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-# Subgraph name pattern (for subgraph creation/management endpoints)
-# Just the name part (e.g., "dev", "staging", "prod1"), not the full ID
+# The name part only ("dev"), not the full ID.
 SUBGRAPH_NAME_PATTERN = r"^[a-zA-Z0-9]{1,20}$"
 
 
 def is_subgraph_id(graph_id: str) -> bool:
-  """Check if graph_id is a subgraph ID.
-
-  Subgraph IDs have a parent_subgraph format where the parent is either
-  a user graph (kg[hex]{16,}) or a shared repository ID.
-
-  Examples:
-      >>> is_subgraph_id("kg0123456789abcdef_dev")
-      True
-      >>> is_subgraph_id("sec_historical")
-      True
-      >>> is_subgraph_id("kg0123456789abcdef")
-      False
-      >>> is_subgraph_id("sec")
-      False
-      >>> is_subgraph_id("_")
-      False
-  """
+  """`{parent}_{name}` where the parent is a user graph or a shared repository."""
   if not graph_id or graph_id in GraphTypeRegistry._get_shared_repo_ids():
     return False
   if "_" not in graph_id:
@@ -379,15 +317,12 @@ def is_subgraph_id(graph_id: str) -> bool:
   parent_part = parts[0]
   subgraph_part = parts[1] if len(parts) > 1 else ""
 
-  # Subgraph name must be non-empty and match pattern
   if not subgraph_part or len(subgraph_part) > 20:
     return False
   if not all(c.isalnum() for c in subgraph_part):
     return False
 
-  # Parent must match the kg[hex]{16,} pattern OR be a shared repo
   if parent_part.startswith("kg") and len(parent_part) >= 18:
-    # Validate parent is all lowercase hex after "kg"
     hex_part = parent_part[2:]
     if all(c in "0123456789abcdef" for c in hex_part):
       return True
@@ -399,18 +334,7 @@ def is_subgraph_id(graph_id: str) -> bool:
 
 
 def parse_graph_id(graph_id: str) -> tuple[str, str | None]:
-  """Parse graph_id into parent graph ID and optional subgraph name.
-
-  Examples:
-      >>> parse_graph_id("kg0123456789abcdef_dev")
-      ("kg0123456789abcdef", "dev")
-      >>> parse_graph_id("kg0123456789abcdef")
-      ("kg0123456789abcdef", None)
-      >>> parse_graph_id("sec")
-      ("sec", None)
-      >>> parse_graph_id("sec_historical")
-      ("sec", "historical")
-  """
+  """Split into (parent graph ID, subgraph name or None)."""
   if is_subgraph_id(graph_id):
     parts = graph_id.split("_", 1)
     return parts[0], parts[1]
@@ -418,12 +342,6 @@ def parse_graph_id(graph_id: str) -> tuple[str, str | None]:
 
 
 def construct_subgraph_id(parent_graph_id: str, subgraph_name: str) -> str:
-  """Construct a full subgraph ID from parent graph ID and subgraph name.
-
-  Examples:
-      >>> construct_subgraph_id("kg0123456789abcdef", "dev")
-      "kg0123456789abcdef_dev"
-  """
   if not parent_graph_id:
     raise ValueError("parent_graph_id cannot be empty")
   if not subgraph_name:

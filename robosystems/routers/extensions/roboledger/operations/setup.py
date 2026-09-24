@@ -1,10 +1,5 @@
-"""Ledger setup — bringing a graph's books into existence.
-
-`initialize` provisions the tenant schema; `initialize-chart-of-accounts`
-seeds the CoA from a taxonomy; `update-entity` and `change-reporting-style`
-edit the reporting entity itself. Everything here is a one-time or rare
-write — the operations a graph runs once, before it has any books.
-"""
+"""Ledger setup: provision the tenant schema, seed the chart of accounts, and
+edit the reporting entity. One-time or rare writes."""
 
 from __future__ import annotations
 
@@ -166,9 +161,8 @@ def _require_entity_updates(body: UpdateEntityRequest) -> None:
     raise HTTPException(status_code=400, detail="No fields provided for update.")
 
 
-# `name`, `legal_name`, `ticker`, `cik` and the rest of the updatable fields are
-# columns of the materialized Entity node, so an edit that never marks the graph
-# leaves LadybugDB answering with the old company details.
+# The updatable fields are columns of the materialized Entity node, so an edit
+# must mark the graph stale.
 update_entity_op = _registrar.register(
   OperationSpec(
     name="update-entity",
@@ -182,10 +176,8 @@ update_entity_op = _registrar.register(
     request_model=UpdateEntityRequest,
     result_type=LedgerEntityResponse,
     business_event_type="ledger_update_entity",
-    # Runs on both surfaces before any session is opened, and preserves the
-    # 400 this operation has always returned for an empty body. Mapping
-    # ValueError to 400 instead would swallow genuine validation failures
-    # from the command, which stay 422.
+    # Keeps the empty-body 400 without mapping ValueError to 400, which would
+    # swallow the command's genuine 422 validation failures.
     pre_validate=_require_entity_updates,
     error_map={ParentEntityNotFoundError: 404},
     mark_stale_reason="entity_updated",

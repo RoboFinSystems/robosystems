@@ -1,11 +1,10 @@
 """MFA second-factor handshake and status endpoints.
 
-Login (password verified, passkey enrolled) returns ``mfa_required`` with a
-short-lived purpose-scoped token; this router redeems it. The token is
-decoded directly (never accepted as a bearer), its ``jti`` carries a retry
-budget and single-use state in Valkey, and every verification failure feeds
-the same progressive-delay machinery as password failures — recovery codes
-are brute-forceable, assertions are not, both get the same accounting.
+Login with a passkey enrolled returns ``mfa_required`` plus a short-lived
+purpose-scoped token that this router redeems. The token is never accepted as
+a bearer; its ``jti`` carries a retry budget and single-use state in Valkey,
+and every failure feeds the same progressive-delay accounting as password
+failures.
 """
 
 import json
@@ -62,10 +61,8 @@ _ATTEMPTS_KEY_PREFIX = "mfa:attempts:"
 def _mfa_token_burned(jti: str) -> bool:
   """Whether this token already minted a session or exhausted its attempts.
 
-  A cheap read-only pre-check; the authoritative gates are
-  ``_register_mfa_attempt`` (budget) and ``_claim_mfa_token`` (single use),
-  both of which are atomic. Fails closed: an unreachable store reads as
-  burned.
+  A cheap pre-check; the atomic gates are ``_register_mfa_attempt`` and
+  ``_claim_mfa_token``. Fails closed: an unreachable store reads as burned.
   """
   try:
     client = create_redis_client(ValkeyDatabase.AUTH)
@@ -81,9 +78,7 @@ def _mfa_token_burned(jti: str) -> bool:
 def _claim_mfa_token(jti: str) -> bool:
   """Atomically claim this token's one session mint (SET NX).
 
-  Called after factor verification and before the session is minted, so
-  concurrent redemptions of the same token race on the claim, not on the
-  mint. Fails closed: if the store cannot confirm the claim, no session.
+  Concurrent redemptions race on the claim, not on the mint. Fails closed.
   """
   try:
     client = create_redis_client(ValkeyDatabase.AUTH)
@@ -98,9 +93,8 @@ def _claim_mfa_token(jti: str) -> bool:
 def _register_mfa_attempt(jti: str) -> bool:
   """Count a verification attempt up front; False once the budget is spent.
 
-  Increment-then-check, so concurrent requests cannot all observe a
-  below-budget counter. Fails closed: an unreachable store refuses the
-  attempt.
+  Increment-then-check so concurrent requests can't all see a below-budget
+  counter. Fails closed.
   """
   try:
     client = create_redis_client(ValkeyDatabase.AUTH)
@@ -126,9 +120,8 @@ def _resolve_mfa_principal(
 ) -> tuple[User, str]:
   """Decode an MFA token and resolve its live user, or raise a generic 401.
 
-  Mirrors the SSO completion path's re-checks: the user must still exist,
-  still be active, and still be on the session_version the token was minted
-  against (a password change mid-handshake kills the flow).
+  The user must still exist, be active, and be on the token's session_version
+  (a password change mid-handshake kills the flow).
   """
   payload = decode_mfa_token(mfa_token, expected_purpose)
   if payload is None:
@@ -324,8 +317,7 @@ async def verify_mfa(
     )
 
   if not _claim_mfa_token(jti):
-    # Someone else redeemed this token between our factor verification and
-    # now — one token, one session, whoever claims first.
+    # Redeemed concurrently since our verification: one token, one session.
     raise _invalid_mfa_token()
   device_fingerprint = extract_device_fingerprint(fastapi_request)
   jwt_token = create_jwt_token(str(user.id), device_fingerprint, session=session)

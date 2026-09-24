@@ -1,15 +1,11 @@
-"""
-Shared constants for MCP tools.
-"""
+"""Guidance text shared across MCP tool descriptions."""
 
-# Query pattern guidance shared across multiple tools
 QUERY_PATTERN_GUIDANCE = """**⚠️ QUERY PATTERN NOTE:**
 When joining multiple relationships from the same node, use comma-separated patterns
 in a SINGLE MATCH clause (not multiple MATCH clauses):
 - ✅ GOOD: `MATCH (f:Fact)-[:R1]->(a), (f)-[:R2]->(b)`
 - ❌ BAD: `MATCH (f:Fact)-[:R1]->(a) MATCH (f)-[:R2]->(b)` (may timeout)"""
 
-# Period type documentation shared across multiple tools
 PERIOD_TYPE_GUIDANCE = """**📅 PERIOD.period_type VALUES:**
 Period nodes classify time context into three types:
 - `instant` - Point-in-time (balance sheet dates)
@@ -24,10 +20,6 @@ Period nodes classify time context into three types:
 - `other` - Non-standard durations
 Note: Element.period_type indicates the expected period type for that metric - different from Period.period_type!"""
 
-# Ledger lifecycle / status filtering — shared across tools that may touch the
-# tenant roboledger ledger spine (Event / Transaction / Entry / LineItem). The
-# graph mirrors the FULL ledger including cancelled/replaced rows; readers must
-# filter to live rows or voided/reversed amounts inflate counts and sums.
 LEDGER_STATUS_GUIDANCE = """**⚠️ LEDGER STATUS FILTERING (Event / Entry / Transaction / LineItem):**
 The graph is a faithful mirror of the ledger and KEEPS cancelled and replaced rows —
 voided/superseded events and draft/reversed entries are NOT removed (they are real audit
@@ -56,13 +48,6 @@ What `is_live` means per node (the equivalent `status` filter, if you need finer
   filtered at generation time — always safe to aggregate. This note applies ONLY to the
   ledger spine, not to Fact queries."""
 
-# Ledger traversal anchor — which node a ledger read starts from. Companion to
-# LEDGER_STATUS_GUIDANCE: that one is about which rows are live, this one is
-# about which rows are reachable at all. Transaction is a PARTIAL layer (it
-# exists only where a source system had a record), so anchoring a traversal on
-# it silently drops every parentless Entry — no error, just a short answer.
-# Same failure shape as the status omission, and it reproduces at scale for the
-# same reason: Operators generate Cypher dynamically.
 LEDGER_ANCHOR_GUIDANCE = """**⚠️ LEDGER TRAVERSAL ANCHOR — start at `Entry`, not `Transaction`:**
 `Transaction` is NOT the top of the ledger and NOT a layer every entry passes through.
 It exists only where a source system had a record of the thing (QuickBooks, a bank feed)
@@ -90,13 +75,9 @@ Transaction returned **zero rows** against a real non-zero answer.
 
 `Fact` queries are unaffected — the hypercube is generated from posted entries already."""
 
-# Ledger amount unit. The OLTP ledger stores integer cents and the close and
-# schedule tools speak cents; materialization divides by 100, so the graph
-# holds dollars. A model that has read a cents rule in another tool's
-# description applies it here and reports every figure a hundred times too
-# small — fluent and silently wrong. Seen on two different models (GPT-5.6
-# Luna, gpt-oss-20b) on the same ledger; Claude and the frontier open-weight
-# models did not do it.
+# The OLTP ledger and the close tools speak cents; the graph holds dollars. A
+# model carrying the cents rule over from another tool reports every figure
+# a hundred times too small.
 LEDGER_AMOUNT_GUIDANCE = """**⚠️ LEDGER AMOUNTS ARE IN DOLLARS, NOT CENTS:**
 `LineItem.debit_amount`, `LineItem.credit_amount`, `Transaction.amount` and
 `Event.amount` are decimal amounts in the ledger's currency: `2835000.0` is
@@ -104,11 +85,8 @@ $2,835,000.00. Report them as returned and never divide by 100. Only the close
 and schedule tools (`list-period-drafts`, schedule and allocation inputs) work in
 integer cents; that convention does not apply to graph queries."""
 
-# Investor amount unit. The RoboInvestor API and GraphQL return a position's
-# cost_basis / current_value as integer cents (authoritative, with *_dollars
-# beside them); materialization divides by 100, so the graph's Position holds
-# dollars under the same property names. The ledger trap again, with the names
-# matching exactly across the two surfaces.
+# The same trap: the API returns cost_basis / current_value in cents, the
+# graph's Position holds dollars under the same names.
 INVESTOR_AMOUNT_GUIDANCE = """**⚠️ POSITION AMOUNTS ARE IN DOLLARS IN THE GRAPH:**
 `Position.cost_basis` and `Position.current_value` are decimal amounts in the
 position's `currency`: `125000.5` is $125,000.50. The RoboInvestor API and GraphQL

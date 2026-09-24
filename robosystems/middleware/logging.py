@@ -1,8 +1,5 @@
-"""Logging middleware for structured API request logging.
-
-This middleware captures all API requests and responses with structured
-logging that's optimized for CloudWatch searching and cost management.
-"""
+"""Structured request and security logging middleware, with query-string
+credential redaction for every log surface."""
 
 import logging
 import time
@@ -25,7 +22,6 @@ from robosystems.security.request_context import bind_request_id, reset_request_
 
 logger = api_logger
 
-# Sensitive query parameters that should always be redacted in logs
 SENSITIVE_QUERY_PARAMS = {
   "token",
   "api_key",
@@ -57,30 +53,16 @@ def redact_sensitive_query_params(query_string: str) -> str:
     ]
     return urlencode(redacted_pairs)
   except Exception:
-    # If parsing fails, return empty string to avoid exposing raw query
+    # Unparseable: drop it rather than expose the raw query.
     return ""
 
 
 class UvicornAccessRedactionFilter(logging.Filter):
   """Redact sensitive query parameters from Uvicorn's own access log.
 
-  Everything else in this module redacts *application* logging, which is not
-  the whole surface: the API runs with ``--access-log``, and Uvicorn writes
-  its own line straight from the ASGI scope —
-
-      '%s - "%s %s HTTP/%s" %d' % (client, method, path_with_query, ver, code)
-
-  — where ``path_with_query`` is the raw query string. Nothing in the app can
-  reach that record, so a secret in a URL lands in the access log intact no
-  matter how carefully the app logs.
-
-  That matters because the MCP connector auth deliberately accepts a
-  graph-scoped key as a ``token`` query parameter: claude.ai and Claude
-  Desktop custom connectors cannot send custom headers, so the URL is the only
-  place the credential can ride. Redacting it here keeps the access log — the
-  alternative was turning ``--access-log`` off and losing it.
-
-  Installed on the ``uvicorn.access`` logger by ``install_uvicorn_log_redaction``.
+  Uvicorn writes that line straight from the ASGI scope, raw query string
+  included, out of the app's reach; the SSE route's ``?token=`` JWT would
+  otherwise land there intact.
   """
 
   def filter(self, record: logging.LogRecord) -> bool:
@@ -100,12 +82,8 @@ class UvicornAccessRedactionFilter(logging.Filter):
 
 
 def install_uvicorn_log_redaction() -> None:
-  """Attach the access-log redaction filter, idempotently.
-
-  Called from application startup rather than the entrypoint so it holds for
-  every way the app is served — the container's `uvicorn` invocation, a local
-  `uv run uvicorn`, and the test client alike.
-  """
+  """Attach the access-log redaction filter, idempotently. Called at app
+  startup so it holds however the app is served."""
   access_logger = logging.getLogger("uvicorn.access")
   if not any(
     isinstance(f, UvicornAccessRedactionFilter) for f in access_logger.filters
@@ -114,7 +92,6 @@ def install_uvicorn_log_redaction() -> None:
 
 
 def get_safe_url_for_logging(request: Request) -> str:
-  """Get a URL that's safe for logging (with sensitive query params redacted)."""
   path = request.url.path
   if request.url.query:
     safe_query = redact_sensitive_query_params(str(request.url.query))
@@ -124,15 +101,7 @@ def get_safe_url_for_logging(request: Request) -> str:
 
 
 class StructuredLoggingMiddleware(BaseHTTPMiddleware):
-  """Middleware that logs all API requests with structured data for CloudWatch.
-
-  Features:
-  - Request/response timing
-  - User and entity context extraction
-  - Request ID generation for tracing
-  - Error categorization
-  - Cost-optimized log levels
-  """
+  """Logs every API request with timing, caller and a request id."""
 
   def __init__(self, app, exclude_paths: list | None = None):
     super().__init__(app)
@@ -147,23 +116,18 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
     ]
 
   async def dispatch(self, request: Request, call_next: Callable) -> Response:
-    # Skip logging for health checks and static assets
     if any(request.url.path.startswith(path) for path in self.exclude_paths):
       return await call_next(request)
 
-    # Generate request ID for tracing. Bound to the request context as well
-    # as request.state so the audit and security events written below the
-    # route handler carry it (`security.request_context`).
+    # Also bound to the request context so audit events below the route carry it.
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
     request_id_token = bind_request_id(request_id)
 
     entity_id = getattr(request.state, "entity_id", None)
 
-    # Extract entity from path if it's a entity-scoped endpoint
     path_parts = request.url.path.strip("/").split("/")
     if len(path_parts) >= 2 and path_parts[0] == "v1":
-      # Check if second part looks like a entity ID
       potential_entity = path_parts[1]
       if potential_entity and potential_entity not in [
         "auth",
@@ -180,12 +144,9 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
       response = await call_next(request)
       duration_ms = (time.time() - start_time) * 1000
 
-      # The caller is resolved by the auth dependency inside the route, so
-      # it is only knowable after the response — read it then, or every
-      # access-log line records an anonymous request.
+      # Set by the auth dependency inside the route, so only readable now.
       user_id = getattr(request.state, "user_id", None)
 
-      # Log successful requests using structured logging
       log_api(
         method=request.method,
         path=request.url.path,
@@ -204,7 +165,6 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
       duration_ms = (time.time() - start_time) * 1000
       user_id = getattr(request.state, "user_id", None)
 
-      # Categorize errors for better searching
       error_category = "application"
       if isinstance(e, PermissionError):
         error_category = "authorization"
@@ -215,7 +175,6 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
       elif "validation" in str(e).lower():
         error_category = "validation"
 
-      # Log error with context using structured logging
       log_app_error(
         error=e,
         component="api_middleware",
@@ -231,32 +190,27 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
         },
       )
 
-      # Re-raise the exception to be handled by FastAPI
       raise
     finally:
       reset_request_id(request_id_token)
 
 
 class SecurityLoggingMiddleware(BaseHTTPMiddleware):
-  """Middleware specifically for security event logging.
-
-  Logs authentication attempts, authorization failures, and suspicious activity.
-  """
+  """Logs auth attempts, authorization failures, admin actions and
+  suspicious requests."""
 
   def __init__(self, app):
     super().__init__(app)
 
   async def dispatch(self, request: Request, call_next: Callable) -> Response:
-    # Extract client information
     client_ip = request.client.host if request.client else "unknown"
     user_agent = request.headers.get("user-agent", "unknown")
 
-    # Check for suspicious patterns
     suspicious_indicators = [
-      len(request.url.path) > 500,  # Extremely long paths
-      "../" in request.url.path,  # Path traversal attempts
-      "script" in request.url.path.lower(),  # Script injection attempts
-      "union" in str(request.url.query).lower(),  # SQL injection attempts
+      len(request.url.path) > 500,
+      "../" in request.url.path,
+      "script" in request.url.path.lower(),
+      "union" in str(request.url.query).lower(),
     ]
 
     if any(suspicious_indicators):
@@ -284,7 +238,6 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
 
     response = await call_next(request)
 
-    # Log authentication events using structured logging
     if request.url.path.startswith("/v1/auth/"):
       action = request.url.path.split("/")[-1]  # login, register, etc.
       success = 200 <= response.status_code < 300
@@ -304,10 +257,8 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
         },
       )
 
-    # Record every authenticated admin-surface action. `admin_key_id` is set on
-    # request.state by AdminAuthMiddleware once the key verifies, so its absence
-    # means authentication never succeeded — those are already recorded (and
-    # alarmed) by log_admin_auth_failure, and must not be double-logged here.
+    # `admin_key_id` is set only once the admin key verifies; failures are
+    # already recorded by log_admin_auth_failure.
     admin_key_id = getattr(request.state, "admin_key_id", None)
     if admin_key_id and request.url.path.startswith("/admin/v1/"):
       SecurityAuditLogger.log_admin_action(
@@ -320,7 +271,6 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
         query=redact_sensitive_query_params(str(request.url.query)) or None,
       )
 
-    # Log authorization failures (403 responses) using structured logging
     if response.status_code == 403:
       user_id = getattr(request.state, "user_id", None)
 

@@ -13,16 +13,12 @@ from .passkeys import router as passkeys_router
 from .password import router as password_router
 from .password_reset import router as password_reset_router
 from .providers import router as providers_router
-
-# Import sub-routers
 from .register import router as register_router
 from .session import router as session_router
 from .sso import router as sso_router
 
-# Create main auth router
 router = APIRouter()
 
-# Include all sub-routers in logical order
 
 # Core authentication
 router.include_router(register_router, tags=["Auth"])
@@ -41,14 +37,12 @@ router.include_router(password_reset_router, tags=["Auth"])
 
 router.include_router(sso_router, tags=["Auth: SSO"])
 
-# Passkey MFA — mounted unconditionally with a runtime PASSKEYS_ENABLED guard
-# (403 when off), unlike OIDC's import-time conditional: the posture-drift
-# test table needs the routes to exist to prove they refuse.
+# Passkey MFA mounts unconditionally with a runtime PASSKEYS_ENABLED guard,
+# so the posture-drift tests can prove the routes refuse.
 router.include_router(passkeys_router, tags=["Auth: Passkeys"])
 router.include_router(mfa_router, tags=["Auth: MFA"])
 
-# Enterprise SSO (OIDC) — flag-gated so the surface doesn't exist unless the
-# deployment opted in (the managed platform never mounts it).
+# Enterprise SSO (OIDC) only exists when the deployment opts in.
 if env.SSO_OIDC_ENABLED:
   from .oidc import router as oidc_router
 

@@ -1,8 +1,4 @@
-"""Shared execution strategies and utilities for query and MCP endpoints.
-
-This module provides base classes and common logic for intelligent strategy
-selection based on client capabilities, system load, and operation characteristics.
-"""
+"""Execution-strategy selection shared by the query and MCP endpoints."""
 
 import re
 from abc import ABC, abstractmethod
@@ -15,30 +11,26 @@ from robosystems.config.query_queue import QueryQueueConfig
 class BaseExecutionStrategy(Enum):
   """Base execution strategies shared by Query and MCP."""
 
-  # Immediate execution strategies
-  JSON_IMMEDIATE = "json_immediate"  # Small result, immediate response
-  JSON_COMPLETE = "json_complete"  # Medium result, wait for complete
+  JSON_IMMEDIATE = "json_immediate"  # small result
+  JSON_COMPLETE = "json_complete"  # medium result, wait for completion
 
-  # Streaming strategies
-  NDJSON_STREAMING = "ndjson_streaming"  # Stream as newline-delimited JSON
-  SSE_STREAMING = "sse_streaming"  # Stream via Server-Sent Events
-  SSE_PROGRESS = "sse_progress"  # SSE with progress updates
+  NDJSON_STREAMING = "ndjson_streaming"
+  SSE_STREAMING = "sse_streaming"
+  SSE_PROGRESS = "sse_progress"
 
-  # Queue strategies
-  QUEUE_WITH_MONITORING = "queue_monitoring"  # Queue with SSE monitoring
-  QUEUE_SIMPLE = "queue_simple"  # Simple queue with polling
+  QUEUE_WITH_MONITORING = "queue_monitoring"  # SSE monitoring
+  QUEUE_SIMPLE = "queue_simple"  # polling
 
-  # Specialized strategies
-  CACHED = "cached"  # Use cached result
+  CACHED = "cached"
 
 
 class ResponseMode(Enum):
   """Response modes for execution."""
 
-  AUTO = "auto"  # Automatic selection based on context
-  SYNC = "sync"  # Force synchronous response
-  ASYNC = "async"  # Force asynchronous/queued response
-  STREAM = "stream"  # Force streaming response
+  AUTO = "auto"
+  SYNC = "sync"
+  ASYNC = "async"  # queued
+  STREAM = "stream"
 
 
 class BaseAnalyzer(ABC):
@@ -56,29 +48,9 @@ class BaseAnalyzer(ABC):
 
   @classmethod
   def analyze_cypher_query(cls, query: str) -> dict[str, Any]:
-    """Analyze a Cypher query to estimate its characteristics and execution requirements.
-
-    This method performs static analysis on a Cypher query to determine execution
-    strategy based on query patterns, complexity, and estimated result size.
-
-    Analysis includes:
-    - Result size estimation based on LIMIT clauses
-    - Detection of aggregation operations (COUNT, SUM, AVG, etc.)
-    - Identification of expensive graph operations (shortest path, all paths)
-    - Detection of potential Cartesian products
-    - Streaming requirements based on estimated data volume
-    - Progress reporting capabilities
-
-    Examples:
-        >>> analyze_cypher_query("MATCH (n) RETURN n LIMIT 10")
-        {'has_limit': True, 'limit_value': 10, 'estimated_rows': 'small', ...}
-
-        >>> analyze_cypher_query("MATCH (a)-[:KNOWS*]-(b) RETURN a, b")
-        {'potentially_expensive': True, 'requires_streaming': True, ...}
-    """
+    """Keyword heuristics over the query text for strategy selection."""
     query_upper = query.upper()
 
-    # Check for LIMIT clause
     has_limit = "LIMIT" in query_upper
     limit_value = None
     if has_limit:
@@ -86,16 +58,13 @@ class BaseAnalyzer(ABC):
       if limit_match:
         limit_value = int(limit_match.group(1))
 
-    # Estimate result size
     estimated_rows = cls._estimate_result_size(query_upper, limit_value)
 
-    # Check for aggregations
     has_aggregation = any(
       agg in query_upper
       for agg in ["COUNT(", "SUM(", "AVG(", "MAX(", "MIN(", "COLLECT("]
     )
 
-    # Check for expensive operations
     has_shortest_path = "SHORTEST" in query_upper and "PATH" in query_upper
     has_all_paths = "ALL" in query_upper and "PATH" in query_upper
     has_cartesian = query_upper.count("MATCH") > 1 and "," in query_upper
@@ -122,30 +91,7 @@ class BaseAnalyzer(ABC):
   def _estimate_result_size(
     cls, query_upper: str, limit_value: int | None
   ) -> int | str:
-    """Estimate the result size category based on query patterns and LIMIT clause.
-
-    This method uses heuristics to categorize expected result size for execution
-    strategy selection. The categorization affects decisions about streaming,
-    batching, and memory allocation.
-
-    Estimation logic:
-    1. If LIMIT is present: categorize based on limit value
-       - <= 100 rows: 'small' (immediate JSON response)
-       - <= 1000 rows: 'medium' (complete JSON response)
-       - > 1000 rows: 'large' (requires streaming)
-    2. If no LIMIT:
-       - Single COUNT without GROUP BY: 'small' (single value)
-       - No LIMIT clause at all: 'large' (unbounded results)
-       - Other patterns: 'medium' (default assumption)
-
-    Examples:
-        >>> _estimate_result_size("MATCH (n) RETURN n LIMIT 50", 50)
-        'small'
-        >>> _estimate_result_size("MATCH (n) RETURN COUNT(n)", None)
-        'small'
-        >>> _estimate_result_size("MATCH (n) RETURN n", None)
-        'large'
-    """
+    """'small', 'medium' or 'large' from the LIMIT value, else from the shape."""
     if limit_value is not None:
       if limit_value <= cls.SMALL_RESULT:
         return "small"
@@ -154,17 +100,16 @@ class BaseAnalyzer(ABC):
       else:
         return "large"
 
-    # No limit value but LIMIT clause present (parameterized limit like $limit)
+    # A parameterized LIMIT ($limit).
     if "LIMIT" in query_upper and limit_value is None:
-      return "medium"  # Assume reasonable size for parameterized limits
+      return "medium"
 
-    # No limit - check for patterns
     if "COUNT(" in query_upper and "GROUP BY" not in query_upper:
-      return "small"  # Single count result
+      return "small"
     elif "LIMIT" not in query_upper:
-      return "large"  # No limit means potentially large
+      return "large"
     else:
-      return "medium"  # Default
+      return "medium"
 
 
 class BaseClientDetector:
@@ -186,19 +131,16 @@ class BaseClientDetector:
       or "application/stream+json" in accept
     )
 
-    # Detect testing tools
     is_testing_tool = any(
       tool in user_agent
       for tool in ["postman", "insomnia", "swagger", "openapi", "curl", "httpie"]
     )
 
-    # Detect browsers
     is_browser = any(
       browser in user_agent
       for browser in ["mozilla", "chrome", "safari", "firefox", "edge"]
     )
 
-    # Detect interactive environment
     is_interactive = is_testing_tool or (
       is_browser and "swagger" in headers.get("referer", "").lower()
     )
@@ -259,19 +201,13 @@ class BaseStrategySelector(ABC):
     if not (supports_sse or supports_ndjson):
       return None
 
-    # For large results, always prefer streaming
     if estimated_size == "large" or requires_streaming:
       if supports_sse:
         return BaseExecutionStrategy.SSE_STREAMING
       elif supports_ndjson:
         return BaseExecutionStrategy.NDJSON_STREAMING
 
-    # For medium results with progress support
     if estimated_size == "medium" and supports_sse:
       return BaseExecutionStrategy.SSE_PROGRESS
 
     return None
-
-
-# NOTE: TimeoutCoordinator is available from robosystems.middleware.robustness
-# Use: from robosystems.middleware.robustness import TimeoutCoordinator

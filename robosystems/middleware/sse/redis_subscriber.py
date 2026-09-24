@@ -33,7 +33,6 @@ class RedisEventSubscriber:
     self._task: asyncio.Task | None = None
 
   async def start(self):
-    """Start the Redis subscriber."""
     if self._running:
       logger.warning("Redis subscriber already running")
       return
@@ -47,7 +46,6 @@ class RedisEventSubscriber:
     self._task = asyncio.create_task(self._listen_for_events())
 
   async def stop(self):
-    """Stop the Redis subscriber."""
     if not self._running:
       return
 
@@ -69,7 +67,6 @@ class RedisEventSubscriber:
         pass
 
   async def subscribe_to_operation(self, operation_id: str):
-    """Subscribe to one operation's event channel."""
     if not self.pubsub:
       logger.error("Redis subscriber not started")
       return
@@ -81,7 +78,6 @@ class RedisEventSubscriber:
       logger.info(f"Subscribed to Redis channel: {channel}")
 
   async def unsubscribe_from_operation(self, operation_id: str):
-    """Unsubscribe from one operation's event channel."""
     if not self.pubsub:
       return
 
@@ -92,7 +88,6 @@ class RedisEventSubscriber:
       logger.info(f"Unsubscribed from Redis channel: {channel}")
 
   async def _listen_for_events(self):
-    """Listen for pub/sub messages and broadcast them to local clients."""
     connection_manager = get_connection_manager()
     logger.info(
       f"Redis event listener started with {len(self.subscriptions)} initial subscriptions"
@@ -108,10 +103,8 @@ class RedisEventSubscriber:
           await asyncio.sleep(1.0)
           continue
 
-        # The timeout must be get_message's own: with redis-py's default
-        # (timeout=0.0) it returns immediately and the `continue` below spins
-        # the loop at full speed whenever any stream is open. wait_for around
-        # an instantly-returning call throttles nothing.
+        # get_message's own timeout: the default (0.0) returns immediately and
+        # would spin this loop.
         message = await self.pubsub.get_message(
           ignore_subscribe_messages=True, timeout=1.0
         )
@@ -156,15 +149,13 @@ class RedisEventSubscriber:
         break
       except Exception as e:
         logger.error(f"Error in Redis event listener: {e}")
-        await asyncio.sleep(1)  # Brief pause before retrying
+        await asyncio.sleep(1)
 
 
-# Global subscriber instance
 _redis_subscriber: RedisEventSubscriber | None = None
 
 
 def get_redis_subscriber() -> RedisEventSubscriber:
-  """Get the global Redis subscriber instance."""
   global _redis_subscriber
   if _redis_subscriber is None:
     _redis_subscriber = RedisEventSubscriber()
@@ -172,12 +163,10 @@ def get_redis_subscriber() -> RedisEventSubscriber:
 
 
 async def start_redis_subscriber():
-  """Start the global Redis subscriber."""
   subscriber = get_redis_subscriber()
   await subscriber.start()
 
 
 async def stop_redis_subscriber():
-  """Stop the global Redis subscriber."""
   subscriber = get_redis_subscriber()
   await subscriber.stop()

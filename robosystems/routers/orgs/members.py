@@ -42,7 +42,6 @@ async def list_org_members(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgMemberListResponse:
   try:
-    # Check if user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -50,7 +49,6 @@ async def list_org_members(
         detail="You are not a member of this organization",
       )
 
-    # Get all members
     memberships = OrgUser.get_org_users(org_id, db)
     members = []
 
@@ -100,7 +98,6 @@ async def update_member_role(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgMemberResponse:
   try:
-    # Check if current user is an admin or owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -128,7 +125,7 @@ async def update_member_role(
         detail="User is not a member of this organization",
       )
 
-    # Prevent any owner role changes - requires dedicated ownership transfer workflow
+    # Owner role changes need a dedicated ownership-transfer workflow.
     if target_membership.role == OrgRole.OWNER:
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -139,7 +136,6 @@ async def update_member_role(
         ),
       )
 
-    # Prevent promoting anyone to owner - requires dedicated ownership transfer workflow
     if request.role == OrgRole.OWNER:
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -165,7 +161,6 @@ async def update_member_role(
           detail="Organization must have at least one owner",
         )
 
-    # Update the role
     previous_role = target_membership.role
     target_membership.role = request.role
     db.commit()
@@ -227,7 +222,6 @@ async def remove_member(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
   try:
-    # Check if current user is an admin or owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -280,19 +274,16 @@ async def remove_member(
 
     # Members can remove themselves
     if user_id == current_user.id and membership.role == OrgRole.MEMBER:
-      # Allow self-removal for members
       pass
     elif user_id == current_user.id:
-      # Admins and owners need another admin/owner to remove them
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Admins and owners cannot remove themselves",
       )
 
-    # Cancel before removing: org membership is what justified the org-billed
-    # repository subscriptions, so they end with it. Provider first — if the
-    # payment provider refuses, the removal aborts rather than off-boarding a
-    # member the org keeps paying for.
+    # Org membership justified the org-billed repository subscriptions, so
+    # cancel them first. Provider first: if it refuses, the removal aborts
+    # rather than off-boarding a member the org keeps paying for.
     try:
       canceled = cancel_user_repository_subscriptions(
         user_id=user_id,
@@ -313,9 +304,8 @@ async def remove_member(
         f"user {user_id} from org {org_id}"
       )
 
-    # Remove the member, revoking their access to org-owned graphs.
-    # Org membership is what justified the graph grants; without the cascade
-    # a removed member would keep full access to every org graph.
+    # Membership justified the org graph grants; without the cascade a removed
+    # member would keep access to every org graph.
     org_graph_ids = [
       row.graph_id
       for row in db.query(Graph.graph_id).filter(Graph.org_id == org_id).all()
@@ -338,23 +328,14 @@ async def remove_member(
     api_key_cache.invalidate_user_jwt_graph_access(user_id)
     api_key_cache.invalidate_user_data(user_id)
 
-    # A user belongs to exactly one org, so removing their last membership
-    # leaves an account that can authenticate but reach nothing: every
-    # org-scoped surface resolves the caller's first membership and there is
-    # no way to create or join an org from the outside. Deactivating makes
-    # that state honest — the kill switch also bumps `session_version` and
-    # revokes API keys, so no credential outlives the membership that
-    # justified it. Reversible by an admin (`activate`) if the removal was a
-    # mistake; freeing the email for a fresh signup is still a deletion.
+    # One org per user: removing the last membership leaves an account that
+    # can authenticate but reach nothing. Deactivating makes that honest (the
+    # kill switch also bumps `session_version` and revokes API keys);
+    # reversible by an admin via `activate`.
     #
-    # Best-effort by construction: the removal is already committed above, so
-    # a failure here must not fail the request. Letting it raise would report
-    # a completed removal as a 500 (the rollback is a no-op on an already
-    # committed transaction), send the caller to retry into a 404, and skip
-    # the audit record below — leaving a privileged access change with no
-    # evidence, which is the gap this surface just closed. Log loudly instead:
-    # the account is live when it should not be, which is the state this
-    # branch exists to prevent, and it is repaired by `users deactivate`.
+    # Best-effort: the removal is already committed, so a failure here must
+    # not 500 the request or skip the audit record below. Log loudly instead;
+    # repair with `users deactivate`.
     deactivated_user = False
     if not OrgUser.get_user_orgs(user_id, db):
       removed_user = User.get_by_id(user_id, db)

@@ -1,9 +1,4 @@
-"""
-Cloudflare Turnstile CAPTCHA verification service.
-
-Provides server-side verification of Turnstile CAPTCHA tokens to prevent bot
-registrations and other automated attacks.
-"""
+"""Server-side Cloudflare Turnstile CAPTCHA verification."""
 
 import logging
 from dataclasses import dataclass
@@ -14,14 +9,11 @@ from ..config import env
 
 logger = logging.getLogger(__name__)
 
-# Cloudflare Turnstile verification endpoint
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 
 @dataclass
 class CaptchaVerificationResult:
-  """Result of CAPTCHA verification."""
-
   success: bool
   error_codes: list[str]
   challenge_ts: str | None = None
@@ -31,8 +23,6 @@ class CaptchaVerificationResult:
 
 
 class CaptchaService:
-  """Service for verifying CAPTCHA tokens."""
-
   def __init__(self):
     self.secret_key = env.TURNSTILE_SECRET_KEY
     self.site_key = env.TURNSTILE_SITE_KEY
@@ -43,14 +33,9 @@ class CaptchaService:
     remote_ip: str | None = None,
     idempotency_key: str | None = None,
   ) -> CaptchaVerificationResult:
-    """
-    Verify a Cloudflare Turnstile CAPTCHA token against the siteverify API.
-
-    Network, API, and internal errors all resolve to an unsuccessful result
-    rather than an exception, so callers always get a decision.
-    """
+    """Verify a token against the siteverify API. Errors resolve to an
+    unsuccessful result, never an exception."""
     if not token:
-      # Only log warning in non-test environments to reduce test noise
       if not env.is_test():
         logger.warning("Empty CAPTCHA token provided")
       return CaptchaVerificationResult(
@@ -58,11 +43,7 @@ class CaptchaService:
       )
 
     if not self.secret_key:
-      # A missing secret means we cannot verify the token. Fail CLOSED in
-      # deployed environments — an enabled CAPTCHA gate with no secret must
-      # reject, not silently admit every request (bot-registration exposure).
-      # Dev/test fall open for convenience (and normally short-circuit earlier
-      # via CAPTCHA_ENABLED in verify_captcha_or_skip).
+      # Fail closed in deployed environments; dev/test fall open.
       if env.is_production() or env.is_staging():
         logger.error(
           "TURNSTILE_SECRET_KEY not configured while CAPTCHA is enabled - "
@@ -76,13 +57,11 @@ class CaptchaService:
       )
       return CaptchaVerificationResult(success=True, error_codes=["missing-secret-key"])
 
-    # Prepare verification request
     data = {
       "secret": self.secret_key,
       "response": token,
     }
 
-    # Add optional parameters
     if remote_ip:
       data["remoteip"] = remote_ip
     if idempotency_key:
@@ -118,22 +97,16 @@ class CaptchaService:
       return CaptchaVerificationResult(success=False, error_codes=["internal-error"])
 
   def is_captcha_required(self) -> bool:
-    """Check if CAPTCHA verification is required in current environment."""
     return env.CAPTCHA_ENABLED
 
   def get_site_key(self) -> str:
-    """Get the Turnstile site key for frontend integration."""
     return self.site_key
 
   async def verify_captcha_or_skip(
     self, token: str | None, remote_ip: str | None = None
   ) -> CaptchaVerificationResult:
-    """
-    Verify a CAPTCHA token if required, skipping when CAPTCHA is disabled.
-
-    The entry point auth endpoints should call; ``token`` may be None where
-    CAPTCHA is off.
-    """
+    """The entry point for auth endpoints: verifies when CAPTCHA is enabled,
+    otherwise succeeds (``token`` may then be None)."""
     if not self.is_captcha_required():
       logger.info("CAPTCHA verification skipped (development mode)")
       return CaptchaVerificationResult(success=True, error_codes=["dev-mode-skip"])
@@ -147,11 +120,9 @@ class CaptchaService:
     return await self.verify_turnstile_token(token, remote_ip)
 
 
-# Global instance for easy import
 captcha_service = CaptchaService()
 
 
-# Error code descriptions for debugging
 TURNSTILE_ERROR_DESCRIPTIONS = {
   "missing-input-secret": "The secret parameter is missing",
   "invalid-input-secret": "The secret parameter is invalid or malformed",
@@ -168,5 +139,4 @@ TURNSTILE_ERROR_DESCRIPTIONS = {
 
 
 def get_error_description(error_code: str) -> str:
-  """Get human-readable description for CAPTCHA error code."""
   return TURNSTILE_ERROR_DESCRIPTIONS.get(error_code, f"Unknown error: {error_code}")

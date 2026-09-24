@@ -1,14 +1,4 @@
-"""Event Handler MCP read tools.
-
-Two hand-written read tools:
-
-1. ``get-event-handler``    — fetch one handler by id.
-2. ``list-event-handlers``  — list handlers with optional filters.
-
-Write tools (``create-event-handler``, ``update-event-handler``,
-``preview-event-block``) are auto-generated from their OperationSpec entries
-in the registrar pipeline.
-"""
+"""Event Handler reads; the writes are registrar-generated."""
 
 from __future__ import annotations
 

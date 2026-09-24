@@ -77,13 +77,10 @@ async def get_graph_metrics(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphMetricsResponse:
-  # Metrics are per-label/per-type COUNTs — a full scan each — issued against
-  # the graph's WRITE node. On a shared repository that is the shared master
-  # (asleep most of the day, and the corpus is hundreds of millions of rows),
-  # so the call either times out or lands a fleet of full scans on the node
-  # that materializes. Shared repositories are platform-managed; their size is
-  # published elsewhere. Refuse up front, before the circuit breaker records
-  # a failure against the graph.
+  # Metrics are a full-scan COUNT per label, issued against the WRITE node: on
+  # a shared repository that is the shared master (hundreds of millions of
+  # rows), so it times out or loads the materializing node. Refuse before the
+  # circuit breaker records a failure.
   if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id.lower()):
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
@@ -409,11 +406,9 @@ async def get_graph_usage(
         )
 
     if include_events:
-      # The caller's own activity on this graph, plus the graph's storage
-      # snapshots. Snapshots are recorded by the usage monitor under a system
-      # principal (they measure the graph, not a member), so a user-only filter
-      # would hide them from every caller — and the caller has already passed
-      # the graph-access check, so a graph-scoped storage row is theirs to see.
+      # The caller's own activity plus the graph's storage snapshots, which the
+      # usage monitor records under a system principal; a user-only filter
+      # would hide them from everyone.
       cutoff_date = now - timedelta(days=_get_days_from_time_range(time_range))
       events = (
         db.query(GraphUsage)

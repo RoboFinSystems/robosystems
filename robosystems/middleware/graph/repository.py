@@ -81,7 +81,6 @@ class UniversalRepository:
     else:
       return method(*args, **kwargs)
 
-  # Core database operations
   async def execute_query(
     self, cypher: str, params: dict[str, Any] | None = None
   ) -> list[dict[str, Any]]:
@@ -91,21 +90,14 @@ class UniversalRepository:
   async def execute_query_streaming(
     self, cypher: str, params: dict[str, Any] | None = None, chunk_size: int = 1000
   ):
-    """Execute a query and yield results in chunks for streaming.
-
-    This method checks if the underlying repository supports streaming,
-    and falls back to chunking regular results if not.
-    """
+    """Yield result chunks, natively or by chunking a full result."""
     if hasattr(self._repository, "execute_query_streaming"):
-      # Use native streaming support
       streaming_method = self._repository.execute_query_streaming
       async for chunk in streaming_method(cypher, params, chunk_size):
         yield chunk
     else:
-      # Fallback: Execute normally and chunk results
       result = await self.execute_query(cypher, params)
 
-      # Convert to streaming format
       columns = list(result[0].keys()) if result else []
       total_rows = len(result)
 
@@ -209,27 +201,22 @@ class UniversalRepository:
     elif hasattr(self._repository, "close"):
       await self.close()
 
-  # Context manager support (sync)
   def __enter__(self):
-    """Sync context manager entry."""
     if hasattr(self._repository, "__enter__"):
       enter_method = self._repository.__enter__
       enter_method()
     return self
 
   def __exit__(self, exc_type, exc_val, exc_tb):
-    """Sync context manager exit."""
     if hasattr(self._repository, "__exit__"):
       exit_method = self._repository.__exit__
       exit_method(exc_type, exc_val, exc_tb)
     elif hasattr(self._repository, "close"):
       self.close_sync()
 
-  # Property delegation
   @property
   def database_name(self) -> str:
     """Get the database name."""
-    # Try different property names that might exist on different repository types
     db_name = getattr(self._repository, "database_name", None)
     if db_name is not None:
       return str(db_name)
@@ -245,25 +232,21 @@ class UniversalRepository:
     """Check if the repository is read-only."""
     return getattr(self._repository, "read_only", False)
 
-  # API-specific methods (only available for APIRepository)
   async def get_schema(self) -> list[dict[str, Any]]:
     """Get database schema information (API repositories only)."""
     if not hasattr(self._repository, "get_schema"):
       raise NotImplementedError("get_schema is only available for API repositories")
     return await self._call_method("get_schema")
 
-  # Direct access to underlying repository for advanced use cases
   def get_underlying_repository(self) -> Repository | GraphClient:
     """Get the underlying repository instance."""
     return self._repository
 
   def __repr__(self) -> str:
-    """String representation of the universal repository."""
     repo_type = "GraphClient" if self._is_async else "Repository"
     return f"UniversalRepository({repo_type}({self.database_name}))"
 
 
-# Convenience functions for creating universal repositories
 def create_universal_repository(
   graph_id: str, operation_type: str = "write", tier=None
 ) -> UniversalRepository:

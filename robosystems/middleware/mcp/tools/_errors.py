@@ -1,12 +1,5 @@
-"""Database-fault translation for hand-written MCP tools.
-
-The registrar-published tools already answer a missing tenant schema with
-``not_initialized`` and any other database fault with a fixed message. Driver
-output must never reach the LLM, so every hand-written tool routes its
-``SQLAlchemyError`` arm through here and both tool families answer alike. The
-domain catch-alls that follow keep their own messages, since those are domain
-text rather than driver output.
-"""
+"""Database-fault answers for hand-written MCP tools, matching the registrar
+tools: driver output (SQL, parameters) must never reach the LLM."""
 
 from __future__ import annotations
 

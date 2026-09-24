@@ -1,17 +1,8 @@
-"""
-Financial statement MCP tools — split into two purpose-built tools.
+"""Financial statement MCP tools.
 
-- ``live-financial-statement`` → OLTP-backed, tenant entity graphs only.
-  Source of truth for RoboLedger users; reads live ledger data through
-  the CoA→GAAP mapping.
-
-- ``financial-statement-analysis`` → Graph-backed (LadybugDB) Cypher
-  traversal. Works on the SEC shared repository today and on any
-  tenant graph whose ledger has been materialized.
-
-Both delegate to the ops layer (``operations/roboledger/{reads,views}/``)
-so REST and MCP share behavior. SEC-specific report resolution lives in
-``adapters/sec/mcp/report_resolver.py``.
+``live-financial-statement`` reads the tenant's OLTP ledger through the
+CoA→GAAP mapping; ``financial-statement-analysis`` reads the graph (SEC, or a
+materialized tenant).
 """
 
 from __future__ import annotations
@@ -37,33 +28,24 @@ from robosystems.operations.roboledger.views import (
 from .base_tool import BaseTool
 
 # The columns a filing presents: two balance-sheet instants, three years of
-# each flow statement. Everything the hypercube holds beyond that — the
-# quarterly note data a 10-K carries, the equity roll-forward's opening
-# instants — is answered on request through ``periods``, not by default.
+# flows. Anything more (a 10-K's quarterly note data) is on request.
 PERIODS_DEFAULT_INSTANT = 2
 PERIODS_DEFAULT_DURATION = 3
 PERIODS_MAX = 100
 
-# The raw-row budget handed to the statement query, independent of the
-# caller's ``limit``. The query fetches newest-first and the period cap runs
-# after it, so a row budget tied to ``limit`` would let a small limit hide
-# older periods from the cap with no ``periods_omitted`` to say so. The
-# query's own ceiling is 1,000; ``limit`` is applied after the cap instead.
+# Independent of ``limit``, which applies after the period cap: tying the
+# fetch to ``limit`` would hide older periods with no ``periods_omitted``.
 QUERY_ROW_CEILING = 1000
 
 _PERIOD_KEY_FIELDS = ("start_date", "end_date", "period_type", "duration_type")
 
 
 def default_period_type(statement_type: str, form: str | None) -> str | None:
-  """The period filter to apply when the caller gave none.
+  """The period filter when the caller gave none.
 
-  A 10-K (or 20-F / 40-F) is filed on an annual cadence, yet its statement
-  hypercube also carries the quarterly figures from its notes — on a FY2024
-  10-K income statement, 8 of 11 period keys and more than half the rows.
-  Nobody asking for "the income statement" wants those, so an annual form
-  defaults to ``annual``. The balance sheet already defaults to instants in
-  the query; a 10-Q's quarter and year-to-date columns share end dates, so
-  the period cap alone bounds it and no filter is forced.
+  An annual form defaults to ``annual``: its hypercube also carries the
+  quarterly note figures, often most of the rows. A 10-Q's quarter and YTD
+  columns share end dates, so the period cap alone bounds it.
   """
   if statement_type == "balance_sheet":
     return None
@@ -77,11 +59,9 @@ def default_period_type(statement_type: str, form: str | None) -> str | None:
 def cap_periods(
   rows: list[dict[str, Any]], periods: int
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
-  """Keep the rows whose period ends on one of the ``periods`` newest end dates.
+  """Keep rows on the ``periods`` newest end dates.
 
-  Returns the kept rows, the distinct period keys they span (newest first),
-  and how many older end dates were cut — so a caller that wants a longer
-  series knows to ask for one.
+  Returns (rows, distinct period keys newest first, count of end dates cut).
   """
   end_dates = sorted({str(r.get("end_date") or "") for r in rows}, reverse=True)
   kept_dates = set(end_dates[:periods])
@@ -102,15 +82,10 @@ def cap_periods(
 
 
 def compact_fact(row: dict[str, Any]) -> dict[str, Any]:
-  """A fact row as a model reads it: null fields say nothing and are dropped,
-  and ``name`` is carried only when it says more than ``qname`` does.
+  """Drop null fields, and ``name`` when it only repeats the qname's local part.
 
-  On SEC filings ``Element.name`` is the qname's local part
-  (``us-gaap:Assets`` / ``Assets``), pure repetition. On a tenant graph the
-  rs-gaap elements carry a label there (``rs-gaap:NonoperatingIncomeExpense``
-  / ``Nonoperating Income (Expense)``), which reads better than the qname
-  and stays. Nothing in the schema pins either shape, so the row is judged,
-  not the graph.
+  SEC names repeat the qname; tenant rs-gaap names are labels. Neither shape
+  is pinned by the schema, so each row is judged on its own.
   """
   qname = row.get("qname") or ""
   name = row.get("name")
@@ -262,12 +237,7 @@ Facts with element qnames, names, classifications, and values aligned with `peri
 
 
 class FinancialStatementAnalysisTool(BaseTool):
-  """MCP tool: run a graph-backed financial statement query.
-
-  Available on shared-repo graphs (SEC) and on tenant graphs once
-  their ledger has been materialized. Uses the roboledger XBRL
-  hypercube schema (`Structure → FactSet → Fact`).
-  """
+  """MCP tool: a financial statement from the graph's XBRL hypercube."""
 
   def get_tool_definition(self) -> dict[str, Any]:
     return {
@@ -405,10 +375,8 @@ class FinancialStatementAnalysisTool(BaseTool):
       )
       report_id = resolved.get("identifier") if resolved else None
 
-      # Mirror of the REST view op: a requested fiscal_year that resolves
-      # to nothing must be an error, not a silent fall-through to the
-      # unscoped ticker sweep below (which orders by end_date DESC and
-      # would answer with the newest filing instead).
+      # As in REST: an unmatched fiscal_year is an error, not a fall-through
+      # to the ticker sweep, which would answer with the newest filing.
       if fiscal_year is not None and not report_id:
         return {
           "error": (

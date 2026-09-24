@@ -1,25 +1,14 @@
 """Execution-time guards for the extensions GraphQL surface.
 
-Two Strawberry schema extensions, both concerned with what one tenant's query
-can do to everyone else's — not with what it can read (that is `auth.py`).
+`OffloadSyncResolvers`: Strawberry runs sync resolvers inline on the event
+loop, and the API has one uvicorn worker, so an OLTP statement in a resolver
+would stall every request. User-written sync resolvers run through
+`run_off_loop` (the limiter REST and MCP share); default attribute resolvers
+and introspection stay inline.
 
-`OffloadSyncResolvers` — every resolver in `resolvers/` is a plain `def`
-that opens an extensions OLTP session, and Strawberry executes a sync
-resolver inline on the event loop. The API runs one uvicorn worker, so an
-OLTP statement running inside a resolver stalled every request on the task
-for its duration. Resolvers now run in the runner thread pool through
-`run_off_loop` — the same limiter the REST operations and MCP tools use, so
-GraphQL reads share the pool-sized ceiling instead of sitting outside it.
-Only user-written sync resolvers are offloaded; the default attribute
-resolvers Strawberry generates for plain fields stay inline (a thread hop
-per scalar field would cost more than it saves), as does introspection.
-
-`MaskUnexpectedErrors` — a resolver exception that is not a deliberate
-GraphQL error reached the client as `str(exc)`: for a database fault that
-string names tables, constraints, and schemas. Everything that is not a
-parse/validation error or a `GraphQLError` the code raised on purpose is
-replaced with a fixed message; a cancelled statement (the session's
-`statement_timeout`) gets its own code so a client can narrow or retry.
+`MaskUnexpectedErrors`: a non-deliberate exception would reach the client as
+`str(exc)`, naming tables and constraints. Those are replaced with a fixed
+message; a statement timeout gets its own code so a client can retry.
 """
 
 from __future__ import annotations
@@ -51,8 +40,7 @@ def _on_event_loop() -> bool:
 
 
 def _is_user_sync_resolver(info: GraphQLResolveInfo) -> bool:
-  """Whether the field being resolved has a resolver someone wrote (as
-  opposed to Strawberry's default attribute getter) and it is synchronous."""
+  """True for a hand-written (not default attribute) sync resolver."""
   field = info.parent_type.fields.get(info.field_name)
   if field is None:
     return False
@@ -85,8 +73,7 @@ class OffloadSyncResolvers(SchemaExtension):
       or not _is_user_sync_resolver(info)
     ):
       return _next(root, info, *args, **kwargs)
-    # Local import: `middleware.operations` pulls in the platform database
-    # module; the schema must stay importable without one.
+    # Local import: the schema must stay importable without the platform DB.
     from robosystems.middleware.operations import run_off_loop
 
     return run_off_loop(partial(_next, root, info, *args, **kwargs))
@@ -112,12 +99,8 @@ def _is_deliberate(error: GraphQLError) -> bool:
 class MaskUnexpectedErrors(SchemaExtension):
   """Replace unintended resolver exceptions with a fixed message.
 
-  Deliberate errors — `StrawberryGraphQLError` with a `code` — pass through
-  untouched, so the documented codes (`LEDGER_NOT_INITIALIZED`,
-  `UNAUTHENTICATED`, `EXTENSION_NOT_PROVISIONED`, ...) still reach the
-  client. Everything else is masked; the request id rides in `extensions`
-  so a report can be matched to the server-side log line, which Strawberry's
-  own `process_errors` already writes with the traceback.
+  Deliberate `GraphQLError`s pass through. Masked errors carry the request id
+  so a report matches the server log line Strawberry already writes.
   """
 
   def _rewrite(self, error: GraphQLError, request_id: str | None) -> GraphQLError:

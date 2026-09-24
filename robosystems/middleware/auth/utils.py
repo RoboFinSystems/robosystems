@@ -11,9 +11,7 @@ from ...models.core import GraphUser, User, UserAPIKey
 from ...security import SecurityAuditLogger
 from .cache import api_key_cache
 
-# Format: "rfs" (account-wide) or "rfsc" (graph-scoped) prefix + 64 hex chars.
-# Lowercase only — secrets.token_hex() always produces lowercase hex.
-# Unambiguous despite the shared stem: total length differs (67 vs 68).
+# "rfs" (account-wide) or "rfsc" (graph-scoped) + 64 lowercase hex chars.
 _API_KEY_FORMAT_RE = re.compile(r"^rfsc?[0-9a-f]{64}$")
 
 
@@ -39,12 +37,9 @@ def _key_scope_allows(key_graph_id: str | None, requested_graph_id: str) -> bool
 def _serialize_user_for_api_key_cache(user: User, key_record: UserAPIKey) -> dict:
   """Serialize the user fields the API-key cache-hit path rebuilds a `User` from.
 
-  Every field a consumer reads off the reconstructed `User` must be here. A
-  column omitted from this payload comes back as ``None`` rather than its
-  declared default, because SQLAlchemy applies column defaults on insert and a
-  cache-built `User` is never flushed — so a non-optional response field reading
-  it fails validation only on a warm cache. Keep this the single definition so
-  the next field added cannot be dropped from one call site out of four.
+  Every field a consumer reads off the rebuilt `User` must be here: an omitted
+  column comes back ``None`` (defaults apply only on insert), failing only on a
+  warm cache.
   """
   return {
     "id": user.id,
@@ -62,11 +57,8 @@ def _serialize_user_for_api_key_cache(user: User, key_record: UserAPIKey) -> dic
 def _cached_user_payload_is_complete(user_data: dict) -> bool:
   """Whether a cached payload carries every field the rebuilt `User` needs.
 
-  Entries written before a field joined the payload are treated as stale so the
-  caller falls back to the database and re-caches. Defaulting the missing field
-  instead would be worse than the crash it replaces: `email_verified` would read
-  False for a verified user, silently downgrading an authorization input rather
-  than failing loudly. The fallback costs one DB read per stale entry, once.
+  An incomplete entry is stale and goes to the database; defaulting e.g.
+  `email_verified` would silently downgrade an authorization input.
   """
   return (
     bool(user_data.get("id"))
@@ -100,7 +92,6 @@ def _hydrate_user_from_cache(user: User, user_data: dict) -> None:
 
 
 def _safe_cache_call(func_name: str, *args, **kwargs):
-  """Safely call cache functions, handling None cache gracefully."""
   if api_key_cache is None:
     return None
   try:
@@ -114,9 +105,7 @@ def _safe_cache_call(func_name: str, *args, **kwargs):
 def validate_api_key(api_key: str, db_session: Session | None = None) -> User | None:
   """Validate an account-wide API key and return its user.
 
-  Bcrypt verification against the database, fronted by the encrypted cache.
-  Graph-scoped keys are rejected here: without a graph context they would
-  reach account-level surfaces, so they are only valid through
+  Graph-scoped keys are rejected here; they are valid only through
   `validate_api_key_with_graph`.
   """
   if not api_key:
@@ -142,8 +131,6 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
         logger.debug(f"API key rejected: expired: {cache_key[:8]}...")
         return None
 
-      # Graph-scoped keys are never valid without a graph context (least
-      # privilege: a connector credential cannot reach account-level surfaces).
       if user_data.get("key_graph_id"):
         logger.debug(
           f"API key rejected: graph-scoped key without graph context: {cache_key[:8]}..."
@@ -153,19 +140,15 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
       user = User()
       _hydrate_user_from_cache(user, user_data)
 
-      # Reject keys owned by a deactivated user, even when the key row and its
-      # cache entry are still marked active. Deactivation invalidates the cache
-      # entry, but this guard closes the window until that propagates.
+      # Closes the window until a deactivation's cache invalidation lands.
       if not user.is_active:
         logger.debug(f"API key rejected: owning user inactive: {cache_key[:8]}...")
         return None
 
       return user
 
-  # Cache miss. Use a short-lived session so the pool connection is returned
-  # right after the DB work; the scoped ``session`` proxy would hold it until
-  # middleware cleanup at end-of-request, which starves long-running endpoints
-  # like MCP tool execution.
+  # Short-lived session: the scoped proxy would hold a pool connection until
+  # end of request, starving long-running endpoints (MCP).
   from ...database import SessionFactory
 
   _owns_session = db_session is None
@@ -187,8 +170,7 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
     # Load while the session is live so the lazy relationship resolves once.
     user = key_record.user
 
-    # Reject keys whose owning user is deactivated. The key's own is_active
-    # flag does not imply the owner's, so both must be checked here.
+    # The key's is_active does not imply the owner's.
     if not user.is_active:
       logger.debug(f"API key rejected: owning user inactive: {cache_key[:8]}...")
       return None
@@ -203,8 +185,7 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
     except Exception as e:
       logger.warning(f"Unexpected error caching API key validation result: {e}")
 
-    # Graph-scoped keys are never valid without a graph context (least
-    # privilege). Cached above so the graph-scoped path still benefits.
+    # Cached above so the graph-scoped path still benefits.
     if key_record.graph_id:
       logger.debug(
         f"API key rejected: graph-scoped key without graph context: {cache_key[:8]}..."
@@ -231,16 +212,12 @@ def validate_api_key_with_graph(
 ) -> User | None:
   """Validate an API key against a graph and return its user.
 
-  Graph-scoped keys (``graph_id`` set on the row) are honored only for their
-  own graph and its subgraphs, regardless of how the key is carried.
-
+  Graph-scoped keys are honored only for their own graph and its subgraphs.
   Returns None for an invalid key or an unauthorized graph, without
   distinguishing the two.
 
-  ``allow_deprovisioned`` is threaded only from the backup export path: it
-  relaxes the gone-graph denial in ``get_effective_role`` and bypasses the
-  cached graph-access decision (which was made under the default, gone →
-  denied), so the relaxation can never be written back into the cache.
+  ``allow_deprovisioned`` (backup export path only) bypasses the cached access
+  decision and is never written back to it.
   """
   if not api_key or not graph_id:
     return None
@@ -253,7 +230,6 @@ def validate_api_key_with_graph(
 
   cached_api_key = _safe_cache_call("get_cached_api_key_validation", api_key_hash)
 
-  # Cached negative result: key is unknown or inactive.
   if cached_api_key and not cached_api_key.get("is_active", False):
     logger.debug(f"Cached API key is inactive: {api_key_hash[:8]}...")
     return None
@@ -279,8 +255,7 @@ def validate_api_key_with_graph(
         logger.debug(f"API key rejected: expired: {api_key_hash[:8]}...")
         return None
 
-      # Key-level scope restrictions (checked on top of the cached user-level
-      # graph access, which is shared across carriage paths).
+      # Key scope, on top of the cached user-level graph access.
       key_graph_id = user_data.get("key_graph_id")
       if not _key_scope_allows(key_graph_id, graph_id):
         logger.debug(
@@ -296,13 +271,11 @@ def validate_api_key_with_graph(
         logger.debug(f"API key rejected: owning user inactive: {api_key_hash[:8]}...")
         return None
 
-      # last_used_at is only updated on the cache-miss path below; touching
-      # it on every cache hit would put the DB pool back in the hot path, and
-      # the cache TTL refreshes it every few minutes regardless.
-
+      # last_used_at is updated only on a cache miss, keeping the DB off the
+      # hot path; the cache TTL bounds its staleness.
       return user
 
-  # Cache miss. Short-lived session, same rationale as validate_api_key().
+  # Short-lived session, as in validate_api_key().
   from ...database import SessionFactory
 
   _owns_session = db_session is None
@@ -331,9 +304,7 @@ def validate_api_key_with_graph(
       logger.debug(f"API key rejected: owning user inactive: {api_key_hash[:8]}...")
       return None
 
-    # Key-level scope restriction, applied before the user-level access check.
-    # A scope mismatch is a durable property of (key, graph), so the negative
-    # access decision is safe to cache for every carriage path.
+    # A scope mismatch is durable for (key, graph), so the denial is cacheable.
     if not _key_scope_allows(key_record.graph_id, graph_id):
       logger.debug(
         f"API key rejected: scoped to another graph: {api_key_hash[:8]}... -> {graph_id}"
@@ -399,9 +370,7 @@ def validate_api_key_with_graph(
         user_data,
         is_active=key_record.is_active,
       )
-      # Do not persist a positive decision reached under allow_deprovisioned:
-      # a later default-path request would read it and grant access to a graph
-      # that is gone.
+      # Never cache a grant reached under allow_deprovisioned.
       if not allow_deprovisioned:
         _safe_cache_call("cache_graph_access", api_key_hash, graph_id, has_access=True)
     except Exception as e:

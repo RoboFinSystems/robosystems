@@ -14,14 +14,11 @@ from .graph import (
 from .otel.setup import get_tracer, setup_telemetry, shutdown_telemetry
 
 __all__ = [
-  # Graph database
   "GraphOperation",
-  # Authentication
   "get_current_user",
   "get_graph_repository",
   "get_optional_user",
   "get_tracer",
-  # Tracing
   "setup_telemetry",
   "shutdown_telemetry",
   "validate_api_key",

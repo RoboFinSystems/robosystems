@@ -33,14 +33,13 @@ class SSEConnectionManager:
   """
 
   def __init__(self):
-    self.connections: dict[str, set[str]] = {}  # operation_id -> set of connection_ids
+    self.connections: dict[str, set[str]] = {}  # operation_id -> connection_ids
     self.connection_queues: dict[
       str, asyncio.Queue
-    ] = {}  # connection_key -> event queue
-    self.user_connections: dict[str, set[str]] = {}  # user_id -> set of connection_keys
+    ] = {}  # "{operation_id}:{connection_id}" -> event queue
+    self.user_connections: dict[str, set[str]] = {}  # user_id -> queue keys
     self._lock = asyncio.Lock()
 
-    # Runtime-tunable via SSM.
     self.max_connections_per_user = TuningConfig.get_sse_max_connections_per_user()
     self.queue_size = TuningConfig.get_sse_queue_size()
 
@@ -65,7 +64,7 @@ class SSEConnectionManager:
             metrics = get_endpoint_metrics()
             metrics.record_sse_connection_rejected(user_id, "connection_limit_exceeded")
           except Exception:
-            pass  # Don't fail if metrics aren't available
+            pass
 
           raise HTTPException(
             status_code=429,
@@ -94,14 +93,13 @@ class SSEConnectionManager:
         metrics = get_endpoint_metrics()
         metrics.record_sse_connection_opened(user_id, operation_id)
       except Exception:
-        pass  # Don't fail if metrics aren't available
+        pass
 
       return queue
 
   async def remove_connection(
     self, operation_id: str, connection_id: str, user_id: str | None = None
   ):
-    """Remove an SSE connection and its queue."""
     async with self._lock:
       if operation_id in self.connections:
         self.connections[operation_id].discard(connection_id)
@@ -128,7 +126,7 @@ class SSEConnectionManager:
         metrics = get_endpoint_metrics()
         metrics.record_sse_connection_closed(user_id or "unknown", operation_id)
       except Exception:
-        pass  # Don't fail if metrics aren't available
+        pass
 
   async def broadcast_event(self, operation_id: str, event: SSEEvent):
     """Fan an event out to every open connection for an operation.
@@ -182,18 +180,16 @@ class SSEConnectionManager:
       except Exception:
         pass  # Metrics are best-effort, never break SSE delivery
 
-    # Clean up failed connections outside the lock to avoid deadlock
+    # Outside the lock: remove_connection takes it.
     for connection_id in failed_connections:
       await self._handle_connection_error(operation_id, connection_id, "Queue overflow")
       await self.remove_connection(operation_id, connection_id)
 
   async def get_active_connections(self, operation_id: str) -> int:
-    """Get number of active connections for an operation."""
     async with self._lock:
       return len(self.connections.get(operation_id, []))
 
   async def get_user_connection_count(self, user_id: str) -> int:
-    """Get number of active connections for a user."""
     async with self._lock:
       return len(self.user_connections.get(user_id, []))
 
@@ -213,15 +209,13 @@ class SSEConnectionManager:
         )
         self.connection_queues[queue_key].put_nowait(error_event)
       except Exception:
-        pass  # Queue might be full or closed, best effort only
+        pass
 
 
-# Global connection manager
 _connection_manager: SSEConnectionManager | None = None
 
 
 def get_connection_manager() -> SSEConnectionManager:
-  """Get the global connection manager instance."""
   global _connection_manager
   if _connection_manager is None:
     _connection_manager = SSEConnectionManager()
@@ -240,8 +234,7 @@ async def create_sse_stream_starlette(
   streams live events until a terminal event or client disconnect, at
   which point it emits `stream_end`. Idle periods emit `keepalive`.
 
-  A stream for an operation belonging to another user yields an `error`
-  event and stops — the caller's identity is the access check.
+  Streams are owner-only: another user's operation yields an `error` event.
   """
   import uuid
 
@@ -295,7 +288,7 @@ async def create_sse_stream_starlette(
       yield {"event": "error", "data": json.dumps({"error": e.detail})}
       return
 
-    # Pub/sub relays events emitted by worker processes into this one.
+    # Relays events emitted by worker processes into this one.
     try:
       from .redis_subscriber import get_redis_subscriber
 
@@ -310,11 +303,10 @@ async def create_sse_stream_starlette(
       OperationStatus.COMPLETED,
       OperationStatus.FAILED,
       OperationStatus.CANCELLED,
-      # Paused runs are off the queue: nothing more arrives until a resume,
-      # and the resumed run is streamed by reconnecting.
+      # Nothing more arrives until a resume; the client reconnects then.
       OperationStatus.AWAITING_INPUT,
     ]:
-      # Already terminal: replay the whole history and close.
+      # Nothing live will arrive: replay the whole history and close.
       all_events = await event_storage.get_events(operation_id, from_sequence=0)
       for event in all_events:
         if request and await request.is_disconnected():
@@ -457,8 +449,8 @@ def create_sse_response_starlette(
     create_sse_stream_starlette(operation_id, user_id, from_sequence, request),
     headers={
       "Cache-Control": "no-cache",
-      "X-Accel-Buffering": "no",  # Disable nginx buffering
+      "X-Accel-Buffering": "no",
       "Connection": "keep-alive",
     },
-    ping=30,  # Automatic keep-alive ping every 30 seconds
+    ping=30,
   )

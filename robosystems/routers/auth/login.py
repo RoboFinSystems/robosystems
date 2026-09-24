@@ -1,6 +1,5 @@
 """User login endpoint."""
 
-# Third-party
 from fastapi import (
   APIRouter,
   Depends,
@@ -18,8 +17,6 @@ from ...middleware.otel.metrics import endpoint_metrics_decorator, record_auth_m
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import AuthResponse, LoginRequest
 from ...models.api.common import COMMON_ERROR_RESPONSES, ErrorResponse
-
-# Local imports
 from ...models.core import User
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
@@ -28,7 +25,6 @@ from ...security.input_validation import sanitize_string, validate_email
 from ...security.password import PasswordSecurity
 from .utils import require_password_auth, verify_password_async
 
-# Create router for login endpoint
 router = APIRouter()
 
 
@@ -52,16 +48,13 @@ async def login(
   rate_limit: None = Depends(auth_rate_limit_dependency),
   _password_auth: None = Depends(require_password_auth),
 ) -> AuthResponse:
-  # Validate and sanitize input
   if not validate_email(request.email):
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email format"
     )
 
-  # Sanitize email to prevent any injection attempts
   sanitized_email = sanitize_string(request.email, max_length=254)
 
-  # Record auth attempt
   record_auth_metrics(
     endpoint="/v1/auth/login",
     method="POST",
@@ -69,13 +62,10 @@ async def login(
     success=False,  # Will update on success
   )
 
-  # Get client details for security logging
   client_ip = fastapi_request.client.host if fastapi_request.client else None
   user_agent = fastapi_request.headers.get("user-agent")
 
-  # Advanced authentication protection checks
   if client_ip:
-    # Check if IP is currently blocked
     is_blocked, block_time = AdvancedAuthProtection.check_ip_blocked(client_ip)
     if is_blocked:
       SecurityAuditLogger.log_security_event(
@@ -91,7 +81,6 @@ async def login(
         risk_level="high",
       )
 
-      # Add security headers to response
       security_headers = AdvancedAuthProtection.get_security_headers(client_ip)
       for header, value in security_headers.items():
         response.headers[header] = value
@@ -102,7 +91,6 @@ async def login(
         headers=security_headers,
       )
 
-    # Check progressive delay
     delay = AdvancedAuthProtection.get_progressive_delay(client_ip)
     if delay > 0:
       SecurityAuditLogger.log_security_event(
@@ -124,15 +112,12 @@ async def login(
         headers={"Retry-After": str(delay)},
       )
 
-  # Find user by email
   user = User.get_by_email(sanitized_email, session)
   if not user or not user.password_hash or not user.is_active:
     # Burn one bcrypt verification so this branch costs the same wall-clock
-    # as a wrong password against a real account (~0.7 s at cost 14). The
-    # generic message below is only generic if the timing is too.
+    # as a wrong password; the generic message is only generic if timing is too.
     await PasswordSecurity.equalize_verify_timing()
 
-    # Record failed attempt for protection system
     if client_ip:
       AdvancedAuthProtection.record_auth_attempt(
         ip_address=client_ip,
@@ -154,7 +139,6 @@ async def login(
     )
 
   if not await verify_password_async(request.password, user.password_hash):
-    # Record failed attempt for protection system
     if client_ip:
       AdvancedAuthProtection.record_auth_attempt(
         ip_address=client_ip,
@@ -176,12 +160,10 @@ async def login(
       status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
     )
 
-  # Passkey MFA interposes exactly here: password verified, session not yet
-  # minted. Enrolled users always get challenged (enrolling opts you in);
-  # unenrolled privileged users are forced through enrollment only when the
-  # enforcement flag is on. Flag off → this block is inert and login is
-  # byte-identical to the pre-passkey behavior. The OIDC lane never passes
-  # through this endpoint, so IdP-governed sessions are never challenged.
+  # Passkey MFA interposes here: password verified, session not yet minted.
+  # Enrolled users are always challenged; unenrolled privileged users are
+  # forced through enrollment only when the enforcement flag is on. OIDC
+  # sessions never pass through this endpoint.
   if env.PASSKEYS_ENABLED:
     from ...models.core import UserPasskey
     from ...operations.passkeys import user_requires_mfa_enrollment
@@ -224,16 +206,13 @@ async def login(
         mfa_token=mfa_token,
       )
 
-  # Extract device fingerprint for token binding
   device_fingerprint = extract_device_fingerprint(fastapi_request)
 
-  # Create JWT token with device binding
   jwt_token = create_jwt_token(str(user.id), device_fingerprint, session=session)
 
   # Bearer-token auth rather than a cookie, so the same token works across all
   # three app domains.
 
-  # Record successful auth
   record_auth_metrics(
     endpoint="/v1/auth/login",
     method="POST",
@@ -242,13 +221,12 @@ async def login(
     user_id=user.id,
   )
 
-  # Record successful login for protection system
   if client_ip:
     AdvancedAuthProtection.record_auth_attempt(
       ip_address=client_ip, success=True, email=sanitized_email, user_agent=user_agent
     )
 
-  # Audit symmetry with the OIDC and passkey lanes, which already log this.
+  # Audit symmetry with the OIDC and passkey lanes.
   SecurityAuditLogger.log_auth_success(
     user_id=str(user.id),
     ip_address=client_ip,
@@ -256,7 +234,6 @@ async def login(
     auth_method="password",
   )
 
-  # Calculate token expiry and refresh threshold
   from ...config.constants import JWT_EXPIRY_HOURS, TOKEN_GRACE_PERIOD_MINUTES
 
   expires_in = int(JWT_EXPIRY_HOURS * 3600)

@@ -44,11 +44,7 @@ def _block_shared_repository(graph_id: str) -> None:
 
 
 def _enforce_graph_access(graph_id: str, require_write: bool = False) -> None:
-  """Check graph lifecycle and subscription status.
-
-  Wraps require_graph_access with a fresh session. Raises HTTPException
-  if the graph is suspended, deprovisioned, or subscription is non-active.
-  """
+  """require_graph_access on a fresh session."""
   from robosystems.middleware.billing.enforcement import require_graph_access
 
   session = SessionFactory()

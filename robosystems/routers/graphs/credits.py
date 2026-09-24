@@ -39,11 +39,9 @@ def get_graph_access(
   from robosystems.middleware.graph.utils import MultiTenantUtils
   from robosystems.models.core.user.user_repository import UserRepository
 
-  # Determine graph type and validate access accordingly
   identity = MultiTenantUtils.get_graph_identity(graph_id)
 
   if identity.is_shared_repository:
-    # Check shared repository access
     if not UserRepository.user_has_access(str(current_user.id), graph_id, db):
       logger.warning(
         f"User {current_user.id} attempted access to shared repository {graph_id} without permission"
@@ -53,8 +51,7 @@ def get_graph_access(
         detail=f"Access denied to shared repository {graph_id}",
       )
 
-    # For shared repositories, create a synthetic GraphUser object
-    # since credits system expects GraphUser interface
+    # Synthetic GraphUser: the credits system expects that interface.
     user_graph = GraphUser()
     user_graph.user_id = str(current_user.id)
     user_graph.graph_id = graph_id
@@ -80,8 +77,7 @@ def get_graph_access(
     if user_graph:
       return user_graph
 
-    # Implicit access (org owner/admin, or parent-graph grant on a subgraph):
-    # synthesize the GraphUser interface the credits system expects.
+    # Implicit access (org owner/admin, or parent grant on a subgraph).
     user_graph = GraphUser()
     user_graph.user_id = str(current_user.id)
     user_graph.graph_id = graph_id
@@ -89,7 +85,6 @@ def get_graph_access(
     return user_graph
 
   else:
-    # Unknown graph type
     logger.error(f"Unknown graph type for graph_id: {graph_id}")
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
@@ -133,7 +128,6 @@ async def get_credit_summary(
     return CreditSummaryResponse(**summary)
 
   except HTTPException:
-    # Re-raise HTTP exceptions (like our 404)
     raise
   except Exception as e:
     logger.error(f"Failed to get credit summary for graph {graph_id}: {e}")
@@ -200,19 +194,15 @@ async def get_credit_transactions(
   )
 
   try:
-    # Determine if this is a repository or user graph
     identity = MultiTenantUtils.get_graph_identity(graph_id)
     user_repo_credits = None
 
     if identity.is_shared_repository:
-      # Query repository credit transactions
-      # Find the user's repository credit pool
       user_repo_credits = UserRepositoryCredits.get_user_repository_credits(
         str(current_user.id), graph_id, db
       )
 
       if not user_repo_credits:
-        # No credit pool found for this user/repository
         return DetailedTransactionsResponse(
           transactions=[],
           summary={},
@@ -221,21 +211,17 @@ async def get_credit_transactions(
           date_range={"start": start_date or "all", "end": end_date or "all"},
         )
 
-      # Build query for repository transactions
       query = db.query(UserRepositoryCreditTransaction).filter(
         UserRepositoryCreditTransaction.credit_pool_id == user_repo_credits.id
       )
     else:
-      # Build query for user graph transactions
       query = db.query(GraphCreditTransaction).filter(
         GraphCreditTransaction.graph_id == graph_id
       )
 
-    # Apply filters
     start_dt = None
     end_dt = None
 
-    # Get the transaction model class for filtering
     TransactionModel = (
       UserRepositoryCreditTransaction
       if identity.is_shared_repository
@@ -253,7 +239,6 @@ async def get_credit_transactions(
       end_dt = datetime.fromisoformat(end_date)
       query = query.filter(TransactionModel.created_at <= end_dt)
 
-    # Filter by operation type if specified
     if operation_type:
       from sqlalchemy import cast
       from sqlalchemy.dialects.postgresql import JSONB
@@ -263,10 +248,8 @@ async def get_credit_transactions(
         == operation_type
       )
 
-    # Get total count before pagination
     total_count = query.count()
 
-    # Apply pagination and ordering
     transactions = (
       query.order_by(TransactionModel.created_at.desc())
       .offset(offset)
@@ -274,12 +257,10 @@ async def get_credit_transactions(
       .all()
     )
 
-    # Get summary by operation type
     from sqlalchemy import cast
     from sqlalchemy.dialects.postgresql import JSONB
 
     if identity.is_shared_repository:
-      # For repositories, use repository credit transactions
       from ...models.core.user.user_repository_credits import (
         UserRepositoryCreditTransactionType,
       )
@@ -303,7 +284,6 @@ async def get_credit_transactions(
         == UserRepositoryCreditTransactionType.CONSUMPTION.value,
       )
 
-      # Apply same date filters to summary
       if start_dt is not None:
         summary_query = summary_query.filter(
           UserRepositoryCreditTransaction.created_at >= start_dt
@@ -315,7 +295,6 @@ async def get_credit_transactions(
 
       summary_results = summary_query.group_by(operation_type_expr).all()
     else:
-      # For user graphs, use graph credit transactions
       operation_type_expr = cast(GraphCreditTransaction.transaction_metadata, JSONB)[
         "operation_type"
       ].astext
@@ -333,7 +312,6 @@ async def get_credit_transactions(
         == CreditTransactionType.CONSUMPTION.value,
       )
 
-      # Apply same date filters to summary
       if start_dt is not None:
         summary_query = summary_query.filter(
           GraphCreditTransaction.created_at >= start_dt
@@ -345,12 +323,11 @@ async def get_credit_transactions(
 
       summary_results = summary_query.group_by(operation_type_expr).all()
 
-    # Build response
     transaction_list = []
     for txn in transactions:
       metadata = txn.get_metadata()
 
-      # Repository transactions don't have these fields, use None as default
+      # Repository transactions lack these fields.
       transaction_list.append(
         EnhancedCreditTransactionResponse(
           id=txn.id,
@@ -366,7 +343,6 @@ async def get_credit_transactions(
         )
       )
 
-    # Build summary
     summary = {}
     for row in summary_results:
       if row.operation_type:  # Skip null operation types
@@ -383,7 +359,6 @@ async def get_credit_transactions(
           else None,
         )
 
-    # Determine date range
     date_range = {"start": start_date or "all", "end": end_date or "all"}
 
     return DetailedTransactionsResponse(

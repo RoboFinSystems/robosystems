@@ -1,31 +1,14 @@
-"""Workflow-playbook MCP tools.
+"""Workflow playbooks: guidance only, no data and no database access.
 
-These tools carry no data and touch no database. Their only job is to
-**inform a multi-step workflow** — the canonical tool sequence, the
-decisions an operator has to make, and the gotchas that aren't obvious
-from any single tool's schema. They are the generic-workflow layer of the
-three-layer guidance model: generic playbook → per-tenant procedure doc →
-per-tenant data.
-
-Why a tool and not external docs: the content is **version-locked to the
-deployed build**. It ships in the same image as the tools it describes, so
-it can never drift from the actual tool names, schemas, or sequence — and
-it reaches every MCP client (Claude Code/Cowork *and* raw JSON-RPC
-callers), not just ones that happen to load a skill file.
-
-``get-close-playbook`` is the first one (the month-end close is the
-highest-value, fully-working MCP workflow today). It's a pure read, so it
-stays available on read-only graphs — an operator can learn the workflow
-before they have write access.
+Served as a tool rather than docs so the text ships with, and cannot drift
+from, the tools it describes, and reaches every MCP client.
 """
 
 from typing import Any
 
-# ── Playbook content (version-locked to this build) ──────────────────────────
-#
-# Authoritative source for the generic close workflow. Edit here when the
-# tool surface changes; keep tenant-specific steps in the per-tenant
-# procedures document, not in this constant.
+# ── Playbook content ─────────────────────────────────────────────────────────
+# Edit with the tool surface; tenant-specific steps belong in the tenant's
+# procedures document, not here.
 
 _RECURRING_SEQUENCE: list[str] = [
   "get-fiscal-calendar — orient: read closed_through, close_target, "

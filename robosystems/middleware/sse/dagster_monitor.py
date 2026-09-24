@@ -1,24 +1,5 @@
-"""Dagster run monitor for SSE progress tracking.
-
-Submits Dagster runs and polls their status, emitting SSE events as it
-goes. Designed to run as a FastAPI background task.
-
-Usage:
-    from starlette.background import BackgroundTasks
-
-    @router.post("/graphs")
-    async def create_graph(request: CreateGraphRequest, background_tasks: BackgroundTasks):
-        operation_id = await create_operation_response(...)
-
-        background_tasks.add_task(
-            run_and_monitor_dagster_job,
-            job_name="create_graph_job",
-            run_config=request.to_dagster_config(),
-            operation_id=operation_id,
-        )
-
-        return {"operation_id": operation_id}
-"""
+"""Submits Dagster runs and polls them, emitting SSE events; entered from a
+FastAPI background task via `run_and_monitor_dagster_job`."""
 
 import asyncio
 import logging
@@ -31,7 +12,7 @@ from robosystems.middleware.sse.event_storage import EventType, SSEEventStorage
 logger = logging.getLogger(__name__)
 
 
-# Dagster run status mapping
+# Dagster status -> (SSE status, progress percent)
 DAGSTER_STATUS_MAP = {
   "QUEUED": ("pending", 0),
   "NOT_STARTED": ("pending", 0),
@@ -51,9 +32,8 @@ class DagsterRunMonitor:
     dagster_host: str | None = None,
     dagster_port: int | None = None,
     poll_interval: float = 2.0,
-    max_poll_time: float = 3600.0,  # 1 hour default timeout
+    max_poll_time: float = 3600.0,
   ):
-    """Host and port default to the configured Dagster webserver."""
     self.dagster_host = dagster_host or env.DAGSTER_HOST
     self.dagster_port = dagster_port or env.DAGSTER_PORT
     self.poll_interval = poll_interval
@@ -62,13 +42,11 @@ class DagsterRunMonitor:
     self._client = None
 
   def _get_client(self):
-    """Get or create DagsterGraphQLClient."""
     if self._client is None:
       try:
         from dagster_graphql import DagsterGraphQLClient
 
-        # Explicit timeout: the library default is 300 s, and these calls run
-        # on the API event loop — a hung webserver must not hold every tenant.
+        # The library default is 300 s; a hung webserver must not hold the API.
         self._client = DagsterGraphQLClient(
           hostname=self.dagster_host,
           port_number=self.dagster_port,
@@ -123,7 +101,6 @@ class DagsterRunMonitor:
     job_name: str,
     run_id: str,
   ):
-    """Emit an operation_started event when Dagster job begins."""
     try:
       self.event_storage.store_event_sync(
         operation_id,
@@ -145,7 +122,6 @@ class DagsterRunMonitor:
     progress_percent: float | None = None,
     details: dict[str, Any] | None = None,
   ):
-    """Emit a progress event to the SSE stream."""
     event_data = {
       "message": message,
       "progress_percent": progress_percent,
@@ -167,12 +143,8 @@ class DagsterRunMonitor:
     operation_id: str,
     result: dict[str, Any],
   ):
-    """Emit a completion event to the SSE stream.
-
-    Merges the result the Dagster job recorded on the operation metadata
-    (graph_id, tables_materialized, …) with the monitoring result
-    (run_id, elapsed_time).
-    """
+    """Emit completion, merging the result the job recorded on the operation
+    metadata with the monitoring result."""
     try:
       stored_result = self.event_storage.get_operation_result_sync(operation_id) or {}
 
@@ -195,7 +167,6 @@ class DagsterRunMonitor:
     error: str,
     error_details: dict[str, Any] | None = None,
   ):
-    """Emit an error event to the SSE stream."""
     try:
       self.event_storage.store_event_sync(
         operation_id,
@@ -292,9 +263,6 @@ class DagsterRunMonitor:
       await asyncio.sleep(self.poll_interval)
 
 
-# Module-level convenience functions
-
-
 async def run_and_monitor_dagster_job(
   job_name: str,
   operation_id: str,
@@ -303,13 +271,11 @@ async def run_and_monitor_dagster_job(
 ) -> dict[str, Any]:
   """Submit a Dagster job and monitor it to completion via SSE.
 
-  The entry point for FastAPI background tasks; returns the final run
-  status and emits an error event before re-raising on failure.
+  Returns the final run status; on failure emits an error event and re-raises.
   """
   monitor = DagsterRunMonitor()
 
   try:
-    # Sync HTTP submit; runs as a background task on the API loop, so offload.
     run_id = await asyncio.to_thread(monitor.submit_job, job_name, run_config, tags)
 
     await monitor.emit_started(operation_id, job_name, run_id)
@@ -344,8 +310,7 @@ def build_graph_job_config(
 ) -> dict[str, Any]:
   """Build the Dagster `run_config` for a graph operation job.
 
-  `kwargs` are applied as config to every op in the job that takes it —
-  several of these jobs have more than one.
+  `kwargs` become the config of every configurable op in the job.
   """
   job_to_ops: dict[str, list[str]] = {
     "create_graph_job": ["create_graph_database", "create_graph_subscription"],

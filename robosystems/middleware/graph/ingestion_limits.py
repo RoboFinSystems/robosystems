@@ -1,20 +1,8 @@
-"""Graph content limit checking for materialization operations.
+"""Limits that block materialization.
 
-Two limit categories, both hard-blocking at the write path:
-
-1. **Aggregate storage GB** — the tier-scoped product cap. Bounds
-   instance disk COGS, drives upgrades. Hit at the write path so
-   customers can't pile up data they then can't promote.
-2. **Per-operation row caps** (`max_rows_per_copy`,
-   `max_single_table_rows`) — OOM guardrails set per instance class.
-   Internal engineering limits, not part of the published tier.
-
-Both block materialization when exceeded.
-
-Data sources:
-- Row counts: GraphFile.duckdb_row_count (tracked at upload time)
-- Storage: Graph API get_database_info() -> size_bytes (file stat, instant)
-- Tier limits: GraphTierConfig.get_graph_limits(tier)
+Aggregate instance storage is the tier's product cap; the per-operation row
+caps (`max_rows_per_copy`, `max_single_table_rows`) are internal OOM
+guardrails, not part of the published tier.
 """
 
 import asyncio
@@ -31,11 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class IngestionLimitChecker:
-  """Check graph content limits before materialization operations.
-
-  Uses tier configuration from graph.yml and existing data from
-  graph_files table (duckdb_row_count) for enforcement.
-  """
+  """Check graph content limits before materialization."""
 
   @classmethod
   async def check_materialization_limits(
@@ -45,14 +29,7 @@ class IngestionLimitChecker:
     tier: str,
     table_name: str | None = None,
   ) -> dict[str, Any]:
-    """Check if materialization would exceed any tier limit.
-
-    Hard-blocks on three checks:
-
-    - ``max_rows_per_copy`` — OOM guardrail across all pending tables
-    - ``max_single_table_rows`` — OOM guardrail per table
-    - aggregate instance storage GB — product cap
-    """
+    """Check pending rows (total and per table) and aggregate instance storage."""
     limits = GraphTierConfig.get_graph_limits(tier)
     errors: list[str] = []
     warnings: list[str] = []
@@ -60,10 +37,8 @@ class IngestionLimitChecker:
     pending_rows = cls._get_pending_row_counts(db, graph_id)
     total_pending_rows = sum(pending_rows.values())
 
-    # Check max_rows_per_copy (hard limit — prevents OOM during materialization).
-    # Fallbacks here and below track ladybug-standard, the smallest tier, for the
-    # reason given in GraphTierConfig.get_graph_limits: a fallback larger than the
-    # actual box defeats the guardrail.
+    # Fallbacks track ladybug-standard, the smallest tier: a fallback larger
+    # than the actual box defeats the guardrail.
     max_rows_per_copy = limits.get("max_rows_per_copy", 1_000_000)
     if total_pending_rows > max_rows_per_copy:
       errors.append(
@@ -77,12 +52,8 @@ class IngestionLimitChecker:
           f"Table '{tbl_name}' has {row_count:,} rows, exceeding max_single_table_rows limit ({max_single_table:,})"
         )
 
-    # Check aggregate instance storage cap (hard limit — product cap, blocks
-    # COGS overruns). Measured at instance scope: a subgraph shares its
-    # parent's box, so the denominator must be the whole instance — measuring
-    # the subgraph's own prefix excludes the parent and sibling databases.
-    # The row-count checks above stay scoped to the requested graph_id, whose
-    # own staging tables are what materialize.
+    # Storage is measured for the whole instance (a subgraph shares its
+    # parent's box); the row checks stay scoped to graph_id's own tables.
     storage_check = await cls.check_instance_storage(
       db, cls._resolve_instance_scope(db, graph_id), tier
     )
@@ -91,8 +62,7 @@ class IngestionLimitChecker:
 
     return {
       "allowed": len(errors) == 0,
-      # Unverifiable storage is a transient condition, not a limit violation;
-      # callers surface it as retryable (503) rather than over-limit (413).
+      # Unverifiable storage: callers answer 503, not 413.
       "retryable": storage_check.get("retryable", False),
       "errors": errors,
       "warnings": warnings,
@@ -112,13 +82,7 @@ class IngestionLimitChecker:
 
   @classmethod
   def _resolve_instance_scope(cls, db: Session, graph_id: str) -> str:
-    """Map a graph id to the id owning its instance.
-
-    The storage breakdown's ``{id}_*`` prefix scan only covers the given id
-    and its children, so a subgraph id must be widened to its parent before
-    the instance cap is measured. Mirrors the resolution the ``/limits``
-    reporting path performs.
-    """
+    """A subgraph widens to its parent: the storage scan covers ``{id}_*`` only."""
     from robosystems.models.core import Graph
 
     graph = Graph.get_by_id(graph_id, db)
@@ -133,31 +97,17 @@ class IngestionLimitChecker:
     graph_id: str,
     tier: str,
   ) -> dict[str, Any]:
-    """Check aggregate storage usage against the tier's instance cap.
-
-    Sums storage for the parent graph and all subgraphs. Returns
-    ``allowed=False`` with a populated ``errors`` list when the
-    aggregate exceeds the tier's ``instance_storage_limit_gb``. This is
-    a hard product cap, blocking at the write path (folded into
-    :meth:`check_materialization_limits`).
-    """
+    """Aggregate storage for the graph and its subgraphs against the tier cap."""
     limit_gb = GraphTierConfig.get_instance_storage_limit_gb(tier)
     warn_pct = (
       GraphTierConfig.get_graph_limits(tier).get("warn_at_percentage", 80) / 100
     )
 
-    # One call covers the whole instance. Subgraphs always live on their
-    # parent's instance, so the breakdown's `{id}_*` scan already includes
-    # them — plus the memory database, vector indexes and staging file. This
-    # also replaces the previous N+1 (one Graph API call per subgraph), and
-    # catches on-disk leftovers the graph registry has lost track of.
+    # One call covers the instance: subgraphs, memory database, vector
+    # indexes, staging, and on-disk leftovers the registry lost track of.
     breakdown = await cls._get_storage_breakdown(graph_id)
     if breakdown is None:
-      # Usage could not be measured. This used to fall through as 0.0 GB /
-      # healthy / allowed, which silently disabled the cap exactly when the
-      # instance was struggling. "Cannot verify" is not "empty": the write
-      # path fails closed, and `retryable` tells callers to surface it as a
-      # transient condition rather than a limit violation.
+      # Fail closed: "cannot verify" is not "empty".
       return {
         "allowed": False,
         "retryable": True,
@@ -177,8 +127,6 @@ class IngestionLimitChecker:
     items = cls.label_orphans(db, graph_id, breakdown.get("items", []))
     total_bytes = breakdown.get("total_bytes", 0)
 
-    # Roll the itemized view up per database for the summary shape, so a
-    # database's graph/vector/staging bytes appear as one line.
     bytes_by_database: dict[str, int] = {}
     for item in items:
       item_id = item.get("id") or graph_id
@@ -190,27 +138,20 @@ class IngestionLimitChecker:
       {
         "graph_id": gid,
         "is_parent": gid == graph_id,
-        # Same reason as total_storage_gb below: 2 decimals of MB bottoms out
-        # at ~10.24 KB, which is larger than a freshly created subgraph.
+        # 2 decimals of MB would round a fresh subgraph to zero.
         "size_mb": round(size / (1024**2), 6),
       }
       for gid, size in sorted(bytes_by_database.items())
     ]
 
-    # Not rounded to 2 decimals. A tenant's whole footprint is routinely tens
-    # of megabytes against a 20 GB cap, and 0.01 GB is a ~10.7 MB quantum —
-    # enough to erase the entire number and to disagree visibly with the
-    # itemized bytes below it. 9 decimals is byte-level.
+    # Byte-level precision: a 0.01 GB quantum (~10.7 MB) can erase a whole
+    # tenant footprint.
     total_storage_gb = round((total_bytes or 0) / (1024**3), 9)
 
-    # The cap is enforced on durable bytes only. A blue-green build briefly
-    # holds a `-wip` copy the size of the database it is rebuilding — counting
-    # it would fail a tenant near the cap in the middle of every materialize,
-    # and a `-wip` left by a crashed build would block the very operation
-    # (materialization) that rebuilds and reclaims it. Orphans stay counted:
-    # they are durable, and blocking on them surfaces registry drift instead
-    # of hiding it. `total_storage_gb` above stays the full real-disk figure —
-    # it is what metering records and what the itemized list sums to.
+    # The cap counts durable bytes only: a blue-green `-wip` copy would fail a
+    # tenant near the cap mid-materialize, and a crashed build's leftover would
+    # block the materialize that reclaims it. Orphans stay counted.
+    # `total_storage_gb` remains the full disk figure that metering records.
     from robosystems.graph_api.core.storage_breakdown import TYPE_TRANSIENT
 
     transient_bytes = sum(
@@ -223,7 +164,6 @@ class IngestionLimitChecker:
       round((enforced_storage_gb / limit_gb) * 100, 1) if limit_gb > 0 else 0
     )
 
-    # Determine status
     if usage_percentage > 100:
       instance_status = "over_limit"
     elif usage_percentage >= warn_pct * 100:
@@ -256,21 +196,11 @@ class IngestionLimitChecker:
   def label_orphans(
     cls, db: Session, graph_id: str, items: list[dict[str, Any]]
   ) -> list[dict[str, Any]]:
-    """Re-label items belonging to subgraphs the graph registry has no row for.
+    """Re-label items of subgraphs the graph registry has no row for as orphans.
 
-    ``compute_storage_breakdown`` runs on the instance and classifies every
-    ``{parent}_*`` database as a subgraph, because from there a live subgraph
-    and the remains of a deleted one look identical. Only here, with a session
-    in hand, can the two be told apart.
-
-    That mattered beyond tidiness: ``/usage`` sums these items by type while
-    the subgraphs page sums by registered id, so leftovers inflated one number
-    and not the other, and the same graph reported two different subgraph
-    footprints. The pass covers a deleted subgraph's whole estate — its
-    database, its vector index, and any staging file it accumulated before
-    staging was closed to subgraphs — not just the ``.lbug`` file. Bytes are
-    untouched — this is a labelling pass, and orphans still occupy disk and
-    still count against the cap.
+    The instance can't tell a live subgraph from a deleted one's remains;
+    only the registry can. Covers the whole estate (database, vector index,
+    staging file). Bytes are untouched, so orphans still count against the cap.
     """
     from robosystems.graph_api.core.storage_breakdown import (
       TYPE_ORPHAN,
@@ -282,12 +212,7 @@ class IngestionLimitChecker:
     subgraph_shaped_types = (TYPE_SUBGRAPH, TYPE_VECTORS, TYPE_STAGING)
 
     def _subgraph_estate(item: dict[str, Any]) -> bool:
-      """Whether this item's id names a subgraph (live or deleted).
-
-      The ``_memory`` exclusion matters for the vectors arm: the memory
-      database's index is ``{parent}_memory``, which is subgraph-shaped but
-      never registered, and must not read as an orphan.
-      """
+      """``{parent}_memory`` is subgraph-shaped but never registered."""
       item_id = item.get("id") or ""
       return (
         item.get("type") in subgraph_shaped_types
@@ -308,8 +233,7 @@ class IngestionLimitChecker:
         .all()
       }
     except Exception as e:
-      # A labelling refinement is not worth failing a storage check over —
-      # the cap reads bytes, which this pass does not touch.
+      # Labelling only; not worth failing a storage check over.
       logger.debug(f"Could not resolve registered subgraphs for {graph_id}: {e}")
       return items
 
@@ -322,10 +246,7 @@ class IngestionLimitChecker:
 
   @classmethod
   def _get_pending_row_counts(cls, db: Session, graph_id: str) -> dict[str, int]:
-    """Get row counts for all active files in a graph, grouped by table name.
-
-    Uses GraphFile.duckdb_row_count which is populated at upload/staging time.
-    """
+    """Row counts per table from GraphFile.duckdb_row_count, set at upload time."""
     results = (
       db.query(
         GraphTable.table_name,
@@ -345,14 +266,7 @@ class IngestionLimitChecker:
 
   @classmethod
   async def _get_storage_breakdown(cls, graph_id: str) -> dict[str, Any] | None:
-    """Get itemized disk usage for a graph, from the Graph API.
-
-    Covers the graph's own database plus its memory database, subgraph
-    databases, vector indexes and staging file — all real disk on the same
-    instance. The pieces outside the primary ``.lbug`` frequently outweigh
-    it, so measuring only that file undercounts the cap denominator and
-    therefore real COGS.
-    """
+    """Itemized disk usage from the Graph API, or None when unavailable."""
     from robosystems.graph_api.client.factory import GraphClientFactory
 
     try:

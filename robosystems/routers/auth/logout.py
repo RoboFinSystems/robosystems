@@ -12,7 +12,6 @@ from ...middleware.auth.jwt import revoke_jwt_token
 from ...middleware.rate_limits import logout_rate_limit_dependency
 from ...models.api.common import COMMON_ERROR_RESPONSES
 
-# Create router for logout endpoint
 router = APIRouter()
 
 
@@ -28,16 +27,14 @@ async def logout(
   _rate_limit: None = Depends(logout_rate_limit_dependency),
 ) -> dict:
   try:
-    # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
+    # Read directly so it doesn't show in the OpenAPI params.
     authorization = request.headers.get("authorization")
     jwt_token = None
     if authorization and authorization.startswith("Bearer "):
       jwt_token = authorization[7:]  # Remove "Bearer " prefix
 
-    # If there's a valid JWT token, revoke it
     if jwt_token:
       try:
-        # Revoke token using the revocation system
         revoke_success = revoke_jwt_token(jwt_token, reason="user_logout")
 
         if revoke_success:

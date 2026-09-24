@@ -31,21 +31,16 @@ __all__ = [
   "ConnectionPattern",
   "Engine",
   "GraphCategory",
-  # Base abstractions
   "GraphEngineInterface",
   "GraphOperation",
   "GraphRouter",
   "GraphTier",
-  # Type definitions
   "NodeType",
-  # Graph components
   "Repository",
   "RepositoryType",
-  # Repository wrapper
   "UniversalRepository",
   "create_universal_repository",
   "create_universal_repository_with_auth",
-  # Primary interface (recommended)
   "get_graph_repository",
   "get_graph_router",
   "get_repository_type",

@@ -1,10 +1,5 @@
-"""Getting a finished report to the people who read it.
-
-Direct shares, the publish lists that address a group of recipients, and
-the blocked-source-graph pair that is a recipient's exit from cross-graph
-sharing. Read the current block list through the `blockedSourceGraphs`
-GraphQL field.
-"""
+"""Report distribution: direct shares, publish lists, and the blocked-source-graph
+pair that is a recipient's exit from cross-graph sharing."""
 
 from __future__ import annotations
 
@@ -283,17 +278,9 @@ async def share_report_op(
       raise HTTPException(status_code=409, detail=str(e))
 
   def _mark_recipients_stale(envelope) -> None:
-    # A share writes rows into each recipient's OLTP schema, but their
-    # LadybugDB projection only picks the report up on a rebuild — so without
-    # this, delivery depends on the recipient happening to have unrelated
-    # ledger activity of their own. Mark each recipient that actually
-    # received a copy. (`roboinvestor-maturity.md` D1, delivery half.)
-    #
-    # Read as a dict, not attributes: `wrap_completed` normalizes the
-    # command's Pydantic result through `model_dump(mode="json")` before the
-    # hook ever sees it. Attribute access here is not a type error — it
-    # silently reads as absent, which is how this callback first shipped
-    # doing nothing at all.
+    # The recipient's LadybugDB projection only picks the report up on a
+    # rebuild, so mark each recipient that received a copy stale. The result
+    # is read as a dict via `_result_payload` (see its docstring).
     for item in _result_payload(envelope).get("results") or []:
       if item.get("status") == "shared":
         mark_graph_stale(item["target_graph_id"], "report_shared_in")
@@ -368,9 +355,7 @@ async def revoke_report_share_op(
   return await _dispatch(ctx, _runner, cache, on_fresh_success=_mark_recipient_stale)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Publish Lists
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Publish Lists ────────────────────────────────────────────────────────────
 
 
 @router.post(
@@ -543,8 +528,7 @@ async def add_publish_list_members_op(
     body=body,
   )
 
-  # The inherited AddMembersRequest is what the ops function takes; unwrap
-  # our dispatch wrapper back to it so the ops layer sees the same shape.
+  # Unwrap to the AddMembersRequest shape the ops function takes.
   add_body = AddMembersRequest(target_graph_ids=body.target_graph_ids)
 
   def _runner():
@@ -616,13 +600,9 @@ async def remove_publish_list_member_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Blocked source graphs — the recipient's exit from cross-graph sharing
-#
-# Sharing is authorized capability-style: whoever holds this graph's id can
-# copy a published report in. These two operations are how a recipient
-# declines. Read the current list via the `blockedSourceGraphs` GraphQL field.
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Blocked source graphs ────────────────────────────────────────────────────
+# Sharing is capability-style (holding this graph's id lets anyone copy a report
+# in); these two operations are how a recipient declines.
 
 
 @router.post(
@@ -679,31 +659,22 @@ async def block_source_graph_op(
         raise HTTPException(status_code=403, detail=str(e))
 
   def _finish_purge(envelope) -> None:
-    # Only a purge changes queryable content, and the OLAP projection is a
-    # full rebuild from OLTP — a block on its own has nothing to re-project,
-    # so it must not trigger one.
+    # Only a purge changes queryable content; a block alone must not trigger
+    # a full re-projection.
     payload = _result_payload(envelope)
     if not payload.get("purged_report_count"):
       return
     mark_graph_stale(graph_id, "shared_reports_purged")
-    # The purge deleted rows; the senders' stored publications are still in
-    # this graph's bundle prefix until this runs. It belongs here rather than
-    # in the command because the rows must be committed first — deleting an
-    # artifact for a purge that rolled back would destroy a live report's
-    # publication, while an orphan object is recoverable.
+    # Delete the senders' stored publications only after the purge commits:
+    # an orphan object is recoverable, a deleted live publication is not.
     delete_report_artifacts(graph_id, list(payload.get("purged_report_ids") or []))
 
   return await _dispatch(ctx, _runner, cache, on_fresh_success=_finish_purge)
 
 
-# Hand-mounted rather than declared through `_registrar`, deliberately. Every
-# registrar spec is also published as an MCP tool
-# (`middleware/mcp/tools/registrar.py`), and shared reports land in the
-# recipient's schema where their own AI operators read them as ordinary data.
-# An operator that could lift a block — acting on text a blocked sender wrote —
-# would hand that sender the undo button for their own exclusion. `block` is
-# hand-written for the same reason; keeping both halves off the tool surface is
-# the point, not an accident of style.
+# Hand-mounted, not `_registrar`, on purpose: registrar specs are published as
+# MCP tools, and an operator reading a blocked sender's shared text must not be
+# able to lift the block. `block` is hand-written for the same reason.
 @router.post(
   "/unblock-source-graph",
   response_model=OperationEnvelope[BlockedSourceGraphResponse],

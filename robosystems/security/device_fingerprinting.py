@@ -8,15 +8,14 @@ from fastapi import Request
 
 
 def extract_device_fingerprint(request: Request) -> dict[str, Any]:
-  """Extract device fingerprint components from a request."""
-  # client_ip is deliberately excluded: it changes too often (VPNs, mobile
-  # networks, load-balancer routing) to be a stable binding signal.
+  """Extract device fingerprint components from a request.
 
+  The client IP is deliberately excluded: it changes too often to bind to.
+  """
   fingerprint = {
     "user_agent": request.headers.get("user-agent", ""),
     "accept_language": request.headers.get("accept-language", ""),
     "accept_encoding": request.headers.get("accept-encoding", ""),
-    # Browser client hints are stable per browser/device
     "sec_ch_ua": request.headers.get("sec-ch-ua", ""),
     "sec_ch_ua_platform": request.headers.get("sec-ch-ua-platform", ""),
   }
@@ -25,8 +24,6 @@ def extract_device_fingerprint(request: Request) -> dict[str, Any]:
 
 
 def create_device_hash(fingerprint: dict[str, Any]) -> str:
-  """Create a SHA256 hash from device fingerprint components."""
-  # Sort keys for consistent hashing
   fingerprint_json = json.dumps(fingerprint, sort_keys=True)
   return hashlib.sha256(fingerprint_json.encode()).hexdigest()
 
@@ -50,17 +47,14 @@ def is_fingerprint_suspicious(
   changes = []
   suspicious = False
 
-  # User agent changes are highly suspicious - indicates different browser/device
   if stored_fingerprint.get("user_agent") != current_fingerprint.get("user_agent"):
     changes.append("user_agent_changed")
     suspicious = True
 
-  # Browser client hints changing is suspicious
   if stored_fingerprint.get("sec_ch_ua") != current_fingerprint.get("sec_ch_ua"):
     changes.append("browser_hints_changed")
     suspicious = True
 
-  # Less critical changes (could be legitimate)
   if stored_fingerprint.get("accept_language") != current_fingerprint.get(
     "accept_language"
   ):

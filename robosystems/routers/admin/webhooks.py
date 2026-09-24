@@ -16,11 +16,8 @@ router = APIRouter(prefix="/admin/v1/webhooks", tags=["admin"])
 
 
 class _WebhookLogContext:
-  """Lightweight stand-in for Dagster's OpExecutionContext.
-
-  The billing handler functions use context.log.info/warning/error.
-  This routes those calls to our standard logger.
-  """
+  """Stand-in for Dagster's OpExecutionContext: routes the billing handlers'
+  context.log calls to the standard logger."""
 
   def __init__(self) -> None:
     self.log = logger
@@ -33,16 +30,11 @@ async def _process_webhook_event(
 ) -> None:
   """Process a Stripe webhook event directly (no Dagster).
 
-  Runs inside the request so the HTTP status reflects the processing
-  outcome — Stripe only redelivers on a non-2xx response, so raising here
-  is what makes retry semantics real. Uses its own database session to keep
-  handler transaction boundaries independent of the request session.
-
-  Raises:
-      SubscriptionNotFoundError: the event references a subscription we have
-          no record of yet (e.g. invoice events racing checkout completion).
-          The event is left unmarked so the redelivery can succeed.
-      Exception: any handler failure; the event is left unmarked.
+  Runs in the request so the HTTP status reflects the outcome: Stripe only
+  redelivers on non-2xx. Uses its own session so handler transactions are
+  independent of the request's. Any raise (including SubscriptionNotFoundError
+  when invoice events race checkout completion) leaves the event unmarked so
+  redelivery can succeed.
   """
   from robosystems.dagster.jobs.billing import (
     SubscriptionNotFoundError,
@@ -103,7 +95,6 @@ async def _process_webhook_event(
       )
       return
 
-    # Mark as processed after successful handling
     BillingAuditLog.mark_webhook_processed(
       event_id, "stripe", event_type, event_data, db
     )
@@ -175,7 +166,6 @@ async def handle_stripe_webhook(
     client_ip = request.client.host if request.client else "unknown"
 
     if not signature:
-      # Log security event for missing signature
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTHORIZATION_DENIED,
         user_id=None,
@@ -197,7 +187,6 @@ async def handle_stripe_webhook(
     except ValueError as e:
       logger.error(f"Invalid webhook signature: {e}")
 
-      # Log security event for failed signature verification
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTHORIZATION_DENIED,
         user_id=None,
@@ -218,7 +207,6 @@ async def handle_stripe_webhook(
     event_data = event.get("data", {}).get("object", {})
     event_id = event.get("id")
 
-    # Check idempotency
     if BillingAuditLog.is_webhook_processed(event_id, "stripe", db):
       logger.info(
         f"Webhook event already processed: {event_id}",

@@ -1,13 +1,4 @@
-"""Event Block MCP read tools for agents.
-
-Two hand-written read tools:
-
-1. ``get-event-block``   — fetch one event envelope by id.
-2. ``list-event-blocks`` — list events with optional filters.
-
-The write tools (``create-event-block``, ``update-event-block``) are
-auto-generated from their OperationSpec entries in the registrar pipeline.
-"""
+"""Event Block reads; the writes are registrar-generated."""
 
 from __future__ import annotations
 
@@ -219,15 +210,8 @@ class ListEventBlocksTool:
 
 
 def _summarize_event_block(envelope) -> dict[str, Any]:
-  """Project a full Event Block envelope to a lean summary shape.
-
-  Drops the per-event metadata blob (which carries the full QB
-  transaction payload, including all entries + line_items + every
-  `qb_*` field) and replaces it with surface signals: amount, currency,
-  description, and a `has_discharge_link` flag derived from
-  ``discharges_event_id``. Identity, type, status, and occurrence info
-  are preserved.
-  """
+  """Drop the metadata blob (the full source-system payload) for a few
+  surface fields and a `has_discharge_link` flag."""
   occurred_at = envelope.occurred_at
   return {
     "id": envelope.id,

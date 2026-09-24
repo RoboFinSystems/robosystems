@@ -18,9 +18,8 @@ from robosystems.operations.search import get_search_service
 
 logger = logging.getLogger(__name__)
 
-# Per-tier burst limiting (GRAPH_SEARCH) applies to ALL graphs, shared or
-# user-owned — OpenSearch is a shared resource. The shared-repo per-plan
-# volume caps in _check_search_rate_limit run on top for SEC et al.
+# Per-tier burst limiting applies to all graphs (OpenSearch is shared); the
+# shared-repo per-plan caps in _check_search_rate_limit run on top.
 router = APIRouter(
   prefix="/search",
   tags=["Search"],
@@ -60,7 +59,7 @@ async def _check_search_rate_limit(
     create_async_redis_client,
   )
 
-  # Check user has access to the shared repo (subscriptions are on the parent)
+  # Subscriptions live on the parent repository.
   from robosystems.database import SessionFactory
   from robosystems.middleware.rate_limits import DualLayerRateLimiter
   from robosystems.models.core.user.user_repository import UserRepository

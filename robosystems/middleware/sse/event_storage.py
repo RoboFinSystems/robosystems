@@ -18,8 +18,6 @@ from robosystems.logger import logger
 
 
 class EventType(str, Enum):
-  """Standard event types for SSE operations."""
-
   OPERATION_STARTED = "operation_started"
   OPERATION_PROGRESS = "operation_progress"
   OPERATION_ERROR = "operation_error"
@@ -30,7 +28,6 @@ class EventType(str, Enum):
   OPERATION_AWAITING_INPUT = "operation_awaiting_input"
   OPERATION_RESUMED = "operation_resumed"
 
-  # Custom event types for specific operations
   GRAPH_CREATION_PROGRESS = "graph_creation_progress"
   AGENT_ANALYSIS_PROGRESS = "agent_analysis_progress"
   BACKUP_PROGRESS = "backup_progress"
@@ -38,8 +35,6 @@ class EventType(str, Enum):
 
 
 class OperationStatus(str, Enum):
-  """Operation status values."""
-
   PENDING = "pending"
   RUNNING = "running"
   # Paused at a checkpoint, off the queue, waiting for a human answer.
@@ -61,15 +56,9 @@ class SSEEvent:
   sequence_number: int = 0
 
   def to_sse_format(self) -> str:
-    """Render as a raw `event:`/`data:` SSE frame.
-
-    Route handlers should stream through sse-starlette's
-    `EventSourceResponse` instead; this is for callers that need the
-    wire text directly.
-    """
+    """Render as a raw SSE frame; routes stream via `EventSourceResponse`."""
     lines = []
     lines.append(f"event: {self.event_type.value}")
-    # Ensure JSON is on a single line for SSE format
     data_json = json.dumps(
       {
         "operation_id": self.operation_id,
@@ -82,16 +71,13 @@ class SSEEvent:
       default=str,
     )
     lines.append(f"data: {data_json}")
-    # SSE format requires double newline to terminate event
     return "\n".join(lines) + "\n\n"
 
   def to_dict(self) -> dict[str, Any]:
-    """Convert to dictionary for JSON serialization."""
     return asdict(self)
 
   @classmethod
   def from_dict(cls, data: dict[str, Any]) -> "SSEEvent":
-    """Create SSEEvent from dictionary."""
     return cls(**data)
 
 
@@ -113,7 +99,6 @@ class OperationMetadata:
   input_request: dict[str, Any] | None = None
 
   def to_dict(self) -> dict[str, Any]:
-    """Convert to dictionary for JSON serialization."""
     return asdict(self)
 
 
@@ -122,16 +107,13 @@ _TERMINAL_FAILURE_STATUSES = frozenset(
 )
 _TERMINAL_STATUSES = _TERMINAL_FAILURE_STATUSES | {OperationStatus.COMPLETED}
 
-# The lifecycle only moves forward, and the first terminal status is final:
-# a late or duplicate OPERATION_ERROR after OPERATION_COMPLETED (at-least-once
-# delivery, a reaper racing a finishing worker) must neither flip a finished
-# operation to failed nor evict the idempotency envelope of an operation that
-# succeeded — a client retry under the same key would then dispatch it again.
+# Status only moves forward and the first terminal status is final, so a late
+# duplicate error can't flip a completed operation or evict its idempotency
+# envelope (a retry would then dispatch it again).
 _STATUS_PRIORITY = {
   OperationStatus.PENDING: 0,
   OperationStatus.RUNNING: 1,
-  # Same rung as RUNNING so a run can pause and resume any number of times;
-  # the terminal rung still wins over both.
+  # Same rung as RUNNING, so a run can pause and resume repeatedly.
   OperationStatus.AWAITING_INPUT: 1,
   OperationStatus.COMPLETED: 2,
   OperationStatus.FAILED: 2,
@@ -191,13 +173,8 @@ def _transition_allowed(current: OperationStatus, new: OperationStatus) -> bool:
 
 
 async def _invalidate_idempotency(operation_id: str) -> None:
-  """Evict the idempotency envelope an async route cached for this operation.
-
-  A route that enqueues work caches a ``pending`` envelope under the caller's
-  Idempotency-Key for 24h. Once the operation fails or is cancelled that
-  envelope would replay ``pending`` to every retry with the same key, so the
-  terminal transition evicts it. Imported lazily: the operations module
-  pulls in FastAPI, which this store must not require.
+  """Evict the cached ``pending`` envelope of a failed or cancelled operation,
+  so a retry dispatches again. Lazy import: this store must not need FastAPI.
   """
   from robosystems.middleware.operations import invalidate_operation_idempotency
 
@@ -224,12 +201,10 @@ def _invalidate_idempotency_sync(operation_id: str) -> None:
 
 
 class SSEEventStorage:
-  """Redis-backed SSE event store with automatic TTL expiry.
+  """Redis-backed SSE event store with TTL expiry.
 
-  Events are kept per operation in a sorted set keyed by sequence number,
-  so a reconnecting client can replay from where it left off. Every stored
-  event is also published to `sse:events:{operation_id}` so an API process
-  sees events emitted by a worker process.
+  Events sit in a per-operation sorted set by sequence number for replay,
+  and are published to `sse:events:{operation_id}` for other processes.
   """
 
   def __init__(
@@ -237,10 +212,9 @@ class SSEEventStorage:
     redis_client: redis_async.Redis | None = None,
     default_ttl: int = CacheDefaults.LONG,
   ):
-    """Initialize event storage, defaulting to the shared SSE Valkey DB."""
     self._redis_client = redis_client
     self._async_redis = None
-    self._sync_redis = None  # For sync methods (background tasks)
+    self._sync_redis = None
     self.default_ttl = default_ttl
 
     self.event_prefix = "sse:operation:events:"
@@ -248,7 +222,6 @@ class SSEEventStorage:
     self.sequence_prefix = "sse:operation:seq:"
 
   async def _get_redis(self) -> redis_async.Redis:
-    """Get async Redis client, creating if needed."""
     if self._async_redis is None:
       if self._redis_client:
         self._async_redis = self._redis_client
@@ -257,7 +230,6 @@ class SSEEventStorage:
     return self._async_redis
 
   async def _get_default_async_redis(self) -> redis_async.Redis:
-    """Get default async Redis client from environment."""
     from robosystems.config.valkey_registry import (
       ValkeyDatabase,
       create_async_redis_client,
@@ -268,7 +240,6 @@ class SSEEventStorage:
     return client
 
   def _get_sync_redis(self) -> Redis:
-    """Get synchronous Redis client for background tasks."""
     if self._sync_redis is None:
       from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
 
@@ -277,7 +248,6 @@ class SSEEventStorage:
     return self._sync_redis
 
   def generate_operation_id(self) -> str:
-    """Generate a unique operation ID (prefixed ULID)."""
     from robosystems.utils.ulid import generate_prefixed_ulid
 
     return generate_prefixed_ulid("op")
@@ -407,7 +377,6 @@ class SSEEventStorage:
     channel = f"sse:events:{operation_id}"
     redis.publish(channel, json.dumps(event.to_dict()))
 
-    # For sync version, update metadata directly
     self._update_operation_metadata_sync(operation_id, event_type, data)
 
     logger.debug(
@@ -420,8 +389,6 @@ class SSEEventStorage:
     self, operation_id: str, event_type: EventType, data: dict[str, Any]
   ):
     """Sync counterpart to `_update_operation_metadata`."""
-    # Progress events carry no status and would race a concurrent
-    # completed/failed event, overwriting the terminal status.
     if event_type not in _STATUS_CHANGING_EVENTS:
       return
 
@@ -441,14 +408,11 @@ class SSEEventStorage:
         metadata_dict = json.loads(str(metadata_json))
         metadata = OperationMetadata(**metadata_dict)
 
-        # Never move a status backwards, and never past its first terminal
-        # state (see `_transition_allowed`).
         new_status = _next_status(event_type)
 
         if new_status and _transition_allowed(metadata.status, new_status):
-          # Evict only on the transition *into* failure, and only once this
-          # write actually lands: a lost CAS below means another event won
-          # the transition, possibly a completion.
+          # Evict only once this write lands: a lost CAS means another event,
+          # possibly a completion, won the transition.
           entering_failure = (
             new_status in _TERMINAL_FAILURE_STATUSES
             and metadata.status not in _TERMINAL_STATUSES
@@ -487,12 +451,8 @@ class SSEEventStorage:
   def update_operation_result_sync(
     self, operation_id: str, result: dict[str, Any]
   ) -> None:
-    """Merge result data into an operation's metadata.
-
-    Dagster jobs call this to record the graph_id and other results before
-    finishing, so the OPERATION_COMPLETED event the monitor emits later
-    carries them.
-    """
+    """Merge result data into an operation's metadata, so the completion
+    event the monitor emits later carries it."""
     redis = self._get_sync_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
     metadata_json = redis.get(metadata_key)
@@ -506,7 +466,6 @@ class SSEEventStorage:
 
     metadata.updated_at = datetime.now(UTC).isoformat()
 
-    # Merge new result with existing result_data (if any)
     if metadata.result_data:
       metadata.result_data.update(result)
     else:
@@ -547,11 +506,9 @@ class SSEEventStorage:
   ):
     """Advance operation status from a status-changing event.
 
-    WATCH-based optimistic locking plus a status priority ladder keeps
-    concurrent writers from downgrading a terminal status.
+    Progress events are skipped: they carry no status and would race a
+    concurrent terminal write.
     """
-    # Progress events carry no status and would race a concurrent
-    # completed/failed event, overwriting the terminal status.
     if event_type not in _STATUS_CHANGING_EVENTS:
       return
 
@@ -570,8 +527,6 @@ class SSEEventStorage:
       metadata_dict = json.loads(metadata_json)
       metadata = OperationMetadata(**metadata_dict)
 
-      # Never move a status backwards, and never past its first terminal
-      # state (see `_transition_allowed`).
       new_status = _next_status(event_type)
 
       if new_status and _transition_allowed(metadata.status, new_status):
@@ -655,7 +610,6 @@ class SSEEventStorage:
   async def cancel_operation(
     self, operation_id: str, reason: str = "Cancelled by user"
   ):
-    """Cancel an operation by storing a cancellation event."""
     await self.store_event(
       operation_id, EventType.OPERATION_CANCELLED, {"reason": reason}
     )
@@ -671,7 +625,6 @@ class SSEEventStorage:
 
     async for key in redis.scan_iter(match=f"{self.metadata_prefix}*"):
       if not await redis.exists(key):
-        # Already expired
         continue
 
       ttl = await redis.ttl(key)
@@ -683,12 +636,10 @@ class SSEEventStorage:
     return cleaned
 
 
-# Global instance (initialized lazily)
 _event_storage: SSEEventStorage | None = None
 
 
 def get_event_storage() -> SSEEventStorage:
-  """Get the global event storage instance."""
   global _event_storage
   if _event_storage is None:
     _event_storage = SSEEventStorage()

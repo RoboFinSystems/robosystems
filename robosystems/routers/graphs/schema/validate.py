@@ -192,13 +192,10 @@ relationships:
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> SchemaValidationResponse:
-  # Initialize robustness components
   operation_logger = get_operation_logger()
 
-  # Record operation start and get timing
   operation_start_time = time.time()
 
-  # Record operation start metrics
   record_operation_metric(
     operation_type=OperationType.SCHEMA_OPERATION,
     status=OperationStatus.SUCCESS,  # Will be updated on completion
@@ -213,14 +210,12 @@ relationships:
     },
   )
 
-  # Initialize timeout for error handling
   operation_timeout = None
 
   try:
-    # Check circuit breaker before processing
     circuit_breaker.check_circuit(current_user.id, "schema_validation")
 
-    # Set up timeout coordination for schema validation (can be complex)
+    # Validation can be complex.
     operation_timeout = timeout_coordinator.calculate_timeout(
       operation_type="validation",
       complexity_factors={
@@ -230,9 +225,6 @@ relationships:
       },
     )
 
-    # Schema operations are included - no credit consumption
-
-    # Log the request with operation logger
     operation_logger.log_external_service_call(
       endpoint="/v1/graphs/schema/validate",
       service_name="schema_manager",
@@ -248,7 +240,6 @@ relationships:
 
     manager = CustomSchemaManager()
 
-    # Parse based on format
     format_map = {
       "json": SchemaFormat.JSON,
       "yaml": SchemaFormat.YAML,
@@ -257,7 +248,6 @@ relationships:
 
     schema_format = format_map.get(request.format.lower(), SchemaFormat.JSON)
 
-    # Attempt to parse the schema with timeout coordination
     def validate_schema_sync():
       errors = []
       warnings = []
@@ -265,7 +255,6 @@ relationships:
       valid = False
 
       try:
-        # Convert string to dict if needed
         if isinstance(request.schema_definition, str):
           if schema_format == SchemaFormat.YAML:
             schema_dict = yaml.safe_load(request.schema_definition)
@@ -274,11 +263,9 @@ relationships:
         else:
           schema_dict = request.schema_definition
 
-        # Parse and validate
         schema = manager.create_from_dict(schema_dict)
         valid = True
 
-        # Collect statistics
         stats = {
           "nodes": len(schema.nodes),
           "relationships": len(schema.relationships),
@@ -291,14 +278,12 @@ relationships:
           ),
         }
 
-        # Check for warnings
         if len(schema.nodes) == 0:
           warnings.append("Schema has no nodes defined")
 
         if len(schema.relationships) > 0 and len(schema.nodes) == 0:
           warnings.append("Schema has relationships but no nodes")
 
-        # Check node connectivity
         connected_nodes = set()
         for rel in schema.relationships:
           if rel.from_node != "*":
@@ -319,13 +304,11 @@ relationships:
 
       return valid, errors, warnings, stats
 
-    # Run validation with timeout
     valid, errors, warnings, stats = await asyncio.wait_for(
       asyncio.get_event_loop().run_in_executor(None, validate_schema_sync),
       timeout=operation_timeout,
     )
 
-    # Check compatibility if requested
     compatibility = None
     if request.check_compatibility and valid:
       try:
@@ -350,11 +333,9 @@ relationships:
     if warnings and valid:
       message += f" with {len(warnings)} warning(s)"
 
-    # Record successful operation
     operation_duration_ms = (time.time() - operation_start_time) * 1000
     circuit_breaker.record_success(current_user.id, "schema_validation")
 
-    # Record success metrics
     record_operation_metric(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.SUCCESS,
@@ -380,11 +361,9 @@ relationships:
     )
 
   except TimeoutError:
-    # Record circuit breaker failure and timeout metrics
     circuit_breaker.record_failure(current_user.id, "schema_validation")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record timeout failure metrics
     record_operation_metric(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
@@ -407,11 +386,9 @@ relationships:
       detail="Schema validation timed out",
     )
   except HTTPException:
-    # Record circuit breaker failure for HTTP exceptions
     circuit_breaker.record_failure(current_user.id, "schema_validation")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record failure metrics
     record_operation_metric(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
@@ -427,11 +404,9 @@ relationships:
     )
     raise
   except Exception as e:
-    # Record circuit breaker failure for general exceptions
     circuit_breaker.record_failure(current_user.id, "schema_validation")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record failure metrics
     record_operation_metric(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,

@@ -24,20 +24,13 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExport
 
 from robosystems.config import env
 
-# Initialize logger
 logger = logging.getLogger(__name__)
 
 
 class QueryParamRedactionSpanProcessor(SpanProcessor):
-  """Redact sensitive query parameters from URL-bearing span attributes.
-
-  The ASGI auto-instrumentation records the full request target — including
-  the query string — into ``http.url``/``http.target`` (old semconv) and
-  ``url.full``/``url.query`` (new semconv). OTel's built-in ``redact_url``
-  only covers cloud-signature params, not ours (``token``, ``api_key``, …),
-  so credential-bearing query strings would otherwise be exported to the
-  tracing backend. Runs the same redaction list as request logging
-  (``middleware/logging.py``) over those attributes at span start.
+  """Redact sensitive query parameters from URL-bearing span attributes at
+  span start, using the request-logging list. OTel's own ``redact_url`` does
+  not cover our parameter names.
   """
 
   _FULL_URL_ATTRS = ("http.url", "url.full", "http.target")
@@ -60,44 +53,34 @@ class QueryParamRedactionSpanProcessor(SpanProcessor):
         span.set_attribute(attr, redact_sensitive_query_params(value))
 
 
-# Configuration
-# OTEL enabled by default for staging/prod, otherwise disabled
 tracing_enabled = getattr(env, "OTEL_ENABLED", env.is_staging() or env.is_production())
 service_name = env.OTEL_SERVICE_NAME
-otlp_endpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT.replace("4317", "4318")  # Use HTTP port
+otlp_endpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT.replace("4317", "4318")  # HTTP port
 resource_attributes = (
   env.OTEL_RESOURCE_ATTRIBUTES if hasattr(env, "OTEL_RESOURCE_ATTRIBUTES") else ""
 )
 
-# Global variables to track instrumentation state
 _tracer_provider: TracerProvider | None = None
 _meter_provider: MeterProvider | None = None
 _instrumentation_enabled = False
 
 
 def _create_resource() -> Resource:
-  """Create OpenTelemetry resource with service information."""
   try:
     service_version = pkg_version("robosystems")
   except Exception:
-    # Fallback if package version can't be determined
     service_version = "unknown"
 
   attributes = {
     "service.name": service_name,
     "service.version": service_version,
     "deployment.environment": env.ENVIRONMENT,
-    # Unique per-process identity so each task/replica maps to its own
-    # Prometheus series (via the `instance` label). Without it, every ECS
-    # task exports its cumulative OTel counters into one shared series;
-    # rate() then misreads the interleaved per-task samples as constant
-    # counter resets and inflates request/event volume metrics massively.
-    # On ECS Fargate the hostname is the unique container ID.
+    # One series per task: interleaved cumulative counters from several tasks
+    # read as constant resets and inflate rate(). Hostname = container ID.
     "service.instance.id": socket.gethostname(),
   }
 
-  # Parse additional resource attributes from environment
-  # (an explicit service.instance.id here still wins, since it overrides above)
+  # An explicit service.instance.id here overrides the one above.
   if resource_attributes:
     try:
       for attr in resource_attributes.split(","):
@@ -111,7 +94,6 @@ def _create_resource() -> Resource:
 
 
 def setup_telemetry(app: FastAPI) -> None:
-  """Sets up OpenTelemetry for the application."""
   global _tracer_provider, _meter_provider, _instrumentation_enabled
 
   if not tracing_enabled:
@@ -128,13 +110,12 @@ def setup_telemetry(app: FastAPI) -> None:
     _tracer_provider = TracerProvider(resource=resource)
     trace.set_tracer_provider(_tracer_provider)
 
-    # Initialize MeterProvider
     metric_readers = []
-    # Allow localhost endpoint in production/staging when using sidecar pattern (ADOT collector)
+    # localhost is the ADOT sidecar in prod/staging, so allowed there.
     should_export_metrics = otlp_endpoint and (
       otlp_endpoint != "http://localhost:4318"
       or env.is_staging()
-      or env.is_production()  # Allow localhost in prod/staging (sidecar pattern)
+      or env.is_production()
     )
 
     if should_export_metrics:
@@ -145,7 +126,7 @@ def setup_telemetry(app: FastAPI) -> None:
         )
         metric_reader = PeriodicExportingMetricReader(
           exporter=otlp_metric_exporter,
-          export_interval_millis=60000,  # Export every 60 seconds (reduced from 30s to cut costs)
+          export_interval_millis=60000,
         )
         metric_readers.append(metric_reader)
         logger.info(f"OTLP metrics exporter configured for endpoint: {otlp_endpoint}")
@@ -156,7 +137,6 @@ def setup_telemetry(app: FastAPI) -> None:
         "Skipping OTLP metrics exporter for localhost endpoint in dev environment (use observability profile)"
       )
 
-    # Custom histogram bucket views for better percentile accuracy
     from robosystems.middleware.otel.metrics import get_metric_views
 
     _meter_provider = MeterProvider(
@@ -166,25 +146,22 @@ def setup_telemetry(app: FastAPI) -> None:
     )
     metrics.set_meter_provider(_meter_provider)
 
-    # Configure exporters
     exporters = []
 
     # Span export is its own switch: the collector only carries a traces
     # pipeline once a backend exists, so this stays off by default.
     traces_enabled = env.OTEL_TRACES_ENABLED
 
-    # Allow localhost endpoint in production/staging when using sidecar pattern (ADOT collector)
     should_export_traces = (
       traces_enabled
       and otlp_endpoint
       and (
         otlp_endpoint != "http://localhost:4318"
         or env.is_staging()
-        or env.is_production()  # Allow localhost in prod/staging (sidecar pattern)
+        or env.is_production()
       )
     )
 
-    # Add OTLP exporter if endpoint is configured and appropriate for environment
     if should_export_traces:
       try:
         otlp_exporter = OTLPSpanExporter(
@@ -204,26 +181,22 @@ def setup_telemetry(app: FastAPI) -> None:
         "OTLP trace exporter disabled - only metrics are enabled for this environment"
       )
 
-    # Add console exporter for development only if explicitly enabled
     if env.is_development() and env.OTEL_CONSOLE_EXPORT:
       exporters.append(ConsoleSpanExporter())
 
-    # Redact sensitive query params before any exporter sees the span
+    # Before any exporter sees the span.
     _tracer_provider.add_span_processor(QueryParamRedactionSpanProcessor())
 
-    # Add span processors
     for exporter in exporters:
       _tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
 
-    # Instrument FastAPI (exclude health check endpoints from auto-instrumentation
-    # to prevent misleading metrics from high-frequency ALB health checks)
+    # Excludes ALB health checks.
     FastAPIInstrumentor.instrument_app(
       app,
       tracer_provider=_tracer_provider,
       excluded_urls="status,health",
     )
 
-    # Instrument other libraries
     RequestsInstrumentor().instrument()
     Psycopg2Instrumentor().instrument()
 
@@ -232,17 +205,14 @@ def setup_telemetry(app: FastAPI) -> None:
 
   except Exception as e:
     logger.error(f"Failed to setup OpenTelemetry: {e}")
-    # Graceful degradation - continue without tracing
 
 
 def get_tracer(name: str | None = None):
-  """Returns a tracer instance."""
   tracer_name = name or __name__
   return trace.get_tracer(tracer_name)
 
 
 def shutdown_telemetry() -> None:
-  """Gracefully shutdown OpenTelemetry components."""
   global _tracer_provider, _meter_provider, _instrumentation_enabled
 
   if _instrumentation_enabled:

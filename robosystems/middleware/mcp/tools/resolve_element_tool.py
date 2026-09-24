@@ -1,12 +1,5 @@
-"""Resolve Element MCP tool — thin wrapper over
-``adapters.sec.mcp.element_resolver.resolve_sec_element``.
-
-The resolution logic (SEC canonical concept matching, text-label
-fallback, query-hint construction) is SEC-specific and lives in the SEC
-adapter alongside ``resolve_sec_report``. The tool itself is
-manifest-gated (``has_semantic_enrichment``) so it only registers on
-graphs where the required SEC artifacts are present.
-"""
+"""resolve-element: a wrapper over the SEC adapter's ``resolve_sec_element``,
+registered only where the manifest declares ``has_semantic_enrichment``."""
 
 from __future__ import annotations
 

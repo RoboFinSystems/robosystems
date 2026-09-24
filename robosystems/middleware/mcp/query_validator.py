@@ -1,9 +1,4 @@
-"""
-Graph Query Validator for MCP Tools.
-
-Validates queries before execution to prevent common errors, detect Neo4j patterns,
-and provide helpful suggestions for AI agents.
-"""
+"""Pre-execution Cypher checks for MCP: syntax, Neo4j-only patterns, and hints."""
 
 import logging
 import re
@@ -28,7 +23,6 @@ class ValidationResult:
 class GraphQueryValidator:
   """Validates graph database queries before execution."""
 
-  # Compiled regex patterns for performance
   COMPILED_PATTERNS = {
     "unbounded_path": re.compile(r"\[(?:\s*:\w+\s*)?\*\s*\]"),
     "where_in_match": re.compile(r"MATCH\s*\([^)]*\bWHERE\b[^)]*\)", re.IGNORECASE),
@@ -133,7 +127,6 @@ class GraphQueryValidator:
     if schema:
       self._parse_schema(schema)
     else:
-      # Use known SEC labels if no schema provided
       self._node_labels = self.SEC_NODE_LABELS.copy()
       self._rel_labels = self.SEC_RELATIONSHIP_LABELS.copy()
 
@@ -148,7 +141,6 @@ class GraphQueryValidator:
       elif item_type in ["relationship", "rel"]:
         self._rel_labels.add(label)
 
-      # Extract properties
       if "properties" in item and isinstance(item["properties"], list):
         prop_names = {p.get("name", "") for p in item["properties"] if p.get("name")}
         if prop_names:
@@ -158,47 +150,38 @@ class GraphQueryValidator:
     """Validate a graph database query."""
     result = ValidationResult(is_valid=True)
 
-    # Skip validation for metadata queries
     if self._is_metadata_query(query):
       return result
 
-    # 1. Basic syntax validation
     syntax_errors = self._validate_basic_syntax(query)
     result.errors.extend(syntax_errors)
 
-    # 2. Neo4j pattern detection and fixes
     neo4j_issues = self._detect_neo4j_patterns(query)
     for issue in neo4j_issues:
       result.errors.append(issue["error"])
       result.suggestions.append(issue["fix"])
       result.neo4j_patterns_found.append(issue["pattern"])
 
-    # 3. Schema validation (if available)
     if self._node_labels or self._rel_labels:
       schema_warnings = self._validate_against_schema(query)
       result.warnings.extend(schema_warnings)
 
-    # 4. Performance validation
     perf_warnings, complexity = self._analyze_performance(query)
     result.warnings.extend(perf_warnings)
     result.complexity_score = complexity
 
-    # 5. SEC/Financial best practices
     best_practices = self._check_financial_best_practices(query)
     result.warnings.extend(best_practices)
 
-    # 6. Parameter validation
     if params:
       param_issues = self._validate_parameters(query, params)
       result.warnings.extend(param_issues)
 
-    # 7. Generate fixed query if there are Neo4j patterns
     if result.neo4j_patterns_found:
       result.fixed_query = self.suggest_query_fix(query, result)
 
     result.is_valid = len(result.errors) == 0
 
-    # Add severity to result
     if result.complexity_score > 50:
       result.warnings.append(
         f"⚠️ High complexity query (score: {result.complexity_score}). Consider optimization."
@@ -216,12 +199,10 @@ class GraphQueryValidator:
     """Validate basic query syntax."""
     errors = []
 
-    # Check for empty query
     if not query.strip():
       errors.append("Query cannot be empty")
       return errors
 
-    # Check for unclosed quotes
     single_quotes = query.count("'")
     double_quotes = query.count('"')
     if single_quotes % 2 != 0:
@@ -229,7 +210,6 @@ class GraphQueryValidator:
     if double_quotes % 2 != 0:
       errors.append("Unclosed double quote detected")
 
-    # Check for unmatched parentheses
     open_parens = query.count("(")
     close_parens = query.count(")")
     if open_parens != close_parens:
@@ -237,7 +217,6 @@ class GraphQueryValidator:
         f"Unmatched parentheses: {open_parens} opening, {close_parens} closing"
       )
 
-    # Check for unmatched brackets
     open_brackets = query.count("[")
     close_brackets = query.count("]")
     if open_brackets != close_brackets:
@@ -251,7 +230,6 @@ class GraphQueryValidator:
     """Detect Neo4j-specific patterns that will fail in graph database."""
     issues = []
 
-    # Pattern 1: Unbounded paths
     for match in self.COMPILED_PATTERNS["unbounded_path"].finditer(query):
       issues.append(
         {
@@ -261,7 +239,6 @@ class GraphQueryValidator:
         }
       )
 
-    # Pattern 2: WHERE inside MATCH
     for match in self.COMPILED_PATTERNS["where_in_match"].finditer(query):
       issues.append(
         {
@@ -271,7 +248,6 @@ class GraphQueryValidator:
         }
       )
 
-    # Pattern 3: Label checking in WHERE
     for match in self.COMPILED_PATTERNS["label_in_where"].finditer(query):
       var_name = match.group(1)
       label_name = match.group(2)
@@ -283,7 +259,6 @@ class GraphQueryValidator:
         }
       )
 
-    # Pattern 4: REMOVE command
     for match in self.COMPILED_PATTERNS["remove_command"].finditer(query):
       prop = match.group(1)
       issues.append(
@@ -294,7 +269,6 @@ class GraphQueryValidator:
         }
       )
 
-    # Pattern 5: IS :: type checking
     for match in self.COMPILED_PATTERNS["type_check"].finditer(query):
       expr = match.group(1)
       type_name = match.group(2)
@@ -307,7 +281,6 @@ class GraphQueryValidator:
         }
       )
 
-    # Pattern 6: Neo4j functions
     for neo4j_func, lbug_func in self.NEO4J_FUNCTION_MAPPINGS.items():
       pattern = rf"\b{neo4j_func}\s*\("
       if re.search(pattern, query, re.IGNORECASE):
@@ -319,7 +292,6 @@ class GraphQueryValidator:
           }
         )
 
-    # Pattern 7: SHOW commands
     for match in self.COMPILED_PATTERNS["show_command"].finditer(query):
       command = match.group(1).lower()
       call_equivalent = {
@@ -336,7 +308,6 @@ class GraphQueryValidator:
         }
       )
 
-    # Pattern 8: FOREACH loops
     if self.COMPILED_PATTERNS["foreach"].search(query):
       issues.append(
         {
@@ -346,7 +317,6 @@ class GraphQueryValidator:
         }
       )
 
-    # Pattern 9: Property += syntax
     if self.COMPILED_PATTERNS["property_append"].search(query):
       issues.append(
         {
@@ -379,18 +349,15 @@ class GraphQueryValidator:
     """Validate query against known schema."""
     warnings = []
 
-    # Extract labels from query
     query_labels = set(self.COMPILED_PATTERNS["label_pattern"].findall(query))
 
-    # Check for unknown labels (only warn if we have a real schema)
-    if self.schema:  # Only if we have actual schema data
+    # Only against a real schema, not the SEC fallback labels.
+    if self.schema:
       unknown_labels = query_labels - self._node_labels - self._rel_labels
       if unknown_labels:
         warnings.append(f"Unknown labels in query: {', '.join(sorted(unknown_labels))}")
 
-    # Extract property references
     for var, prop in self.COMPILED_PATTERNS["property_pattern"].findall(query):
-      # Try to infer label from context
       label_match = re.search(rf"{var}\s*:\s*(\w+)", query)
       if label_match:
         label = label_match.group(1)
@@ -406,12 +373,10 @@ class GraphQueryValidator:
 
     query_upper = query.upper()
 
-    # 1. Missing LIMIT
     if "RETURN" in query_upper and "LIMIT" not in query_upper:
       warnings.append("No LIMIT clause - query may return large result set")
       complexity_score += 20
 
-    # 2. Variable-length paths
     var_paths = self.COMPILED_PATTERNS["var_length_path"].findall(query)
     for lower, upper in var_paths:
       lower_bound = int(lower) if lower else 1
@@ -427,7 +392,6 @@ class GraphQueryValidator:
         )
         complexity_score += 15
 
-    # 3. Multiple MATCH without WITH
     match_count = query_upper.count("MATCH")
     with_count = query_upper.count("WITH")
 
@@ -437,7 +401,6 @@ class GraphQueryValidator:
       )
       complexity_score += (match_count - 1) * 20
 
-    # 4. Generic node patterns
     generic_patterns = self.COMPILED_PATTERNS["generic_node"].findall(query)
     if generic_patterns:
       warnings.append(
@@ -445,13 +408,11 @@ class GraphQueryValidator:
       )
       complexity_score += 30
 
-    # 5. Multiple ORDER BY
     order_by_count = query_upper.count("ORDER BY")
     if order_by_count > 1:
       warnings.append("Multiple ORDER BY clauses may impact performance")
       complexity_score += order_by_count * 10
 
-    # 6. String operations in WHERE
     string_ops = ["CONTAINS", "STARTS WITH", "ENDS WITH", "=~"]
     for op in string_ops:
       if op in query_upper:
@@ -468,34 +429,29 @@ class GraphQueryValidator:
 
     query_lower = query.lower()
 
-    # 1. Fact queries without units
     if "fact" in query_lower and "unit" not in query_lower:
       if "value" in query_lower or "numeric" in query_lower:
         warnings.append(
           "💡 Fact value queries should include Unit relationships for proper context"
         )
 
-    # 2. Fact queries without periods
     if "fact" in query_lower and "period" not in query_lower:
       if any(term in query_lower for term in ["trend", "time", "date", "historical"]):
         warnings.append(
           "💡 Consider including Period relationships for temporal analysis"
         )
 
-    # 3. Element queries without qname
     if "element" in query_lower and "qname" not in query_lower:
       warnings.append(
         "💡 Element queries should filter by qname for better performance"
       )
 
-    # 4. Report queries without date filtering
     if "report" in query_lower:
       if not any(
         term in query_lower for term in ["report_date", "filing_date", "filed_date"]
       ):
         warnings.append("💡 Consider filtering reports by date to limit results")
 
-    # 5. Check for common XBRL elements
     if "element" in query_lower:
       has_known_element = any(
         element.lower() in query_lower for element in self.COMMON_XBRL_ELEMENTS
@@ -511,24 +467,19 @@ class GraphQueryValidator:
     """Validate query parameters."""
     warnings = []
 
-    # Extract parameter placeholders from query
     query_params = set(self.COMPILED_PATTERNS["param_pattern"].findall(query))
 
-    # Check for missing parameters
     provided_params = set(params.keys())
     missing_params = query_params - provided_params
     if missing_params:
       warnings.append(f"Missing parameters: {', '.join(sorted(missing_params))}")
 
-    # Check for unused parameters
     unused_params = provided_params - query_params
     if unused_params:
       warnings.append(f"Unused parameters provided: {', '.join(sorted(unused_params))}")
 
-    # Validate parameter types for common cases
     for param_name, param_value in params.items():
       if "cik" in param_name.lower() and param_value:
-        # CIK should be numeric or padded string
         if isinstance(param_value, str):
           if not param_value.isdigit():
             warnings.append(
@@ -536,7 +487,6 @@ class GraphQueryValidator:
             )
 
       if "date" in param_name.lower() and param_value:
-        # Basic date format check
         if isinstance(param_value, str) and not self.COMPILED_PATTERNS[
           "date_format"
         ].match(param_value):
@@ -548,7 +498,6 @@ class GraphQueryValidator:
     """Generate a fixed version of the query based on validation results."""
     fixed_query = query
 
-    # Apply automatic fixes for Neo4j patterns
     for pattern in validation_result.neo4j_patterns_found:
       if pattern == "unbounded_path":
         fixed_query = re.sub(r"\[\s*\*\s*\]", "[*1..5]", fixed_query)
@@ -567,7 +516,6 @@ class GraphQueryValidator:
         )
 
       elif pattern == "where_in_match":
-        # Move WHERE out of MATCH
         fixed_query = re.sub(
           r"MATCH\s*\(([^)]*)\s+WHERE\s+([^)]*)\)",
           r"MATCH (\1) WHERE \2",
@@ -576,7 +524,6 @@ class GraphQueryValidator:
         )
 
       elif pattern == "label_in_where":
-        # Fix label checking
         fixed_query = re.sub(
           r"WHERE\s+(\w+)\s*:\s*(\w+)",
           r"WHERE label(\1) = '\2'",
@@ -592,28 +539,24 @@ class GraphQueryValidator:
 
     error_msg = "[FAILED] **Query Validation Failed**\n\n"
 
-    # Add errors
     if validation.errors:
       error_msg += "**Errors (must fix):**\n"
       for i, error in enumerate(validation.errors, 1):
         error_msg += f"{i}. {error}\n"
       error_msg += "\n"
 
-    # Add suggestions
     if validation.suggestions:
       error_msg += "**💡 Suggestions:**\n"
       for i, suggestion in enumerate(validation.suggestions, 1):
         error_msg += f"{i}. {suggestion}\n"
       error_msg += "\n"
 
-    # Add warnings
     if validation.warnings:
       error_msg += "**⚠️ Warnings:**\n"
       for warning in validation.warnings:
         error_msg += f"- {warning}\n"
       error_msg += "\n"
 
-    # Add fixed query if available
     if validation.fixed_query:
       error_msg += "**🔧 Auto-fixed query:**\n"
       error_msg += f"```cypher\n{validation.fixed_query}\n```\n"

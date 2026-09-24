@@ -53,10 +53,8 @@ from robosystems.models.core import Graph, GraphUser, OrgLimits, OrgRole, OrgUse
 
 router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
 
-# Surfaced to prospects at graph-creation time, so these describe only what is
-# built. All three are read twice below — the schema-loading path and its
-# fallback — and single-sourcing them here is what keeps the copies from
-# diverging.
+# Shown to prospects at graph creation, so these describe only what is built.
+# Single-sourced for the schema-loading path and its fallback.
 _DISPLAY_NAMES = {
   "roboledger": "RoboLedger - Accounting & Financial Reporting",
   "roboinvestor": "RoboInvestor - Investment Management",
@@ -105,12 +103,7 @@ def _raise_http_exception(
 
 
 def _label_fields(graph: Graph | None) -> tuple[str, list[str]]:
-  """Read the ``(description, tags)`` pair off a graph, tolerating ``None``.
-
-  A repository row can be absent (``UserRepository.graph``), which the model
-  properties cannot express on their own. Coercion of the underlying JSONB
-  lives on the model so this and the update command agree on it.
-  """
+  """``(description, tags)`` off a graph; a repository row's graph can be None."""
   if graph is None:
     return "", []
   return graph.description, graph.tags
@@ -133,17 +126,14 @@ async def get_graphs(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    # Get all user-graph relationships (user graphs)
     user_graphs = GraphUser.get_by_user_id(current_user.id, session)
 
-    # Get all user-repository relationships (shared repositories)
     from robosystems.models.core.user.user_repository import UserRepository
 
     user_repositories = UserRepository.get_user_repositories(
       current_user.id, session, active_only=True
     )
 
-    # Find the selected graph
     selected_graph_id = None
     graphs = []
     admin_graphs = 0
@@ -152,15 +142,12 @@ async def get_graphs(
 
     listed_graph_ids: set[str] = set()
 
-    # Add user graphs
     for user_graph in user_graphs:
-      # A subgraph carries no grant of its own — access is the parent's grant
-      # at the parent's role — so any row on a subgraph id predates that rule
-      # and is ignored; the subgraph is listed under its parent below.
+      # A subgraph has no grant of its own (access is the parent's), so a row
+      # on a subgraph id is stale; the subgraph is listed under its parent.
       if user_graph.graph.is_subgraph:
         continue
 
-      # Skip deprovisioned graphs
       graph_status = user_graph.graph.status or "active"
       if graph_status == "deprovisioned":
         continue
@@ -168,7 +155,6 @@ async def get_graphs(
       if user_graph.is_selected:
         selected_graph_id = user_graph.graph_id
 
-      # Count roles
       if user_graph.role == "admin":
         admin_graphs += 1
       else:
@@ -224,8 +210,7 @@ async def get_graphs(
           )
         )
 
-    # Add org-owned graphs the user holds implicitly as org owner/admin
-    # (no explicit GraphUser row — access derives from the org role).
+    # Org-owned graphs held implicitly via org owner/admin (no GraphUser row).
     admin_org_ids = [
       ou.org_id
       for ou in OrgUser.get_user_orgs(current_user.id, session)
@@ -297,7 +282,6 @@ async def get_graphs(
         )
       )
 
-    # Record business event for graphs access with additional details
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs",
@@ -358,16 +342,13 @@ async def create_graph(
 
   op_name = "create-graph"
   user_id = str(current_user.id)
-  # No graph_id exists yet — use sentinel for idempotency scoping.
-  # The cache key is (user_id, "new", op_name, idempotency_key, fingerprint),
-  # which is unique enough to prevent duplicate graph creation retries.
+  # No graph_id exists yet, so a sentinel scopes the idempotency key.
   _graph_id = "new"
   body_fp = fingerprint_body(request)
 
-  # The key is reserved from here until the pending envelope is recorded, so
-  # a concurrent retry cannot dispatch a second creation, and every exit that
-  # does not record — a 402/403 from the checks below, an enqueue failure —
-  # releases it.
+  # The key stays reserved until the pending envelope is recorded, so a
+  # concurrent retry can't dispatch a second creation; every exit that doesn't
+  # record (402/403 below, enqueue failure) releases it.
   async with idempotent_dispatch(
     cache, user_id, _graph_id, op_name, idempotency_key, body_fp
   ) as idem:
@@ -375,13 +356,10 @@ async def create_graph(
       return idem.replay
 
     try:
-      # Check org's graph limits
       user_orgs = OrgUser.get_user_orgs(current_user.id, db)
       if not user_orgs:
-        # Reachable, not exceptional: removal from a last org leaves an account
-        # with no membership, and every other org-resolving surface answers 403
-        # here. A 500 would file an ordinary authorization outcome as a server
-        # fault and count against the API's error rate.
+        # Reachable: leaving a last org leaves no membership. 403 like every
+        # other org-resolving surface, not a 500.
         _raise_http_exception(
           status_code=status.HTTP_403_FORBIDDEN,
           error_code="org_not_found",
@@ -394,11 +372,8 @@ async def create_graph(
       membership = user_orgs[0]
       org_id = membership.org_id
 
-      # Creating a graph starts a recurring charge on the org's payment method
-      # and consumes org quota, so it is an owner/admin action. Members cannot
-      # add a payment method either (checkout is owner-only), so without this a
-      # member could commit the org's stored card without its billing
-      # administrators knowing until the invoice arrived.
+      # Starts a recurring charge on the org's card and consumes org quota, so
+      # owner/admin only (members can't add a payment method either).
       if not membership.can_create_graphs():
         _raise_http_exception(
           status_code=status.HTTP_403_FORBIDDEN,
@@ -481,9 +456,8 @@ async def create_graph(
         created_by=user_id,
       )
 
-      # The pending envelope is bound to the operation: should creation later
-      # fail, the terminal-status hook evicts it so a retry under the same key
-      # dispatches again instead of replaying `pending` for 24h.
+      # If creation later fails, the terminal-status hook evicts this envelope
+      # so a retry under the same key dispatches again.
       await idem.record(envelope)
 
       log_operation_audit(
@@ -526,10 +500,8 @@ async def get_available_extensions(
     )
 
     manager = SchemaManager()
-    # Only what an entity graph can actually be created with. `knowledge` is a
-    # loadable schema, but it is installed on a subgraph rather than composed
-    # into an entity graph, so listing it here offered callers a value the
-    # create path rejects with a 422.
+    # `knowledge` is installed on a subgraph, not composed into an entity
+    # graph, so the create path would reject it.
     extensions_info = [
       info
       for info in manager.list_available_extensions()
@@ -537,26 +509,21 @@ async def get_available_extensions(
     ]
     logger.info(f"Got {len(extensions_info)} extensions from schema manager")
 
-    # Convert to response format
     available_extensions = []
     for ext_info in extensions_info:
       logger.debug(
         f"Extension {ext_info['name']}: available={ext_info.get('available', False)}"
       )
       if ext_info["available"]:
-        # Try to get actual node/relationship counts
         try:
           from robosystems.schemas.loader import (
             get_contextual_schema_loader,
             get_schema_loader,
           )
 
-          # Use context-aware loading for RoboLedger to show accurate counts
           if ext_info["name"] == "roboledger":
-            # For display purposes, show the full accounting context
-            # which represents what entity graphs will get
+            # The full accounting context entity graphs get.
             loader = get_contextual_schema_loader("application", "roboledger")
-            # Override description with context-aware information
             description = _ROBOLEDGER_DESCRIPTION
           elif ext_info["name"] == "roboinvestor":
             loader = get_schema_loader([ext_info["name"]])
@@ -586,7 +553,6 @@ async def get_available_extensions(
           }
         )
 
-    # Convert dictionaries to AvailableExtension objects
     extension_objects = [
       AvailableExtension(
         name=str(ext["name"]),
@@ -602,7 +568,6 @@ async def get_available_extensions(
     )
 
   except Exception as e:
-    # Fallback response if schema manager fails
     logger.error(f"Failed to load schema extensions: {e}")
     return AvailableExtensionsResponse(
       extensions=[
@@ -638,26 +603,19 @@ async def get_available_graph_tiers(
     from robosystems.config import BillingConfig
     from robosystems.config.graph_tier import GraphTierConfig
 
-    # include_disabled=True is deliberate, same reasoning as /v1/offering:
-    # get_available_tiers gates on deployment.always_enabled/enabled_default,
-    # which answers "is the CloudFormation stack deployed by default" — not
-    # "can a customer buy this". Large and XLarge carry enabled_default: false
-    # plus an enable_var only the deploy workflow reads, so honouring the flag
-    # here made both tiers invisible in production. What is sellable is
-    # decided by the billing catalog below.
+    # include_disabled=True: enabled_default answers "is the stack deployed by
+    # default", not "can a customer buy this" (Large/XLarge would vanish in
+    # production). The billing catalog below decides what is sellable.
     tiers = GraphTierConfig.get_available_tiers(include_disabled=True)
 
-    # Filter out internal-only and not-yet-available tiers
     excluded_tiers = [
       "ladybug-shared",
     ]
     tiers = [tier for tier in tiers if tier.get("tier") not in excluded_tiers]
 
-    # Attach pricing from the billing catalog, which also decides what is
-    # offered: a tier billing cannot price is not purchasable here and is
-    # omitted unless the caller asked for disabled tiers. No hardcoded price
-    # fallback — a fabricated number that matches neither billing nor Stripe
-    # is worse than omission.
+    # The billing catalog also decides what is offered: a tier it can't price
+    # is omitted (unless disabled tiers were requested). No hardcoded price
+    # fallback: a number matching neither billing nor Stripe is worse.
     try:
       tier_pricing = BillingConfig.get_all_pricing_info().get("subscription_tiers", {})
     except Exception as pricing_error:
@@ -733,7 +691,7 @@ async def get_graph_capacity(
         logger.warning(f"Failed to check capacity for {tier_name}: {e}")
         capacity_status = "at_capacity"
 
-      # Auto-scaling queue removed — scalable means unavailable
+      # No auto-scaling queue, so scalable means unavailable.
       if capacity_status == "scalable":
         capacity_status = "at_capacity"
 
@@ -780,7 +738,6 @@ async def select_graph(
     user_graph_ids = [ug.graph_id for ug in user_graphs]
 
     if graph_id not in user_graph_ids:
-      # Record business event for access denied
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
         endpoint="/v1/graphs/{graph_id}/select",
@@ -802,7 +759,6 @@ async def select_graph(
     success = GraphUser.set_selected_graph(current_user.id, graph_id, session)
 
     if not success:
-      # Record business event for graph not found
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
         endpoint="/v1/graphs/{graph_id}/select",
@@ -817,7 +773,6 @@ async def select_graph(
         code=ErrorCode.NOT_FOUND,
       )
 
-    # Record business event for successful graph selection with additional details
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/select",

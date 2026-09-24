@@ -52,9 +52,8 @@ async def list_api_keys(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    # Active only: a revoked key can never be reactivated from this surface,
-    # so listing it forever leaves the user's key list growing without bound
-    # and offers no action they can take on the row.
+    # Active only: a revoked key can't be reactivated here, so listing it
+    # offers no action and grows the list without bound.
     api_keys = UserAPIKey.get_active_by_user_id(current_user.id, db)
 
     api_key_infos = []
@@ -354,10 +353,8 @@ async def revoke_api_key(
     was_already_inactive = not api_key.is_active
 
     if not api_key.deactivate(db):
-      # The key row is revoked, but its cached validation entry could not be
-      # cleared — until it is, the key may keep authenticating from cache.
-      # Fail the request so the caller retries: deactivate re-asserts the
-      # invalidation on an already-inactive key, so the retry converges.
+      # The cached validation entry may keep the key authenticating: fail so
+      # the caller retries (deactivate re-asserts the invalidation).
       raise create_error_response(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="API key revocation incompletely applied; retry",

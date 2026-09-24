@@ -1,16 +1,6 @@
-"""GraphQL types for the Report-package read.
-
-The Report is the package container; its items are its FactSets, each
-rehydrated as an :class:`InformationBlock`. The resolver lives in
-`resolvers/ledger.py` next to the existing `report` field; types
-are split into this file because they're hand-written rather than
-auto-derived from Pydantic (the `block` field needs the manual
-`InformationBlock.from_pydantic` projection).
-
-Date / datetime fields use Strawberry's native scalar types so the
-GraphQL schema is consistent with the auto-derived `Report` type
-(which exposes them via Strawberry's pydantic integration). Codegen
-on the client side maps these to typed Date / DateTime values.
+"""GraphQL types for the Report-package read: the Report plus its FactSets,
+each rehydrated as an `InformationBlock`. Hand-written because `block` needs
+the manual `InformationBlock.from_pydantic` projection.
 """
 
 from __future__ import annotations

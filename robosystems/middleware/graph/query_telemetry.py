@@ -1,17 +1,8 @@
-"""Shared-repository query telemetry.
+"""Query telemetry for shared repositories only (no-op on user graphs).
 
-Detection layer for the shared query surface: classifies bad query/tool
-outcomes (timeouts, capacity rejections, rate limits, policy denials, engine
-disruptions) and records them through the security audit log, which publishes
-the CloudWatch metrics the detective-control alarms watch. Also emits
-structured per-query cost lines (start/end pairs) so operators can rank users
-by total execution time and reconstruct in-flight work around an incident.
-
-Scope: shared repositories ONLY. User graphs run on dedicated instances, so
-per-query telemetry of this kind never applies to them; every entry point
-gates on the shared-repository check and no-ops elsewhere.
-
-All functions are best-effort — they must never raise into the request path.
+Classifies bad outcomes into the security audit log, whose CloudWatch metrics
+the detective-control alarms watch, and emits start/end cost lines per query.
+Best-effort: nothing here may raise into the request path.
 """
 
 import json
@@ -122,13 +113,8 @@ def record_shared_query_outcome(
   tool_name: str | None = None,
   disruption: bool = False,
 ) -> None:
-  """Record one bad query outcome on a shared repository (no-op elsewhere).
-
-  Classification precedence: an explicit ``signal`` wins; otherwise
-  ``status_code`` maps through the outcome table; otherwise ``error`` is
-  checked for the engine-disruption shape. Unclassifiable outcomes are
-  silently dropped — this records signals, not every failure.
-  """
+  """Record one bad outcome: explicit ``signal``, else by ``status_code``,
+  else an engine disruption; anything unclassifiable is dropped."""
   try:
     if not _is_shared(graph_id):
       return
@@ -171,12 +157,7 @@ def log_shared_query_start(
   query_length: int | None = None,
   strategy: str | None = None,
 ) -> str | None:
-  """Emit the start half of a per-query cost line pair on a shared repository.
-
-  Returns an execution id to pass to ``log_shared_query_end`` so the pair can
-  be joined in log queries; returns None (and emits nothing) off the shared
-  surface.
-  """
+  """Emit the start cost line; return the exec id that joins it to the end."""
   try:
     if not _is_shared(graph_id):
       return None
@@ -212,9 +193,7 @@ def log_shared_query_end(
   source: str = "query",
   tool_name: str | None = None,
 ) -> None:
-  """Emit the end half of a cost line pair. Safe to call with a None exec_id
-  (emits nothing — the start half was off-surface or failed).
-  """
+  """Emit the end cost line; a None exec_id emits nothing."""
   try:
     if exec_id is None or not _is_shared(graph_id):
       return

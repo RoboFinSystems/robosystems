@@ -1,9 +1,4 @@
-"""
-Graph MCP (Model Context Protocol) module.
-
-This module provides MCP functionality for interacting with graph databases
-through the RoboSystems Graph API infrastructure.
-"""
+"""MCP access to graph databases over the Graph API."""
 
 from .client import GraphMCPClient
 from .exceptions import (

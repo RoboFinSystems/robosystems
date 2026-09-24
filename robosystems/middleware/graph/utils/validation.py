@@ -1,7 +1,4 @@
-"""Graph ID validation utilities.
-
-Functions for validating graph identifiers and database names.
-"""
+"""Graph identifier and database-name validation."""
 
 import re
 
@@ -9,12 +6,7 @@ from robosystems.logger import logger
 
 
 def is_shared_repository(graph_id: str | None) -> bool:
-  """Check if the given graph_id refers to a registered shared repository.
-
-  Note: This checks exact parent repository IDs only (e.g., "sec").
-  For checking subgraphs too (e.g., "sec_historical"), use
-  ``is_shared_repository_or_subgraph`` from the config registry.
-  """
+  """Exact repository IDs only ("sec", not "sec_historical")."""
   from robosystems.config.shared_repositories import (
     is_shared_repository as _registry_check,
   )
@@ -23,10 +15,6 @@ def is_shared_repository(graph_id: str | None) -> bool:
 
 
 def is_shared_repository_or_subgraph(graph_id: str | None) -> bool:
-  """Check if the given graph_id is a shared repository OR a subgraph of one.
-
-  This checks both parent IDs (e.g., "sec") and subgraph IDs (e.g., "sec_historical").
-  """
   from robosystems.config.shared_repositories import (
     is_shared_repository_or_subgraph as _registry_check,
   )
@@ -35,14 +23,7 @@ def is_shared_repository_or_subgraph(graph_id: str | None) -> bool:
 
 
 def validate_graph_id(graph_id: str) -> str:
-  """Validate graph_id meets database naming requirements.
-
-  Graph database names must:
-  - Not be empty
-  - Be at most 64 characters long
-  - Contain only alphanumeric characters, underscores, and hyphens
-  - Not be reserved names
-  """
+  """Return graph_id or raise ValueError; shared repository IDs pass as-is."""
   if not graph_id:
     raise ValueError("graph_id cannot be empty")
 
@@ -74,10 +55,7 @@ def validate_graph_id(graph_id: str) -> str:
 
 
 def validate_database_creation(graph_id: str) -> str:
-  """Validate that a new database can be created for the given graph_id.
-
-  This combines graph_id validation with database limit checking.
-  """
+  """Validate the ID for a new database. No capacity check happens here."""
   validated_graph_id = validate_graph_id(graph_id)
 
   logger.info(f"Validated database creation for graph_id: {validated_graph_id}")

@@ -1,17 +1,8 @@
-"""RoboInvestor operation routes.
+"""RoboInvestor operation routes, all declared on one `OperationRegistrar`
+(which also generates the MCP tools).
 
-All operations are declared on a single `OperationRegistrar`. The
-registrar mounts each spec as a `POST /extensions/roboinvestor/{graph_id}
-/operations/{op_name}` route, wires in the auth dependency + feature
-gate, translates domain exceptions via each spec's `error_map`, and
-emits the `OperationEnvelope` + audit trail. MCP tools for every spec
-are auto-generated via `MCPRegistrar` — no MCP-specific code lives
-here.
-
-Portfolio and position writes flow through the Portfolio Block envelope ops
-(`create-portfolio-block`, `update-portfolio-block`,
-`delete-portfolio-block`) — there is no atom-level CRUD on portfolios or
-positions. Securities are Master Data CRUD.
+Portfolio and position writes go only through the Portfolio Block envelope
+ops; securities are master-data CRUD.
 """
 
 from __future__ import annotations

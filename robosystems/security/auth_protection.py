@@ -17,8 +17,6 @@ from ..security import SecurityAuditLogger, SecurityEventType
 
 
 class ThreatLevel(Enum):
-  """IP address threat assessment levels."""
-
   LOW = "low"
   MEDIUM = "medium"
   HIGH = "high"
@@ -27,8 +25,6 @@ class ThreatLevel(Enum):
 
 @dataclass
 class AuthAttempt:
-  """Authentication attempt tracking."""
-
   timestamp: float
   success: bool
   ip_address: str
@@ -38,8 +34,6 @@ class AuthAttempt:
 
 @dataclass
 class IPThreatAssessment:
-  """IP address threat assessment."""
-
   threat_level: ThreatLevel
   failed_attempts: int
   successful_attempts: int
@@ -50,58 +44,50 @@ class IPThreatAssessment:
 
 
 class AdvancedAuthProtection:
-  """Advanced authentication protection system."""
-
-  # Progressive delay configuration (seconds)
+  # Failed attempts -> delay seconds. Keys must be contiguous: a missing key
+  # falls back to the highest delay, not the next tier down.
   PROGRESSIVE_DELAYS = {
-    0: 0,  # no failures: no delay. Every key must be present and
-    #       contiguous — the lookup is an exact-key get whose fallback is the
-    #       *highest* delay, so any gap charges that caller the 8th-failure
-    #       delay rather than the next tier down.
-    1: 1,  # 1st failure: 1 second
-    2: 2,  # 2nd failure: 2 seconds
-    3: 5,  # 3rd failure: 5 seconds
-    4: 10,  # 4th failure: 10 seconds
-    5: 30,  # 5th failure: 30 seconds
-    6: 60,  # 6th failure: 1 minute
-    7: 300,  # 7th failure: 5 minutes
-    8: 900,  # 8th failure: 15 minutes
+    0: 0,
+    1: 1,
+    2: 2,
+    3: 5,
+    4: 10,
+    5: 30,
+    6: 60,
+    7: 300,
+    8: 900,
   }
 
-  # Threat level thresholds
+  # Minimum failed attempts per level.
   THREAT_THRESHOLDS = {
-    ThreatLevel.MEDIUM: 5,  # 5+ failed attempts
-    ThreatLevel.HIGH: 10,  # 10+ failed attempts
-    ThreatLevel.CRITICAL: 20,  # 20+ failed attempts
+    ThreatLevel.MEDIUM: 5,
+    ThreatLevel.HIGH: 10,
+    ThreatLevel.CRITICAL: 20,
   }
 
-  # Block durations (seconds)
+  # Seconds.
   BLOCK_DURATIONS = {
-    ThreatLevel.MEDIUM: 900,  # 15 minutes
-    ThreatLevel.HIGH: 3600,  # 1 hour
-    ThreatLevel.CRITICAL: 86400,  # 24 hours
+    ThreatLevel.MEDIUM: 900,
+    ThreatLevel.HIGH: 3600,
+    ThreatLevel.CRITICAL: 86400,
   }
 
-  # Cache keys
   ATTEMPT_KEY_PREFIX = "auth_attempts"
   IP_THREAT_KEY_PREFIX = "ip_threat"
   DELAY_KEY_PREFIX = "auth_delay"
 
   @classmethod
   def _get_attempt_key(cls, ip_address: str) -> str:
-    """Get cache key for tracking attempts by IP."""
     ip_hash = hashlib.sha256(ip_address.encode()).hexdigest()[:16]
     return f"{cls.ATTEMPT_KEY_PREFIX}:{ip_hash}"
 
   @classmethod
   def _get_threat_key(cls, ip_address: str) -> str:
-    """Get cache key for IP threat assessment."""
     ip_hash = hashlib.sha256(ip_address.encode()).hexdigest()[:16]
     return f"{cls.IP_THREAT_KEY_PREFIX}:{ip_hash}"
 
   @classmethod
   def _get_delay_key(cls, ip_address: str) -> str:
-    """Get cache key for progressive delay tracking."""
     ip_hash = hashlib.sha256(ip_address.encode()).hexdigest()[:16]
     return f"{cls.DELAY_KEY_PREFIX}:{ip_hash}"
 
@@ -126,13 +112,9 @@ class AdvancedAuthProtection:
       email=email,
     )
 
-    # Update attempt history
     cls._update_attempt_history(ip_address, attempt)
-
-    # Update threat assessment
     cls._update_threat_assessment(ip_address, attempt)
 
-    # Log security event for failed attempts
     if not success:
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTH_FAILURE,
@@ -149,16 +131,12 @@ class AdvancedAuthProtection:
 
   @staticmethod
   def _dump(value) -> str:
-    """Serialize to a JSON string. The cache backs onto redis, whose encoder
-    accepts only str/bytes/int/float — a raw dict or list raises DataError and
-    the whole layer silently no-ops (which is exactly how it went dead)."""
+    """JSON-encode: redis rejects a raw dict or list."""
     return json.dumps(value)
 
   @staticmethod
   def _load(raw):
-    """Parse a cached value. decode_responses=True hands back a str, so the
-    stored JSON must be parsed before use; already-decoded values pass through
-    (the strict test fake stores the same JSON string)."""
+    """Parse a cached JSON value; already-decoded values pass through."""
     if raw is None:
       return None
     if isinstance(raw, (bytes, bytearray)):
@@ -182,14 +160,12 @@ class AdvancedAuthProtection:
 
   @classmethod
   def _update_attempt_history(cls, ip_address: str, attempt: AuthAttempt) -> None:
-    """Update attempt history for an IP address."""
+    """Append to the IP's attempt history, keeping the last 24 hours."""
     key = cls._get_attempt_key(ip_address)
 
     try:
-      # Get existing attempts (last 24 hours)
       attempts_data = cls._load(rate_limit_cache.get(key)) or []
 
-      # Add new attempt
       attempts_data.append(
         {
           "timestamp": attempt.timestamp,
@@ -199,26 +175,20 @@ class AdvancedAuthProtection:
         }
       )
 
-      # Keep only last 24 hours of attempts
-      cutoff = time.time() - 86400  # 24 hours
+      cutoff = time.time() - 86400
       attempts_data = [a for a in attempts_data if a["timestamp"] > cutoff]
 
-      # Store back in cache (expire in 25 hours to be safe)
       rate_limit_cache.set(key, cls._dump(attempts_data), expire=86400 + 3600)
 
     except Exception as e:
-      # Auth must not fail because the threat store is unreachable or corrupt;
-      # but log the type so a real breakage is visible, not silently swallowed
-      # the way this layer's failures were for months.
+      # Auth must not fail on the threat store, but a breakage must be visible.
       logger.warning(f"auth threat: attempt history not stored ({type(e).__name__})")
 
   @classmethod
   def _update_threat_assessment(cls, ip_address: str, attempt: AuthAttempt) -> None:
-    """Update threat assessment for an IP address."""
     key = cls._get_threat_key(ip_address)
 
     try:
-      # Get existing assessment
       assessment_data = rate_limit_cache.get(key)
 
       if assessment_data:
@@ -234,10 +204,9 @@ class AdvancedAuthProtection:
           block_expires=None,
         )
 
-      # Update counters
       if attempt.success:
         assessment.successful_attempts += 1
-        # Reset failed attempts on successful login
+        # A success forgives one failure, not all of them.
         if assessment.failed_attempts > 0:
           assessment.failed_attempts = max(0, assessment.failed_attempts - 1)
       else:
@@ -245,7 +214,6 @@ class AdvancedAuthProtection:
 
       assessment.last_attempt = attempt.timestamp
 
-      # Determine threat level
       if assessment.failed_attempts >= cls.THREAT_THRESHOLDS[ThreatLevel.CRITICAL]:
         assessment.threat_level = ThreatLevel.CRITICAL
       elif assessment.failed_attempts >= cls.THREAT_THRESHOLDS[ThreatLevel.HIGH]:
@@ -255,19 +223,16 @@ class AdvancedAuthProtection:
       else:
         assessment.threat_level = ThreatLevel.LOW
 
-      # Update blocking status
       if assessment.threat_level in cls.BLOCK_DURATIONS and not attempt.success:
         block_duration = cls.BLOCK_DURATIONS[assessment.threat_level]
         assessment.is_blocked = True
         assessment.block_expires = time.time() + block_duration
 
-      # Check if block has expired
       if assessment.is_blocked and assessment.block_expires:
         if time.time() > assessment.block_expires:
           assessment.is_blocked = False
           assessment.block_expires = None
 
-      # Store assessment (expire in 25 hours)
       rate_limit_cache.set(key, cls._dump_assessment(assessment), expire=86400 + 3600)
 
     except Exception as e:
@@ -283,7 +248,6 @@ class AdvancedAuthProtection:
       if assessment_data:
         assessment = cls._load_assessment(assessment_data)
 
-        # Check if block has expired
         if assessment.is_blocked and assessment.block_expires:
           if time.time() > assessment.block_expires:
             assessment.is_blocked = False
@@ -293,7 +257,6 @@ class AdvancedAuthProtection:
     except Exception as e:
       logger.warning(f"auth threat: assessment not read ({type(e).__name__})")
 
-    # Return default assessment
     return IPThreatAssessment(
       threat_level=ThreatLevel.LOW,
       failed_attempts=0,
@@ -306,11 +269,7 @@ class AdvancedAuthProtection:
 
   @classmethod
   def check_ip_blocked(cls, ip_address: str) -> tuple[bool, int | None]:
-    """
-    Check whether an IP address is currently blocked.
-
-    Returns ``(is_blocked, seconds_until_unblock)``.
-    """
+    """Return ``(is_blocked, seconds_until_unblock)``."""
     assessment = cls.get_ip_threat_assessment(ip_address)
 
     if assessment.is_blocked and assessment.block_expires:
@@ -318,10 +277,8 @@ class AdvancedAuthProtection:
       if remaining > 0:
         return True, remaining
       else:
-        # Block expired, clear it
         assessment.is_blocked = False
         assessment.block_expires = None
-        # Update cache
         key = cls._get_threat_key(ip_address)
         try:
           rate_limit_cache.set(
@@ -334,20 +291,14 @@ class AdvancedAuthProtection:
 
   @classmethod
   def get_progressive_delay(cls, ip_address: str) -> int:
-    """
-    Get the remaining progressive delay for an IP.
-
-    Returns the seconds still to wait before the next attempt is allowed, or 0.
-    """
+    """Seconds still to wait before the IP's next attempt, or 0."""
     assessment = cls.get_ip_threat_assessment(ip_address)
 
-    # Get delay based on failed attempts
     delay = cls.PROGRESSIVE_DELAYS.get(
       min(assessment.failed_attempts, max(cls.PROGRESSIVE_DELAYS.keys())),
       cls.PROGRESSIVE_DELAYS[max(cls.PROGRESSIVE_DELAYS.keys())],
     )
 
-    # Check if we're still in delay period
     delay_key = cls._get_delay_key(ip_address)
     try:
       last_delay_time = cls._load(rate_limit_cache.get(delay_key))
@@ -365,8 +316,7 @@ class AdvancedAuthProtection:
     """Start the progressive delay window after a failed authentication attempt."""
     delay_key = cls._get_delay_key(ip_address)
     try:
-      # Record the delay application time
-      rate_limit_cache.set(delay_key, cls._dump(time.time()), expire=3600)  # 1 hour
+      rate_limit_cache.set(delay_key, cls._dump(time.time()), expire=3600)
     except Exception as e:
       logger.warning(f"auth threat: progressive delay not stored ({type(e).__name__})")
 

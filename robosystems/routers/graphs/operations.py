@@ -1,11 +1,9 @@
-"""Graph lifecycle operations — CQRS command surface.
+"""Graph lifecycle operations — CQRS command surface at
+``POST /v1/graphs/{graph_id}/operations/{op_name}``.
 
-All handlers return ``OperationEnvelope`` with idempotency + audit.
-Sync operations use ``execute_operation``; async operations use the
-manual ``wrap_pending`` + ``log_operation_audit`` pattern (same as
-``auto_map_elements_op`` in roboledger operations).
-
-URL surface: ``POST /v1/graphs/{graph_id}/operations/{op_name}``
+All handlers return ``OperationEnvelope`` with idempotency + audit. Sync
+operations use ``execute_operation``; async ones use ``wrap_pending`` +
+``log_operation_audit`` directly.
 """
 
 from __future__ import annotations
@@ -65,17 +63,9 @@ _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 _GRAPH_OPS_PATH = "/v1/graphs/{graph_id}/operations"
 _AUDIT_EVENT = "graph.operation"
 
-# ── Surfaces refused on subgraphs ──────────────────────────────────────────
-#
-# A subgraph exists to be written to *directly*: raw Cypher and schema
-# extension, which the parent graph refuses outright (see
-# `middleware/mcp/tools/subgraph_write_tools` — "the main graph is read-only to
-# raw statements"). The staging pipeline is the parent's write path and works
-# the opposite way round: it rebuilds the database from DuckDB into a `-wip`
-# copy and file-renames it over the active one (`_materialize_blue_green`).
-# Point both at one database and the swap silently discards every direct write
-# made since staging began. They are not two ways to write — they are two
-# owners of the same file, and only one can win.
+# Surfaces refused on subgraphs. A subgraph is written to directly (raw Cypher,
+# schema extension); staging rebuilds the database into a `-wip` copy and swaps
+# it over the active one, which would silently discard those direct writes.
 _SUBGRAPH_NO_STAGING = (
   "The file staging pipeline is not available on subgraphs. Staging rebuilds "
   "the database and swaps it into place, which would discard the direct writes "
@@ -83,9 +73,8 @@ _SUBGRAPH_NO_STAGING = (
   "directly through its own MCP connector."
 )
 
-# Semantic memory is per-database storage on the parent's instance. A subgraph
-# is meant to be cheap to create and throw away, and its memory would be a
-# second store to keep in step with the parent's for no gain.
+# A subgraph is cheap and disposable; its own memory store would just be a
+# second store to keep in step with the parent's.
 _SUBGRAPH_NO_MEMORY = (
   "Semantic memory is not available on subgraphs. Store memories on the parent "
   "graph, or keep the data in the subgraph itself as nodes."
@@ -131,11 +120,6 @@ async def _dispatch(ctx, runner, cache, on_fresh_success=None):
     raise HTTPException(status_code=409, detail=str(exc))
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# create-subgraph
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 @router.post(
   "/create-subgraph",
   response_model=OperationEnvelope,
@@ -169,7 +153,7 @@ async def create_subgraph_op(
   require_graph_write_role(user_id, graph_id)
 
   if body.fork_parent:
-    # Async path — enqueue worker task, return pending envelope
+    # Async path: enqueue a worker task and return a pending envelope.
     async with idempotent_dispatch(
       cache, user_id, graph_id, op_name, idempotency_key, fingerprint_body(body)
     ) as idem:
@@ -200,7 +184,6 @@ async def create_subgraph_op(
       )
       return envelope
 
-  # Sync path — create immediately
   ctx = _ctx(
     graph_id=graph_id,
     user_id=user_id,
@@ -216,11 +199,6 @@ async def create_subgraph_op(
     return result
 
   return await _dispatch(ctx, _runner, cache)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# delete-subgraph
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(
@@ -254,10 +232,8 @@ async def delete_subgraph_op(
   )
   from robosystems.security import SecurityAuditLogger, SecurityEventType
 
-  # Shared-repo subgraphs (e.g. `sec_historical`) are platform-managed.
-  # The admin-role check further down would implicitly block this too,
-  # but keep the explicit guard so a future change to how repo access is
-  # granted can't silently expose this path.
+  # The admin-role check below would block this too; kept explicit so a change
+  # to repo access grants can't silently expose it.
   if is_shared_repository_or_subgraph(graph_id):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
@@ -298,8 +274,7 @@ async def delete_subgraph_op(
         "parent_graph_id": subgraph.parent_graph_id,
         "user_id": user.id,
         "forced": body.force,
-        # What happened, not what was asked: the service reports whether the
-        # pre-delete backup was actually taken.
+        # Whether the pre-delete backup was actually taken, not whether asked.
         "backup_created": bool(deletion_result.get("backup_created")),
         "backup_id": deletion_result.get("backup_id"),
       },
@@ -315,11 +290,6 @@ async def delete_subgraph_op(
     }
 
   return await _dispatch(ctx, _runner, cache)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# delete-graph
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(
@@ -368,8 +338,6 @@ async def delete_graph_op(
   from robosystems.operations.providers.payment_provider import get_payment_provider
   from robosystems.security import SecurityAuditLogger, SecurityEventType
 
-  # Shared repos run on platform-managed infrastructure with no
-  # user-cancelable subscription. Reject up-front with a clear error.
   if is_shared_repository_or_subgraph(graph_id):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
@@ -408,10 +376,8 @@ async def delete_graph_op(
         detail=f"No active subscription found for graph {graph_id}.",
       )
 
-    # Deletion is a billing event — match the authorization on every other
-    # cancel path (billing/subscriptions, repo cancel) by also requiring the
-    # caller to be org owner. Graph admin alone is operational authority and
-    # not enough to authorize a billing-side action.
+    # A billing event: require org owner, as every other cancel path does.
+    # Graph admin alone is operational authority only.
     org_user = OrgUser.get_by_org_and_user(subscription.org_id, user.id, db)
     if not org_user or org_user.role != OrgRole.OWNER:
       raise HTTPException(
@@ -434,10 +400,8 @@ async def delete_graph_op(
         ),
       )
 
-    # `at_period_end` only makes sense for active subscriptions: a pending /
-    # provisioning / paused sub may not have `current_period_end` set, which
-    # would leave `ends_at = None` and let the deprovision sensor skip it
-    # forever. Force callers to use immediate teardown in that case.
+    # Only active subs reliably have `current_period_end`; without it
+    # `ends_at` stays None and the deprovision sensor skips the graph forever.
     if body.at_period_end and subscription.status != SubscriptionStatus.ACTIVE.value:
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -450,9 +414,7 @@ async def delete_graph_op(
 
     immediate = not body.at_period_end
 
-    # Stripe-side cancel: full cancel for immediate, period-end for deferred.
-    # Stripe's default cancel does NOT prorate or refund; period-end uses
-    # the standard Subscription.modify(cancel_at_period_end=True) path.
+    # Stripe's default cancel does not prorate or refund.
     if subscription.stripe_subscription_id:
       try:
         provider = get_payment_provider("stripe")
@@ -464,14 +426,10 @@ async def delete_graph_op(
             cancel_at_period_end=True,
           )
       except Exception as exc:
-        # Provider first, and fail closed. A raise here means Stripe still
-        # holds a live subscription that will keep billing; cancelling locally
-        # anyway would end the customer's access while the charges continue —
-        # the inverse of what "delete" promised — and nothing replays the
-        # provider cancel later. Same contract as the repository cancel path
-        # (`ProviderCancellationError` → 502, local state untouched): the
-        # customer sees the failure and retries, instead of paying for a graph
-        # that no longer exists.
+        # Fail closed: cancelling locally while Stripe still bills would end
+        # access while charges continue, and nothing replays the provider
+        # cancel. Same contract as the repository cancel path (502, local
+        # state untouched); the customer retries.
         logger.error(
           f"Failed to cancel Stripe subscription "
           f"{subscription.stripe_subscription_id} during delete-graph "
@@ -539,23 +497,13 @@ async def delete_graph_op(
     )
 
     if immediate:
-      # Suspend here rather than waiting for expired_graph_subscription_sensor
-      # to notice. The cancel above already wrote everything that sensor keys
-      # off (status=canceled, ends_at=now, cancellation_type=immediate), so the
-      # graph is irreversibly gone the moment it commits — but Graph.status is
-      # a projection of billing state reconciled on a 300s tick, so until then
-      # every read still reports "active" and the graph stays fully usable.
-      # Measured in production: one teardown reported active for 2m50s after
-      # the call returned, another for roughly five minutes — an unpredictable
-      # 0-300s window in which a destroyed graph looks perfectly healthy and
-      # still answers queries. There is no undo past this point, so the status
-      # must not lag the fact.
-      #
-      # The sensor stays as the backstop: it still owns period-end expiry,
-      # payment failures, provider-originated cancels, and any run that dies
-      # between the cancel commit and this write. Its query filters on
-      # status == ACTIVE, so once this lands it simply stops matching. Guarded
-      # on ACTIVE because transition_status rejects suspended -> suspended.
+      # Suspend now rather than waiting for expired_graph_subscription_sensor:
+      # Graph.status is reconciled on a 300s tick, so until then a graph that
+      # is irreversibly gone still reports active and answers queries. The
+      # sensor remains the backstop (period-end expiry, payment failures,
+      # provider-originated cancels, a run that dies before this write) and
+      # stops matching once status leaves ACTIVE. Guarded on ACTIVE because
+      # transition_status rejects suspended -> suspended.
       graph_row = Graph.get_by_id(graph_id, db)
       if graph_row and graph_row.status == GraphStatus.ACTIVE.value:
         graph_row.transition_status(GraphStatus.SUSPENDED, db)
@@ -595,19 +543,10 @@ def _reserve_backup_slot(
 ) -> str:
   """Take a slot against the graph's daily backup quota, returning its row id.
 
-  Counting rows and then letting the async job insert one leaves a window where
-  concurrent requests all observe the same count and all pass. The row is
-  therefore inserted here, and the job adopts it.
-
-  The count and the insert are serialized per graph by locking the graph row
-  first. That is enough because the quota is per-graph: two requests for the
-  same graph queue behind each other, and unrelated graphs never wait on one
-  another. Placeholder storage fields are overwritten by the job once it knows
-  the real key.
-
-  Raises 429 when the tier's allowance is spent. A negative limit means
-  unlimited, and an unresolvable tier already fell back to the smallest
-  allowance upstream.
+  The row is inserted here (and adopted by the job) so concurrent requests
+  can't all pass on the same count; locking the graph row serializes count +
+  insert per graph. Raises 429 when the allowance is spent; a negative limit
+  means unlimited.
   """
   from datetime import UTC, datetime, timedelta
 
@@ -653,11 +592,6 @@ def _release_backup_slot(backup_id: str, db: Session) -> None:
       reservation.fail_backup(db, "Backup job could not be enqueued")
   except Exception as e:
     logger.error(f"Could not release backup reservation {backup_id}: {e}")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# create-backup
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(
@@ -722,11 +656,9 @@ async def create_backup_op(
         detail="Only 'full_dump' backup format is currently supported",
       )
 
-    # Cap retention to the tier's maximum. Unconditional: a missing graph row
-    # or tier falls back to the smallest tier's cap rather than skipping the
-    # clamp — an uncapped value would be accepted here and then destroyed by
-    # the 90-day S3 lifecycle rule, leaving a COMPLETED record pointing at a
-    # deleted object.
+    # Unconditional clamp to the tier's retention cap (smallest tier when
+    # unresolvable): an uncapped value would be destroyed by the 90-day S3
+    # lifecycle rule, leaving a COMPLETED record pointing at a deleted object.
     graph_record = Graph.get_by_id(graph_id, db)
     backup_tier = (
       str(graph_record.graph_tier)
@@ -737,10 +669,8 @@ async def create_backup_op(
     tier_max = backup_limits.get("backup_retention_days", 7)
     effective_retention_days = min(body.retention_days, tier_max)
 
-    # Enforce the per-tier daily limit that /limits and /tiers have been
-    # publishing all along. Same fail-small posture as the retention clamp: an
-    # unresolvable tier gets the smallest allowance rather than an exemption.
-    # A negative limit means unlimited (the xlarge tier).
+    # Same fail-small posture: an unresolvable tier gets the smallest
+    # allowance. A negative limit means unlimited.
     max_per_day = backup_limits.get("max_backups_per_day", 2)
     reservation_id = _reserve_backup_slot(
       graph_id=graph_id,
@@ -771,8 +701,7 @@ async def create_backup_op(
         params={"job_name": "backup_graph_job", "run_config": run_config},
       )
     except Exception:
-      # Release the slot rather than leaving a PENDING row holding quota for a
-      # job that will never run. FAILED rows are excluded from the count.
+      # Free the quota slot; FAILED rows are excluded from the count.
       _release_backup_slot(reservation_id, db)
       raise
     operation_id = response["operation_id"]
@@ -813,11 +742,6 @@ async def create_backup_op(
     return envelope
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# change-tier
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 @router.post(
   "/change-tier",
   response_model=OperationEnvelope,
@@ -845,10 +769,8 @@ async def change_tier_op(
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.operations.graph.commands.tier import change_graph_tier_cmd
 
-  # Shared repositories (SEC, etc.) run on platform-managed infrastructure —
-  # they have no user-owned subscription, so `change_graph_tier_cmd` would
-  # fail at the subscription lookup anyway. Reject up-front so the error
-  # message points at the real reason instead of "subscription not found".
+  # Shared repos have no user-owned subscription; reject up front so the error
+  # names the real reason rather than "subscription not found".
   if is_shared_repository_or_subgraph(graph_id):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
@@ -889,11 +811,6 @@ async def change_tier_op(
       event=_AUDIT_EVENT,
     )
     return envelope
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# update-graph-metadata
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(
@@ -951,11 +868,6 @@ async def update_graph_metadata_op(
     )
 
   return await _dispatch(ctx, _runner, cache)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# materialize
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(

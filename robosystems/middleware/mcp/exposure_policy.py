@@ -1,25 +1,10 @@
-"""Which operations reach MCP, and why the rest deliberately do not.
+"""Hand-written operations deliberately kept off MCP, each with its reason.
 
-Write operations reach clients on two surfaces: the REST operations routes
-under ``/extensions/{domain}/{graph_id}/operations/{name}`` and the MCP tool
-list. An operation registered through ``OperationRegistrar`` gets both from a
-single ``OperationSpec`` — the REST route is mounted and the MCP tool is
-auto-generated from the same declaration, so the two cannot drift.
-
-Operations mounted as hand-written ``@router.post`` blocks have no such
-guarantee. For those, *absence from MCP is indistinguishable from a decision
-not to expose*, so a complete capability can sit unreachable without anyone
-noticing. This module removes the ambiguity: every hand-written operation
-without an MCP tool must appear in :data:`MCP_EXPOSURE_HOLDS` with a reason,
-and ``tests/middleware/mcp/test_operation_exposure.py`` fails the build
-otherwise.
-
-Adding a hand-written operation therefore forces a choice: expose it, or say
-why not. Removing an operation forces the stale hold to be cleaned up — the
-test rejects entries that no longer name a real operation.
-
-Prefer the registrar. A hold is for operations that should not be driven by an
-AI operator at all, not for ones nobody has got around to wiring.
+Registrar operations get an MCP tool automatically; a hand-written
+``@router.post`` without one must be listed here, or
+``tests/middleware/mcp/test_operation_exposure.py`` fails, and stale entries
+fail it too. A hold is for operations an AI operator should not drive, not
+for unfinished wiring.
 """
 
 from __future__ import annotations

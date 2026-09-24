@@ -47,7 +47,6 @@ async def list_invoices(
   try:
     from ...models.core import OrgRole, OrgUser
 
-    # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -134,7 +133,6 @@ async def get_upcoming_invoice(
   try:
     from ...models.core import OrgRole, OrgUser
 
-    # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -154,10 +152,8 @@ async def get_upcoming_invoice(
     if not customer.stripe_customer_id:
       return None
 
-    # An upcoming invoice belongs to a subscription, so resolve one locally
-    # first. Beyond correctness this keeps the no-subscription case off the
-    # network entirely — the previous customer-only call spent ~4s per
-    # billing page load before Stripe rejected it.
+    # An upcoming invoice belongs to a subscription; resolving it locally also
+    # keeps the no-subscription case off the network (~4s per page load).
     subscription_id = next(
       (
         sub.stripe_subscription_id

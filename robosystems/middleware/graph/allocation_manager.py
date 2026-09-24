@@ -91,12 +91,8 @@ class InstanceStatus(Enum):
   TERMINATING = "terminating"
 
 
-# A graph row in one of these statuses occupies a slot on its instance. This is
-# the single definition of "occupied" for the whole platform: `_find_best_instance`
-# places against it, and the fleet metrics collector reports free slots against it
-# (`operations/graph/infrastructure.py`). Keep them on one constant — a capacity
-# *reading* that uses a different status rule than the capacity *decision* will
-# disagree with reality in whichever direction nobody is looking.
+# The single definition of "occupies a slot": placement (`_find_best_instance`)
+# and the fleet metrics collector must agree on it.
 OCCUPYING_DATABASE_STATUSES = frozenset(
   {
     DatabaseStatus.ACTIVE.value,
@@ -154,31 +150,28 @@ class LadybugAllocationManager:
     asg_name: str | None = None,
   ):
     self.environment = environment
-    # Use environment variable if max_databases_per_instance not explicitly provided
     self.max_databases_per_instance = (
       max_databases_per_instance
       if max_databases_per_instance is not None
       else MultiTenantUtils.get_max_databases_per_node()
     )
 
-    # Tier-based configuration for database allocation.
-    # Runtime-specific settings are configured in the corresponding userdata scripts.
-    # Memory and chunk size settings are loaded from graph.yml via GraphTierConfig.
+    # Memory and chunk sizes come from graph.yml via GraphTierConfig.
     self.tier_configs = {
       GraphTier.LADYBUG_STANDARD: {
         "backend": "ladybug",
         "backend_type": "ladybug",
-        "databases_per_instance": self.max_databases_per_instance,  # Dedicated (1 per instance)
+        "databases_per_instance": self.max_databases_per_instance,
       },
       GraphTier.LADYBUG_LARGE: {
         "backend": "ladybug",
         "backend_type": "ladybug",
-        "databases_per_instance": 1,  # Dedicated instance (parent + subgraphs)
+        "databases_per_instance": 1,  # parent + its subgraphs
       },
       GraphTier.LADYBUG_XLARGE: {
         "backend": "ladybug",
         "backend_type": "ladybug",
-        "databases_per_instance": 1,  # Large dedicated instance (parent + subgraphs)
+        "databases_per_instance": 1,
       },
       GraphTier.LADYBUG_SHARED: {
         "backend": "ladybug",
@@ -289,7 +282,6 @@ class LadybugAllocationManager:
         f"Invalid graph ID format: {graph_id}. Must be 'kg' followed by 16+ lowercase hex characters or a shared repository name."
       )
 
-    # Check if this is a subgraph - if so, route to parent's allocation
     subgraph_info = parse_subgraph_id(graph_id)
     if subgraph_info:
       logger.info(
@@ -303,8 +295,7 @@ class LadybugAllocationManager:
           f"Cannot create subgraph without parent allocation."
         )
 
-      # Parent's instance, subgraph's id. Creating the database itself
-      # happens a layer up.
+      # Creating the database itself happens a layer up.
       logger.info(
         f"Subgraph {graph_id} will use parent's instance {parent_location.instance_id} "
         f"({parent_location.private_ip})"
@@ -348,14 +339,13 @@ class LadybugAllocationManager:
           "Please contact support or try again later."
         )
 
-      # Atomic allocation using DynamoDB conditional writes
       now = datetime.now(UTC)
       max_retries = 3
       retry_count = 0
 
       while retry_count < max_retries:
         try:
-          # STEP 1: Atomically create database entry with condition that it doesn't exist
+          # STEP 1: create the graph row only if the graph_id is free.
           self.graph_table.put_item(
             Item={
               "graph_id": graph_id,
@@ -369,24 +359,23 @@ class LadybugAllocationManager:
               "last_accessed": now.isoformat(),
               "status": DatabaseStatus.ACTIVE.value,
               "database_size_mb": Decimal(0),
-              "allocation_lock": f"allocated_by_{now.timestamp()}",  # Allocation tracking
+              "allocation_lock": f"allocated_by_{now.timestamp()}",
             },
-            ConditionExpression="attribute_not_exists(graph_id)",  # ATOMIC: Only if database doesn't exist
+            ConditionExpression="attribute_not_exists(graph_id)",
           )
 
-          # STEP 2: Atomically increment instance count with capacity check
+          # STEP 2: claim a slot on the instance, conditional on capacity.
           try:
             self.instance_table.update_item(
               Key={"instance_id": instance.instance_id},
               UpdateExpression="ADD database_count :inc SET last_allocation = :timestamp",
-              ConditionExpression="database_count < max_databases",  # ATOMIC: Only if capacity available
+              ConditionExpression="database_count < max_databases",
               ExpressionAttributeValues={
                 ":inc": 1,
                 ":timestamp": now.isoformat(),
               },
             )
 
-            # Both operations succeeded - allocation complete
             break
 
           except ClientError as capacity_error:
@@ -394,12 +383,11 @@ class LadybugAllocationManager:
               capacity_error.response["Error"]["Code"]
               == "ConditionalCheckFailedException"
             ):
-              # Instance is now at capacity - rollback database creation and retry with different instance
+              # Lost the race for the last slot: undo STEP 1, try another instance.
               logger.warning(
                 f"Instance {instance.instance_id} reached capacity during allocation, rolling back"
               )
 
-              # Rollback: Delete the database entry we just created
               try:
                 self.graph_table.delete_item(
                   Key={"graph_id": graph_id},
@@ -430,19 +418,17 @@ class LadybugAllocationManager:
               )
               continue
             else:
-              # Different error - re-raise
               raise capacity_error
 
         except ClientError as e:
           if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            # Database already exists - this is a graph_id collision
             try:
               response = self.graph_table.get_item(Key={"graph_id": graph_id})
               if "Item" in response:
                 item = response["Item"]
                 existing_entity = item.get("entity_id", "unknown")
                 if existing_entity == entity_id:
-                  # Same entity retrying - safe to return existing allocation
+                  # Same entity retrying: idempotent.
                   logger.info(
                     f"Database {graph_id} already allocated to same entity {entity_id} (idempotent retry)"
                   )
@@ -456,7 +442,6 @@ class LadybugAllocationManager:
                     backend_type=item.get("backend_type", "ladybug"),
                   )
                 else:
-                  # Different entity - graph_id collision, must not share allocation
                   logger.error(
                     f"Graph ID collision: {graph_id} already belongs to entity {existing_entity}, "
                     f"requested by entity {entity_id}"
@@ -465,7 +450,6 @@ class LadybugAllocationManager:
                     f"Graph ID {graph_id} already exists (owned by a different entity)."
                   )
               else:
-                # Shouldn't happen - conditional check failed but item doesn't exist
                 logger.error(
                   f"Conditional check failed but database {graph_id} not found"
                 )
@@ -480,11 +464,10 @@ class LadybugAllocationManager:
                 f"Database allocation failed for {graph_id} and lookup failed"
               )
           else:
-            # Different DynamoDB error
             raise e
 
       SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.AUTH_SUCCESS,  # Could add DATABASE_ALLOCATED
+        event_type=SecurityEventType.AUTH_SUCCESS,
         details={
           "action": "database_allocated",
           "entity_id": entity_id,
@@ -529,7 +512,6 @@ class LadybugAllocationManager:
           # Protection is defense in depth; its failure must not fail allocation.
           logger.error(f"Failed to enable instance protection: {e}")
 
-        # Publish metrics (only in prod/staging)
         await self._publish_allocation_metrics()
 
       return DatabaseLocation(
@@ -584,7 +566,6 @@ class LadybugAllocationManager:
         backend_type=parent_location.backend_type,
       )
 
-    # Parent graph or shared repository - look up in DynamoDB
     try:
       response = self.graph_table.get_item(Key={"graph_id": graph_id})
 
@@ -594,13 +575,12 @@ class LadybugAllocationManager:
       item = response["Item"]
       instance_id = item["instance_id"]
 
-      # The graph registry's cached private_ip goes stale after instance
-      # replacement, so fall back to the instance registry.
+      # A row without a cached private_ip resolves through the instance
+      # registry, which is authoritative for instance details.
       private_ip = item.get("private_ip")
       availability_zone = item.get("availability_zone", "unknown")
 
       if not private_ip:
-        # The instance registry is authoritative for instance details.
         instance_response = self.instance_table.get_item(
           Key={"instance_id": instance_id}
         )
@@ -683,12 +663,12 @@ class LadybugAllocationManager:
 
       deallocation_timestamp = datetime.now(UTC).isoformat()
 
-      # STEP 1: Atomically mark database as deleted (only if not already deleted)
+      # STEP 1: mark deleted, unless another process already did.
       try:
         self.graph_table.update_item(
           Key={"graph_id": graph_id},
           UpdateExpression="SET #status = :deleted_status, deleted_at = :time, deallocation_lock = :lock_id",
-          ConditionExpression="#status <> :deleted_status",  # ATOMIC: Only if not already deleted
+          ConditionExpression="#status <> :deleted_status",
           ExpressionAttributeNames={"#status": "status"},
           ExpressionAttributeValues={
             ":deleted_status": DatabaseStatus.DELETED.value,
@@ -698,18 +678,17 @@ class LadybugAllocationManager:
         )
       except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-          # Database already deleted by another process
           logger.info(f"Database {graph_id} was already deleted by another process")
           return True
         else:
           raise e
 
-      # STEP 2: Atomically decrement instance count (only if count > 0)
+      # STEP 2: release the slot, never below zero.
       try:
         self.instance_table.update_item(
           Key={"instance_id": instance_id},
           UpdateExpression="ADD database_count :dec SET last_deallocation = :timestamp",
-          ConditionExpression="database_count > :zero",  # ATOMIC: Only if count > 0
+          ConditionExpression="database_count > :zero",
           ExpressionAttributeValues={
             ":dec": -1,
             ":zero": 0,
@@ -720,12 +699,11 @@ class LadybugAllocationManager:
         if (
           capacity_error.response["Error"]["Code"] == "ConditionalCheckFailedException"
         ):
-          # Instance count is already 0 - this shouldn't happen but handle gracefully
+          # An integrity issue worth auditing, but not a reason to fail.
           logger.warning(
             f"Instance {instance_id} database count was already 0 during deallocation"
           )
 
-          # Log this as a potential integrity issue but don't fail the deallocation
           SecurityAuditLogger.log_security_event(
             event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
             details={
@@ -738,13 +716,12 @@ class LadybugAllocationManager:
             risk_level="medium",
           )
         else:
-          # Unexpected error - try to rollback database status change
+          # Undo STEP 1.
           logger.error(
             f"Failed to decrement database count for {instance_id}: {capacity_error}"
           )
 
           try:
-            # Rollback: Change database status back to active
             self.graph_table.update_item(
               Key={"graph_id": graph_id},
               UpdateExpression="SET #status = :active_status REMOVE deleted_at, deallocation_lock",
@@ -764,7 +741,7 @@ class LadybugAllocationManager:
           return False
 
       SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.AUTHORIZATION_DENIED,  # Could add DATABASE_DEALLOCATED
+        event_type=SecurityEventType.AUTHORIZATION_DENIED,
         details={
           "action": "database_deallocated",
           "graph_id": graph_id,
@@ -780,7 +757,6 @@ class LadybugAllocationManager:
       # Keep the volume registry in step so replacement doesn't restore it.
       await self._update_volume_registry_remove_database(instance_id, graph_id)
 
-      # Check if instance now has zero databases and remove protection if so (only in prod/staging)
       if self.environment not in ["dev", "test"]:
         try:
           response = self.instance_table.get_item(Key={"instance_id": instance_id})
@@ -809,7 +785,6 @@ class LadybugAllocationManager:
         except ClientError as e:
           logger.error(f"Failed to check instance database count: {e}")
 
-        # Publish metrics (only in prod/staging)
         await self._publish_allocation_metrics()
 
       return True
@@ -960,14 +935,11 @@ class LadybugAllocationManager:
       return False
 
   def _count_allocated_graphs(self, instance_id: str) -> int:
-    """Count graphs allocated to an instance from the graph registry.
+    """Occupied slots per the graph registry, the authoritative record.
 
-    The graph registry is the authoritative record: rows are written
-    conditionally at allocation time and re-pointed by the volume-manager
-    Lambda when instances cycle. Capacity decisions must not use the
-    instance registry's denormalized `database_count`, which resets when a
-    replacement instance re-registers after ASG cycling — a drifted zero
-    makes an occupied dedicated writer look empty and gets it double-booked.
+    Not the instance registry's `database_count`: it resets when a
+    replacement instance re-registers, and a drifted zero would double-book
+    an occupied writer.
     """
     from boto3.dynamodb.conditions import Key
 
@@ -1013,7 +985,6 @@ class LadybugAllocationManager:
           )
           return None
 
-        # Check if the tier's ASG exists (especially for optional tiers in prod)
         stack_name = self._get_stack_name_for_tier(target_tier)
         if not stack_name:
           logger.warning(
@@ -1046,11 +1017,8 @@ class LadybugAllocationManager:
         if exclude_instance and instance_id == exclude_instance:
           continue
 
-        # Occupancy comes from the graph registry, not the instance
-        # registry's database_count — that counter resets to a stale value
-        # when a replacement instance re-registers after ASG cycling, which
-        # would make an occupied dedicated writer look empty. The counter is
-        # still used as the atomic race guard during allocation (STEP 2).
+        # See `_count_allocated_graphs`; `database_count` remains only the
+        # atomic race guard in allocation STEP 2.
         database_count = self._count_allocated_graphs(instance_id)
         max_databases = int(item.get("max_databases", self.max_databases_per_instance))
 
@@ -1110,12 +1078,10 @@ class LadybugAllocationManager:
 
       item = response["Item"]
 
-      # Construct ASG name from tier and environment (kebab-case convention)
       cluster_tier = item.get("cluster_tier", "ladybug-standard")
       if self.environment in ["prod", "staging"]:
         return f"robosystems-{cluster_tier}-writers-{self.environment}-asg"
 
-      # Fallback for development/test environments
       return self.default_asg_name
 
     except ClientError as e:
@@ -1164,19 +1130,12 @@ class LadybugAllocationManager:
   async def _publish_failure_metric(
     self, failure_reason: str, entity_id: str, user_id: str | None = None
   ):
-    """Publish allocation failure metric to CloudWatch (only in prod/staging).
+    """Publish an allocation failure metric (prod/staging only).
 
-    Emitted under **two** dimension sets, and the duplication is deliberate.
-    CloudWatch matches an alarm to a metric on the exact dimension set, so a
-    datum carrying only ``FailureReason`` is invisible to an alarm watching
-    ``Environment`` — which is what
-    ``graph-ladybug.yaml``'s ``AllocationFailureAlarm`` does. That alarm sat
-    ``OK`` for six months not because provisioning never failed but because
-    nothing had ever published to the stream it watches, and
-    ``TreatMissingData: notBreaching`` renders permanent silence as health.
-
-    Fixing the emitter rather than the alarm keeps ``FailureReason``, which is
-    the dimension worth having during triage, and needs no stack deploy.
+    Emitted under two dimension sets on purpose: CloudWatch matches alarms on
+    the exact dimension set, and ``AllocationFailureAlarm`` in
+    ``graph-ladybug.yaml`` watches ``Environment``, while ``FailureReason`` is
+    the one useful in triage.
     """
     if self.environment in ["dev", "test"]:
       return
@@ -1227,9 +1186,8 @@ class LadybugAllocationManager:
     )
 
     try:
-      # Paginated scan with a hard page cap so a pathological table can't
-      # spin here forever.
-      MAX_PAGES = 100  # Volume registry should never have this many pages
+      # Page cap so a pathological table can't spin here forever.
+      MAX_PAGES = 100
       all_items = []
       last_evaluated_key = None
       pages_scanned = 0
@@ -1261,26 +1219,22 @@ class LadybugAllocationManager:
         )
 
       if not all_items:
-        # Try alternative: look up volume from instance registry
         logger.warning(
           f"No attached volume found via scan for instance {instance_id}, "
           f"trying instance registry lookup"
         )
 
-        # Check instance registry for volume info
         try:
           instance_response = self.instance_table.get_item(
             Key={"instance_id": instance_id}
           )
           if "Item" in instance_response:
             instance_item = instance_response["Item"]
-            # The instance might have volume info cached
             logger.info(
               f"Instance {instance_id} found in instance registry, "
               f"AZ: {instance_item.get('availability_zone')}, tier: {instance_item.get('tier')}"
             )
 
-            # Try to find volume by AZ and tier
             az = instance_item.get("availability_zone")
             tier = instance_item.get("tier")
             if az and tier:
@@ -1343,13 +1297,11 @@ class LadybugAllocationManager:
         f"Failed to update volume registry for database {graph_id} "
         f"on instance {instance_id}: {e}. This will cause database loss on ASG refresh!"
       )
-      # Note: We don't fail the allocation, but this is a critical issue that needs attention
 
   async def _update_volume_registry_remove_database(
     self, instance_id: str, graph_id: str
   ) -> None:
     """Remove a database from an instance's volume registry."""
-    # The volume registry doesn't exist outside prod/staging.
     if self.environment in ["dev", "test"]:
       logger.debug(
         f"Skipping volume registry removal in {self.environment} environment"
@@ -1357,9 +1309,7 @@ class LadybugAllocationManager:
       return
 
     try:
-      # Find the volume attached to this instance using paginated scan
-      # Safety limits to prevent infinite loops
-      MAX_PAGES = 100  # Volume registry should never have this many pages
+      MAX_PAGES = 100
       items = []
       last_evaluated_key = None
       pages_scanned = 0
@@ -1400,7 +1350,8 @@ class LadybugAllocationManager:
       volume_id = items[0]["volume_id"]
       current_databases = items[0].get("databases", [])
 
-      # Conditional on the list we read, so a concurrent edit is detected.
+      # The condition only checks graph_id is still listed; it does not
+      # detect other concurrent edits to the list.
       if graph_id in current_databases:
         updated_databases = [db for db in current_databases if db != graph_id]
         try:
@@ -1420,7 +1371,6 @@ class LadybugAllocationManager:
           )
         except ClientError as e:
           if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            # Concurrent modification - database was already removed or list changed
             logger.debug(
               f"Database {graph_id} already removed from volume {volume_id} registry "
               f"(concurrent modification detected)"
@@ -1435,7 +1385,6 @@ class LadybugAllocationManager:
         f"Failed to update volume registry for database {graph_id} removal "
         f"on instance {instance_id}: {e}"
       )
-      # Don't fail the deallocation - volume registry is supplementary
 
 
 def create_allocation_manager(environment: str = "prod") -> LadybugAllocationManager:

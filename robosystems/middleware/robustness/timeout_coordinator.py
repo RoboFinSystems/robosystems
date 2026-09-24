@@ -1,8 +1,7 @@
-"""Hierarchical timeout coordination.
+"""Per-tool timeouts for the endpoint, queue, tool and instance layers.
 
-Derives each layer's timeout from the one above it, so an inner call always
-expires before the outer call it is nested in and the innermost failure is
-the one reported.
+Each layer is shorter than the one it is nested in, so the innermost failure
+is the one reported.
 """
 
 from dataclasses import dataclass
@@ -12,8 +11,6 @@ from robosystems.logger import logger
 
 @dataclass
 class TimeoutConfiguration:
-  """Timeout configuration for different layers."""
-
   endpoint_timeout: float
   queue_timeout: float
   tool_timeout: float
@@ -24,72 +21,64 @@ class TimeoutCoordinator:
   """Coordinate timeouts across endpoint, queue, tool, and instance layers."""
 
   def __init__(self):
-    """Initialize timeout coordinator with default configurations."""
-    # Default timeout configurations by tool type
     self.timeout_configs: dict[str, TimeoutConfiguration] = {
       "cypher_query": TimeoutConfiguration(
-        endpoint_timeout=30.0,  # 30s API limit
-        queue_timeout=28.0,  # 2s buffer for response
-        tool_timeout=25.0,  # 3s buffer for queue overhead
-        instance_timeout=20.0,  # 5s buffer for HTTP/network overhead
+        endpoint_timeout=30.0,
+        queue_timeout=28.0,
+        tool_timeout=25.0,
+        instance_timeout=20.0,
       ),
       "read-graph-cypher": TimeoutConfiguration(
-        endpoint_timeout=30.0,  # 30s API limit
-        queue_timeout=28.0,  # 2s buffer for response
-        tool_timeout=25.0,  # 3s buffer for queue overhead
-        instance_timeout=20.0,  # 5s buffer for HTTP/network overhead
+        endpoint_timeout=30.0,
+        queue_timeout=28.0,
+        tool_timeout=25.0,
+        instance_timeout=20.0,
       ),
       "get-graph-schema": TimeoutConfiguration(
-        endpoint_timeout=30.0,  # 30s API limit
-        queue_timeout=28.0,  # 2s buffer
-        tool_timeout=25.0,  # 3s buffer
-        instance_timeout=20.0,  # 5s buffer
+        endpoint_timeout=30.0,
+        queue_timeout=28.0,
+        tool_timeout=25.0,
+        instance_timeout=20.0,
       ),
       "get-graph-info": TimeoutConfiguration(
-        endpoint_timeout=30.0,  # 30 seconds total
-        queue_timeout=25.0,  # 25 seconds for queue processing
-        tool_timeout=20.0,  # 20 seconds for tool execution
-        instance_timeout=15.0,  # 15 seconds for graph database instance
+        endpoint_timeout=30.0,
+        queue_timeout=25.0,
+        tool_timeout=20.0,
+        instance_timeout=15.0,
       ),
       "default": TimeoutConfiguration(
-        endpoint_timeout=30.0,  # 30s API limit
-        queue_timeout=28.0,  # 2s buffer
-        tool_timeout=25.0,  # 3s buffer
-        instance_timeout=20.0,  # 5s buffer
+        endpoint_timeout=30.0,
+        queue_timeout=28.0,
+        tool_timeout=25.0,
+        instance_timeout=20.0,
       ),
     }
 
     logger.debug("Initialized TimeoutCoordinator with hierarchical timeout management")
 
   def get_timeout_config(self, tool_name: str) -> TimeoutConfiguration:
-    """Get timeout configuration for a specific tool."""
     return self.timeout_configs.get(tool_name, self.timeout_configs["default"])
 
   def get_endpoint_timeout(self, tool_name: str) -> float:
-    """Get endpoint timeout for a tool."""
     config = self.get_timeout_config(tool_name)
     return config.endpoint_timeout
 
   def get_queue_timeout(self, tool_name: str) -> float:
-    """Get queue timeout for a tool."""
     config = self.get_timeout_config(tool_name)
     return config.queue_timeout
 
   def get_tool_timeout(self, tool_name: str) -> float:
-    """Get tool execution timeout."""
     config = self.get_timeout_config(tool_name)
     return config.tool_timeout
 
   def get_instance_timeout(self, tool_name: str) -> float:
-    """Get graph database instance timeout."""
     config = self.get_timeout_config(tool_name)
     return config.instance_timeout
 
   def validate_timeout_hierarchy(self, tool_name: str) -> bool:
-    """Validate that timeout hierarchy is properly configured."""
+    """Whether timeouts strictly decrease down the layers."""
     config = self.get_timeout_config(tool_name)
 
-    # Check that timeouts decrease down the hierarchy
     hierarchy_valid = (
       config.endpoint_timeout
       > config.queue_timeout
@@ -107,7 +96,6 @@ class TimeoutCoordinator:
     return hierarchy_valid
 
   def get_timeout_summary(self, tool_name: str) -> dict[str, str | float | bool]:
-    """Get timeout summary for monitoring/debugging."""
     config = self.get_timeout_config(tool_name)
 
     return {
@@ -122,8 +110,8 @@ class TimeoutCoordinator:
   def calculate_timeout(
     self, operation_type: str, complexity_factors: dict | None = None
   ) -> float:
-    """Calculate timeout based on operation type and complexity factors."""
-    # Map operation types to timeout configurations
+    """Endpoint timeout for an operation type, scaled by complexity factors
+    (capped at 3x)."""
     operation_mapping = {
       "database_query": "cypher_query",
       "database_write": "cypher_query",
@@ -137,7 +125,6 @@ class TimeoutCoordinator:
     if complexity_factors:
       multiplier = 1.0
 
-      # Adjust based on limit/row count
       if "limit" in complexity_factors:
         limit = complexity_factors["limit"]
         if limit > 5000:
@@ -145,17 +132,14 @@ class TimeoutCoordinator:
         elif limit > 1000:
           multiplier *= 1.5
 
-      # Adjust for search operations
       if complexity_factors.get("has_search", False):
         multiplier *= 1.3
 
-      # Adjust for write operations with multiple fields
       if "fields_count" in complexity_factors:
         fields = complexity_factors["fields_count"]
         if fields > 5:
           multiplier *= 1.2
 
-      # Cap the multiplier to prevent excessive timeouts
       multiplier = min(multiplier, 3.0)
       base_timeout *= multiplier
 
