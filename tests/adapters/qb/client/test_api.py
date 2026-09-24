@@ -1094,6 +1094,19 @@ class TestRetryBehavior:
     validation_error = ValidationException("bad input", error_code=2000)
     assert _is_retryable_qb_error(validation_error) is False
 
+  @pytest.mark.parametrize(
+    ("status", "expected"),
+    [(429, True), (500, True), (503, True), (400, False), (404, False)],
+  )
+  def test_http_error_retry_by_status(self, status, expected):
+    """A real Response is falsy for 4xx/5xx, so the status must still be read."""
+    from robosystems.adapters.quickbooks.client.api import _is_retryable_qb_error
+
+    response = requests.Response()
+    response.status_code = status
+    error = requests.exceptions.HTTPError(response=response)
+    assert _is_retryable_qb_error(error) is expected
+
   def test_retry_exhausts_after_5_attempts(self):
     """A persistent 5xx exhausts retry budget after 5 attempts."""
     from quickbooks.exceptions import QuickbooksException

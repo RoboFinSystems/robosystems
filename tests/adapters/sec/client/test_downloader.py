@@ -320,6 +320,59 @@ class TestSECDownloaderDownloadFiling:
     assert result is False
     assert downloader._stats.failed == 1
 
+  @staticmethod
+  def _response(status, content=b""):
+    response = AsyncMock()
+    response.status = status
+    response.headers = {"Retry-After": "0"}
+    response.read = AsyncMock(return_value=content)
+    response.raise_for_status = MagicMock()
+    response.__aenter__ = AsyncMock(return_value=response)
+    response.__aexit__ = AsyncMock()
+    return response
+
+  @pytest.mark.asyncio
+  async def test_429_retry_does_not_deadlock_on_full_semaphore(self, mock_hit):
+    """A retry must not re-acquire the slot it already holds."""
+    import asyncio
+
+    downloader = SECDownloader(skip_existing=False, max_concurrent=1)
+    mock_s3 = MagicMock()
+    downloader._s3 = mock_s3
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(
+      side_effect=[self._response(429), self._response(200, b"zip")]
+    )
+    downloader._session = mock_session
+    downloader._stats = DownloadStats()
+
+    result = await asyncio.wait_for(
+      downloader._download_filing(mock_hit, 2024, "test-bucket"), timeout=2
+    )
+
+    assert result is True
+    assert downloader._stats.downloaded == 1
+    assert mock_session.get.call_count == 2
+
+  @pytest.mark.asyncio
+  async def test_429_gives_up_after_max_retries(self, mock_hit):
+    import asyncio
+
+    downloader = SECDownloader(skip_existing=False, max_concurrent=1)
+    downloader._s3 = MagicMock()
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(side_effect=lambda _url: self._response(429))
+    downloader._session = mock_session
+    downloader._stats = DownloadStats()
+
+    result = await asyncio.wait_for(
+      downloader._download_filing(mock_hit, 2024, "test-bucket"), timeout=2
+    )
+
+    assert result is False
+    assert downloader._stats.failed == 1
+    assert mock_session.get.call_count == 4
+
 
 class TestSECDownloaderDownloadFilings:
   """Tests for batch filing download."""

@@ -1214,11 +1214,11 @@ class TestConvenienceFunctions:
         )
 
   @pytest.mark.asyncio
-  async def test_sec_ingestion_prod_fallback_on_discovery_failure(self):
-    """SEC ingestion falls back to GRAPH_API_URL on discovery failure."""
+  async def test_sec_ingestion_prod_never_falls_back_to_graph_api_url(self):
+    """GRAPH_API_URL defaults to localhost, so prod must not write there."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
       mock_env.is_development.return_value = False
-      mock_env.GRAPH_API_URL = "http://fallback:8001"
+      mock_env.GRAPH_API_URL = "http://localhost:8001"
       mock_env.GRAPH_API_KEY = "key"
 
       with (
@@ -1229,14 +1229,24 @@ class TestConvenienceFunctions:
         ),
         patch(f"{FACTORY_MODULE}.GraphClient") as MockClient,
       ):
-        mock_client = MagicMock()
-        MockClient.return_value = mock_client
+        with pytest.raises(ServiceUnavailableError, match="Cannot find shared master"):
+          await get_graph_client_for_sec_ingestion()
+        MockClient.assert_not_called()
 
-        await get_graph_client_for_sec_ingestion()
+  @pytest.mark.asyncio
+  async def test_open_master_breaker_does_not_fall_back_outside_dev(self):
+    with patch(f"{FACTORY_MODULE}.env") as mock_env:
+      mock_env.is_development.return_value = False
+      mock_env.GRAPH_CIRCUIT_BREAKERS_ENABLED = True
+      mock_env.GRAPH_API_URL = "http://localhost:8001"
 
-        MockClient.assert_called_once_with(
-          base_url="http://fallback:8001", api_key="key"
-        )
+      with patch.object(
+        GraphClientFactory._master_circuit_breaker,
+        "should_attempt",
+        AsyncMock(return_value=False),
+      ):
+        with pytest.raises(ServiceUnavailableError, match="circuit breaker open"):
+          await GraphClientFactory._get_shared_master_url()
 
   @pytest.mark.asyncio
   async def test_sec_ingestion_prod_raises_when_no_fallback(self):

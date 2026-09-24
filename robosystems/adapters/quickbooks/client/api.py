@@ -33,7 +33,8 @@ def _is_retryable_qb_error(exc: BaseException) -> bool:
     return False
   if isinstance(exc, requests.exceptions.RequestException):
     if isinstance(exc, requests.exceptions.HTTPError):
-      status = getattr(exc.response, "status_code", None) if exc.response else None
+      # Not ``if exc.response``: a Response is falsy for any 4xx/5xx.
+      status = getattr(exc.response, "status_code", None)
       return status in (429, 500, 502, 503, 504)
     return True
   if isinstance(exc, QuickbooksException):

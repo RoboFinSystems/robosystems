@@ -95,7 +95,6 @@ class SECDownloader:
     hit: EftsHit,
     year: int,
     bucket: str,
-    retry_count: int = 0,
   ) -> bool:
     """Download a single filing to S3."""
     MAX_RETRIES = 3
@@ -117,36 +116,39 @@ class SECDownloader:
     async with self._semaphore:
       async with self._limiter:
         try:
-          async with self._session.get(url) as response:
-            if response.status == 404:
-              logger.debug(f"No XBRL ZIP for {hit.accession}")
-              self._stats.skipped += 1
-              return True
+          # 429s are waited out in place: re-entering would need a second slot.
+          content = b""
+          for attempt in range(MAX_RETRIES + 1):
+            async with self._session.get(url) as response:
+              if response.status == 404:
+                logger.debug(f"No XBRL ZIP for {hit.accession}")
+                self._stats.skipped += 1
+                return True
 
-            if response.status == 429:
-              if retry_count >= MAX_RETRIES:
+              if response.status != 429:
+                response.raise_for_status()
+                content = await response.read()
+                break
+
+              if attempt == MAX_RETRIES:
                 logger.error(f"Max retries exceeded for {hit.accession}")
                 self._stats.failed += 1
                 return False
               retry_after = min(
                 int(response.headers.get("Retry-After", 60)), MAX_RETRY_AFTER
               )
-              logger.warning(
-                f"Rate limited, waiting {retry_after}s "
-                f"(retry {retry_count + 1}/{MAX_RETRIES})"
-              )
-              await asyncio.sleep(retry_after)
-              return await self._download_filing(hit, year, bucket, retry_count + 1)
+            logger.warning(
+              f"Rate limited, waiting {retry_after}s "
+              f"(retry {attempt + 1}/{MAX_RETRIES})"
+            )
+            await asyncio.sleep(retry_after)
 
-            response.raise_for_status()
-            content = await response.read()
+          if not content:
+            logger.warning(f"Empty response for {hit.accession}")
+            self._stats.failed += 1
+            return False
 
-            if not content or len(content) == 0:
-              logger.warning(f"Empty response for {hit.accession}")
-              self._stats.failed += 1
-              return False
-
-            await self._monitor.record(len(content))
+          await self._monitor.record(len(content))
 
         except aiohttp.ClientError as e:
           logger.error(f"Download failed for {hit.accession}: {e}")
