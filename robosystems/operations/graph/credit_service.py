@@ -832,6 +832,7 @@ class CreditService:
       repo_costs = _get_credit_costs(repository_name) or {}
       base_cost = repo_costs.get(operation_type, Decimal("1.0"))
 
+    balance_before = Decimal(str(shared_credits.current_balance or 0))
     success = shared_credits.consume_credits(
       amount=base_cost,
       repository_name=repository_name,
@@ -856,18 +857,30 @@ class CreditService:
         "addon_tier": addon_tier,
       }
     else:
+      drained = Decimal("0")
+      if drain_on_shortfall:
+        self.session.refresh(shared_credits)
+        drained = balance_before - Decimal(str(shared_credits.current_balance or 0))
+        if drained > 0:
+          # The drain is real spend; callers close their session uncommitted.
+          self.session.commit()
+
       repo_plan = shared_credits.user_repository.repository_plan
       addon_tier = repo_plan.value if hasattr(repo_plan, "value") else str(repo_plan)
 
-      return {
+      result: dict[str, Any] = {
         "success": False,
         "error": "Insufficient shared repository credits",
-        "credits_consumed": 0,
+        "credits_consumed": float(drained),
         "required_credits": float(base_cost),
         "available_credits": float(shared_credits.current_balance),
         "addon_type": shared_credits.user_repository.repository_type,
         "addon_tier": addon_tier,
       }
+      if drained > 0:
+        result["drained_to_zero"] = True
+        result["shortfall"] = float(base_cost) - float(drained)
+      return result
 
   def get_shared_repository_summary(self, user_id: str) -> dict[str, Any]:
     """Every repository pool the user holds, keyed by repository type."""
