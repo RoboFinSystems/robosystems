@@ -1,10 +1,12 @@
 """Admin webhook handlers for payment providers."""
 
+from contextlib import contextmanager
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ...database import SessionFactory, get_db_session
+from ...database import SessionFactory, engine, get_db_session
 from ...logger import get_logger
 from ...middleware.rate_limits import webhook_rate_limit_dependency
 from ...models.core.billing import BillingAuditLog
@@ -208,50 +210,77 @@ async def handle_stripe_webhook(
     event_data = event.get("data", {}).get("object", {})
     event_id = event.get("id")
 
-    # Held for this request's transaction. A concurrent redelivery of the same
-    # event gets a non-2xx and Stripe retries it later, when the processed
-    # check below turns it away. Non-blocking: the DB call is sync and a wait
-    # here would stall the event loop the first delivery is running on.
-    acquired = db.execute(
-      text("SELECT pg_try_advisory_xact_lock(hashtext(:key))"),
-      {"key": f"stripe-webhook:{event_id}"},
-    ).scalar()
-    if not acquired:
-      raise HTTPException(
-        status_code=409, detail="Event is already being processed; retry"
-      )
-
-    if BillingAuditLog.is_webhook_processed(event_id, "stripe", db):
-      logger.info(
-        f"Webhook event already processed: {event_id}",
-        extra={"event_id": event_id, "event_type": event_type},
-      )
-      return {"status": "success", "message": "Event already processed"}
-
-    logger.info(
-      f"Processing Stripe webhook: {event_type}",
-      extra={"event_type": event_type, "event_id": event_id},
-    )
-
-    from robosystems.dagster.jobs.billing import SubscriptionNotFoundError
-
-    try:
-      await _process_webhook_event(
-        event_id=event_id,
-        event_type=event_type,
-        event_data=event_data,
-      )
-    except SubscriptionNotFoundError:
-      # Non-2xx so Stripe redelivers; the event was not marked as processed.
-      raise HTTPException(
-        status_code=409,
-        detail="Event references a subscription not yet recorded; retry",
-      )
-
-    return {"status": "success", "message": "Webhook processed"}
+    with _event_claim(event_id):
+      return await _handle_claimed_event(event_id, event_type, event_data, db)
 
   except HTTPException:
     raise
   except Exception as e:
     logger.error(f"Failed to handle webhook: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail="Failed to process webhook")
+
+
+@contextmanager
+def _event_claim(event_id: str):
+  """Hold a per-event advisory lock for the whole processing of one delivery.
+
+  On its own connection: handlers (provisioning among them) share and commit
+  the request's session, which would release a transaction-scoped lock
+  midway. Non-blocking, since the DB call is sync and a wait would stall the
+  event loop the first delivery runs on; a concurrent redelivery gets a
+  non-2xx and Stripe retries it once the processed check can turn it away.
+  """
+  params = {"key": f"stripe-webhook:{event_id}"}
+  conn = engine.connect()
+  try:
+    acquired = conn.execute(
+      text("SELECT pg_try_advisory_lock(hashtext(:key))"), params
+    ).scalar()
+    conn.commit()
+    if not acquired:
+      raise HTTPException(
+        status_code=409, detail="Event is already being processed; retry"
+      )
+    try:
+      yield
+    finally:
+      try:
+        conn.execute(text("SELECT pg_advisory_unlock(hashtext(:key))"), params)
+        conn.commit()
+      except Exception:
+        conn.invalidate()
+  finally:
+    conn.close()
+
+
+async def _handle_claimed_event(
+  event_id: str, event_type: str, event_data: dict, db: Session
+) -> dict:
+  if BillingAuditLog.is_webhook_processed(event_id, "stripe", db):
+    logger.info(
+      f"Webhook event already processed: {event_id}",
+      extra={"event_id": event_id, "event_type": event_type},
+    )
+    return {"status": "success", "message": "Event already processed"}
+
+  logger.info(
+    f"Processing Stripe webhook: {event_type}",
+    extra={"event_type": event_type, "event_id": event_id},
+  )
+
+  from robosystems.dagster.jobs.billing import SubscriptionNotFoundError
+
+  try:
+    await _process_webhook_event(
+      event_id=event_id,
+      event_type=event_type,
+      event_data=event_data,
+    )
+  except SubscriptionNotFoundError:
+    # Non-2xx so Stripe redelivers; the event was not marked as processed.
+    raise HTTPException(
+      status_code=409,
+      detail="Event references a subscription not yet recorded; retry",
+    )
+
+  return {"status": "success", "message": "Webhook processed"}

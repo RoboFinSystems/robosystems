@@ -155,6 +155,25 @@ def _as_utc(value: datetime) -> datetime:
   return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
+def _stripe_confirms_reactivation(stripe_subscription_id: str | None, context) -> bool:
+  """Whether Stripe's live subscription is active with no pending cancel.
+
+  A payload emitted before a local cancel and redelivered after it looks
+  exactly like a portal reactivation; only the live object tells them apart.
+  """
+  if not stripe_subscription_id:
+    return False
+  from robosystems.operations.providers.payment_provider import get_payment_provider
+
+  live = get_payment_provider("stripe").get_subscription_state(stripe_subscription_id)
+  confirmed = live.get("status") == "active" and not live.get("cancel_at_period_end")
+  if not confirmed:
+    context.log.warning(
+      f"Ignoring stale reactivation for {stripe_subscription_id}: live state {live}"
+    )
+  return confirmed
+
+
 def _extract_stripe_subscription_id(data: dict) -> str | None:
   """Stripe subscription id from any event payload; its location varies by API version."""
   # The object IS a subscription (customer.subscription.updated/deleted)
@@ -528,10 +547,10 @@ async def _handle_invoice_updated(
 
   new_status = invoice_data.get("status", invoice.status)
   old_status = invoice.status
-  # Events arrive out of order; a settled invoice never goes back to draft/open.
-  if old_status in ("paid", "void", "uncollectible") and new_status in (
-    "draft",
-    "open",
+  # Events arrive out of order. Paid and void are final; uncollectible can
+  # still be paid but never goes back to draft or open.
+  if old_status in ("paid", "void") or (
+    old_status == "uncollectible" and new_status in ("draft", "open")
   ):
     new_status = old_status
 
@@ -608,9 +627,12 @@ async def _handle_charge_refunded(
     context.log.info(f"Charge {stripe_charge_id} refunded but no invoice associated")
     return
 
+  # Locked so refunds of different charges on one invoice, delivered at once,
+  # serialize on the line lookup below.
   invoice = (
     db_session.query(BillingInvoice)
     .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
+    .with_for_update()
     .first()
   )
 
@@ -627,6 +649,7 @@ async def _handle_charge_refunded(
     )
     .first()
   )
+  recorded = -(refund_item.amount_cents or 0) if refund_item is not None else 0
   if refund_item is None:
     refund_item = BillingInvoiceLineItem(
       invoice_id=invoice.id,
@@ -638,8 +661,11 @@ async def _handle_charge_refunded(
       period_end=invoice.period_end,
     )
     db_session.add(refund_item)
-  refund_item.unit_price_cents = -amount_refunded
-  refund_item.amount_cents = -amount_refunded
+  # Deliveries arrive out of order; the running total only grows, so an
+  # older event must not shrink a larger recorded refund.
+  refunded = max(recorded, amount_refunded)
+  refund_item.unit_price_cents = -refunded
+  refund_item.amount_cents = -refunded
   invoice._recalculate_totals(db_session)
 
   BillingAuditLog.log_event(
@@ -700,7 +726,12 @@ async def _handle_subscription_updated(
 
   # Portal cancel mirrors the UI cancel: access continues to period end.
   if cancel_at_period_end:
-    if subscription.status != "canceled":
+    if subscription.status == "failed":
+      context.log.info(
+        f"Subscription {subscription.id} is failed; ignoring cancel_at_period_end"
+      )
+      db_session.commit()
+    elif subscription.status != "canceled":
       subscription.cancel(db_session, immediate=False)
       context.log.info(
         f"Subscription {subscription.id} canceled via Stripe portal "
@@ -720,6 +751,7 @@ async def _handle_subscription_updated(
     and subscription.ends_at
     and _as_utc(subscription.ends_at) > datetime.now(UTC)
     and status == "active"
+    and _stripe_confirms_reactivation(subscription_data.get("id"), context)
   ):
     subscription.status = "active"
     subscription.canceled_at = None
@@ -750,7 +782,7 @@ async def _handle_subscription_updated(
 
   # A late or out-of-order event must not revive a terminal row: the only
   # way back from canceled is the portal reactivation above.
-  if subscription.status in ("canceled", "failed") and new_status != "canceled":
+  if subscription.status in ("canceled", "failed"):
     context.log.warning(
       f"Ignoring Stripe status {status!r} for terminal subscription "
       f"{subscription.id} ({subscription.status})"

@@ -93,3 +93,13 @@ class TestCalendarMonthPeriods:
       sub.renew_period(test_db)
       ends.append(sub.current_period_end.date().isoformat())
     assert ends == ["2026-02-28", "2026-03-31", "2026-04-30"]
+
+  def test_a_period_drifted_by_the_old_arithmetic_renews_from_its_own_day(
+    self, test_db
+  ):
+    started = datetime(2026, 1, 1, tzinfo=UTC)
+    _, sub = _due_subscription(
+      test_db, datetime(2026, 9, 28, tzinfo=UTC), started_at=started
+    )
+    sub.renew_period(test_db)
+    assert sub.current_period_end.date().isoformat() == "2026-10-28"

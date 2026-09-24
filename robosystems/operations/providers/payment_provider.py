@@ -114,6 +114,11 @@ class PaymentProvider(ABC):
     """The provider invoice id a payment paid, or None."""
     pass
 
+  @abstractmethod
+  def get_subscription_state(self, subscription_id: str) -> dict[str, Any]:
+    """The live ``status`` and ``cancel_at_period_end`` of a subscription."""
+    pass
+
 
 class StripePaymentProvider(PaymentProvider):
   """Stripe implementation of payment provider."""
@@ -709,6 +714,13 @@ class StripePaymentProvider(PaymentProvider):
     )
     payments = client.deserialize(response, api_mode="V1").get("data") or []
     return payments[0].get("invoice") if payments else None
+
+  def get_subscription_state(self, subscription_id: str) -> dict[str, Any]:
+    subscription = self.stripe.Subscription.retrieve(subscription_id)
+    return {
+      "status": subscription.get("status"),
+      "cancel_at_period_end": bool(subscription.get("cancel_at_period_end")),
+    }
 
   def _subscription_already_terminal(self, subscription_id: str) -> bool:
     """True when Stripe has no live subscription left to cancel.

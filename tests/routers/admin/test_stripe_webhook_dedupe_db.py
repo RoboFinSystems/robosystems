@@ -55,3 +55,36 @@ async def test_a_delivery_already_in_flight_is_refused_not_run_twice():
   finally:
     holder.close()
     db.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_claim_survives_a_commit_on_the_request_session():
+  """Provisioning shares and commits the request session; that must not
+  release the claim while the delivery is still being processed."""
+  event_id = f"evt_test_{uuid.uuid4().hex[:12]}"
+  provider = MagicMock()
+  provider.verify_webhook.return_value = _event(event_id)
+  db, probe = SessionFactory(), SessionFactory()
+  seen: list[bool] = []
+
+  async def process(**_kwargs):
+    db.commit()
+    seen.append(
+      probe.execute(
+        text("SELECT pg_try_advisory_lock(hashtext(:key))"),
+        {"key": f"stripe-webhook:{event_id}"},
+      ).scalar()
+    )
+
+  try:
+    with (
+      patch.object(webhooks, "get_payment_provider", return_value=provider),
+      patch.object(webhooks, "_process_webhook_event", new=process),
+    ):
+      await webhooks.handle_stripe_webhook(_request(), db=db, _rate_limit=None)
+    assert seen == [False]
+  finally:
+    probe.execute(text("SELECT pg_advisory_unlock_all()"))
+    probe.close()
+    db.close()

@@ -556,6 +556,11 @@ class BillingSubscription(Base):
     31st as the months allow instead of drifting earlier each month.
     """
     anchor = (self.started_at or start).day
+    # A period that does not already end on its anchor was set by the old
+    # 30-day arithmetic; renew from its own day rather than jump to the anchor
+    # and bill a short period.
+    if start.day != min(anchor, calendar.monthrange(start.year, start.month)[1]):
+      anchor = start.day
     months = 12 if self.billing_interval == BillingInterval.ANNUAL.value else 1
     # Both "monthly" and "usage_based" bill on a monthly cadence.
     month_index = start.month - 1 + months
