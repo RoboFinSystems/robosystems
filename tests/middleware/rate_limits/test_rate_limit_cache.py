@@ -117,12 +117,11 @@ class TestClearRateLimit:
 
 
 class TestGetSet:
-  def test_get_disabled(self):
-    with patch("robosystems.middleware.rate_limits.cache.env") as mock_env:
-      mock_env.RATE_LIMIT_ENABLED = False
-      c = RateLimitCache.__new__(RateLimitCache)
-      c.enabled = False
-      assert c.get("key") is None
+  def test_get_ignores_the_rate_limit_flag(self, cache):
+    """Auth protection keeps its state here; it must not switch off with limits."""
+    cache.enabled = False
+    cache._redis.get.return_value = b"value"
+    assert cache.get("key") == b"value"
 
   def test_get_success(self, cache):
     cache._redis.get.return_value = b"value"
@@ -132,12 +131,10 @@ class TestGetSet:
     cache._redis.get.side_effect = Exception("fail")
     assert cache.get("key") is None
 
-  def test_set_disabled(self):
-    with patch("robosystems.middleware.rate_limits.cache.env") as mock_env:
-      mock_env.RATE_LIMIT_ENABLED = False
-      c = RateLimitCache.__new__(RateLimitCache)
-      c.enabled = False
-      assert c.set("key", "val") is False
+  def test_set_ignores_the_rate_limit_flag(self, cache):
+    cache.enabled = False
+    cache._redis.set.return_value = True
+    assert cache.set("key", "val", expire=60) is True
 
   def test_set_success(self, cache):
     cache._redis.set.return_value = True

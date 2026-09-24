@@ -30,6 +30,7 @@ from robosystems.models.core import (
   UserPasskey,
 )
 from robosystems.operations import passkeys as passkey_ops
+from robosystems.security.auth_protection import AdvancedAuthProtection
 from robosystems.security.password import PasswordSecurity
 
 PASSWORD = "T3stP@ssw0rd!x"
@@ -279,7 +280,13 @@ class TestMfaHandshakeSeam:
       assert UserMfaRecoveryCode.remaining_count(str(user.id), test_db) == 9
 
   def test_wrong_recovery_codes_exhaust_the_token(self, client, test_db):
-    with patch.object(env, "PASSKEYS_ENABLED", True), _fake_auth_valkey():
+    # The per-IP throttle would answer 429 first; this pins the token budget.
+    with (
+      patch.object(env, "PASSKEYS_ENABLED", True),
+      _fake_auth_valkey(),
+      patch.object(AdvancedAuthProtection, "get_progressive_delay", return_value=0),
+      patch.object(AdvancedAuthProtection, "check_ip_blocked", return_value=(False, 0)),
+    ):
       user, _passkey, mfa_token = self._login_to_challenge(client, test_db)
       codes = UserMfaRecoveryCode.create_set(str(user.id), test_db)
 

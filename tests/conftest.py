@@ -112,6 +112,24 @@ def mock_get_current_user():
     yield mock
 
 
+@pytest.fixture(autouse=True)
+def isolated_auth_protection_store():
+  """A fresh in-memory threat store per test, so failed logins in one test
+  can't block the client IP in the next through a shared Valkey."""
+  store: dict = {}
+
+  class _Store:
+    def get(self, key):
+      return store.get(key)
+
+    def set(self, key, value, expire=None):
+      store[key] = value
+      return True
+
+  with patch("robosystems.security.auth_protection.rate_limit_cache", _Store()):
+    yield store
+
+
 @pytest.fixture(scope="module")
 def client(test_db):
   """Create a test client."""
