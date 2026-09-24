@@ -82,6 +82,8 @@ class MappingOperator(Operator):
     mapped_total = 0
     flagged_total = 0
     last_skipped = 0
+    last_pass: dict = {}
+    error = None
     coverage_percent = 0.0
     passes = 0
     stop_reason = "pass_cap_reached"
@@ -98,6 +100,11 @@ class MappingOperator(Operator):
 
       md = (await self._run_single_pass(ctx)).metadata
       passes = attempt
+      if md.get("error"):
+        error = md["error"]
+        stop_reason = "error"
+        break
+      last_pass = md
       coverage_percent = md.get("coverage_percent", coverage_percent)
       pass_mapped = md.get("mapped", 0)
       pass_flagged = md.get("flagged", 0)
@@ -114,21 +121,39 @@ class MappingOperator(Operator):
         stop_reason = "no_progress"
         break
 
-    return OperatorResult(
-      content=(
-        f"Mapping stopped ({stop_reason}) after {passes} pass(es): "
-        f"{mapped_total} mapped, {flagged_total} flagged for review, "
-        f"{coverage_percent:.0f}% coverage"
-      ),
-      metadata={
-        "mapped": mapped_total,
-        "flagged": flagged_total,
-        "skipped": last_skipped,
-        "coverage_percent": coverage_percent,
-        "passes": passes,
-        "stop_reason": stop_reason,
-      },
+    # Refused and unclassified elements stay unmapped, so the last pass's
+    # counts are current, and they carry the caller's next step.
+    refused = last_pass.get("refused_closed_history", 0)
+    unclassified = last_pass.get("unclassified", 0)
+    content = (
+      f"Mapping stopped ({stop_reason}) after {passes} pass(es): "
+      f"{mapped_total} mapped, {flagged_total} flagged for review, "
+      f"{coverage_percent:.0f}% coverage"
     )
+    if error:
+      content += f"; last pass failed: {error}"
+    if unclassified:
+      content += f"; {unclassified} unclassified (no EFS trait — needs classification)"
+    if refused:
+      content += (
+        f"; {refused} refused (landed history in a closed month "
+        "— reopen those months latest-first, then re-run)"
+      )
+
+    metadata = {
+      "mapped": mapped_total,
+      "flagged": flagged_total,
+      "skipped": last_skipped,
+      "refused_closed_history": refused,
+      "unclassified": unclassified,
+      "unclassified_elements": last_pass.get("unclassified_elements", []),
+      "coverage_percent": coverage_percent,
+      "passes": passes,
+      "stop_reason": stop_reason,
+    }
+    if error:
+      metadata["error"] = error
+    return OperatorResult(content=content, metadata=metadata)
 
   def _has_credit_budget(self, ctx: OperatorContext) -> bool:
     """Fails open on lookup error: ``MAX_MAPPING_PASSES`` still bounds spend."""

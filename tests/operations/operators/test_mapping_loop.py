@@ -205,3 +205,56 @@ async def test_stops_when_cancelled_before_pass():
   assert result.metadata["stop_reason"] == "cancelled"
   assert result.metadata["passes"] == 0
   assert result.metadata["mapped"] == 0
+
+
+@pytest.mark.asyncio
+async def test_guidance_from_the_last_pass_reaches_the_caller():
+  """Refused-closed-history and unclassified counts carry the caller's next step."""
+  op = _operator()
+  op._has_credit_budget = lambda ctx: True
+
+  async def one_pass(ctx):
+    return OperatorResult(
+      content="pass",
+      metadata={
+        "mapped": 0,
+        "flagged": 0,
+        "skipped": 0,
+        "refused_closed_history": 2,
+        "unclassified": 1,
+        "unclassified_elements": [{"id": "elem_1", "name": "Suspense"}],
+        "coverage_percent": 80.0,
+      },
+    )
+
+  op._run_single_pass = one_pass
+
+  result = await op.run(_Ctx())
+
+  assert result.metadata["refused_closed_history"] == 2
+  assert result.metadata["unclassified"] == 1
+  assert result.metadata["unclassified_elements"] == [
+    {"id": "elem_1", "name": "Suspense"}
+  ]
+  assert "reopen those months" in result.content
+  assert "needs classification" in result.content
+
+
+@pytest.mark.asyncio
+async def test_a_failed_pass_stops_with_its_error():
+  op = _operator()
+  op._has_credit_budget = lambda ctx: True
+
+  async def failing_pass(ctx):
+    return OperatorResult(
+      content="Failed to get unmapped elements: boom",
+      metadata={"error": "boom", "mapped": 0, "flagged": 0, "skipped": 0},
+    )
+
+  op._run_single_pass = failing_pass
+
+  result = await op.run(_Ctx())
+
+  assert result.metadata["stop_reason"] == "error"
+  assert result.metadata["error"] == "boom"
+  assert "boom" in result.content
