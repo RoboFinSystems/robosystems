@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.models.extensions import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
 from robosystems.operations.roboledger.reports.statement_sets import (
   StatementStampError,
@@ -250,33 +249,14 @@ class TestStampHappyPath:
     assert result.stamped is True
     assert result.rule_summary is None
 
-  def test_pivot_receives_prior_month_delta_basis(self):
-    """The pivot must get [prior month, close month] — the indirect-CF
-    derivation and the cash foot both no-op below two periods, which is
-    the bug that stamped CF = NetIncome + DDA with zero WC deltas."""
+  def test_the_close_month_is_pivoted_alone(self):
+    """A single column derives its own cash flow from its opening balances,
+    so no prior month rides the pivot as a delta basis."""
     session = self._happy_session()
     gen = MagicMock(return_value=_fake_facts())
     _stamp(session, generate_report_facts=gen)
     periods = gen.call_args.kwargs["periods"]
-    assert [(p.start, p.end) for p in periods] == [
-      (PRIOR_PS, PRIOR_PE),
-      (PS, PE),
-    ]
-    assert [p.label for p in periods] == ["2025-12", "2026-01"]
-
-  def test_prior_month_facts_derive_but_never_stamp(self):
-    """Prior-month pivot output is the delta basis only — every stamped
-    Fact must carry the close month's period_end."""
-    session = self._happy_session()
-    result = _stamp(session)
-    assert result.stamped is True
-    stamped = [
-      call.args[0]
-      for call in session.add.call_args_list
-      if isinstance(call.args[0], Fact)
-    ]
-    assert len(stamped) == 2  # el_cash + el_rev for the close month
-    assert all(f.period_end == PE for f in stamped)
+    assert [(p.start, p.end, p.label) for p in periods] == [(PS, PE, "2026-01")]
 
 
 # ────────────────────────────────────────────────────────────────────────────

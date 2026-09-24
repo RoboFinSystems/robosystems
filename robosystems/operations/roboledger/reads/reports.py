@@ -34,16 +34,15 @@ from robosystems.operations.roboledger.reads.fiscal_calendar import (
   get_fiscal_year_start_month,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
-  FactRow,
-  _compute_prior_period,
-  generate_report_facts,
-  render_structure_view,
-)
-from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec as FactPeriodSpec,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   ReportFact as ReportFactData,
+)
+from robosystems.operations.roboledger.reports.fact_grid import (
+  _compute_prior_period,
+  generate_report_facts,
+  render_structure_view,
 )
 from robosystems.operations.roboledger.reports.guard_rails import validate_report
 from robosystems.operations.roboledger.reports.network_picker import (
@@ -768,7 +767,6 @@ def get_statement(
     report_def.comparative,
     report_def.periods,
   )
-  periods = [periods[i] for i in rendered_period_indexes(block_type, periods)]
 
   if not periods:
     return StatementResponse(
@@ -950,22 +948,6 @@ def build_current_and_prior_periods(start: date, end: date) -> list[FactPeriodSp
   ]
 
 
-def rendered_period_indexes(
-  statement_type: str, periods: list[FactPeriodSpec]
-) -> list[int]:
-  """Column indexes a statement renders, in the order ``periods`` was built.
-
-  Every period renders, except the earliest on a cash flow statement when two
-  or more were pivoted: the indirect method uses it only as the delta basis,
-  so rendered it would foot while missing every working-capital delta.
-  """
-  indexes = list(range(len(periods)))
-  if statement_type != "cash_flow_statement" or len(periods) < 2:
-    return indexes
-  earliest = min(indexes, key=lambda i: periods[i].end)
-  return [i for i in indexes if i != earliest]
-
-
 def get_live_financial_statement(
   session: Session,
   *,
@@ -991,15 +973,9 @@ def get_live_financial_statement(
     periods=periods,
     reporting_style_id=reporting_style_id,
   )
-  columns = rendered_period_indexes(statement_type, periods)
-  rendered_periods = [periods[i] for i in columns]
-
-  # Validate the full grid (all-zero children still foot their subtotals),
-  # but only the rendered columns.
+  # Validate the full grid: all-zero children still foot their subtotals.
   validation = validate_report(
-    statement_type,
-    [_project_row(row, columns) for row in grid.rows],
-    period_labels=[p.label for p in rendered_periods],
+    statement_type, grid.rows, period_labels=[p.label for p in periods]
   )
 
   facts: list[LiveStatementFactRow] = []
@@ -1007,11 +983,7 @@ def get_live_financial_statement(
     # Abstract rows duplicate the concrete subtotal beneath them.
     if row.is_abstract:
       continue
-    values = (
-      row.values
-      if len(rendered_periods) == len(periods)
-      else [row.values[i] for i in columns]
-    )
+    values = row.values
     if not any(v != 0.0 for v in values):
       continue
     facts.append(
@@ -1032,9 +1004,7 @@ def get_live_financial_statement(
   return LiveFinancialStatementResponse(
     graph_id=graph_id,
     statement_type=statement_type,
-    periods=[
-      PeriodSpec(start=p.start, end=p.end, label=p.label) for p in rendered_periods
-    ],
+    periods=[PeriodSpec(start=p.start, end=p.end, label=p.label) for p in periods],
     facts=facts,
     fact_count=len(facts),
     validation=ValidationCheckResponse(
@@ -1046,18 +1016,4 @@ def get_live_financial_statement(
     ),
     unmapped_count=unmapped_count,
     truncated=truncated,
-  )
-
-
-def _project_row(row: FactRow, columns: list[int]) -> FactRow:
-  return FactRow(
-    element_id=row.element_id,
-    element_qname=row.element_qname,
-    element_name=row.element_name,
-    classification=row.classification,
-    balance_type=row.balance_type,
-    values=[row.values[i] if i < len(row.values) else None for i in columns],
-    is_subtotal=row.is_subtotal,
-    is_abstract=row.is_abstract,
-    depth=row.depth,
   )
