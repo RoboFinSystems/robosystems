@@ -1,10 +1,9 @@
 # RoboLedger Demos
 
-RoboLedger ships a suite of self-contained demos that exercise the full accounting stack — ingest, mapping, period close, reporting, and XBRL export — entirely against the local stack, with no live QuickBooks connection. They come in three flavors:
+RoboLedger ships a suite of self-contained demos that exercise the full accounting stack — ingest, mapping, period close, reporting, and XBRL export — entirely against the local stack, with no live QuickBooks connection. They come in two flavors:
 
 - **Synthetic data** (`just demo-roboledger`) — a fully-populated tenant generated from synthetic books: 16 months for a consulting firm, a filed annual report, a mapped Chart of Accounts, schedules, and one period queued for the AI-driven close. The fastest way to see RoboLedger end-to-end (~60 seconds), and the canonical surface for prospect demos, frontend evaluation, and regression testing. **This page walks through it in detail.**
 - **Showcase scenarios** (`just demo-coffee-roaster`, `just demo-saas-startup`) — the same scenario engine pointed at two businesses with a story: Driftline Coffee (profitable but cash-poor) and Cadence Labs (burning cash on a deferred-revenue runway). Use these when the *shape of the numbers* is the point. See [Showcase Scenarios](#showcase-scenarios) below.
-- **Seattle Method / XBRL** (`just demo-seattle-method`, `just demo-world-online`) — built on Charlie Hoffman's *published* [Seattle Method](https://github.com/seattlemethod/prototypes) reference datasets. These prove cross-taxonomy projection and round-trip XBRL fidelity against an external reference, at both toy and realistic scale. See [Seattle Method XBRL Demos](#seattle-method-xbrl-demos) below.
 
 Connecting a *real* QuickBooks company (sandbox or production) is a live OAuth connection rather than a demo — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
 
@@ -28,7 +27,6 @@ The synthetic demo needs no QuickBooks account, Intuit Developer setup, or ngrok
 - [Customization](#customization)
 - [Comparison to the QuickBooks Workflow](#comparison-to-the-quickbooks-workflow)
 - [Showcase Scenarios](#showcase-scenarios)
-- [Seattle Method XBRL Demos](#seattle-method-xbrl-demos)
 - [Next Steps](#next-steps)
 
 ## Overview
@@ -476,63 +474,6 @@ just demo-roboinvestor
 ```
 
 See [RoboInvestor Operations](RoboInvestor-Operations) for what it exercises.
-
-## Seattle Method XBRL Demos
-
-Beyond the synthetic demo, RoboLedger ships two demos built on Charlie Hoffman's **published [Seattle Method](https://github.com/seattlemethod/prototypes) reference datasets**. Where the synthetic demo shows the product surface, these prove **cross-taxonomy projection** and **round-trip XBRL fidelity**: RoboLedger ingests an external XBRL reporting taxonomy and a ledger tagged against it, decomposes each balance's period change via `rollforward` Information Blocks, renders the result in *both* the source vocabulary and our canonical `rs-gaap`, exports an XBRL 2.1 + JSON-LD bundle, and reconciles the output against Charlie's published reference.
-
-Both exercise the three-block architecture end to end — the **Taxonomy Block** (load the external taxonomy as a Chart of Accounts), the **Event Block** (ingest the tagged journal entries), and the **Information Block** (author the rollforwards and render the statements). See [Information Blocks](Information-Blocks), [Taxonomy & Frameworks](Taxonomy-and-Frameworks), and [Event-Driven Ledger](Event-Driven-Ledger).
-
-### Lemonade Stand (Test Case 1)
-
-Charlie's 14-journal-entry Q1 2024 lemonade-stand dataset, tagged against his `mini` reporting framework — the smallest end-to-end proof of the methodology.
-
-```bash
-# Provision → load mini taxonomy → seed mini→rs-gaap mappings → ingest 14 JEs →
-# author rollforwards → reconcile → materialize the 4-statement report.
-just demo-seattle-method
-
-# A single step. Steps: pull | provision | load | seed-mappings | ingest |
-# author-rollforwards | reconcile | create-report | download-bundles.
-# Only `pull` and `provision` run standalone; every other step needs --graph.
-just demo-seattle-method --step provision
-just demo-seattle-method --step ingest --graph <graph_id>
-
-# Re-render just the artifacts against an existing graph
-just demo-seattle-method-reconcile <graph_id>
-just demo-seattle-method-create-report <graph_id>
-```
-
-It produces 239 `mini` concepts loaded as Elements, ~36 `mini → rs-gaap` mapping Associations, 14 Events/Entries (~32 LineItems) each carrying its business-event flow tag, and 8 `rollforward` Information Blocks (one per balance-sheet leaf with activity). The run then renders a line-by-line reconciliation against Charlie's published facts, the rs-gaap 4-statement Report (BS / IS / CF / SE), and a JSON-LD + XBRL 2.1 bundle — validated on the host with **Arelle** (XBRL 2.1 structural parity) and **pySHACL** (against `frameworks/ontology/v1/shapes.ttl` for semantic parity).
-
-### The World Online (at scale)
-
-The scaled-up sibling — Charlie's *The World Online* dataset: **22,288 GL lines across 3,389 journal entries**, a real 239-account chart of accounts, and opening balances, tagged against the **MINI 2026** framework. Same methodology, realistic mid-size-company scale.
-
-```bash
-# Full pipeline. The 3,389-entry ingest is the intended per-entry path and takes a
-# few minutes, with a live progress readout.
-just demo-world-online
-
-# Smoke-test the whole pipeline on a 50-entry subset first
-just demo-world-online --limit 50
-
-# A single step. Same registry as the lemonade stand plus trial-balance and
-# statement-reconcile; again, only `pull` and `provision` run without --graph.
-just demo-world-online --step ingest --graph <graph_id>
-
-# Re-render individual artifacts against an existing graph
-just demo-world-online-reconcile <graph_id>            # GL pivot vs the published summary
-just demo-world-online-create-report <graph_id>        # rs-gaap 4-statement report
-just demo-world-online-trial-balance <graph_id>        # trial balance (debits = credits)
-just demo-world-online-statement-reconcile <graph_id>  # statement anchor totals vs the reference instance
-```
-
-Beyond the lemonade stand it adds a real chart of accounts collapsed to `mini` line items (the GL account and provenance preserved on each LineItem's metadata), a trial balance rendered via the `trialBalance` GraphQL query, and two reconciliations — a cell-by-cell `(line-item × business-event)` pivot against the published transaction summary, and a statement-level reconciliation of the four-statement anchor totals against the reference instance.
-
-Its load-bearing design decision is **opening balances as ordinary transactions**: the 12/31/2023 beginning-balance lines flow through `Transaction → Entry → LineItem` like any other entry, tagged with an `OpeningBalance` flow concept, so the rollforward engine attributes them as the genesis event rather than synthesizing an opening number outside the pipeline.
-
-> Both demos classify every reconciliation delta by owner — *matching*, *methodology gap*, *our bug*, or *source-data quality* — so a report with mixed categories is more informative than an all-green one: it makes explicit what each side owns.
 
 ## Next Steps
 

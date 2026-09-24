@@ -72,7 +72,7 @@ The financial-content model underneath the products. Each concept page has a ref
 - **[Event Block Reference](Event-Block-Reference)** - Fields, vocabularies, transitions, handlers, errors
 - **[Taxonomy & Frameworks](Taxonomy-and-Frameworks)** - The rs-gaap and fac frameworks, the library, and the Taxonomy Block
 - **[Reporting & Rendering](Reporting-and-Rendering)** - The calc-DAG, what the renderer derives, reporting styles, views
-- **[Serialization & Export](Serialization-and-Export)** - XBRL, JSON-LD, holon and Tavi exports, and reading them without the platform
+- **[Serialization & Export](Serialization-and-Export)** - Tavi, holon and XBRL exports, and reading them without the platform
 
 ## Run It Yourself
 

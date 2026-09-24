@@ -126,7 +126,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   }'
 ```
 
-**Downloading a report bundle is a read, not an operation.** Generating, regenerating, and filing reports are command writes (`create-report`, `regenerate-report`, `file-report`, `transition-filing-status`), but fetching the produced artifact is not: the former `GET .../reports/{id}/download` REST resource has been retired. Use the GraphQL field `reportDownloadUrl(reportId:, format:, expiresIn:)` on `POST /extensions/{graph_id}/graphql`. Every flavor — `JSONLD` (the default), `HOLON_JSONLD`, `XBRL_2_1` — resolves to a short-lived presigned S3 URL the client follows directly; the API never streams the bytes. See [GraphQL Reads](GraphQL-Reads).
+**Downloading a report bundle is a read, not an operation.** Generating, regenerating, and filing reports are command writes (`create-report`, `regenerate-report`, `file-report`, `transition-filing-status`), but fetching the produced artifact is not: the former `GET .../reports/{id}/download` REST resource has been retired. Use the GraphQL field `reportDownloadUrl(reportId:, format:, expiresIn:)` on `POST /extensions/{graph_id}/graphql`. Every flavor — `TAVI` (the default, stored at publish), `HOLON_JSONLD`, `XBRL_2_1` — resolves to a short-lived presigned S3 URL the client follows directly; the API never streams the bytes. See [GraphQL Reads](GraphQL-Reads).
 
 ## Period Close
 
