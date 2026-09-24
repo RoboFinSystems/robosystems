@@ -958,6 +958,8 @@ class GraphMCPTools:
             self._tool_unavailable_reason("add-node-table", "MCP_SUBGRAPH_OPS_ENABLED")
           )
         result = await self.add_node_table_tool.execute(arguments)
+        if isinstance(result, dict) and result.get("success"):
+          self.clear_schema_cache()
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "add-relationship-table":
@@ -968,6 +970,8 @@ class GraphMCPTools:
             )
           )
         result = await self.add_relationship_table_tool.execute(arguments)
+        if isinstance(result, dict) and result.get("success"):
+          self.clear_schema_cache()
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "remember":

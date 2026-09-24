@@ -273,10 +273,6 @@ class AddNodeTableTool(BaseTool):
       )
       success = result.get("success", False)
       if success:
-        # Clear schema cache so get-graph-schema reflects the new table
-        if hasattr(self.client, "_mcp_tools"):
-          self.client._mcp_tools.clear_schema_cache()
-
         return {
           "success": True,
           "table_name": table_name,
@@ -411,9 +407,6 @@ class AddRelationshipTableTool(BaseTool):
       )
       success = result.get("success", False)
       if success:
-        if hasattr(self.client, "_mcp_tools"):
-          self.client._mcp_tools.clear_schema_cache()
-
         return {
           "success": True,
           "table_name": table_name,

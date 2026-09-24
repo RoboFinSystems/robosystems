@@ -308,6 +308,7 @@ class LadybugService:
       try:
         validated_graph_id = validate_database_name(request.database)
         validate_cypher_query(request.cypher)
+        validate_query_parameters(request.parameters)
 
         if validated_graph_id not in self.db_manager.list_databases():
           _raise_database_not_found(validated_graph_id)

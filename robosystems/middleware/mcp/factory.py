@@ -26,14 +26,17 @@ async def create_graph_mcp_client(
       graph_id=graph_id, operation_type=operation_type
     )
 
-    if hasattr(graph_client, "config") and hasattr(graph_client.config, "base_url"):
-      api_base_url = graph_client.config.base_url
-    elif hasattr(graph_client, "_base_url"):
-      api_base_url = graph_client._base_url
-    elif hasattr(graph_client, "base_url"):
-      api_base_url = graph_client.base_url
-    else:
-      api_base_url = env.GRAPH_API_URL or "http://localhost:8001"
+    try:
+      if hasattr(graph_client, "config") and hasattr(graph_client.config, "base_url"):
+        api_base_url = graph_client.config.base_url
+      elif hasattr(graph_client, "_base_url"):
+        api_base_url = graph_client._base_url
+      elif hasattr(graph_client, "base_url"):
+        api_base_url = graph_client.base_url
+      else:
+        api_base_url = env.GRAPH_API_URL or "http://localhost:8001"
+    finally:
+      await graph_client.close()
 
     if not api_base_url:
       api_base_url = "http://localhost:8001"

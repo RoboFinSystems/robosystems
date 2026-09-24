@@ -383,3 +383,31 @@ class TestExecuteBackup:
       mock_vacuum.assert_not_called()
     finally:
       temp_path.unlink(missing_ok=True)
+
+
+class TestCompressAndUploadReplica:
+  def test_metadata_level_matches_zstd_level(self, tmp_path):
+    from robosystems.graph_api.core.backup_service import OnInstanceBackupService
+
+    db_path = tmp_path / "dbs" / "kg1.lbug"
+    db_path.parent.mkdir()
+    db_path.write_bytes(b"x" * 100)
+
+    def fake_zstd(cmd, **kwargs):
+      Path(cmd[cmd.index("-o") + 1]).write_bytes(b"x" * 40)
+
+    s3_client = MagicMock()
+    s3_client.head_object.return_value = {"ContentLength": 40}
+    service = OnInstanceBackupService(db_manager=MagicMock(), task_manager=MagicMock())
+
+    with (
+      patch(f"{MODULE}.env") as mock_env,
+      patch(f"{MODULE}.subprocess.run", side_effect=fake_zstd) as mock_run,
+    ):
+      mock_env.LBUG_DATABASE_PATH = str(db_path.parent)
+      service._compress_and_upload_replica(
+        db_path, "bucket", "key", "t1", 100, s3_client=s3_client
+      )
+
+    metadata = s3_client.upload_file.call_args.kwargs["ExtraArgs"]["Metadata"]
+    assert f"-{metadata['compression_level']}" in mock_run.call_args.args[0]

@@ -240,12 +240,13 @@ class TestConvertToChunks:
     ):
       chunks.append(chunk)
 
-    # Empty data yields no chunks (range(0, 0, chunk_size) is empty)
-    assert len(chunks) == 0
+    assert len(chunks) == 1
+    assert chunks[0]["data"] == []
+    assert chunks[0]["is_last_chunk"] is True
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_empty_list_yields_no_chunks(self):
+  async def test_empty_list_yields_one_last_chunk(self):
     client = MagicMock()
     wrapper = StreamingRepositoryWrapper(client)
 
@@ -253,7 +254,11 @@ class TestConvertToChunks:
     async for chunk in wrapper._convert_to_chunks([], chunk_size=100, start_time=0):
       chunks.append(chunk)
 
-    assert len(chunks) == 0
+    assert len(chunks) == 1
+    assert chunks[0]["is_last_chunk"] is True
+    assert chunks[0]["row_count"] == 0
+    assert chunks[0]["total_rows_sent"] == 0
+    assert "execution_time_ms" in chunks[0]
 
   @pytest.mark.asyncio
   @pytest.mark.unit

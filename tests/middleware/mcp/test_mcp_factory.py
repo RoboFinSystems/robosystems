@@ -59,6 +59,7 @@ class TestCreateGraphMCPClient:
 
     # Mock client factory
     mock_graph_client = Mock()
+    mock_graph_client.close = AsyncMock()
     mock_graph_client.config.base_url = "http://discovered-url.com"
     mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
 
@@ -103,6 +104,7 @@ class TestCreateGraphMCPClient:
 
     # Mock client factory
     mock_graph_client = Mock()
+    mock_graph_client.close = AsyncMock()
     mock_graph_client.config = None  # No config attribute
     mock_graph_client._base_url = "http://user-graph-url.com"
     mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
@@ -147,6 +149,7 @@ class TestCreateGraphMCPClient:
 
     # Mock client with base_url attribute
     mock_graph_client = Mock()
+    mock_graph_client.close = AsyncMock()
     del mock_graph_client.config  # No config attribute
     del mock_graph_client._base_url  # No _base_url attribute
     mock_graph_client.base_url = "http://base-url-fallback.com"
@@ -183,6 +186,7 @@ class TestCreateGraphMCPClient:
 
     # Mock client with no URL attributes
     mock_graph_client = Mock()
+    mock_graph_client.close = AsyncMock()
     del mock_graph_client.config
     del mock_graph_client._base_url
     del mock_graph_client.base_url
@@ -219,6 +223,7 @@ class TestCreateGraphMCPClient:
 
     # Mock client with no URL attributes
     mock_graph_client = Mock()
+    mock_graph_client.close = AsyncMock()
     del mock_graph_client.config
     del mock_graph_client._base_url
     del mock_graph_client.base_url
@@ -301,6 +306,7 @@ class TestCreateGraphMCPClient:
     mock_is_shared.return_value = True
 
     mock_graph_client = Mock()
+    mock_graph_client.close = AsyncMock()
     mock_graph_client.config.base_url = "http://discovered.com"
     mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
 
@@ -503,3 +509,21 @@ class TestFactoryIntegration:
     except Exception:
       # Expected to fail without mocks, but syntax should be valid
       pass
+
+
+class TestDiscoveryClientClosed:
+  @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
+  @patch("robosystems.graph_api.client.factory.GraphClientFactory")
+  async def test_discovery_client_is_closed(self, mock_factory, mock_client_class):
+    """The GraphClient opened only to discover a base URL must be closed."""
+    mock_graph_client = Mock()
+    mock_graph_client.close = AsyncMock()
+    mock_graph_client.config.base_url = "http://discovered-url.com"
+    mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
+
+    await create_graph_mcp_client("kg123abc")
+
+    mock_graph_client.close.assert_awaited_once()
+    assert mock_client_class.call_args.kwargs["api_base_url"] == (
+      "http://discovered-url.com"
+    )

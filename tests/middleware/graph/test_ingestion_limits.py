@@ -895,3 +895,20 @@ class TestUnmeasurableStorageFailsClosed:
     assert result["allowed"] is False
     assert result["retryable"] is False
     assert result["status"] == "over_limit"
+
+
+class TestStorageBreakdownClosesClient:
+  @pytest.mark.asyncio
+  async def test_client_closed_when_breakdown_times_out(self):
+    client = MagicMock()
+    client.get_storage_breakdown = AsyncMock(side_effect=TimeoutError())
+    client.close = AsyncMock()
+
+    with patch(
+      "robosystems.graph_api.client.factory.GraphClientFactory.create_client",
+      AsyncMock(return_value=client),
+    ):
+      result = await IngestionLimitChecker._get_storage_breakdown("kg_test")
+
+    assert result is None
+    client.close.assert_awaited_once()

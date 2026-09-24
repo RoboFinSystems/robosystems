@@ -134,6 +134,23 @@ class TestLadybugConnectionPoolAcquireRelease:
     assert conn_info2.use_count == 2
     assert pool._stats["connections_reused"] == 1
 
+  @patch("robosystems.graph_api.core.ladybug.pool.lbug")
+  @patch("robosystems.graph_api.core.ladybug.config.get_database_memory_config")
+  def test_connection_ids_stay_unique_after_eviction(self, mock_mem_config, mock_lbug):
+    """A new connection after one is closed must not reuse a live id."""
+    mock_mem_config.return_value = 256
+    mock_lbug.Connection.side_effect = lambda db: MagicMock()
+    (Path(self.temp_dir) / "testdb.lbug").touch()
+    pool = _make_pool(self.temp_dir)
+
+    created = [pool._create_new_connection("testdb", read_only=False) for _ in range(3)]
+    pool._close_connection("testdb", "testdb_0")
+    newest = pool._create_new_connection("testdb", read_only=False)
+
+    live = pool._pools["testdb"]
+    assert len(live) == 3
+    assert {id(c) for c in live.values()} == {id(c) for c in (*created[1:], newest)}
+
   def test_release_connection(self):
     """Should release connection without error."""
     pool = _make_pool(self.temp_dir)
@@ -387,6 +404,27 @@ class TestLadybugConnectionPoolForceDatabaseCleanup:
 
       mock_temp_conn.execute.assert_called_once_with("CHECKPOINT;")
       mock_temp_conn.close.assert_called_once()
+
+  def test_force_cleanup_sec_checkpoints_a_database_without_execute(self):
+    """A real ladybug.Database has no execute(); the checkpoint must still run."""
+    pool = _make_pool(self.temp_dir)
+
+    mock_db = MagicMock(spec=["close"])
+    pool._databases["sec"] = mock_db
+    pool._pools["sec"] = {}
+
+    with (
+      patch("ladybug.Connection") as mock_conn_cls,
+      patch("gc.collect"),
+    ):
+      mock_temp_conn = MagicMock()
+      mock_conn_cls.return_value = mock_temp_conn
+
+      pool.force_database_cleanup("sec", aggressive=False)
+
+      mock_conn_cls.assert_called_once_with(mock_db)
+      mock_temp_conn.execute.assert_called_once_with("CHECKPOINT;")
+    mock_db.close.assert_called_once()
 
   def test_force_cleanup_aggressive_gc(self):
     """Aggressive mode should run multiple GC rounds."""

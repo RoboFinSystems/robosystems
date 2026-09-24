@@ -72,6 +72,9 @@ class AdmissionController:
     self._rejection_rate = 0.0
     self._shed_start_time: float | None = None
 
+    # The first non-blocking sample is always 0.0; take it here.
+    psutil.cpu_percent(None)
+
   def check_admission(
     self,
     queue_depth: int,
@@ -183,7 +186,7 @@ class AdmissionController:
       memory = psutil.virtual_memory()
       memory_percent = memory.percent
 
-      cpu_percent = psutil.cpu_percent(interval=0.1)
+      cpu_percent = psutil.cpu_percent(interval=None)
 
       load_avg = psutil.getloadavg()[0]
 

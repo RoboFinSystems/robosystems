@@ -140,6 +140,15 @@ class TestAdmissionController:
     assert decision == AdmissionDecision.ACCEPT
     assert reason is None
 
+  def test_cpu_sampling_does_not_block(self, mock_psutil):
+    """CPU is sampled non-blocking, primed once at construction."""
+    controller = AdmissionController()
+    mock_psutil.cpu_percent.assert_called_once_with(None)
+
+    controller.check_admission(queue_depth=0, max_queue_size=100, active_queries=0)
+
+    mock_psutil.cpu_percent.assert_called_with(interval=None)
+
   def test_check_admission_reject_memory(self, controller, mock_psutil):
     """Test rejecting due to high memory usage."""
     # Set high memory usage

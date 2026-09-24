@@ -627,6 +627,8 @@ class TestStageIncrementalToDuckDB:
 
     # Should fail but temp table should be cleaned up
     assert result.status == "partial"
+    assert result.error is not None
+    assert "Entity" in result.error
     # delete_table is called at least once for temp cleanup
     mock_client.delete_table.assert_called()
 

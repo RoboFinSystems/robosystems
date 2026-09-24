@@ -21,6 +21,7 @@ from robosystems.logger import logger
 S3_MULTIPART_CHUNKSIZE = 100 * 1024 * 1024  # 100 MB
 S3_MULTIPART_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 S3_MAX_CONCURRENCY = 4
+R2_ZSTD_LEVEL = 15
 
 
 class OnInstanceBackupService:
@@ -307,7 +308,15 @@ class OnInstanceBackupService:
       compress_start = datetime.now(UTC)
       try:
         subprocess.run(
-          ["zstd", "-T0", "--long", "-15", str(db_path), "-o", str(compressed_file)],
+          [
+            "zstd",
+            "-T0",
+            "--long",
+            f"-{R2_ZSTD_LEVEL}",
+            str(db_path),
+            "-o",
+            str(compressed_file),
+          ],
           check=True,
           capture_output=True,
           text=True,
@@ -355,7 +364,7 @@ class OnInstanceBackupService:
             "created_at": datetime.now(UTC).isoformat(),
             "original_size": str(db_size),
             "compression": "zstd",
-            "compression_level": "12",
+            "compression_level": str(R2_ZSTD_LEVEL),
           },
         },
       )

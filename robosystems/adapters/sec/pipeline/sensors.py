@@ -417,7 +417,9 @@ def sec_wake_to_stage_sensor(context: RunStatusSensorContext):
   request_job=sec_materialize_job,
   default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
-  description="Trigger incremental graph materialization after DuckDB staging completes",
+  description=(
+    "Trigger a full LadybugDB rebuild from DuckDB after incremental staging completes"
+  ),
 )
 def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
   """Trigger a full LadybugDB rebuild from DuckDB after incremental staging.

@@ -417,6 +417,33 @@ class TestDuckDBConnectionPoolForceCleanup:
 
 
 @pytest.mark.unit
+class TestDuckDBConnectionPoolConnectionIds:
+  def setup_method(self):
+    self.temp_dir = tempfile.mkdtemp()
+
+  def teardown_method(self):
+    shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+  def test_connection_ids_stay_unique_after_eviction(self):
+    """A new connection after one is closed must not reuse a live id."""
+    pool = _make_pool(self.temp_dir)
+
+    with (
+      patch("robosystems.graph_api.core.duckdb.pool.duckdb.connect") as mock_connect,
+      patch.object(pool, "_configure_connection"),
+      patch.object(pool, "_test_new_connection", return_value=True),
+    ):
+      mock_connect.side_effect = lambda path: MagicMock()
+      created = [pool._create_new_connection("testdb") for _ in range(3)]
+      pool._close_connection("testdb", "testdb_0")
+      newest = pool._create_new_connection("testdb")
+
+    live = pool._pools["testdb"]
+    assert len(live) == 3
+    assert {id(c) for c in live.values()} == {id(c) for c in (*created[1:], newest)}
+
+
+@pytest.mark.unit
 class TestDuckDBConnectionPoolStats:
   """Tests for get_stats."""
 

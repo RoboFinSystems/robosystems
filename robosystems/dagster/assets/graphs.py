@@ -105,7 +105,8 @@ user_graph_backup_source = AssetSpec(
   key="user_graph_backup",
   description=(
     "User graph databases backed up to S3. "
-    "Triggered on-demand via the create-backup operation."
+    "Run nightly by the graph backup schedule and on demand via the "
+    "create-backup operation."
   ),
   group_name="graphs",
   metadata={

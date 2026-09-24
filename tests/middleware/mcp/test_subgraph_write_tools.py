@@ -437,3 +437,46 @@ class TestSharedRepoWriteProtection:
     )
     assert result["error"] == "read_only"
     mock_shared_subgraph_client.graph_client.install_schema.assert_not_called()
+
+
+@pytest.mark.unit
+class TestDdlClearsSchemaCache:
+  """A successful DDL tool call through the dispatcher drops the schema cache."""
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("tool_name", "attr", "tool_cls", "arguments"),
+    [
+      (
+        "add-node-table",
+        "add_node_table_tool",
+        AddNodeTableTool,
+        {
+          "table_name": "CompanyProfile",
+          "properties": [
+            {"name": "identifier", "type": "STRING", "is_primary_key": True}
+          ],
+        },
+      ),
+      (
+        "add-relationship-table",
+        "add_relationship_table_tool",
+        AddRelationshipTableTool,
+        {"table_name": "OWNS", "from_node": "Company", "to_node": "Asset"},
+      ),
+    ],
+  )
+  async def test_schema_cache_cleared(
+    self, mock_subgraph_client, tool_name, attr, tool_cls, arguments
+  ):
+    from robosystems.middleware.mcp.tools.manager import GraphMCPTools
+
+    tools = GraphMCPTools(mock_subgraph_client)
+    setattr(tools, attr, tool_cls(mock_subgraph_client))
+    tools.schema_tool._schema_cache = [{"label": "Stale"}]
+    tools.schema_tool._schema_cache_time = 1e18
+
+    result = await tools.call_tool(tool_name, arguments, return_raw=True)
+
+    assert result["success"] is True
+    assert tools.schema_tool._schema_cache is None

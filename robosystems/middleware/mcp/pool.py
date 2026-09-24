@@ -182,7 +182,8 @@ class MCPConnectionPool:
             "idle_seconds": idle_time,
             "lifetime_seconds": lifetime,
             "will_expire_in": max(
-              self.max_idle_time - idle_time, self.max_lifetime - lifetime, 0
+              0,
+              min(self.max_idle_time - idle_time, self.max_lifetime - lifetime),
             ),
           }
         )

@@ -319,7 +319,7 @@ def is_subgraph_id(graph_id: str) -> bool:
 
   if not subgraph_part or len(subgraph_part) > 20:
     return False
-  if not all(c.isalnum() for c in subgraph_part):
+  if not re.fullmatch(r"[a-zA-Z0-9]+", subgraph_part):
     return False
 
   if parent_part.startswith("kg") and len(parent_part) >= 18:

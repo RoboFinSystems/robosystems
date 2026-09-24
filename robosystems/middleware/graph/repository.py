@@ -101,7 +101,7 @@ class UniversalRepository:
       columns = list(result[0].keys()) if result else []
       total_rows = len(result)
 
-      for i in range(0, total_rows, chunk_size):
+      for i in range(0, total_rows or 1, chunk_size):
         chunk_data = result[i : i + chunk_size]
         chunk = {
           "chunk_index": i // chunk_size,

@@ -8,6 +8,7 @@ All connections to one database share a single ``lbug.Database`` object: two
 Database objects over the same file do not see each other's committed writes.
 """
 
+import itertools
 import os
 import threading
 import weakref
@@ -66,6 +67,7 @@ class LadybugConnectionPool:
 
     # One Database object per database name, shared by all its connections.
     self._databases: dict[str, lbug.Database] = {}
+    self._conn_ids = itertools.count()
 
     self._stats = {
       "connections_created": 0,
@@ -337,7 +339,7 @@ class LadybugConnectionPool:
       if database_name not in self._pools:
         self._pools[database_name] = {}
 
-      conn_id = f"{database_name}_{len(self._pools[database_name])}"
+      conn_id = f"{database_name}_{next(self._conn_ids)}"
       self._pools[database_name][conn_id] = connection_info
 
       self._stats["connections_created"] += 1
@@ -514,7 +516,7 @@ class LadybugConnectionPool:
 
           # SEC's WAL is large enough that closing without a checkpoint
           # leaves a long recovery for the next open.
-          if database_name == "sec" and hasattr(db, "execute"):
+          if database_name == "sec":
             try:
               temp_conn = lbug.Connection(db)
               temp_conn.execute("CHECKPOINT;")

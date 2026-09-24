@@ -178,6 +178,51 @@ class TestMaterializeFromDuckDBSuccess:
     assert result.total_rows_ingested == 100
     mock_client.materialize_table.assert_called_once()
 
+  @pytest.mark.asyncio
+  @patch(
+    "robosystems.operations.graph.shared_repository_service.ensure_shared_repository_exists",
+    new_callable=AsyncMock,
+  )
+  @patch(
+    "robosystems.adapters.sec.processors.ingestion.materialization.get_graph_client"
+  )
+  @patch(
+    "robosystems.adapters.sec.processors.ingestion.materialization.RoboLedgerContext"
+  )
+  @patch("robosystems.adapters.sec.processors.ingestion.materialization.S3Client")
+  @patch("robosystems.adapters.sec.processors.ingestion.materialization.env")
+  async def test_result_reports_tables_and_rows(
+    self,
+    mock_env,
+    mock_s3_client,
+    mock_context,
+    mock_get_client,
+    mock_ensure_repo,
+  ):
+    """The result names the tables that landed, the ones that failed, and rows."""
+    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
+    mock_env.ENVIRONMENT = "dev"
+    mock_ensure_repo.return_value = {"status": "exists"}
+
+    mock_client = AsyncMock()
+    mock_get_client.return_value = mock_client
+    mock_client.materialize_table.side_effect = [
+      {"rows_ingested": 100, "execution_time_ms": 500, "status": "success"},
+      RuntimeError("boom"),
+    ]
+
+    from robosystems.adapters.sec.processors.ingestion.materialization import (
+      LadybugMaterializer,
+    )
+
+    mat = LadybugMaterializer()
+    result = await mat.materialize_from_duckdb(table_names=["Entity", "Fact"])
+
+    assert result.status == "partial"
+    assert result.table_names == ["Entity"]
+    assert [t["table_name"] for t in result.failed_tables] == ["Fact"]
+    assert result.total_rows == 100
+
 
 @pytest.mark.unit
 class TestTriggerIngestion:
