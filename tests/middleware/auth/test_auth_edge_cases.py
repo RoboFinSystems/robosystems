@@ -9,9 +9,6 @@ import pytest
 from robosystems.middleware.auth.cache import APIKeyCache
 from robosystems.middleware.auth.utils import _is_valid_api_key_format
 
-# Mark entire test module as slow due to encryption operations
-pytestmark = pytest.mark.slow
-
 
 class TestKeyRotationEdgeCases:
   """Test key rotation with rollback and error handling."""

@@ -13,9 +13,6 @@ from robosystems.middleware.auth.distributed_lock import (
   get_sso_lock_manager,
 )
 
-# Mark entire test module as slow due to distributed lock operations
-pytestmark = pytest.mark.slow
-
 
 @pytest.fixture
 def mock_redis():
@@ -35,6 +32,13 @@ def mock_redis():
 def distributed_lock(mock_redis):
   """Create a DistributedLock instance with mock Redis."""
   return DistributedLock(mock_redis, "test_lock", ttl_seconds=30)
+
+
+@pytest.fixture
+def no_backoff():
+  """Acquisition retries 50 times with backoff; a refused lock need not wait."""
+  with patch("robosystems.middleware.auth.distributed_lock.time.sleep"):
+    yield
 
 
 @pytest.fixture
@@ -333,7 +337,7 @@ class TestDistributedLock:
 
   @patch("robosystems.middleware.auth.distributed_lock.SecurityAuditLogger")
   def test_context_manager_acquisition_failure(
-    self, mock_audit_logger, distributed_lock, mock_redis
+    self, mock_audit_logger, distributed_lock, mock_redis, no_backoff
   ):
     """Test context manager when acquisition fails."""
     mock_redis.set.return_value = False
@@ -375,7 +379,7 @@ class TestSSOTokenLockManager:
   @pytest.mark.asyncio
   @patch("robosystems.middleware.auth.distributed_lock.SecurityAuditLogger")
   async def test_lock_sso_token_failure(
-    self, mock_audit_logger, sso_lock_manager, mock_redis
+    self, mock_audit_logger, sso_lock_manager, mock_redis, no_backoff
   ):
     """Test failed SSO token locking."""
     mock_redis.set.return_value = False
@@ -410,7 +414,7 @@ class TestSSOTokenLockManager:
   @pytest.mark.asyncio
   @patch("robosystems.middleware.auth.distributed_lock.SecurityAuditLogger")
   async def test_lock_sso_session_failure(
-    self, mock_audit_logger, sso_lock_manager, mock_redis
+    self, mock_audit_logger, sso_lock_manager, mock_redis, no_backoff
   ):
     """Test failed SSO session locking."""
     mock_redis.set.return_value = False

@@ -1,7 +1,5 @@
 """Tests for canonical taxonomy concepts."""
 
-import pytest
-
 
 class TestTaxonomyStructure:
   """Test taxonomy structure and integrity."""
@@ -99,7 +97,6 @@ class TestTaxonomyStructure:
         f"Concept {concept.id} has invalid period_type: {concept.period_type}"
       )
 
-  @pytest.mark.slow
   def test_element_taxonomy_embeddings(self):
     """Verify embeddings are computed correctly (loads model)."""
     from robosystems.adapters.sec.taxonomy import get_element_taxonomy
@@ -112,7 +109,6 @@ class TestTaxonomyStructure:
         f"Concept {concept.id} embedding has wrong dimension: {len(concept.embedding)}"
       )
 
-  @pytest.mark.slow
   def test_structure_taxonomy_embeddings(self):
     """Verify structure embeddings are computed correctly (loads model)."""
     from robosystems.adapters.sec.taxonomy import get_structure_taxonomy
