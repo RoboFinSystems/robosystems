@@ -451,6 +451,8 @@ class GraphClientFactory:
               await cls._master_circuit_breaker.record_success()
             return url
 
+      # Routing deliberately ignores the instance_busy.py counter; only the
+      # GHA pre-refresh workflows read it.
       logger.warning(
         f"No healthy shared master found in DynamoDB after scanning "
         f"{env.ENVIRONMENT} environment"

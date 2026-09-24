@@ -98,7 +98,7 @@ class MigrationService:
 
     Must run before EXPORT: the new engine cannot replay an old WAL tail, and
     the raw .lbug system backup excludes the .wal. auto_checkpoint only fires
-    past a size threshold, so small graphs never drain on their own.
+    past a size threshold (512 MB), so small graphs never drain on their own.
     Best-effort — the Parquet export captures committed WAL data regardless.
     """
     from robosystems.graph_api.core.ladybug import get_ladybug_service

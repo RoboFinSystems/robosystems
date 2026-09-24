@@ -267,7 +267,7 @@ async def download_backup(
     from robosystems.middleware.graph.utils import MultiTenantUtils
 
     # Fold the WAL into the main file, which is all this copies; a tenant
-    # graph rarely reaches the auto-checkpoint threshold. Must follow the
+    # graph rarely reaches the 512 MB auto-checkpoint threshold. Must follow the
     # list_databases() check above: a read-write open creates an absent
     # database.
     try:

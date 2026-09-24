@@ -461,7 +461,9 @@ class QBClient:
     a string is passed through as-is).
 
     Returns ``(entities_by_type, watermark_too_old)``. Deleted entities come
-    back with ``status='Deleted'`` in the same lists. ``watermark_too_old``
+    back with ``status='Deleted'`` in the same lists; nothing handles them yet
+    (the loader has no soft-delete path), so a QB-side delete persists here
+    until the next full rebuild. ``watermark_too_old``
     means QB rejected the window (~30 days); the caller should fall back to a
     full lookback. Any other 400 raises ``HTTPError``.
     """
