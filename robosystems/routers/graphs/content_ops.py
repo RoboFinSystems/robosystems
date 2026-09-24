@@ -1,15 +1,8 @@
-"""Content operations — non-language knowledge writes (CQRS command surface).
+"""Content operations (memory, corpus documents, file staging) at
+``POST /v1/graphs/{graph_id}/operations/{op_name}``.
 
-Memory (remember / forget / update-memory), corpus documents (index-document /
-delete-document), and file staging (ingest-file / delete-file) all write through
-the operation envelope. They share the ``/operations/{op}`` path and the
-envelope machinery with ``operations.py`` (graph lifecycle) but carry their own
-"Content Operations" tag.
-
-All handlers return ``OperationEnvelope`` with idempotency + audit, and delegate
-to the operations kernel (services / commands) — no business logic here.
-
-URL surface: ``POST /v1/graphs/{graph_id}/operations/{op_name}``
+Same envelope machinery as ``operations.py`` (graph lifecycle), under its own
+"Content Operations" tag. Handlers delegate to the operations kernel.
 """
 
 from __future__ import annotations
@@ -52,8 +45,7 @@ from robosystems.models.api.graphs.operations import (
 from robosystems.models.api.graphs.tables import FileUploadRequest
 from robosystems.models.core import User
 
-# Shared envelope-dispatch machinery lives with the lifecycle ops; content ops
-# reuse it verbatim (one-way import — operations.py never imports this module).
+# One-way import: operations.py never imports this module.
 from robosystems.routers.graphs.operations import (
   _AUDIT_EVENT,
   _GRAPH_OPS_PATH,
@@ -91,24 +83,18 @@ def _block_shared_repo(graph_id: str) -> None:
 
 
 def _require_graph_write_access(graph_id: str, user_id: str) -> None:
-  """Enforce write-level graph access: the member/admin **write role** AND
-  subscription/lifecycle state.
+  """Require the member/admin write role and a writable subscription state.
 
-  ``get_current_user_with_graph`` only proves graph *membership* — a read-only
-  ``viewer`` passes it. And ``require_graph_access(require_write=True)`` is a
-  billing/lifecycle gate that takes **no user** (it blocks writes during a
-  subscription grace period, not by role). So both checks are required: the
-  role check is what actually keeps a viewer off the content-op write surface.
-  Shared by all content-op write handlers.
+  ``get_current_user_with_graph`` lets a viewer through, and
+  ``require_graph_access`` checks billing/lifecycle only (no user), so both
+  checks are needed.
   """
   from robosystems.database import SessionFactory
   from robosystems.middleware.auth.dependencies import require_graph_write_role
   from robosystems.middleware.billing.enforcement import require_graph_access
 
-  # Write role (member/admin) — viewer is read-only.
   require_graph_write_role(user_id, graph_id)
 
-  # Subscription/lifecycle gate (blocks writes during a grace period).
   session = SessionFactory()
   try:
     require_graph_access(graph_id, session, require_write=True)
@@ -136,11 +122,6 @@ def _resolve_graph_tier(graph_id: str, session) -> str:
       detail="Unable to determine subscription tier",
     )
   return graph.graph_tier
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# remember (semantic memory — content op)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(
@@ -203,11 +184,6 @@ async def remember_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# forget (semantic memory — content op)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 @router.post(
   "/forget",
   response_model=OperationEnvelope,
@@ -235,9 +211,8 @@ async def forget_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
-  # Deliberately not `_block_subgraph`: `remember` is closed, but anything a
-  # subgraph stored before that must still be removable without deleting the
-  # whole subgraph. Closing the way out as well as the way in strands data.
+  # Deliberately not `_block_subgraph`: data a subgraph stored before
+  # `remember` was closed must stay removable.
   _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "forget"
@@ -262,11 +237,6 @@ async def forget_op(
       await client.close()
 
   return await _dispatch(ctx, _runner, cache)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# update-memory (semantic memory — content op)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(
@@ -317,10 +287,8 @@ async def update_memory_op(
       service = get_memory_service(client)
       if service is None:  # pragma: no cover - gated above
         raise HTTPException(status_code=503, detail="Semantic memory is not enabled")
-      # exclude_unset so a partial update only forwards the fields the caller
-      # actually set — otherwise the unset fields dump as None and the service
-      # (which keys on model_fields_set) wipes memory_type/tags/source_ref/
-      # provenance to NULL.
+      # exclude_unset: the service keys on model_fields_set, so dumping unset
+      # fields as None would wipe them.
       record = await service.update_memory(
         graph_id,
         body.memory_id,
@@ -335,11 +303,6 @@ async def update_memory_op(
       await client.close()
 
   return await _dispatch(ctx, _runner, cache)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# index-document (corpus content op)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(
@@ -426,11 +389,6 @@ async def index_document_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# delete-document (corpus content op)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 @router.post(
   "/delete-document",
   response_model=OperationEnvelope,
@@ -482,11 +440,6 @@ async def delete_document_op(
       session.close()
 
   return await _dispatch(ctx, _runner, cache)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# create-file-upload (raw → presigned S3 upload content op)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(
@@ -542,11 +495,6 @@ async def create_file_upload_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# ingest-file (raw → staging content flow)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 @router.post(
   "/ingest-file",
   response_model=OperationEnvelope,
@@ -599,8 +547,8 @@ async def ingest_file_op(
       background_tasks=background_tasks,
     )
 
-    # Async staging (Dagster) returns an operation_id → pending; direct staging
-    # with no follow-on ingest completes inline → completed.
+    # Async staging returns an operation_id (pending); direct staging with no
+    # follow-on ingest completes inline.
     if result.get("operation_id"):
       envelope = wrap_pending(
         op_name,
@@ -624,11 +572,6 @@ async def ingest_file_op(
       event=_AUDIT_EVENT,
     )
     return envelope
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# delete-file (raw content op)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(
@@ -658,8 +601,8 @@ async def delete_file_op(
   from robosystems.operations.graph.commands.delete_file import delete_file_cmd
 
   _block_shared_repo(graph_id)
-  # Deliberately not `_block_subgraph`: uploads are closed, but files staged
-  # before that must stay removable. See the note on `forget`.
+  # Deliberately not `_block_subgraph`: files staged before uploads were
+  # closed must stay removable.
   _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "delete-file"

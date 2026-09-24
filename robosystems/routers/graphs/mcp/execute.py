@@ -1,12 +1,8 @@
-"""MCP tool authorization and execution, shared by the transports.
+"""MCP tool authorization and execution for the Streamable HTTP transport.
 
-`authorize_mcp_tool_call` is the gauntlet every `tools/call` runs — fail-closed
-write classification, StatementKernel policy for the Cypher tools, per-graph
-role checks, shared-repository subscription lookup, and volume rate limits —
-and `execute_tool_to_json` resolves a call to one JSON result for the strategy
-the selector picked. The Streamable HTTP transport (`remote.py`) is the only
-caller; the REST tool endpoints that used to live here were removed once the
-transport carried all of their traffic.
+`authorize_mcp_tool_call` is the gauntlet every `tools/call` runs;
+`execute_tool_to_json` resolves a call to one JSON result for the selected
+strategy.
 """
 
 import asyncio
@@ -42,27 +38,18 @@ from .streaming import (
 
 circuit_breaker = CircuitBreakerManager()
 
-# MCP result cache TTLs (seconds).
-# To manually invalidate: just admin dev cache flush mcp_cache
+# MCP result cache TTLs (seconds). Flush with: just admin dev cache flush mcp_cache
 _MCP_INFO_CACHE_TTL = 1800  # 30 minutes
 _MCP_SCHEMA_CACHE_TTL = 3600  # 1 hour
 
-# Shared module-level Redis client for MCP cache — created once, reuses connection pool.
-# Lazily initialized on first use to avoid import-time URL resolution issues.
+# Created lazily to avoid import-time URL resolution.
 _mcp_redis_client: Any = None
 
-# Write classification is FAIL-CLOSED: any tool NOT in this read-only allowlist
-# is treated as a write and must pass the member/admin role check (a `viewer`
-# is read-only). This is deliberately an inverted allowlist so that every new
-# tool — including every registrar-generated OLTP command op — defaults to
-# write and cannot silently become viewer-writable.
-#
-# The `read-*-cypher` tools are intentionally ABSENT: they are classified per
-# query by the StatementKernel (they can carry a write statement), handled
-# separately below.
-#
-# When adding a new READ tool, add it here (otherwise viewers can't call it —
-# safe, but over-restrictive). New WRITE tools need no change.
+# Write classification is fail-closed: any tool not in this allowlist is a
+# write and needs the member/admin role, so every new tool (including
+# registrar-generated command ops) defaults to write. The `read-*-cypher` tools
+# are absent on purpose: the StatementKernel classifies them per statement.
+# A new read tool must be added here, or viewers can't call it.
 READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
   {
     # Graph introspection / exploration
@@ -126,11 +113,7 @@ def _get_mcp_redis_client() -> Any:
 
 
 def _mcp_cache_key(graph_id: str, tool_name: str) -> str:
-  """Build a Valkey cache key for MCP tool results.
-
-  Only the argument-free tools (get-graph-schema, get-graph-info) are cached,
-  so graph_id plus tool_name identifies a result uniquely.
-  """
+  """Only argument-free tools are cached, so graph_id + tool_name is unique."""
   return f"mcp:{graph_id}:{tool_name}"
 
 
@@ -206,13 +189,9 @@ async def authorize_mcp_tool_call(
 ) -> str:
   """Run the shared MCP tool-call authorization gauntlet.
 
-  Used by the remote JSON-RPC transport (POST /mcp, both the per-graph and
-  the OAuth-only route) and the in-process operator path so the surfaces
-  cannot drift: fail-closed write classification, StatementKernel statement policy for cypher read tools,
-  per-graph role validation, shared-repo subscription lookup, and dual-layer
-  volume rate limiting.
-
-  Returns the resolved access type, `"read"` or `"write"`. Raises 403 on
+  Fail-closed write classification, StatementKernel policy for Cypher read
+  tools, per-graph role validation, shared-repo subscription lookup, and
+  volume rate limiting. Returns ``"read"`` or ``"write"``; raises 403 on
   access or subscription denial and 429 on volume limits.
   """
   from robosystems.config import env
@@ -223,31 +202,19 @@ async def authorize_mcp_tool_call(
     "read-neo4j-cypher",
     "read-ladybug-cypher",
   )
-  # Fail-closed write classification: a tool is a WRITE unless it appears on
-  # the read-only allowlist, so every non-read tool — including all
-  # registrar-generated OLTP command ops (update-journal-entry, close-period,
-  # execute-event-block, the content-op writes) — requires the member/admin
-  # role via `validate_mcp_access(..., "write")` below. Cypher read tools are
-  # classified per statement by the StatementKernel, since they can carry a
-  # write.
   is_write_query = (not is_cypher_read_tool) and (
     tool_call.name not in READ_ONLY_MCP_TOOLS
   )
 
-  # Validate access using a short-lived session.  The MCP endpoint's
-  # tool execution can take minutes; using a scoped session or FastAPI
-  # db dependency would hold a pool connection for the entire duration.
-  # A plain SessionFactory() session is closed immediately after the
-  # DB work, returning the connection to the pool before tool execution.
+  # A short-lived session, closed before tool execution (which can take
+  # minutes), so no pool connection is held for the call's duration.
   repo_access = None
   sess = SessionFactory()
   try:
     if is_cypher_read_tool:
       cypher_query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]
-      # Only authorize an actual statement. An empty/missing query is a
-      # validation error the tool surfaces ("Query parameter is required"),
-      # not a policy decision — and is_write_operation fail-safes empty input
-      # to "write", which would otherwise mis-trigger the write block.
+      # An empty query is a validation error for the tool to surface, not a
+      # policy decision; is_write_operation would fail-safe it to "write".
       if cypher_query.strip():
         authz = statement_kernel.authorize(
           engine=StatementEngine.CYPHER,
@@ -261,10 +228,7 @@ async def authorize_mcp_tool_call(
     access_type = "write" if is_write_query else "read"
     await validate_mcp_access(graph_id, current_user, sess, access_type)
 
-    # Look up shared-repo subscription while session is still open.
-    # Covers subgraphs (e.g. sec_historical) too — subscriptions live on
-    # the parent, so resolve to it before the lookup, matching the query
-    # path in query/execute.py::_check_shared_repository_limits.
+    # Subscriptions live on the parent repository.
     if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
       from robosystems.config.shared_repositories import (
         resolve_shared_repository_parent,
@@ -277,7 +241,6 @@ async def authorize_mcp_tool_call(
   finally:
     sess.close()
 
-  # Apply dual-layer rate limiting for shared repositories (incl. subgraphs)
   if (
     MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     and env.RATE_LIMIT_ENABLED
@@ -299,8 +262,7 @@ async def authorize_mcp_tool_call(
     try:
       limiter = DualLayerRateLimiter(redis_client)
 
-      # Check shared-repository per-plan volume limits (burst protection is
-      # already enforced upstream by subscription_aware_rate_limit_dependency).
+      # Per-plan volume limits; burst protection is enforced upstream.
       limit_check = await limiter.check_limits(
         user_id=str(current_user.id),
         graph_id=graph_id,
@@ -355,19 +317,16 @@ async def execute_tool_to_json(
 ) -> dict[str, Any]:
   """Execute a tool call to a single JSON result for the given strategy.
 
-  The remote JSON-RPC transport must return one result per `tools/call`
-  (MCP has no partial-result mechanism), so streaming strategies are
-  aggregated server-side and cacheable strategies go through the Valkey MCP
-  cache. Queue strategies fall through to direct execution here; the remote
-  transport bridges the queue over its SSE response mode instead.
+  MCP has no partial results, so streaming strategies are aggregated here.
+  Queue strategies fall through to direct execution; the remote transport
+  bridges the queue itself over SSE.
   """
   if strategy == MCPExecutionStrategy.SCHEMA_CACHED:
     cached = await _get_mcp_cache(graph_id, tool_call.name)
     if cached is not None:
       return cached
     result = await execute_tool_directly(handler, tool_call, timeout)
-    # Never cache an execution failure — a transient backend error would be
-    # served as the schema for the full cache TTL.
+    # Never cache a failure: it would be served as the schema for the full TTL.
     if not is_tool_error_result(result):
       await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_SCHEMA_CACHE_TTL)
     return result

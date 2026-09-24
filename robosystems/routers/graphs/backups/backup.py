@@ -1,15 +1,8 @@
-"""
-Backup read routes (list).
+"""Backup list route.
 
-Backup creation lives at ``POST /v1/graphs/{graph_id}/operations/create-backup``.
-
-There is no customer-facing restore. Backups are a *download* capability: every
-graph type with an upstream rebuilds from it rather than from a snapshot
-(entity graphs re-materialize from the extensions database, generic graphs from
-their staged source files, shared repositories re-ingest), and the classes with
-no upstream — entity subgraphs and the semantic memory store — are recovered by
-downloading the payload and rebuilding, or by an operator-run restore. The
-restore machinery is retained for that internal path only; see
+There is no customer-facing restore: backups are a download capability. Graphs
+with an upstream rebuild from it; the rest (entity subgraphs, the memory store)
+are recovered by downloading and rebuilding, or by the operator-only
 ``dagster/jobs/graph.py::restore_backup``.
 """
 
@@ -50,7 +43,6 @@ from robosystems.models.api.graphs.backups import (
 )
 from robosystems.models.core import User, UserRepository
 
-# Create router
 router = APIRouter()
 
 
@@ -74,8 +66,8 @@ async def list_backups(
     50, ge=1, le=100, description="Maximum number of backups to return"
   ),
   offset: int = Query(0, ge=0, description="Number of backups to skip"),
-  # Export grace period: a departing org's OWNER/ADMIN can still list a
-  # torn-down graph's backups (get_effective_role allow_deprovisioned).
+  # Export grace period: a departing org's owner/admin can still list a
+  # torn-down graph's backups.
   current_user: User = Depends(get_current_user_with_deprovisioned_graph),
   db: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
@@ -85,18 +77,12 @@ async def list_backups(
       f"Starting list_backups for graph_id: {graph_id}, user: {current_user.id}"
     )
 
-    # Access validated by the graph_access_dependency (deprovisioned-tolerant)
-
-    # List backups from database instead of S3
     logger.info(f"Querying database for backups of graph: {graph_id}")
 
-    # Listing shows what the customer can act on: their own backups and the
-    # scheduled ones taken on their behalf. System-initiated rows are
-    # pre-restore snapshots and migration-export artifacts — internal to an
-    # operation they did not request, so surfacing them would be noise.
+    # Only backups the customer can act on: their own and scheduled ones.
+    # System-initiated rows are internal (pre-restore, migration export).
     from robosystems.models.core import BackupInitiator, BackupStatus, GraphBackup
 
-    # Query database for backups
     backup_records = (
       db.query(GraphBackup)
       .filter(
@@ -124,10 +110,8 @@ async def list_backups(
       f"Found {len(backup_records)} backups in database (total: {total_count})"
     )
 
-    # Convert to response format
     backups = []
     for backup in backup_records:
-      # Parse backup format from metadata or filename
       backup_format = "full_dump"  # default
       if backup.backup_metadata and "backup_format" in backup.backup_metadata:
         backup_format = backup.backup_metadata["backup_format"]
@@ -146,10 +130,8 @@ async def list_backups(
           backup_format=backup_format,
           backup_type=backup.backup_type,
           initiated_by=backup.initiated_by,
-          # Tri-state flattened for the API: the manifest records "included" /
-          # "absent", and a backup predating memory support records nothing at
-          # all. That last case stays None rather than collapsing to False,
-          # because "makes no claim" and "had none" are different answers.
+          # None when the backup predates memory support: "makes no claim"
+          # differs from "had none".
           memory_included=(
             {"included": True, "absent": False}.get(
               (backup.backup_metadata or {}).get("memory")
@@ -158,7 +140,6 @@ async def list_backups(
           status=backup.status.value
           if hasattr(backup.status, "value")
           else str(backup.status),
-          # s3_bucket and s3_key removed - infrastructure details not exposed
           original_size_bytes=backup.original_size_bytes or 0,
           compressed_size_bytes=backup.compressed_size_bytes or 0,
           compression_ratio=backup.backup_metadata.get("compression_ratio", 0.0)
@@ -179,11 +160,8 @@ async def list_backups(
         )
       )
 
-    # Check if this is a shared repository and get download quota.
-    # Subgraph-aware, and the quota keys on the parent repository — matching
-    # the download endpoint, which enforces against the parent's counter. List
-    # and download must resolve a subgraph identically or they report and
-    # enforce different numbers.
+    # Quota keys on the parent repository, exactly as the download endpoint
+    # enforces it, so list and download report the same numbers.
     is_shared_repo = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     download_quota = None
 
@@ -210,7 +188,6 @@ async def list_backups(
           resets_at=quota_info["resets_at"],
         )
 
-    # Record business event
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graph/backups",

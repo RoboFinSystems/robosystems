@@ -1,8 +1,4 @@
-"""
-Password security utilities for RoboSystems.
-
-Provides secure password validation, hashing, and strength assessment.
-"""
+"""Password policy validation, strength scoring, hashing, and generation."""
 
 import re
 import secrets
@@ -15,8 +11,6 @@ import bcrypt
 
 
 class PasswordStrength(Enum):
-  """Password strength levels."""
-
   VERY_WEAK = "very_weak"
   WEAK = "weak"
   FAIR = "fair"
@@ -26,8 +20,6 @@ class PasswordStrength(Enum):
 
 @dataclass
 class PasswordValidationResult:
-  """Result of password validation."""
-
   is_valid: bool
   strength: PasswordStrength
   score: int  # 0-100
@@ -39,40 +31,34 @@ class PasswordValidationResult:
 class PasswordSecurity:
   """Password validation, strength scoring, hashing, and generation."""
 
-  # Password requirements
   MIN_LENGTH = 12
   MAX_LENGTH = 128
-  MIN_STRENGTH_SCORE = 60  # Minimum acceptable score
+  MIN_STRENGTH_SCORE = 60
 
-  # Character requirements
   REQUIRE_UPPERCASE = True
   REQUIRE_LOWERCASE = True
   REQUIRE_DIGITS = True
   REQUIRE_SPECIAL = True
   MIN_UNIQUE_CHARS = 8
 
-  # bcrypt configuration
-  BCRYPT_ROUNDS = 14  # Higher security for passwords vs API keys
-  # bcrypt only uses the first 72 bytes; 5.0+ raises instead of truncating
-  # silently. Truncating explicitly keeps long passwords working and preserves
-  # verification of hashes written under bcrypt 4.x (which truncated implicitly).
+  BCRYPT_ROUNDS = 14
+  # bcrypt 5 raises past 72 bytes; truncating explicitly keeps hashes written
+  # under bcrypt 4 (which truncated silently) verifiable.
   BCRYPT_MAX_BYTES = 72
 
-  # Common weak patterns
   WEAK_PATTERNS = [
-    r"(.)\1{2,}",  # Repeated characters (aaa, 111)
-    r"123456",  # Sequential numbers
-    r"abcdef",  # Sequential letters
-    r"qwerty",  # Keyboard patterns
-    r"password",  # Common words
+    r"(.)\1{2,}",  # aaa, 111
+    r"123456",
+    r"abcdef",
+    r"qwerty",
+    r"password",
     r"admin",
     r"user",
     r"login",
     r"welcome",
-    r"robosystems",  # Entity name
+    r"robosystems",
   ]
 
-  # Common passwords (subset - in production would use larger list)
   COMMON_PASSWORDS = {
     "password123",
     "admin123",
@@ -104,7 +90,6 @@ class PasswordSecurity:
     suggestions = []
     score = 0
 
-    # Basic length checks
     if len(password) < cls.MIN_LENGTH:
       errors.append(f"Password must be at least {cls.MIN_LENGTH} characters long")
       suggestions.append(f"Add {cls.MIN_LENGTH - len(password)} more characters")
@@ -114,7 +99,6 @@ class PasswordSecurity:
     if len(password) > cls.MAX_LENGTH:
       errors.append(f"Password must not exceed {cls.MAX_LENGTH} characters")
 
-    # Character type analysis
     char_types = {
       "uppercase": bool(re.search(r"[A-Z]", password)),
       "lowercase": bool(re.search(r"[a-z]", password)),
@@ -122,7 +106,6 @@ class PasswordSecurity:
       "special": bool(re.search(r'[!@#$%^&*()\-_+=\[\]{};:,.?"|<>\\/>~`]', password)),
     }
 
-    # Character requirements
     if cls.REQUIRE_UPPERCASE and not char_types["uppercase"]:
       errors.append("Password must contain at least one uppercase letter")
       suggestions.append("Add an uppercase letter (A-Z)")
@@ -147,7 +130,6 @@ class PasswordSecurity:
     elif char_types["special"]:
       score += 15
 
-    # Unique character count
     unique_chars = len(set(password))
     if unique_chars < cls.MIN_UNIQUE_CHARS:
       errors.append(
@@ -159,7 +141,6 @@ class PasswordSecurity:
     elif unique_chars >= cls.MIN_UNIQUE_CHARS:
       score += 10
 
-    # Pattern checks
     for pattern in cls.WEAK_PATTERNS:
       if re.search(pattern, password.lower()):
         errors.append("Password contains weak patterns")
@@ -167,13 +148,11 @@ class PasswordSecurity:
         score -= 10
         break
 
-    # Common password check
     if password.lower() in cls.COMMON_PASSWORDS:
       errors.append("Password is too common")
       suggestions.append("Choose a more unique password")
       score -= 20
 
-    # Email similarity check
     if email:
       email_parts = email.lower().split("@")[0].split(".")
       for part in email_parts:
@@ -183,21 +162,17 @@ class PasswordSecurity:
           score -= 15
           break
 
-    # Length bonus
     if len(password) >= 16:
       score += 10
     if len(password) >= 20:
       score += 5
 
-    # Variety bonus
     char_variety = sum(char_types.values())
     if char_variety == 4:
       score += 10
 
-    # Ensure score is in valid range
     score = max(0, min(100, score))
 
-    # Determine strength
     if score >= 90:
       strength = PasswordStrength.STRONG
     elif score >= 75:
@@ -247,9 +222,7 @@ class PasswordSecurity:
 
     return await asyncio.to_thread(cls.verify_password, password, hashed)
 
-  # A fixed cost-14 hash whose only purpose is burning the same bcrypt work as
-  # a real verification. The candidate string below never matches it — the
-  # result is discarded; only the wall-clock parity matters.
+  # Exists only to burn a real verification's bcrypt work; never matches.
   _TIMING_EQUALIZER_HASH = (
     "$2b$14$QZqnSEVBjqfiGXIKfN1osuDqkogiNCpSZW3UFxutpEGp1hB7VxkZe"
   )
@@ -258,11 +231,8 @@ class PasswordSecurity:
   async def equalize_verify_timing(cls) -> None:
     """Burn one bcrypt verification's worth of work, off the loop.
 
-    The login miss path (unknown email, inactive user, null hash) would
-    otherwise return 401 having done zero bcrypt work, while a real account
-    pays the full cost-14 hash — a ~0.7 s gap. The generic "Invalid email or
-    password" is only generic if both branches cost the same, so the miss
-    path calls this. Re-measure if the cost factor changes.
+    The login miss path calls this so it costs the same as a real check and
+    the generic 401 doesn't leak which accounts exist.
     """
     await cls.verify_password_async(
       "timing-equalizer-candidate", cls._TIMING_EQUALIZER_HASH
@@ -270,12 +240,8 @@ class PasswordSecurity:
 
   @classmethod
   def _bcrypt_bytes(cls, password: str) -> bytes:
-    """Encode a password to bcrypt's 72-byte input, truncating if needed.
-
-    bcrypt raises on inputs longer than 72 bytes, so the truncation has to
-    happen here — and it must stay byte-exact, because stored hashes were
-    produced against the truncated input.
-    """
+    """Encode to bcrypt's 72-byte input; must stay byte-exact, since stored
+    hashes were produced against the truncated input."""
     return password.encode("utf-8")[: cls.BCRYPT_MAX_BYTES]
 
   @classmethod
@@ -288,10 +254,8 @@ class PasswordSecurity:
     if length < cls.MIN_LENGTH:
       length = cls.MIN_LENGTH
 
-    # All available characters for password generation
     all_chars = string.ascii_letters + string.digits + "!@#$%^&*()"
 
-    # Add required character types first
     required_pools = [
       string.ascii_uppercase,
       string.ascii_lowercase,
@@ -310,14 +274,11 @@ class PasswordSecurity:
         password_chars.append(char)
         used_chars.add(char)
 
-      # Fill remaining length, ensuring we meet minimum unique character requirement
       while len(password_chars) < length:
         char = secrets.choice(all_chars)
         password_chars.append(char)
         used_chars.add(char)
 
-        # If we still need more unique chars and we're running low on unused chars,
-        # prioritize unused characters
         if len(used_chars) < cls.MIN_UNIQUE_CHARS and len(password_chars) < length:
           unused_chars = [c for c in all_chars if c not in used_chars]
           if unused_chars:
@@ -325,24 +286,20 @@ class PasswordSecurity:
             password_chars.append(char)
             used_chars.add(char)
 
-      # Shuffle the password
       secrets.SystemRandom().shuffle(password_chars)
       password = "".join(password_chars)
 
-      # Verify no weak patterns (specifically repeated chars like "aaa")
       has_weak_pattern = any(
         re.search(pattern, password.lower()) for pattern in cls.WEAK_PATTERNS
       )
       if not has_weak_pattern:
         return password
 
-    # If all attempts failed, return the last generated password
-    # (extremely unlikely with 10 attempts)
     return password
 
   @classmethod
   def get_password_policy(cls) -> dict[str, Any]:
-    """Get the current password policy, for frontend display of requirements."""
+    """The password policy, for frontend display."""
     return {
       "min_length": cls.MIN_LENGTH,
       "max_length": cls.MAX_LENGTH,

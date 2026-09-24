@@ -46,7 +46,7 @@ async def update_user_password(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    # Fetch full user from DB — cached user from get_current_user may not have password_hash
+    # The cached user from get_current_user may lack password_hash.
     user_with_password = User.get_by_id(user_id, db)
     if not user_with_password:
       raise create_error_response(
@@ -110,10 +110,8 @@ async def update_user_password(
         code=ErrorCode.INVALID_INPUT,
       )
 
-    # Hash through the policy function (BCRYPT_ROUNDS), not a bare gensalt():
-    # registration and reset both hash at the policy cost, and a bare
-    # bcrypt.gensalt() defaults to cost 12, silently downgrading every account
-    # that changes its password below the configured work factor.
+    # The policy hash (BCRYPT_ROUNDS): a bare bcrypt.gensalt() defaults to
+    # cost 12, silently downgrading the account below the work factor.
     new_password_hash = await PasswordSecurity.hash_password_async(request.new_password)
 
     user_in_session = User.get_by_id(user_id, db)
@@ -126,10 +124,8 @@ async def update_user_password(
 
     user_in_session.password_hash = new_password_hash
 
-    # Bump session_version so every JWT minted before this change stops
-    # authenticating. invalidate_sessions() commits the new hash alongside the
-    # bump, so the two cannot diverge: a failure rolls both back rather than
-    # leaving the password changed while prior sessions stay live.
+    # invalidate_sessions() commits the new hash with the session_version
+    # bump, so a failure rolls back both rather than leaving old sessions live.
     user_in_session.invalidate_sessions(db)
 
     metrics_instance = get_endpoint_metrics()

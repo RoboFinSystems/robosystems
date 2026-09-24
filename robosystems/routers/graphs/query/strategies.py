@@ -1,8 +1,5 @@
-"""Query execution strategies.
-
-Selects an execution strategy from client capabilities, current system load,
-and the shape of the query itself.
-"""
+"""Query execution strategy selection from client capabilities, system load,
+and query shape."""
 
 import re
 from enum import Enum
@@ -23,7 +20,6 @@ from robosystems.middleware.robustness import TimeoutCoordinator
 class ExecutionStrategy(Enum):
   """Query execution strategies including base and query-specific strategies."""
 
-  # Base strategies
   JSON_IMMEDIATE = "json_immediate"
   JSON_COMPLETE = "json_complete"
   NDJSON_STREAMING = "ndjson_streaming"
@@ -33,7 +29,6 @@ class ExecutionStrategy(Enum):
   QUEUE_SIMPLE = "queue_simple"
   CACHED = "cached"
 
-  # Additional query-specific strategies
   SSE_QUEUE_STREAM = "sse_queue_stream"  # Queue first, then stream via SSE
   TRADITIONAL_QUEUE = "traditional_queue"  # Return 202 with polling URLs
   SYNC_TESTING = "sync_testing"  # Synchronous for testing tools
@@ -63,30 +58,23 @@ class QueryAnalyzer(BaseAnalyzer):
     if limit_value:
       return limit_value
 
-    # Parameterized LIMIT (e.g., LIMIT $limit) - assume medium size
     if "LIMIT" in query_upper and limit_value is None:
       return cls.MEDIUM_RESULT
 
-    # Single aggregation without GROUP BY
     if "COUNT(" in query_upper and "GROUP BY" not in query_upper:
       return 1
 
-    # Simple queries without MATCH
     if "MATCH" not in query_upper:
       return 10
 
-    # Queries with WHERE clause (filtered)
     if "WHERE" in query_upper:
-      # Very specific filters
       if query_upper.count("AND") >= 2:
         return 50
       return 100
 
-    # Path queries can be very large
     if "PATH" in query_upper:
       return cls.LARGE_RESULT * 10
 
-    # Unfiltered MATCH - assume large
     return cls.LARGE_RESULT
 
 
@@ -96,18 +84,14 @@ class ClientDetector(BaseClientDetector):
   @classmethod
   def detect_client_type(cls, headers: dict[str, str]) -> dict[str, Any]:
     """Detect client type and capabilities from request headers."""
-    # Get base client capabilities
     base_info = cls.detect_client_capabilities(headers)
 
-    # Extract additional query-specific information
     prefer_header = headers.get("prefer", "")
 
-    # Parse Prefer header
     prefers_wait = "wait" in prefer_header
     prefers_stream = "stream" in prefer_header
     prefers_async = "respond-async" in prefer_header
 
-    # Extract wait time from Prefer header if present
     wait_time = None
     if "wait=" in prefer_header:
       wait_match = re.search(r"wait=(\d+)", prefer_header)
@@ -145,10 +129,7 @@ class StrategySelector(BaseStrategySelector):
     mode_override: ResponseMode | None = None,
     is_write_operation: bool = False,
   ) -> tuple[ExecutionStrategy, dict[str, Any]]:
-    """Select the execution strategy.
-
-    Returns the strategy paired with the metadata explaining the choice.
-    """
+    """Returns the strategy paired with the metadata explaining the choice."""
     metadata = {
       "query_analysis": query_analysis,
       "client_info": client_info,
@@ -157,45 +138,35 @@ class StrategySelector(BaseStrategySelector):
       "is_write": is_write_operation,
     }
 
-    # Handle mode overrides
     if mode_override == ResponseMode.SYNC:
-      # Force synchronous response
       return ExecutionStrategy.SYNC_TESTING, metadata
     elif mode_override == ResponseMode.ASYNC:
-      # Force queued response
       return ExecutionStrategy.TRADITIONAL_QUEUE, metadata
     elif mode_override == ResponseMode.STREAM:
-      # Force streaming - choose based on capabilities
       if client_info["capabilities"]["sse"]:
         return ExecutionStrategy.SSE_STREAMING, metadata
       elif client_info["capabilities"]["ndjson"]:
         return ExecutionStrategy.NDJSON_STREAMING, metadata
       else:
-        # Client doesn't support streaming but requested it
         logger.warning("Client requested streaming but doesn't support SSE or NDJSON")
         return ExecutionStrategy.NDJSON_STREAMING, metadata
 
-    # Auto mode: let the analysis and system state decide.
-
-    # Testing tools get special treatment
     if client_info["is_interactive"]:
-      # Interactive tools (Postman, Swagger) need synchronous responses
-      # But respect size limits to avoid timeouts
+      # Interactive tools (Postman, Swagger) always get a synchronous response;
+      # a large estimate is only logged.
       if query_analysis["estimated_rows"] <= QueryAnalyzer.MEDIUM_RESULT:
         return ExecutionStrategy.SYNC_TESTING, metadata
       else:
-        # Large result for testing tool - warn but try
         logger.info(
           f"Testing tool detected with large query (est. {query_analysis['estimated_rows']} rows)"
         )
         return ExecutionStrategy.SYNC_TESTING, metadata
 
-    # Check system load
     needs_queue = system_state["queue_size"] > 0 or system_state[
       "running_queries"
     ] >= system_state.get("max_concurrent", 5)
 
-    # Write operations can't stream
+    # Writes can't stream.
     if is_write_operation:
       if needs_queue:
         return ExecutionStrategy.TRADITIONAL_QUEUE, metadata
@@ -204,48 +175,38 @@ class StrategySelector(BaseStrategySelector):
     # System needs queue - decide based on client capabilities
     if needs_queue:
       if client_info["capabilities"]["sse"] and not client_info["preferences"]["async"]:
-        # Best option: Queue with SSE then stream results
         return ExecutionStrategy.SSE_QUEUE_STREAM, metadata
       else:
-        # Fallback to traditional queuing
         return ExecutionStrategy.TRADITIONAL_QUEUE, metadata
 
-    # System has capacity - decide based on result size
     estimated_rows = query_analysis["estimated_rows"]
 
     if estimated_rows <= QueryAnalyzer.SMALL_RESULT:
-      # Small results - return immediately as JSON
       return ExecutionStrategy.JSON_IMMEDIATE, metadata
 
     elif estimated_rows <= QueryAnalyzer.MEDIUM_RESULT:
-      # Medium results - choose based on client preference
       if client_info["preferences"]["stream"]:
         if client_info["capabilities"]["sse"]:
           return ExecutionStrategy.SSE_STREAMING, metadata
         elif client_info["capabilities"]["ndjson"]:
           return ExecutionStrategy.NDJSON_STREAMING, metadata
-      # Default: wait for complete result
       return ExecutionStrategy.JSON_COMPLETE, metadata
 
     else:  # Large result
-      # Large results should stream if possible
       if client_info["capabilities"]["sse"]:
         return ExecutionStrategy.SSE_STREAMING, metadata
       elif client_info["capabilities"]["ndjson"]:
         return ExecutionStrategy.NDJSON_STREAMING, metadata
       else:
-        # Client doesn't support streaming — return as JSON regardless of size
         return ExecutionStrategy.JSON_COMPLETE, metadata
 
 
 class QueryTimeoutCoordinator(TimeoutCoordinator):
   """Coordinate timeout hierarchy for query operations."""
 
-  # Default timeout buffers (in seconds)
   QUEUE_BUFFER = 30  # Queue timeout should be 30s less than endpoint
   EXECUTION_BUFFER = 30  # Execution timeout should be 30s less than queue
 
-  # Maximum timeouts by context
   MAX_TESTING_TIMEOUT = 30  # Max timeout for testing tools
   MAX_STREAMING_TIMEOUT = 300  # Max timeout for streaming
   MAX_QUEUE_TIMEOUT = 600  # Max timeout for queued queries
@@ -254,9 +215,8 @@ class QueryTimeoutCoordinator(TimeoutCoordinator):
   def calculate_timeouts(
     cls, requested_timeout: int, strategy: ExecutionStrategy, is_testing: bool = False
   ) -> dict[str, int]:
-    """Derive the per-layer timeouts for one query execution, so the outer
-    budget always exceeds the inner ones."""
-    # Apply context-based limits
+    """Per-layer timeouts for one query: each inner layer gets a 30s-smaller
+    budget than the one above it, floored at 30s."""
     if is_testing:
       endpoint_timeout = min(requested_timeout, cls.MAX_TESTING_TIMEOUT)
     elif strategy in [
@@ -267,7 +227,6 @@ class QueryTimeoutCoordinator(TimeoutCoordinator):
     else:
       endpoint_timeout = min(requested_timeout, cls.MAX_QUEUE_TIMEOUT)
 
-    # Calculate cascade with buffers
     queue_timeout = max(endpoint_timeout - cls.QUEUE_BUFFER, 30)
     execution_timeout = max(queue_timeout - cls.EXECUTION_BUFFER, 30)
 

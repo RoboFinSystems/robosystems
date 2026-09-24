@@ -1,15 +1,7 @@
-"""Document management MCP tools — create, read, update, list documents.
+"""Document CRUD tools (PostgreSQL rows plus the OpenSearch index).
 
-Free-form notes live here too, as documents with ``folder="memory"``.
-
-Five tools:
-1. create-document: Create a markdown document (PG + OpenSearch)
-2. update-document: Edit an existing document's content or metadata
-3. delete-document: Remove a document from PG + OpenSearch by ID
-4. get-document: Retrieve full document content by ID
-5. list-documents: Browse documents in the graph (filter by folder/source_type)
-
-Discovery (search) is handled by the existing search-documents tool.
+Free-form notes are documents with ``folder="memory"``; search is
+search-documents.
 """
 
 from typing import Any
@@ -24,7 +16,6 @@ from ._errors import database_failure
 
 
 def _get_platform_session():
-  """Get a platform database session."""
   from robosystems.database import SessionFactory
 
   return SessionFactory()
@@ -78,14 +69,7 @@ def _resolve_graph_owner(graph_id: str) -> str | None:
 
 
 def _resolve_acting_user(client: Any, graph_id: str) -> str | None:
-  """Who a write should be stamped with.
-
-  The MCP handler attaches the authenticated user's id to the client
-  (``client.user_id``); that is the actor. Only when no user is threaded
-  through — an in-process tool driven by a background operator — does this
-  fall back to the graph's admin, so the write is at least attributed to an
-  accountable owner rather than to whichever member happened to join first.
-  """
+  """``client.user_id``, else (a background operator) the graph's owner."""
   user_id = getattr(client, "user_id", None)
   if user_id:
     return str(user_id)

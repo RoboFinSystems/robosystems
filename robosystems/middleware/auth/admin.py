@@ -43,8 +43,7 @@ class AdminAuthMiddleware:
   def verify_admin_key(self, api_key: str) -> dict[str, Any] | None:
     """Return key metadata when `api_key` matches the admin key, else None.
 
-    The comparison is constant-time so a wrong key leaks no timing signal
-    about how much of it was right.
+    Constant-time comparison.
     """
     admin_key = self._get_admin_key()
 
@@ -55,7 +54,7 @@ class AdminAuthMiddleware:
       return {
         "key_id": "admin",
         "name": "Admin API Key",
-        "permissions": ["*"],  # Admin has all permissions
+        "permissions": ["*"],
         "created_by": "system",
       }
 
@@ -123,7 +122,7 @@ def require_admin(permissions: list[str] | None = None):
         admin_permissions = request.state.admin.get("permissions", [])
 
         if "*" in admin_permissions:
-          pass  # Has all permissions
+          pass
         else:
           has_permission = any(perm in admin_permissions for perm in permissions)
           if not has_permission:

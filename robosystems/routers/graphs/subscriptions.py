@@ -57,9 +57,8 @@ def _resolve_subscription_target(
 ) -> tuple[str, str]:
   """Resolve whose subscription is being managed, and authorize it.
 
-  Members manage their own subscriptions; org owners and admins manage any
-  member's — the org is paying, so it can stop paying (decision 4). Returns
-  (target_user_id, org_id).
+  Members manage their own; org owners and admins manage any member's (the org
+  is paying). Returns (target_user_id, org_id).
   """
   from ...models.core import OrgUser
 
@@ -152,7 +151,7 @@ async def get_subscription(
       )
 
     if is_shared_repository(graph_id):
-      # Subscriptions are on the parent repo, not subgraphs
+      # Subscriptions live on the parent repo, not subgraphs.
       parent_repo_id = resolve_shared_repository_parent(graph_id)
       subscription = BillingSubscription.get_by_resource_and_user(
         resource_type="repository",
@@ -165,11 +164,8 @@ async def get_subscription(
         resource_type="graph", resource_id=graph_id, session=db
       )
 
-      # Org membership alone grants no graph access — a plain member needs an
-      # explicit grant, and owners/admins are implicit admins on every org
-      # graph. Resolve the graph role, the same rule the graph surface and
-      # the org graph listing apply, so a member cannot read the tier and
-      # billing period of a graph they cannot otherwise reach.
+      # Org membership alone grants no graph access, so a member can't read the
+      # tier and billing period of a graph they can't otherwise reach.
       if subscription and not GraphUser.user_has_access(current_user.id, graph_id, db):
         raise HTTPException(
           status_code=403,
@@ -232,22 +228,17 @@ async def create_repository_subscription(
         ),
       )
 
-    # Repository access is per-user while billing is org-level, so the
-    # subscriber — not the caller — is what determines who gets access. Owners
-    # and admins may subscribe another member of their org; everyone else
-    # resolves to themselves. Same rule (and same helper) as plan changes and
-    # cancellation, which also accept a target user.
+    # Access is per-user while billing is org-level, so the subscriber (not
+    # the caller) gets access. Same rule as plan changes and cancellation.
     target_user_id, org_id = _resolve_subscription_target(
       current_user, request.user_id, db
     )
     subscribing_for_other = target_user_id != current_user.id
 
     parent_repo_id = resolve_shared_repository_parent(graph_id)
-    # Only the subscriber's own subscription conflicts — repository access is
-    # per user, so a colleague's subscription is an upsell, not a duplicate.
-    # And only a subscription still in force conflicts: canceled and failed
-    # rows are kept as history, so the check must filter on status or a past
-    # failure would block every retry.
+    # Only the subscriber's own in-force subscription conflicts: a colleague's
+    # is an upsell, and canceled/failed rows are history (else a past failure
+    # would block every retry).
     existing = BillingSubscription.get_by_resource_and_user(
       resource_type="repository",
       resource_id=parent_repo_id,
@@ -273,8 +264,7 @@ async def create_repository_subscription(
         detail=f"Invalid plan '{request.plan_name}' for repository '{graph_id}'",
       )
 
-    # org_id came from _resolve_subscription_target above, which already
-    # verified the caller's org membership and that any target user shares it.
+    # _resolve_subscription_target already verified org membership.
     customer = BillingCustomer.get_or_create(org_id, db)
 
     can_provision, error_message = customer.can_provision_resources(
@@ -288,9 +278,8 @@ async def create_repository_subscription(
         or "Valid payment method required to subscribe to repositories.",
       )
 
-    # Create subscription in "provisioning" state. plan_name is the canonical
-    # plan key from config, not the request's raw string — everything keyed on
-    # the plan (rate limits, credits, price lookups) expects the canonical form.
+    # The canonical plan key, not the request's raw string: rate limits,
+    # credits and price lookups all key on it.
     plan_name = plan_config["name"]
     try:
       subscription = BillingSubscription.create_subscription(
@@ -304,10 +293,8 @@ async def create_repository_subscription(
         user_id=target_user_id,
       )
     except IntegrityError:
-      # The advisory pre-check above raced a concurrent subscribe for the same
-      # subscriber; the partial unique index on live (resource, user) rows is
-      # the guarantee, and it fires here — before any provider call, so there
-      # is no stray provider subscription to compensate for.
+      # Lost a race with a concurrent subscribe; the partial unique index is
+      # the guarantee, and it fires before any provider call.
       db.rollback()
       raise HTTPException(
         status_code=409,
@@ -325,9 +312,8 @@ async def create_repository_subscription(
       subscription_id=subscription.id,
       description=f"Created {plan_name} subscription for {graph_id} repository",
       actor_type="user",
-      # The actor is who performed the action; the subscriber is who receives
-      # access. They differ when an owner or admin provisions for a member, and
-      # collapsing them would lose the record of who authorized the charge.
+      # Actor (who authorized the charge) differs from subscriber when an
+      # owner/admin provisions for a member.
       actor_user_id=current_user.id,
       event_data={
         "resource_type": "repository",
@@ -338,7 +324,6 @@ async def create_repository_subscription(
       },
     )
 
-    # Create Stripe subscription if billing is enabled and customer has payment method
     if (
       env.BILLING_ENABLED
       and customer.has_payment_method
@@ -348,9 +333,7 @@ async def create_repository_subscription(
         from ...operations.providers.payment_provider import get_payment_provider
 
         provider = get_payment_provider("stripe")
-        # Stripe products/prices are keyed on the parent repository and the
-        # canonical plan name; a subgraph URL or raw plan string here misses
-        # the product and errors out of the billing path.
+        # Keyed on the parent repository and canonical plan name.
         stripe_price_id = provider.get_or_create_price(
           plan_name=plan_name,
           resource_type="repository",
@@ -395,9 +378,7 @@ async def create_repository_subscription(
           exc_info=True,
         )
         subscription.status = SubscriptionStatus.FAILED.value
-        # Terminal rows carry ends_at — it is the retention timestamp the
-        # lifecycle machinery keys on, and a terminal row without it is
-        # invisible to that machinery.
+        # Terminal rows need ends_at: the lifecycle machinery keys on it.
         subscription.ends_at = datetime.now(UTC)
         db.commit()
         raise HTTPException(
@@ -405,27 +386,21 @@ async def create_repository_subscription(
           detail="Failed to create payment subscription. Please verify your payment method.",
         )
 
-    # Store IDs before commit detaches the objects. Provisioning grants the
-    # UserRepository row and credit pool, so it must key on the subscriber.
+    # Capture ids before commit detaches the objects. Provisioning keys on the
+    # subscriber.
     subscription_id = subscription.id
     user_id = target_user_id
 
-    # Commit so run_user_repository_provisioning can see the subscription
     db.commit()
 
-    # Delegate to run_user_repository_provisioning for:
-    # - Grant repository access
-    # - Allocate credits
-    # - Activate subscription
-    # - Generate invoice
-    # - Report to Dagster
+    # Provisioning grants access, allocates credits, activates the
+    # subscription, invoices, and reports to Dagster.
     from robosystems.operations.graph.provisioning_service import (
       run_user_repository_provisioning,
     )
 
     try:
-      # Provisioning is keyed on the parent repository (RepositoryType,
-      # UserRepository rows); a subgraph URL here would fail the enum lookup.
+      # Keyed on the parent repository; a subgraph id would fail the enum lookup.
       result = await run_user_repository_provisioning(
         operation_id=None,  # No SSE tracking for sync API calls
         subscription_id=subscription_id,
@@ -444,13 +419,10 @@ async def create_repository_subscription(
       )
     except Exception as e:
       logger.error(f"Repository provisioning failed: {e}", exc_info=True)
-      # Subscription was created but provisioning failed
-      # The subscription will be in a bad state - mark it as failed
       failed_sub = db.query(BillingSubscription).filter_by(id=subscription_id).first()
       if failed_sub:
         failed_sub.status = SubscriptionStatus.FAILED.value
         failed_sub.ends_at = datetime.now(UTC)
-        # Cancel Stripe subscription so the customer isn't charged
         if failed_sub.stripe_subscription_id:
           try:
             from ...operations.providers.payment_provider import get_payment_provider
@@ -468,7 +440,6 @@ async def create_repository_subscription(
         detail="Repository provisioning failed.",
       )
 
-    # Re-fetch subscription to get updated state from provisioning
     updated_subscription = (
       db.query(BillingSubscription).filter_by(id=subscription_id).first()
     )
@@ -534,7 +505,6 @@ async def _change_repository_plan(
     current_user, request.user_id, db
   )
 
-  # Find existing subscription (subscriptions are on the parent repo)
   parent_repo_id = resolve_shared_repository_parent(graph_id)
   subscription = BillingSubscription.get_by_resource_and_user(
     resource_type="repository",
@@ -556,7 +526,6 @@ async def _change_repository_plan(
 
   new_plan_name = request.new_plan_name
 
-  # Validate the new plan exists
   plan_config = BillingConfig.get_repository_plan(parent_repo_id, new_plan_name)
   if not plan_config:
     raise HTTPException(
@@ -573,10 +542,8 @@ async def _change_repository_plan(
   old_plan = subscription.plan_name
   is_upgrade = new_price_cents > subscription.base_price_cents
 
-  # Fetch the access record, which is keyed on the parent repository, BEFORE
-  # any write. Looking it up after `update_plan` commits would leave the
-  # subscription mutated with credits and rate limits untouched whenever the
-  # record is missing.
+  # Fetch before any write: if missing after `update_plan` commits, the plan
+  # would change with credits and rate limits untouched.
   user_repo = UserRepository.get_by_user_and_repository(
     target_user_id, parent_repo_id, db
   )
@@ -591,15 +558,10 @@ async def _change_repository_plan(
       detail="Repository access record not found. Please contact support.",
     )
 
-  # Stripe first, DB second. The reverse order left an unrecoverable seam:
-  # update_plan commits, Stripe fails, and every retry dies on the
-  # "Already on this plan" check above — local state says the new plan while
-  # Stripe keeps billing the old price forever. This order converges instead:
-  # a Stripe failure changes nothing locally (clean 502, retry works), and a
-  # DB failure after Stripe succeeded leaves the retry path open, where
-  # re-applying the same price to the subscription is a no-op.
-  # Products/prices are keyed on the parent repository and the canonical
-  # plan name.
+  # Stripe first, DB second, so retries converge: a Stripe failure changes
+  # nothing locally, and a DB failure after Stripe leaves the retry open
+  # (re-applying the same price is a no-op). The reverse order stranded
+  # retries on "Already on this plan" while Stripe billed the old price.
   stripe_sub_id = subscription.stripe_subscription_id
   if stripe_sub_id:
     provider = get_payment_provider("stripe")
@@ -754,9 +716,8 @@ async def cancel_repository_subscription(
         ),
       )
 
-  # Provider first, then local state and access — a provider failure means the
-  # customer is still being billed, so nothing local may change.
-  # Cancellation does NOT prorate or refund.
+  # Provider first: on provider failure the customer is still billed, so
+  # nothing local may change. Cancellation does not prorate or refund.
   try:
     cancel_subscription_op(
       subscription,

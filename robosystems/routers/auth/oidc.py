@@ -1,20 +1,14 @@
 """OIDC login endpoints — the browser-redirect surface for enterprise SSO.
 
-Mounted only when ``SSO_OIDC_ENABLED`` (see ``routers/auth/__init__.py``);
-both endpoints are ``include_in_schema=False`` because they speak in
-redirects, not JSON — this is deliberately not SDK surface.
+Mounted only when ``SSO_OIDC_ENABLED``; excluded from the schema because they
+speak in redirects, not JSON. ``/oidc/login`` 302s to the IdP (and doubles as
+the IdP-initiated login URI, which sends ``iss``); ``/oidc/callback``
+validates the ID token, resolves the user (link-only) and hands the browser to
+the login home's ``?session_id=`` bridge, so no JWT is minted here.
 
-Flow: ``GET /oidc/login`` 302s to the IdP (also serving as the IdP-initiated
-login URI for the Okta app tile, which sends ``iss``); the IdP redirects back
-to ``GET /oidc/callback``, which validates the ID token, resolves the user
-(link-only), and hands the browser to the login home's existing
-``?session_id=`` bridge entry — the same ``sso-complete`` consumption path the
-cross-app bridge uses, so no JWT is minted here.
-
-Failures redirect to the login home with a ``reason`` code rather than
-returning JSON: a top-level browser navigation that dead-ends on an error
-body is unrecoverable UX. The distinction between failure kinds lives in the
-audit log, not the browser.
+Failures redirect to the login home with a ``reason`` code: a top-level
+navigation that dead-ends on a JSON error is unrecoverable. Failure detail
+lives in the audit log.
 """
 
 import json
@@ -53,9 +47,8 @@ from .utils import AVAILABLE_APPS, SSO_SESSION_EXPIRY_SECONDS, Config
 
 router = APIRouter()
 
-# Browser-binding cookie for the OIDC flow: mirrors the state's browser_state
-# secret so the callback can prove the completing browser is the one that
-# started the flow. Path-scoped to the callback so it is sent nowhere else.
+# Mirrors the state's browser_state secret so the callback can prove the
+# completing browser started the flow. Path-scoped to the callback.
 _BIND_COOKIE = "oidc_flow"
 _BIND_COOKIE_PATH = "/v1/auth/oidc/callback"
 
@@ -71,8 +64,7 @@ def _clear_bind_cookie(response: RedirectResponse) -> RedirectResponse:
 
 
 def _fail_redirect(reason: str) -> RedirectResponse:
-  # Always clears the binding cookie: reachable both before it is set (login
-  # errors) and after (callback errors); deleting an absent cookie is a no-op.
+  # Always clears the binding cookie; deleting an absent one is a no-op.
   return _clear_bind_cookie(
     RedirectResponse(f"{_login_home_url()}/login?reason={reason}", status_code=302)
   )
@@ -100,10 +92,8 @@ async def oidc_login(
     logger.error("OIDC login requested but no connection is configured")
     return _fail_redirect("oidc_failed")
 
-  # Third-party-initiated login (the Okta app tile) sends `iss`. Validate it
-  # against the configured issuer and refuse a mismatch rather than following
-  # it — an honored attacker-supplied `iss` would start an auth-code flow
-  # against a hostile authorization server.
+  # Third-party-initiated login sends `iss`: refuse a mismatch rather than
+  # start an auth-code flow against an attacker-supplied server.
   if iss is not None and iss.rstrip("/") != connection.issuer:
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTH_FAILURE,
@@ -129,9 +119,8 @@ async def oidc_login(
     return _fail_redirect("oidc_failed")
 
   response = RedirectResponse(authorize_url, status_code=302)
-  # SameSite=Lax so the cookie survives the IdP's top-level GET redirect back
-  # to the callback while still blocking cross-site POST use. Secure outside
-  # local dev (localhost is http).
+  # Lax survives the IdP's top-level GET redirect back while blocking
+  # cross-site POST use. Secure outside local dev (http).
   response.set_cookie(
     _BIND_COOKIE,
     browser_state,
@@ -194,10 +183,8 @@ async def oidc_callback(
   if state_data is None:
     return _denied("oidc_failed", "state_invalid_or_replayed", "high")
 
-  # Browser binding: the completing browser must present the cookie set when
-  # this flow began. Defeats login-CSRF (an attacker delivering their own
-  # captured callback URL to a victim) — the victim's browser has no matching
-  # cookie. compare_digest to avoid leaking the match via timing.
+  # Browser binding defeats login-CSRF (an attacker's captured callback URL
+  # delivered to a victim, whose browser has no matching cookie).
   bind_cookie = request.cookies.get(_BIND_COOKIE) or ""
   if not secrets.compare_digest(bind_cookie, str(state_data.get("browser_state", ""))):
     return _denied("oidc_failed", "browser_binding_mismatch", "high")
@@ -221,9 +208,8 @@ async def oidc_callback(
     logger.error(f"OIDC callback dependency failure: {exc}")
     return _fail_redirect("oidc_failed")
 
-  # The claim compared against the SCIM-stamped external_id at first-login
-  # linking (default `sub`; Entra deployments configure `oid`). Absent claim
-  # → None → linking is refused rather than comparing against "None".
+  # Compared against the SCIM-stamped external_id at first-login linking
+  # (default `sub`, `oid` on Entra). An absent claim refuses linking.
   binding_raw = claims.get(env.SSO_OIDC_BINDING_CLAIM)
   try:
     resolution = resolve_oidc_user(
@@ -241,11 +227,9 @@ async def oidc_callback(
 
   user = resolution.user
 
-  # Hand off through the existing cross-app bridge consumption path: the
-  # login home reads ?session_id= and POSTs /sso-complete, which mints the
-  # platform JWT. sso-complete hard-requires a token_id in the payload (it
-  # deletes the originating single-use SSO token) — an OIDC login has no such
-  # token, so a synthetic one is written and the deletes no-op harmlessly.
+  # Hand off through the cross-app bridge: the login home POSTs /sso-complete,
+  # which mints the JWT. sso-complete requires a token_id (it deletes the
+  # originating SSO token); OIDC has none, so a synthetic one no-ops.
   session_id = str(uuid.uuid4())
   payload = {
     "user_id": user.id,

@@ -1,6 +1,4 @@
-"""
-Schema Tool - Retrieves the complete database schema.
-"""
+"""The get-graph-schema tool, cached per instance."""
 
 import time
 from threading import RLock
@@ -13,24 +11,17 @@ from .base_tool import BaseTool
 
 
 class SchemaTool(BaseTool):
-  """
-  Tool for retrieving database schema information.
-  """
-
   def __init__(self, client):
     super().__init__(client)
-    # Schema caching for performance
     self._schema_cache = None
     self._schema_cache_time = None
     self._schema_cache_ttl = CacheDefaults.SHORT
     self._cache_lock = RLock()
 
-    # Cache statistics
     self._cache_hits = 0
     self._cache_misses = 0
 
   def get_tool_definition(self) -> dict[str, Any]:
-    """Get the tool definition for schema retrieval."""
     return {
       "name": "get-graph-schema",
       "description": """Get the complete database schema showing all node types, properties, and relationships.
@@ -60,10 +51,8 @@ class SchemaTool(BaseTool):
     }
 
   async def execute(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
-    """Execute the schema tool with caching."""
     self._log_tool_execution("get-graph-schema", arguments)
 
-    # Check cache first
     current_time = time.time()
     with self._cache_lock:
       if (
@@ -77,7 +66,6 @@ class SchemaTool(BaseTool):
         )
         return self._schema_cache
 
-    # Cache miss - fetch fresh schema
     with self._cache_lock:
       self._cache_misses += 1
       logger.debug(
@@ -85,10 +73,8 @@ class SchemaTool(BaseTool):
       )
 
     try:
-      # Fetch schema from client
       schema = await self.client.get_schema()
 
-      # Cache the result
       with self._cache_lock:
         self._schema_cache = schema
         self._schema_cache_time = current_time

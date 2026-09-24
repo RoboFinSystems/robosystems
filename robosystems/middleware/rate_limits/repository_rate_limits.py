@@ -26,59 +26,44 @@ from robosystems.config.shared_repositories import (
 
 
 class AllowedSharedEndpoints(str, Enum):
-  """Endpoints allowed for shared repositories."""
-
-  QUERY = "query"  # Direct Cypher queries
-  MCP = "mcp"  # MCP tool access
-  AGENT = "agent"  # AI agent operations
-  SEARCH = "search"  # Full-text search (OpenSearch)
-  SCHEMA = "schema"  # Schema inspection
-  STATUS = "status"  # Status checks
+  QUERY = "query"
+  MCP = "mcp"
+  AGENT = "agent"
+  SEARCH = "search"
+  SCHEMA = "schema"
+  STATUS = "status"
 
 
-# Endpoints that are BLOCKED for shared repositories
 BLOCKED_SHARED_ENDPOINTS = [
-  "backup",  # No backups of shared data
-  "restore",  # No restore operations
-  "delete",  # No deletion
-  "admin",  # No admin operations
-  "sync",  # No sync operations
-  "import",  # No imports to shared repos
-  "connections",  # No connection management
-  "settings",  # No settings changes
+  "backup",
+  "restore",
+  "delete",
+  "admin",
+  "sync",
+  "import",
+  "connections",
+  "settings",
 ]
 
 
 class SharedRepositoryRateLimits:
-  """Rate limits specific to shared repositories by subscription tier.
-
-  Uses the shared repository registry as the accessor for rate limits from manifests.
-  NO FREE TIER - all access requires a paid subscription.
-  """
+  """Per-plan limits from the repository manifests. There is no free tier."""
 
   @classmethod
   def get_limits(cls, repository: str, plan: str) -> dict:
-    """Get rate limits for a repository and plan."""
     return _get_rate_limits(repository, plan) or {}
 
   @classmethod
   def is_endpoint_allowed(cls, repository: str, endpoint: str) -> bool:
-    """Check if an endpoint is allowed for a shared repository.
-
-    The repository must be forwarded: dropping it skipped every per-repo
-    allowed/blocked list and always ran the cross-manifest fallback —
-    invisible with one registered manifest, wrong the moment there are two.
-    """
+    """Check an endpoint against the repository's own allowed/blocked lists."""
     return _is_endpoint_allowed(endpoint, repo_id=repository)
 
 
 class DualLayerRateLimiter:
   """Enforce shared-repository subscription-plan *volume* limits.
 
-  Per-request burst protection is applied upstream by the per-tier FastAPI
-  dependency (``subscription_aware_rate_limit_dependency``); this class only
-  layers the manifest's per-plan volume caps on top for shared repos. (The
-  name is historical — there is now a single layer here.)
+  Burst protection is upstream (``subscription_aware_rate_limit_dependency``);
+  despite the name, this is a single layer.
   """
 
   def __init__(self, redis_client: redis.Redis):
@@ -92,18 +77,13 @@ class DualLayerRateLimiter:
     endpoint: str,
     repository_plan: str | None = None,
   ) -> dict:
-    """Check shared-repository per-plan volume limits."""
     from robosystems.config import env
 
-    # Only shared repositories (including subgraphs like sec_historical) are
-    # gated here; other graphs rely on the upstream burst dependency alone.
     if not is_shared_repository_or_subgraph(graph_id):
       return {"allowed": True, "repo": None}
 
-    # Resolve subgraph to parent for policy + subscription lookups
     parent_repo_id = resolve_shared_repository_parent(graph_id)
 
-    # The endpoint must be allowed for shared repositories
     if not SharedRepositoryRateLimits.is_endpoint_allowed(parent_repo_id, endpoint):
       return {
         "allowed": False,
@@ -112,7 +92,6 @@ class DualLayerRateLimiter:
         "allowed_endpoints": list(AllowedSharedEndpoints),
       }
 
-    # Access requires a valid (paid) subscription plan
     if not repository_plan:
       return {
         "allowed": False,
@@ -137,13 +116,11 @@ class DualLayerRateLimiter:
   async def _check_repository_limit(
     self, user_id: str, repository: str, operation: str, plan: str
   ) -> dict:
-    """Check repository-specific volume limits."""
     limits = SharedRepositoryRateLimits.get_limits(repository, plan)
 
     if not limits:
       return {"allowed": False, "message": "No access to repository"}
 
-    # Map operation to limit keys
     operation_keys = {
       "query": "queries",
       "mcp": "mcp_queries",
@@ -153,11 +130,9 @@ class DualLayerRateLimiter:
 
     base_key = operation_keys.get(operation, "queries")
 
-    # Check different time windows
     checks = []
     now = datetime.now(UTC)
 
-    # Check minute limit
     minute_limit_key = f"{base_key}_per_minute"
     if minute_limit_key in limits:
       limit = limits[minute_limit_key]
@@ -179,7 +154,6 @@ class DualLayerRateLimiter:
           }
         checks.append({"window": "minute", "limit": limit, "current": count})
 
-    # Check hour limit
     hour_limit_key = f"{base_key}_per_hour"
     if hour_limit_key in limits:
       limit = limits[hour_limit_key]
@@ -199,7 +173,6 @@ class DualLayerRateLimiter:
           }
         checks.append({"window": "hour", "limit": limit, "current": count})
 
-    # Check day limit
     day_limit_key = f"{base_key}_per_day"
     if day_limit_key in limits:
       limit = limits[day_limit_key]
@@ -222,7 +195,6 @@ class DualLayerRateLimiter:
     return {"allowed": True, "checks": checks}
 
   async def get_usage_stats(self, user_id: str, repository: str, plan: str) -> dict:
-    """Get current usage statistics for a user."""
     limits = SharedRepositoryRateLimits.get_limits(repository, plan)
     if not limits:
       return {}
@@ -230,13 +202,10 @@ class DualLayerRateLimiter:
     now = datetime.now(UTC)
     stats = {}
 
-    # Get current usage for each operation type
     for operation in ["query", "mcp", "agent", "search"]:
       operation_stats = {}
 
-      # Check each time window. The token must match exactly what
-      # _check_repository_limit writes ("min"/"hour"/"day") — using
-      # window[:3] produced "hou" for the hour bucket and silently read 0.
+      # Tokens must match the keys _check_repository_limit writes.
       for window, token, fmt in [
         ("minute", "min", "%Y%m%d%H%M"),
         ("hour", "hour", "%Y%m%d%H"),

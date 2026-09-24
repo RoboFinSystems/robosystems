@@ -1,14 +1,7 @@
 """Strawberry types for the Taxonomy Block GraphQL surface.
 
-Leaf types are hand-written — `TaxonomyBlockElement.origin` is a
-`Literal["library", "tenant"]` which Strawberry's pydantic decorator
-can't derive, so the leaves use explicit `@strawberry.type` + a
-`from_pydantic` classmethod. Top-level :class:`TaxonomyBlock` is also
-hand-written because `verification_results` is an opaque JSON list.
-`from_pydantic` on the envelope constructs the full tree explicitly.
-
-Verification results carry an opaque JSON shape; clients consume the
-raw payload as the rule-evaluation surface stabilizes.
+Hand-written: `TaxonomyBlockElement.origin` is a `Literal` the pydantic
+decorator can't derive, and `verification_results` is opaque JSON.
 """
 
 from __future__ import annotations
@@ -176,8 +169,6 @@ class TaxonomyBlock:
   associations: list[TaxonomyBlockAssociation]
   rules: list[TaxonomyBlockRule]
 
-  # `verification_results` is an opaque JSON list; clients receive the
-  # raw payload until the rule-evaluation surface stabilizes.
   verification_results: list[VerificationResultPayload]
 
   element_count: int

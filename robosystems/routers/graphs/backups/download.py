@@ -1,6 +1,4 @@
-"""
-Backup download URL generation endpoint.
-"""
+"""Backup download URL generation endpoint."""
 
 from datetime import UTC, datetime
 
@@ -34,7 +32,6 @@ from robosystems.models.core import Graph, User, UserRepository
 
 from .utils import get_backup_manager, verify_admin_access
 
-# Create router
 router = APIRouter()
 
 
@@ -77,8 +74,7 @@ async def get_backup_download_url(
   expires_in: int = Query(
     3600, ge=300, le=86400, description="URL expiration time in seconds"
   ),
-  # Export grace period: see list_backups. Both the dependency and the
-  # in-handler admin check below allow a torn-down graph for org OWNER/ADMIN.
+  # Export grace period: see list_backups.
   current_user: User = Depends(get_current_user_with_deprovisioned_graph),
   session: Session = Depends(get_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
@@ -109,19 +105,14 @@ async def get_backup_download_url(
   minutes to 24 hours.
   """
   try:
-    # Access validated by the graph_access_dependency (deprovisioned-tolerant)
     is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     has_tier_limit = False
-    # The single id the monthly counter is keyed on. Both the check and the
-    # increment must use it: the shared path resolves a subgraph to its parent
-    # for the check (`sec_historical` → `sec`), so the increment has to resolve
-    # the same way or the two halves count different things.
+    # The one id the monthly counter keys on; check and increment must both
+    # resolve a subgraph to its parent (`sec_historical` → `sec`).
     quota_resource_id = graph_id
 
-    # Check download rate limits based on graph type
     if is_shared:
-      # Shared repository: check subscription and plan-based limits
-      # Resolve subgraph to parent for subscription lookup
+      # Subscriptions live on the parent repository.
       from robosystems.config.shared_repositories import (
         resolve_shared_repository_parent,
       )
@@ -142,7 +133,6 @@ async def get_backup_download_url(
         parent_repo_id, plan
       )
 
-      # Limit of 0 means downloads are not available on this plan
       if monthly_limit == 0:
         raise HTTPException(
           status_code=status.HTTP_403_FORBIDDEN,
@@ -166,21 +156,13 @@ async def get_backup_download_url(
           },
         )
     else:
-      # A dedicated graph's backup is the whole database, unencrypted, behind
-      # a URL that lives up to a day. Creating and restoring one already
-      # require admin on the graph; taking one out does too. Shared
-      # repositories are gated by subscription plan above instead — there is
-      # no per-graph role there.
+      # The whole database, unencrypted, behind a URL living up to a day:
+      # admin only, like create and restore. Shared repos gate on plan above.
       verify_admin_access(current_user, graph_id, session, allow_deprovisioned=True)
 
-      # Dedicated graph: check tier-based download limits.
-      # Deprovisioned graphs are included deliberately. The final backup is
-      # taken precisely so a departing customer can retrieve their data during
-      # the published export grace period, and the default lookup skips
-      # deprovisioned rows — which 404'd the one download that window exists
-      # for. Access is unchanged: verify_admin_access above still gates this
-      # on graph admin, which after teardown only the org's owners and admins
-      # still hold.
+      # Deprovisioned graphs included on purpose: the final backup exists so a
+      # departing customer can retrieve their data in the export grace period.
+      # verify_admin_access above still gates it.
       graph_record = Graph.get_by_id(graph_id, session, include_deprovisioned=True)
       if not graph_record:
         logger.warning(
@@ -218,7 +200,6 @@ async def get_backup_download_url(
             },
           )
 
-    # Get backup manager and generate download URL
     backup_manager = get_backup_manager()
 
     download_url = await backup_manager.get_backup_download_url(
@@ -231,14 +212,12 @@ async def get_backup_download_url(
         detail="Backup not found or cannot be downloaded",
       )
 
-    # Increment download count for rate limiting
     if is_shared or has_tier_limit:
       await DownloadRateLimiter.increment_download_count(
         user_id=str(current_user.id),
         resource_id=quota_resource_id,
       )
 
-    # Record business event
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graph/backup/download",

@@ -1,8 +1,4 @@
-"""Streaming response handlers for query execution.
-
-NDJSON and Server-Sent Events implementations for large result sets, built on
-the shared streaming utilities so the query and MCP endpoints behave alike.
-"""
+"""NDJSON and SSE streaming handlers for query execution."""
 
 import asyncio
 import hashlib
@@ -25,7 +21,6 @@ from robosystems.models.api.graphs.query import (
 from robosystems.models.core import User
 from robosystems.security.error_handling import safe_error_message
 
-# Initialize circuit breaker
 circuit_breaker = CircuitBreakerManager()
 
 
@@ -35,13 +30,11 @@ async def execute_query_with_timeout(
   """Execute a query, raising `TimeoutError` once `timeout` seconds elapse."""
 
   async def execute():
-    # Check if repository has async execute_query method
     if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
       repository.execute_query
     ):
       return await repository.execute_query(query, parameters)
     else:
-      # Fallback for sync repositories
       loop = asyncio.get_event_loop()
       return await loop.run_in_executor(
         None, repository.execute_query, query, parameters
@@ -73,31 +66,24 @@ async def stream_ndjson_response(
       chunk_index = 0
       columns = None
 
-      # Check if repository supports native streaming
       if hasattr(repository, "execute_query_streaming"):
-        # Use native streaming support
         async for chunk in repository.execute_query_streaming(
           request.query, request.parameters, chunk_size=chunk_size
         ):
-          # Extract columns from first chunk
           if columns is None and chunk:
             columns = (
               list(chunk[0].keys()) if isinstance(chunk, list) else chunk.get("columns")
             )
 
-          # Handle different chunk formats
           if isinstance(chunk, dict):
-            # Repository returns structured chunks
             rows = chunk.get("rows", chunk.get("data", []))
             chunk_columns = chunk.get("columns")
           else:
-            # Repository returns raw rows
             rows = chunk
             chunk_columns = None
 
           total_rows += len(rows)
 
-          # Create NDJSON chunk
           ndjson_chunk = {
             "chunk_index": chunk_index,
             "rows": rows,
@@ -105,19 +91,17 @@ async def stream_ndjson_response(
             "total_rows_sent": total_rows,
           }
 
-          # Include columns in first chunk
           if chunk_index == 0 and (columns or chunk_columns):
             ndjson_chunk["columns"] = columns or chunk_columns
 
           yield json.dumps(ndjson_chunk) + "\n"
           chunk_index += 1
 
-          # Log progress periodically
           if chunk_index % 10 == 0:
             logger.debug(f"Streamed {total_rows} rows in {chunk_index} chunks")
 
       else:
-        # Fallback: Execute complete query and chunk it
+        # Fallback: execute the whole query, then chunk it.
         result = await execute_query_with_timeout(
           repository,
           request.query,
@@ -128,7 +112,6 @@ async def stream_ndjson_response(
         columns = list(result[0].keys()) if result else []
         total_rows = len(result)
 
-        # Stream in chunks
         for i in range(0, total_rows, chunk_size):
           chunk = result[i : i + chunk_size]
 
@@ -139,13 +122,11 @@ async def stream_ndjson_response(
             "total_rows_sent": min(i + chunk_size, total_rows),
           }
 
-          # Include columns in first chunk
           if i == 0:
             ndjson_chunk["columns"] = columns
 
           yield json.dumps(ndjson_chunk) + "\n"
 
-      # Send completion metadata
       execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
       final_chunk = {
@@ -157,7 +138,6 @@ async def stream_ndjson_response(
       }
       yield json.dumps(final_chunk) + "\n"
 
-      # Record success metrics
       circuit_breaker.record_success(graph_id, "cypher_query")
 
       api_logger.info(
@@ -174,9 +154,8 @@ async def stream_ndjson_response(
       )
 
     except Exception as e:
-      # Stream error as NDJSON. Headers are already sent, so in-band is the
-      # only channel — sanitize at the yield: infrastructure exception text
-      # stays in server logs, the caller's own query errors pass through.
+      # Headers are already sent, so the error goes in-band, sanitized:
+      # infrastructure text stays in logs, the caller's query errors pass.
       error_chunk = {
         "error": safe_error_message(e) or "Query streaming failed",
         "error_type": type(e).__name__,
@@ -185,7 +164,6 @@ async def stream_ndjson_response(
       }
       yield json.dumps(error_chunk) + "\n"
 
-      # Record failure metrics
       circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
       logger.error(f"NDJSON streaming failed: {e}", exc_info=True)
 
@@ -211,11 +189,7 @@ async def stream_sse_response(
   include_progress: bool = True,
   start_time: datetime | None = None,
 ) -> EventSourceResponse:
-  """Stream query results as Server-Sent Events.
-
-  Carries progress updates, result chunks, and metadata, so the client can
-  render progressively.
-  """
+  """Stream query results as Server-Sent Events (progress, chunks, metadata)."""
   if not start_time:
     start_time = datetime.now(UTC)
 
@@ -226,7 +200,6 @@ async def stream_sse_response(
       chunk_count = 0
       columns = None
 
-      # Send start event
       yield {
         "event": "started",
         "data": json.dumps(
@@ -239,12 +212,10 @@ async def stream_sse_response(
         ),
       }
 
-      # Check for native streaming support
       if hasattr(repository, "execute_query_streaming"):
         async for chunk in repository.execute_query_streaming(
           request.query, request.parameters, chunk_size=chunk_size
         ):
-          # Extract columns from first chunk
           if columns is None and chunk:
             if isinstance(chunk, dict):
               columns = chunk.get("columns")
@@ -253,7 +224,6 @@ async def stream_sse_response(
               columns = list(chunk[0].keys()) if chunk else []
               rows = chunk
 
-            # Send schema event
             if columns:
               yield {"event": "schema", "data": json.dumps({"columns": columns})}
           else:
@@ -262,7 +232,6 @@ async def stream_sse_response(
           chunk_count += 1
           total_rows += len(rows)
 
-          # Send chunk event
           yield {
             "event": "chunk",
             "data": json.dumps(
@@ -275,7 +244,6 @@ async def stream_sse_response(
             ),
           }
 
-          # Send progress updates
           if include_progress and chunk_count % 10 == 0:
             yield {
               "event": "progress",
@@ -289,7 +257,6 @@ async def stream_sse_response(
             }
 
       else:
-        # Execute complete query
         yield {
           "event": "executing",
           "data": json.dumps({"message": "Executing query..."}),
@@ -305,10 +272,8 @@ async def stream_sse_response(
         columns = list(result[0].keys()) if result else []
         total_rows = len(result)
 
-        # Send schema
         yield {"event": "schema", "data": json.dumps({"columns": columns})}
 
-        # Stream in chunks
         for i in range(0, total_rows, chunk_size):
           chunk = result[i : i + chunk_size]
           chunk_count += 1
@@ -325,7 +290,6 @@ async def stream_sse_response(
             ),
           }
 
-          # Progress updates for large results
           if include_progress and i > 0 and i % (chunk_size * 10) == 0:
             progress_percent = (i / total_rows) * 100
             yield {
@@ -339,7 +303,6 @@ async def stream_sse_response(
               ),
             }
 
-      # Send completion event
       execution_time = (datetime.now(UTC) - start_time).total_seconds()
 
       yield {
@@ -355,7 +318,6 @@ async def stream_sse_response(
         ),
       }
 
-      # Record success metrics
       circuit_breaker.record_success(graph_id, "cypher_query")
 
       api_logger.info(
@@ -425,7 +387,6 @@ async def stream_sse_with_queue(
     query_id = None
 
     try:
-      # Calculate query cost
       credits_required = 0.0  # Queries are included
 
       query_id = await queue_manager.submit_query(
@@ -437,7 +398,6 @@ async def stream_sse_with_queue(
         priority=priority,
       )
 
-      # Send queued event
       initial_status = await queue_manager.get_query_status(query_id)
       queue_event_data = {
         "query_id": query_id,
@@ -446,7 +406,6 @@ async def stream_sse_with_queue(
         "message": "Query has been queued",
       }
 
-      # Emit to unified SSE if operation_id provided
       if operation_id:
         await emit_event_to_operation(
           operation_id,
@@ -459,7 +418,6 @@ async def stream_sse_with_queue(
         "data": json.dumps(queue_event_data),
       }
 
-      # Monitor queue position
       last_position = initial_status.get("queue_position", 0)
       announced_start = False
 

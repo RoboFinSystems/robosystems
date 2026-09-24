@@ -1,7 +1,4 @@
-"""Database operation utilities.
-
-Functions for database name resolution, creation, and management.
-"""
+"""Database name resolution and creation."""
 
 import asyncio
 from typing import Any
@@ -18,19 +15,12 @@ from .validation import is_shared_repository, validate_graph_id
 
 
 def is_multitenant_mode() -> bool:
-  """Check if the system is running in multi-tenant mode.
-
-  For graph databases, multi-tenant is always enabled via clusters.
-  """
+  """Always True: graph databases are multi-tenant via clusters."""
   return True
 
 
 def get_database_name(graph_id: str | None = None) -> str:
-  """Get the appropriate database name based on multi-tenant mode and graph_id.
-
-  Special handling for shared repositories - always routes to their specific
-  database names regardless of multi-tenant mode.
-  """
+  """Shared repositories always map to their own database name."""
   if graph_id and is_shared_repository(graph_id):
     repository_name = get_repository_database_name(graph_id)
     logger.debug(f"Routing to shared repository database: '{repository_name}'")
@@ -60,7 +50,7 @@ def get_repository_database_name(repository_id: str) -> str:
   if not is_shared_repository(repository_id):
     raise ValueError(f"Unknown shared repository: {repository_id}")
 
-  # For shared repositories, the database name is the repository ID itself
+  # The repository ID is its database name.
   return repository_id
 
 
@@ -90,10 +80,7 @@ def get_database_path_for_graph(graph_id: str) -> str:
 
 
 def get_max_databases_per_node() -> int:
-  """Get the maximum number of databases per graph node.
-
-  Uses tier-specific configuration from graph.yml via GraphTierConfig.
-  """
+  """From the CLUSTER_TIER's graph.yml config; 10 when unset or unreadable."""
   try:
     from robosystems.config.graph_tier import GraphTierConfig
 
@@ -102,7 +89,7 @@ def get_max_databases_per_node() -> int:
       instance_config = GraphTierConfig.get_instance_config(tier)
       return instance_config.get("databases_per_instance", 10)
   except Exception:
-    pass  # Fall back to default
+    pass
   return 10
 
 

@@ -32,7 +32,6 @@ from ...models.api.common import COMMON_ERROR_RESPONSES
 from ...models.core import User
 from ...security.device_fingerprinting import extract_device_fingerprint
 
-# Create router for session endpoints
 router = APIRouter()
 
 
@@ -48,7 +47,7 @@ async def get_me(
   _rate_limit: None = Depends(auth_status_rate_limit_dependency),
 ) -> dict:
   try:
-    # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
+    # Read directly so it doesn't show in the OpenAPI params.
     authorization = fastapi_request.headers.get("authorization")
     jwt_token = None
     if authorization and authorization.startswith("Bearer "):
@@ -61,10 +60,8 @@ async def get_me(
         headers={"WWW-Authenticate": "Bearer"},
       )
 
-    # Extract device fingerprint for verification
     device_fingerprint = extract_device_fingerprint(fastapi_request)
 
-    # Verify JWT token with device binding
     verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
     if not verify_result:
       raise HTTPException(
@@ -74,7 +71,6 @@ async def get_me(
       )
     user_id, token_session_version = verify_result
 
-    # Get user from database
     user = User.get_by_id(user_id, session)
     if not user:
       raise HTTPException(
@@ -128,18 +124,16 @@ async def refresh_session(
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(jwt_refresh_rate_limit_dependency),
 ) -> AuthResponse:
-  # Import jwt at function level to avoid circular imports
   from datetime import datetime, timedelta
 
   import jwt
 
   from ...middleware.auth.jwt import JWTConfig
 
-  # Initialize payload variable
   payload = None
 
   try:
-    # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
+    # Read directly so it doesn't show in the OpenAPI params.
     authorization = fastapi_request.headers.get("authorization")
     jwt_token = None
     if authorization and authorization.startswith("Bearer "):
@@ -150,17 +144,15 @@ async def refresh_session(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
       )
 
-    # Extract device fingerprint for verification
     device_fingerprint = extract_device_fingerprint(fastapi_request)
 
-    # Verify current JWT token - allow recently expired tokens for refresh
     user_id: str | None = None
     token_session_version: int = 0
     verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
     if verify_result:
       user_id, token_session_version = verify_result
     else:
-      # For refresh endpoint, try to verify recently expired tokens
+      # Refresh accepts a recently expired token within the grace period.
       try:
         payload = jwt.decode(
           jwt_token,
@@ -172,16 +164,14 @@ async def refresh_session(
         )
 
         # Purpose-scoped tokens (SSO handoff, MFA challenge) fail
-        # `verify_jwt_claims` on type even while unexpired, and on `exp`
-        # once they age out. The grace path must re-apply the same gate or
-        # an expired MFA/SSO token mints a session JWT.
+        # `verify_jwt_claims` on type; the grace path must re-apply that gate
+        # or an expired MFA/SSO token mints a session JWT.
         if not is_session_access_token(payload) or not payload.get("jti"):
           raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
           )
 
-        # Check if token expired recently (within reduced grace period)
         exp = payload.get("exp")
         if exp:
           exp_time = datetime.fromtimestamp(exp, tz=UTC)
@@ -196,15 +186,15 @@ async def refresh_session(
               detail="Token expired beyond grace period",
             )
 
-          # CRITICAL SECURITY: Only allow grace period refresh if token actually expired
-          # Reject tokens that haven't expired (negative time_since_expiry indicates other failure reasons)
+          # A negative value means verification failed for some other reason
+          # than expiry; the grace path must not paper over it.
           if time_since_expiry < timedelta(0):
             raise HTTPException(
               status_code=status.HTTP_401_UNAUTHORIZED,
               detail="Token verification failed - not expired",
             )
 
-          # CRITICAL SECURITY: Always validate device fingerprint in grace period
+          # The grace path still enforces device binding and revocation.
           from ...security.device_fingerprinting import create_device_hash
 
           stored_device_hash = payload.get("device_hash")
@@ -219,7 +209,6 @@ async def refresh_session(
                 detail="Device changes detected. Please re-authenticate.",
               )
 
-          # CRITICAL SECURITY: Always check revocation status in grace period
           user_id = payload.get("user_id")
           jti = payload.get("jti")
           if jti and user_id:
@@ -266,7 +255,6 @@ async def refresh_session(
 
     publish_principal(fastapi_request, str(user.id), "jwt_token")
 
-    # Revoke the old token before issuing a new one
     revoke_success = revoke_jwt_token(jwt_token, reason="session_refresh")
     if revoke_success:
       logger.info(f"Old JWT token revoked during session refresh for user {user_id}")
@@ -275,10 +263,8 @@ async def refresh_session(
         f"Failed to revoke old JWT token during session refresh for user {user_id}"
       )
 
-    # Create new JWT token with fresh expiry and device binding
     new_jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
-    # Log successful refresh for security monitoring
     from ...security import SecurityAuditLogger, SecurityEventType
 
     SecurityAuditLogger.log_security_event(
@@ -293,11 +279,9 @@ async def refresh_session(
       },
     )
 
-    # Calculate token expiry and refresh threshold
     expires_in = int(JWT_EXPIRY_HOURS * 3600)  # Convert hours to seconds
     refresh_threshold = TOKEN_GRACE_PERIOD_MINUTES * 60  # Convert minutes to seconds
 
-    # Return new token for Bearer authentication
     return AuthResponse(
       user={
         "id": user.id,

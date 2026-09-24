@@ -1,9 +1,7 @@
-"""Semantic memory reads — recall / list / get.
+"""Semantic memory reads: ranked `recall` plus list / get.
 
-Backed by the per-graph LanceDB memory store on the writer/master instance.
-Writes (remember / forget / update-memory) go through the content-ops envelope
-in operations.py; this router is the read half: ranked semantic `recall` plus
-the deterministic list / get governance reads.
+Backed by the per-graph LanceDB store on the writer instance. Writes go through
+the content operations in content_ops.py.
 """
 
 import logging

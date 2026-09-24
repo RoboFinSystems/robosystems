@@ -1,42 +1,10 @@
-"""Graph lifecycle MCP tools.
+"""Graph lifecycle and connection MCP tools.
 
-Five tools that mirror a subset of the REST graph lifecycle surface at
-`POST /v1/graphs/{graph_id}/operations/*`:
-
-1. `create-subgraph` — isolated workspace within the parent graph
-2. `delete-subgraph` — hard-delete a subgraph (admin on parent)
-3. `list-subgraphs` — enumerate subgraphs for the current parent graph
-4. `materialize` — rebuild LadybugDB from OLTP (extensions) or staging
-5. `create-backup` — enqueue a full-dump backup (admin)
-
-Plus two platform-DB connection tools that share the same hand-written
-rationale (platform DB, graph-scoped auth, no extensions registrar):
-
-6. `set-write-policy` — opt a connection into / out of outbound write-back
-7. `sync-connection` — trigger a provider resync (the write half of the
-   sync-freshness pair; `get-fiscal-calendar` / `get-graph-sync-status`
-   are the read half)
-
-**Deliberately NOT exposed on MCP:**
-
-- `change-tier` — destructive 3-5 minute EBS migration with billing
-  implications and fail-on-downgrade semantics. Humans execute it on the
-  REST surface.
-
-Restore is not on MCP either, but for a different reason: it is not exposed
-anywhere customer-facing. Backups are a download capability — every graph type
-with an upstream rebuilds from that upstream, and the classes without one are
-recovered by downloading the payload and rebuilding, or by an operator-run
-restore job.
-
-Tools stay hand-written rather than registrar-generated because:
-- Each targets the **platform DB** (not extensions), different session
-- Auth rules differ per op: admin-on-parent, entity-graph checks
-- Several dispatch async Dagster jobs and return an operation_id that
-  the agent can poll via `/v1/operations/{operation_id}/stream`
-
-Tool descriptions frame each operation for an agent — what a subgraph *is*,
-when a backup is the right move — rather than restating the operation name.
+A subset of `POST /v1/graphs/{graph_id}/operations/*` plus the platform-DB
+connection tools. Hand-written rather than registrar-generated: they use the
+platform DB, their auth rules differ per op, and several dispatch async jobs.
+`change-tier` (a destructive, billed EBS migration) and restore (operator-run)
+are deliberately absent.
 """
 
 from __future__ import annotations
@@ -52,14 +20,11 @@ from robosystems.logger import logger
 
 
 def _open_platform_session():
-  """Open a short-lived, INDEPENDENT platform-DB session.
+  """Return ``(session, close)`` for an independent platform-DB session.
 
-  MCP tools don't receive a FastAPI-injected session. This opens its own
-  ``SessionFactory()`` session rather than the request-scoped registry: an MCP
-  tool body runs inside a request and inside a runner thread that inherited the
-  request's contextvars, so the scoped session would resolve to the endpoint's
-  own Session and closing it here would tear it down mid-request. Returns
-  ``(session, close)``.
+  Not the scoped session: the tool runs inside the request's contextvars, so
+  that would resolve to the endpoint's own Session and closing it here would
+  tear it down mid-request.
   """
   from robosystems.database import SessionFactory
 
@@ -72,7 +37,6 @@ def _open_platform_session():
 
 
 def _require_user(client) -> Any | None:
-  """Fetch `client.user` or return an auth-missing error dict."""
   user = getattr(client, "user", None)
   if user is None:
     return None
@@ -87,7 +51,6 @@ def _user_missing_err() -> dict[str, Any]:
 
 
 def _block_shared_repo(graph_id: str) -> dict[str, Any] | None:
-  """Return an error envelope if the target is a shared repository."""
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 
   if is_shared_repository_or_subgraph(graph_id):
@@ -101,7 +64,6 @@ def _block_shared_repo(graph_id: str) -> dict[str, Any] | None:
 
 
 def _verify_admin_on_graph(user, graph_id: str, session) -> dict[str, Any] | None:
-  """Check that `user` has an `admin` role on `graph_id`."""
   from robosystems.models.core.graph.graph_user import GraphUser
 
   if not GraphUser.user_has_admin_access(user.id, graph_id, session):
@@ -118,11 +80,8 @@ def _verify_admin_on_graph(user, graph_id: str, session) -> dict[str, Any] | Non
 
 
 def _subgraph_credential_hint(parent_graph_id: str) -> str:
-  """What credential reaches a subgraph's ``connector_url`` from this
-  connector. A graph-scoped key covers the parent's subgraphs; an OAuth
-  grant is bound to exactly one route, so the OAuth answer is "authorize
-  the new URL" — telling an OAuth connector to reuse its token would send
-  it into a 401-and-refresh loop at the subgraph."""
+  """Which credential reaches a subgraph from this connector. An OAuth grant
+  is bound to one URL; reusing its token would 401-and-refresh loop."""
   from robosystems.security.request_context import current_principal
 
   principal = current_principal()
@@ -209,9 +168,7 @@ class CreateSubgraphTool:
 
     from robosystems.middleware.graph.utils.subgraph import validate_subgraph_name
 
-    # Use the canonical ASCII validator (^[a-zA-Z0-9]{1,20}$) rather than
-    # Unicode-permissive str.isalnum(), which admits names like "café" that the
-    # downstream construct_subgraph_id then rejects with a generic error.
+    # ASCII-only; str.isalnum() would admit "café".
     if not validate_subgraph_name(name):
       return {
         "error": "invalid_name",
@@ -233,11 +190,8 @@ class CreateSubgraphTool:
 
     session, close = _open_platform_session()
     try:
-      # Mirror the REST gates (`routers/graphs/subgraphs/main.py::create_subgraph`)
-      # by running the same helpers: the feature flag, admin role + lifecycle/
-      # subscription state on the parent, tier support, active parent, quota
-      # and name uniqueness. A gate that exists on one of two entry points to
-      # the same service is not a gate.
+      # The same gate helpers as the REST route, so neither entry point
+      # bypasses the other's checks.
       from fastapi import HTTPException
 
       from robosystems.config import env
@@ -270,10 +224,6 @@ class CreateSubgraphTool:
         if gate_error.status_code == 409:
           return {"error": "name_taken", "message": detail}
         if gate_error.status_code == 400:
-          # A malformed name is caught by validate_subgraph_name() above, so
-          # this is unreachable for real input today; keep the mapping
-          # exhaustive so a 400 from any gate helper codes as invalid_name
-          # rather than defaulting into the subgraph_not_allowed bucket.
           return {"error": "invalid_name", "message": detail}
         lowered = detail.lower()
         is_role_denial = "admin access" in lowered or "access denied" in lowered
@@ -300,10 +250,8 @@ class CreateSubgraphTool:
         logger.error("create-subgraph failed for %s: %s", parent_graph_id, exc)
         return {"error": "create_failed", "message": str(exc)}
 
-      # An id with no way to reach it is the whole friction here: under the
-      # stdio bridge you created then switched in-session, but a remote
-      # connector is URL-anchored, so the caller needs the address and the
-      # (already-satisfied) credential answer handed to them, not inferred.
+      # A remote connector is URL-anchored, so hand back the address and the
+      # credential answer.
       subgraph_id = result.get("graph_id")
       return {
         "subgraph_id": subgraph_id,
@@ -388,8 +336,7 @@ class DeleteSubgraphTool:
         "message": f"{subgraph_id!r} is not a valid subgraph identifier.",
       }
 
-    # The client's current graph must be the subgraph's parent — prevents
-    # cross-tenant delete via a mismatched `graph_id`/`subgraph_id`.
+    # Prevents a cross-tenant delete via a mismatched subgraph_id.
     current_parent = self.client.graph_id
     if info.parent_graph_id != current_parent:
       return {
@@ -399,10 +346,7 @@ class DeleteSubgraphTool:
         ),
       }
 
-    # Shared-repo subgraphs (e.g., `sec_historical`) are platform-managed.
-    # The manager normally skips write-tool registration for shared repos
-    # (read_only=True), so this is defense-in-depth against a mistake in
-    # that gating — and makes the error message specific.
+    # Defense in depth: the manager doesn't register writes on shared repos.
     repo_err = _block_shared_repo(current_parent)
     if repo_err:
       return repo_err
@@ -624,8 +568,6 @@ class MaterializeTool:
       try:
         result = await materialize_cmd(graph_id, body, user, session)
       except Exception as exc:
-        # Re-raise HTTPException details through the envelope; other
-        # failures become a generic command_failed.
         detail = getattr(exc, "detail", None) or str(exc)
         status_code = getattr(exc, "status_code", None)
         if status_code:
@@ -714,11 +656,8 @@ class CreateBackupTool:
       if admin_err:
         return admin_err
 
-      # Cap retention to the tier max. Unconditional, mirroring the REST
-      # route: a missing graph row or tier falls back to the smallest tier's
-      # cap rather than skipping the clamp. Skipping it would let an uncapped
-      # value reach `expires_at` while the 90-day S3 lifecycle rule still
-      # deletes the object, leaving a completed record pointing at nothing.
+      # Always clamp, as REST does (unknown tier = smallest cap): the S3
+      # lifecycle rule deletes at 90 days whatever `expires_at` says.
       graph_record = Graph.get_by_id(graph_id, session)
       backup_tier = (
         str(graph_record.graph_tier)
@@ -729,14 +668,8 @@ class CreateBackupTool:
       tier_max = backup_limits.get("backup_retention_days", 7)
       retention_days = min(retention_days, tier_max)
 
-      # Daily limit, mirroring the REST route for the same reason the clamp
-      # above mirrors it: this path enqueues the same job, so a check that
-      # lives on only one of them is not a limit. A negative value means
-      # unlimited; an unresolvable tier gets the smallest allowance.
-      # Reserve the slot the same way the REST route does. Counting rows and
-      # letting the async job insert one leaves a window where concurrent
-      # requests all pass the same check, and a limit enforced on one of two
-      # entry points is not a limit.
+      # Daily limit, reserved up front as REST does so concurrent requests
+      # can't all pass a row count. Negative means unlimited.
       from fastapi import HTTPException
 
       from robosystems.routers.graphs.operations import (
@@ -795,7 +728,7 @@ class CreateBackupTool:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# get-graph-sync-status (moved from materialization_tools.py)
+# get-graph-sync-status
 # ══════════════════════════════════════════════════════════════════════════
 
 
@@ -846,8 +779,7 @@ class GetGraphSyncStatusTool:
       if graph is None:
         return {"error": "graph_not_found", "message": f"Graph {graph_id} not found."}
 
-      # Source → OLTP edge: per-connection health + the last sync
-      # attempt's outcome.
+      # Source → OLTP edge.
       connections = [
         {
           "connection_id": conn.id,
@@ -915,15 +847,7 @@ class GetGraphSyncStatusTool:
 
 
 class SyncConnectionTool:
-  """Trigger a provider resync for this graph's connection.
-
-  The write half of the sync-freshness pair (`get-fiscal-calendar` /
-  `get-graph-sync-status` are the read half). Platform-DB, hand-written
-  for the same reason as `set-write-policy`: `Connection` lives in the
-  platform DB and the op is graph-scoped via the service rather than the
-  extensions registrar. Both this tool and the REST sync endpoint call
-  the same `dispatch_connection_sync` kernel — same lock, same dispatch.
-  """
+  """Trigger a provider resync; shares `dispatch_connection_sync` with REST."""
 
   def __init__(self, graph_client):
     self.client = graph_client
@@ -1056,8 +980,7 @@ class SyncConnectionTool:
       return {"error": "command_failed", "message": str(exc)}
 
     if not result.get("dispatched"):
-      # No run was started, so telling the operator to poll would send it
-      # into a wait that never resolves.
+      # Nothing to poll for; saying otherwise would start a wait that never ends.
       return {
         "status": "no_op",
         **result,
@@ -1085,12 +1008,7 @@ class SyncConnectionTool:
 
 
 class SetWritePolicyTool:
-  """Set a connection's source-of-truth write policy (the write-back opt-in).
-
-  Platform-DB, hand-written (same rationale as the lifecycle tools above):
-  `Connection` lives in the platform DB and the op is graph-scoped via the
-  service rather than the extensions registrar (which carries no graph_id).
-  """
+  """Set a connection's source-of-truth write policy (the write-back opt-in)."""
 
   def __init__(self, graph_client):
     self.client = graph_client

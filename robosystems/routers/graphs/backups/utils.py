@@ -1,6 +1,4 @@
-"""
-Shared utilities for backup operations.
-"""
+"""Shared utilities for backup endpoints."""
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -8,7 +6,7 @@ from sqlalchemy.orm import Session
 from robosystems.models.core import GraphUser, User
 from robosystems.operations.graph.engine.backup_manager import create_backup_manager
 
-# Lazy initialization of backup manager to avoid S3 connection during import
+# Lazy, so importing doesn't open an S3 connection.
 _backup_manager = None
 
 

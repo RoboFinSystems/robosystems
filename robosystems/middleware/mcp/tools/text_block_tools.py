@@ -1,9 +1,8 @@
-"""Text-block binding MCP tool — bind a Document to a disclosure element.
+"""bind-text-block: bind a Document to a disclosure element.
 
-Hand-written (not registrar-generated) because the command needs BOTH the
-platform database session (Documents live there) and the tenant
-extensions session — the ``OperationSpec`` runner passes neither the
-platform session nor the trusted-path ``graph_id``.
+Hand-written: it needs the platform session (Documents) and the tenant
+extensions session, and the registrar runner passes neither the platform
+session nor the trusted ``graph_id``.
 """
 
 from typing import Any

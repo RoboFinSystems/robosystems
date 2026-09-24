@@ -1,6 +1,4 @@
-"""
-API v1 routers.
-"""
+"""API v1 router assembly."""
 
 from fastapi import APIRouter
 
@@ -66,7 +64,7 @@ from .graphs.mcp import roboledger_router as mcp_roboledger_router
 from .graphs.operations import router as graph_operations_router
 from .graphs.operator import (
   router as operator_router,
-)  # AI Operator module with modular structure
+)
 from .graphs.schema import validate_router as schema_validate_router
 from .offering import offering_router
 from .operations import router as operations_router
@@ -74,122 +72,94 @@ from .orgs import router as orgs_router
 from .status import router as status_router
 from .user import router as user_router
 
-# Graph-scoped routes that require an existing graph_id
 router = APIRouter(prefix="/v1/graphs/{graph_id}", tags=[])
 
-# Include routers for graph-scoped endpoints
-# Conditionally include connections router based on feature flag
 if env.CONNECTIONS_ENABLED:
   from .graphs.connections import router as connections_router
 
   router.include_router(connections_router, prefix="/connections")
-router.include_router(
-  operator_router
-)  # No prefix - handled in the operator module itself
-# Streamable-HTTP MCP transport at the bare /mcp path (POST, JSON-RPC 2.0);
-# schema-excluded, so it never appears in the generated SDK clients. It is
-# the graph's only MCP surface — the REST tool endpoints were removed.
+router.include_router(operator_router)
+# Streamable-HTTP MCP transport (JSON-RPC 2.0), schema-excluded so it stays
+# out of the generated SDK clients.
 router.include_router(mcp_remote_router, prefix="/mcp")
 router.include_router(backups_router, prefix="/backups")
-router.include_router(
-  usage_router
-)  # No prefix - handles /metrics and /usage internally
-router.include_router(query_router)  # No prefix - handled in the query module itself
-router.include_router(schema_router)  # No prefix - handled in the schema module itself
-router.include_router(credits_router)  # Already has /credits prefix
-router.include_router(health_router)  # No prefix - handles /health internally
-router.include_router(info_router)  # No prefix - handles /info internally
-router.include_router(limits_router)  # No prefix - handles /limits internally
-router.include_router(members_router)  # Already has /members prefix
+router.include_router(usage_router)
+router.include_router(query_router)
+router.include_router(schema_router)
+router.include_router(credits_router)
+router.include_router(health_router)
+router.include_router(info_router)
+router.include_router(limits_router)
+router.include_router(members_router)
 router.include_router(subgraphs_router, prefix="/subgraphs")
-router.include_router(
-  graph_subscriptions_router, prefix="/subscriptions"
-)  # Unified subscription management
-router.include_router(
-  tables_router
-)  # No prefix - handles all /tables and /files paths internally
+router.include_router(graph_subscriptions_router, prefix="/subscriptions")
+router.include_router(tables_router)
 
-# The fact-grid views router mounts at /extensions/roboledger/{graph_id}/views
-# in main.py, not here: the grid is roboledger-schema-specific (XBRL
-# hypercube), not part of the schema-agnostic platform graph surface.
+# The fact-grid views router mounts in main.py under /extensions/roboledger:
+# it is roboledger-schema-specific, not part of the platform graph surface.
 
-# Conditionally include search / documents / memory routers based on flags.
-# search_router hosts document search AND memory recall → mount under either flag.
+# search_router hosts both document search and memory recall.
 if env.SEMANTIC_SEARCH_ENABLED or env.SEMANTIC_MEMORY_ENABLED:
   from .graphs import search_router
 
-  router.include_router(search_router)  # No prefix - handles /search internally
+  router.include_router(search_router)
 
 if env.SEMANTIC_SEARCH_ENABLED:
   from .graphs import documents_router
 
-  router.include_router(documents_router)  # No prefix - handles /documents internally
+  router.include_router(documents_router)
 
 if env.SEMANTIC_MEMORY_ENABLED:
   from .graphs import memory_router
 
-  router.include_router(memory_router)  # No prefix - handles /memory internally
+  router.include_router(memory_router)
 
 router.include_router(graph_operations_router, prefix="/operations")
 router.include_router(graph_content_ops_router, prefix="/operations")
-router.include_router(files_router)  # No prefix - handles /files endpoint
+router.include_router(files_router)
 
-# Non-graph-scoped routes that don't require a graph_id
 
-# Schema VALIDATION is graph-independent (validate a candidate schema BEFORE a
-# graph exists) so it gets its own dedicated, Schema-tagged /v1/graphs router
-# (single "Schema" tag) — NOT the graph-scoped router (info/export read a
-# deployed graph) and NOT the Graphs CRUD router (which would double-tag it).
-# Mounted in main.py → POST /v1/graphs/schema/validate.
+# Schema validation needs no graph, so it gets its own Schema-tagged router
+# (mounted in main.py as POST /v1/graphs/schema/validate) rather than the
+# graph-scoped or Graphs CRUD router, which would double-tag it.
 graph_schema_router_v1 = APIRouter(prefix="/v1/graphs", tags=["Schema"])
 graph_schema_router_v1.include_router(schema_validate_router)
 
 user_router_v1 = APIRouter(prefix="/v1", tags=[])
 user_router_v1.include_router(user_router, prefix="")
 
-# Organization routes
 orgs_router_v1 = APIRouter(prefix="/v1", tags=[])
 orgs_router_v1.include_router(orgs_router)
 
-# Include offering router (non-graph-scoped)
 offering_router_v1 = APIRouter(prefix="/v1")
-offering_router_v1.include_router(offering_router)  # Already has /offering prefix
+offering_router_v1.include_router(offering_router)
 
-# Operations router for unified SSE operations
 operations_router_v1 = APIRouter(prefix="/v1", tags=["Operations"])
 operations_router_v1.include_router(operations_router)
 
-# Graph-agnostic MCP transport: POST /v1/mcp, OAuth-only — the consent
-# grant names the graph. Schema-excluded like the per-graph transport.
-# (Same empty-path rule as the per-graph transport: the bare path must be
-# supplied by the include prefix, not the router's own.)
+# Graph-agnostic MCP transport, OAuth-only: the consent grant names the graph.
+# The bare path must come from the include prefix, not the router's own.
 mcp_agnostic_router_v1 = APIRouter(prefix="/v1")
 mcp_agnostic_router_v1.include_router(mcp_agnostic_router, prefix="/mcp")
-# The RoboLedger twin: POST /v1/mcp/roboledger — RoboLedger graphs only, with
-# a product tool profile (a directory listing freezes one tool list per URL).
+# RoboLedger graphs only, with a product tool profile (a directory listing
+# freezes one tool list per URL).
 mcp_agnostic_router_v1.include_router(mcp_roboledger_router, prefix="/mcp/roboledger")
 
-# Auth routes that don't require a graph_id
-# No `tags` here: the auth sub-routers tag themselves, so the passkey, MFA
-# and SSO mechanisms can carve out their own groups. A tag set here would
-# merge into every route and win the grouping, since consumers read the
-# first tag — the reference's page layout and the Python SDK's module
-# directories both.
+# No `tags` here: the auth sub-routers tag themselves, and a tag set here
+# would win the grouping (consumers read the first tag: the API reference's
+# page layout and the Python SDK's module directories).
 auth_router_v1 = APIRouter(prefix="/v1/auth")
 auth_router_v1.include_router(auth_router)
 
-# Status routes that don't require a graph_id
 status_router_v1 = APIRouter(prefix="/v1", tags=["Status"])
 status_router_v1.include_router(status_router)
 
-# Billing routes that don't require a graph_id
 billing_router_v1 = APIRouter(prefix="/v1")
 billing_router_v1.include_router(customer_router)
 billing_router_v1.include_router(billing_subscriptions_router)
 billing_router_v1.include_router(invoices_router)
 billing_router_v1.include_router(checkout_router)
 
-# Admin routes that don't require a graph_id
 admin_router_v1 = APIRouter(prefix="")
 admin_router_v1.include_router(admin_cache_router)
 admin_router_v1.include_router(admin_subscription_router)
@@ -200,11 +170,8 @@ admin_router_v1.include_router(admin_graphs_router)
 admin_router_v1.include_router(admin_users_router)
 admin_router_v1.include_router(admin_orgs_router)
 
-# Extensions reads live at /extensions/{graph_id}/graphql; writes at
-# POST /extensions/{roboledger,roboinvestor}/{graph_id}/operations/{op_name}.
-# Both mount directly in main.py, with no router_v1 wrapper.
+# Extensions routers mount directly in main.py.
 
-# Export routers for main application
 __all__ = [
   "admin_router_v1",
   "auth_router_v1",

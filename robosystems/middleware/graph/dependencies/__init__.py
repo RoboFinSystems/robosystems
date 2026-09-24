@@ -20,9 +20,7 @@ from .repositories import (
 )
 
 __all__ = [
-  # Auth dependencies
   "get_graph_database",
-  # Repository dependencies
   "get_graph_repository_dependency",
   "get_graph_repository_with_auth",
   "get_main_repository",
@@ -31,7 +29,6 @@ __all__ = [
   "get_user_graph_repository",
   "optional_entity",
   "optional_user_graph",
-  # Helper dependencies
   "require_entity",
   "require_graph_category",
   "require_user_graph",

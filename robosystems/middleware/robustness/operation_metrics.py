@@ -16,8 +16,6 @@ from robosystems.logger import logger
 
 
 class OperationType(Enum):
-  """Types of operations for metrics categorization."""
-
   API_REQUEST = "api_request"
   DATABASE_QUERY = "database_query"
   EXTERNAL_SERVICE = "external_service"
@@ -34,8 +32,6 @@ class OperationType(Enum):
 
 
 class OperationStatus(Enum):
-  """Status of operations."""
-
   SUCCESS = "success"
   FAILURE = "failure"
   TIMEOUT = "timeout"
@@ -63,7 +59,6 @@ class CircuitBreakerMetrics:
     last_failure_time: float | None = None,
     recovery_time: float | None = None,
   ):
-    """Update circuit breaker status for monitoring."""
     with self._lock:
       self._circuit_status[graph_id][operation] = {
         "state": state,
@@ -74,19 +69,16 @@ class CircuitBreakerMetrics:
       }
 
   def get_circuit_status(self, graph_id: str | None = None) -> dict[str, Any]:
-    """Get circuit breaker status for a graph or all graphs."""
     with self._lock:
       if graph_id:
         return dict(self._circuit_status.get(graph_id, {}))
       return {gid: dict(circuits) for gid, circuits in self._circuit_status.items()}
 
 
-# Global instance
 _metrics_collector: CircuitBreakerMetrics | None = None
 
 
 def get_operation_metrics_collector() -> CircuitBreakerMetrics:
-  """Get the global circuit breaker metrics instance."""
   global _metrics_collector
   if _metrics_collector is None:
     _metrics_collector = CircuitBreakerMetrics()
@@ -104,11 +96,7 @@ def record_operation_metric(
   error_details: str | None = None,
   metadata: dict[str, Any] | None = None,
 ):
-  """Record an operation metric.
-
-  This is a lightweight shim that logs notable events. The primary metrics
-  pipeline is OTel (middleware/otel/metrics.py).
-  """
+  """Log failures and slow operations; real metrics go through OTel."""
   if status != OperationStatus.SUCCESS:
     logger.warning(
       f"Operation {operation_type.value} {status.value}: "

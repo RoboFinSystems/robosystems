@@ -1,6 +1,4 @@
-"""
-Shared utilities for connection operations.
-"""
+"""Shared utilities for connection operations."""
 
 import time
 
@@ -14,7 +12,6 @@ from robosystems.middleware.robustness import (
 )
 from robosystems.operations.providers.registry import ProviderRegistry
 
-# Initialize provider registry singleton
 provider_registry = ProviderRegistry()
 
 

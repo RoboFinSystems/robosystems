@@ -1,6 +1,4 @@
-"""
-Backup statistics endpoint.
-"""
+"""Backup statistics endpoint."""
 
 from datetime import UTC, datetime
 
@@ -24,10 +22,8 @@ from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.backups import BackupStatsResponse
 from robosystems.models.core import User
 
-# Constants
 PERCENTAGE_MULTIPLIER = 100.0
 
-# Create router
 router = APIRouter()
 
 
@@ -56,7 +52,6 @@ async def get_backup_stats(
       f"Starting get_backup_stats for graph_id: {graph_id}, user: {current_user.id}"
     )
 
-    # Query database for backups instead of S3
     from robosystems.models.core import BackupStatus, GraphBackup
 
     backup_records = (
@@ -67,7 +62,6 @@ async def get_backup_stats(
       f"Got {len(backup_records)} backups for stats calculation from database"
     )
 
-    # Calculate statistics
     total_backups = len(backup_records)
     successful_backups = sum(
       1 for backup in backup_records if backup.status == BackupStatus.COMPLETED
@@ -81,7 +75,6 @@ async def get_backup_stats(
       else 0.0
     )
 
-    # Calculate storage metrics
     total_original_size = sum(
       backup.original_size_bytes or 0 for backup in backup_records
     )
@@ -90,7 +83,6 @@ async def get_backup_stats(
     )
     storage_saved = max(0, total_original_size - total_compressed_size)
 
-    # Calculate average compression ratio
     compression_ratios = []
     for backup in backup_records:
       if (
@@ -106,7 +98,6 @@ async def get_backup_stats(
       sum(compression_ratios) / len(compression_ratios) if compression_ratios else 1.0
     )
 
-    # Get latest backup date
     latest_backup_date = None
     if backup_records:
       latest_backup = max(
@@ -116,7 +107,6 @@ async def get_backup_stats(
       if latest_backup.created_at:
         latest_backup_date = latest_backup.created_at.isoformat()
 
-    # Count backup formats
     backup_formats = {}
     for backup in backup_records:
       format_type = "full_dump"

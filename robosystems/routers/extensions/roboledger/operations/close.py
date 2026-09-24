@@ -1,10 +1,7 @@
 """Month-end close and the schedules that drive it.
 
-Configure the close target, lock a period, reopen one, and backfill the
-statement history behind the boundary. The schedule operations sit here
-rather than on their own because promoting matured obligations is a
-close-time activity — it is how a schedule-driven close is driven to
-completion in a single session.
+Schedule operations live here because promoting matured obligations is how a
+schedule-driven close completes in a single session.
 """
 
 from __future__ import annotations
@@ -169,12 +166,7 @@ class BackfillPlanHistoryOperation(BackfillPlanHistoryRequest):
   pass  # range and chunking already in body
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Close Workflow
-#
-# Month-end processing: configure the close target, generate schedule
-# entries, handle asset disposals, then lock the period.
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Close Workflow ───────────────────────────────────────────────────────────
 
 
 @router.post(
@@ -238,13 +230,8 @@ async def set_close_target_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-# All ledger writes — closing entries, journal entries, schedule truncation,
-# asset disposal, journal entry reversal — go through create-event-block with
-# Python-registered event types. The handler modules live in
-# operations/event_block/python_handlers/: journal_entry_recorded (manual GL
-# writes), journal_entry_reversed (offsetting reversal of a posted entry),
-# schedule_entry_due (schedule period matured), and asset_disposed (atomic
-# disposal plus schedule termination).
+# Ledger writes (closing entries, reversals, schedule truncation, disposals)
+# go through create-event-block with Python-registered event types.
 
 
 @router.post(
@@ -325,9 +312,7 @@ async def close_period_op(
       }
       if e.gate.pending_obligation_count:
         detail["pending_obligation_count"] = e.gate.pending_obligation_count
-        # Route through the Pydantic response model so the error-detail
-        # shape stays aligned with the calendar-read shape; if the model
-        # gains a field, this serialization picks it up automatically.
+        # Via the response model so the shape tracks the calendar read.
         detail["pending_obligation_sample"] = [
           PendingObligationDetailResponse(
             event_id=d.event_id,
@@ -372,10 +357,7 @@ async def close_period_op(
         ),
       )
     except WritebackFailed as e:
-      # Close-period pre-publish failure. Surface the structured
-      # failed-events payload so operators can see exactly which drafts
-      # QB rejected (mapping issue, balance error, closed-in-QB period,
-      # etc.) and retry the close after fixing.
+      # Surface which drafts QB rejected so the operator can fix and retry.
       raise HTTPException(
         status_code=422,
         detail={
@@ -385,10 +367,8 @@ async def close_period_op(
         },
       )
     except StatementStampError as e:
-      # The close rolled back: reporting is configured but the pivot
-      # couldn't stamp the period's canonical statement sets. Fix the
-      # cause (mapping/style) and re-run the close — nothing was
-      # committed.
+      # Rolled back, nothing committed: the pivot couldn't stamp the period's
+      # statement sets. Fix mapping/style and re-run.
       raise HTTPException(
         status_code=422,
         detail={
@@ -466,8 +446,7 @@ async def reopen_period_op(
           service=_fiscal_svc,
         ).fiscal_calendar
     except RowLockedError as e:
-      # A concurrent writer holds the rows this needs. Retryable, and the
-      # same 409 the registrar-driven operations return.
+      # A concurrent writer holds the rows; retryable, same 409 as the registrar.
       raise HTTPException(status_code=409, detail=str(e))
     except PeriodNotFoundInLedgerError:
       raise HTTPException(
@@ -553,13 +532,8 @@ async def backfill_plan_history_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-# On-demand obligation promotion. Normally the `scheduled_obligation_promoter`
-# Dagster sensor runs this every few minutes; this operation exposes the same
-# `promote_pending_obligations` sweep so an interactive caller or an MCP close
-# co-pilot can promote matured schedule obligations now instead of waiting for
-# the background cadence — required to drive a schedule-driven close to
-# completion in a single session. Idempotent (skips already-classified rows,
-# reconciles to existing drafts).
+# The `scheduled_obligation_promoter` sensor's sweep, on demand, so a close can
+# finish in one session. Idempotent.
 promote_obligations_op = _registrar.register(
   OperationSpec(
     name="promote-obligations",
@@ -580,8 +554,7 @@ promote_obligations_op = _registrar.register(
     command=cmd_promote_obligations,
     request_model=PromoteObligationsRequest,
     result_type=PromoteObligationsResponse,
-    # The background sweep holds the candidate set's row locks. Retryable,
-    # same as the approval path's conflict.
+    # The background sweep holds the candidate rows' locks. Retryable.
     error_map={ValueError: 422, RowLockedError: 409},
     mark_stale_reason="obligations_promoted",
   )
@@ -646,8 +619,7 @@ terminate_schedule_op = _registrar.register(
     result_type=TerminateScheduleResponse,
     error_map={
       ScheduleNotFoundError: 404,
-      # The void locks the same pending rows the promotion sweep holds.
-      # Retryable.
+      # The void locks the rows the promotion sweep holds. Retryable.
       RowLockedError: 409,
       ValueError: 422,
     },

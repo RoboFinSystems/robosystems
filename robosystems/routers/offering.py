@@ -40,28 +40,19 @@ async def get_service_offerings(
   _rate_limit: None = Depends(public_api_rate_limit_dependency),
 ) -> ServiceOfferingsResponse:
   try:
-    # Get graph subscription information from billing config
     graph_pricing = BillingConfig.get_all_pricing_info()
 
-    # Get tier configurations from graph.yml for technical specs
     from ..config.graph_tier import GraphTierConfig
 
-    # include_disabled=True is deliberate. get_available_tiers() gates on
-    # deployment.always_enabled / enabled_default, which answers "is the
-    # CloudFormation stack deployed by default" — not "can a customer buy
-    # this". Large and XLarge carry enabled_default: false plus an enable_var
-    # (LBUG_LARGE_ENABLED_PROD) that only the deploy workflow reads, so the
-    # running API cannot see that they are in fact enabled. Filtering here
-    # dropped their tier_config and silently zeroed max_subgraphs and
-    # api_rate_multiplier. The customer_tiers list below plus the billing
-    # plans are the real gate on what gets listed.
+    # include_disabled=True: enabled_default answers "is the stack deployed by
+    # default", not "can a customer buy this", and filtering on it zeroed
+    # Large/XLarge's max_subgraphs and api_rate_multiplier. customer_tiers plus
+    # the billing plans are the real gate.
     tier_configs = GraphTierConfig.get_available_tiers(include_disabled=True)
 
-    # Filter to only customer-facing tiers (exclude internal/shared infrastructure)
     customer_tiers = ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]
     tier_configs = [tier for tier in tier_configs if tier.get("tier") in customer_tiers]
 
-    # Build graph subscription tiers from billing plans
     graph_tiers = []
     for tier_name, plan_data in graph_pricing["subscription_tiers"].items():
       if not plan_data or tier_name not in customer_tiers:
@@ -69,25 +60,20 @@ async def get_service_offerings(
 
       tier_config = next((t for t in tier_configs if t.get("tier") == tier_name), None)
 
-      # Skip a tier this environment cannot describe. Billing defines what is
-      # purchasable and graph.yml defines the specs; where the two disagree —
-      # local dev defines only ladybug-standard, since it runs a single
-      # graph_api — omitting the tier says "not offered here" instead of
-      # advertising fabricated limits.
+      # Billing says what is purchasable, graph.yml the specs; where they
+      # disagree (local dev defines only ladybug-standard), omit the tier rather
+      # than advertise fabricated limits.
       if not tier_config:
         logger.info(
           f"Skipping tier {tier_name} in offerings: no tier config for this environment"
         )
         continue
 
-      # Get backup retention from graph.yml (single source of truth for infra limits)
       backup_limits = GraphTierConfig.get_backup_limits(tier_name)
       backup_retention_days = backup_limits.get("backup_retention_days", 0)
 
-      # Get instance type from graph.yml. vcpus and instance_ram_gb are the
-      # physical instance specs; duckdb_max_threads and max_memory_mb are
-      # tuning knobs (threads can oversubscribe the CPU, and max_memory_mb is
-      # the LadybugDB budget after OS overhead) and must not be reported here.
+      # Physical specs only: duckdb_max_threads and max_memory_mb are tuning
+      # knobs and must not be reported.
       instance_config = GraphTierConfig.get_instance_config(tier_name)
       instance_type = instance_config.get("type", "")
       vcpus = instance_config.get("vcpus", 0)
@@ -100,7 +86,6 @@ async def get_service_offerings(
         else "Managed infrastructure"
       )
 
-      # Build features list
       features = [
         f"{plan_data.get('monthly_credit_allocation', 0):,} AI credits per graph",
         infrastructure,
@@ -116,7 +101,6 @@ async def get_service_offerings(
 
       graph_limits: dict = tier_config.get("limits", {}).get("graph_limits", {})
       if not graph_limits:
-        # Try from the writer config directly
         graph_limits = GraphTierConfig.get_graph_limits(tier_name)
       storage_limit = graph_limits.get("instance_storage_limit_gb", 0)
       if storage_limit > 0:
@@ -144,7 +128,6 @@ async def get_service_offerings(
 
     graph_tiers.sort(key=lambda x: x["monthly_price_per_graph"])
 
-    # Get repository subscription information directly from manifests
     repositories = []
     for repo_id, manifest in _get_all_manifests().items():
       plans = []
@@ -183,15 +166,12 @@ async def get_service_offerings(
       }
       repositories.append(repo_info)
 
-    # Get operation costs
     base_costs = {
       k: float(v) for k, v in graph_pricing.get("ai_operation_costs", {}).items()
     }
 
-    # Get no-credit operations list
     no_credit_ops = graph_pricing.get("no_credit_operations", [])
 
-    # Get AI token pricing from authoritative source
     from ..config.billing.ai import AIBillingConfig
 
     token_pricing = {}
@@ -216,9 +196,8 @@ async def get_service_offerings(
         ],
       },
       repository_subscriptions={
-        # Per USER, not per organization: access, credits, and volume limits
-        # all key on the subscribing user (UserRepository / UserRepositoryCredits).
-        # There is no org-level sharing of repository access.
+        # Per user, not per org: access, credits and volume limits all key on
+        # the subscribing user.
         "description": "Per-user shared repository access subscriptions",
         "pricing_model": "per_user",
         "repositories": repositories,

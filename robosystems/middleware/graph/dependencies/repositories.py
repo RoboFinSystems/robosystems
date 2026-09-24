@@ -1,7 +1,4 @@
-"""Repository factory dependencies.
-
-FastAPI dependency functions for creating graph repositories.
-"""
+"""FastAPI dependencies that hand out graph repositories."""
 
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -66,13 +63,7 @@ async def get_user_graph_repository(
   operation_type: str = Query("write", description="Operation type: read or write"),
   db: Session = Depends(get_db_session),
 ) -> Repository:
-  """Get a repository specifically for user-created graphs.
-
-  Validates that:
-  1. The graph is a user graph (not shared repository)
-  2. The user has access via GraphUser table
-  3. The requested operation is allowed
-  """
+  """User graphs only; checks GraphUser access and, for writes, a write role."""
   identity = MultiTenantUtils.get_graph_identity(graph_id)
   if not identity.is_user_graph:
     raise HTTPException(
@@ -107,13 +98,7 @@ async def get_shared_repository(
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
 ) -> Repository:
-  """Get a repository for a shared data repository.
-
-  Validates that:
-  1. The repository is a known shared repository
-  2. The user has read access permissions
-  3. Returns read-only repository
-  """
+  """A read-only repository for a shared repository the user can read."""
   if not MultiTenantUtils.is_shared_repository(repository_name):
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,

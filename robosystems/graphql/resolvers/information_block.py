@@ -1,15 +1,7 @@
-"""Information Block GraphQL resolver — cross-domain, always-on.
+"""Information Block GraphQL resolver: cross-domain, always composed, read-only.
 
-Mirrors the :class:`LibraryQuery` pattern: always composed into the
-Query root regardless of which per-domain extension flags are on.
-Uses :func:`open_library_session` so the endpoint works on both the
-library sentinel (`graph_id='library'`) and any tenant graph_id —
-reads are driven by the session's `search_path`, no per-graph
-extension gate needed.
-
-Writes stay on `POST /extensions/roboledger/{g}/operations/create-information-block`
-where the existing registrar pattern mounts them; this module is
-read-only.
+Uses `open_library_session`, so it serves both the `library` sentinel and
+tenant graphs via the session `search_path`.
 """
 
 from __future__ import annotations
@@ -50,10 +42,7 @@ class InformationBlockQuery:
     info: Info[GraphQLContext, None],
     id: strawberry.ID,
     scenario_id: str | None = None,
-    # Nullable rather than `bool = False`: generated SDK clients pass
-    # explicit null for omitted variables, and GraphQL rejects null for a
-    # non-null argument even with a schema default (same contract as the
-    # pagination args in _common.resolve_pagination).
+    # Nullable for codegen clients that send explicit null (see resolve_pagination).
     series: bool | None = None,
     series_history: int | None = None,
     series_forecast: int | None = None,

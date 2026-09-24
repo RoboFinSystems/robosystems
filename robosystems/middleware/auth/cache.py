@@ -42,37 +42,32 @@ class APIKeyCache:
   GRAPH_CACHE_KEY_PREFIX = "apikey_graph:"
   USER_DATA_PREFIX = "user:"
   AUDIT_LOG_RATE_LIMIT_PREFIX = "audit_rate_limit:"
-  AUDIT_LOG_RATE_LIMIT_TTL = CacheDefaults.SHORT  # only log once per user per 5 minutes
+  AUDIT_LOG_RATE_LIMIT_TTL = CacheDefaults.SHORT  # one audit line per user per TTL
   JWT_CACHE_KEY_PREFIX = "jwt:"
   JWT_GRAPH_CACHE_KEY_PREFIX = "jwt_graph:"
 
-  # Rate limiting configuration
   RATE_LIMIT_PREFIX = "rate_limit:"
 
-  # Cache validation configuration
   CACHE_VALIDATION_PREFIX = "cache_val:"
   CACHE_SIGNATURE_PREFIX = "cache_sig:"
-  CACHE_VERSION = "v2.0"  # Version for cache format compatibility
+  CACHE_VERSION = "v2.0"
 
-  # Security thresholds
   MAX_CACHE_AGE_SECONDS = CacheDefaults.JWT_TTL  # max age regardless of TTL
-  CACHE_REFRESH_THRESHOLD = 1200  # 20 minutes - refresh cache if older than this
-  VALIDATION_FAILURE_THRESHOLD = 5  # Max validation failures before security alert
+  CACHE_REFRESH_THRESHOLD = 1200  # re-stamp entries older than this on read
+  VALIDATION_FAILURE_THRESHOLD = 5  # decryption failures before a security event
 
-  # Key rotation configuration
-  KEY_ROTATION_INTERVAL = 86400  # 24 hours - rotate encryption keys daily
+  KEY_ROTATION_INTERVAL = 86400
   KEY_ROTATION_PREFIX = "key_rotation:"
   KEY_GENERATION_PREFIX = "key_gen:"
   KEY_GENERATION_RECHECK_SECONDS = 60
 
-  # Signature optimization configuration
   SIGNATURE_CACHE_PREFIX = "sig_cache:"
-  SIGNATURE_CACHE_TTL = CacheDefaults.SHORT  # cache computed signatures
-  MAX_SIGNATURE_CACHE_SIZE = 1000  # Limit in-memory signature cache size
+  # In-process memo of computed signatures.
+  SIGNATURE_CACHE_TTL = CacheDefaults.SHORT
+  MAX_SIGNATURE_CACHE_SIZE = 1000
 
   def __init__(self):
     self._redis = None
-    # TTLs are runtime-tunable via SSM Parameter Store.
     self.ttl = TuningConfig.get_cache_api_key_ttl()
     self.jwt_ttl = TuningConfig.get_cache_jwt_ttl()
 
@@ -89,7 +84,6 @@ class APIKeyCache:
 
   @property
   def redis(self) -> redis.Redis:
-    """Get Redis connection, creating if needed."""
     if self._redis is None:
       try:
         self._redis = create_redis_client(ValkeyDatabase.AUTH)
@@ -105,11 +99,8 @@ class APIKeyCache:
 
   @property
   def encryption_key(self) -> bytes:
-    """Get the encryption key for the shared key generation.
-
-    Re-reads the generation periodically so every process follows a rotation
-    made by any other, rather than keeping the key it derived at startup.
-    """
+    """The key for the shared key generation, re-read periodically so every
+    process follows a rotation made by any other."""
     now = time.monotonic()
     if (
       self._encryption_key is None
@@ -121,7 +112,6 @@ class APIKeyCache:
 
   @property
   def cipher(self) -> Fernet:
-    """Get Fernet cipher for the current encryption key."""
     key = self.encryption_key
     if self._cipher is None or self._cipher_key != key:
       self._cipher = Fernet(key)
@@ -129,27 +119,21 @@ class APIKeyCache:
     return self._cipher
 
   def _get_api_key_cache_key(self, api_key_hash: str) -> str:
-    """Get cache key for API key data."""
     return f"{self.CACHE_KEY_PREFIX}{api_key_hash}"
 
   def _get_graph_cache_key(self, api_key_hash: str, graph_id: str) -> str:
-    """Get cache key for API key + graph access."""
     return f"{self.GRAPH_CACHE_KEY_PREFIX}{api_key_hash}:{graph_id}"
 
   def _get_user_cache_key(self, user_id: str) -> str:
-    """Get cache key for user data."""
     return f"{self.USER_DATA_PREFIX}{user_id}"
 
   def _get_jwt_cache_key(self, jwt_hash: str) -> str:
-    """Get cache key for JWT validation data."""
     return f"{self.JWT_CACHE_KEY_PREFIX}{jwt_hash}"
 
   def _get_jwt_graph_cache_key(self, user_id: str, graph_id: str) -> str:
-    """Get cache key for JWT user + graph access."""
     return f"{self.JWT_GRAPH_CACHE_KEY_PREFIX}{user_id}:{graph_id}"
 
   def _hash_jwt_token(self, token: str) -> str:
-    """Create a hash of the JWT token for caching."""
     return hashlib.sha256(token.encode()).hexdigest()
 
   def _derive_encryption_key(self) -> bytes:
@@ -515,7 +499,7 @@ class APIKeyCache:
   def _verify_cache_signature(
     self, cache_key: str, data: dict[str, Any], expected_signature: str
   ) -> bool:
-    """Verify cache data integrity using HMAC signature."""
+    """Constant-time HMAC check of cache data."""
     try:
       actual_signature = self._create_cache_signature(cache_key, data)
       is_valid = secrets.compare_digest(actual_signature, expected_signature)
@@ -803,13 +787,8 @@ class APIKeyCache:
           f"JWT user cache session_version mismatch for {user_id}: "
           f"cache={cached_version}, token={session_version}"
         )
-        # Proactively evict the stale entry. Under normal operation
-        # ``_invalidate_auth_cache`` already deleted this on the
-        # version bump; reaching this branch usually means that
-        # delete failed (the documented fail-open window). Removing
-        # it here halves the DB overhead for the rest of the cache
-        # TTL by preventing every subsequent request from also
-        # taking the cache→DB fallthrough.
+        # Normally already evicted on the version bump; reaching here means
+        # that delete failed, so evict now to stop repeated DB fallthrough.
         try:
           self.redis.delete(cache_key, signature_key)
         except Exception as evict_err:
@@ -846,8 +825,6 @@ class APIKeyCache:
         signature_key = f"{self.CACHE_SIGNATURE_PREFIX}user:{user_id}"
         self.redis.delete(cache_key, signature_key)
       except Exception as cleanup_err:
-        # Best-effort cleanup; failure here is non-fatal (the outer return
-        # is already None) but worth a debug breadcrumb for diagnosis.
         logger.debug(
           f"Cleanup of corrupted JWT user cache for {user_id} also failed: "
           f"{cleanup_err}"
@@ -855,12 +832,9 @@ class APIKeyCache:
       return None
 
   def invalidate_jwt_user_data(self, user_id: str) -> bool:
-    """Invalidate JWT user-data cache for a user.
+    """Invalidate a user's JWT user-data cache.
 
-    Returns True on success, False on Redis failure. Callers
-    (notably ``User._invalidate_auth_cache``) use this to drive retries
-    and surface critical failures — do NOT swallow exceptions silently
-    here, the bool is the contract.
+    Returns False on Redis failure; callers drive retries off the bool.
     """
     try:
       cache_key = self._get_user_cache_key(user_id)
@@ -873,14 +847,8 @@ class APIKeyCache:
       return False
 
   def _api_key_cache_keys(self, api_key_hash: str) -> list[str]:
-    """Every Redis key holding state for one API key: the validation entry,
-    its signature, and each cached per-graph access decision.
-
-    Revocation must drop all of them together. The per-graph entries are the
-    ones a partial sweep misses: ``validate_api_key_with_graph`` short-circuits
-    on a cached allow, so a surviving ``apikey_graph:`` entry keeps a revoked
-    key inside the graph until TTL even after the validation entry is gone.
-    """
+    """Every Redis key holding state for one API key, including its per-graph
+    access decisions: revocation must drop them all together."""
     api_key_cache_key = self._get_api_key_cache_key(api_key_hash)
     signature_key = f"{self.CACHE_SIGNATURE_PREFIX}{api_key_hash}"
 
@@ -893,10 +861,8 @@ class APIKeyCache:
     return [api_key_cache_key, signature_key, *graph_keys, *signature_keys]
 
   def invalidate_api_key(self, api_key_hash: str) -> bool:
-    """Drop every cached record for an API key: validation, signature, and
-    per-graph access decisions. Returns True when the deletes took; False
-    means an entry may survive until TTL, which revocation callers must
-    treat as incomplete.
+    """Drop every cached record for an API key. False means an entry may
+    survive until TTL, which revocation callers must treat as incomplete.
     """
     try:
       keys_to_delete = self._api_key_cache_keys(api_key_hash)
@@ -971,8 +937,7 @@ class APIKeyCache:
     """Invalidate a user's cached JWT graph access, or all of it when
     `graph_id` is None.
 
-    Returns True on success, False on Redis failure. The bool is the
-    contract for callers driving retries — see ``invalidate_jwt_user_data``.
+    Returns False on Redis failure; callers drive retries off the bool.
     """
     try:
       if graph_id:
@@ -996,11 +961,10 @@ class APIKeyCache:
   def invalidate_user_graph_access(
     self, user_id: str, graph_id: str | None = None
   ) -> None:
-    """Invalidate cached API-key graph access, for one graph or all of them.
+    """Invalidate cached API-key graph access, for one graph or all.
 
-    The API-key cache is keyed by key hash, not user, so this matches by
-    pattern and clears every key's entry for the graph rather than only
-    this user's — over-invalidating instead of leaving a stale grant.
+    Keyed by key hash, not user, so every key's entry for the graph is
+    cleared: over-invalidating rather than leaving a stale grant.
     """
     try:
       if graph_id:
@@ -1021,10 +985,7 @@ class APIKeyCache:
   def invalidate_user_data(self, user_id: str) -> None:
     """Drop every cache entry embedding this user's profile or grants.
 
-    Covers the user-keyed JWT cache, any API key or JWT entry whose payload
-    names this user (each API key's per-graph access decisions go with it),
-    and their JWT graph access. Call after a profile change or a grant
-    revocation so no surface keeps serving the old record.
+    Call after a profile change or grant revocation.
     """
     try:
       invalidated_count = 0
@@ -1041,23 +1002,14 @@ class APIKeyCache:
         try:
           cached_data = cast(str | None, self.redis.get(key))
           if cached_data:
-            # Entries are written through _encrypt_cache_data, so they are
-            # base64(fernet(json)) — a plain json.loads raised on every entry
-            # and the except below swallowed it, which meant no API-key entry
-            # was ever evicted. Decrypt through the same helper the read path
-            # uses; it returns the inner payload, so user_data is at the top.
             data = self._decrypt_cache_data(cached_data)
             api_key_hash = key[len(self.CACHE_KEY_PREFIX) :]
             if data is None:
-              # Unreadable here (another key generation): it may name this
-              # user, so drop it rather than let it outlive the revocation.
+              # Unreadable (another key generation): it may name this user.
               self.redis.delete(*self._api_key_cache_keys(api_key_hash))
               continue
             user_data = data.get("user_data", {})
             if user_data.get("id") == user_id:
-              # Drop the key's per-graph access decisions along with the
-              # validation entry: a revoked grant is what brought us here,
-              # and a cached allow on that graph would outlive it.
               self.redis.delete(*self._api_key_cache_keys(api_key_hash))
               invalidated_count += 1
         except Exception as e:
@@ -1070,8 +1022,6 @@ class APIKeyCache:
         try:
           cached_data = cast(str | None, self.redis.get(key))
           if cached_data:
-            # Same defect as the API-key loop above: JWT entries are written
-            # encrypted too, so json.loads never succeeded here either.
             data = self._decrypt_cache_data(cached_data)
             if data is None:
               self.redis.delete(key)
@@ -1091,7 +1041,6 @@ class APIKeyCache:
       logger.error(f"Failed to invalidate user data cache for user {user_id}: {e}")
 
   def get_cache_stats(self) -> dict[str, Any]:
-    """Get cache statistics including security metrics."""
     try:
       info = cast(dict[str, Any], self.redis.info())
       api_key_count = len(cast(list[str], self.redis.keys(f"{self.CACHE_KEY_PREFIX}*")))
@@ -1102,9 +1051,7 @@ class APIKeyCache:
       jwt_graph_count = len(
         cast(list[str], self.redis.keys(f"{self.JWT_GRAPH_CACHE_KEY_PREFIX}*"))
       )
-      # Revocations are written by `middleware/auth/jwt.revoke_jwt_token` on
-      # the same AUTH database, keyed by `jti`. Counted from the shared prefix
-      # constant so this metric cannot drift off the store it reports on.
+      # Written by `jwt.revoke_jwt_token` on the same database.
       jwt_revoked_count = len(
         cast(list[str], self.redis.keys(f"{JWT_REVOCATION_KEY_PREFIX}*"))
       )
@@ -1151,24 +1098,20 @@ class APIKeyCache:
       return {"connected": False, "error": str(e)}
 
   def _should_log_audit_event(self, user_id: str, event_type: str) -> bool:
-    """Return True unless this (user, event_type) was logged recently.
-
-    Keeps routine low-risk events such as cache hits from flooding the
-    audit stream. Errors default to logging.
-    """
+    """True unless this (user, event_type) was logged recently; errors log."""
     try:
       rate_limit_key = f"{self.AUDIT_LOG_RATE_LIMIT_PREFIX}{user_id}:{event_type}"
 
       existing = self.redis.get(rate_limit_key)
       if existing:
-        return False  # Rate limited
+        return False
 
       self.redis.setex(rate_limit_key, self.AUDIT_LOG_RATE_LIMIT_TTL, "1")
-      return True  # Not rate limited, log the event
+      return True
 
     except Exception as e:
       logger.debug(f"Failed to check audit rate limit: {e}")
-      return True  # Default to logging on error
+      return True
 
   def perform_cache_integrity_audit(self) -> dict[str, Any]:
     """Scan every cache entry and report decryption, signature, and

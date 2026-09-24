@@ -57,12 +57,9 @@ __all__ = [
   "BLOCKED_SHARED_ENDPOINTS",
   "SUBSCRIPTION_RATE_LIMITS",
   "AllowedSharedEndpoints",
-  # Download rate limits
   "DownloadRateLimiter",
-  # Repository rate limits
   "DualLayerRateLimiter",
   "EndpointCategory",
-  # Headers middleware
   "RateLimitHeaderMiddleware",
   "SharedRepositoryRateLimits",
   "analytics_rate_limit_dependency",
@@ -74,7 +71,6 @@ __all__ = [
   "create_custom_rate_limit_dependency",
   "general_api_rate_limit_dependency",
   "get_endpoint_category",
-  # Subscription rate limits
   "get_subscription_rate_limit",
   "graph_scoped_rate_limit_dependency",
   "logout_rate_limit_dependency",
@@ -86,9 +82,7 @@ __all__ = [
   "oidc_rate_limit_dependency",
   "passkey_management_rate_limit_dependency",
   "public_api_rate_limit_dependency",
-  # Cache
   "rate_limit_cache",
-  # Main rate limiting
   "rate_limit_dependency",
   "scim_ip_rate_limit_dependency",
   "scim_rate_limit_dependency",

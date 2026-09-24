@@ -1,6 +1,4 @@
-"""
-Subgraph info endpoint.
-"""
+"""Subgraph info endpoint."""
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.exc import SQLAlchemyError
@@ -56,7 +54,6 @@ async def get_subgraph_info(
   handle_circuit_breaker_check(graph_id, "subgraph_info")
 
   try:
-    # Get and verify subgraph using subgraph name
     subgraph = get_subgraph_by_name(graph_id, subgraph_name, session, current_user)
 
     if not subgraph.is_subgraph:
@@ -65,22 +62,17 @@ async def get_subgraph_info(
         detail=f"{subgraph.graph_id} is not a subgraph. Use the regular graph info endpoint.",
       )
 
-    # Same source as the list read, so the two agree. One instance-wide
-    # breakdown covers every subgraph on the parent's box; None means "could
-    # not measure", which is distinct from an empty subgraph's genuine 0.
+    # Same source as the list read, so the two agree; None means unmeasured.
     from .main import get_subgraph_sizes
 
     sizes = await get_subgraph_sizes(graph_id)
     size_bytes = sizes.get(subgraph.graph_id)
     size_mb = round(size_bytes / (1024 * 1024), 6) if size_bytes is not None else None
 
-    # Node and edge counts still need a Graph API read this endpoint doesn't
-    # make; size was the field that disagreed across surfaces.
     node_count = None
     edge_count = None
     last_accessed = None
 
-    # Log successful info retrieval
     api_logger.info(
       f"Retrieved subgraph info for {subgraph.graph_id} by user {current_user.id}"
     )
@@ -88,7 +80,6 @@ async def get_subgraph_info(
     record_operation_metrics(start_time, "info", graph_id)
     log_metric("subgraph_info_retrieved", 1, {"subgraph": subgraph.graph_id})
 
-    # Mark circuit breaker success
     circuit_breaker.record_success(graph_id, "subgraph_info")
 
     return SubgraphResponse(
@@ -120,9 +111,7 @@ async def get_subgraph_info(
     raise
   except SQLAlchemyError as e:
     logger.error(f"Database error getting subgraph info: {e}")
-    # Record failure metric
     log_metric("subgraph_info_failed", 1, {"error_type": "database"})
-    # Mark circuit breaker failure
     circuit_breaker.record_failure(graph_id, "subgraph_info")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -130,9 +119,7 @@ async def get_subgraph_info(
     )
   except Exception as e:
     logger.error(f"Unexpected error getting subgraph info: {e}", exc_info=True)
-    # Record failure metric
     log_metric("subgraph_info_failed", 1, {"error_type": "unexpected"})
-    # Mark circuit breaker failure
     circuit_breaker.record_failure(graph_id, "subgraph_info")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

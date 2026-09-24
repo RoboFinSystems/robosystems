@@ -1,15 +1,10 @@
 """MCP OAuth 2.1 authorization server — the wire surface.
 
-Exactly what MCP clients need and nothing more (spec decision #2): RFC 8414
-metadata, RFC 9728 protected-resource metadata for both MCP routes, the
-authorization-code flow with PKCE (the consent screen lives on the login
-home), the token endpoint with refresh rotation, RFC 7009 revocation, and
-RFC 7591 dynamic registration. Everything is gated on ``MCP_OAUTH_ENABLED``
-and answers 404 when the flag is off, so the surface is invisible rather
-than merely refusing.
-
-Every endpoint is excluded from the OpenAPI schema: this is a protocol
-surface for OAuth clients, not part of the SDK-facing API.
+Exactly what MCP clients need: RFC 8414 metadata, RFC 9728 protected-resource
+metadata for both MCP routes, the authorization-code flow with PKCE (consent
+lives on the login home), the token endpoint with refresh rotation, RFC 7009
+revocation, and RFC 7591 dynamic registration. Gated on ``MCP_OAUTH_ENABLED``
+(404 when off) and excluded from OpenAPI: a protocol surface, not SDK API.
 """
 
 import base64

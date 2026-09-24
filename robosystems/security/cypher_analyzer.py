@@ -1,10 +1,7 @@
 """
-Cypher query analysis for write operation detection.
-
-The sole write barrier for the Cypher query surface: every read-only path
-classifies its query here before execution. Analysis fails closed — an
-unparseable query, or a `CALL` form outside the read-only allowlist, is
-treated as a write.
+Cypher query classification: the sole write barrier for the Cypher query
+surface. Fails closed — an unparseable query, or a `CALL` outside the
+read-only allowlist, is treated as a write.
 """
 
 import logging
@@ -15,9 +12,7 @@ from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
-# What `_clean_query` substitutes for a backtick-quoted identifier. Named so
-# the CALL-target checks can recognise "the name was quoted" without ever
-# reading the raw (unmasked) query.
+# What `_clean_query` substitutes for a backtick-quoted identifier.
 _IDENTIFIER_PLACEHOLDER = "IDENTIFIER"
 
 
@@ -33,11 +28,9 @@ class GuardedStringMatch(NamedTuple):
 
 
 class CypherOperationType(Enum):
-  """Types of Cypher operations."""
-
   READ = "read"
   WRITE = "write"
-  MIXED = "mixed"  # Contains both read and write operations
+  MIXED = "mixed"
 
 
 class CypherSecurityAnalyzer:
@@ -48,7 +41,6 @@ class CypherSecurityAnalyzer:
   any keyword matching, so data can never hide code from the classifier.
   """
 
-  # Definitive write operation keywords (must be exact matches)
   WRITE_KEYWORDS = {
     "CREATE",
     "MERGE",
@@ -62,14 +54,13 @@ class CypherSecurityAnalyzer:
     "UPDATE",
   }
 
-  # Bulk operation keywords that should use dedicated endpoints
+  # Belong on the dedicated staging endpoints
   BULK_KEYWORDS = {
     "COPY",
     "LOAD",
     "IMPORT",
   }
 
-  # Administrative operations that require special permissions
   ADMIN_KEYWORDS = {
     "EXPORT",
     "INSTALL",
@@ -77,7 +68,6 @@ class CypherSecurityAnalyzer:
     "USE",
   }
 
-  # Schema DDL operations that modify graph structure
   SCHEMA_DDL_KEYWORDS = {
     "CREATE NODE TABLE",
     "CREATE REL TABLE",
@@ -90,7 +80,6 @@ class CypherSecurityAnalyzer:
     "RENAME COLUMN",
   }
 
-  # System procedure calls that may need restrictions
   SYSTEM_PROCEDURES = {
     "show_warnings",
     "clear_warnings",
@@ -101,16 +90,9 @@ class CypherSecurityAnalyzer:
     "show_connection",
   }
 
-  # Procedures permitted on a read-only path. This is an ALLOWLIST and the
-  # classifier fails closed: a `CALL` to anything not named here is treated
-  # as a write, because the engine's procedure surface includes index DDL
-  # and session-configuration verbs that the keyword patterns below cannot
-  # see (those keywords are matched on `\b` word boundaries, and `_` is a
-  # word character, so an underscore-joined procedure name never matches).
-  #
-  # Keep this list minimal. A legitimate read procedure that is missing
-  # shows up as a refused query — safe, visible, and a one-line fix. The
-  # inverse mistake is silent.
+  # Fail-closed allowlist: a `CALL` to anything else is a write, since the
+  # keyword patterns cannot see procedure-level DDL. Keep it minimal; a missing
+  # read procedure fails visibly, an extra write one silently.
   READ_ONLY_PROCEDURES = {
     "show_tables",
     "table_info",
@@ -124,20 +106,12 @@ class CypherSecurityAnalyzer:
     "query_fts_index",
   }
 
-  # Procedures that execute a *statement supplied as a string argument*.
-  # Static analysis classifies the CALL, never the payload: `_clean_query`
-  # masks string literals precisely so keyword detection sees code and not
-  # data, which means every family gate (bulk / admin / DDL) is blind to
-  # what such a procedure will run. The write gate already fails closed on
-  # any CALL outside READ_ONLY_PROCEDURES, but a caller who legitimately
-  # holds write access (a subgraph member) passes that gate — so these are
-  # refused outright on every surface, regardless of role. Names are
-  # matched case-insensitively against the CALL target.
+  # Procedures that run a statement passed as a string, which static analysis
+  # cannot classify; refused outright on every surface, regardless of role.
   OPAQUE_STATEMENT_PROCEDURES = {
     "gql",
   }
 
-  # Read-only keywords that should never trigger write detection
   READ_KEYWORDS = {
     "MATCH",
     "RETURN",
@@ -204,40 +178,27 @@ class CypherSecurityAnalyzer:
   _CLOSERS = frozenset(")]}")
 
   def __init__(self):
-    """Initialize the analyzer with compiled patterns."""
-    # Pattern to find potential write keywords (case-insensitive)
     self.write_pattern = re.compile(
       r"\b(" + "|".join(self.WRITE_KEYWORDS) + r")\b", re.IGNORECASE
     )
 
-    # Pattern to find bulk operation keywords (case-insensitive)
     self.bulk_pattern = re.compile(
       r"\b(" + "|".join(self.BULK_KEYWORDS) + r")\b", re.IGNORECASE
     )
 
-    # Pattern to find admin operation keywords (case-insensitive)
     self.admin_pattern = re.compile(
       r"\b(" + "|".join(self.ADMIN_KEYWORDS) + r")\b", re.IGNORECASE
     )
 
-    # Pattern to find CALL procedures. Dots are allowed so namespaced
-    # procedure names resolve as one identifier rather than matching on
-    # their prefix alone.
+    # Dots allowed so a namespaced procedure name resolves as one identifier.
     self.call_pattern = re.compile(r"\bCALL\s+([\w.]+)\s*\(", re.IGNORECASE)
 
-    # `CALL <setting> = <value>` is the session-configuration form. It takes
-    # no parentheses, so the procedure pattern above never sees it.
+    # `CALL <setting> = <value>`: session configuration, no parentheses.
     self.call_assignment_pattern = re.compile(r"\bCALL\s+([\w.]+)\s*=", re.IGNORECASE)
 
-    # Statement-leading transaction control / checkpoint — see
-    # `_find_admin_operations`.
     self.transaction_control_pattern = re.compile(
       r"(?:^|;)\s*(BEGIN|COMMIT|ROLLBACK|CHECKPOINT)\b", re.IGNORECASE
     )
-
-    # Comments, string literals, and backtick identifiers are masked by the
-    # single-pass scanner in `_clean_query` (not by regex) so an in-string
-    # comment marker can't hide a trailing write keyword.
 
   def analyze_query(self, query: str) -> CypherOperationType:
     """
@@ -250,17 +211,13 @@ class CypherSecurityAnalyzer:
     if not query or not isinstance(query, str):
       raise ValueError("Query must be a non-empty string")
 
-    # Basic security validations
     self._validate_query_security(query)
 
-    # Remove comments and strings to avoid false positives
     cleaned_query = self._clean_query(query)
 
-    # Analyze the cleaned query for write operations
     write_operations = self._find_write_operations(cleaned_query)
     read_operations = self._find_read_operations(cleaned_query)
 
-    # Determine operation type
     if write_operations and read_operations:
       return CypherOperationType.MIXED
     elif write_operations:
@@ -275,7 +232,6 @@ class CypherSecurityAnalyzer:
       return operation_type in (CypherOperationType.WRITE, CypherOperationType.MIXED)
     except Exception as e:
       logger.warning(f"Query analysis failed, defaulting to write operation: {e}")
-      # Default to treating as write operation for security
       return True
 
   def is_schema_ddl(self, query: str) -> bool:
@@ -296,7 +252,6 @@ class CypherSecurityAnalyzer:
       return len(bulk_ops) > 0
     except Exception as e:
       logger.warning(f"Bulk operation analysis failed: {e}")
-      # Default to false for bulk operations
       return False
 
   def is_admin_operation(self, query: str) -> bool:
@@ -307,17 +262,14 @@ class CypherSecurityAnalyzer:
       return len(admin_ops) > 0
     except Exception as e:
       logger.warning(f"Admin operation analysis failed: {e}")
-      # Default to true for safety with admin operations
       return True
 
   def is_non_read_call(self, query: str) -> bool:
     """Check if a query contains CALL forms that are not read-only.
 
-    True for procedure invocations outside READ_ONLY_PROCEDURES and for
-    session-configuration assignments. Exists for validators that gate on
-    the operation *family* (bulk / admin / DDL) rather than on
-    `is_write_operation`, so they can still refuse the CALL surface without
-    refusing ordinary graph writes.
+    For validators that gate on operation family rather than
+    `is_write_operation`, so they can refuse the CALL surface without refusing
+    ordinary graph writes. Fails closed.
     """
     try:
       cleaned_query = self._clean_query(query)
@@ -334,20 +286,13 @@ class CypherSecurityAnalyzer:
       return len(system_calls) > 0
     except Exception as e:
       logger.warning(f"System call analysis failed: {e}")
-      # Default to false for system calls
       return False
 
   def has_opaque_statement_call(self, query: str) -> bool:
     """Check whether a query calls a procedure in OPAQUE_STATEMENT_PROCEDURES.
 
-    A backtick-quoted CALL target counts too. The engine resolves
-    ``CALL `GQL`(...)`` to the same procedure as ``CALL GQL(...)``, but
-    ``_clean_query`` has already masked the quoted name to a placeholder by
-    the time it is inspected here — so a name-based check cannot see it.
-    Nothing legitimate quotes a procedure name; refusing the shape closes
-    the evasion without weakening the masking the classifier depends on.
-
-    Fails closed: if analysis raises, the query is treated as containing one.
+    A backtick-quoted CALL target also counts, since its name is masked and
+    nothing legitimate quotes one. Fails closed.
     """
     try:
       cleaned_query = self._clean_query(query)
@@ -367,14 +312,10 @@ class CypherSecurityAnalyzer:
   ) -> GuardedStringMatch | None:
     """Find a string-match predicate applied to a guarded ``Label.property``.
 
-    A guarded property counts when it appears anywhere in either operand of
-    CONTAINS / STARTS WITH / ENDS WITH / ``=~`` or in a call to one of
-    STRING_MATCH_FUNCTIONS — so ``lower(f.value) CONTAINS ...`` matches, while
-    a statement that string-matches one property and merely returns a guarded
-    one does not. An alias carries its expression with it, so
-    ``WITH f.value AS v WHERE v CONTAINS ...`` matches too. The variable's
-    label is read from the node patterns; when it cannot be, the property
-    name alone decides.
+    A guarded property counts anywhere in either operand of a string-match
+    operator or STRING_MATCH_FUNCTIONS call, including through an ``AS`` alias;
+    merely returning it does not. When the variable's label can't be read, the
+    property name alone decides.
 
     Returns None when nothing matches, and when analysis fails.
     """
@@ -525,22 +466,14 @@ class CypherSecurityAnalyzer:
     return None
 
   def _validate_query_security(self, query: str) -> None:
-    """
-    Perform basic security validations on the query.
-
-    Raises:
-        ValueError: If the query appears suspicious or dangerous
-    """
-    # Check for excessively long queries (potential DoS)
-    if len(query) > 100000:  # 100KB limit
+    """Raise ValueError for an oversized or suspicious query."""
+    if len(query) > 100000:
       raise ValueError("Query exceeds maximum allowed length")
 
-    # Check for suspicious nested comment patterns
     nested_comments = query.count("/*") - query.count("*/")
     if nested_comments != 0:
       raise ValueError("Unbalanced comment blocks detected")
 
-    # Check for potential injection patterns
     suspicious_patterns = [
       r";\s*CREATE\s+USER",
       r";\s*DROP\s+DATABASE",
@@ -555,21 +488,11 @@ class CypherSecurityAnalyzer:
 
   def _clean_query(self, query: str) -> str:
     """
-    Mask comments, string literals, and backtick-quoted identifiers so that
-    keyword detection only ever sees *code*, not data.
+    Mask comments, string literals, and backtick-quoted identifiers so keyword
+    detection only ever sees code, not data.
 
-    This is a single left-to-right scan that decides context (string vs.
-    comment vs. identifier vs. code) at each position. A staged
-    strip-comments-then-strings approach is unsafe: a ``//`` (or ``/*``)
-    sequence *inside* a string literal would be treated as a comment and eat a
-    real write keyword that follows the closed string
-    (e.g. ``... WHERE n.x = '//' CREATE (m) ...``), causing a write to be
-    misclassified as a read. Scanning once, quotes toggle string context
-    before any comment marker is honoured, so an in-string ``//`` can never
-    hide the code after the string.
-
-    Comments are blanked and strings/identifiers become neutral placeholder
-    tokens.
+    One left-to-right scan so string context is decided before any comment
+    marker; staged regex stripping lets data hide code.
     """
     out: list[str] = []
     i = 0
@@ -577,22 +500,20 @@ class CypherSecurityAnalyzer:
     while i < n:
       ch = query[i]
 
-      # Line comment: // ... to end of line
       if ch == "/" and i + 1 < n and query[i + 1] == "/":
         nl = query.find("\n", i)
         i = n if nl == -1 else nl
         out.append(" ")
         continue
 
-      # Block comment: /* ... */  (unbalanced -> consume to end; the security
-      # pre-check already rejects unbalanced blocks fail-closed)
+      # Unbalanced blocks are already rejected by _validate_query_security.
       if ch == "/" and i + 1 < n and query[i + 1] == "*":
         end = query.find("*/", i + 2)
         i = n if end == -1 else end + 2
         out.append(" ")
         continue
 
-      # String literal: '...' or "..."  (backslash escapes the next char)
+      # Backslash escapes the next char inside a string literal.
       if ch == "'" or ch == '"':
         quote = ch
         i += 1
@@ -607,15 +528,9 @@ class CypherSecurityAnalyzer:
         out.append(" STRING_LITERAL ")
         continue
 
-      # Backtick-quoted identifier. Kuzu/openCypher do NOT use backslash
-      # escaping inside backtick identifiers: a backslash is a literal
-      # character and the identifier closes at the next backtick (an escaped
-      # backtick is written by doubling it). This tokenizer must match the
-      # engine lexer exactly, so close at the FIRST backtick and do not
-      # honour backslash. Any divergence here changes which keywords the
-      # classifier can see. The rule is conservative w.r.t. doubled-backtick
-      # identifiers (the analyzer may split them into two tokens), which only
-      # ever over-classifies a write, never hides one.
+      # Backtick identifiers have no backslash escaping in the engine lexer;
+      # close at the first backtick to match it exactly. Doubled backticks
+      # split into two tokens, which can only over-classify.
       if ch == "`":
         i += 1
         while i < n:
@@ -635,7 +550,6 @@ class CypherSecurityAnalyzer:
     """Find write operation keywords in the cleaned query."""
     found_operations = set()
 
-    # Find all potential write keywords
     matches = self.write_pattern.finditer(query)
 
     for match in matches:
@@ -646,11 +560,7 @@ class CypherSecurityAnalyzer:
       if self._validate_keyword_context(query, keyword, start_pos):
         found_operations.add(keyword)
 
-    # `CALL` is a verb the keyword patterns above cannot classify, so it is
-    # scanned separately. Folding the result in here (rather than into a
-    # separate public predicate) is deliberate: `is_write_operation` and
-    # `analyze_query` are the two gates every surface actually calls, and
-    # both read from this set.
+    # Folded in here because every surface gates on the two callers of this.
     found_operations |= self._find_call_operations(query)
 
     return found_operations
@@ -658,17 +568,9 @@ class CypherSecurityAnalyzer:
   def _find_call_operations(self, query: str) -> set[str]:
     """Find `CALL` forms that must not be treated as reads.
 
-    Two forms, neither reachable by the word-boundary keyword patterns:
-
-    - ``CALL <name>(...)`` — a procedure invocation. Fails closed: anything
-      outside ``READ_ONLY_PROCEDURES`` counts as a write, since the engine's
-      procedure surface includes index DDL whose names are underscore-joined
-      and therefore invisible to a ``\\b``-anchored keyword match.
-    - ``CALL <name> = <value>`` — session configuration. Always a write: it
-      mutates connection state that outlives the statement, and connections
-      are pooled and shared.
-
-    Returns normalized markers (``CALL:<name>`` / ``CALL_SET:<name>``).
+    A procedure outside ``READ_ONLY_PROCEDURES`` (fail closed), or any
+    ``CALL <name> = <value>`` (session state on a pooled connection). Returns
+    ``CALL:<name>`` / ``CALL_SET:<name>`` markers.
     """
     found: set[str] = set()
 
@@ -686,7 +588,6 @@ class CypherSecurityAnalyzer:
     """Find read operation keywords in the cleaned query."""
     found_operations = set()
 
-    # Create pattern for read keywords
     read_pattern = re.compile(
       r"\b(" + "|".join(self.READ_KEYWORDS) + r")\b", re.IGNORECASE
     )
@@ -702,7 +603,6 @@ class CypherSecurityAnalyzer:
     """Find bulk operation keywords in the cleaned query."""
     found_operations = set()
 
-    # Find all potential bulk keywords
     matches = self.bulk_pattern.finditer(query)
 
     for match in matches:
@@ -719,7 +619,6 @@ class CypherSecurityAnalyzer:
     """Find administrative operation keywords in the cleaned query."""
     found_operations = set()
 
-    # Find all potential admin keywords
     matches = self.admin_pattern.finditer(query)
 
     for match in matches:
@@ -730,21 +629,15 @@ class CypherSecurityAnalyzer:
       if self._validate_keyword_context(query, keyword, start_pos):
         found_operations.add(keyword)
 
-    # Special case: IMPORT/EXPORT DATABASE are admin operations
     if re.search(r"\b(IMPORT|EXPORT)\s+DATABASE\b", query, re.IGNORECASE):
       found_operations.add("DATABASE_MIGRATION")
 
-    # Special case: DETACH DATABASE is an admin operation (but not DETACH DELETE)
+    # DETACH DATABASE, not DETACH DELETE
     if re.search(r"\bDETACH\s+DATABASE\b", query, re.IGNORECASE):
       found_operations.add("DETACH_DATABASE")
 
-    # Transaction control and CHECKPOINT. Every request runs in its own
-    # auto-transaction; a manual BEGIN leaves a transaction open on a pooled
-    # engine connection that the next borrower inherits — a read-only one
-    # refuses their writes, a write one holds locks against ingestion and
-    # every other tenant of a shared database — and CHECKPOINT is an
-    # engine-level maintenance verb. Matched at statement start (or after a
-    # `;`) so a property named `begin` or `commit` in a read is untouched.
+    # Manual transactions would outlive the request on a pooled connection.
+    # Anchored at statement start so a property named `begin` still reads.
     if self.transaction_control_pattern.search(query):
       found_operations.add("TRANSACTION_CONTROL")
 
@@ -754,7 +647,6 @@ class CypherSecurityAnalyzer:
     """Find system procedure calls in the cleaned query."""
     found_calls = set()
 
-    # Find all CALL statements
     matches = self.call_pattern.finditer(query)
 
     for match in matches:
@@ -768,43 +660,32 @@ class CypherSecurityAnalyzer:
     """Find schema DDL keywords in the cleaned query."""
     found_operations = set()
 
-    # Check for CREATE NODE/REL TABLE
     if re.search(r"\bCREATE\s+(NODE|REL)\s+TABLE\b", query, re.IGNORECASE):
       found_operations.add("CREATE_TABLE")
 
-    # Check for DROP NODE/REL TABLE
     if re.search(r"\bDROP\s+(NODE|REL)\s+TABLE\b", query, re.IGNORECASE):
       found_operations.add("DROP_TABLE")
 
-    # Check for bare CREATE/DROP TABLE. LadybugDB/Kuzu drops with `DROP TABLE
-    # <name>` (no NODE/REL qualifier), which the qualified regexes above miss —
-    # leaving a table-destroying statement classified as a plain write.
+    # The engine also accepts unqualified `DROP TABLE <name>`.
     if re.search(r"\b(CREATE|DROP)\s+TABLE\b", query, re.IGNORECASE):
       found_operations.add("TABLE_DDL")
 
-    # Check for CREATE/DROP INDEX (incl. vector/FTS indexes) and SEQUENCE —
-    # DDL that is_write_operation would otherwise pass through as a write.
     if re.search(r"\b(CREATE|DROP)\s+INDEX\b", query, re.IGNORECASE):
       found_operations.add("INDEX_DDL")
     if re.search(r"\b(CREATE|DROP)\s+SEQUENCE\b", query, re.IGNORECASE):
       found_operations.add("SEQUENCE_DDL")
 
-    # Check for ALTER TABLE
     if re.search(r"\bALTER\s+TABLE\b", query, re.IGNORECASE):
       found_operations.add("ALTER_TABLE")
 
-    # Check for ADD/DROP/RENAME COLUMN
     if re.search(r"\b(ADD|DROP|RENAME)\s+COLUMN\b", query, re.IGNORECASE):
       found_operations.add("MODIFY_COLUMN")
 
-    # Check for RENAME TABLE
     if re.search(r"\bRENAME\s+TABLE\b", query, re.IGNORECASE):
       found_operations.add("RENAME_TABLE")
 
-    # COMMENT ON is a catalog write: it changes what `CALL show_tables()`
-    # returns to every reader of the database, and the write keyword set
-    # never sees it (`comment` is far too common a property name to match
-    # bare). The two-word form is unambiguous.
+    # A catalog write the keyword set can't see (`comment` is a common
+    # property name, so only the two-word form is matched).
     if re.search(r"\bCOMMENT\s+ON\b", query, re.IGNORECASE):
       found_operations.add("COMMENT_ON")
 
@@ -824,8 +705,6 @@ class CypherSecurityAnalyzer:
 
   def get_write_operation_details(self, query: str) -> dict:
     """
-    Get detailed information about write operations in the query.
-
     On analysis failure the result reports ``is_write_operation: True`` and
     ``analysis_successful: False`` — callers must treat it as a write.
     """
@@ -851,7 +730,7 @@ class CypherSecurityAnalyzer:
       logger.error(f"Query analysis failed: {e}")
       return {
         "operation_type": "unknown",
-        "is_write_operation": True,  # Default to safe assumption
+        "is_write_operation": True,
         "is_bulk_operation": False,
         "write_keywords_found": [],
         "read_keywords_found": [],
@@ -862,64 +741,37 @@ class CypherSecurityAnalyzer:
       }
 
 
-# Global instance for use throughout the application
 cypher_analyzer = CypherSecurityAnalyzer()
 
 
 def is_write_operation(query: str) -> bool:
-  """Determine whether a Cypher query contains write operations.
-
-  The single entry point for write detection — read-only paths must gate on
-  this rather than pattern-matching the query themselves.
-  """
+  """The single write-detection gate; read-only paths must not pattern-match
+  queries themselves."""
   return cypher_analyzer.is_write_operation(query)
 
 
 def is_bulk_operation(query: str) -> bool:
-  """
-  Determine whether a Cypher query contains bulk operations (COPY, LOAD, IMPORT).
-
-  These belong on the staging and materialization path, not the general
-  /query endpoint.
-  """
+  """COPY / LOAD / IMPORT, which belong on the staging path, not /query."""
   return cypher_analyzer.is_bulk_operation(query)
 
 
 def is_admin_operation(query: str) -> bool:
-  """
-  Determine whether a Cypher query contains administrative operations.
-
-  EXPORT, INSTALL, ATTACH, DETACH, USE and the database-level forms; these
-  require admin privileges.
-  """
+  """EXPORT, INSTALL, ATTACH, DETACH, USE and the database-level forms."""
   return cypher_analyzer.is_admin_operation(query)
 
 
 def is_non_read_call(query: str) -> bool:
-  """
-  Determine whether a Cypher query contains CALL forms that are not read-only.
-
-  Procedure invocations outside the read-only allowlist and session
-  configuration assignments both count. For validators gating on operation
-  family rather than write-ness.
-  """
+  """See ``CypherSecurityAnalyzer.is_non_read_call``."""
   return cypher_analyzer.is_non_read_call(query)
 
 
 def has_system_calls(query: str) -> bool:
-  """Determine whether a Cypher query calls a system procedure."""
   return cypher_analyzer.has_system_calls(query)
 
 
 def has_opaque_statement_call(query: str) -> bool:
-  """
-  Determine whether a Cypher query calls a procedure that executes a
-  statement supplied as a string (e.g. ``CALL GQL('...')``).
-
-  Such calls defeat static authorization by construction — the payload is a
-  string literal the analyzer deliberately does not read — so callers refuse
-  them outright rather than classifying them.
-  """
+  """Whether the query calls a procedure that runs a string-supplied
+  statement; callers refuse these outright rather than classifying them."""
   return cypher_analyzer.has_opaque_statement_call(query)
 
 
@@ -927,25 +779,17 @@ def find_guarded_string_match(
   query: str, guarded_properties: Iterable[str]
 ) -> GuardedStringMatch | None:
   """
-  Find a string-match predicate applied to one of ``guarded_properties``.
-
-  Each entry is ``"Label.property"``. A repository declares the text columns
-  it does not serve through Cypher string matching; callers refuse a statement
-  this returns a match for.
+  Find a string-match predicate on one of ``guarded_properties``
+  (``"Label.property"`` entries); callers refuse a statement that matches.
   """
   return cypher_analyzer.find_guarded_string_match(query, guarded_properties)
 
 
 def is_schema_ddl(query: str) -> bool:
-  """
-  Determine whether a Cypher query contains schema DDL operations.
-
-  These modify graph structure (CREATE/DROP/ALTER TABLE, INDEX, SEQUENCE) and
-  are restricted so a graph's schema stays immutable after creation.
-  """
+  """Table, index, sequence and column DDL; a graph's schema is immutable
+  after creation."""
   return cypher_analyzer.is_schema_ddl(query)
 
 
 def analyze_cypher_query(query: str) -> dict:
-  """Analyze a Cypher query and return detailed classification results."""
   return cypher_analyzer.get_write_operation_details(query)

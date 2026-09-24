@@ -64,12 +64,10 @@ async def stream_operation_events(
   _rate_limit: None = Depends(sse_connection_rate_limit_dependency),
 ) -> EventSourceResponse:
   try:
-    # Verify operation exists and user has access
     event_storage = get_event_storage()
     metadata = await event_storage.get_operation_metadata(operation_id)
 
     if not metadata:
-      # Record metrics for not found
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
         endpoint="/v1/operations/{operation_id}/stream",
@@ -87,9 +85,7 @@ async def stream_operation_events(
         detail="Operation not found. It may have expired or been cancelled.",
       )
 
-    # Check user access
     if metadata.user_id != current_user.id:
-      # Record metrics for access denied
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
         endpoint="/v1/operations/{operation_id}/stream",
@@ -108,7 +104,6 @@ async def stream_operation_events(
         detail="Access denied to operation.",
       )
 
-    # Record successful connection metrics
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/operations/{operation_id}/stream",
@@ -128,7 +123,6 @@ async def stream_operation_events(
       f"User {current_user.id} connected to SSE stream for operation {operation_id}"
     )
 
-    # Create and return SSE response using sse-starlette
     return create_sse_response_starlette(
       operation_id=operation_id,
       user_id=current_user.id,
@@ -140,10 +134,8 @@ async def stream_operation_events(
     raise
 
   except Exception as e:
-    # Log unexpected errors
     logger.error(f"Unexpected error in operation stream endpoint: {e}")
 
-    # Record error metrics
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/operations/{operation_id}/stream",
@@ -188,7 +180,6 @@ async def get_operation_status(
     metadata = await event_storage.get_operation_metadata(operation_id)
 
     if not metadata:
-      # Record metrics for not found
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
         endpoint="/v1/operations/{operation_id}/status",
@@ -205,9 +196,7 @@ async def get_operation_status(
         detail="Operation not found. It may have expired or been cancelled.",
       )
 
-    # Check user access
     if metadata.user_id != current_user.id:
-      # Record metrics for access denied
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
         endpoint="/v1/operations/{operation_id}/status",
@@ -226,7 +215,6 @@ async def get_operation_status(
         detail="Access denied to operation.",
       )
 
-    # Build response
     response = {
       "operation_id": metadata.operation_id,
       "operation_type": metadata.operation_type,
@@ -236,13 +224,11 @@ async def get_operation_status(
       "graph_id": metadata.graph_id,
     }
 
-    # Add result or error data
     if metadata.status == OperationStatus.COMPLETED and metadata.result_data:
       response["result"] = metadata.result_data
     elif metadata.status == OperationStatus.FAILED and metadata.error_message:
       response["error"] = metadata.error_message
 
-    # Add helpful links
     links = {
       "stream": f"/v1/operations/{operation_id}/stream",
     }
@@ -258,10 +244,8 @@ async def get_operation_status(
 
     response["_links"] = links
 
-    # Add status-specific messages
     if metadata.status == OperationStatus.PENDING:
-      # Pending means waiting for a worker; say how far back in line it is
-      # so a client can tell "queued behind a long task" from "about to run".
+      # Queue position lets a client tell "behind a long task" from "about to run".
       position, depth = await get_queue_position(operation_id)
       response["queue_position"] = position
       response["queue_depth"] = depth
@@ -276,8 +260,7 @@ async def get_operation_status(
     elif metadata.status == OperationStatus.RUNNING:
       response["message"] = "Operation is currently executing"
     elif metadata.status == OperationStatus.AWAITING_INPUT:
-      # The prompt and its details are the caller's; the checkpoint and the
-      # queue payload behind them are the worker's and stay server-side.
+      # The checkpoint and queue payload behind the prompt stay server-side.
       request = metadata.input_request or {}
       response["message"] = "Operation is paused and waiting for input"
       response["input_request"] = {
@@ -292,7 +275,6 @@ async def get_operation_status(
     elif metadata.status == OperationStatus.CANCELLED:
       response["message"] = "Operation was cancelled"
 
-    # Record successful status check metrics
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/operations/{operation_id}/status",
@@ -313,10 +295,8 @@ async def get_operation_status(
     raise
 
   except Exception as e:
-    # Log unexpected errors
     logger.error(f"Unexpected error in operation status endpoint: {e}")
 
-    # Record error metrics
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/operations/{operation_id}/status",
@@ -369,14 +349,12 @@ async def cancel_operation(
         detail="Operation not found. It may have expired or been cancelled.",
       )
 
-    # Check user access
     if metadata.user_id != current_user.id:
       raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,
         detail="Access denied to operation.",
       )
 
-    # Check if operation can be cancelled
     if metadata.status in [
       OperationStatus.COMPLETED,
       OperationStatus.FAILED,
@@ -391,7 +369,6 @@ async def cancel_operation(
       operation_id, reason="Cancelled by user request"
     )
 
-    # Record cancellation metrics
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/operations/{operation_id}",
@@ -418,10 +395,8 @@ async def cancel_operation(
     raise
 
   except Exception as e:
-    # Log unexpected errors
     logger.error(f"Unexpected error in cancel operation endpoint: {e}")
 
-    # Record error metrics
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/operations/{operation_id}",
@@ -494,17 +469,14 @@ async def resume_operation(
   request = metadata.input_request or {}
   task = request.get("task")
   if not task:
-    # A pause without its queue payload cannot be put back; only a store
-    # that lost the request mid-write produces this.
+    # Only a store that lost the request mid-write produces this.
     raise HTTPException(
       status_code=http_status.HTTP_409_CONFLICT,
       detail="Operation cannot be resumed: its checkpoint was not recorded.",
     )
 
-  # Queue first, status second: if the push fails the operation stays
-  # awaiting_input with its resume link intact and the caller can retry. The
-  # other order could strand it RUNNING, off the queue, with the recovery
-  # path erased.
+  # Queue first: if the push fails the operation stays awaiting_input with its
+  # resume link, and the caller can retry. The reverse could strand it RUNNING.
   await requeue_task(
     operation_id,
     task,

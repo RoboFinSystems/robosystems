@@ -46,7 +46,6 @@ async def list_tables(
   start_time = datetime.now(UTC)
 
   try:
-    # Verify graph access
     repository = await get_universal_repository(graph_id, "read")
 
     if not repository:
@@ -55,7 +54,6 @@ async def list_tables(
         detail=f"Graph {graph_id} not found",
       )
 
-    # Log structured operation
     api_logger.info(
       "Listing staging tables",
       extra={
@@ -75,8 +73,7 @@ async def list_tables(
     from robosystems.operations.graph.table_service import TableService
 
     table_service = TableService(db)
-    # S3 paths are namespaced by the graph creator — the oldest access row.
-    # Ordering matters once a graph has multiple users.
+    # S3 paths are namespaced by the graph creator: the oldest access row.
     user_graph = (
       db.query(GraphUser)
       .filter(GraphUser.graph_id == graph_id)
@@ -100,10 +97,8 @@ async def list_tables(
       for table in db_tables
     ]
 
-    # Calculate execution time
     execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
-    # Record business event
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/tables",
@@ -119,7 +114,6 @@ async def list_tables(
       user_id=current_user.id,
     )
 
-    # Log structured completion
     api_logger.info(
       "Tables listed successfully",
       extra={
@@ -139,7 +133,6 @@ async def list_tables(
     raise
 
   except Exception as e:
-    # Record business event for failure
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/tables",

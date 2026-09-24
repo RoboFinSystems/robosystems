@@ -58,7 +58,7 @@ async def create_checkout_session(
   try:
     from ...models.core import OrgLimits, OrgRole, OrgUser
 
-    # Get user's org - they must be an OWNER
+    # The user's org; they must be an OWNER.
     user_orgs = OrgUser.get_user_orgs(current_user.id, db)
     if not user_orgs:
       raise HTTPException(
@@ -75,11 +75,9 @@ async def create_checkout_session(
         detail="Only organization owners can manage billing",
       )
 
-    # Gate a graph checkout on the org's graph limit before collecting payment.
-    # The graph-creation route enforces the same limit up front, but in the
-    # checkout lane provisioning happens post-payment via the webhook, so
-    # without this an org at its limit could pay and then be refused the graph
-    # it just bought. Refuse the sale here instead, matching the graph route.
+    # Enforce the org graph limit before payment: provisioning happens
+    # post-payment via the webhook, so an org at its limit would pay and then
+    # be refused the graph.
     if request.resource_type == "graph":
       org_limits = OrgLimits.get_or_create_for_org(org_id, db)
       can_create, reason = org_limits.can_create_graph(db)
@@ -89,27 +87,24 @@ async def create_checkout_session(
     customer = BillingCustomer.get_or_create(org_id, db)
     logger.info(f"Using billing customer for org {org_id}")
 
-    # Enterprise customers don't need checkout
     if customer.invoice_billing_enabled:
       raise HTTPException(
         status_code=400,
         detail="Checkout not required for enterprise customers with invoice billing",
       )
 
-    # If they already have a payment method, they shouldn't be here
     if customer.has_payment_method:
       raise HTTPException(
         status_code=400,
         detail="Payment method already on file. Create resource directly.",
       )
 
-    # Validate plan exists
     plan_config = None
     repo_name = None
     if request.resource_type == "graph":
       plan_config = BillingConfig.get_subscription_plan(request.plan_name)
     elif request.resource_type == "repository":
-      # NOTE: repository_name contains the graph_id (e.g., "sec"), not display name
+      # repository_name holds the graph_id (e.g. "sec"), not a display name.
       repo_name = request.resource_config.get("repository_name")
       if repo_name:
         plan_config = BillingConfig.get_repository_plan(repo_name, request.plan_name)
@@ -120,11 +115,8 @@ async def create_checkout_session(
         detail=f"Invalid plan '{request.plan_name}' for {request.resource_type}",
       )
 
-    # Gate a graph checkout on writer capacity for the tier — the same
-    # refuse-the-sale rule as the org graph limit above, one level down.
-    # Provisioning runs post-payment; if no writer has a free slot the sale
-    # must not complete. Fails closed: if capacity cannot be determined, the
-    # sale is refused rather than collected.
+    # Same refuse-the-sale rule for writer capacity on the tier. Fails closed:
+    # unknown capacity refuses the sale.
     if request.resource_type == "graph":
       capacity_status = await _tier_capacity_status(request.plan_name)
       if capacity_status != "ready":
@@ -142,13 +134,10 @@ async def create_checkout_session(
 
     provider = get_payment_provider("stripe")
 
-    # Retire any earlier checkout for this same resource before opening a new
-    # one. Cancelling the local row alone is not enough: the hosted session it
-    # points at stays payable at the provider for up to 24 hours, and a payment
-    # against it would bind a live provider subscription to a row already
-    # marked canceled — money that never becomes a resource. Expire the session
-    # first; if it turns out to have been paid, that checkout won and this one
-    # must not open a second one.
+    # Retire any earlier checkout for this resource. The hosted session stays
+    # payable at the provider for up to 24h, so expire it first; cancelling the
+    # local row alone could bind a paid provider subscription to a canceled
+    # row. If it was already paid, that checkout won and no new one opens.
     already_paid = HTTPException(
       status_code=409,
       detail=(
@@ -166,10 +155,8 @@ async def create_checkout_session(
       .all()
     )
     for stale_sub in stale_pending:
-      # Same resource only. Repository checkouts are per repository: an
-      # in-flight checkout for a different repository under the same org is
-      # not superseded by this one, and must not be expired — or, if it was
-      # already paid, mistaken for this resource's payment.
+      # Same resource only: another repository's in-flight checkout must not
+      # be expired, or mistaken for this resource's payment if already paid.
       if request.resource_type == "repository":
         stale_config = (stale_sub.subscription_metadata or {}).get(
           "resource_config"
@@ -180,9 +167,8 @@ async def create_checkout_session(
 
       stale_session_id = stale_sub.provider_subscription_id
       if stale_session_id and not stale_session_id.startswith("cs_"):
-        # `checkout.session.completed` has already replaced the session id
-        # with the provider's subscription id: the row is paid and waiting
-        # for the provisioning claim. It is not a stale checkout.
+        # Already paid (the webhook swapped in the subscription id) and
+        # awaiting provisioning; not a stale checkout.
         raise already_paid
       if stale_session_id:
         outcome = provider.expire_checkout_session(stale_session_id)
@@ -203,7 +189,6 @@ async def create_checkout_session(
     if stale_pending:
       db.commit()
 
-    # Create subscription in PENDING_PAYMENT status
     subscription = BillingSubscription.create_subscription(
       org_id=org_id,
       resource_type=request.resource_type,
@@ -215,9 +200,8 @@ async def create_checkout_session(
       user_id=current_user.id,
     )
 
-    # Resource configuration for the post-payment provisioning step. The
-    # subscriber also stays in metadata for older webhook payloads; the
-    # user_id column is now the authoritative copy.
+    # For the post-payment provisioning step. user_id stays in metadata for
+    # older webhook payloads; the column is the authoritative copy.
     subscription.subscription_metadata = {
       "resource_config": request.resource_config,
       "user_id": current_user.id,
@@ -227,13 +211,11 @@ async def create_checkout_session(
     db.commit()
     db.refresh(subscription)
 
-    # Get or create Stripe customer ID
     if not customer.stripe_customer_id:
       stripe_customer_id = provider.create_customer(current_user.id, current_user.email)
       customer.stripe_customer_id = stripe_customer_id
       db.commit()
 
-    # Get/create the Stripe price from billing config
     try:
       stripe_price_id = provider.get_or_create_price(
         plan_name=request.plan_name,
@@ -247,7 +229,6 @@ async def create_checkout_session(
         detail="Payment configuration error.",
       )
 
-    # Create Stripe checkout session
     checkout = provider.create_checkout_session(
       customer_id=customer.stripe_customer_id,
       price_id=stripe_price_id,
@@ -258,7 +239,6 @@ async def create_checkout_session(
       },
     )
 
-    # Link checkout session to subscription
     subscription.provider_subscription_id = checkout["session_id"]
     subscription.provider_customer_id = customer.stripe_customer_id
     db.commit()
@@ -312,9 +292,8 @@ async def get_checkout_status(
 
     subscription = BillingSubscription.get_by_provider_subscription_id(session_id, db)
 
-    # Fallback: after webhook processing, provider_subscription_id is updated
-    # from the checkout session ID to the Stripe subscription ID, so look up
-    # by the preserved checkout_session_id in metadata.
+    # After the webhook, provider_subscription_id holds the Stripe
+    # subscription id, so fall back to the checkout_session_id in metadata.
     if not subscription:
       subscription = (
         db.query(BillingSubscription)

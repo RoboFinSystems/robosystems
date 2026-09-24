@@ -1,8 +1,5 @@
-"""MCP strategy selection and execution coordination.
-
-Picks an execution strategy (immediate JSON, streaming, queued, cached) for a
-given MCP tool call from the tool type, request headers, and system load.
-"""
+"""MCP execution strategy selection: picks immediate JSON, streaming, queued,
+or cached execution from the tool type, request headers, and system load."""
 
 import re
 from enum import Enum
@@ -18,7 +15,6 @@ from robosystems.middleware.graph.execution_strategies import (
 class MCPExecutionStrategy(Enum):
   """MCP tool execution strategies optimized for AI agents."""
 
-  # Base strategies
   JSON_IMMEDIATE = "json_immediate"
   JSON_COMPLETE = "json_complete"
   NDJSON_STREAMING = "ndjson_streaming"
@@ -28,7 +24,6 @@ class MCPExecutionStrategy(Enum):
   QUEUE_SIMPLE = "queue_simple"
   CACHED = "cached"
 
-  # Additional MCP-specific strategies
   STREAM_AGGREGATED = "stream_aggregated"  # Stream and aggregate for agent
   SCHEMA_CACHED = "schema_cached"  # Use cached schema
   INFO_CACHED = "info_cached"  # Use cached graph info
@@ -37,7 +32,6 @@ class MCPExecutionStrategy(Enum):
 class MCPToolAnalyzer(BaseAnalyzer):
   """Analyze MCP tool calls to determine optimal execution strategy."""
 
-  # Tool categories
   QUERY_TOOLS = ["read-graph-cypher", "read-neo4j-cypher", "read-ladybug-cypher"]
   SCHEMA_TOOLS = ["get-graph-schema", "get-neo4j-schema", "get-ladybug-schema"]
   INFO_TOOLS = ["get-graph-info"]
@@ -60,18 +54,15 @@ class MCPToolAnalyzer(BaseAnalyzer):
       "supports_progress": False,
     }
 
-    # Query-specific analysis - use base analyzer for Cypher
     if tool_name in cls.QUERY_TOOLS:
       query = arguments.get("query", "")
       query_analysis = cls.analyze_cypher_query(query)
       analysis.update(query_analysis)
 
-    # Schema tools support progress updates
     elif tool_name in cls.SCHEMA_TOOLS:
       analysis["supports_progress"] = True
       analysis["estimated_result_size"] = "large"  # Schemas can be large
 
-    # Info tools are typically fast
     elif tool_name in cls.INFO_TOOLS:
       analysis["estimated_duration_ms"] = 100
       analysis["estimated_result_size"] = "small"
@@ -93,7 +84,6 @@ class MCPToolAnalyzer(BaseAnalyzer):
   @classmethod
   def _is_cacheable(cls, tool_name: str) -> bool:
     """Determine if tool results can be cached."""
-    # Schema and info are cacheable, queries generally are not
     return tool_name in cls.SCHEMA_TOOLS or tool_name in cls.INFO_TOOLS
 
   @classmethod
@@ -101,7 +91,6 @@ class MCPToolAnalyzer(BaseAnalyzer):
     """Estimate execution duration in milliseconds."""
     if tool_name in cls.QUERY_TOOLS:
       query = arguments.get("query", "")
-      # Complex queries take longer
       if "SHORTEST" in query.upper() or "ALL" in query.upper():
         return 5000
       elif "MATCH" in query.upper():
@@ -127,7 +116,6 @@ class MCPToolAnalyzer(BaseAnalyzer):
           return "medium"
         else:
           return "large"
-      # No limit means potentially large
       return "large"
     elif tool_name in cls.SCHEMA_TOOLS:
       return "large"  # Schemas can be extensive
@@ -139,7 +127,6 @@ class MCPToolAnalyzer(BaseAnalyzer):
     """Analyze a Cypher query for MCP-specific optimizations."""
     query_upper = query.upper()
 
-    # Detect patterns that benefit from streaming
     has_match = "MATCH" in query_upper
     has_aggregation = any(
       agg in query_upper for agg in ["COUNT(", "SUM(", "AVG(", "COLLECT("]
@@ -171,29 +158,21 @@ class MCPStrategySelector(BaseStrategySelector):
     graph_id: str,
     user_tier: str | None = None,
   ) -> MCPExecutionStrategy:
-    """Select the execution strategy for an MCP tool call.
-
-    Weighs tool type and estimated complexity, client capabilities, current
-    system load and queue depth, whether the graph is a shared repository,
-    and the caller's subscription tier.
-    """
+    """Select the execution strategy for an MCP tool call."""
     analysis = MCPToolAnalyzer.analyze_tool_call(tool_name, arguments)
 
     is_mcp_client = client_info.get("is_mcp_client", False)
 
-    # 1. Check for cached strategy
     cached_strategy = cls._select_cached_strategy(analysis, system_state)
     if cached_strategy:
       return cached_strategy
 
-    # 2. Check for high load strategy
     high_load_strategy = cls._select_high_load_strategy(
       system_state, is_mcp_client, client_info
     )
     if high_load_strategy:
       return high_load_strategy
 
-    # 3. Select based on tool category
     if analysis["tool_category"] == "query":
       return cls._select_query_strategy(analysis, is_mcp_client, client_info)
     elif analysis["tool_category"] == "schema":
@@ -243,20 +222,16 @@ class MCPStrategySelector(BaseStrategySelector):
     result_size = analysis["estimated_result_size"]
     requires_streaming = analysis["requires_streaming"]
 
-    # Small queries - direct execution
     if result_size == "small" and not requires_streaming:
       return MCPExecutionStrategy.JSON_IMMEDIATE
 
-    # Medium queries - complete then return
     elif result_size == "medium":
       if requires_streaming:
         return MCPExecutionStrategy.STREAM_AGGREGATED
       else:
         return MCPExecutionStrategy.JSON_COMPLETE
 
-    # Large queries - always stream
     else:
-      # For MCP clients, aggregate streaming transparently
       if is_mcp_client:
         return MCPExecutionStrategy.STREAM_AGGREGATED
       else:
@@ -264,19 +239,13 @@ class MCPStrategySelector(BaseStrategySelector):
 
   @classmethod
   def _select_schema_strategy(cls) -> MCPExecutionStrategy:
-    """Select strategy for schema tools.
-
-    Schema fetches are fast (<150ms) so SSE adds no value. MCP clients send
-    Accept: text/event-stream which would otherwise trigger SSE_PROGRESS, but
-    the EventSource reconnect is always GET which 405s on this POST-only endpoint.
-    Always use JSON_COMPLETE for schema.
-    """
+    """Always JSON_COMPLETE: schema fetches are fast, and SSE would be chosen
+    for MCP clients' Accept header with no benefit."""
     return MCPExecutionStrategy.JSON_COMPLETE
 
   @classmethod
   def get_timeout_for_strategy(cls, strategy: MCPExecutionStrategy) -> int:
     """Get appropriate timeout in seconds for the strategy."""
-    # MCP-specific timeouts
     mcp_timeouts = {
       MCPExecutionStrategy.JSON_IMMEDIATE: 30,
       MCPExecutionStrategy.JSON_COMPLETE: 60,
@@ -299,11 +268,8 @@ class MCPClientDetector(BaseClientDetector):
 
   @classmethod
   def detect_client_type(cls, headers: dict[str, str]) -> dict[str, Any]:
-    """Detect MCP client capabilities from request headers.
-
-    The stdio bridge identifies itself with a `robosystems-mcp` User-Agent or
-    an `X-MCP-Client` header; otherwise capabilities come from `Accept`.
-    """
+    """The stdio bridge identifies itself with a `robosystems-mcp` User-Agent or
+    an `X-MCP-Client` header; otherwise capabilities come from `Accept`."""
     base_info = cls.detect_client_capabilities(headers)
 
     user_agent = headers.get("user-agent", "").lower()
@@ -313,7 +279,6 @@ class MCPClientDetector(BaseClientDetector):
       "robosystems-mcp" in user_agent or mcp_client != "" or "mcp" in user_agent
     )
 
-    # MCP clients get special handling
     if is_mcp_client:
       return {
         "is_mcp_client": True,
@@ -326,7 +291,6 @@ class MCPClientDetector(BaseClientDetector):
         "is_interactive": base_info["is_interactive"],
       }
 
-    # For non-MCP clients, use base detection with MCP-specific additions
     return {
       "is_mcp_client": False,
       "supports_sse": base_info["supports_sse"],

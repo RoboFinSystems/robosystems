@@ -1,13 +1,8 @@
-"""Access-token validation for the MCP routes — the OAuth counterpart of
-``utils.validate_api_key``.
+"""OAuth access-token validation for the MCP routes.
 
-An opaque ``rfso…`` bearer resolves to an ``OAuthPrincipal``: the user
-plus the grant's tenant scope (one graph, one canonical resource). The
-route then checks the resource matches (audience) and runs the same live
-access checks every carriage runs. Validation results are cached under
-the token's SHA-256 digest through ``api_key_cache`` — the same encrypted,
-signed store the API-key path uses — so revocation (``OAuthToken.revoke``)
-clears the entry by digest.
+An opaque ``rfso…`` bearer resolves to an ``OAuthPrincipal``: the user plus
+the grant's scope (one graph, one resource). Results are cached by token
+digest in ``api_key_cache``, so revocation clears the entry by digest.
 """
 
 from dataclasses import dataclass
@@ -97,9 +92,8 @@ def _principal_from_payload(user_data: dict[str, Any]) -> OAuthPrincipal | None:
 def validate_oauth_access_token(plain_token: str) -> OAuthPrincipal | None:
   """Resolve a presented access token, or ``None`` when it is not live.
 
-  Expired, revoked, unknown, and tokens whose grant, client, or user are
-  no longer active all read as ``None`` — the caller answers 401
-  ``invalid_token`` without distinguishing them.
+  Every failure reads as ``None``; the caller answers 401 without
+  distinguishing them.
   """
   if not is_oauth_access_token(plain_token) or len(plain_token) > 256:
     return None

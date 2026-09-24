@@ -1,15 +1,8 @@
 """`GraphMCPTools` — the per-graph MCP tool surface.
 
-Tool availability is schema-driven:
-- Core tools (cypher, schema) are always available
-- Extension tools (financial statements, etc.) require matching schema_extensions
-- Infrastructure tools (subgraph navigation + writes) are gated by feature flags
-
-**Registrar-generated tools:** Extensions with an `OperationRegistrar`
-(roboledger, roboinvestor) contribute their `OperationSpec`s as
-auto-generated MCP tools via `registrar.build_tools_for_extension`. These
-are looked up in `_registrar_dispatch` at call time before the hand-written
-if/elif ladder, so a name present in both resolves to the generated tool.
+Core tools are always present, extension tools follow `schema_extensions`,
+and infrastructure tools are feature-flagged. Registrar-generated tools are
+dispatched before the hand-written ladder, so they win on a name clash.
 """
 
 import json
@@ -51,31 +44,18 @@ if TYPE_CHECKING:
   from .registrar import _RegistrarMCPTool
 
 
-# The tool surface a tenant subgraph advertises.
-#
-# A subgraph is a modality container, not an extensions domain target: it has
-# no extensions OLTP schema (`extensions_session` validates `^kg[0-9a-f]{16,}$`,
-# which `{parent}_{name}` cannot match), no connections, and no OLTP→OLAP
-# materialization relationship. It inherits `schema_extensions` from its parent
-# (`subgraph_service` copies the column), so without this cut every roboledger
-# tool registers and most of the advertised surface fails — the OLTP ones with
-# an internal schema-validator string, the platform ones by confidently
-# answering about a relationship that does not exist. `graphql_tool` rejects
-# subgraphs on the same reasoning; this applies it at the tool-list layer.
-#
-# The list is short because a subgraph is a live, writable graph database —
-# schema plus Cypher — and the only such surface, since
-# `_validate_subgraph_context` blocks raw writes on the parent.
+# The tool surface a tenant subgraph advertises. A subgraph inherits its
+# parent's `schema_extensions` but has no extensions OLTP schema, no
+# connections and no materialization, so every other tool would fail or
+# answer about machinery that isn't there. It is schema plus Cypher.
 SUBGRAPH_TOOL_PROFILE = frozenset(
   {
     # Schema DDL — the point of a subgraph
     "add-node-table",
     "add-relationship-table",
     "get-graph-schema",
-    # Registered outside this manager (see routers/graphs/mcp), so it never
-    # appears in the list this filter trims. Listed anyway so the call_tool
-    # guard below treats it as allowed rather than refusing a tool that is
-    # perfectly meaningful on a subgraph.
+    # Registered outside this manager (routers/graphs/mcp); listed so the
+    # call_tool guard allows it.
     "get-graph-info",
     # Cypher, both directions
     "read-graph-cypher",
@@ -92,18 +72,13 @@ SUBGRAPH_TOOL_PROFILE = frozenset(
 )
 
 
-# The tools the RoboLedger MCP route (`/v1/mcp/roboledger`) withholds. That
-# route exists for directory listings that freeze one tool list per URL (the
-# ChatGPT plugin), so it serves the accounting workflow and leaves out what a
-# chat client cannot use or should not drive. An exclusion list, not an
-# allowlist, so a new ledger tool appears there by default. Applied by the
-# transport (`routers/graphs/mcp/remote.py`) to `tools/list`, `initialize`'s
-# instructions and `tools/call`; `/v1/mcp` and the per-graph route keep all of
-# them.
+# Tools the `/v1/mcp/roboledger` route withholds: it serves directory listings
+# that freeze one tool list per URL, so it drops what a chat client cannot use
+# or should not drive. An exclusion list, so new ledger tools appear by
+# default. Applied in `routers/graphs/mcp/remote.py`.
 ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
   {
-    # Subgraph-only. On a parent graph they answer `subgraph_required` and
-    # point at a subgraph connector, which a chat user cannot add mid-conversation.
+    # Subgraph-only; a chat user cannot add a subgraph connector mid-conversation.
     "write-graph-cypher",
     "add-node-table",
     "add-relationship-table",
@@ -111,13 +86,11 @@ ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
     "create-subgraph",
     "delete-subgraph",
     "list-subgraphs",
-    # Platform operations. `materialize` already runs on staleness, can clear
-    # the graph (`rebuild=true`), and answers with a stream URL a chat client
-    # cannot follow.
+    # `materialize` already runs on staleness, can clear the graph
+    # (`rebuild=true`), and answers with a stream URL a chat client can't follow.
     "create-backup",
     "materialize",
-    # Turns on write-back to the customer's QuickBooks: an owner decision in
-    # the app, not a chat action.
+    # QuickBooks write-back is an owner decision in the app, not a chat action.
     "set-write-policy",
     # Maintenance and onboarding repair, not the close.
     "rebuild-schedule",
@@ -129,15 +102,7 @@ ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
 
 
 def resolve_schema_extensions(graph_id: str) -> list[str]:
-  """Resolve schema extensions for a graph.
-
-  For shared repositories: reads from the adapter manifest (no DB query needed).
-  For user graphs: queries the PostgreSQL graphs table.
-
-  Returns:
-      List of extension names (e.g., ["roboledger"]), or empty list.
-  """
-  # Shared repos: resolve from manifest (in-memory, no DB needed)
+  """Shared repositories read the manifest; user graphs read the graphs table."""
   try:
     from robosystems.config.shared_repositories import (
       get_manifest,
@@ -154,7 +119,6 @@ def resolve_schema_extensions(graph_id: str) -> list[str]:
   except Exception:
     logger.warning(f"Manifest lookup failed for {graph_id}, trying PostgreSQL")
 
-  # User graph: query PostgreSQL
   try:
     from robosystems.database import SessionFactory
     from robosystems.models.core import Graph
@@ -174,13 +138,10 @@ def resolve_schema_extensions(graph_id: str) -> list[str]:
 
 
 class GraphMCPTools:
-  """
-  MCP tools implementation using Graph API.
+  """Per-graph MCP tools.
 
-  Tool availability is layered:
-  - Layer 1 (Core): cypher, schema — always available
-  - Layer 2 (Schema): financial tools — only when schema_extensions includes "roboledger"
-  - Layer 3 (Infrastructure): subgraph navigation + writes, data — gated by feature flags
+  Layer 1 (core) is always present, layer 2 needs the "roboledger" schema
+  extension, layer 3 (infrastructure) is feature-flagged.
   """
 
   def __init__(
@@ -189,27 +150,23 @@ class GraphMCPTools:
     schema_extensions: list[str] | tuple[str, ...] = (),
     read_only: bool = False,
   ):
-    # Import here to avoid circular import
     from ..client import GraphMCPClient
 
     self.client: GraphMCPClient = graph_client
     self.schema_extensions: tuple[str, ...] = tuple(schema_extensions)
     self.read_only: bool = read_only
 
-    # Initialize query validator
     self.validator = GraphQueryValidator()
 
-    # Layer 1: Core tools (always available for any graph)
+    # Layer 1: core
     self.cypher_tool = CypherTool(
       graph_client, schema_extensions=self.schema_extensions
     )
     self.schema_tool = SchemaTool(graph_client)
 
-    # Layer 1: GraphQL escape-hatch tools (gated by EXTENSIONS_GRAPHQL_ENABLED)
-    # MCP_GRAPHQL_ENABLED is a runtime kill switch checked at dispatch time.
-    # Excluded on shared repos: the typed surface is the extensions OLTP
-    # schema, which a shared repository like 'sec' does not have —
-    # introspection answers, but every real query errors.
+    # Layer 1: GraphQL. MCP_GRAPHQL_ENABLED is a runtime kill switch checked
+    # at dispatch. Not on shared repos: they have no extensions OLTP schema,
+    # so introspection answers but every real query errors.
     self.graphql_schema_tool: GraphqlSchemaTool | None = None
     self.graphql_query_tool: GraphqlQueryTool | None = None
     if env.EXTENSIONS_GRAPHQL_ENABLED and not self._is_shared_repository():
@@ -218,7 +175,7 @@ class GraphMCPTools:
         graph_client, schema_extensions=self.schema_extensions
       )
 
-    # Layer 2: Schema extension tools (gated by schema_extensions)
+    # Layer 2: schema extension
     self.example_queries_tool = None
     self.live_financial_statement_tool = None
     self.financial_statement_analysis_tool = None
@@ -235,51 +192,34 @@ class GraphMCPTools:
         LiveFinancialStatementTool,
       )
 
-      # Graph-backed analytical view — works on shared-repo + materialized
-      # tenant graphs alike. Always registered on roboledger graphs.
+      # Graph-backed: shared repos and materialized tenants alike.
       self.financial_statement_analysis_tool = FinancialStatementAnalysisTool(
         graph_client
       )
-      # The map and the block — xbrlkit's `disclosures` / `information_block`
-      # over a report the platform holds whole: the published filing on a
-      # shared repo, the ledger's own report on a tenant, read into xbrlkit's
-      # model (one implementation of the block rules; the graph is not in the
-      # path). Reads, so they stay on read-only surfaces too.
+      # xbrlkit over the report held whole (the published filing on a shared
+      # repo, the ledger's report on a tenant); the graph is not in the path.
       from .disclosure_tools import DisclosuresTool, InformationBlockTool
 
       self.disclosures_tool = DisclosuresTool(graph_client)
       self.information_block_tool = InformationBlockTool(graph_client)
-      # OLTP-backed live statement — tenant entity graphs only. Skipped on
-      # shared repos (no OLTP tenant schema). A pure read, so it stays
-      # available on read-only surfaces (graph viewers, read-only operators).
+      # OLTP-backed, so tenant graphs only.
       if not self._is_shared_repository():
         self.live_financial_statement_tool = LiveFinancialStatementTool(graph_client)
 
-      # Semantic enrichment tools (roboledger + manifest flag)
       if self._should_include_semantic_tools():
         from .resolve_element_tool import ResolveElementTool
 
         self.resolve_element_tool = ResolveElementTool(graph_client)
 
-    # Layer 3: Graph lifecycle tools — subgraph navigation + lifecycle ops
-    # mirroring a subset of the REST `/v1/graphs/{g}/operations/*` surface.
-    # Writes are gated by `read_only`; `list-subgraphs` is a pure read, so it
-    # stays available whenever the navigation flag is set.
-    #
-    # Deliberately **not exposed on MCP** — `change-tier` is a 3-5 minute
-    # destructive EBS migration with billing implications and
-    # fail-on-downgrade semantics, so it stays on REST for humans.
-    #
-    # Restore is absent for a different reason: it has no customer-facing
-    # surface at all. Backups are for download; restore is operator-run.
+    # Layer 3: graph lifecycle, a subset of `/v1/graphs/{g}/operations/*`.
+    # `change-tier` stays REST-only: a destructive, billed EBS migration.
+    # Restore has no customer surface at all; it is operator-run.
     self.create_subgraph_tool = None
     self.delete_subgraph_tool = None
     self.list_subgraphs_tool = None
     self.create_backup_tool = None
     if env.MCP_WORKSPACE_ENABLED:
-      # Navigation tools (list / switch) — always available.
       self.list_subgraphs_tool = ListSubgraphsTool(graph_client)
-      # Write tools — blocked on shared-repo or read-only graphs.
       if not read_only:
         self.create_subgraph_tool = CreateSubgraphTool(graph_client)
         self.delete_subgraph_tool = DeleteSubgraphTool(graph_client)
@@ -299,11 +239,8 @@ class GraphMCPTools:
 
       self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
-    # Layer 2: Materialization — `materialize` + `get-graph-sync-status`.
-    # User entity graphs only (shared repos use their own pipeline and
-    # don't track staleness). `materialize` mirrors the REST body shape.
-    # The pair splits on read_only: sync status is a pure read and stays
-    # available on read-only surfaces; materialize is the write half.
+    # Layer 2: materialization. User entity graphs only: shared repos use
+    # their own pipeline and don't track staleness.
     self.get_graph_sync_status_tool = None
     self.materialize_tool = None
     if (
@@ -316,34 +253,23 @@ class GraphMCPTools:
       if not read_only:
         self.materialize_tool = MaterializeTool(graph_client)
 
-    # Connection write-policy — the outbound write-back opt-in. Platform-DB,
-    # writable user graphs only: shared repos have no editable connections,
-    # and read-only graphs can't change policy.
     self.set_write_policy_tool = None
     if not read_only and not self._is_shared_repository():
       self.set_write_policy_tool = SetWritePolicyTool(graph_client)
 
-    # Connection sync — the on-demand resync trigger (write half of the
-    # sync-freshness pair; get-fiscal-calendar / get-graph-sync-status are
-    # the read half). Same gate as set-write-policy: platform-DB,
-    # writable user graphs only — not roboledger-gated because the REST
-    # sync endpoint isn't either. Withheld from subgraphs alongside its
-    # read half above: connections are registered to the parent, and a sync
-    # feeds the staging pipeline the subgraph doesn't have.
+    # Not roboledger-gated, matching the REST sync endpoint. Not on
+    # subgraphs: connections belong to the parent.
     self.sync_connection_tool = None
     if not read_only and not self._is_shared_repository() and not self._is_subgraph():
       self.sync_connection_tool = SyncConnectionTool(graph_client)
 
-    # Layer 2: Period-workflow read tools (gated by roboledger extension
-    # + ROBOLEDGER_ENABLED). Writes are registrar-generated.
+    # Layer 2: period workflow and fiscal calendar
     self.get_period_close_status_tool = None
     self.list_period_drafts_tool = None
-    # Fiscal calendar tools (same gate as schedule tools)
     self.get_fiscal_calendar_tool = None
     self.close_period_tool = None
     self.reopen_period_tool = None
     self.backfill_plan_history_tool = None
-    # Information Block read tools (get/list-information-block)
     self.get_information_block_tool = None
     self.list_information_blocks_tool = None
     if (
@@ -362,16 +288,6 @@ class GraphMCPTools:
         ListPeriodDraftsTool,
       )
 
-      # Period-workflow read tools — they span multiple blocks, so they are
-      # not Information Block tools. Schedules are read through
-      # `list-information-blocks` with block_type='schedule' and written
-      # through the registrar-generated create/update/delete-information-block
-      # ops; see `schedule_tools.py` for the full routing.
-      #
-      # The reads (period status, drafts, fiscal calendar) stay available on
-      # read-only surfaces; only the writes (close/reopen/backfill) require a
-      # writable graph. All read the extensions OLTP DB, which has no schema
-      # for a shared repo — hence the shared-repository exclusion above.
       self.get_period_close_status_tool = GetPeriodCloseStatusTool(graph_client)
       self.list_period_drafts_tool = ListPeriodDraftsTool(graph_client)
       self.get_fiscal_calendar_tool = GetFiscalCalendarTool(graph_client)
@@ -380,10 +296,8 @@ class GraphMCPTools:
         self.reopen_period_tool = ReopenPeriodTool(graph_client)
         self.backfill_plan_history_tool = BackfillPlanHistoryTool(graph_client)
 
-    # Information Block reads stay available on read-only *tenant* graphs (no
-    # read_only guard) but are excluded on shared repos: they read the
-    # extensions OLTP DB, which has no per-graph schema for a shared repo like
-    # 'sec' (the call fails with "Invalid graph_id for schema name: sec").
+    # The extensions OLTP reads below all skip shared repos, which have no
+    # per-graph OLTP schema.
     self.get_information_block_tool = None
     self.list_information_blocks_tool = None
     if (
@@ -399,11 +313,7 @@ class GraphMCPTools:
       self.get_information_block_tool = GetInformationBlockTool(graph_client)
       self.list_information_blocks_tool = ListInformationBlocksTool(graph_client)
 
-    # Workflow playbook (guidance only — version-locked to this build).
-    # Pure read with no DB access, so it stays available on read-only tenant
-    # graphs: an operator can learn the close workflow before they have write
-    # access. Excluded on shared repos — the close workflow is a roboledger
-    # tenant concept with no meaning on a shared repository like 'sec'.
+    # No DB access; skipped on shared repos, where a close means nothing.
     self.get_close_playbook_tool = None
     if (
       self._has_extension("roboledger")
@@ -414,7 +324,6 @@ class GraphMCPTools:
 
       self.get_close_playbook_tool = GetClosePlaybookTool(graph_client)
 
-    # Agent reads (get-agent, list-agents, agent-activity)
     self.get_agent_tool = None
     self.list_agents_tool = None
     self.agent_activity_tool = None
@@ -429,7 +338,6 @@ class GraphMCPTools:
       self.list_agents_tool = ListAgentsTool(graph_client)
       self.agent_activity_tool = AgentActivityTool(graph_client)
 
-    # Event Handler reads (get-event-handler, list-event-handlers)
     self.get_event_handler_tool = None
     self.list_event_handlers_tool = None
     if (
@@ -442,9 +350,6 @@ class GraphMCPTools:
       self.get_event_handler_tool = GetEventHandlerTool(graph_client)
       self.list_event_handlers_tool = ListEventHandlersTool(graph_client)
 
-    # Event Block reads (get-event-block, list-event-blocks) — same gate as
-    # information block reads: read-only tenant graphs yes, shared repos no
-    # (extensions OLTP DB has no schema for a shared repo).
     self.get_event_block_tool = None
     self.list_event_blocks_tool = None
     if (
@@ -457,10 +362,7 @@ class GraphMCPTools:
       self.get_event_block_tool = GetEventBlockTool(graph_client)
       self.list_event_blocks_tool = ListEventBlocksTool(graph_client)
 
-    # Layer 2: Taxonomy mapping read tools (gated by roboledger extension +
-    # ROBOLEDGER_ENABLED). Writes — create-mapping-association,
-    # create-associations, update/delete-association — are
-    # registrar-generated.
+    # Layer 2: taxonomy mapping reads; the writes are registrar-generated.
     self.list_mapping_structures_tool = None
     self.get_unmapped_elements_tool = None
     self.suggest_mapping_tool = None
@@ -477,16 +379,12 @@ class GraphMCPTools:
         SuggestMappingTool,
       )
 
-      # All four are extensions-OLTP reads (suggest-mapping computes its
-      # suggestions heuristically — no writes, no AI), so they stay available
-      # on read-only surfaces; the shared-repo exclusion is because the OLTP
-      # DB has no per-graph schema for a shared repository.
+      # suggest-mapping is heuristic: no writes, no AI.
       self.list_mapping_structures_tool = ListMappingStructuresTool(graph_client)
       self.get_unmapped_elements_tool = GetUnmappedElementsTool(graph_client)
       self.suggest_mapping_tool = SuggestMappingTool(graph_client)
       self.get_mapping_summary_tool = GetMappingSummaryTool(graph_client)
 
-    # Layer 3: Text search tools (gated by SEMANTIC_SEARCH_ENABLED)
     self.search_documents_tool = None
     self.get_document_section_tool = None
     if env.SEMANTIC_SEARCH_ENABLED:
@@ -495,9 +393,7 @@ class GraphMCPTools:
       self.search_documents_tool = SearchDocumentsTool(graph_client)
       self.get_document_section_tool = GetDocumentSectionTool(graph_client)
 
-    # Layer 3: Semantic memory tools (LanceDB) — gated by SEMANTIC_MEMORY_ENABLED
-    # plus the MCP sub-gate. Recall is read-capable; remember/forget need a
-    # writable, non-shared graph. Distinct from the subgraph-Cypher memory tools.
+    # Semantic memory (LanceDB)
     self.semantic_remember_tool = None
     self.semantic_recall_tool = None
     self.semantic_update_memory_tool = None
@@ -516,19 +412,14 @@ class GraphMCPTools:
 
       self.semantic_recall_tool = SemanticRecallTool(graph_client)
       if not read_only:
-        # A subgraph gets no memory store of its own, so the two tools that
-        # would create one are withheld. Forget stays — see the note on the
-        # REST `forget` op: anything stored before the gate must still be
-        # removable.
+        # A subgraph gets no memory store, so the tools that would create
+        # one are withheld; forget stays so older entries remain removable.
         if not self._is_subgraph():
           self.semantic_remember_tool = SemanticRememberTool(graph_client)
           self.semantic_update_memory_tool = SemanticUpdateMemoryTool(graph_client)
         self.semantic_forget_tool = SemanticForgetTool(graph_client)
 
-    # Layer 3: Document management tools (user graphs only, not shared repos)
-    # Shared repos (SEC) use OpenSearch directly — no PG document rows.
-    # Read tools (list/get) are available on read-only user graphs.
-    # Write tools (create/update) require writable user graphs.
+    # Documents: shared repos use OpenSearch directly and have no PG rows.
     self.create_document_tool = None
     self.update_document_tool = None
     self.delete_document_tool = None
@@ -543,20 +434,16 @@ class GraphMCPTools:
         UpdateDocumentTool,
       )
 
-      # Read tools — available on all user graphs (including read-only)
       self.get_document_tool = GetDocumentTool(graph_client)
       self.list_documents_tool = ListDocumentsTool(graph_client)
 
-      # Write tools — only on writable graphs
       if not read_only:
         self.create_document_tool = CreateDocumentTool(graph_client)
         self.update_document_tool = UpdateDocumentTool(graph_client)
         self.delete_document_tool = DeleteDocumentTool(graph_client)
 
-    # Document → text-block-fact binding: hand-written (needs BOTH the
-    # platform session for the Document and the tenant extensions session,
-    # which the registrar runner doesn't pass). Writable roboledger graphs
-    # only.
+    # Hand-written: needs both the platform and the tenant extensions session,
+    # which the registrar runner doesn't pass.
     self.bind_text_block_tool = None
     if (
       not read_only
@@ -567,19 +454,13 @@ class GraphMCPTools:
 
       self.bind_text_block_tool = BindTextBlockTool(graph_client)
 
-    # Cache statistics (inherited from schema tool)
     self._cache_hits = 0
     self._cache_misses = 0
 
     # ── Registrar-generated tools ──────────────────────────────────────
-    # Auto-generate MCP tools from every OperationSpec declared for the
-    # graph's enabled extensions. Keyed by tool name — checked before the
-    # hand-written if/elif ladder in `call_tool` so migrations can drop
-    # hand-written classes without touching the dispatch code.
     self._cached_meta: GraphExtensionContext | None = None
     self._registrar_dispatch: dict[str, _RegistrarMCPTool] = {}
     if not read_only:
-      # Skip registrar wiring for shared repos; they never accept writes.
       from .registrar import build_tools_for_extension
 
       for ext in self.schema_extensions:
@@ -597,13 +478,7 @@ class GraphMCPTools:
     )
 
   def _get_cached_meta(self) -> "GraphExtensionContext | None":
-    """Lazy accessor for platform DB graph metadata.
-
-    First call opens a short-lived session, caches the result on the
-    handler instance. Subsequent registrar-tool calls within the same
-    handler lifetime hit the cache. On any load failure, returns None so
-    the tool's own gate path handles it.
-    """
+    """Graph metadata, loaded once per handler; None on failure (the gate reloads)."""
     if self._cached_meta is not None:
       return self._cached_meta
     try:
@@ -625,11 +500,9 @@ class GraphMCPTools:
     return self._cached_meta
 
   def _has_extension(self, extension: str) -> bool:
-    """Check if the graph has a specific schema extension."""
     return extension in self.schema_extensions
 
   def _is_shared_repository(self) -> bool:
-    """Check if the graph is a shared repository (e.g., SEC)."""
     try:
       from robosystems.config.shared_repositories import (
         is_shared_repository_or_subgraph,
@@ -640,15 +513,8 @@ class GraphMCPTools:
       return False
 
   def _is_subgraph(self) -> bool:
-    """Whether this connector is pointed at a subgraph.
-
-    Subgraphs are the direct-write surface (write-cypher, schema extension),
-    which is mutually exclusive with the staging pipeline: materialization
-    swaps a rebuilt database over the active one and would discard those
-    writes. They also get no semantic memory. MCP dispatch bypasses FastAPI
-    DI, so the REST gate in `routers/graphs/operations` has to be mirrored
-    here or the connector is a way around it.
-    """
+    """Subgraph writes are exclusive with materialization, which would discard
+    them. MCP bypasses FastAPI DI, so the REST gate is mirrored here."""
     try:
       from robosystems.middleware.graph.utils import is_subgraph
 
@@ -657,14 +523,7 @@ class GraphMCPTools:
       return False
 
   def _is_tenant_subgraph(self) -> bool:
-    """Whether this graph is a subgraph of a *tenant* graph.
-
-    Shared-repository subgraphs (``sec_historical``) are deliberately not
-    included: they already take the `_is_shared_repository` path, which cuts a
-    different and larger surface. This predicate governs only the tenant case
-    — ``{kg…}_{name}`` — where the parent's `schema_extensions` are inherited
-    but none of the OLTP or platform-lifecycle machinery follows.
-    """
+    """Excludes shared-repo subgraphs, which take the `_is_shared_repository` cut."""
     if self._is_shared_repository():
       return False
     try:
@@ -675,11 +534,7 @@ class GraphMCPTools:
       return False
 
   def _should_include_semantic_tools(self) -> bool:
-    """Check if semantic enrichment tools should be included.
-
-    Returns true if the manifest declares has_semantic_enrichment=True.
-    Resolves subgraph parent so that subgraphs inherit the parent manifest.
-    """
+    """True when the (parent) manifest declares has_semantic_enrichment."""
     try:
       from robosystems.config.shared_repositories import (
         get_manifest,
@@ -699,7 +554,6 @@ class GraphMCPTools:
     return False
 
   def _get_semantic_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get semantic enrichment tool definitions."""
     if self.resolve_element_tool is None:
       return []
     return [
@@ -707,11 +561,6 @@ class GraphMCPTools:
     ]
 
   def _get_navigation_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get graph-lifecycle tool definitions (navigation + write ops).
-
-    Empty unless MCP_WORKSPACE_ENABLED. Read-only graphs get the navigation
-    tools only.
-    """
     tools = []
     if self.list_subgraphs_tool is not None:
       tools.append(self.list_subgraphs_tool.get_tool_definition())
@@ -724,8 +573,6 @@ class GraphMCPTools:
     return tools
 
   def _get_subgraph_write_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get subgraph write/DDL tool definitions. Empty unless
-    MCP_SUBGRAPH_OPS_ENABLED."""
     if self.write_cypher_tool is None:
       return []
     return [
@@ -735,7 +582,6 @@ class GraphMCPTools:
     ]
 
   def _get_semantic_memory_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get semantic memory (LanceDB) tool definitions (remember/recall/forget)."""
     tools = []
     if self.semantic_recall_tool is not None:
       tools.append(self.semantic_recall_tool.get_tool_definition())
@@ -748,14 +594,12 @@ class GraphMCPTools:
     return tools
 
   def _get_fact_grid_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get fact-grid tool definitions. Empty unless FACT_GRID_ENABLED."""
     tools = []
     if self.build_fact_grid_tool is not None:
       tools.append(self.build_fact_grid_tool.get_tool_definition())
     return tools
 
   def _get_materialization_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get materialization awareness tool definitions (sync status + trigger)."""
     tools = []
     if self.get_graph_sync_status_tool is not None:
       tools.append(self.get_graph_sync_status_tool.get_tool_definition())
@@ -764,10 +608,8 @@ class GraphMCPTools:
     return tools
 
   def _get_schedule_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get period-workflow tool definitions + fiscal calendar tools."""
     tools = []
-    # Playbook first so it's the most prominent close-workflow entry in the
-    # listing — it tells the agent how the rest of these tools compose.
+    # Playbook first: it tells the agent how the rest compose.
     if self.get_close_playbook_tool is not None:
       tools.append(self.get_close_playbook_tool.get_tool_definition())
     if self.get_period_close_status_tool is not None:
@@ -785,7 +627,6 @@ class GraphMCPTools:
     return tools
 
   def _get_taxonomy_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get taxonomy read tool definitions (CoA → GAAP workflow)."""
     tools = []
     if self.list_mapping_structures_tool is not None:
       tools.append(self.list_mapping_structures_tool.get_tool_definition())
@@ -798,7 +639,6 @@ class GraphMCPTools:
     return tools
 
   def _get_information_block_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get Information Block read tool definitions (cross-block-type reads)."""
     tools = []
     if self.get_information_block_tool is not None:
       tools.append(self.get_information_block_tool.get_tool_definition())
@@ -833,7 +673,6 @@ class GraphMCPTools:
     return tools
 
   def _get_search_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get text search tool definitions."""
     tools = []
     if self.search_documents_tool is not None:
       tools.append(self.search_documents_tool.get_tool_definition())
@@ -842,14 +681,6 @@ class GraphMCPTools:
     return tools
 
   def _get_curated_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get curated financial statement tool definitions.
-
-    - ``financial-statement-analysis`` — graph-backed (SEC + materialized tenants)
-    - ``live-financial-statement`` — OLTP-backed (tenant entity graphs only)
-    - ``disclosures`` / ``information-block`` — xbrlkit's map and block over
-      the report held whole (the published filing on SEC, the ledger's own
-      report on a tenant)
-    """
     tools: list[dict[str, Any]] = []
     if self.financial_statement_analysis_tool is not None:
       tools.append(self.financial_statement_analysis_tool.get_tool_definition())
@@ -862,60 +693,34 @@ class GraphMCPTools:
     return tools
 
   def _tool_unavailable_reason(self, tool_name: str, feature_flag: str) -> str:
-    """Return a context-aware error message for unavailable tools."""
     if self.read_only:
       return f"{tool_name} is not available on this read-only graph."
     return f"{tool_name} tool is not available. Set {feature_flag}=true to enable this feature."
 
   def get_tool_definitions_as_dict(self) -> list[dict[str, Any]]:
-    """Assemble the tool definitions this graph advertises."""
-    # Layer 1: Core tools (always available)
     tools = [
       self.cypher_tool.get_tool_definition(),
       self.schema_tool.get_tool_definition(),
     ]
 
-    # Layer 1: GraphQL escape-hatch (EXTENSIONS_GRAPHQL_ENABLED + MCP_GRAPHQL_ENABLED)
     if self.graphql_schema_tool is not None and env.MCP_GRAPHQL_ENABLED:
       tools.append(self.graphql_schema_tool.get_tool_definition())
     if self.graphql_query_tool is not None and env.MCP_GRAPHQL_ENABLED:
       tools.append(self.graphql_query_tool.get_tool_definition())
 
-    # Layer 2: Schema extension tools (roboledger)
     if self._has_extension("roboledger"):
       tools.append(self.example_queries_tool.get_tool_definition())
-
-      # Semantic enrichment tools (preferred path for concept resolution)
       tools.extend(self._get_semantic_tool_definitions())
-
-      # Curated financial tools (FactSet-powered)
       tools.extend(self._get_curated_tool_definitions())
-
-      # Fact grid tool (custom element/period/entity queries)
       tools.extend(self._get_fact_grid_tool_definitions())
-
-      # Materialization tools (sync status + trigger)
       tools.extend(self._get_materialization_tool_definitions())
-
-      # Schedule tools (close workflow)
       tools.extend(self._get_schedule_tool_definitions())
-
-      # Taxonomy mapping tools (CoA → GAAP workflow)
       tools.extend(self._get_taxonomy_tool_definitions())
-
-      # Information Block read tools (cross-block-type reads)
       tools.extend(self._get_information_block_tool_definitions())
-
-      # Agent read tools (get-agent, list-agents, agent-activity)
       tools.extend(self._get_agent_tool_definitions())
-
-      # Event Handler read tools (get-event-handler, list-event-handlers)
       tools.extend(self._get_event_handler_tool_definitions())
-
-      # Event Block read tools (get-event-block, list-event-blocks)
       tools.extend(self._get_event_block_tool_definitions())
 
-    # Layer 3: Infrastructure tools (feature-flag gated)
     tools.extend(self._get_navigation_tool_definitions())
     if self.set_write_policy_tool is not None:
       tools.append(self.set_write_policy_tool.get_tool_definition())
@@ -926,23 +731,17 @@ class GraphMCPTools:
     tools.extend(self._get_search_tool_definitions())
     tools.extend(self._get_document_tool_definitions())
 
-    # Layer 0: Registrar-generated tools (per enabled extension).
-    # Appended last so hand-written tools retain their historical
-    # ordering; clients rely on get_tool_definitions_as_dict to
-    # enumerate by name, not index.
     for tool in self._registrar_dispatch.values():
       tools.append(tool.get_tool_definition())
 
-    # Applied last, over the assembled list, rather than as a condition on
-    # each of the ~20 registration gates above: a tool added later is
-    # excluded by default instead of by remembering to exclude it.
+    # Filtered over the assembled list so a tool added later is excluded
+    # by default.
     if self._is_tenant_subgraph():
       tools = [t for t in tools if t.get("name") in SUBGRAPH_TOOL_PROFILE]
 
     return tools
 
   def _get_document_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get document management tool definitions (create, update, get, list)."""
     tools = []
     if self.create_document_tool is not None:
       tools.append(self.create_document_tool.get_tool_definition())
@@ -961,19 +760,9 @@ class GraphMCPTools:
   async def call_tool(
     self, name: str, arguments: dict[str, Any], return_raw: bool = False
   ) -> Any:
-    """Dispatch an MCP tool by name.
-
-    Args:
-        name: Tool name
-        arguments: Tool arguments
-        return_raw: Return the tool's native result instead of a JSON string.
-    """
-    # A client that listed tools before switching graphs — or that ignored
-    # `tools/list_changed` — can still call a tool this graph no longer
-    # advertises. Answer it, rather than letting the call dead-end in an
-    # extensions schema validator whose message ("Invalid graph_id for schema
-    # name: kg…_entities") describes an internal invariant the caller has no
-    # way to act on.
+    """Dispatch by name; `return_raw` returns the native result, not JSON."""
+    # A client with a stale tool list can still call a tool this graph no
+    # longer advertises; answer it instead of failing in the OLTP validator.
     if self._is_tenant_subgraph() and name not in SUBGRAPH_TOOL_PROFILE:
       result = {
         "error": "not_applicable_on_subgraph",
@@ -989,24 +778,19 @@ class GraphMCPTools:
       return result if return_raw else json.dumps(result, indent=2)
 
     try:
-      # Layer 0: Registrar-generated tools (auto-derived from OperationSpec)
-      # Checked first so hand-written if/elif branches can be pruned as
-      # tools migrate. These tools embed the extension gate internally.
+      # Registrar tools first; they carry their own extension gate.
       registrar_tool = self._registrar_dispatch.get(name)
       if registrar_tool is not None:
         result = await registrar_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Layer 1: Core tools (always available)
       if name == "read-graph-cypher":
         result = await self.cypher_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "get-graph-schema":
-        # For schema tool, we need to handle caching differently
         result = await self.schema_tool.execute(arguments)
 
-        # Update our cache stats from schema tool
         schema_stats = self.schema_tool.get_cache_stats()
         self._cache_hits = schema_stats["cache_hits"]
         self._cache_misses = schema_stats["cache_misses"]
@@ -1052,7 +836,6 @@ class GraphMCPTools:
         result = await self.graphql_query_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Layer 2: Schema extension tools (roboledger-gated)
       elif name == "get-example-queries":
         if self.example_queries_tool is None:
           raise ValueError(
@@ -1108,7 +891,6 @@ class GraphMCPTools:
         result = await self.live_financial_statement_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Layer 3: Graph lifecycle tools (MCP_WORKSPACE_ENABLED, read_only gates)
       elif name == "create-subgraph":
         if self.create_subgraph_tool is None:
           raise ValueError(
@@ -1231,7 +1013,6 @@ class GraphMCPTools:
         result = await self.build_fact_grid_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Materialization tools
       elif name == "get-graph-sync-status":
         if self.get_graph_sync_status_tool is None:
           raise ValueError(
@@ -1249,7 +1030,6 @@ class GraphMCPTools:
         result = await self.materialize_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Period-workflow read tools (writes are registrar-generated, Layer 0).
       elif name == "get-period-close-status":
         if self.get_period_close_status_tool is None:
           raise ValueError(
@@ -1277,7 +1057,6 @@ class GraphMCPTools:
         result = await self.get_close_playbook_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Information Block read tools (writes are registrar-generated, handled at Layer 0)
       elif name == "get-information-block":
         if self.get_information_block_tool is None:
           raise ValueError(
@@ -1296,7 +1075,6 @@ class GraphMCPTools:
         result = await self.list_information_blocks_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Agent read tools (writes are registrar-generated, handled at Layer 0)
       elif name == "get-agent":
         if self.get_agent_tool is None:
           raise ValueError(
@@ -1324,7 +1102,6 @@ class GraphMCPTools:
         result = await self.agent_activity_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Event Handler read tools (writes are registrar-generated)
       elif name == "get-event-handler":
         if self.get_event_handler_tool is None:
           raise ValueError(
@@ -1343,7 +1120,6 @@ class GraphMCPTools:
         result = await self.list_event_handlers_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Event Block read tools (writes are registrar-generated, handled at Layer 0)
       elif name == "get-event-block":
         if self.get_event_block_tool is None:
           raise ValueError(
@@ -1362,7 +1138,6 @@ class GraphMCPTools:
         result = await self.list_event_blocks_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Fiscal calendar tools
       elif name == "get-fiscal-calendar":
         if self.get_fiscal_calendar_tool is None:
           raise ValueError(
@@ -1399,7 +1174,6 @@ class GraphMCPTools:
         result = await self.backfill_plan_history_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Taxonomy mapping tools
       elif name == "get-unmapped-elements":
         if self.get_unmapped_elements_tool is None:
           raise ValueError(
@@ -1463,7 +1237,6 @@ class GraphMCPTools:
         result = await self.bind_text_block_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Document management tools
       elif name == "create-document":
         if self.create_document_tool is None:
           raise ValueError(
@@ -1511,7 +1284,6 @@ class GraphMCPTools:
       error_context = self._build_error_context(name, arguments, e)
       error_msg = str(e)
 
-      # Timeout-specific suggestions for the calling agent.
       if name == "read-graph-cypher" and "query" in arguments:
         query = arguments["query"]
         if len(query) > 1000:
@@ -1526,14 +1298,13 @@ class GraphMCPTools:
         extra={"error_context": error_context},
       )
       if return_raw:
-        raise  # Re-raise for raw mode
+        raise
       return f"Timeout: {error_msg}"
 
     except GraphQueryComplexityError as e:
       error_context = self._build_error_context(name, arguments, e)
       error_msg = str(e)
 
-      # Complexity-specific suggestions for the calling agent.
       if hasattr(e, "details") and "complexity_score" in e.details:
         score = e.details["complexity_score"]
         error_msg += f"\n💡 Complexity score: {score}. Consider simplifying the query."
@@ -1543,7 +1314,7 @@ class GraphMCPTools:
         extra={"error_context": error_context},
       )
       if return_raw:
-        raise  # Re-raise for raw mode
+        raise
       return f"Complexity Error: {error_msg}"
 
     except GraphAPIError as e:
@@ -1557,7 +1328,6 @@ class GraphMCPTools:
       enhanced_msg = self._enhance_error_message(error_msg, name, arguments)
 
       if return_raw:
-        # Preserve original exception with enhanced message
         e.args = (enhanced_msg, *e.args[1:]) if len(e.args) > 1 else (enhanced_msg,)
         if hasattr(e, "details"):
           e.details = {**e.details, **error_context}
@@ -1565,7 +1335,6 @@ class GraphMCPTools:
       return f"Error: {enhanced_msg}"
 
     except ValueError as e:
-      # Handle argument validation errors with specific context
       error_msg = str(e)
       if "Query parameter" in error_msg or "argument" in error_msg.lower():
         error_msg = f"Invalid argument in tool '{name}': {error_msg}"
@@ -1578,7 +1347,6 @@ class GraphMCPTools:
       return f"Validation Error: {error_msg}"
 
     except Exception as e:
-      # Handle other errors with enhanced sanitization and context
       error_context = self._build_error_context(name, arguments, e)
       error_msg = self._sanitize_error_message(str(e))
 
@@ -1608,16 +1376,14 @@ class GraphMCPTools:
   def _build_error_context(
     self, tool_name: str, arguments: dict[str, Any], exception: Exception
   ) -> dict[str, Any]:
-    """Build error context for logging and debugging."""
     context: dict[str, Any] = {
       "tool_name": tool_name,
       "graph_id": self.client.graph_id,
       "exception_type": type(exception).__name__,
     }
 
-    # Add argument context (sanitized)
     if arguments:
-      # Don't log full query content for security, just metadata
+      # Query metadata only, never its content.
       arg_context: dict[str, Any] = {}
       for key, value in arguments.items():
         if key == "query" and isinstance(value, str):
@@ -1634,7 +1400,6 @@ class GraphMCPTools:
 
       context["arguments"] = arg_context
 
-    # Add exception-specific context
     if hasattr(exception, "error_code"):
       context["error_code"] = exception.error_code
     if hasattr(exception, "details"):
@@ -1645,10 +1410,8 @@ class GraphMCPTools:
   def _enhance_error_message(
     self, error_msg: str, tool_name: str, arguments: dict[str, Any]
   ) -> str:
-    """Enhance error messages with tool-specific context and suggestions."""
     enhanced_msg = error_msg
 
-    # Add tool-specific suggestions
     if tool_name == "read-graph-cypher":
       if "Parser exception" in error_msg:
         enhanced_msg += "\n\n🔧 Query Syntax Help:"
@@ -1673,7 +1436,6 @@ class GraphMCPTools:
     elif tool_name == "get-graph-schema" and "timeout" in error_msg.lower():
       enhanced_msg += "\n\n💡 Large schema detected. Consider using read-graph-cypher with CALL SHOW_TABLES() for specific node types."
 
-    # Add general suggestions based on error patterns
     if "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
       enhanced_msg += "\n\n🔐 Check API permissions and authentication credentials."
 
@@ -1686,7 +1448,6 @@ class GraphMCPTools:
 
   def _sanitize_error_message(self, error_msg: str) -> str:
     """Strip file paths and credentials out of an error message."""
-    # Remove file paths and sensitive details
     sensitive_patterns = [
       r"/[^\s]+\.db",  # Database file paths
       r"password[=:][^\s]+",  # Password patterns
@@ -1700,7 +1461,6 @@ class GraphMCPTools:
 
       sanitized = re.sub(pattern, "[REDACTED]", sanitized, flags=re.IGNORECASE)
 
-    # Map common errors to user-friendly messages
     error_mappings = {
       "connection": "Database connection failed",
       "timeout": "Query execution timed out",
@@ -1724,8 +1484,7 @@ class GraphMCPTools:
     return self.schema_tool.get_cache_stats()
 
   async def close(self):
-    """Close MCP tools and log final statistics."""
-    # Log final cache statistics
+    """Log final cache statistics."""
     stats = self.get_cache_stats()
     logger.info(
       f"MCP Tools cache stats - Hits: {stats['cache_hits']}, "

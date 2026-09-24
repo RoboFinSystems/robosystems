@@ -1,14 +1,4 @@
-"""Agent MCP read tools for agents.
-
-Three hand-written read tools:
-
-1. ``get-agent``       — fetch one agent by id.
-2. ``list-agents``     — list agents with optional filters.
-3. ``agent-activity``  — agent + recent events + recent transactions.
-
-Write tools (``create-agent``, ``update-agent``) are auto-generated from
-their OperationSpec entries in the registrar pipeline.
-"""
+"""Reads for REA agents (counterparties); the writes are registrar-generated."""
 
 from __future__ import annotations
 

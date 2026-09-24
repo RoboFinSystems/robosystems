@@ -41,7 +41,6 @@ class OperationManager:
       operation_id=operation_id,
     )
 
-    # Moves status to RUNNING and broadcasts over pub/sub.
     start_data = {
       "operation_type": operation_type,
       "graph_id": graph_id,
@@ -56,13 +55,8 @@ class OperationManager:
     return op_id
 
   async def mark_running(self, operation_id: str, message: str = "Starting..."):
-    """Move a queued operation to RUNNING when a worker picks it up.
-
-    Queued work is registered PENDING by `create_operation_response` and,
-    until this event, nothing distinguished "waiting in the queue" from
-    "executing" — `/status` reported pending for the whole run. The started
-    event carries the first progress frame so streams see it as one.
-    """
+    """Move a queued (PENDING) operation to RUNNING when a worker picks it
+    up; the started event doubles as the first progress frame."""
     await self.event_storage.store_event(
       operation_id,
       EventType.OPERATION_STARTED,
@@ -117,7 +111,6 @@ class OperationManager:
   async def cancel_operation(
     self, operation_id: str, reason: str = "Cancelled by user"
   ):
-    """Cancel an operation."""
     await self.event_storage.cancel_operation(operation_id, reason)
     logger.info(f"Cancelled operation {operation_id}: {reason}")
 
@@ -131,11 +124,9 @@ class OperationManager:
   ):
     """Pause an operation at a checkpoint until a human answers.
 
-    `task` is the queue payload (task_type, graph_id, user_id, params) the
-    resume needs to re-enqueue the run; `checkpoint` is whatever the task
-    needs to pick up where it stopped. Both travel back to the task under
-    `params["resume"]` — the operation store is the only place they live
-    while the run is off the queue.
+    `task` is the queue payload the resume re-enqueues; `checkpoint` is what
+    the task needs to pick up where it stopped. Both return to the task under
+    `params["resume"]`, and live only in the operation store meanwhile.
     """
     input_request = {
       "prompt": prompt,
@@ -154,9 +145,8 @@ class OperationManager:
   async def resume_operation(self, operation_id: str, user_input: dict[str, Any]):
     """Record the answer and move the operation back to RUNNING.
 
-    Called after the task payload is back on the queue: a failed push then
-    leaves the pause — and its resume link — in place for a retry, whereas
-    flipping the status first would strand an unqueued operation as RUNNING.
+    Call only after the task is back on the queue, so a failed push leaves
+    the pause in place for a retry instead of stranding it as RUNNING.
     """
     await self.event_storage.store_event(
       operation_id,
@@ -166,7 +156,6 @@ class OperationManager:
     logger.info(f"Resumed operation {operation_id}")
 
   async def get_operation_status(self, operation_id: str) -> OperationStatus | None:
-    """Get current status of an operation."""
     metadata = await self.event_storage.get_operation_metadata(operation_id)
     return metadata.status if metadata else None
 
@@ -182,10 +171,7 @@ class OperationManager:
     """Run a block as a tracked operation, yielding the operation ID.
 
     Completes the operation on normal exit, fails it on exception, and
-    cancels it on `asyncio.CancelledError` — always re-raising.
-
-        async with manager.operation_context("graph_creation", user_id) as op_id:
-            await manager.emit_progress(op_id, "Creating nodes...")
+    cancels it on `asyncio.CancelledError`, always re-raising.
     """
     op_id = None
     try:
@@ -222,16 +208,7 @@ class OperationManager:
     operation_id: str | None = None,
     initial_data: dict[str, Any] | None = None,
   ) -> str:
-    """Run `operation_func` inside `operation_context`, returning its ID.
-
-    async def create_graph(operation_id: str):
-        manager = get_operation_manager()
-        await manager.emit_progress(operation_id, "Creating nodes...")
-
-    operation_id = await manager.run_operation(
-        "graph_creation", user_id, create_graph
-    )
-    """
+    """Run `operation_func` inside `operation_context`, returning its ID."""
     async with self.operation_context(
       operation_type=operation_type,
       user_id=user_id,
@@ -276,12 +253,10 @@ class OperationManager:
     return op_id
 
 
-# Global instance
 _operation_manager: OperationManager | None = None
 
 
 def get_operation_manager() -> OperationManager:
-  """Get the global operation manager instance."""
   global _operation_manager
   if _operation_manager is None:
     _operation_manager = OperationManager()
@@ -348,9 +323,8 @@ async def create_operation_response(
   """Register an operation and return the response body endpoints should
   hand back when queueing work.
 
-  The operation is created but not started; the worker that picks it up
-  emits the started event. The returned `_links` point at the stream,
-  status, and cancel endpoints in `routers/operations.py`.
+  The operation is created PENDING; the worker that picks it up emits the
+  started event.
   """
   manager = get_operation_manager()
 

@@ -1,6 +1,4 @@
-"""
-Connection management endpoints (create, list, get, delete).
-"""
+"""Connection management endpoints (create, list, get, delete)."""
 
 import asyncio
 from typing import Literal
@@ -69,14 +67,12 @@ async def create_connection(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionResponse:
-  # Registering a source is a write to the graph (it seeds sync, the fiscal
-  # calendar and the mapping operator); membership alone is not enough.
+  # Registering a source seeds sync, the fiscal calendar and the mapping
+  # operator: a graph write.
   require_graph_write_role(str(current_user.id), graph_id)
 
-  # Initialize robustness components
   components = create_robustness_components()
 
-  # Record operation start metrics
   record_operation_start(
     operation_name="create_connection",
     endpoint="/v1/graphs/{graph_id}/connections",
@@ -88,14 +84,11 @@ async def create_connection(
     },
   )
 
-  # Initialize timeout (will be overridden in try block)
   operation_timeout = 30.0
 
   try:
-    # Check circuit breaker before processing
     components["circuit_breaker"].check_circuit(graph_id, "connection_create")
 
-    # Set up timeout coordination for external service calls
     operation_timeout = components["timeout_coordinator"].calculate_timeout(
       operation_type="external_service",
       complexity_factors={
@@ -105,7 +98,6 @@ async def create_connection(
       },
     )
 
-    # Log the request with operation logger
     components["operation_logger"].log_external_service_call(
       endpoint="/v1/graphs/{graph_id}/connections",
       service_name="connection_service",
@@ -120,7 +112,6 @@ async def create_connection(
       },
     )
 
-    # Get the appropriate config based on provider
     config = None
     if request.provider == "quickbooks":
       config = request.quickbooks_config
@@ -130,12 +121,10 @@ async def create_connection(
       config = request.mercury_config
     elif request.provider == "plaid":
       config = request.plaid_config
-    # Validate provider is enabled before any database operations
+    # Validates the provider is enabled before any database work.
     provider_registry.get_provider(request.provider)
 
-    # Native and synced ledgers never mix — a bank feed needs a chart and no
-    # live QuickBooks; QuickBooks cannot take over natively-kept books
-    # (specs/ledger/native-accounting-cutover.md §2).
+    # Native and synced ledgers never mix.
     try:
       assert_provider_compatible(graph_id, request.provider, db)
     except ProviderConflictError as conflict:
@@ -145,10 +134,8 @@ async def create_connection(
         code=conflict.code,
       )
 
-    # Prevent duplicate connections: one connection per provider per graph —
-    # except 'external', where the identity is the source_name (a graph can
-    # register several external sources; the same source_name early-returns
-    # its existing registration).
+    # One connection per provider per graph, except 'external' (identity is
+    # source_name; a repeat source_name returns the existing registration).
     existing_connections = await ConnectionService.list_connections(
       user_id=str(current_user.id),
       graph_id=graph_id,
@@ -192,7 +179,6 @@ async def create_connection(
         metadata=existing.get("metadata", {}),
       )
 
-    # Create connection using provider registry with timeout coordination
     connection_id = await asyncio.wait_for(
       provider_registry.create_connection(
         request.provider,
@@ -205,7 +191,6 @@ async def create_connection(
       timeout=operation_timeout,
     )
 
-    # Get the created connection
     connection = await ConnectionService.get_connection(
       connection_id, current_user.id, graph_id=graph_id
     )
@@ -217,7 +202,6 @@ async def create_connection(
         code=ErrorCode.INTERNAL_ERROR,
       )
 
-    # Record successful operation
     record_operation_success(
       components=components,
       operation_name="create_connection",
@@ -245,7 +229,6 @@ async def create_connection(
     )
 
   except TimeoutError:
-    # Record circuit breaker failure and timeout metrics
     record_operation_failure(
       components=components,
       operation_name="create_connection",
@@ -265,7 +248,6 @@ async def create_connection(
       code=ErrorCode.OPERATION_FAILED,
     )
   except HTTPException:
-    # Record circuit breaker failure for HTTP exceptions
     record_operation_failure(
       components=components,
       operation_name="create_connection",
@@ -276,7 +258,6 @@ async def create_connection(
     )
     raise
   except ValueError as e:
-    # Handle disabled provider errors as client errors
     record_operation_failure(
       components=components,
       operation_name="create_connection",
@@ -294,7 +275,6 @@ async def create_connection(
       code=ErrorCode.FORBIDDEN,
     )
   except Exception as e:
-    # Record circuit breaker failure for general exceptions
     record_operation_failure(
       components=components,
       operation_name="create_connection",
@@ -331,7 +311,6 @@ async def list_connections(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> list[ConnectionResponse]:
   try:
-    # Get connections from service
     connections = await ConnectionService.list_connections(
       entity_id=entity_id or None,
       provider=provider or None,
@@ -339,7 +318,6 @@ async def list_connections(
       graph_id=graph_id,
     )
 
-    # Convert to response models
     response_connections = []
     for conn in connections:
       response_connections.append(
@@ -445,9 +423,7 @@ async def set_connection_write_policy(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionResponse:
-  # `get_current_user_with_graph` proves graph membership only. Opting a
-  # connection into outbound write-back (e.g. QuickBooks) is a privileged
-  # mutation — a read-only `viewer` must not reach it. Enforce member/admin.
+  # Opting into outbound write-back is privileged: member/admin, not viewer.
   require_graph_write_role(str(current_user.id), graph_id)
 
   try:
@@ -530,8 +506,6 @@ async def delete_connection(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
   try:
-    # Deleting a connection revokes credentials — enforce the admin role the
-    # endpoint has always documented.
     if not GraphUser.user_has_admin_access(str(current_user.id), graph_id, db):
       raise create_error_response(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -539,7 +513,6 @@ async def delete_connection(
         code=ErrorCode.FORBIDDEN,
       )
 
-    # Get connection before deletion for cleanup
     connection = await ConnectionService.get_connection(
       connection_id, current_user.id, graph_id=graph_id
     )
@@ -581,7 +554,7 @@ async def delete_connection(
         risk_level="medium",
       )
 
-    # Provider-specific cleanup BEFORE deletion (e.g., revoke OAuth tokens)
+    # Provider cleanup (e.g. revoking OAuth tokens) before deletion.
     try:
       provider_registry.get_provider(provider)
       await provider_registry.cleanup_connection(provider, connection, graph_id)
@@ -620,7 +593,6 @@ async def delete_connection(
   except HTTPException:
     raise
   except ValueError as e:
-    # Handle disabled provider errors as client errors
     logger.warning(f"Provider not available for connection cleanup: {e}")
     raise create_error_response(
       status_code=status.HTTP_403_FORBIDDEN,

@@ -15,8 +15,6 @@ from robosystems.logger import logger
 
 
 class LogLevel(Enum):
-  """Log levels for operations."""
-
   DEBUG = "debug"
   INFO = "info"
   WARNING = "warning"
@@ -24,8 +22,6 @@ class LogLevel(Enum):
 
 
 class OperationLogEventType(Enum):
-  """Types of operation log events."""
-
   OPERATION_START = "operation_start"
   OPERATION_SUCCESS = "operation_success"
   OPERATION_FAILURE = "operation_failure"
@@ -66,20 +62,15 @@ class OperationLogEntry:
   trace_id: str | None = None
 
   def to_dict(self) -> dict[str, Any]:
-    """Convert log entry to dictionary for JSON serialization."""
     data = asdict(self)
-    # Convert enums to strings
     data["event_type"] = self.event_type.value
     data["level"] = self.level.value
     return {k: v for k, v in data.items() if v is not None}
 
 
 class OperationLogger:
-  """Enhanced logger for API operations with structured logging and context tracking.
-
-  Provides operation-scoped logging with automatic correlation IDs,
-  performance tracking, and security audit trails.
-  """
+  """Operation-scoped structured logging, keeping a bounded in-memory buffer
+  of recent entries for inspection."""
 
   def __init__(
     self,
@@ -88,17 +79,14 @@ class OperationLogger:
     slow_operation_threshold_ms: float = 5000.0,
     max_log_entries: int = 10000,
   ):
-    """Initialize operation logger."""
     self.enable_performance_logging = enable_performance_logging
     self.enable_debug_logging = enable_debug_logging
     self.slow_operation_threshold_ms = slow_operation_threshold_ms
     self.max_log_entries = max_log_entries
 
-    # Thread-safe storage for structured logs
     self._lock = threading.RLock()
     self._log_entries: list[OperationLogEntry] = []
 
-    # Operation context tracking
     self._operation_contexts: dict[str, dict[str, Any]] = {}
 
     logger.info(
@@ -120,7 +108,6 @@ class OperationLogger:
     operation_id = trace_id or f"{operation}_{int(time.time() * 1000000)}"
     start_time = time.time()
 
-    # Store operation context
     with self._lock:
       self._operation_contexts[operation_id] = {
         "operation": operation,
@@ -413,11 +400,9 @@ class OperationLogger:
     )
 
   def _add_log_entry(self, entry: OperationLogEntry) -> None:
-    """Add log entry to structured storage (called with lock held)."""
     with self._lock:
       self._log_entries.append(entry)
 
-      # Trim old entries if over limit
       if len(self._log_entries) > self.max_log_entries:
         self._log_entries = self._log_entries[-self.max_log_entries :]
 
@@ -435,7 +420,7 @@ class OperationLogger:
     with self._lock:
       filtered_entries = []
 
-      for entry in reversed(self._log_entries):  # Most recent first
+      for entry in reversed(self._log_entries):
         if entry.timestamp < cutoff_time:
           break
 
@@ -465,14 +450,7 @@ class OperationLogger:
     operation_name: str | None = None,
     metadata: dict[str, Any] | None = None,
   ):
-    """Context manager for automatic operation logging.
-
-    Usage:
-        async with operation_logger.operation_context("entity_create", endpoint, graph_id, user_id) as op_id:
-            # Perform operation
-            result = await some_operation()
-            # Success logged automatically
-    """
+    """Log start, then success or failure (re-raising), around a block."""
     operation_id = self.log_operation_start(
       operation=operation,
       endpoint=endpoint,
@@ -490,12 +468,10 @@ class OperationLogger:
       raise
 
 
-# Global operation logger instance
 _operation_logger: OperationLogger | None = None
 
 
 def get_operation_logger() -> OperationLogger:
-  """Get the global operation logger instance."""
   global _operation_logger
 
   if _operation_logger is None:

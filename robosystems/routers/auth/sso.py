@@ -51,7 +51,6 @@ from .utils import (
   is_safe_relative_path,
 )
 
-# Create router for SSO endpoints
 router = APIRouter()
 
 
@@ -70,7 +69,7 @@ async def generate_sso_token(
   _rate_limit: None = Depends(sso_rate_limit_dependency),
 ) -> SSOTokenResponse:
   try:
-    # Extract JWT token from Authorization header (doesn't show in OpenAPI params) or fall back to cookie
+    # Header read directly so it doesn't show in the OpenAPI params; cookie fallback.
     authorization = request.headers.get("authorization")
     jwt_token = None
     if authorization and authorization.startswith("Bearer "):
@@ -85,7 +84,6 @@ async def generate_sso_token(
         headers={"WWW-Authenticate": "Bearer"},
       )
 
-    # Verify current JWT token (with device fingerprint binding)
     device_fingerprint = extract_device_fingerprint(request)
     verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
     if not verify_result:
@@ -111,22 +109,18 @@ async def generate_sso_token(
 
     publish_principal(request, str(user.id), "jwt_token")
 
-    # Create temporary SSO token
     sso_token, token_id = create_sso_token(user.id, session=session)
     expires_at = datetime.now(UTC) + timedelta(seconds=SSO_TOKEN_EXPIRY_SECONDS)
 
-    # Store token ID in Valkey for single-use tracking with distributed locking
     try:
       redis_client = await get_async_redis_client()
 
-      # Use distributed lock to prevent race conditions during token creation
       lock_manager = get_sso_lock_manager()
       if lock_manager:
         async with lock_manager.lock_sso_token(token_id, "token_creation"):
-          # Atomic token storage
           existing_token = await redis_client.get(f"sso_token:{token_id}")
           if existing_token:
-            # Token ID collision (very unlikely with UUID4)
+            # UUID4 collision: effectively impossible, so treat as suspicious.
             SecurityAuditLogger.log_security_event(
               event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
               details={
@@ -206,25 +200,21 @@ async def sso_token_exchange(
   _rate_limit: None = Depends(sso_rate_limit_dependency),
 ) -> SSOExchangeResponse:
   try:
-    # Validate token structure
     if not request.token or not isinstance(request.token, str):
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid SSO token format"
       )
 
-    # Validate target app
     if request.target_app not in AVAILABLE_APPS:
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid target application"
       )
 
-    # Validate return URL as a same-app relative path
     if request.return_url and not is_safe_relative_path(request.return_url):
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid return URL"
       )
 
-    # Verify SSO token
     secret_key = Config.get_jwt_secret()
 
     try:
@@ -244,14 +234,13 @@ async def sso_token_exchange(
           status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid SSO token"
         )
 
-      # Check if token has already been used with distributed locking
+      # Single-use check under a distributed lock.
       try:
         redis_client = await get_async_redis_client()
         lock_manager = get_sso_lock_manager()
 
         if lock_manager:
           async with lock_manager.lock_sso_token(token_id, "token_exchange"):
-            # Atomic token verification and exchange marking
             stored_user_id = await redis_client.get(f"sso_token:{token_id}")
 
             if not stored_user_id:
@@ -283,7 +272,6 @@ async def sso_token_exchange(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid SSO token"
               )
 
-            # Check if token is already being exchanged
             exchange_marker = await redis_client.get(f"sso_token_exchange:{token_id}")
             if exchange_marker:
               SecurityAuditLogger.log_security_event(
@@ -300,14 +288,12 @@ async def sso_token_exchange(
                 detail="SSO token is already being processed",
               )
 
-            # Atomically mark token as being exchanged to prevent race conditions.
-            # Marker must outlive the token itself or the double-exchange guard
+            # The marker must outlive the token, or the double-exchange guard
             # expires while the token is still valid.
             await redis_client.setex(
               f"sso_token_exchange:{token_id}", SSO_TOKEN_EXPIRY_SECONDS, "exchanged"
             )
 
-            # Log successful token exchange marking
             SecurityAuditLogger.log_security_event(
               event_type=SecurityEventType.AUTH_SUCCESS,
               details={
@@ -353,7 +339,6 @@ async def sso_token_exchange(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid SSO token"
       )
 
-    # Verify user exists and is active
     user = User.get_by_id(user_id, session)
     if not user or not user.is_active:
       raise HTTPException(
@@ -378,20 +363,17 @@ async def sso_token_exchange(
         detail="SSO token session has been invalidated",
       )
 
-    # Create temporary session ID for secure handoff
     session_id = str(uuid.uuid4())
     expires_at = datetime.now(UTC) + timedelta(
       seconds=SSO_SESSION_EXPIRY_SECONDS
     )  # Very short
 
-    # Store session mapping in Redis with distributed locking
     try:
       redis_client = await get_async_redis_client()
       lock_manager = get_sso_lock_manager()
 
       if lock_manager:
         async with lock_manager.lock_sso_session(session_id, "session_creation"):
-          # Check for session ID collision
           existing_session = await redis_client.get(f"sso_session:{session_id}")
           if existing_session:
             SecurityAuditLogger.log_security_event(
@@ -417,14 +399,12 @@ async def sso_token_exchange(
             "created_at": datetime.now(UTC).isoformat(),
           }
 
-          # Atomically store session data
           await redis_client.setex(
             f"sso_session:{session_id}",
             SSO_SESSION_EXPIRY_SECONDS,
             json.dumps(session_data),
           )
 
-          # Log successful session creation
           SecurityAuditLogger.log_security_event(
             event_type=SecurityEventType.AUTH_SUCCESS,
             details={
@@ -460,7 +440,6 @@ async def sso_token_exchange(
         detail="Session creation failed",
       )
 
-    # Build app-specific redirect URLs
     app_urls = Config.get_app_urls()
 
     base_url = app_urls.get(request.target_app)
@@ -506,14 +485,12 @@ async def sso_complete(
   try:
     session_id = body.session_id
 
-    # Retrieve and validate session with distributed locking
     try:
       redis_client = await get_async_redis_client()
       lock_manager = get_sso_lock_manager()
 
       if lock_manager:
         async with lock_manager.lock_sso_session(session_id, "session_completion"):
-          # Atomic session consumption
           session_data_str = await redis_client.get(f"sso_session:{session_id}")
 
           if not session_data_str:
@@ -530,7 +507,6 @@ async def sso_complete(
               detail="Session expired or invalid",
             )
 
-          # Parse session data
           session_data = json.loads(session_data_str)
           user_id = session_data.get("user_id")
           token_id = session_data.get("token_id")
@@ -549,12 +525,11 @@ async def sso_complete(
               status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session data"
             )
 
-          # Atomically delete session and related tokens (single use)
+          # Single use: delete the session and related tokens atomically.
           await redis_client.delete(f"sso_session:{session_id}")
           await redis_client.delete(f"sso_token:{token_id}")
           await redis_client.delete(f"sso_token_exchange:{token_id}")
 
-          # Log successful session completion
           SecurityAuditLogger.log_security_event(
             event_type=SecurityEventType.AUTH_SUCCESS,
             details={
@@ -601,21 +576,19 @@ async def sso_complete(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session data"
       )
 
-    # Verify user exists and is active
     user = User.get_by_id(user_id, session)
     if not user or not user.is_active:
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive"
       )
 
-    # Reject handoffs whose sessions were invalidated between exchange and
-    # completion (password change, deactivation).
+    # Reject handoffs invalidated between exchange and completion (password
+    # change, deactivation).
     try:
       handoff_session_version = int(session_data.get("session_version", 0) or 0)
       current_session_version = int(getattr(user, "session_version", 0) or 0)
     except (TypeError, ValueError):
-      # Fail closed: this check exists to reject invalidated sessions, so a
-      # value that cannot be parsed must not be treated as a match.
+      # Fail closed: an unparseable version must not count as a match.
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session data"
       )
@@ -635,12 +608,10 @@ async def sso_complete(
         detail="Session has been invalidated",
       )
 
-    # Create new JWT token for this session with device binding
     device_fingerprint = extract_device_fingerprint(request)
     jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
-    # Bearer-token auth: the token is returned in the response body for the
-    # frontend to store. No auth cookie is set.
+    # Bearer-token auth: the token goes in the response body; no auth cookie.
 
     expires_in = int(JWT_EXPIRY_HOURS * 3600)
     refresh_threshold = int(TOKEN_GRACE_PERIOD_MINUTES * 60)

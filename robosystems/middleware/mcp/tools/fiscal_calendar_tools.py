@@ -1,25 +1,8 @@
-"""Fiscal calendar MCP tools for AI accounting close workflows.
+"""Fiscal calendar MCP tools: get-fiscal-calendar, close-period, reopen-period,
+backfill-plan-history.
 
-Four tools that expose the fiscal calendar state machine to Claude:
-
-1. get-fiscal-calendar — read current state (closed_through, close_target,
-   gap, closeable_now, blockers)
-2. close-period — the final commit action: atomically posts all drafts in
-   the period, marks the period closed, advances closed_through, auto-advances
-   close_target when reached
-3. reopen-period — undo a prior close. Requires a reason for the audit log.
-4. backfill-plan-history — compile monthly statement history behind the
-   close boundary (chunked reopen → reclose restamps, feeding the plan's
-   historical columns).
-
-Initialize and set-close-target are deliberately NOT exposed as MCP tools:
-initialize is a one-time onboarding operation done via the UI, and
-set-close-target is a configuration action that normal close workflows
-don't need (auto-advance handles it). Both are still available via REST.
-
-All tools route through `operations/roboledger/{reads,commands}/
-fiscal_calendar.py` so MCP, GraphQL, and the REST operation surface
-share one source of truth for both behavior and wire shape.
+Initialize and set-close-target stay REST-only: one is onboarding, and
+auto-advance makes the other unnecessary in a normal close.
 """
 
 import asyncio
@@ -71,14 +54,7 @@ from ._errors import database_failure
 
 
 def _calendar_dict(session, graph_id: str, calendar, service) -> dict[str, Any]:
-  """Build the MCP wire shape for the fiscal calendar.
-
-  Wraps `build_fiscal_calendar_response` (the shared ops-layer assembler)
-  and tacks on `has_sync_connection` — the only field the MCP tool
-  surfaced that isn't on the Pydantic response model. Everything else
-  flows through `model_dump(mode="json")` so date/time fields serialize
-  as ISO-8601 strings, matching the original handcrafted shape.
-  """
+  """The shared response plus `has_sync_connection`, which only MCP carries."""
   with _platform_session() as platform_db:
     has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
   response = build_fiscal_calendar_response(
@@ -333,9 +309,7 @@ The receipt:
       },
     }
 
-  # Polling budget for the dispatched close. The server cuts a tool call at
-  # 25s, so this has to land inside that with room for the dispatch itself;
-  # what is left over is the handback the operator reads.
+  # The server cuts a tool call at 25s; the budget leaves room for dispatch.
   POLL_INTERVAL_S = 1.0
   POLL_BUDGET_S = 18.0
 
@@ -353,10 +327,7 @@ The receipt:
     if gate is not None:
       return gate
 
-    # A real user id, not the graph-scoped sentinel the synchronous path
-    # could fall back to: the operation is readable at
-    # /v1/operations/{id}/status only by the user it was created for, so a
-    # sentinel would enqueue work nobody could then look up.
+    # No sentinel fallback: only the creating user can read the operation.
     user_id = getattr(self.client, "user_id", None)
     if not user_id:
       return {
@@ -384,9 +355,7 @@ The receipt:
         },
       )
     except Exception as exc:
-      # Nothing was queued, which makes this the one failure here that is
-      # safe to retry — and worth saying so, because every other message
-      # this tool returns says the opposite.
+      # Nothing was queued: the one failure here that is safe to retry.
       logger.warning("close-period could not dispatch: %s", exc, exc_info=True)
       return {
         "error": "dispatch_failed",
@@ -400,9 +369,7 @@ The receipt:
     operation_id = dispatch["operation_id"]
 
     storage = get_event_storage()
-    # Measured against the clock rather than by summing the intended sleeps:
-    # the budget is "how long the caller has been waiting", and an interval
-    # that rounds to nothing must still exhaust it rather than spin.
+    # Wall-clock deadline, so a tiny interval still exhausts the budget.
     loop = asyncio.get_running_loop()
     deadline = loop.time() + self.POLL_BUDGET_S
     started_at = loop.time()
@@ -411,9 +378,7 @@ The receipt:
       try:
         metadata = await storage.get_operation_metadata(operation_id)
       except Exception as exc:
-        # The close is already running. Losing sight of it is a reporting
-        # problem, not a reason to suggest doing it again — fall through to
-        # the handback, which sends the operator to the period itself.
+        # The close is running; losing sight of it is no reason to redo it.
         logger.warning(
           "close-period lost track of operation %s: %s",
           operation_id,
@@ -423,8 +388,7 @@ The receipt:
         break
       status = metadata.status if metadata else None
       if metadata and status == OperationStatus.COMPLETED:
-        # The task already shaped this — return it as it stands so the
-        # receipt reads the same whether the worker was fast or slow.
+        # Already shaped by the task, so fast and slow closes read the same.
         return metadata.result_data or {}
       if metadata and status == OperationStatus.FAILED:
         return {
@@ -471,13 +435,8 @@ The receipt:
     }
 
   def _gate_check(self, arguments: dict[str, Any]) -> Any:
-    """Answer an uncloseable period without burning a worker slot.
-
-    The task re-runs this gate under the period fence, which is the
-    authoritative check; this one only spares the operator a dispatch and a
-    poll to be told something already knowable. A period that becomes
-    uncloseable in between is caught there and comes back as a refusal.
-    """
+    """Refuse an uncloseable period before dispatch. Advisory only: the task
+    re-runs the gate under the period fence, which is authoritative."""
     graph_id = self.client.graph_id
     try:
       require_graph_extension_mcp("roboledger", graph_id)
@@ -645,8 +604,6 @@ class ReopenPeriodTool:
           "period": period,
           "reason": reason,
           "fiscal_calendar": fc_payload,
-          # Canonical statement sets deleted by the reopen (a reopened
-          # month is no longer a closed assertion; re-closing restamps).
           "statement_sets_retracted": result.statement_sets_retracted,
         }
     except FiscalCalendarError as exc:

@@ -1,11 +1,5 @@
-"""Shared helpers for GraphQL resolvers, kept in one place so bounds and
-behavior can't drift between domains.
-
-- Pagination guards (`resolve_pagination`, `validate_pagination`).
-  Strawberry has no `Field(ge=…, le=…)` equivalent, so the bounds are
-  asserted at the resolver boundary.
-- `open_extensions_session` / `open_library_session` — the auth, extension
-  gate, and session-open prelude every data resolver runs.
+"""Shared resolver helpers: pagination guards and the auth/extension-gate/
+session prelude every data resolver runs.
 """
 
 from __future__ import annotations
@@ -29,11 +23,8 @@ def resolve_pagination(
 ) -> tuple[int, int]:
   """Default null pagination args, then bounds-check.
 
-  Generated SDK clients (graphql-codegen) pass explicit `null` for
-  every omitted variable, and GraphQL rejects explicit null for a
-  non-null argument even when it declares a default — so pagination
-  args are declared nullable in the schema (`Int` rather than
-  `Int! = N`) and defaulted here instead.
+  The args are nullable in the schema (not `Int! = N`) because codegen clients
+  send explicit `null` for omitted variables, which a non-null arg rejects.
   """
   resolved_limit = default_limit if limit is None else limit
   resolved_offset = 0 if offset is None else offset
@@ -42,12 +33,7 @@ def resolve_pagination(
 
 
 def validate_pagination(limit: int, offset: int) -> None:
-  """Reject out-of-range pagination args at the resolver boundary.
-
-  Raises `StrawberryGraphQLError` so callers get an `INVALID_PAGINATION`
-  entry in `errors[]` rather than a 500 — the same shape as an
-  authentication failure.
-  """
+  """Raise `INVALID_PAGINATION` (in `errors[]`, not a 500) when out of range."""
   if not _MIN_LIMIT <= limit <= _MAX_LIMIT:
     raise strawberry.exceptions.StrawberryGraphQLError(
       message=f"limit must be between {_MIN_LIMIT} and {_MAX_LIMIT}",
@@ -63,22 +49,10 @@ def validate_pagination(limit: int, offset: int) -> None:
 def require_extension(info: Info[GraphQLContext, None], extension: str) -> None:
   """Raise `EXTENSION_NOT_PROVISIONED` if the graph lacks this extension.
 
-  `get_context` validates auth and graph access but deliberately does not
-  403 graphs that lack an extension — that would break the `hello` probe
-  and introspection. Domain resolvers call this from their session opener
-  so the first data field fails cleanly instead of falling through to a
-  missing schema.
-
-  `schema_extensions` is empty for anonymous introspection traffic, and
-  `require_user` runs first, so this only fires for authenticated calls.
-
-  This gate is intentionally weaker than the REST gate
-  (`require_graph_extension` in `middleware/extensions.py`), which also
-  rejects `graph_type == "repository"` so command writes can never land in
-  a shared tenant schema. Repository graphs such as SEC declare
-  `schema_extensions=["roboledger"]` so ledger-shaped *reads* work against
-  shared data; adding a `graph_type` check here would break SEC GraphQL
-  reads for every subscriber.
+  Not done in `get_context`, which would break the `hello` probe and
+  introspection. Deliberately weaker than the REST gate: no
+  `graph_type == "repository"` check, because SEC declares `roboledger` so
+  ledger-shaped reads work against shared data.
   """
   if extension not in info.context["schema_extensions"]:
     raise strawberry.exceptions.StrawberryGraphQLError(
@@ -92,13 +66,9 @@ def require_any_extension(
 ) -> None:
   """Like :func:`require_extension`, but any one of several will do.
 
-  For reads whose data can arrive on a graph that never provisioned the
-  extension that *owns* the table. A cross-graph report share writes ledger
-  rows into the recipient's schema, so an investor-only tenant legitimately
-  holds reports it can never author — gating those reads on `roboledger`
-  would hide data the platform delivered on purpose. The tenant schema always
-  has the tables (`provision_tenant_schema` creates all of them regardless of
-  the graph's extensions), so this is a policy gate, not a structural one.
+  For reads whose rows can arrive via cross-graph share on a graph that never
+  provisioned the owning extension. A policy gate only: every tenant schema
+  has all the tables.
   """
   provisioned = info.context["schema_extensions"]
   if not any(extension in provisioned for extension in extensions):
@@ -109,12 +79,10 @@ def require_any_extension(
 
 
 def open_extensions_session(info: Info[GraphQLContext, None], extension: str):
-  """Shared auth, extension-gate, and extensions-session prelude.
+  """Auth, extension-gate, and extensions-session prelude.
 
-  `get_context` already enforced auth and graph access, so `require_user`
-  here only catches the anonymous-introspection case. `require_extension`
-  keeps resolvers from opening a session on a graph that lacks the
-  extension.
+  `require_user` here only catches anonymous introspection; `get_context`
+  already enforced graph access.
   """
   require_user(info)
   require_extension(info, extension)
@@ -128,11 +96,7 @@ def open_extensions_session(info: Info[GraphQLContext, None], extension: str):
 def open_extensions_session_for_any(
   info: Info[GraphQLContext, None], extensions: tuple[str, ...]
 ):
-  """`open_extensions_session` for reads served to more than one domain.
-
-  See :func:`require_any_extension` — the received-report surface is the case
-  this exists for.
-  """
+  """`open_extensions_session` gated by :func:`require_any_extension`."""
   require_user(info)
   require_any_extension(info, extensions)
   graph_id = require_graph_id(info)
@@ -142,18 +106,10 @@ def open_extensions_session_for_any(
 
 
 def open_library_session(info: Info[GraphQLContext, None]):
-  """Open an extensions session for library reads on any graph_id.
+  """Extensions session for library reads, with no extension gate.
 
-  Unlike `open_extensions_session`, this does not gate on a per-graph
-  extension flag: library reads are safe on any authenticated graph because
-  the rows returned are driven by the session's `search_path`.
-
-  - `graph_id == "library"` → `search_path = public` → canonical library.
-  - `graph_id == "kg…"` → `search_path = {schema}, public` → the tenant's
-    library copy plus any tenant extensions of library tables (its own CoA
-    elements and anchor associations).
-
-  Access control is enforced by `check_graph_access` in `get_context`.
+  Rows follow the `search_path`: `library` sees `public`, a tenant sees its
+  own schema then `public`.
   """
   require_user(info)
   graph_id = require_graph_id(info)

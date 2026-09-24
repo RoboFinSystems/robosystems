@@ -1,34 +1,17 @@
 """Remote MCP transport — Streamable HTTP (JSON-RPC 2.0) over the existing tool layer.
 
-``POST /v1/graphs/{graph_id}/mcp`` is the wire-protocol front door for MCP
-clients that connect by URL (Claude custom connectors, Cursor, ``mcp-remote``).
-The npx stdio bridge translates MCP to the REST tool endpoints; this endpoint
-speaks the protocol directly, so a graph is connectable by pasting its URL.
+``POST /v1/graphs/{graph_id}/mcp`` lets MCP clients connect to a graph by URL.
+Dispatch is hand-rolled rather than mounted from the MCP SDK because the tool
+surface is dynamic per graph and every call must run behind the same FastAPI
+dependency chain as the REST tool endpoints (auth, graph access, rate limits,
+write classification, circuit breaker).
 
-The dispatch is hand-rolled rather than mounted from the MCP SDK server: the
-tool surface is dynamic per graph (shared-repo gating, ``read_only``,
-extension flags), and every call must run behind the same FastAPI dependency
-chain as the REST tool endpoints — auth, per-graph access, rate limits, the
-shared write-classification gauntlet, and the circuit breaker.
-
-Transport rules:
-
-- ``graph_id`` lives in the URL path and never becomes a tool argument. The
-  per-graph ``serverInfo.name`` and ``instructions`` reinforce the anchor,
-  and instructions are rebuilt per ``initialize`` rather than frozen at
-  client-process start.
+- ``graph_id`` comes from the URL (or, on the OAuth-only ``/v1/mcp`` and
+  ``/v1/mcp/roboledger`` routes, from the consent grant); never a tool argument.
 - Stateless: no ``Mcp-Session-Id``, no GET-side SSE channel, no resumability.
-  A subgraph is addressed as another connector URL, never via in-session
-  switching.
-- Two credential carriages on the per-graph route: ``X-API-Key`` and an
-  OAuth ``Authorization: Bearer`` bound to this exact URL — nothing in the
-  query string. The graph-agnostic ``POST /v1/mcp`` (``agnostic_router``)
-  is OAuth-only: the consent grant names the graph, and the transport
-  dispatches on that resolved ``graph_id`` exactly as the per-graph route
-  dispatches on the URL's. ``POST /v1/mcp/roboledger`` (``roboledger_router``)
-  is the same for RoboLedger graphs, with a product tool profile.
-- Excluded from the OpenAPI schema so the JSON-RPC envelope never lands in
-  the generated SDK clients.
+- Credentials: ``X-API-Key`` or an OAuth bearer bound to this URL, never the
+  query string.
+- Excluded from OpenAPI so the JSON-RPC envelope stays out of the SDK clients.
 """
 
 import asyncio
@@ -92,14 +75,10 @@ roboledger_router = APIRouter()
 
 _NO_EXCLUSIONS: frozenset[str] = frozenset()
 
-# Protocol revisions this transport can negotiate. The server answers with the
-# client's requested revision when supported, else its own latest. Exactly the
-# revision this dispatch implements is offered — 2024-11-05 predates Streamable
-# HTTP, and 2025-03-26 permitted JSON-RPC batching, which this transport
-# unconditionally rejects, so advertising either would promise semantics the
-# wire doesn't honor. Clients on other revisions negotiate to 2025-06-18 at
-# initialize (Claude requests 2025-11-25 and accepts this fine); requests
-# carrying no MCP-Protocol-Version header are still served for compatibility.
+# Only the revision this dispatch implements is offered: 2024-11-05 predates
+# Streamable HTTP and 2025-03-26 permitted batching, which is rejected here.
+# Other clients negotiate down at initialize; requests without an
+# MCP-Protocol-Version header are still served.
 MCP_SUPPORTED_PROTOCOL_VERSIONS = frozenset({"2025-06-18"})
 MCP_LATEST_PROTOCOL_VERSION = "2025-06-18"
 
@@ -110,11 +89,9 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
-# The capability profile asserted for every remote caller. Real MCP clients
-# (Claude, Cursor) send neither the `robosystems-mcp` User-Agent nor the
-# X-MCP-Client header the npx bridge sends, so header sniffing would classify
-# them as browsers and degrade strategy selection. Anything speaking JSON-RPC
-# on this endpoint IS an MCP client by construction.
+# Asserted for every remote caller: real MCP clients send neither the npx
+# bridge's User-Agent nor X-MCP-Client, so header sniffing would misclassify
+# them as browsers.
 _REMOTE_CLIENT_INFO: dict[str, Any] = {
   "is_mcp_client": True,
   "supports_sse": True,
@@ -128,15 +105,12 @@ _REMOTE_CLIENT_INFO: dict[str, Any] = {
 
 
 def _transport_gate(request: Request) -> None:
-  """HTTP-level Streamable HTTP checks, run before auth and dispatch.
+  """Streamable HTTP checks run before auth and dispatch.
 
-  Origin: the MCP spec requires servers to validate Origin and answer 403 for
-  untrusted values. Server-to-server callers (Claude's backend, the npx
-  bridge) send no Origin header — absent is allowed; a browser context must
-  come from a first-party app origin.
-
-  Content-Type: JSON-RPC bodies must be ``application/json``, which also
-  keeps the endpoint out of the browser "simple request" delivery class.
+  Origin: the MCP spec requires 403 for untrusted values; server-to-server
+  callers send none, so absent is allowed. Content-Type must be exactly
+  ``application/json``, which keeps the endpoint out of the browser "simple
+  request" class.
   """
   from robosystems.config import env
 
@@ -147,9 +121,8 @@ def _transport_gate(request: Request) -> None:
       detail="Origin not allowed",
     )
 
-  # Exact media-type essence match — a substring check would accept
-  # `text/plain; application/json` (still a browser simple request) and
-  # unrelated `+json` types.
+  # Exact media-type match: a substring check would accept
+  # `text/plain; application/json` (still a simple request).
   content_type = request.headers.get("content-type", "")
   media_type = content_type.split(";", 1)[0].strip().casefold()
   if media_type != "application/json":
@@ -202,12 +175,9 @@ def _tool_error_result(msg_id: Any, text: str) -> JSONResponse:
 def _tool_failure(result: Any) -> tuple[bool, str | None]:
   """Classify an internal tool result as (is_error, failure_kind).
 
-  Two failure encodings reach this transport: the handler's marked text
-  result (``is_error``/``error_kind``, see ``handlers.tool_error_result``)
-  and the streaming aggregator's failure shape (``success: False`` +
-  ``error`` — which also covers a stream that ended with no terminal event).
-  ``failure_kind`` is ``timeout``/``backend`` (breaker-relevant) or
-  ``constraint`` (caller error).
+  Handles both the handler's marked text result and the streaming
+  aggregator's ``success: False`` shape. ``failure_kind`` is
+  ``timeout``/``backend`` (breaker-relevant) or ``constraint`` (caller error).
   """
   if is_tool_error_result(result):
     return True, tool_error_kind(result)
@@ -218,11 +188,7 @@ def _tool_failure(result: Any) -> tuple[bool, str | None]:
 
 
 def _to_tool_result(result: Any) -> dict[str, Any]:
-  """Map an internal tool result onto the MCP ``tools/call`` result shape.
-
-  Execution failures come back as ``isError: true`` so the model sees a
-  failed call rather than error prose masquerading as valid output.
-  """
+  """Map an internal tool result onto the MCP ``tools/call`` result shape."""
   is_error, _ = _tool_failure(result)
   if isinstance(result, dict) and result.get("type") == "text" and "text" in result:
     content = [{"type": "text", "text": result["text"]}]
@@ -259,8 +225,7 @@ async def _handle_initialize(
 
   await _validate_read_access(graph_id, current_user)
 
-  # Instructions are rebuilt on every initialize from the live tool surface,
-  # so a reconnecting client picks up changes to the graph's tool set.
+  # Rebuilt per initialize so a reconnecting client sees the live tool set.
   instructions: str | None = None
   repository = await get_graph_repository(graph_id, _get_mcp_operation_type(graph_id))
   handler = MCPHandler(repository, graph_id, current_user)
@@ -292,8 +257,7 @@ async def _handle_initialize(
 def _without(
   tools: list[dict[str, Any]], excluded_tools: frozenset[str]
 ) -> list[dict[str, Any]]:
-  """The tool list minus a route's excluded names. Filtering before the
-  instructions are built keeps them from naming a withheld tool."""
+  """Filtered before instructions are built so they never name a withheld tool."""
   if not excluded_tools:
     return tools
   return [t for t in tools if t.get("name") not in excluded_tools]
@@ -329,9 +293,8 @@ async def _handle_tools_list(
 
 
 def _tool_title(tool: dict[str, Any]) -> str:
-  """A human title for a tool: the definition's own when it has one, else
-  its name with the hyphens read as spaces (``close-period`` → ``Close
-  period``). Directory listings require one on every tool."""
+  """The definition's title, else the name with hyphens read as spaces.
+  Directory listings require one on every tool."""
   explicit = tool.get("title")
   if isinstance(explicit, str) and explicit.strip():
     return explicit.strip()
@@ -340,18 +303,13 @@ def _tool_title(tool: dict[str, Any]) -> str:
 
 
 def _tool_annotations(name: str, title: str) -> dict[str, Any]:
-  """MCP tool annotations, explicit on every tool.
+  """MCP tool annotations, explicit on every tool (directory scans reject a
+  tool with none).
 
-  Reads (the ``READ_ONLY_MCP_TOOLS`` allowlist, which is also the
-  authorization classification) are read-only and idempotent; everything
-  else is a write and is hinted destructive — conservatively, since the
-  authorization gauntlet treats every non-read tool as a mutation. The
-  Cypher read tools are hinted read-only too: ``assert_read_only_cypher``
-  refuses write, bulk, admin and schema-DDL statements on every path that
-  executes on their behalf, so the hint promises exactly what the tool
-  enforces (``write-graph-cypher`` stays destructive). Directory scans —
-  ChatGPT's in particular — reject a tool that carries no hints. All tools
-  act on this graph alone (closed world).
+  ``READ_ONLY_MCP_TOOLS`` and the Cypher read tools (guarded by
+  ``assert_read_only_cypher`` on every path) are read-only and idempotent;
+  everything else is hinted destructive, matching the authorization
+  gauntlet's treatment of non-read tools as mutations.
   """
   annotations: dict[str, Any] = {"title": title, "openWorldHint": False}
   if name in READ_ONLY_MCP_TOOLS or name in _CYPHER_READ_TOOLS:
@@ -363,9 +321,7 @@ def _tool_annotations(name: str, title: str) -> dict[str, Any]:
   return annotations
 
 
-# Strategies whose work is long or chunked enough to earn the SSE response
-# mode. Everything else answers as a single application/json body — Streamable
-# HTTP lets the server choose per call.
+# Strategies that answer as SSE; everything else is a single JSON body.
 _SSE_STRATEGIES = frozenset(
   {
     MCPExecutionStrategy.STREAM_AGGREGATED,
@@ -375,9 +331,8 @@ _SSE_STRATEGIES = frozenset(
   }
 )
 
-# Keepalive interval for SSE responses. Comment pings (`: ping …`) keep the
-# stream alive through the ALB idle timeout (default 60s) without being
-# parsed as messages by MCP clients.
+# SSE comment pings keep the stream alive through the ALB idle timeout (60s)
+# without being parsed as messages.
 _SSE_PING_SECONDS = 15
 
 # Cypher read tools route through the shared query queue under load; other
@@ -393,14 +348,11 @@ _QUEUE_STRATEGIES = frozenset(
   }
 )
 
-# Explicit end-to-end ceiling (queue wait + execution) for a bridged queued
-# call. MCP tools/call must resolve on this request, so unlike the REST 202
-# path — where the client owns the polling budget — the held stream needs its
-# own deliberate ceiling. Matches the long-tool ceiling advertised in
-# tools/list capabilities.
+# End-to-end ceiling (queue wait + execution) for a bridged queued call:
+# tools/call must resolve on this request, unlike the REST 202 polling path.
+# Matches the long-tool ceiling advertised in tools/list.
 _QUEUE_BRIDGE_TIMEOUT_SECONDS = 300
 
-# Poll cadence for bridged queue monitoring (same as the REST monitor loop).
 _QUEUE_POLL_SECONDS = 1.0
 
 
@@ -409,10 +361,9 @@ def _event_to_progress(
 ) -> tuple[dict[str, Any] | None, float]:
   """Map one internal streaming event to a notifications/progress message.
 
-  Internal progress events mix scales (percentages vs row counts), so the
-  emitted `progress` value is clamped monotonically increasing as the MCP
-  spec requires. Data-bearing events (chunks, results) return None here —
-  they are aggregated into the final response, never sent as notifications.
+  Internal events mix scales (percentages vs row counts), so ``progress`` is
+  forced monotonic as the MCP spec requires. Data-bearing events return None;
+  they go into the final response.
   """
   etype = event.get("event")
   data = event.get("data") or {}
@@ -461,19 +412,15 @@ async def _stream_tool_call(
 ):
   """Drive one tools/call as the SSE body of the POST response.
 
-  Emits notifications/progress while the tool runs (only when the client sent
-  `_meta.progressToken` — the MCP contract), then the final JSON-RPC response,
-  then ends the stream. A client disconnect cancels this generator and with it
-  the in-flight tool work — the transport-level closure of the abandoned-CPU
-  gap. sse_starlette's comment ping carries the stream across the ALB idle
-  timeout while the tool is silent.
+  Emits notifications/progress only when the client sent
+  ``_meta.progressToken``, then the final JSON-RPC response. A client
+  disconnect cancels this generator and the in-flight tool work with it.
   """
   events: list[dict[str, Any]] = []
   last_progress = 0.0
   payload: dict[str, Any]
   started = time.monotonic()
-  # Default covers the generator being closed at a yield (client disconnect
-  # cancels in-flight work); every settled path overwrites it.
+  # Stays set if the generator is closed at a yield (client disconnect).
   outcome = "client_disconnected"
   try:
     try:
@@ -600,12 +547,9 @@ async def _stream_queued_call(
 ):
   """Bridge a queued cypher execution onto the SSE response.
 
-  The REST endpoint answers queue strategies with 202 + a polling URL, which
-  has no MCP equivalent — tools/call must resolve on this request. So the
-  bridge submits to the shared query queue, holds the stream, relays queue
-  state as notifications/progress, and emits the final JSON-RPC response on
-  completion. A client disconnect cancels the queued query so abandoned work
-  stops consuming queue capacity.
+  The REST 202 + polling URL has no MCP equivalent, so this holds the stream,
+  relays queue state as progress, and emits the final response. A client
+  disconnect cancels the queued query.
   """
   from robosystems.middleware.graph.query_queue import QueryStatus, get_query_queue
   from robosystems.middleware.mcp.tools.cypher_tool import assert_read_only_cypher
@@ -622,8 +566,7 @@ async def _stream_queued_call(
   outcome = "client_disconnected"
   try:
     try:
-      # Same read-only guard the tool applies on the direct path; the queue
-      # runs the raw statement, so it must be refused before submission.
+      # The queue runs the raw statement, so the read-only guard runs first.
       try:
         assert_read_only_cypher(query, graph_id)
       except ValueError as exc:
@@ -706,17 +649,14 @@ async def _stream_queued_call(
 
           await asyncio.sleep(_QUEUE_POLL_SECONDS)
     except _ReadOnlyViolation as exc:
-      # A denied statement is a policy answer, not a backend failure: no
-      # breaker hit, and the model sees why so it can rephrase.
+      # A policy answer, not a backend failure: no breaker hit.
       query_settled = True
       outcome = "denied"
       payload = _tool_error_payload(msg_id, f"Error: {exc}")
     except TimeoutError:
       outcome = "bridge_timeout"
-      # Deliberate: the bridge ceiling exhausting counts against the breaker.
-      # Whether the 300s went to queue wait or execution, the backend didn't
-      # produce a result in time — and if the queue is saturated, opening the
-      # breaker sheds exactly the load the queue is drowning under.
+      # Counts against the breaker: under queue saturation, opening it sheds
+      # the load the queue is drowning under.
       circuit_breaker.record_failure(graph_id, tool_call.name)
       payload = _tool_error_payload(
         msg_id,
@@ -753,9 +693,8 @@ async def _stream_queued_call(
       source="mcp_remote",
       tool_name=tool_call.name,
     )
-    # Reached without a settled queue state on disconnect (generator closed
-    # at a yield), bridge timeout, or submit/monitor failure: stop the queued
-    # work so abandoned queries don't burn queue capacity.
+    # Disconnect, bridge timeout, or submit/monitor failure: cancel the queued
+    # work so it stops consuming queue capacity.
     if not query_settled and queue_id is not None:
       try:
         await queue_manager.cancel_query(queue_id, str(current_user.id))
@@ -776,8 +715,7 @@ async def _handle_tools_call(
   name = params.get("name")
   if not isinstance(name, str) or not name:
     return _rpc_error(msg_id, INVALID_PARAMS, "Invalid params: 'name' is required")
-  # A withheld tool is refused, not just hidden: a client can call a name it
-  # never listed.
+  # Refused, not just hidden: a client can call a name it never listed.
   if name in excluded_tools:
     return _tool_error_result(
       msg_id, f"Tool '{name}' is not available on this connection."
@@ -795,9 +733,8 @@ async def _handle_tools_call(
     circuit_breaker.check_circuit(graph_id, name)
     access_type = await authorize_mcp_tool_call(graph_id, tool_call, current_user)
   except HTTPException as e:
-    # Tool failures leave this transport as HTTP 200 + isError per the MCP
-    # contract, so outcomes must be recorded here at classification time —
-    # status-code-level telemetry is blind to this surface.
+    # Tool failures leave as HTTP 200 + isError, so status-code telemetry is
+    # blind here; record the outcome at classification time.
     record_shared_query_outcome(
       graph_id,
       current_user.id,
@@ -860,16 +797,12 @@ async def _handle_tools_call(
   accept_header = request.headers.get("accept", "")
   client_accepts_sse = "text/event-stream" in accept_header
 
-  # Queue bridge: under load, cypher reads route through the shared query
-  # queue. The stream relays queue state as progress and resolves with the
-  # result — no handler needed, the queue executes the query itself.
+  # Under load, cypher reads route through the shared query queue; the stream
+  # relays queue state and resolves with the result.
   #
-  # DELIBERATE: a client that doesn't accept SSE falls through to bounded
-  # direct execution below, bypassing queue admission during exactly the load
-  # window the queue exists for. Accepted because spec-compliant MCP clients
-  # always send `Accept: …, text/event-stream` (the fallback is for curl-grade
-  # callers), the direct path is still bounded by its strategy timeout, and
-  # the graph API's own admission control backstops instance saturation.
+  # A client that doesn't accept SSE falls through to bounded direct execution,
+  # bypassing queue admission. Accepted: spec-compliant clients always accept
+  # SSE, and the graph API's own admission control backstops saturation.
   if (
     strategy in _QUEUE_STRATEGIES and name in _CYPHER_READ_TOOLS and client_accepts_sse
   ):
@@ -889,9 +822,7 @@ async def _handle_tools_call(
   repository = await get_graph_repository(graph_id, _get_mcp_operation_type(graph_id))
   handler = MCPHandler(repository, graph_id, current_user)
 
-  # SSE-on-POST: long/streaming strategies answer as text/event-stream when
-  # the client accepts it (MCP clients advertise both). Handler ownership
-  # passes to the generator, which closes it when the stream ends.
+  # Handler ownership passes to the generator, which closes it.
   if strategy in _SSE_STRATEGIES and client_accepts_sse:
     return EventSourceResponse(
       _stream_tool_call(
@@ -965,8 +896,7 @@ async def _handle_tools_call(
       await handler.close()
 
   failed, failure_kind = _tool_failure(result)
-  # Constraint failures mean the backend answered fine — they reset the
-  # breaker like a success; only timeout/backend failures count against it.
+  # Constraint failures mean the backend answered: they count as a success.
   if failed and failure_kind in ("timeout", "backend"):
     circuit_breaker.record_failure(graph_id, name)
   else:
@@ -1054,11 +984,8 @@ async def dispatch_jsonrpc(
   method = message.get("method")
   msg_id = message.get("id")
 
-  # Post-negotiation requests must carry a supported MCP-Protocol-Version when
-  # they send the header at all (absent = pre-header clients, allowed for
-  # backwards compatibility). Unsupported values answer 400, as the MCP
-  # Streamable HTTP transport specification requires. initialize is exempt —
-  # negotiation happens in its body.
+  # Absent header = pre-header client, allowed. An unsupported value is 400 per
+  # the Streamable HTTP spec. initialize negotiates in its body instead.
   version_header = request.headers.get("mcp-protocol-version")
   if (
     method != "initialize"
@@ -1076,12 +1003,9 @@ async def dispatch_jsonrpc(
     # Notifications never receive JSON-RPC replies; reject at HTTP level only.
     return Response(status_code=http_status.HTTP_400_BAD_REQUEST)
 
-  # A message without a method is a client->server response; a message without
-  # an id is a notification. Streamable HTTP: accept both with 202, no body.
-  # This runs BEFORE params validation — a notification must never receive a
-  # reply, not even an error for malformed params (JSON-RPC 2.0 §4.1).
-  # (notifications/initialized and notifications/cancelled land here —
-  # cancellation is best-effort only on a stateless multi-node transport.)
+  # Responses (no method) and notifications (no id) get 202 with no body, and
+  # before params validation: a notification never receives a reply
+  # (JSON-RPC 2.0 §4.1). Cancellation is best-effort on a stateless transport.
   if not isinstance(method, str) or "id" not in message:
     return Response(status_code=http_status.HTTP_202_ACCEPTED)
 
@@ -1108,8 +1032,7 @@ async def dispatch_jsonrpc(
     else:
       return _rpc_error(msg_id, METHOD_NOT_FOUND, f"Method not found: {method}")
   except HTTPException as e:
-    # Access denials from initialize / tools/list surface as JSON-RPC errors
-    # rather than tool results (there is no tool result to attach them to).
+    # initialize / tools/list denials have no tool result to attach to.
     detail = e.detail if isinstance(e.detail, str) else json.dumps(e.detail)
     return _rpc_error(msg_id, INVALID_REQUEST, detail, http_code=e.status_code)
   except Exception as e:

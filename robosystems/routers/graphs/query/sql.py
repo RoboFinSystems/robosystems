@@ -1,9 +1,6 @@
-"""SQL statement execution over the graph's columnar tables (DuckDB).
-
-Peer to the Cypher endpoint in the query layer: a relational lens on the same
-graph-centric data. Read-only — writes are gated on the DuckDB
-write-connection sandbox. Shared repositories are rejected, since they have no
-user columnar tables. Authorization runs through the shared StatementKernel.
+"""SQL execution over the graph's columnar tables (DuckDB), the relational peer
+to the Cypher endpoint. Read-only; shared repositories are rejected (no user
+tables). Authorization runs through the shared StatementKernel.
 """
 
 from datetime import UTC, datetime
@@ -73,8 +70,8 @@ async def execute_sql(
 
   circuit_breaker.check_circuit(graph_id, "table_query")
 
-  # Authorize the statement — SQL is read-only and blocked on shared repos.
-  # Shared, transport-independent path (also used by /query/cypher, MCP).
+  # Shared, transport-independent authorization: SQL is read-only and blocked
+  # on shared repos.
   try:
     statement_kernel.authorize(
       engine=StatementEngine.SQL,
@@ -95,7 +92,6 @@ async def execute_sql(
     raise
 
   try:
-    # Verify graph access
     repository = await get_universal_repository(graph_id, "read")
 
     if not repository:
@@ -104,7 +100,6 @@ async def execute_sql(
         detail=f"Graph {graph_id} not found",
       )
 
-    # Log structured query attempt
     api_logger.info(
       "SQL statement execution started",
       extra={
@@ -119,7 +114,6 @@ async def execute_sql(
       },
     )
 
-    # Execute query via graph API
     from robosystems.graph_api.client.factory import get_graph_client
 
     client = await get_graph_client(graph_id=graph_id, operation_type="read")
@@ -128,12 +122,10 @@ async def execute_sql(
       graph_id=graph_id, sql=request.sql, parameters=request.parameters
     )
 
-    # Calculate execution time
     execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     circuit_breaker.record_success(graph_id, "table_query")
 
-    # Record business event
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/query/sql",
@@ -148,7 +140,6 @@ async def execute_sql(
       user_id=current_user.id,
     )
 
-    # Log structured completion
     api_logger.info(
       "SQL statement completed successfully",
       extra={
@@ -171,7 +162,6 @@ async def execute_sql(
   except Exception as e:
     circuit_breaker.record_failure(graph_id, "table_query")
 
-    # Record business event for failure
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/query/sql",
@@ -198,9 +188,8 @@ async def execute_sql(
       exc_info=True,
     )
 
-    # The caller's own statement errors keep their message; infrastructure
-    # exceptions (boto3/redis/driver text naming hosts and internals) collapse
-    # to a generic detail — the full text is in the log line above.
+    # Caller statement errors keep their message; infrastructure exceptions
+    # collapse to a generic detail (full text is logged above).
     safe_message = safe_error_message(e)
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,

@@ -1,9 +1,7 @@
-"""Subgraph write MCP tools.
+"""Schema and data write tools, for subgraphs only.
 
-Lets AI agents extend schema and write data on subgraphs. All tools enforce
-subgraph-only access — the parent graph is read-only to raw statements, whose
-writes go through structured extension ops instead. For the per-graph vector
-memory store, see `semantic_memory_tools.py`.
+The parent graph is read-only to raw statements; its writes go through
+structured extension ops.
 """
 
 import re
@@ -15,7 +13,7 @@ from robosystems.middleware.graph.utils import is_subgraph
 from ..exceptions import GraphAPIError
 from .base_tool import BaseTool
 
-# Lazy import to avoid circular imports with adapter chain
+# Imported lazily: the adapter chain imports back into this package.
 _is_shared_repository_or_subgraph = None
 
 
@@ -28,23 +26,15 @@ def _get_is_shared_repository_or_subgraph():
   return _is_shared_repository_or_subgraph
 
 
-# Valid LadybugDB property types
 VALID_PROPERTY_TYPES = {"STRING", "INT32", "INT64", "DOUBLE", "BOOLEAN"}
 
-# Valid table name pattern
 TABLE_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 
-# Valid property name pattern
 PROPERTY_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def _validate_subgraph_context(graph_id: str) -> dict[str, Any] | None:
-  """Validate the active graph is a writable subgraph. Returns error dict if not.
-
-  Blocks writes on:
-  - Parent graphs (must use a subgraph)
-  - Shared repository graphs and their subgraphs (always read-only)
-  """
+  """Error dict unless the graph is a non-shared subgraph."""
   if not is_subgraph(graph_id):
     return {
       "error": "subgraph_required",
@@ -54,7 +44,6 @@ def _validate_subgraph_context(graph_id: str) -> dict[str, Any] | None:
       "(list-subgraphs returns each connector_url).",
     }
 
-  # Shared repository subgraphs are always read-only
   if _get_is_shared_repository_or_subgraph()(graph_id):
     return {
       "error": "read_only",
@@ -66,12 +55,8 @@ def _validate_subgraph_context(graph_id: str) -> dict[str, Any] | None:
 
 
 def _validate_write_query(query: str) -> str | None:
-  """Validate a Cypher write query. Returns error message if invalid.
-
-  Uses the central security analyzer (the same predicates the StatementKernel
-  composes) rather than hand-rolled keyword/pattern regexes, so this tool-layer
-  guard — which also protects the Operator path — can't diverge from the kernel.
-  """
+  """Error message, or None. Uses the kernel's analyzer predicates, since this
+  guard also covers the Operator path, which bypasses the kernel."""
   from robosystems.security.cypher_analyzer import (
     has_opaque_statement_call,
     is_admin_operation,
@@ -80,9 +65,8 @@ def _validate_write_query(query: str) -> str | None:
     is_write_operation,
   )
 
-  # A procedure that executes a string payload (CALL GQL('...')) classifies
-  # as a write, so it would pass the write requirement below — and the family
-  # gates cannot see inside the string. Refuse the shape, as the kernel does.
+  # A string payload (CALL GQL('...')) counts as a write but is opaque to the
+  # gates below; refuse it, as the kernel does.
   if has_opaque_statement_call(query):
     return (
       "Blocked operation detected. Procedures that execute a statement passed "
@@ -90,12 +74,9 @@ def _validate_write_query(query: str) -> str | None:
       "not allowed; submit the statement directly with an unquoted name."
     )
 
-  # Block DDL / bulk / admin — the same dangerous categories the kernel and the
-  # read tool reject (DROP/ALTER/TABLE/INDEX, LOAD CSV/COPY, CALL DB./APOC.).
   if is_schema_ddl(query) or is_bulk_operation(query) or is_admin_operation(query):
     return "Blocked operation detected. DDL and system operations are not allowed in write queries."
 
-  # A write tool requires an actual write operation.
   if not is_write_operation(query):
     return (
       "Query must contain a write operation (CREATE, MERGE, SET, DELETE, REMOVE). "
@@ -155,7 +136,6 @@ class WriteCypherTool(BaseTool):
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     self._log_tool_execution("write-graph-cypher", arguments)
 
-    # Validate subgraph context
     error = _validate_subgraph_context(self.client.graph_id)
     if error:
       return error
@@ -164,7 +144,6 @@ class WriteCypherTool(BaseTool):
     if not query:
       return {"error": "invalid_query", "message": "Query parameter is required"}
 
-    # Validate write query
     validation_error = _validate_write_query(query)
     if validation_error:
       return {"error": "invalid_query", "message": validation_error}
@@ -240,7 +219,6 @@ class AddNodeTableTool(BaseTool):
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     self._log_tool_execution("add-node-table", arguments)
 
-    # Validate subgraph context
     error = _validate_subgraph_context(self.client.graph_id)
     if error:
       return error
@@ -248,21 +226,18 @@ class AddNodeTableTool(BaseTool):
     table_name = arguments.get("table_name", "")
     properties = arguments.get("properties", [])
 
-    # Validate table name
     if not TABLE_NAME_PATTERN.match(table_name):
       return {
         "error": "invalid_table_name",
         "message": "Table name must start with a letter, contain only letters/numbers/underscores, and be 1-64 characters",
       }
 
-    # Validate properties
     if not properties:
       return {
         "error": "invalid_properties",
         "message": "At least one property is required",
       }
 
-    # Check for primary key
     has_pk = any(p.get("is_primary_key") for p in properties)
     if not has_pk:
       return {
@@ -270,7 +245,6 @@ class AddNodeTableTool(BaseTool):
         "message": "At least one property must be marked as is_primary_key: true",
       }
 
-    # Validate each property
     for prop in properties:
       name = prop.get("name", "")
       ptype = prop.get("type", "")
@@ -383,7 +357,6 @@ class AddRelationshipTableTool(BaseTool):
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     self._log_tool_execution("add-relationship-table", arguments)
 
-    # Validate subgraph context
     error = _validate_subgraph_context(self.client.graph_id)
     if error:
       return error
@@ -393,14 +366,12 @@ class AddRelationshipTableTool(BaseTool):
     to_node = arguments.get("to_node", "")
     properties = arguments.get("properties", [])
 
-    # Validate table name
     if not TABLE_NAME_PATTERN.match(table_name):
       return {
         "error": "invalid_table_name",
         "message": "Relationship table name must start with a letter, contain only letters/numbers/underscores, and be 1-64 characters",
       }
 
-    # Validate node references
     if not TABLE_NAME_PATTERN.match(from_node):
       return {
         "error": "invalid_from_node",
@@ -412,7 +383,6 @@ class AddRelationshipTableTool(BaseTool):
         "message": f"to_node '{to_node}' is not a valid table name",
       }
 
-    # Validate properties
     for prop in properties:
       name = prop.get("name", "")
       ptype = prop.get("type", "")
@@ -441,7 +411,6 @@ class AddRelationshipTableTool(BaseTool):
       )
       success = result.get("success", False)
       if success:
-        # Clear schema cache
         if hasattr(self.client, "_mcp_tools"):
           self.client._mcp_tools.clear_schema_cache()
 

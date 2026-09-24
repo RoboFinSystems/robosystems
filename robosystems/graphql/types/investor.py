@@ -1,10 +1,6 @@
-"""Strawberry types for investor (roboinvestor) extensions queries.
+"""Strawberry types for roboinvestor queries.
 
-Wraps Pydantic response models from `robosystems.models.api.extensions.investor`.
-Most types use `strawberry.experimental.pydantic.type(all_fields=True)`;
-`Security` + `SecurityList` are hand-written because `Security.terms: dict`
-needs the Strawberry `JSON` scalar (the pydantic decorator doesn't know how
-to map an untyped `dict` field).
+`Security`/`SecurityList` are hand-written: `terms: dict` needs the JSON scalar.
 """
 
 from __future__ import annotations

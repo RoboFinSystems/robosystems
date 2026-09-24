@@ -25,7 +25,6 @@ from robosystems.models.core import User
 
 router = APIRouter(tags=["Graph Health"])
 
-# Initialize robustness components
 circuit_breaker = CircuitBreakerManager()
 timeout_coordinator = TimeoutCoordinator()
 
@@ -36,21 +35,14 @@ _IDLE_CEILING_PERCENT = 50.0
 def _resources_exposable(graph_id: str, graph_tier: str) -> bool:
   """Whether instance CPU/memory may be shown to this graph's owner.
 
-  Safe only when the instance is genuinely single-tenant, so both checks are
-  required and neither is redundant:
-
-  - Shared repositories (e.g. sec) run one database per box but are read by
-    every tenant, so instance load leaks cross-tenant activity.
-  - A packed tier co-locates unrelated tenants by construction.
-
-  Driving the second check off the tier's ``databases_per_instance`` rather
-  than a tier allowlist means a future packed tier closes this automatically.
+  Only on a genuinely single-tenant instance: shared repositories are read by
+  every tenant, and a packed tier co-locates tenants. Keying on
+  ``databases_per_instance`` closes any future packed tier automatically.
   """
   from robosystems.config.graph_tier import GraphTierConfig
   from robosystems.middleware.graph.utils import MultiTenantUtils
 
-  # Subgraph-aware: sec_historical serves every tenant from the shared master
-  # exactly as sec does, so both must resolve the same way here.
+  # Subgraph-aware: sec_historical is served from the shared master like sec.
   if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
     return False
   return GraphTierConfig.get_databases_per_instance(graph_tier) == 1
@@ -63,11 +55,9 @@ def _derive_resource_status(
 ) -> str | None:
   """Interpret raw load, so a normal workload doesn't read as a fault.
 
-  Materialization deliberately boosts to near the whole instance, so a high
-  memory reading is usually the engine working as designed. ``constrained``
-  is therefore anchored to the admission controller's own thresholds — the
-  point at which the node starts shedding work — rather than an arbitrary
-  number, so it means "actually worth acting on".
+  Materialization boosts memory near the whole instance by design, so
+  ``constrained`` is anchored to the admission controller's shedding
+  thresholds, not an arbitrary number.
   """
   if cpu_percent is None and memory_percent is None:
     return None
@@ -91,14 +81,9 @@ async def _get_graph_client(graph_id: str) -> GraphClient:
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.graph_api.client.factory import GraphClientFactory
 
-  # Determine operation type based on graph
-  # Shared repositories and their subgraphs (e.g. sec_historical) are read-only
+  # Shared repositories and their subgraphs are read-only.
   operation_type = "read" if is_shared_repository_or_subgraph(graph_id) else "write"
 
-  # Create client using factory for endpoint discovery
-  # Factory automatically handles routing:
-  # - Shared repos: Routes to shared_master/shared_replica
-  # - User graphs: Looks up tier from database and routes appropriately
   client = await GraphClientFactory.create_client(
     graph_id=graph_id, operation_type=operation_type
   )
@@ -132,30 +117,25 @@ async def get_database_health(
   try:
     _repository = await get_universal_repository(graph_id, "read")
 
-    # Get Graph client and health information
     graph_client = await _get_graph_client(graph_id)
 
     try:
-      # Calculate timeout for health check
       health_timeout = timeout_coordinator.calculate_timeout(
         "database_health", {"complexity": "low"}
       )
 
-      # Get database metrics and general health from Graph API
       db_metrics = await asyncio.wait_for(
         graph_client.get_database_metrics(graph_id=graph_id),
         timeout=health_timeout,
       )
 
-      # Also get cluster health for uptime
+      # Cluster health supplies uptime.
       cluster_health = await graph_client.health_check()
 
-      # Record successful operation
       circuit_breaker.record_success(graph_id, "database_health")
 
       logger.debug(f"Database health retrieved for graph {graph_id}")
 
-      # Pull staleness data from the platform DB (Graph model)
       from datetime import UTC, datetime
 
       from robosystems.models.core import Graph
@@ -193,8 +173,7 @@ async def get_database_health(
         if is_stale:
           staleness_alert = ["Graph is stale — materialization recommended"]
 
-      # Instance CPU/memory, dedicated single-tenant instances only.
-      # Best-effort: a failure here must not fail the health check.
+      # Dedicated single-tenant instances only; best-effort.
       cpu_usage_percent = None
       memory_usage_percent = None
       memory_usage_mb = None

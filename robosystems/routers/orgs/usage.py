@@ -46,7 +46,6 @@ async def get_org_limits(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgLimitsResponse:
   try:
-    # Check if user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -63,15 +62,13 @@ async def get_org_limits(
 
     usage = limits.get_current_usage(db)
 
-    # Calculate if any limits are approaching or exceeded
     warnings = []
     current_graphs = usage["graphs"]["current"]
     if current_graphs >= limits.max_graphs * 0.9:
       warnings.append(f"Approaching graph limit ({current_graphs}/{limits.max_graphs})")
 
-    # Role as well as quota: reporting True to a member who would be refused at
-    # the create endpoint would make this flag a lie, and clients act on it —
-    # the graph-creation page gates its whole wizard behind it.
+    # Role as well as quota: clients gate the graph-creation wizard on this
+    # flag, so it must not say True to a member the create endpoint refuses.
     can_create_graph = membership.can_create_graphs() and limits.can_create_graph(db)[0]
 
     return OrgLimitsResponse(
@@ -108,7 +105,6 @@ async def get_org_usage(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgUsageResponse:
   try:
-    # Check if user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -116,26 +112,20 @@ async def get_org_usage(
         detail="You are not a member of this organization",
       )
 
-    # This is an org-wide aggregate — per-graph names, credit balances and
-    # storage for every graph the org owns — so it is billing-shaped rather
-    # than caller-shaped, and gated like invoices. Narrowing it to the caller's
-    # graphs instead would make "organization usage" mean something different
-    # per reader; a plain member has no accessible view of an org-wide total.
+    # An org-wide, billing-shaped aggregate (every graph's names, credits,
+    # storage), so it is gated like invoices rather than narrowed per caller.
     if not membership.is_admin():
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Only admins and owners can view organization usage",
       )
 
-    # Get all graphs for the org
     graphs = db.query(Graph).filter(Graph.org_id == org_id).all()
     graph_ids = [g.graph_id for g in graphs]
 
-    # Calculate time range
     end_date = datetime.now(UTC)
     start_date = end_date - timedelta(days=days)
 
-    # Aggregate credit usage across all graphs
     total_credits_used = Decimal(0)
     total_ai_operations = 0
     total_storage_gb = 0.0
@@ -147,7 +137,6 @@ async def get_org_usage(
       if not credits:
         continue
 
-      # Get usage records for this graph in the time period
       usage_records = (
         db.query(GraphUsage)
         .filter(
@@ -168,7 +157,6 @@ async def get_org_usage(
         for r in usage_records
         if r.event_type == UsageEventType.CREDIT_CONSUMPTION.value
       )
-      # Get latest storage snapshot
       latest_storage = (
         db.query(GraphUsage)
         .filter(
@@ -179,8 +167,7 @@ async def get_org_usage(
         .first()
       )
 
-      # GraphUsage.storage_gb is a Float column and the running total is a
-      # Decimal, so the snapshot value must be converted before it is added.
+      # storage_gb is Float and the running total Decimal: convert first.
       graph_storage = float(latest_storage.storage_gb or 0) if latest_storage else 0.0
 
       graph_usage_details.append(
@@ -199,10 +186,8 @@ async def get_org_usage(
       total_ai_operations += graph_ai_ops
       total_storage_gb += graph_storage
 
-    # Calculate daily averages
     daily_avg_credits = float(total_credits_used) / max(days, 1)
 
-    # Project monthly usage
     projected_monthly_credits = daily_avg_credits * 30
 
     summary = OrgUsageSummary(
@@ -215,14 +200,12 @@ async def get_org_usage(
       storage_limit_gb=None,  # We'll expand this later
     )
 
-    # Get historical usage trend (daily aggregates)
     daily_usage = []
     for i in range(min(days, 30)):
       day_start = start_date + timedelta(days=i)
       day_end = day_start + timedelta(days=1)
 
-      # Same definition as the summary above, so the two agree within one
-      # payload: credits sum across whatever rows carry them.
+      # Same definition as the summary, so the two agree within one payload.
       day_records = (
         db.query(
           func.sum(GraphUsage.credits_consumed).label("credits"),

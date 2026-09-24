@@ -1,18 +1,9 @@
-"""The map and the block — ``disclosures`` and ``information-block`` over a report held whole.
+"""``disclosures`` and ``information-block``: xbrlkit's tools over a report
+held whole (the published filing on SEC, the ledger's report on a tenant).
 
-The two shaped tools ``xbrlkit serve`` offers over a loaded filing, served
-here over a report the platform holds whole: the published filing on the SEC
-shared repository, the ledger's own report on a tenant graph. Both delegate
-to ``operations/roboledger/views/information_blocks.py``, which reads the
-report into xbrlkit's model and runs xbrlkit's own tools over it, so REST,
-MCP and the local server answer from one implementation. Read-only; the
-graph is not in the path.
-
-On a tenant graph these sit beside ``get-information-block`` /
-``list-information-blocks``, which return one *authored* block's envelope
-(its rules, verification and provenance). These two read a section whole —
-values, breakdowns, footing, text. The descriptions say which is which; the
-names are the contract `xbrlkit serve` set and do not change.
+Read-only, and the graph is not in the path. Unlike ``get-information-block``,
+which returns an authored block's envelope, these read a section's content.
+The names are the contract ``xbrlkit serve`` set.
 """
 
 from __future__ import annotations
@@ -72,9 +63,8 @@ def _clean(value: Any) -> str | None:
 
 
 def _cap(value: Any, ceiling: int) -> int | None:
-  """An explicit cap clamped to xbrlkit's ceiling; ``None`` leaves the budget
-  in charge. A value that is not a whole number raises, and the tool answers
-  with an error rather than a traceback."""
+  """Clamp to xbrlkit's ceiling; ``None`` leaves the budget in charge. Raises
+  on a non-integer, which the tool answers as an error."""
   if value is None:
     return None
   return max(1, min(int(value), ceiling))

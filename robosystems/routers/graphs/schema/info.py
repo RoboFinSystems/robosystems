@@ -55,13 +55,10 @@ async def get_graph_schema_info(
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> SchemaInfoResponse:
-  # Initialize robustness components
   operation_logger = get_operation_logger()
 
-  # Record operation start and get timing
   operation_start_time = time.time()
 
-  # Record operation start metrics
   record_operation_metric(
     operation_type=OperationType.SCHEMA_OPERATION,
     status=OperationStatus.SUCCESS,  # Will be updated on completion
@@ -73,14 +70,11 @@ async def get_graph_schema_info(
     metadata={},
   )
 
-  # Initialize timeout for error handling
   operation_timeout = None
 
   try:
-    # Check circuit breaker before processing
     circuit_breaker.check_circuit(graph_id, "schema")
 
-    # Set up timeout coordination for schema operations
     operation_timeout = timeout_coordinator.calculate_timeout(
       operation_type="database_query",
       complexity_factors={
@@ -88,9 +82,7 @@ async def get_graph_schema_info(
         "expected_complexity": "medium",
       },
     )
-    # Schema operations are included - no credit consumption
 
-    # Log the request with operation logger
     operation_logger.log_external_service_call(
       endpoint="/v1/graphs/{graph_id}/schema",
       service_name="graph_repository",
@@ -102,15 +94,12 @@ async def get_graph_schema_info(
       metadata={},
     )
 
-    # Get repository with unified authentication and authorization
     repository = await get_universal_repository(graph_id, "read")
 
-    # Get schema information with timeout coordination
     schema = await asyncio.wait_for(
       get_schema_info(repository), timeout=operation_timeout
     )
 
-    # Record business event for successful schema retrieval
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/schema",
@@ -125,11 +114,9 @@ async def get_graph_schema_info(
       user_id=current_user.id,
     )
 
-    # Record successful operation
     operation_duration_ms = (time.time() - operation_start_time) * 1000
     circuit_breaker.record_success(graph_id, "schema")
 
-    # Record success metrics
     record_operation_metric(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.SUCCESS,
@@ -147,11 +134,9 @@ async def get_graph_schema_info(
     return SchemaInfoResponse(graph_id=graph_id, schema=schema)
 
   except TimeoutError:
-    # Record circuit breaker failure and timeout metrics
     circuit_breaker.record_failure(graph_id, "schema")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record timeout failure metrics
     record_operation_metric(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
@@ -173,11 +158,9 @@ async def get_graph_schema_info(
       detail="Schema operation timed out",
     )
   except HTTPException:
-    # Record circuit breaker failure for HTTP exceptions
     circuit_breaker.record_failure(graph_id, "schema")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record failure metrics
     record_operation_metric(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
@@ -192,11 +175,9 @@ async def get_graph_schema_info(
     )
     raise
   except Exception as e:
-    # Record circuit breaker failure for general exceptions
     circuit_breaker.record_failure(graph_id, "schema")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record failure metrics
     record_operation_metric(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
@@ -211,7 +192,6 @@ async def get_graph_schema_info(
       },
     )
 
-    # Record business event for unexpected errors
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/schema",

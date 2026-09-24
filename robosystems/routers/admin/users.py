@@ -51,11 +51,8 @@ async def list_users(
   """List all users with optional filters."""
   session = next(get_db_session())
   try:
-    # Outer join: a user with no org membership is exactly who support needs
-    # to find here — removal from a last org deactivates the account and
-    # leaves the email squatted, and freeing it means resolving this email to
-    # an id. An inner join hid precisely that population (the row builder
-    # below already handles a missing membership).
+    # Outer join: users with no org membership (deactivated on removal from a
+    # last org, email still squatted) are exactly who support looks up here.
     query = session.query(User).outerjoin(OrgUser, User.id == OrgUser.user_id)
 
     if email:
@@ -424,13 +421,9 @@ async def _set_active(
 async def deactivate_user(request: Request, user_id: str):
   """Deactivate a user, cutting off both interactive and programmatic access.
 
-  Invalidates every session and revokes every API key. This is the escalation
-  above a password change — that rotates a credential and invalidates sessions,
-  but deliberately leaves keys alone so routine rotation doesn't break
-  integrations. Use this when an account is compromised or must be suspended.
-
-  Safe to re-run: key revocation is best-effort per key, so a repeat call
-  finishes anything a partial failure left behind.
+  Invalidates every session and revokes every API key (a password change
+  leaves keys alone). Use for a compromised or suspended account. Safe to
+  re-run: it finishes anything a partial failure left behind.
   """
   return await _set_active(request, user_id, active=False)
 

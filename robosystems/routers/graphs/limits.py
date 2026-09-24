@@ -39,7 +39,6 @@ from robosystems.models.core import User
 
 router = APIRouter(tags=["Graph Limits"])
 
-# Initialize robustness components
 circuit_breaker = CircuitBreakerManager()
 timeout_coordinator = TimeoutCoordinator()
 
@@ -48,14 +47,9 @@ async def _get_graph_client(graph_id: str) -> GraphClient:
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.graph_api.client.factory import GraphClientFactory
 
-  # Determine operation type based on graph
-  # Shared repositories and their subgraphs (e.g. sec_historical) are read-only
+  # Shared repositories and their subgraphs are read-only.
   operation_type = "read" if is_shared_repository_or_subgraph(graph_id) else "write"
 
-  # Create client using factory for endpoint discovery
-  # Factory automatically handles routing:
-  # - Shared repos: Routes to shared_master/shared_replica
-  # - User graphs: Looks up tier from database and routes appropriately
   client = await GraphClientFactory.create_client(
     graph_id=graph_id, operation_type=operation_type
   )
@@ -90,7 +84,6 @@ async def get_graph_limits(
   try:
     await get_universal_repository(graph_id, "read")
 
-    # Import needed functions
     from robosystems.config.graph_tier import (
       GraphTierConfig,
       get_tier_backup_limits,
@@ -100,13 +93,9 @@ async def get_graph_limits(
     from robosystems.models.core.graph import Graph
     from robosystems.models.core.graph.graph_credits import GraphCredits
 
-    # Get graph information if it exists
     graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
 
-    # Determine graph tier:
-    # - User graphs: Use tier from database
-    # - Shared repositories: Use ladybug-shared tier
-    # - Fallback: ladybug-standard (shouldn't happen in practice)
+    # ladybug-standard fallback shouldn't occur in practice.
     if graph:
       graph_tier = str(graph.graph_tier)
     elif MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
@@ -114,16 +103,12 @@ async def get_graph_limits(
     else:
       graph_tier = "ladybug-standard"
 
-    # Subgraph-aware, matching _get_graph_client above: sec_historical must
-    # take the shared-repository path here too, or the sections below walk the
-    # shared master's storage — the exact latency hazard their comments forbid.
+    # Subgraph-aware, so sec_historical also skips the storage walks below.
     is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
 
-    # The tier whose rate-limit table the limiter enforces for requests to
-    # this graph. Shared repositories are user-keyed at the fallback tier, and
-    # a tier string without a limits table (ladybug-shared, legacy values)
-    # also floors there — without this, the lookup below would fall through to
-    # the anonymous "base" table and report 20/min for a graph served 60.
+    # The tier whose rate-limit table the limiter enforces here. Shared repos
+    # and tiers without a table floor to FALLBACK_TIER; otherwise the lookup
+    # falls through to the anonymous "base" table (20/min for a graph served 60).
     from ...config.rate_limits import EndpointCategory, RateLimitConfig
     from ...middleware.rate_limits.graph_tier_resolver import FALLBACK_TIER
 
@@ -133,8 +118,8 @@ async def get_graph_limits(
       else FALLBACK_TIER
     )
 
-    # Instance storage limit from graph.yml. Reads the itemized breakdown so
-    # this figure agrees with `instance_usage` below and with cap enforcement.
+    # From the itemized breakdown, so it agrees with `instance_usage` and cap
+    # enforcement.
     max_storage_gb = GraphTierConfig.get_instance_storage_limit_gb(graph_tier)
     storage_limits = {
       "current_usage_gb": None,
@@ -142,18 +127,10 @@ async def get_graph_limits(
       "approaching_limit": False,
     }
 
-    # Shared repositories are measured for their tier limit only. Three
-    # reasons not to compute their live footprint:
-    #
-    # - There is nothing to enforce. The tenant does not own a shared
-    #   repository's size and cannot act on it, which is why `instance_usage`
-    #   below is already skipped for them.
-    # - It would be measured on a read replica, which serves the repository
-    #   over S3 ATTACH with no data volume — so local disk is a cache, not the
-    #   repository. The number would be wrong as well as expensive.
-    # - It is expensive in a place that hurts. A shared repository is large
-    #   (SEC is ~110 GB) and its replicas serve every tenant, so a recursive
-    #   walk per request is a latency hazard on shared infrastructure.
+    # Shared repositories report only their tier limit: the tenant can't act
+    # on their size, a read replica serves them over S3 ATTACH (local disk is a
+    # cache, so the number would be wrong), and a recursive walk of a ~110 GB
+    # repository per request is a latency hazard on shared infrastructure.
     if not is_shared:
       try:
         graph_client = await _get_graph_client(graph_id)
@@ -164,9 +141,8 @@ async def get_graph_limits(
 
         current_storage_gb = breakdown.get("total_bytes", 0) / (1024**3)
 
-        # The warning flag reads durable bytes only, matching cap enforcement:
-        # a blue-green `-wip` copy the size of the database would trip it on
-        # every rebuild of a graph past ~40% usage.
+        # Durable bytes only, matching cap enforcement: a blue-green `-wip`
+        # copy would trip the flag on every rebuild past ~40% usage.
         from robosystems.graph_api.core.storage_breakdown import TYPE_TRANSIENT
 
         transient_bytes = sum(
@@ -179,10 +155,8 @@ async def get_graph_limits(
         )
 
         storage_limits = {
-          # Byte-level precision, not 2 decimals. Rounding to 0.01 GB quantises
-          # this to ~10.7 MB, which for a graph in the tens of megabytes both
-          # destroys the figure and makes it contradict the itemized breakdown
-          # rendered directly beneath it.
+          # Byte precision: 0.01 GB rounding (~10.7 MB) destroys small graphs'
+          # figures and contradicts the itemized breakdown.
           "current_usage_gb": round(current_storage_gb, 9),
           "max_storage_gb": max_storage_gb,
           "approaching_limit": durable_storage_gb > (max_storage_gb * 0.8),
@@ -190,24 +164,20 @@ async def get_graph_limits(
       except Exception as e:
         logger.warning(f"Could not get storage info for {graph_id}: {e}")
 
-    # Get copy/ingestion limits from tier configuration (based on graph tier)
     copy_limits = get_tier_copy_operation_limits(graph_tier)
 
-    # Define query limits based on graph tier
     query_limits = {
       "max_timeout_seconds": GraphTierConfig.get_query_timeout(graph_tier),
       "chunk_size": GraphTierConfig.get_chunk_size(graph_tier),
-      # These are application-level limits not in YAML config
+      # Application-level limits, not in the YAML config.
       "max_rows_per_query": 10000,
       "concurrent_queries": 1,
     }
 
-    # Get backup limits from tier configuration (based on graph tier)
     backup_limits = get_tier_backup_limits(graph_tier)
 
-    # Report what the limiter actually enforces, read from the same table the
-    # limiter reads. Deriving this from api_rate_multiplier would advertise a
-    # ceiling no tier is granted.
+    # Read from the limiter's own table; deriving from api_rate_multiplier
+    # would advertise a ceiling no tier is granted.
     query_limit = RateLimitConfig.get_rate_limit(
       enforced_tier, EndpointCategory.GRAPH_QUERY
     )
@@ -215,14 +185,12 @@ async def get_graph_limits(
 
     rate_limits = {
       "requests_per_minute": requests_per_minute,
-      # Derived, not separately enforced: the limiter uses fixed-window
-      # per-minute buckets, so these describe the same budget over a longer
-      # span rather than independent ceilings.
+      # Same budget over a longer span, not independent ceilings: the limiter
+      # uses fixed-window per-minute buckets.
       "requests_per_hour": requests_per_minute * 60,
       "burst_capacity": requests_per_minute,
     }
 
-    # Get credit limits if applicable
     credit_limits = {}
     if not is_shared:
       try:
@@ -235,14 +203,10 @@ async def get_graph_limits(
             "current_balance": int(graph_credits.current_balance),
           }
       except Exception as e:
-        # A bare pass here once hid a nonexistent-column read for the life of
-        # the endpoint; credits are optional in the response, but the failure
-        # must be visible.
+        # Credits are optional in the response, but the failure must be visible.
         logger.warning(f"Could not get credit limits for {graph_id}: {e}")
 
-    # Document usage against the tier cap. Mirrors upload enforcement
-    # (DocumentService._check_tier_limit): only uploaded documents count, and
-    # shared repositories have no documents surface at all.
+    # Mirrors DocumentService._check_tier_limit: only uploaded documents count.
     document_limits = None
     if not is_shared:
       try:
@@ -263,10 +227,8 @@ async def get_graph_limits(
       except Exception as e:
         logger.warning(f"Could not get document limits for {graph_id}: {e}")
 
-    # Subgraph count against the tier cap. A count axis, not a storage one —
-    # creation is refused at the cap however small the subgraphs are, so this
-    # cannot be derived from `instance` below. Reported for parent graphs only:
-    # subgraphs do not nest, and shared repositories have no tenant-owned cap.
+    # A count axis, not storage: creation is refused at the cap however small
+    # the subgraphs are. Parent graphs only (subgraphs don't nest).
     subgraph_limits = None
     if not is_shared and graph is not None and not bool(graph.is_subgraph):
       try:
@@ -289,16 +251,14 @@ async def get_graph_limits(
       except Exception as e:
         logger.warning(f"Could not get subgraph limits for {graph_id}: {e}")
 
-    # Get content limits and instance usage for non-shared graphs.
-    # check_instance_storage is a single Graph API call covering the whole
-    # instance — subgraphs live on the parent's box, so one breakdown itemizes
-    # them all.
+    # One check_instance_storage call covers the whole instance: subgraphs live
+    # on the parent's box.
     content_limits = None
     instance_usage = None
     if not is_shared:
       graph_limits_config = GraphTierConfig.get_graph_limits(graph_tier)
 
-      # Get node count (informational only — fast, internally tracked by LadybugDB)
+      # Informational only; cheap, tracked internally by LadybugDB.
       node_count = None
       try:
         graph_client = await _get_graph_client(graph_id)
@@ -316,11 +276,9 @@ async def get_graph_limits(
         chunk_size_rows=graph_limits_config["chunk_size_rows"],
       )
 
-      # Get aggregate instance storage usage (parent + subgraphs)
       try:
         from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
 
-        # Use parent graph_id for instance-level aggregation
         parent_graph_id = graph_id
         if graph and graph.parent_graph_id:
           parent_graph_id = graph.parent_graph_id
@@ -347,9 +305,8 @@ async def get_graph_limits(
 
     response = GraphLimitsResponse(
       graph_id=graph_id,
-      # Graph subscriptions are per graph, not per user (User has no tier
-      # column): report the tier whose limits this graph's requests are
-      # actually held to.
+      # Subscriptions are per graph, not per user: report the tier this graph's
+      # requests are actually held to.
       subscription_tier=enforced_tier,
       graph_tier=graph_tier,
       is_shared_repository=is_shared,

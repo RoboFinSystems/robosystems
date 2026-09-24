@@ -27,14 +27,9 @@ def _visible_org_graphs(
 ) -> list[Graph]:
   """Org graphs this user may see.
 
-  Org membership alone grants no graph access — a plain member needs an
-  explicit `GraphUser` grant — so listing every org graph to any member
-  discloses the names, tiers and IDs of graphs they cannot reach. Owners and
-  admins are implicit admins on every org-owned graph, so for them the visible
-  set is the whole org.
-
-  Mirrors the resolution `GraphUser.get_effective_role` performs per graph,
-  applied as a single query rather than per-row.
+  Membership alone grants no graph access (a member needs a `GraphUser`
+  grant); owners and admins are implicit admins on every org graph. Mirrors
+  `GraphUser.get_effective_role` as a single query.
   """
   query = db.query(Graph).filter(Graph.org_id == org_id)
 
@@ -65,16 +60,13 @@ async def list_user_orgs(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgListResponse:
   try:
-    # Get all org memberships for the user
     org_memberships = OrgUser.get_user_orgs(current_user.id, db)
 
     orgs = []
     for membership in org_memberships:
       org = membership.org
-      # The graph count is scoped to what this caller can actually see, so it
-      # matches the org detail view; org membership alone grants no graph
-      # access. Member count stays org-wide — the roster is visible to
-      # everyone in the org.
+      # Graph count is scoped to what this caller can see; member count stays
+      # org-wide (the roster is visible to everyone in the org).
       member_count = len(OrgUser.get_org_users(org.id, db))
       graph_count = len(_visible_org_graphs(org.id, membership, current_user.id, db))
 
@@ -118,7 +110,6 @@ async def get_org(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgDetailResponse:
   try:
-    # Check if user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -128,7 +119,6 @@ async def get_org(
 
     org = membership.org
 
-    # Get all members
     memberships = OrgUser.get_org_users(org_id, db)
     members = []
     for m in memberships:
@@ -143,12 +133,10 @@ async def get_org(
         }
       )
 
-    # Get org limits
     from ...models.core import OrgLimits
 
     limits = OrgLimits.get_by_org_id(org_id, db)
 
-    # Get graphs
     graphs = _visible_org_graphs(org_id, membership, current_user.id, db)
     graph_list = [
       {
@@ -203,7 +191,6 @@ async def update_org(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgDetailResponse:
   try:
-    # Check if user is an admin or owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -219,7 +206,6 @@ async def update_org(
 
     org = membership.org
 
-    # Update fields if provided
     if request.name is not None:
       org.name = request.name
 
@@ -257,7 +243,6 @@ async def list_org_graphs(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> list[dict]:
   try:
-    # Check if user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -270,7 +255,6 @@ async def list_org_graphs(
 
     result = []
     for graph in graphs:
-      # Get graph credits info
       from ...models.core import GraphCredits
 
       credits = GraphCredits.get_by_graph_id(graph.graph_id, db)

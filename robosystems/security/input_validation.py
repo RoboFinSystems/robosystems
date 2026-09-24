@@ -5,18 +5,10 @@ import re
 
 
 def sanitize_string(value: str, max_length: int = 1000) -> str:
-  """Sanitize string input to prevent XSS and injection attacks.
-
-  Truncates to ``max_length``, HTML-escapes, then strips angle brackets,
-  quotes, NULs, and newlines.
-  """
-  # Truncate to max length
+  """Truncate to ``max_length``, HTML-escape, then strip angle brackets,
+  quotes, NULs and newlines."""
   value = value[:max_length]
-
-  # HTML escape
   value = html.escape(value)
-
-  # Remove potentially dangerous characters
   value = re.sub(r'[<>"\'\0\r\n]', "", value)
 
   return value.strip()
@@ -46,18 +38,16 @@ def sanitize_user_input(data: dict) -> dict:
 
 
 def validate_username(username: str) -> bool:
-  """Validate username format."""
-  # Allow alphanumeric, underscore, dash, 3-30 characters
+  """Alphanumeric, underscore and dash, 3-30 characters."""
   pattern = r"^[a-zA-Z0-9_-]{3,30}$"
   return bool(re.match(pattern, username))
 
 
 def sanitize_sql_identifier(identifier: str) -> str:
-  """Sanitize a SQL identifier (table or column name) to a safe, legal form."""
-  # Allow only alphanumeric and underscore
+  """Reduce a SQL identifier to alphanumerics and underscores, not leading
+  with a digit."""
   sanitized = re.sub(r"[^a-zA-Z0-9_]", "", identifier)
 
-  # Ensure it doesn't start with a number
   if sanitized and sanitized[0].isdigit():
     sanitized = "_" + sanitized
 
@@ -72,11 +62,9 @@ def validate_uuid(value: str) -> bool:
 
 def sanitize_url(url: str) -> str | None:
   """Validate an http(s) URL, returning None for anything else."""
-  # Basic URL validation
   url_pattern = r"^https?://[a-zA-Z0-9.-]+(\.[a-zA-Z]{2,})+(/.*)?$"
 
   if re.match(url_pattern, url):
-    # Remove any javascript: or data: protocols
     if url.lower().startswith(("javascript:", "data:", "vbscript:")):
       return None
     return url
@@ -86,14 +74,11 @@ def sanitize_url(url: str) -> str | None:
 
 def strip_html_tags(text: str) -> str:
   """Remove all HTML tags from text."""
-  # Remove HTML tags
   clean = re.compile("<.*?>")
   return re.sub(clean, "", text)
 
 
 def validate_api_key(api_key: str) -> bool:
   """Validate API key format (shape only — this is not authentication)."""
-  # API keys should match expected format
-  # Example: rsk_1234567890abcdef... (64+ chars)
   pattern = r"^rsk_[a-zA-Z0-9]{60,}$"
   return bool(re.match(pattern, api_key))

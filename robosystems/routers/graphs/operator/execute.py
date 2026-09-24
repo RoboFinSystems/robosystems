@@ -1,11 +1,8 @@
 """Operator execution: `POST /v1/graphs/{graph_id}/operator`.
 
-Every operator run executes on the background worker. The endpoint resolves
-the operator, runs the gates that can refuse the request outright (graph
-lifecycle, repository limits, write role, graph scope, credits), enqueues the
-run and answers 202 with the operation's stream/status/cancel links. Under
-`?mode=sync` it waits a bounded time for the worker and answers 200 with the
-result when it lands in time. Operator runs consume AI credits.
+Every run executes on the background worker. The endpoint runs the gates that
+can refuse outright, enqueues, and answers 202 with stream/status/cancel links;
+under `?mode=sync` it waits a bounded time and answers 200 if the result lands.
 """
 
 import asyncio
@@ -91,21 +88,15 @@ _MODE_DESCRIPTION = (
 async def _enforce_shared_repository_agent_limits(
   graph_id: str, current_user: User, db: Session
 ) -> None:
-  """Apply the graph lifecycle gate, then shared-repository operator limits.
-
-  Repository plans advertise ``agent_calls_per_*`` limits, and this is where
-  the operator surface enforces them — the counterpart to the equivalent
-  hooks on query, mcp and search. The lifecycle gate is the shared one, so a
-  suspended or expired graph is refused here as it is everywhere else. Every
-  entry point to a metered surface needs both; neither is optional.
-  """
+  """Apply the graph lifecycle gate, then shared-repository operator limits
+  (the plans' ``agent_calls_per_*``). Every metered entry point needs both."""
   from robosystems.middleware.billing.enforcement import require_graph_access
   from robosystems.routers.graphs.query.execute import (
     _check_shared_repository_limits,
   )
 
-  # Lifecycle/subscription gate (read strength — write-capable operators run
-  # the write-strength check through `enforce_operator_write_role`).
+  # Read strength; write-capable operators get the write check through
+  # `enforce_operator_write_role`.
   require_graph_access(graph_id, db, require_write=False)
 
   await _check_shared_repository_limits(
@@ -124,8 +115,7 @@ def _check_operator_post_enabled():
 
 
 def _request_context(request: OperatorRequest) -> dict | None:
-  """The free-form context dict handed to the operator as ctx.extra, with the
-  typed per-question credit ceiling folded in when the caller set one."""
+  """ctx.extra for the operator, with the per-question credit ceiling folded in."""
   if request.max_credits is None:
     return request.context
   return {**(request.context or {}), "max_credits": request.max_credits}
@@ -188,12 +178,8 @@ def _gate(
   db: Session,
   mode: BaseOperatorMode,
 ) -> None:
-  """Refuse now what the worker would refuse later.
-
-  The worker re-checks all three with its own session (a task can wait in
-  the queue past a role change or a spent balance), but a caller should get
-  the 403 or 402 on the request, not a failed operation to go and read.
-  """
+  """Refuse now what the worker would refuse later: the worker re-checks with
+  its own session, but the caller should get the 403/402 on the request."""
   enforce_operator_write_role(operator, graph_id, str(current_user.id))
   enforce_operator_graph_scope(operator, graph_id)
   try:

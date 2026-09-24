@@ -42,9 +42,8 @@ router = APIRouter(tags=["User"])
 
 
 def _mask_email(email: str | None) -> str:
-  """``jane@example.com`` -> ``j***@example.com`` for the change notice, which
-  goes to the OLD address and should hint at the new one without disclosing it
-  in full."""
+  """``jane@example.com`` -> ``j***@example.com``: the change notice goes to
+  the OLD address and should hint at the new one without disclosing it."""
   if not email or "@" not in email:
     return "a new address"
   local, _, domain = email.partition("@")
@@ -122,11 +121,8 @@ async def update_user_profile(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> UserResponse:
-  # Interactive session only: a programmatic API key must never reach a route
-  # that can change the sign-in address. Keys are long-lived and widely
-  # copied — CI config, connector URLs — so they are not proof of presence.
-  # Same rule the passkey surfaces enforce
-  # (middleware/auth/dependencies.py get_optional_jwt_user).
+  # Interactive session only: long-lived, widely copied API keys are not proof
+  # of presence for changing the sign-in address (same rule as passkeys).
   if current_user is None:
     raise create_error_response(
       status_code=status.HTTP_401_UNAUTHORIZED,
@@ -156,9 +152,8 @@ async def update_user_profile(
     sanitized_email = None
     email_changed = False
 
-    # Case-insensitive so submitting your own current address (in any case) is a
-    # no-op rather than prompting reauth and then 409-ing against your own row
-    # (User.get_by_email lowercases its lookup).
+    # Case-insensitive, so resubmitting your own address is a no-op rather than
+    # a reauth prompt followed by a 409 against your own row.
     current_email_lower = (current_user.email or "").lower()
     if (
       "email" in update_data
@@ -171,9 +166,8 @@ async def update_user_profile(
           code=ErrorCode.INVALID_INPUT,
         )
 
-      # Re-authenticate before changing the sign-in address, exactly as passkey
-      # enrollment/removal do. A live proof (password or a fresh mgmt-flow
-      # passkey assertion) is required; a valid session alone is not enough.
+      # A live proof (password or fresh passkey assertion) is required, as for
+      # passkey enrollment/removal; a session alone is not enough.
       try:
         passkey_ops.verify_reauth(
           db,
@@ -198,9 +192,8 @@ async def update_user_profile(
           code=ErrorCode.UNAUTHORIZED,
         )
 
-      # Store lowercase: User.create/update and get_by_email all normalize, and
-      # a mixed-case address written here would silently never match at login
-      # or password reset (both lowercase their input before the lookup).
+      # Stored lowercase: login and reset lowercase before lookup, so a
+      # mixed-case address would never match.
       sanitized_email = sanitize_string(update_data["email"], max_length=254).lower()
       existing_user = User.get_by_email(sanitized_email, db)
       if existing_user:
@@ -228,9 +221,8 @@ async def update_user_profile(
 
     if "name" in update_data:
       user_in_session.name = sanitize_string(update_data["name"], max_length=100)
-    # Only write email on a real change (sanitized_email is set only when the
-    # requested address differs from the current one and passed reauth). This
-    # is also where the previous address is captured for the change notice.
+    # sanitized_email is set only for a real, reauthenticated change; the
+    # previous address is captured here for the change notice.
     previous_email: str | None = None
     if sanitized_email:
       previous_email = str(user_in_session.email) if user_in_session.email else None
@@ -246,10 +238,9 @@ async def update_user_profile(
 
     app_source = detect_app_source(fastapi_request) if email_changed else None
 
-    # Tell the PREVIOUS address its account's email was changed — the one
-    # signal the account owner still receives if this change was hostile. Sent
-    # regardless of EMAIL_VERIFICATION_ENABLED; a fire-and-forget notice whose
-    # failure never fails the request (the Dagster op's own send is best-effort).
+    # Notify the PREVIOUS address: the one signal the owner still gets if the
+    # change was hostile. Sent regardless of EMAIL_VERIFICATION_ENABLED;
+    # fire-and-forget.
     if email_changed and previous_email:
       background_tasks.add_task(
         run_and_monitor_dagster_job,
@@ -264,7 +255,6 @@ async def update_user_profile(
         ),
       )
 
-    # Queue verification email for new email address
     if email_changed and env.EMAIL_VERIFICATION_ENABLED:
       client_ip = fastapi_request.client.host if fastapi_request.client else None
       user_agent = fastapi_request.headers.get("user-agent")

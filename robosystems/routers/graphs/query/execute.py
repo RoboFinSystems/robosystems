@@ -86,16 +86,13 @@ from .streaming import (
   stream_sse_with_queue,
 )
 
-# Initialize circuit breaker
 circuit_breaker = CircuitBreakerManager()
 
 
-# Use helper functions from handlers module
 _get_user_priority = get_user_priority_from_handler
 _get_query_operation_type = get_query_operation_type
 
 
-# Create router for execute endpoint
 router = APIRouter()
 
 
@@ -138,14 +135,12 @@ async def execute_cypher_query(
 ) -> CypherStatementResponse | JSONResponse | StreamingResponse | EventSourceResponse:
   start_time = datetime.now(UTC)
 
-  # Enforce graph lifecycle and subscription status (reads allowed)
   from robosystems.middleware.billing.enforcement import require_graph_access
 
   graph = require_graph_access(graph_id, session, require_write=False)
 
   circuit_breaker.check_circuit(graph_id, "cypher_query")
 
-  # Determine chunk size based on tier (if not explicitly provided)
   from robosystems.config.graph_tier import GraphTierConfig
 
   if chunk_size is None:
@@ -155,17 +150,14 @@ async def execute_cypher_query(
     else:
       chunk_size = GraphTierConfig.get_chunk_size(None)  # Use default
 
-  # Initialize client_info for exception handling
   client_info = {"is_interactive": False}
 
-  # Shared-repository telemetry context (no-ops on user graphs)
   is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
   key_prefix = api_key_prefix_from_request(full_request)
   exec_id: str | None = None
 
   try:
-    # Authorize the statement — write policy, engine validation, role gate.
-    # Shared, transport-independent path (also used by /query/sql, MCP).
+    # Shared, transport-independent authorization (also used by /query/sql, MCP).
     auth = statement_kernel.authorize(
       engine=StatementEngine.CYPHER,
       graph_id=graph_id,
@@ -176,13 +168,10 @@ async def execute_cypher_query(
     is_write = auth.is_write
     access_type = auth.access_type
 
-    # Apply dual-layer rate limiting for shared repositories
     await _check_shared_repository_limits(
       graph_id=graph_id, user=current_user, session=session, endpoint="query"
     )
 
-    # Get repository with auth
-    # Convert graph tier string to GraphTier enum
     tier = GraphTier.LADYBUG_STANDARD
     if graph and graph.graph_tier:
       tier_map = {
@@ -196,10 +185,8 @@ async def execute_cypher_query(
     try:
       repository = await get_universal_repository(graph_id, access_type, tier)
     except HTTPException:
-      # Re-raise HTTP exceptions as-is (already properly formatted)
       raise
     except Exception as e:
-      # Handle repository access errors with better messaging
       error_message = str(e)
       if (
         "No access to repository" in error_message
@@ -226,7 +213,6 @@ async def execute_cypher_query(
           detail="Failed to access repository.",
         )
 
-    # Log structured query attempt with business context
     api_logger.info(
       f"Cypher query execution started: {request.query[:50]}...",
       extra={
@@ -244,24 +230,19 @@ async def execute_cypher_query(
       },
     )
 
-    # Analyze query characteristics
     query_analysis = QueryAnalyzer.analyze_query(request.query)
 
-    # Detect client capabilities
     headers = dict(full_request.headers)
     client_info = ClientDetector.detect_client_type(headers)
 
-    # Override for test mode
     if test_mode:
       client_info["is_testing_tool"] = True
       client_info["is_interactive"] = True
 
-    # Get system state
     queue_manager = get_query_queue()
     system_state = queue_manager.get_stats()
     system_state["max_concurrent"] = 5  # Configurable threshold
 
-    # Convert string mode to enum if provided
     mode_enum = None
     if mode:
       try:
@@ -269,7 +250,6 @@ async def execute_cypher_query(
       except ValueError:
         logger.warning(f"Invalid mode parameter: {mode}")
 
-    # Select execution strategy
     strategy, metadata = StrategySelector.select_strategy(
       query_analysis=query_analysis,
       client_info=client_info,
@@ -284,7 +264,6 @@ async def execute_cypher_query(
       is_testing=client_info["is_interactive"],
     )
 
-    # Log strategy selection
     api_logger.info(
       f"Query execution strategy: {strategy.value}",
       extra={
@@ -310,17 +289,13 @@ async def execute_cypher_query(
       strategy=strategy.value,
     )
 
-    # Execute based on strategy
     if strategy == ExecutionStrategy.SSE_QUEUE_STREAM:
-      # Queue with SSE then stream results
-      # Create unified SSE operation for monitoring
       sse_response = await create_operation_response(
         operation_type="cypher_query_streaming",
         user_id=current_user.id,
         graph_id=graph_id,
       )
 
-      # Stream with unified monitoring support
       log_shared_query_end(
         exec_id,
         graph_id,
@@ -339,7 +314,6 @@ async def execute_cypher_query(
       )
 
     elif strategy == ExecutionStrategy.SSE_STREAMING:
-      # Direct SSE streaming
       log_shared_query_end(
         exec_id,
         graph_id,
@@ -359,7 +333,6 @@ async def execute_cypher_query(
       )
 
     elif strategy == ExecutionStrategy.NDJSON_STREAMING:
-      # NDJSON streaming
       log_shared_query_end(
         exec_id,
         graph_id,
@@ -382,11 +355,9 @@ async def execute_cypher_query(
       ExecutionStrategy.JSON_COMPLETE,
       ExecutionStrategy.SYNC_TESTING,
     ]:
-      # Execute and return JSON
       timeout = timeouts["execution"]
       try:
         if strategy == ExecutionStrategy.SYNC_TESTING:
-          # Testing mode - provide helpful feedback
           if query_analysis["estimated_rows"] > QueryAnalyzer.LARGE_RESULT:
             logger.warning(
               f"Testing mode with large query ({query_analysis['estimated_rows']} rows)"
@@ -396,10 +367,8 @@ async def execute_cypher_query(
           repository, request.query, request.parameters, timeout
         )
 
-        # Calculate execution time
         execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
-        # Extract columns
         columns = list(result[0].keys()) if result else []
 
         log_shared_query_end(
@@ -413,7 +382,6 @@ async def execute_cypher_query(
           source="query_cypher",
         )
 
-        # Check if result is too large for testing tools
         if (
           client_info["is_interactive"]
           and len(result) > 10000
@@ -421,7 +389,6 @@ async def execute_cypher_query(
         ):
           logger.warning(f"Large result ({len(result)} rows) for testing tool")
 
-          # Truncate with warning
           return JSONResponse(
             content={
               "success": True,
@@ -445,7 +412,6 @@ async def execute_cypher_query(
 
         circuit_breaker.record_success(graph_id, "cypher_query")
 
-        # Record business event for successful execution
         metrics_instance = get_endpoint_metrics()
         metrics_instance.record_business_event(
           endpoint="/v1/graphs/{graph_id}/query",
@@ -464,7 +430,6 @@ async def execute_cypher_query(
           user_id=current_user.id,
         )
 
-        # Log structured query completion
         api_logger.info(
           "Cypher query execution completed successfully",
           extra={
@@ -480,7 +445,6 @@ async def execute_cypher_query(
           },
         )
 
-        # Log performance metric
         log_metric(
           "cypher_query_success",
           1,
@@ -494,7 +458,6 @@ async def execute_cypher_query(
           },
         )
 
-        # Return complete result
         return CypherStatementResponse(
           success=True,
           data=result,
@@ -506,10 +469,8 @@ async def execute_cypher_query(
         )
 
       except TimeoutError:
-        # Record circuit breaker failure for timeout
         circuit_breaker.record_failure(graph_id, "cypher_query")
 
-        # Record business event for timeout
         metrics_instance = get_endpoint_metrics()
         metrics_instance.record_business_event(
           endpoint="/v1/graphs/{graph_id}/query",
@@ -525,12 +486,10 @@ async def execute_cypher_query(
           user_id=current_user.id,
         )
 
-        # Shared repositories and their subgraphs have their own scaling
-        # (ALB + ASG) — queuing just delays the inevitable, so return a
-        # timeout error. User graphs benefit from the queue since they have
-        # limited connections (max 3) and no read replicas.
-        # A write never falls back: it is still running on the Graph API, so
-        # resubmitting it would execute it twice.
+        # Shared repos scale on their own (ALB + ASG), so queuing only delays
+        # the timeout; user graphs have few connections and no replicas, so
+        # they fall back to the queue. A write never falls back: it is still
+        # running on the Graph API and would execute twice.
         if client_info["is_interactive"] or is_shared or is_write:
           elapsed = (datetime.now(UTC) - start_time).total_seconds()
 
@@ -573,10 +532,8 @@ async def execute_cypher_query(
             },
           )
         else:
-          # User graph - fall through to queue for fair connection sharing
           logger.info("Direct execution timed out, falling back to queue")
 
-    # TRADITIONAL_QUEUE or fallback
     sse_response = None
     try:
       sse_response = await create_operation_response(
@@ -637,7 +594,6 @@ async def execute_cypher_query(
           detail="Too many concurrent queries. Please wait for existing queries to complete.",
         )
       elif "Query rejected" in str(queue_error):
-        # Admission control rejection
         metrics_instance.record_business_event(
           endpoint="/v1/graphs/{graph_id}/query",
           method="POST",
@@ -676,9 +632,6 @@ async def execute_cypher_query(
           detail=safe_error_message(queue_error) or "Failed to queue query",
         )
 
-    # Continue with the successfully queued query_id and status
-
-    # Record business event for successful queue submission
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/query",
@@ -698,7 +651,6 @@ async def execute_cypher_query(
       user_id=current_user.id,
     )
 
-    # Build response with helpful instructions
     base_url = str(full_request.base_url).rstrip("/")
 
     response_content = {
@@ -710,7 +662,6 @@ async def execute_cypher_query(
       "message": "Query has been queued for execution",
     }
 
-    # Add helpful instructions for testing tools
     if client_info["is_interactive"]:
       response_content["instructions"] = {
         "message": "Your query is queued. Monitor via unified SSE endpoint:",
@@ -721,7 +672,6 @@ async def execute_cypher_query(
         ),
       }
 
-    # Machine-readable links - only unified SSE monitoring
     response_content["_links"] = {
       "self": str(full_request.url),
       "monitor": f"/v1/operations/{sse_response['operation_id']}/stream",  # Unified monitoring only
@@ -740,7 +690,6 @@ async def execute_cypher_query(
     )
 
   except ValueError as e:
-    # Handle credit-related errors (no credit pool found)
     if "No credit pool found" in str(e):
       log_shared_query_end(
         exec_id,
@@ -772,17 +721,15 @@ async def execute_cypher_query(
       api_key_prefix=key_prefix,
       source="query_cypher",
     )
-    # Re-raise other ValueErrors — 400s are client errors, keep specific message
+    # Other ValueErrors are client errors; keep the specific message.
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,
       detail=str(e),
     )
 
   except HTTPException as exc:
-    # 503 is deliberate backpressure (admission control, rebuilding, full
-    # queue), not a fault of the graph. Counting it as a breaker failure turns
-    # a resource ceiling into an outage: the rejections trip the breaker and
-    # every subsequent query fails even once the pressure clears.
+    # 503 is deliberate backpressure, not a graph fault; counting it would let
+    # the rejections trip the breaker and outlast the pressure.
     if (
       exc.status_code >= 500
       and exc.status_code != http_status.HTTP_503_SERVICE_UNAVAILABLE
@@ -809,11 +756,9 @@ async def execute_cypher_query(
     raise
 
   except GraphTransientError as e:
-    # The Graph API rejected the request rather than failing it — admission
-    # control (memory/CPU/connection headroom), a 502/504, or its own client
-    # breaker already being open. Surface the reason as 503 + Retry-After so
-    # the caller can back off, and do not record a breaker failure: the graph
-    # is healthy, just at capacity.
+    # The Graph API rejected rather than failed the request (admission
+    # control, 502/504, its own breaker open): 503 + Retry-After, and no
+    # breaker failure since the graph is healthy, just at capacity.
     retry_after = 30
     logger.warning(f"Graph API unavailable for {graph_id}: {e}")
     record_shared_query_outcome(
@@ -844,8 +789,7 @@ async def execute_cypher_query(
       },
       user_id=current_user.id if current_user else None,
     )
-    # Transient-rejection text can name factory internals (pool state, the
-    # shared master) — the caller only needs "at capacity, back off".
+    # Rejection text can name factory internals; the caller needs only "back off".
     raise HTTPException(
       status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
       detail=safe_error_message(e)
@@ -873,7 +817,6 @@ async def execute_cypher_query(
       source="query_cypher",
     )
 
-    # Record business event for unexpected errors
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/query",
@@ -890,9 +833,8 @@ async def execute_cypher_query(
 
     logger.error(f"Unexpected error in query execution: {e}")
 
-    # Provide helpful error for testing tools. is_interactive is caller-
-    # controlled (test_mode / User-Agent), so it confers verbosity of shape
-    # only — the message itself is sanitized like every other sink.
+    # is_interactive is caller-controlled, so it changes the response shape
+    # only; the message is still sanitized.
     if client_info.get("is_interactive"):
       return JSONResponse(
         status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -933,14 +875,12 @@ async def _check_shared_repository_limits(
   )
   from robosystems.models.core.user.user_repository import UserRepository
 
-  # Only apply to shared repositories (including subgraphs like sec_historical)
   if not is_shared_repository_or_subgraph(graph_id):
     return
 
-  # Resolve subgraph to parent for subscription lookup (subscriptions are on the parent)
+  # Subscriptions live on the parent repository.
   parent_repo_id = resolve_shared_repository_parent(graph_id)
 
-  # ALWAYS check access (authorization) - this is not gated by rate limiting
   repo_access = UserRepository.get_by_user_and_repository(
     user.id, parent_repo_id, session
   )
@@ -954,7 +894,6 @@ async def _check_shared_repository_limits(
       f"Subscribe at {env.ROBOSYSTEMS_URL}/repositories/browse",
     )
 
-  # Rate limiting is optional - skip if disabled (dev environments)
   if not env.RATE_LIMIT_ENABLED:
     return
 
@@ -964,17 +903,14 @@ async def _check_shared_repository_limits(
   )
   from robosystems.middleware.rate_limits import DualLayerRateLimiter
 
-  # Get Redis client for rate limiting with proper ElastiCache support
   redis_client = create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
 
   try:
     limiter = DualLayerRateLimiter(redis_client)
 
-    # repo_access already fetched above for access check
     repo_plan = repo_access.repository_plan if repo_access else None
 
-    # Check shared-repository per-plan volume limits (burst protection is
-    # already enforced upstream by subscription_aware_rate_limit_dependency).
+    # Per-plan volume limits; burst protection is enforced upstream.
     limit_check = await limiter.check_limits(
       user_id=user.id,
       graph_id=graph_id,
@@ -1008,6 +944,3 @@ async def _check_shared_repository_limits(
 
   finally:
     await redis_client.close()
-
-  # Note: Direct API queries are included - no credit consumption
-  # Only MCP queries (AI-mediated) consume credits

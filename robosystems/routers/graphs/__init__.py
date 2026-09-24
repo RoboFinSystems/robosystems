@@ -1,9 +1,4 @@
-"""Graph routers, mounted under `/v1/graphs`.
-
-Covers graph creation and listing, per-graph backups, connections, credits,
-files, health, limits, members, query, schema, subgraphs, subscriptions,
-tables, and usage.
-"""
+"""Graph routers, mounted under `/v1/graphs`."""
 
 from robosystems.config import env
 
@@ -41,13 +36,10 @@ __all__ = [
   "usage_router",
 ]
 
-# The fact grid is roboledger schema-specific, so it lives on the extensions
-# surface: routers/extensions/roboledger/views.py, mounted in main.py.
+# The fact grid is roboledger-specific and lives on the extensions surface.
 
-# Conditionally export search, documents, and memory routers based on flags.
-# The search router hosts both document search and memory `recall`, so it mounts
-# when EITHER feature is on; documents CRUD is search-only; memory governance is
-# memory-only.
+# The search router hosts both document search and memory `recall`, so it
+# mounts when either feature is on.
 if env.SEMANTIC_SEARCH_ENABLED:
   from .documents import router as documents_router  # noqa: F401
 

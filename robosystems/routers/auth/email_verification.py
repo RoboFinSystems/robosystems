@@ -25,7 +25,6 @@ from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.device_fingerprinting import extract_device_fingerprint
 from .utils import detect_app_source, may_issue_session_without_login
 
-# Create router for email verification endpoints
 router = APIRouter()
 
 
@@ -33,12 +32,9 @@ async def get_current_user_for_email_verification(
   request: Request,
   session: Session = Depends(get_async_db_session),
 ) -> User:
-  """Resolve the authenticated user for the email-verification endpoints.
-
-  A local copy of the shared dependency, kept here to avoid a circular import
-  with `middleware.auth.dependencies`. Raises 401 when authentication fails.
-  """
-  # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
+  """Local copy of the shared dependency, avoiding a circular import with
+  `middleware.auth.dependencies`. Raises 401 when authentication fails."""
+  # Read directly so it doesn't show in the OpenAPI params.
   authorization = request.headers.get("authorization")
 
   if not authorization or not authorization.startswith("Bearer "):
@@ -77,7 +73,6 @@ async def get_current_user_for_email_verification(
 
   publish_principal(request, str(user.id), "jwt_token")
 
-  # Log successful authentication
   client_ip = request.client.host if request.client else None
   user_agent = request.headers.get("user-agent")
   SecurityAuditLogger.log_auth_success(
@@ -107,18 +102,15 @@ async def resend_verification_email(
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(auth_rate_limit_dependency),
 ) -> dict:
-  # Check if already verified
   if current_user.email_verified:
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
       detail="Email is already verified",
     )
 
-  # Get client details for token creation
   client_ip = request.client.host if request.client else None
   user_agent = request.headers.get("user-agent")
 
-  # Generate new verification token
   token = UserToken.create_token(
     user_id=current_user.id,
     token_type="email_verification",
@@ -130,7 +122,6 @@ async def resend_verification_email(
 
   app = detect_app_source(request)
 
-  # Queue verification email via Dagster (async with retry logic)
   run_config = build_email_job_config(
     email_type="email_verification",
     to_email=current_user.email,
@@ -176,7 +167,6 @@ async def verify_email(
   background_tasks: BackgroundTasks,
   session: Session = Depends(get_async_db_session),
 ) -> AuthResponse:
-  # Verify token and get user
   user_id = UserToken.verify_token(
     raw_token=request.token,
     token_type="email_verification",
@@ -196,16 +186,13 @@ async def verify_email(
       detail="User not found",
     )
 
-  # Mark email as verified
   user.verify_email(session)
 
-  # Get client details for security logging
   client_ip = fastapi_request.client.host if fastapi_request.client else None
   user_agent = fastapi_request.headers.get("user-agent")
 
   app = detect_app_source(fastapi_request)
 
-  # Queue welcome email via Dagster (async with retry logic)
   run_config = build_email_job_config(
     email_type="welcome",
     to_email=user.email,
@@ -245,7 +232,7 @@ async def verify_email(
       message="Email verified successfully. Sign in to continue.",
     )
 
-  # Generate JWT token for auto-login with device binding
+  # Auto-login with device binding.
   device_fingerprint = extract_device_fingerprint(fastapi_request)
   jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 

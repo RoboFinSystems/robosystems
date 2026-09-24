@@ -1,19 +1,9 @@
-"""Instance Busy Counter
+"""Per-instance busy counter for destructive operations.
 
-Atomic DynamoDB counter on the instance-registry table to report when an
-EC2 graph instance is running a destructive operation (materialization,
-bulk staging, etc.). GHA pre-refresh workflows poll this counter before
-cycling the container or replacing the instance, so long-running work is
-not interrupted mid-flight.
-
-The counter is per-instance and tracks concurrent destructive operations
-via atomic DynamoDB ADD, which handles overlapping operations correctly.
-A timestamp on every write drives stale detection on the reader side
-(GHA) in case a crash leaves the counter incremented without a matching
-decrement.
-
-DynamoDB write failures are logged but never raised — a broken counter
-must not block the actual work.
+An atomic ADD on the instance-registry row that GHA refresh workflows poll
+before cycling a container or instance. Every write stamps a timestamp so the
+reader can detect a counter left incremented by a crash. It is a soft signal:
+write failures are logged, never raised.
 """
 
 import asyncio
@@ -28,8 +18,7 @@ from robosystems.logger import logger
 
 from .allocation_manager import get_dynamodb_resource
 
-# Known op_kind labels for observability. Not enforced at runtime — this
-# is a convention for the writer side. GHA reads the kind only for logging.
+# Conventional op_kind labels; GHA reads the kind only for logging.
 OP_KIND_MATERIALIZATION = "materialization"
 OP_KIND_DAGSTER_MATERIALIZATION = "dagster_materialization"
 OP_KIND_SEC_STAGING = "sec_staging"
@@ -43,12 +32,7 @@ def _iso_now() -> str:
 
 
 def _update_counter(instance_id: str, delta: int, op_kind: str) -> None:
-  """Apply an atomic counter update to the instance-registry entry.
-
-  Always safe — log-and-continue on any DynamoDB failure, never raises.
-  Missing `active_destructive_ops` attribute is treated as 0 by DynamoDB
-  ADD, so no schema migration or initialization is required.
-  """
+  """Never raises. ADD treats a missing attribute as 0."""
   if not instance_id:
     logger.warning("instance_busy: skipping counter update — instance_id is empty")
     return
@@ -90,8 +74,7 @@ async def _update_counter_async(instance_id: str, delta: int, op_kind: str) -> N
   try:
     await asyncio.to_thread(_update_counter, instance_id, delta, op_kind)
   except Exception as e:
-    # Defense in depth — _update_counter swallows its own errors, so this
-    # should only fire on event-loop / thread-pool failure.
+    # Only thread-pool failures reach here; _update_counter swallows its own.
     logger.warning(
       f"instance_busy: async counter dispatch failed for {instance_id} "
       f"({op_kind}, delta={delta}): {e}"
@@ -99,25 +82,11 @@ async def _update_counter_async(instance_id: str, delta: int, op_kind: str) -> N
 
 
 async def resolve_instance_id_for_graph(graph_id: str) -> str:
-  """Look up the EC2 instance ID hosting the given graph.
+  """The EC2 instance hosting a graph, or "" on any failure.
 
-  Thin convenience helper for callers that have a ``graph_id`` but no
-  ``GraphClient`` handy (e.g., Dagster assets that run on a worker and
-  would like to publish a busy counter against the target instance).
-  Creates a short-lived client solely to read its ``_instance_id``
-  routing metadata, then closes it.
-
-  Returns an empty string on any failure (graph not found, routing
-  error, etc.) — callers pass the result to :func:`begin_destructive_op`
-  which already treats empty strings as a no-op.
-
-  This helper is intentionally tolerant: publishing the busy counter is
-  a soft coordination signal, and a lookup failure must never block the
-  destructive operation itself.
+  "" makes the counter a no-op; a lookup failure must never block the work.
   """
   try:
-    # Lazy import to avoid circular dependency with the graph_api client
-    # factory at module load time.
     from robosystems.graph_api.client.factory import GraphClientFactory
 
     client = await GraphClientFactory.create_client(
@@ -135,16 +104,8 @@ async def resolve_instance_id_for_graph(graph_id: str) -> str:
 
 
 async def begin_destructive_op(instance_id: str, op_kind: str) -> None:
-  """Imperative +1 to the busy counter. Pair with :func:`end_destructive_op`.
-
-  Prefer the :func:`instance_busy` context manager when possible — this
-  imperative variant exists for call sites where inserting ``async with``
-  would force a large re-indentation (e.g., deeply nested try/finally
-  blocks). Callers MUST guarantee a matching ``end_destructive_op`` in a
-  ``finally`` that runs regardless of success or failure.
-
-  Log-and-continue on DynamoDB failure.
-  """
+  """+1 to the busy counter. Prefer :func:`instance_busy`; otherwise callers
+  must call :func:`end_destructive_op` in a ``finally``."""
   await _update_counter_async(instance_id, delta=1, op_kind=op_kind)
 
 
@@ -158,24 +119,7 @@ async def instance_busy(
   instance_id: str,
   op_kind: str,
 ) -> AsyncIterator[None]:
-  """Mark an EC2 graph instance as busy for the duration of the block.
-
-  Atomically increments `active_destructive_ops` on the instance's
-  instance-registry DynamoDB entry on entry and decrements on exit
-  (including on exception). GHA refresh workflows read this attribute
-  before cycling the container or replacing the instance.
-
-  The counter is a soft coordination signal, not a correctness boundary:
-    - DynamoDB write failures are logged but do not fail the caller.
-    - GHA readers apply stale-detection via `last_destructive_op_at`.
-    - Concurrent operations on the same instance are handled by atomic
-      ADD on the DynamoDB side.
-
-  Example:
-    client = await GraphClientFactory.create_client(graph_id=graph_id, ...)
-    async with instance_busy(client._instance_id, OP_KIND_MATERIALIZATION):
-      await do_long_destructive_work(client)
-  """
+  """Mark an instance busy for the duration of the block, exceptions included."""
   await _update_counter_async(instance_id, delta=1, op_kind=op_kind)
   try:
     yield
@@ -188,13 +132,7 @@ def instance_busy_sync(
   instance_id: str,
   op_kind: str,
 ) -> Iterator[None]:
-  """Synchronous variant of :func:`instance_busy` for sync call sites.
-
-  Use this from Dagster ops or any other sync context where awaiting the
-  async variant is not convenient. Same semantics: increment on entry,
-  decrement on exit (including exceptions), log-and-continue on DDB
-  failure.
-  """
+  """Synchronous :func:`instance_busy`."""
   _update_counter(instance_id, delta=1, op_kind=op_kind)
   try:
     yield

@@ -48,7 +48,6 @@ async def list_subscriptions(
   try:
     from ...models.core import OrgUser
 
-    # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -65,13 +64,10 @@ async def list_subscriptions(
       ),
     ]
 
-    # Billing is org-scoped but repository access is per-user, so an org-wide
-    # list hands a plain member every other member's subscriptions. Owners and
-    # admins manage billing and need the whole org; everyone else sees only the
-    # rows attributed to them. `user_id` is set on repository subscriptions and
-    # NULL on graph subscriptions, which are org-level resources rather than
-    # per-person ones — so a plain member sees neither other people's seats nor
-    # the org's graph inventory.
+    # Billing is org-scoped but repository access is per-user: owners/admins
+    # see the whole org; others see only rows attributed to them. Graph
+    # subscriptions have NULL user_id (org-level), so members don't see the
+    # org's graph inventory either.
     if not membership.can_manage_billing():
       filters.append(BillingSubscription.user_id == current_user.id)
 
@@ -141,7 +137,6 @@ async def get_subscription(
   try:
     from ...models.core import OrgUser
 
-    # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -154,9 +149,7 @@ async def get_subscription(
       BillingSubscription.org_id == org_id,
     ]
 
-    # Same narrowing the listing applies: a member sees their own subscriptions,
-    # billing managers see the org's. Without it, fetch-by-id remains a way
-    # around the filtered list for anyone holding an id.
+    # Same narrowing as the listing, so fetch-by-id can't bypass it.
     if not membership.can_manage_billing():
       filters.append(BillingSubscription.user_id == current_user.id)
 
@@ -231,7 +224,6 @@ async def cancel_subscription(
   try:
     from ...models.core import OrgRole, OrgUser
 
-    # Verify user is an owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -266,13 +258,10 @@ async def cancel_subscription(
         detail="Cannot cancel during tier upgrade. Please wait for upgrade to complete.",
       )
 
-    # Resource-scoped cancellation lives where the resource lives:
-    #   - User graphs  → POST /v1/graphs/{g}/operations/delete-graph
-    #   - Repositories → POST /v1/graphs/{repo_id}/subscription/cancel
-    # That keeps "one canonical cancel path per resource type" and avoids
-    # the two-paths drift we cleaned up in the graph case. The billing
-    # cancel endpoint is reserved for future non-resource-scoped subs
-    # (e.g. platform-level add-ons not tied to a graph_id).
+    # Resource-scoped cancellation lives with the resource (graphs:
+    # delete-graph; repositories: /v1/graphs/{repo_id}/subscription/cancel),
+    # one canonical path per type. This endpoint is for future
+    # non-resource-scoped subscriptions.
     if subscription.resource_type == "graph":
       raise HTTPException(
         status_code=400,
@@ -303,10 +292,8 @@ async def cancel_subscription(
           ),
         )
 
-    # Cancel in Stripe if there's a linked Stripe subscription. For period-end
-    # we mark the Stripe sub to cancel at period end; for immediate we cancel
-    # outright. Stripe.Subscription.cancel() does NOT prorate or refund by
-    # default — credit-on-account is handled separately.
+    # Stripe's cancel does not prorate or refund; credit-on-account is
+    # handled separately.
     if subscription.stripe_subscription_id:
       try:
         provider = get_payment_provider("stripe")

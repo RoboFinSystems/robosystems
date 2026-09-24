@@ -1,6 +1,4 @@
-"""
-OAuth endpoints for connection authentication.
-"""
+"""OAuth endpoints for connection authentication."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -36,11 +34,10 @@ from robosystems.operations.connection_service import (
 
 router = APIRouter()
 
-# Providers that authorize through these endpoints. QuickBooks and Mercury
-# redirect (OAuth 2.0); Plaid authorizes in the embedded Link widget — init
-# returns a link_token instead of an auth_url, and Link's public_token comes
-# back through the callback as ``code``. Handlers are looked up per call so a
-# test can patch the provider module's singleton.
+# QuickBooks and Mercury redirect (OAuth 2.0); Plaid authorizes in the
+# embedded Link widget: init returns a link_token, and Link's public_token
+# comes back through the callback as ``code``. Handlers are looked up per call
+# so tests can patch the provider module's singleton.
 OAUTH_PROVIDERS = frozenset({"quickbooks", "mercury", "plaid"})
 
 
@@ -70,12 +67,10 @@ async def _complete_mercury_oauth(
 ) -> dict:
   """Finish a Mercury consent: exchange, store, record, validate, sync.
 
-  Mercury has no realm and no revival path — a disconnected feed is purged
-  (the partnership's deletion protocol) and a reconnect is a new row. The
-  connect-time sync config was parked in the pending row's credential
-  bundle; it rides into the token bundle as provider data. The consent is
-  written to the security audit log: the record the data agreement asks
-  for (who connected which organization, over which scope, when).
+  No realm and no revival path: a disconnected feed is purged and a reconnect
+  is a new row. The consent is written to the security audit log (who
+  connected which organization, over which scope, when), as the data
+  agreement requires.
   """
   from robosystems.models.core import ConnectionCredentials
   from robosystems.operations.providers.mercury_provider import (
@@ -203,8 +198,7 @@ async def _complete_plaid_link(
   db: Session,
 ) -> dict:
   """Finish Link. A bank the graph already has connected is refused (409) and
-  a fresh pending row for it is withdrawn, so the duplicate leaves nothing
-  behind."""
+  the fresh pending row withdrawn."""
   from robosystems.adapters.plaid.client import PlaidError
   from robosystems.operations.providers.plaid_provider import (
     DuplicateBankConnectionError,
@@ -260,12 +254,10 @@ async def init_oauth(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> OAuthInitResponse:
-  # Completing OAuth stores credentials and starts a full-rebuild sync —
-  # a write to the graph, so the write role is required from the start.
+  # Completing OAuth stores credentials and starts a sync: a graph write.
   require_graph_write_role(str(current_user.id), graph_id)
 
   try:
-    # Get connection to verify it exists and get provider
     connection = await ConnectionService.get_connection(
       request.connection_id, current_user.id, graph_id=graph_id
     )
@@ -287,7 +279,7 @@ async def init_oauth(
       )
 
     # The callback can revive a soft-deleted connection, so the books guard
-    # runs here too (specs/ledger/native-accounting-cutover.md §2).
+    # runs here too.
     try:
       assert_provider_compatible(graph_id, provider, db)
     except ProviderConflictError as conflict:
@@ -305,7 +297,6 @@ async def init_oauth(
         db=db,
       )
 
-    # Generate authorization URL
     auth_url, state = _oauth_handler_for(provider).get_authorization_url(
       connection_id=request.connection_id,
       user_id=str(current_user.id),
@@ -347,12 +338,10 @@ async def oauth_callback(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
-  # The callback stores tokens, revives soft-deleted connections and kicks
-  # off the initial sync: a write to the graph.
+  # Stores tokens, revives connections and starts a sync: a graph write.
   require_graph_write_role(str(current_user.id), graph_id)
 
   try:
-    # Handle OAuth errors
     if request.error:
       logger.error(f"OAuth error: {request.error} - {request.error_description}")
       raise create_error_response(
@@ -361,7 +350,6 @@ async def oauth_callback(
         code=ErrorCode.PROVIDER_ERROR,
       )
 
-    # Validate state
     from robosystems.operations.providers.oauth_handler import OAuthState
 
     state_data = OAuthState.validate(request.state)
@@ -372,7 +360,6 @@ async def oauth_callback(
         code=ErrorCode.INVALID_INPUT,
       )
 
-    # Verify user matches
     if str(current_user.id) != state_data["user_id"]:
       raise create_error_response(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -394,7 +381,6 @@ async def oauth_callback(
         code=ErrorCode.NOT_FOUND,
       )
 
-    # Verify provider matches
     if connection["provider"].lower() != provider.lower():
       raise create_error_response(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -402,7 +388,6 @@ async def oauth_callback(
         code=ErrorCode.INVALID_INPUT,
       )
 
-    # Handle provider-specific OAuth completion
     if provider.lower() == "quickbooks":
       from robosystems.operations.providers.quickbooks_provider import (
         quickbooks_oauth_handler,
@@ -418,9 +403,8 @@ async def oauth_callback(
       )
       returned_realm_id = provider_data.get("realm_id")
 
-      # Re-authorizing a connection must not move it to another company: its
-      # ledger already holds the first company's books, and the next
-      # incremental sync would write the second one's on top.
+      # Must not move to another company: the ledger holds the first
+      # company's books and the next incremental sync would write over them.
       stored_realm_id = (connection.get("metadata") or {}).get("realm_id")
       if stored_realm_id and returned_realm_id and stored_realm_id != returned_realm_id:
         raise create_error_response(
@@ -433,12 +417,9 @@ async def oauth_callback(
         )
       is_pending = connection.get("status") == "pending_oauth"
 
-      # Reuse-on-re-OAuth: if a soft-deleted connection exists
-      # for this graph+provider+realm, revive it in place rather than
-      # leaving the pending connection as a brand-new row. Preserves
-      # connection_id so the tenant-side events / agents / elements
-      # scoped to it stay attached (avoids the orphan-data footgun the
-      # old hard-delete path created).
+      # Revive a soft-deleted connection for this graph+provider+realm in
+      # place, keeping its connection_id so tenant-side data scoped to it
+      # stays attached.
       revived_id: str | None = None
       if returned_realm_id:
         from robosystems.models.core.connection.connection import Connection
@@ -457,28 +438,18 @@ async def oauth_callback(
             returned_realm_id,
             connection_id,
           )
-          # Order matters — `restore` commits before `delete` commits.
-          # If the process crashes between, BOTH connections are alive
-          # (a retry sees the restored prior and skips the no-op
-          # delete on the pending). Reversing this order would leave
-          # the pending deleted but the prior still soft-deleted on
-          # crash — neither would be visible to the user and recovery
-          # would require manual intervention.
+          # Restore commits before delete: a crash between leaves both alive
+          # (recoverable on retry); the reverse would leave neither visible.
           prior.restore(db)
           revived_id = str(prior.id)
-          # Hard-delete the pending Connection — it has no tenant data
-          # attached and no credentials stored yet (store_tokens fires
-          # after this branch).
+          # The pending row has no tenant data and no credentials yet.
           pending = Connection.get_by_id(connection_id, db)
           if pending is not None:
             pending.delete(db)
-          # Pull the refreshed dict for downstream auto-sync.
           connection = await ConnectionService.get_connection(
             revived_id, current_user.id, graph_id=graph_id, db_session=db
           )
 
-      # Route subsequent writes at the revived id if reuse happened,
-      # else at the freshly-created pending id.
       target_connection_id = revived_id or connection_id
 
       quickbooks_oauth_handler.store_tokens(
@@ -486,17 +457,14 @@ async def oauth_callback(
       )
 
       if connection is None:
-        # Tokens are stored on the revived row already; the sync below
-        # needs the connection dict, so this is a hard stop, not a
-        # crash — surfacing an actionable error beats an AttributeError
-        # after the credential write.
+        # Tokens are already stored; fail with an actionable error rather
+        # than an AttributeError in the sync below.
         raise create_error_response(
           status_code=status.HTTP_404_NOT_FOUND,
           detail="Connection not found",
           code=ErrorCode.NOT_FOUND,
         )
 
-      # Update connection metadata
       metadata = connection.get("metadata") or {}
       metadata.update(
         {
@@ -506,7 +474,6 @@ async def oauth_callback(
         }
       )
 
-      # Update connection in database
       await ConnectionService.update(
         connection_id=target_connection_id,
         user_id=str(current_user.id),
@@ -521,12 +488,9 @@ async def oauth_callback(
       )
 
       if is_valid:
-        # First sync after a fresh OAuth has no prior data to be
-        # incremental against — full_rebuild so the user sees their full
-        # history. A connection already synced once re-triggers with the
-        # default incremental window. Detected via ``last_sync`` being
-        # None; ``connection`` nests it under ``metadata``. Dispatched
-        # under the per-connection lock, like the sync endpoint.
+        # A fresh connection has nothing to be incremental against, so its
+        # first sync is a full rebuild. Dispatched under the per-connection
+        # lock, like the sync endpoint.
         is_first_sync = (connection.get("metadata") or {}).get("last_sync") is None
         task_id = await dispatch_first_sync(
           graph_id=graph_id,

@@ -1,9 +1,4 @@
-"""Factory functions for building Graph MCP clients.
-
-Endpoint discovery goes through `GraphClientFactory`, which routes shared
-repositories to the shared master/replica fleet and user graphs to their
-tier's instance.
-"""
+"""Graph MCP client construction; endpoints come from `GraphClientFactory`."""
 
 from contextlib import asynccontextmanager
 
@@ -19,16 +14,7 @@ from .pool import get_connection_pool
 async def create_graph_mcp_client(
   graph_id: str = "sec", api_base_url: str | None = None
 ) -> GraphMCPClient:
-  """
-  Create a Graph MCP client with environment-based configuration and timeout controls.
-
-  Args:
-      graph_id: Graph database identifier
-      api_base_url: Override API URL (uses env var if None)
-
-  Returns:
-      Configured GraphMCPClient instance with appropriate timeouts
-  """
+  """Without `api_base_url`, the endpoint is discovered for the graph."""
   if not api_base_url:
     from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
     from robosystems.graph_api.client.factory import GraphClientFactory
@@ -40,7 +26,6 @@ async def create_graph_mcp_client(
       graph_id=graph_id, operation_type=operation_type
     )
 
-    # Extract the base URL from the client
     if hasattr(graph_client, "config") and hasattr(graph_client.config, "base_url"):
       api_base_url = graph_client.config.base_url
     elif hasattr(graph_client, "_base_url"):
@@ -48,10 +33,8 @@ async def create_graph_mcp_client(
     elif hasattr(graph_client, "base_url"):
       api_base_url = graph_client.base_url
     else:
-      # Fallback to environment variable
       api_base_url = env.GRAPH_API_URL or "http://localhost:8001"
 
-    # Ensure we have a valid URL
     if not api_base_url:
       api_base_url = "http://localhost:8001"
 
@@ -59,7 +42,6 @@ async def create_graph_mcp_client(
       f"GraphClientFactory discovered endpoint: {api_base_url} for graph {graph_id}"
     )
 
-  # Configure timeouts - runtime tunable via SSM
   timeout = TuningConfig.get_graph_http_timeout()
   query_timeout = TuningConfig.get_graph_query_timeout()
   max_query_length = MAX_QUERY_LENGTH
@@ -77,36 +59,16 @@ async def create_graph_mcp_client(
 async def acquire_graph_mcp_client(
   graph_id: str = "sec", api_base_url: str | None = None, use_pool: bool = True
 ):
-  """
-  Acquire a Graph MCP client from the connection pool.
-
-  This is the preferred method for getting MCP clients as it reuses
-  connections to reduce initialization overhead.
-
-  Args:
-      graph_id: Graph database identifier
-      api_base_url: Override API URL (uses env var if None)
-      use_pool: Whether to use connection pooling (default: True)
-
-  Yields:
-      Configured GraphMCPClient instance
-
-  Example:
-      async with acquire_graph_mcp_client("sec") as client:
-          result = await client.execute_query("MATCH (n) RETURN n LIMIT 1")
-  """
+  """Yield a pooled client (preferred), or a fresh one closed on exit."""
   if use_pool:
-    # Use connection pool for better performance
     pool = get_connection_pool()
     async with pool.acquire(graph_id, api_base_url) as client:
       yield client
   else:
-    # Create a new client without pooling (for testing or special cases)
     client = await create_graph_mcp_client(graph_id, api_base_url)
     try:
       yield client
     finally:
-      # Clean up if client has a close method
       if hasattr(client, "close"):
         try:
           await client.close()

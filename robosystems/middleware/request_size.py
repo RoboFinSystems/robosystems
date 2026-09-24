@@ -1,36 +1,13 @@
-"""Request-body size limiting.
+"""Request-body size limiting, enforced before auth or rate limiting read
+the body.
 
-An app that reads a request body into memory before authentication or rate
-limiting runs has an unbounded body as a pre-auth memory-allocation DoS that
-nothing downstream can bound. FastAPI/Starlette resolve the body during
-dependency and model validation, and some routes (the Stripe webhook) call
-``await request.body()`` explicitly before any check.
+The cap applies to ``Content-Length`` and to the streamed body itself (so a
+chunked request is bounded too). The body is buffered and replayed, so an
+oversized request gets a 413 without the app ever being invoked; nothing
+stream-consumes a request body, so buffering costs nothing extra.
 
-:class:`BodySizeLimitMiddleware` enforces the cap in two places:
-
-1. the ``Content-Length`` header (every conforming client sets it), rejected
-   before the app is invoked; and
-2. the streamed body itself, byte-counted as the middleware buffers it, so a
-   chunked request with no ``Content-Length`` is bounded by the same cap.
-
-The body is buffered in the middleware and replayed to the app, so the cap is
-enforced without depending on how a downstream route or middleware handles a
-mid-read failure — an oversized request is answered with a 413 and the app is
-never invoked for it. Neither app stream-consumes a request body (public
-uploads go straight to S3 via presigned PUT), so buffering up to the limit
-costs nothing a body read would not have cost anyway.
-
-Subclasses choose the limit per request by overriding
-:meth:`BodySizeLimitMiddleware._limit_for`. Two do:
-
-* :class:`RequestSizeLimitMiddleware` (here) resolves a longest-prefix path
-  override, letting one family — the webhook — carry a tighter limit than the
-  default.
-* The Graph API's variant resolves a limit per endpoint family, since a Cypher
-  query and a bulk body have very different reasonable sizes.
-
-Both inherit the body handling itself, so the limit is the only thing a
-subclass varies and the two services cannot enforce it differently.
+Subclasses vary only the limit, via :meth:`BodySizeLimitMiddleware._limit_for`
+(here per path prefix; the Graph API per endpoint family).
 """
 
 from __future__ import annotations
@@ -69,9 +46,6 @@ class BodySizeLimitMiddleware:
       )
       return
 
-    # Buffer the body, enforcing the cap as it arrives. Reject before invoking
-    # the app if it overflows — a chunked request with no Content-Length is
-    # bounded here, not merely at the header.
     buffered: list[Message] = []
     received = 0
     while True:
@@ -118,10 +92,7 @@ class BodySizeLimitMiddleware:
         "headers": [
           (b"content-type", b"application/json"),
           (b"content-length", str(len(body)).encode()),
-          # We answer without consuming the (over-limit) request body. On an
-          # HTTP/1.1 keep-alive connection the unread bytes would otherwise be
-          # read as the start of the next request and desync the stream, so
-          # signal the server to close the connection after this response.
+          # The unread body would desync a keep-alive connection.
           (b"connection", b"close"),
         ],
       }

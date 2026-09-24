@@ -11,25 +11,19 @@ from ...logger import logger
 
 
 class RateLimitCache:
-  """Manages rate limiting using Valkey/Redis DB 1."""
+  """Sliding-window rate limiting on the RATE_LIMITS Valkey DB."""
 
-  # Rate limiting configuration
   RATE_LIMIT_PREFIX = "rate_limit:"
 
   def __init__(self):
-    """Initialize Redis connection for rate limiting."""
     self._redis = None
-    # Rate limiting configuration
     self.enabled = env.RATE_LIMIT_ENABLED
 
   @property
   def redis(self) -> redis.Redis:
-    """Get Redis connection, creating if needed."""
     if self._redis is None:
       try:
-        # Use the new connection factory with proper ElastiCache support
         self._redis = create_redis_client(ValkeyDatabase.RATE_LIMITS)
-        # Test connection
         self._redis.ping()
         logger.info("Connected to Valkey/Redis for rate limiting")
       except Exception as e:
@@ -38,13 +32,13 @@ class RateLimitCache:
     return self._redis
 
   def _get_rate_limit_key(self, identifier: str) -> str:
-    """Get cache key for rate limiting."""
     return f"{self.RATE_LIMIT_PREFIX}{identifier}"
 
   def check_rate_limit(
     self, identifier: str, limit: int, window: int, fail_closed: bool = False
   ) -> tuple[bool, int]:
-    """Check if request is within rate limit using sliding window."""
+    """Return (allowed, remaining). A backend failure fails open unless
+    ``fail_closed``."""
     if not self.enabled:
       return True, limit
 
@@ -52,7 +46,6 @@ class RateLimitCache:
       key = self._get_rate_limit_key(identifier)
       now = time.time()
 
-      # Use Lua script for atomic sliding window with debugging
       lua_script = """
       local key = KEYS[1]
       local window = tonumber(ARGV[1])
@@ -85,7 +78,6 @@ class RateLimitCache:
       remaining = int(result[1])
 
       if not allowed:
-        # Log with actual count for debugging
         try:
           actual_count = self.redis.zcard(key)
         except Exception:
@@ -101,19 +93,14 @@ class RateLimitCache:
     except Exception as e:
       logger.error(f"Rate limiting check failed for {identifier}: {e}")
       if fail_closed:
-        # High-value category (auth/brute-force): a broken limiter must NOT
-        # silently disable protection. Deny, and log distinctly so alerting can
-        # treat this as a limiter-backend incident rather than an attack.
         logger.error(
           f"Rate limiter failing CLOSED for {identifier}: denying because the "
           f"limiter backend is unavailable"
         )
         return False, 0
-      # Default: fail open - a limiter outage shouldn't take down general traffic.
       return True, limit
 
   def get_rate_limit_stats(self) -> dict[str, Any]:
-    """Get rate limiting statistics."""
     if not self.enabled:
       return {"enabled": False}
 
@@ -129,8 +116,6 @@ class RateLimitCache:
         "jwt_limits": len([k for k in keys if "jwt:" in k]),
       }
 
-      # Memory usage tracking removed - redis.memory_usage_pattern not available
-
       return stats
 
     except Exception as e:
@@ -138,7 +123,6 @@ class RateLimitCache:
       return {"enabled": True, "error": str(e)}
 
   def clear_rate_limit(self, identifier: str) -> bool:
-    """Clear rate limit for specific identifier."""
     try:
       key = self._get_rate_limit_key(identifier)
       deleted = self.redis.delete(key)
@@ -149,7 +133,7 @@ class RateLimitCache:
       return False
 
   def get(self, key: str) -> Any:
-    """Get value from cache."""
+    """Plain key read; None when rate limiting is disabled."""
     if not self.enabled:
       return None
     try:
@@ -158,7 +142,7 @@ class RateLimitCache:
       return None
 
   def set(self, key: str, value: Any, expire: int | None = None) -> bool:
-    """Set value in cache with optional expiration."""
+    """Plain key write; a no-op when rate limiting is disabled."""
     if not self.enabled:
       return False
     try:
@@ -167,7 +151,6 @@ class RateLimitCache:
       return False
 
 
-# Global rate limit cache instance
 try:
   rate_limit_cache = RateLimitCache()
   logger.debug("Rate limiting cache initialized successfully")

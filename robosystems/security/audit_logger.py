@@ -1,9 +1,5 @@
-"""
-Security Audit Logger
-
-Provides structured logging for security events including authentication failures,
-authorization violations, and suspicious activities.
-"""
+"""Structured security audit logging, with CloudWatch metrics for the
+alerting subset of events."""
 
 import json
 import threading
@@ -18,8 +14,6 @@ from .request_context import audit_context
 
 
 class SecurityEventType(Enum):
-  """Security event types for audit logging."""
-
   AUTH_FAILURE = "auth_failure"
   AUTH_SUCCESS = "auth_success"
   AUTH_TOKEN_EXPIRED = "auth_token_expired"
@@ -33,22 +27,17 @@ class SecurityEventType(Enum):
   INJECTION_ATTEMPT = "injection_attempt"
   PRIVILEGE_ESCALATION_ATTEMPT = "privilege_escalation_attempt"
   FINANCIAL_TRANSACTION = "financial_transaction"
-  # New event types for S3 security
   INVALID_INPUT = "invalid_input"
   PATH_TRAVERSAL_ATTEMPT = "path_traversal_attempt"
-  # Event types for data operations
   DATA_IMPORT = "data_import"
   OPERATION_TIMEOUT = "operation_timeout"
   OPERATION_FAILED = "operation_failed"
-  # Email and password reset events
   EMAIL_SENT = "email_sent"
   EMAIL_VERIFIED = "email_verified"
   PASSWORD_RESET_REQUESTED = "password_reset_requested"
   PASSWORD_RESET_COMPLETED = "password_reset_completed"
-  # Token management events
   TOKEN_REFRESH = "token_refresh"
-  # OIDC login refused after the IdP authenticated (unprovisioned or
-  # deactivated user) — alarm-worthy, unlike ordinary auth noise
+  # Refused after the IdP authenticated; alarms, unlike ordinary auth noise.
   OIDC_LOGIN_DENIED = "oidc_login_denied"
   # SCIM provisioning lifecycle (operational; only the auth failure alarms)
   SCIM_USER_PROVISIONED = "scim_user_provisioned"
@@ -56,12 +45,8 @@ class SecurityEventType(Enum):
   SCIM_USER_DEACTIVATED = "scim_user_deactivated"
   SCIM_USER_REACTIVATED = "scim_user_reactivated"
   SCIM_AUTH_FAILURE = "scim_auth_failure"
-  # Membership lifecycle — privileged access changes made through our own
-  # API (SOC 2 CC6.x: access granted, modified and removed through an
-  # authorized process, with a record). Evidence, not alerts: no metric,
-  # like the SCIM lifecycle events. ``user_id`` on the event is the actor;
-  # ``details`` carries the target, the scope (org_id / graph_id) and the
-  # prior and new role.
+  # Membership lifecycle (SOC 2 CC6.x evidence, no metric). ``user_id`` is
+  # the actor; ``details`` carries target, scope and prior/new role.
   ORG_MEMBER_ADDED = "org_member_added"
   ORG_MEMBER_ROLE_CHANGED = "org_member_role_changed"
   ORG_MEMBER_REMOVED = "org_member_removed"
@@ -69,45 +54,30 @@ class SecurityEventType(Enum):
   GRAPH_MEMBER_ROLE_CHANGED = "graph_member_role_changed"
   GRAPH_MEMBER_REMOVED = "graph_member_removed"
 
-  # Connection lifecycle — the native accounting cutover
   CONNECTION_SEVERED = "connection_severed"
-  # Bank-feed lifecycle — the records a bank partnership's data agreement
-  # asks for: the customer's consent on connect (who, which organization,
-  # which credential and scope) and the deletion on disconnect (what was
-  # purged). Evidence, not alerts.
+  # Bank-feed consent on connect and purge on disconnect. Evidence, not alerts.
   BANK_FEED_CONSENT_GRANTED = "bank_feed_consent_granted"
   BANK_FEED_PURGED = "bank_feed_purged"
-  # Every authenticated request to the admin surface (SOC 2 CC6.1: privileged
-  # access is restricted AND what it did is recorded). Evidence, not alerts:
-  # no metric, like the membership and SCIM lifecycle events — the admin
-  # surface is unreachable from the internet, so volume here is not a signal.
-  # ``user_id`` is the admin credential that acted, which is what correlates
-  # this line to the CloudTrail ``GetSecretValue`` that fetched it.
+  # Every authenticated admin-surface request (SOC 2 CC6.1 evidence, no
+  # metric). ``user_id`` is the admin credential, correlating to CloudTrail.
   ADMIN_ACTION = "admin_action"
-  # Passkey MFA lifecycle (operational; only MFA_FAILED alarms — a spike is
-  # the second-factor brute-force / phishing-relay signal)
+  # Only MFA_FAILED alarms.
   PASSKEY_ENROLLED = "passkey_enrolled"
   PASSKEY_REMOVED = "passkey_removed"
   MFA_CHALLENGE_ISSUED = "mfa_challenge_issued"
   MFA_VERIFIED = "mfa_verified"
   MFA_FAILED = "mfa_failed"
   MFA_RECOVERY_USED = "mfa_recovery_used"
-  # Subgraph events
   SUBGRAPH_CREATED = "subgraph_created"
   SUBGRAPH_DELETED = "subgraph_deleted"
-  # Graph lifecycle events
   GRAPH_DELETED = "graph_deleted"
   # Shared-repository query telemetry
   QUERY_ABUSE_SIGNAL = "query_abuse_signal"
   QUERY_ENGINE_DISRUPTION = "query_engine_disruption"
 
 
-# CloudWatch metrics: the compliance/alerting-relevant subset of security
-# events is published to RoboSystems/Security/{env} so the detective-control
-# alarms (cloudformation/api.yaml, graph-ladybug-replicas.yaml) can actually
-# fire. Operational events (email_sent, auth_success, operation_timeout, …)
-# are deliberately excluded to keep the metric stream low-volume and the
-# alarms meaningful.
+# The alerting subset, published to RoboSystems/Security/{env} for the
+# detective-control alarms. Operational events are excluded to keep them quiet.
 _METRIC_FOR_EVENT: dict[SecurityEventType, str] = {
   SecurityEventType.AUTH_FAILURE: "AuthFailure",
   SecurityEventType.AUTH_TOKEN_EXPIRED: "AuthFailure",
@@ -129,7 +99,7 @@ _METRIC_FOR_EVENT: dict[SecurityEventType, str] = {
 # so FailedAdminAuthAlarm has a dedicated, low-noise trigger.
 _ADMIN_AUTH_FAILURE_METRIC = "FailedAdminAuth"
 
-# Auth-failure event types that count as an admin failure when details.admin is set.
+# Count as an admin failure when details.admin is set.
 _ADMIN_FLAGGABLE_EVENTS = frozenset(
   {
     SecurityEventType.AUTH_FAILURE,
@@ -138,12 +108,8 @@ _ADMIN_FLAGGABLE_EVENTS = frozenset(
   }
 )
 
-# Metric publishing runs OFF the request path. log_security_event is called
-# synchronously from async auth handlers (get_current_user, AdminAuthMiddleware),
-# so a blocking put_metric_data would stall the whole event loop — worst during
-# an auth-failure spike, which is exactly when these alarms matter. Publish on a
-# small bounded thread pool instead, with short client timeouts, and shed load
-# past _METRIC_MAX_INFLIGHT rather than let work queue without bound under a flood.
+# Publishing runs on a small pool off the (async) auth path, shedding load
+# past this bound so an auth-failure flood can't stall or queue unboundedly.
 _METRIC_MAX_INFLIGHT = 256
 
 _cloudwatch_client: Any = None
@@ -158,8 +124,7 @@ def _get_cloudwatch_client() -> Any:
     import boto3
     from botocore.config import Config
 
-    # Short timeouts + no retries: a stalled CloudWatch endpoint must fail fast,
-    # never hold a pool thread (or, historically, the event loop) for ~60s.
+    # Fail fast: a stalled endpoint must not hold a pool thread.
     _cloudwatch_client = boto3.client(
       "cloudwatch",
       region_name=env.AWS_REGION,
@@ -188,7 +153,6 @@ def _put_metric_data(namespace: str, metric_names: list[str]) -> None:
       ],
     )
   except Exception as e:
-    # Metrics are best-effort; a publish failure must not surface anywhere.
     logger.debug(f"Failed to publish security metric(s) {metric_names}: {e}")
   finally:
     with _metric_lock:
@@ -196,14 +160,8 @@ def _put_metric_data(namespace: str, metric_names: list[str]) -> None:
 
 
 def _publish_security_metrics(metric_names: list[str]) -> None:
-  """Queue security alerting metrics for CloudWatch, off the request path.
-
-  Best-effort and prod/staging-only: skipped where there is no CloudWatch or
-  credentials (dev/test). The actual publish runs on a bounded thread pool so it
-  never blocks the (often async) auth path, and load is shed past
-  ``_METRIC_MAX_INFLIGHT`` so a flood can't grow the queue without bound. Never
-  raises into the caller.
-  """
+  """Queue alerting metrics for CloudWatch. Best-effort, prod/staging only,
+  never raises."""
   global _metric_inflight
   if not metric_names:
     return
@@ -217,15 +175,13 @@ def _publish_security_metrics(metric_names: list[str]) -> None:
   try:
     _get_metric_executor().submit(_put_metric_data, namespace, list(metric_names))
   except Exception as e:
-    # Executor rejected the task (e.g. interpreter shutdown) — release the slot.
+    # Executor rejected the task (e.g. shutdown): release the slot.
     with _metric_lock:
       _metric_inflight -= 1
     logger.debug(f"Failed to queue security metric(s) {metric_names}: {e}")
 
 
 class SecurityAuditLogger:
-  """Centralized security audit logging."""
-
   @staticmethod
   def log_security_event(
     event_type: SecurityEventType,
@@ -258,18 +214,12 @@ class SecurityAuditLogger:
       "user_agent": user_agent,
       "endpoint": endpoint,
       "details": details or {},
-      # Request correlation and credential attribution, when inside a
-      # request: the request id ties the event to the access-log line, and
-      # the api_key_prefix scopes an incident to the credential that acted.
-      # Absent outside a request; never overrides what the caller supplied.
+      # Request id and credential, when inside a request.
       **audit_context(),
     }
 
-    # Log as structured JSON for security monitoring
     logger.warning(f"SECURITY_AUDIT: {json.dumps(audit_data)}")
 
-    # Publish the alerting metric for the compliance-relevant subset so the
-    # CloudWatch detective-control alarms can fire (no-op outside prod/staging).
     metric_names: list[str] = []
     metric = _METRIC_FOR_EVENT.get(event_type)
     if metric:
@@ -285,12 +235,7 @@ class SecurityAuditLogger:
     endpoint: str | None = None,
     user_agent: str | None = None,
   ):
-    """Log an admin-surface authentication failure.
-
-    Flags the event as admin so a dedicated ``FailedAdminAuth`` CloudWatch
-    metric is emitted alongside the generic ``AuthFailure`` signal, giving
-    ``FailedAdminAuthAlarm`` a low-noise trigger.
-    """
+    """Log an admin-surface auth failure; also emits ``FailedAdminAuth``."""
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTH_FAILURE,
       ip_address=ip_address,
@@ -310,15 +255,10 @@ class SecurityAuditLogger:
     user_agent: str | None = None,
     query: str | None = None,
   ):
-    """Record one authenticated action on the admin surface.
+    """Record one authenticated admin-surface request, whatever it returned.
 
-    Emitted for every request that got past admin authentication, whatever it
-    returned — a 403 or a 500 on the admin surface is as much a part of the
-    trail as a 200. Authentication *failures* are not routed here; they go to
-    :meth:`log_admin_auth_failure`, which alarms.
-
-    ``endpoint`` is the literal path, identifiers included: which subscription
-    or user was acted on is the point of the record, not incidental detail.
+    ``endpoint`` is the literal path, identifiers included: what was acted on
+    is the point of the record.
     """
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.ADMIN_ACTION,
@@ -345,7 +285,6 @@ class SecurityAuditLogger:
     user_agent: str | None = None,
     endpoint: str | None = None,
   ):
-    """Log authentication failure."""
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTH_FAILURE,
       user_id=user_id,
@@ -363,7 +302,6 @@ class SecurityAuditLogger:
     user_agent: str | None = None,
     auth_method: str = "api_key",
   ):
-    """Log successful authentication."""
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTH_SUCCESS,
       user_id=user_id,
@@ -381,7 +319,6 @@ class SecurityAuditLogger:
     ip_address: str | None = None,
     endpoint: str | None = None,
   ):
-    """Log authorization denial."""
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTHORIZATION_DENIED,
       user_id=user_id,
@@ -399,7 +336,6 @@ class SecurityAuditLogger:
     limit_type: str = "api",
     user_agent: str | None = None,
   ):
-    """Log rate limit violation."""
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.RATE_LIMIT_EXCEEDED,
       user_id=user_id,
@@ -418,7 +354,6 @@ class SecurityAuditLogger:
     payload: str = "",
     injection_type: str = "sql",
   ):
-    """Log potential injection attempt."""
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.INJECTION_ATTEMPT,
       user_id=user_id,
@@ -426,7 +361,7 @@ class SecurityAuditLogger:
       endpoint=endpoint,
       details={
         "injection_type": injection_type,
-        "payload_snippet": payload[:100] if payload else "",  # Limit payload size
+        "payload_snippet": payload[:100] if payload else "",
       },
       risk_level="critical",
     )
@@ -440,7 +375,6 @@ class SecurityAuditLogger:
     invalid_value: str = "",
     validation_error: str = "",
   ):
-    """Log input validation failure."""
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.INPUT_VALIDATION_FAILURE,
       user_id=user_id,
@@ -448,9 +382,7 @@ class SecurityAuditLogger:
       endpoint=endpoint,
       details={
         "field_name": field_name,
-        "invalid_value": invalid_value[:50]
-        if invalid_value
-        else "",  # Limit value size
+        "invalid_value": invalid_value[:50] if invalid_value else "",
         "validation_error": validation_error,
       },
       risk_level="medium",
@@ -467,7 +399,6 @@ class SecurityAuditLogger:
     ip_address: str | None = None,
     endpoint: str | None = None,
   ):
-    """Log financial transaction for audit trail."""
     details = {
       "transaction_type": transaction_type,
       "amount": amount,
@@ -528,7 +459,6 @@ class SecurityAuditLogger:
     endpoint: str | None = None,
     metadata: dict[str, Any] | None = None,
   ):
-    """Log suspicious activity."""
     details = {
       "activity_type": activity_type,
       "description": description,

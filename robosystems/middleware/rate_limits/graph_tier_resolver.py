@@ -11,31 +11,21 @@ from ...config.rate_limits import RateLimitConfig
 from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 
-# Tightest customer tier. Used whenever the real tier cannot be established,
-# so degradation is always toward less throughput, never more.
+# Tightest customer tier, used whenever the real tier can't be established.
 FALLBACK_TIER = GraphTier.LADYBUG_STANDARD.value
 
-# Short enough that a tier change takes effect promptly, long enough that the
-# lookup does not run on every request in a burst.
 _TIER_CACHE_TTL_SECONDS = 300
 
 _CACHE_PREFIX = "ratelimit:graph_tier:"
 
-# Sentinel stored for graph ids that resolve to nothing, so a stream of requests
-# for a non-existent graph does not re-query the database each time.
+# Negative-cache sentinel for graph ids that resolve to nothing.
 _UNKNOWN = "-"
 
-# Static path segments that occupy the graph-id position under /v1/graphs.
-# Treating one as a graph id would collapse every caller of that route into a
-# single shared bucket — the cross-tenant failure the shared-repository
-# exclusion exists to prevent. Those routes use the general limiter today, so
-# this guard is defense in depth against one of them adopting the
-# subscription-aware dependency.
+# Static segments in the graph-id position under /v1/graphs; read as a graph
+# id, one would put every caller of that route in one shared bucket.
 _STATIC_GRAPH_SEGMENTS = frozenset({"schema", "tiers", "capacity", "extensions"})
 
-# One client for the process, created lazily. The limiter runs per request on
-# the hottest path in the API; creating a client (and its connection pool) per
-# call would mean a TCP/TLS handshake per request in production.
+# One client per process: this runs on every request.
 _redis_client = None
 
 
@@ -49,13 +39,8 @@ def _redis():
 def extract_graph_id(path: str) -> str | None:
   """Pull the graph id out of a request path, or None if it is not graph-scoped.
 
-  Three shapes carry a graph id:
-      /v1/graphs/{graph_id}/...
-      /extensions/{graph_id}/graphql
-      /extensions/{domain}/{graph_id}/operations/...
-
-  The middle form is distinguished from the last by its second segment: a
-  domain is a known product name, anything else is a graph id.
+  Shapes: /v1/graphs/{graph_id}/..., /extensions/{graph_id}/graphql, and
+  /extensions/{domain}/{graph_id}/operations/...
   """
   parts = [segment for segment in path.split("/") if segment]
 
@@ -75,7 +60,6 @@ def _cached_tier(graph_id: str) -> str | None:
   try:
     value = _redis().get(f"{_CACHE_PREFIX}{graph_id}")
   except Exception as e:
-    # A cache outage must not fail the request; fall through to the database.
     logger.debug(f"Rate limit tier cache unavailable for {graph_id}: {e}")
     return None
   return value if isinstance(value, str) else None
@@ -91,14 +75,8 @@ def _store_tier(graph_id: str, tier: str) -> None:
 def resolve_graph_tier(graph_id: str) -> str:
   """Return the graph's tier, or the tightest tier if it cannot be determined.
 
-  Never raises: rate limiting is not the place to surface a lookup failure, and
-  failing open would let an error hand out more throughput than the customer
-  bought.
-
-  A tier string with no entry in SUBSCRIPTION_RATE_LIMITS — ladybug-shared on
-  a repository row, or any unrecognized value — also resolves to FALLBACK_TIER:
-  without this guard the limits lookup falls through to the anonymous "base"
-  table, dropping a paying customer below the floor this module promises.
+  Never raises. A tier with no SUBSCRIPTION_RATE_LIMITS entry (e.g.
+  ladybug-shared) also resolves to FALLBACK_TIER, not the anonymous "base".
   """
   cached = _cached_tier(graph_id)
   if cached == _UNKNOWN:

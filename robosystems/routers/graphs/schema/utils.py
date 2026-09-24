@@ -9,7 +9,6 @@ from robosystems.middleware.robustness import (
   TimeoutCoordinator,
 )
 
-# Schema queries for runtime graph inspection
 SCHEMA_QUERIES = {
   "tables": "CALL SHOW_TABLES() RETURN *",
   "node_labels": """CALL SHOW_TABLES()
@@ -26,7 +25,6 @@ RETURN DISTINCT label, collect(DISTINCT prop) as properties
 LIMIT 100""",
 }
 
-# Initialize robustness components (shared across schema endpoints)
 circuit_breaker = CircuitBreakerManager()
 timeout_coordinator = TimeoutCoordinator()
 
@@ -37,16 +35,13 @@ async def get_schema_info(repository: Any) -> dict[str, Any]:
   schema_info = {"node_labels": [], "relationship_types": [], "node_properties": {}}
 
   try:
-    # Execute LadybugDB-specific schema queries
     if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
       repository.execute_query
     ):
-      # Get all tables first
       tables_result = await repository.execute_query(SCHEMA_QUERIES["tables"])
     else:
       tables_result = repository.execute_query(SCHEMA_QUERIES["tables"])
 
-    # Process tables to separate nodes and relationships
     node_tables = []
     rel_tables = []
 
@@ -62,12 +57,10 @@ async def get_schema_info(repository: Any) -> dict[str, Any]:
     schema_info["node_labels"] = node_tables
     schema_info["relationship_types"] = rel_tables
 
-    # For node properties, we query each table individually because
-    # LadybugDB exposes schema details through per-table catalog lookups.
-    # CALL TABLE_INFO is a catalog query (metadata only), so it's fast even for many tables
+    # LadybugDB exposes properties through per-table catalog lookups; TABLE_INFO
+    # is metadata-only, so this stays fast for many tables.
     for node_label in node_tables:
       try:
-        # Get table info for each node type
         table_info_query = f"CALL TABLE_INFO('{node_label}') RETURN *"
         if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
           repository.execute_query
@@ -76,7 +69,6 @@ async def get_schema_info(repository: Any) -> dict[str, Any]:
         else:
           columns_result = repository.execute_query(table_info_query)
 
-        # Extract property names
         properties = [col.get("name", "") for col in columns_result if col.get("name")]
         if properties:
           schema_info["node_properties"][node_label] = properties
@@ -88,7 +80,6 @@ async def get_schema_info(repository: Any) -> dict[str, Any]:
     logger.warning(f"Failed to get complete schema info: {e!s}")
     # Try fallback with simple queries
     try:
-      # Fallback to just getting table names
       if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
         repository.execute_query
       ):

@@ -1,6 +1,4 @@
-"""
-Cypher Tool - Executes read-only Cypher queries against the graph database.
-"""
+"""The read-graph-cypher tool and its read-only guard."""
 
 from typing import TYPE_CHECKING, Any
 
@@ -20,10 +18,6 @@ if TYPE_CHECKING:
 
 
 class CypherTool(BaseTool):
-  """
-  Tool for executing read-only Cypher queries.
-  """
-
   def __init__(
     self,
     client: "GraphMCPClient",
@@ -33,20 +27,13 @@ class CypherTool(BaseTool):
     self.schema_extensions: tuple[str, ...] = tuple(schema_extensions)
 
   def _has_ledger_spine(self) -> bool:
-    """True only for entity graphs that materialize the roboledger ledger spine.
-
-    The SEC shared repo carries the ``roboledger`` extension too — including the
-    base REA ``Event``/``Agent`` tables (present but empty) — yet not the
-    materialized three-level ledger (Transaction/Entry/LineItem). Because the
-    empty ``Event`` table makes node-presence an unreliable signal, we exclude
-    shared repositories and subgraphs explicitly here.
-    """
+    """True only for tenant graphs. The SEC repo carries ``roboledger`` and
+    empty REA tables but no ledger, so table presence is no signal."""
     if "roboledger" not in self.schema_extensions:
       return False
     return self._is_tenant_graph()
 
   def _has_investor_positions(self) -> bool:
-    """True only for entity graphs that materialize RoboInvestor positions."""
     if "roboinvestor" not in self.schema_extensions:
       return False
     return self._is_tenant_graph()
@@ -63,7 +50,6 @@ class CypherTool(BaseTool):
       return False
 
   def get_tool_definition(self) -> dict[str, Any]:
-    """Get the tool definition for Cypher queries."""
     description = """Execute read-only Cypher queries against the graph database.
 
 **WHEN TO USE:**
@@ -131,7 +117,6 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
     }
 
   async def execute(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
-    """Execute the Cypher tool."""
     self._log_tool_execution("read-graph-cypher", arguments)
 
     query = arguments.get("query", "").strip()
@@ -140,37 +125,21 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
 
     parameters = arguments.get("parameters", {})
 
-    # Validate query for basic issues
     validation_result = self.validator.validate(query, parameters)
 
-    # Check for write operations (read-only validation)
     self._validate_read_only(query)
 
-    # Log query warnings
     for warning in validation_result.warnings:
       logger.warning(f"Query warnings: {warning}")
 
     try:
-      # Execute the query through the client
-      # Note: MCP queries don't consume credits but are still rate limited
       result = await self.client.execute_query(query, parameters)
       return result
     except Exception as e:
-      # Sanitize error message
       error_message = self._sanitize_error_message(str(e))
       raise GraphAPIError(f"Query execution failed: {error_message}")
 
   def _sanitize_error_message(self, error_msg: str) -> str:
-    """
-    Sanitize error messages to remove sensitive information.
-
-    Args:
-        error_msg: Raw error message
-
-    Returns:
-        Sanitized error message
-    """
-    # Remove file paths and sensitive details
     sensitive_patterns = [
       r"/[^\s]+\.db",  # Database file paths
       r"password[=:][^\s]+",  # Password patterns
@@ -184,7 +153,6 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
 
       sanitized = re.sub(pattern, "[REDACTED]", sanitized, flags=re.IGNORECASE)
 
-    # Map common errors to user-friendly messages
     error_mappings = {
       "connection": "Database connection failed",
       "timeout": "Query execution timed out",
@@ -199,38 +167,18 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
     return sanitized
 
   def _validate_read_only(self, query: str) -> None:
-    """
-    Validate that the query is read-only.
-
-    Args:
-        query: Cypher query to validate
-
-    Raises:
-        ValueError: If query contains write, bulk, admin, or schema-DDL operations
-    """
     assert_read_only_cypher(query, self.client.graph_id)
 
 
 def assert_read_only_cypher(query: str, graph_id: str | None = None) -> None:
-  """Refuse anything but a read for the read-graph-cypher tool.
+  """Raise ValueError for anything but a read.
 
-  Module-level so every path that executes on the tool's behalf runs the
-  same predicate: `CypherTool.execute_query` (direct and streaming), the
-  Operator path (which calls the tool directly, bypassing the HTTP handler
-  and kernel), and the queued strategies in the MCP routers, which submit
-  the raw statement to the query queue without ever constructing the tool.
-
-  With ``graph_id``, a shared repository's declared read limits apply too —
-  the Operator path reaches the engine without the kernel that enforces
-  them everywhere else.
-
-  Raises:
-      ValueError: If the query contains write, bulk, admin, or schema-DDL
-          operations, or a read the graph's repository refuses.
+  Module-level so every path running read-graph-cypher shares it, including
+  the MCP routers' queued strategies, which never construct the tool. With
+  ``graph_id``, a shared repository's read limits apply too, since the
+  Operator path bypasses the kernel that enforces them elsewhere.
   """
-  # Route every category through the central security analyzer — the same
-  # predicates the StatementKernel (REST /query/cypher) composes — so this
-  # tool-layer guard can't diverge.
+  # The same analyzer predicates the StatementKernel composes.
   from robosystems.security.cypher_analyzer import (
     is_admin_operation,
     is_bulk_operation,

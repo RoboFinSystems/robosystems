@@ -10,8 +10,6 @@ from ..logger import logger
 
 
 class DatabaseSessionMiddleware(BaseHTTPMiddleware):
-  """Middleware to ensure database sessions are properly cleaned up after requests."""
-
   async def dispatch(self, request: Request, call_next: Callable) -> Response:
     """Scope the shared session to this request and release it on the way out.
 

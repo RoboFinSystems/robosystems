@@ -47,7 +47,6 @@ from .utils import (
   require_password_auth,
 )
 
-# Create router for password reset endpoints
 router = APIRouter()
 
 
@@ -66,27 +65,23 @@ async def forgot_password(
   _rate_limit: None = Depends(auth_rate_limit_dependency),
   _password_auth: None = Depends(require_password_auth),
 ) -> dict:
-  # Validate and sanitize email
   if not validate_email(request.email):
-    # For security, still return success to prevent enumeration
+    # Still report success, to prevent enumeration.
     return {
       "message": "If an account exists with this email, a password reset link has been sent."
     }
 
   sanitized_email = sanitize_string(request.email, max_length=254)
 
-  # Get client details
   client_ip = fastapi_request.client.host if fastapi_request.client else None
   user_agent = fastapi_request.headers.get("user-agent")
 
-  # Try to find user. A user with no password_hash is IdP-governed
-  # (SCIM-provisioned / passwordless): never issue a reset token for one, so
-  # a forgotten-password email can never bootstrap a password onto an account
-  # the customer's IdP owns. Same generic response either way.
+  # A user with no password_hash is IdP-governed: never issue a reset token,
+  # so a reset email can't bootstrap a password onto an IdP-owned account.
+  # Same generic response either way.
   user = User.get_by_email(sanitized_email, session)
 
   if user and user.is_active and user.password_hash:
-    # Generate reset token
     token = UserToken.create_token(
       user_id=user.id,
       token_type="password_reset",
@@ -98,7 +93,7 @@ async def forgot_password(
 
     app = detect_app_source(fastapi_request)
 
-    # Queue reset email via Dagster (async with retry logic)
+    # Queued via Dagster, with retries.
     run_config = build_email_job_config(
       email_type="password_reset",
       to_email=user.email,
@@ -127,7 +122,6 @@ async def forgot_password(
       risk_level="medium",
     )
   else:
-    # Log attempt without issuing a token (security monitoring)
     logger.warning(
       f"Password reset refused for email: {sanitized_email} (exists={user is not None})"
     )
@@ -146,7 +140,7 @@ async def forgot_password(
       risk_level="low",
     )
 
-  # Always return success (enumeration protection)
+  # Always success (enumeration protection).
   return {
     "message": "If an account exists with this email, a password reset link has been sent."
   }
@@ -165,7 +159,6 @@ async def validate_reset_token(
   session: Session = Depends(get_async_db_session),
   _password_auth: None = Depends(require_password_auth),
 ) -> ResetPasswordValidateResponse:
-  # Validate token without consuming it
   user_id = UserToken.validate_token(
     raw_token=token,
     token_type="password_reset",
@@ -175,7 +168,6 @@ async def validate_reset_token(
   if not user_id:
     return ResetPasswordValidateResponse(valid=False, email=None)
 
-  # Get user to return masked email
   user = User.get_by_id(user_id, session)
   if not user:
     return ResetPasswordValidateResponse(valid=False, email=None)
@@ -209,7 +201,6 @@ async def reset_password(
   session: Session = Depends(get_async_db_session),
   _password_auth: None = Depends(require_password_auth),
 ) -> AuthResponse:
-  # Verify token and get user
   user_id = UserToken.verify_token(
     raw_token=request.token,
     token_type="password_reset",
@@ -229,9 +220,8 @@ async def reset_password(
       detail="User not found",
     )
 
-  # Belt to the forgot-request guard: an IdP-governed account (NULL
-  # password_hash) can never have a password set through the reset flow,
-  # even if a token somehow exists for it. Same response as a bad token.
+  # Backstop to the forgot-request guard for IdP-governed accounts; same
+  # response as a bad token.
   if not user.password_hash:
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTH_FAILURE,
@@ -245,7 +235,7 @@ async def reset_password(
       detail="Invalid or expired reset token",
     )
 
-  # Validate password strength (uses same rules as /password/check endpoint)
+  # Same rules as the /password/check endpoint.
   password_result = PasswordSecurity.validate_password(request.new_password)
   if not password_result.is_valid:
     raise HTTPException(
@@ -255,21 +245,15 @@ async def reset_password(
 
   password_hash = await hash_password_async(request.new_password)
 
-  # Update user's password
   user.update(session, password_hash=password_hash)
 
-  # Invalidate every existing JWT (including refresh chain) by bumping the
-  # user's session_version. The claim is checked on every auth, so prior
-  # tokens stop working on their next request. The previous implementation
-  # iterated UserToken records (email/reset tokens) and called revoke on
-  # them, which never matched any actual JWT.
+  # Bumping session_version invalidates every existing JWT, including the
+  # refresh chain, on its next request.
   try:
     user.invalidate_sessions(session)
   except Exception as invalidate_err:
     logger.error(f"Error invalidating sessions during password reset: {invalidate_err}")
-    # Log the error but continue with the password reset
 
-  # Get client details for security logging
   client_ip = fastapi_request.client.host if fastapi_request.client else None
   user_agent = fastapi_request.headers.get("user-agent")
 
@@ -297,8 +281,7 @@ async def reset_password(
       message="Password reset successfully. Sign in to continue.",
     )
 
-  # Generate new JWT token for auto-login with device binding.
-  # This picks up the just-bumped session_version.
+  # Auto-login; picks up the just-bumped session_version.
   device_fingerprint = extract_device_fingerprint(fastapi_request)
   jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 

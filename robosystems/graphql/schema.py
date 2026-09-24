@@ -1,21 +1,7 @@
-"""Extensions GraphQL schema.
+"""Strawberry schema served at `/extensions/{graph_id}/graphql`.
 
-Assembles the Strawberry Schema served at `/extensions/{graph_id}/graphql`.
-The top-level `Query` root composes the per-domain resolver classes
-(`LedgerQuery`, `InvestorQuery`) only when their feature flags are enabled,
-plus a `hello` auth probe. A ledger-only deployment therefore exposes only
-ledger fields rather than fields that fail at runtime. The router mounts on
-`ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED`, so with both off the schema is
-never served.
-
-The endpoint is graph-scoped at the URL level: `graph_id` is a path
-parameter, not a query argument, and resolvers read it via
-`info.context["graph_id"]`. Auth and per-graph access are validated by
-`get_context` before any resolver runs.
-
-Strawberry's `auto_camel_case=True` default exposes Python snake_case fields
-as camelCase on the wire, matching what the TypeScript and Python SDK
-facades expect.
+The `Query` root composes only the domain resolver classes whose feature
+flags are on. See graphql/README.md.
 """
 
 from __future__ import annotations
@@ -73,16 +59,9 @@ class _BaseQuery:
     return f"hello, {user.email}"
 
 
-# `limit` and `offset` mean the same thing on all 31 arguments that take them:
-# `resolvers/_common.py` validates every pair against one shared guard. Only the
-# per-field default varies, and that is resolved server-side, so one description
-# is accurate everywhere and beats 31 copies drifting apart. A docstring `Args:`
-# entry still wins where a field needs to say something else.
-#
-# The bounds are interpolated from the guard rather than written out. They are a
-# public claim — this text reaches GraphiQL, the published reference, the SDK
-# snapshot and the `get-graphql-schema` MCP tool — and a hardcoded "1-1000" goes
-# on asserting itself after someone edits `_MAX_LIMIT`, on every field at once.
+# One description for every `limit`/`offset` argument (all validated by the
+# same guard in resolvers/_common.py); a docstring `Args:` entry overrides it.
+# Bounds are interpolated so the public text tracks `_MAX_LIMIT`.
 COMMON_ARGUMENT_DESCRIPTIONS = {
   "limit": (
     f"Maximum rows to return, {_MIN_LIMIT}-{_MAX_LIMIT}. Omit to use this "
@@ -101,13 +80,7 @@ _ARG_ENTRY = re.compile(r"^(\w+)\s*:\s*(.*)$")
 
 
 def _split_docstring(doc: str) -> tuple[str, dict[str, str]]:
-  """Separate a docstring's prose from its Google-style `Args:` block.
-
-  The prose becomes the field description and the entries become argument
-  descriptions, so both live in the one place a Python author already writes.
-  The `Args:` block is stripped from the prose rather than published twice —
-  the reference renders arguments as their own table.
-  """
+  """Split a docstring into prose and its Google-style `Args:` entries."""
   lines = doc.splitlines()
   prose: list[str] = []
   args: dict[str, str] = {}
@@ -141,23 +114,9 @@ def _split_docstring(doc: str) -> tuple[str, dict[str, str]]:
 def _describe_from_docstrings(cls: type) -> type:
   """Publish each resolver's docstring as its GraphQL field description.
 
-  Strawberry reads a description only from an explicit
-  `@strawberry.field(description=...)`; it ignores `__doc__`. Every
-  resolver here already carries a docstring written as API copy, so without
-  this pass the 66 entry points ship with no description at all while the
-  types they return are richly documented — the index into the schema blank
-  and the shapes it points at full.
-
-  Running it once over the composed root means a resolver is documented the
-  moment someone writes an ordinary docstring, on every surface that reads
-  the schema: GraphiQL, introspection, the SDK snapshot, the
-  `get-graphql-schema` MCP tool and the published reference. An explicit
-  `description=` still wins, so a field whose public wording should differ
-  from its docstring can say so.
-
-  **A resolver docstring is therefore public API copy.** Implementation
-  notes, retired endpoints and app-internal call sites belong in comments
-  inside the function, not in the docstring.
+  Strawberry ignores `__doc__`; an explicit `description=` still wins.
+  **A resolver docstring is therefore public API copy** — implementation
+  notes belong in comments inside the function.
   """
   for field in cls.__strawberry_definition__.fields:
     resolver = field.base_resolver
@@ -182,16 +141,10 @@ def _describe_from_docstrings(cls: type) -> type:
 def _build_query_type() -> type:
   """Build the Query root from whichever domain mixins are enabled.
 
-  Dropping a disabled domain entirely, rather than exposing fields that
-  fail with `*_NOT_INITIALIZED` at runtime, keeps introspection honest so
-  clients can branch on the schema shape.
-
-  `LibraryQuery`, `InformationBlockQuery`, and `TaxonomyBlockQuery` are
-  always composed: they are cross-domain and not gated by a per-graph
-  extension flag. Their data visibility is driven by the session
-  `search_path`, which follows from the URL's `graph_id` — the `library`
-  sentinel browses the public schema, a tenant graph_id sees tenant rows
-  with public fallback.
+  A disabled domain is dropped rather than exposed as fields that fail at
+  runtime, so clients can branch on the schema shape. The cross-domain
+  mixins are always composed; their visibility follows the session
+  `search_path`.
   """
   bases: tuple[type, ...] = (
     InformationBlockQuery,
@@ -208,22 +161,10 @@ def _build_query_type() -> type:
 
 Query = _build_query_type()
 
-# The limiters bound query cost against the small extensions OLTP pool, where
-# each resolved field can open a session. They are passed as factory callables
-# (not instances) per Strawberry's per-request construction contract.
-# Introspection is unaffected — the depth limiter does not count introspection
-# fields — so SDK codegen still works.
-#
-# OpenTelemetry spans land in the same pipeline as the REST routes (tracer
-# provider set up in `middleware/otel/setup.py`). The `Sync` variant works on
-# both sync and async execution paths; the async variant breaks
-# `schema.execute_sync(...)`, which cannot host async context managers.
-#
-# `OffloadSyncResolvers` must come after the OpenTelemetry extension: the
-# resolve hooks compose with the last extension outermost, and the resolver
-# span has to open inside the worker thread around the actual work rather
-# than around a coroutine handle. `MaskUnexpectedErrors` scrubs what reaches
-# `errors[]` — see `graphql/execution.py` for both.
+# Limiters are factories: Strawberry constructs extensions per request.
+# The Sync OTel variant is required because the async one breaks
+# `execute_sync`. `OffloadSyncResolvers` must come after it: the last extension
+# is outermost, and the resolver span has to open inside the worker thread.
 schema = strawberry.Schema(
   query=Query,
   extensions=[
@@ -248,20 +189,9 @@ def _camel(name: str) -> str:
 def _camelize_field_references(built: strawberry.Schema) -> strawberry.Schema:
   """Rewrite `snake_case` field references in descriptions to the wire name.
 
-  Most of these descriptions are Pydantic class docstrings and
-  `Field(description=...)` text, and those models serve REST as well, where
-  `balance_type` *is* the property name. Strawberry's `auto_camel_case`
-  renames the field on the way through, but nothing renames the prose that
-  points at it — so `Account` shipped telling a GraphQL reader to ask for
-  `balance_type`, which the schema rejects. The same sentence is correct on
-  `/docs/api` and wrong on `/docs/extensions/graphql`.
-
-  Rewriting here rather than at the source is what keeps both true: the
-  docstring stays written in the model's own vocabulary, and the name is
-  translated on the surface that renamed it. A token is only rewritten when
-  its camelCase form is a real field (or argument) of the same type and the
-  snake_case form is not, so prose that happens to contain an underscored
-  word is left alone.
+  The descriptions come from Pydantic prose shared with REST, where the
+  snake_case name is correct. A token is rewritten only when its camelCase
+  form is a field or argument of the same type and the snake form is not.
   """
   for gql_type in built._schema.type_map.values():
     if gql_type.name.startswith("__"):

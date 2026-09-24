@@ -1,16 +1,7 @@
-"""Hybrid search MCP tools for SEC filing document discovery and retrieval.
+"""search-documents (BM25, plus KNN when `semantic`) and get-document-section.
 
-Two-tool pattern:
-1. search-documents: Hybrid (BM25 + KNN) search returning ranked snippets with metadata
-2. get-document-section: Drill into a specific result for full content
-
-All searches use hybrid mode combining keyword matching (BM25) with vector
-similarity (KNN) via a normalization pipeline for balanced scoring.
-
-A tool result is context the model pays for on every later turn, so a hit
-carries what is needed to choose it and the section call carries what is
-needed to answer. The REST surface keeps the full response models; the
-trimming lives here, in ``compact_search_response`` and ``window_section``.
+A result is context the model pays for on every later turn, so a hit carries
+only what is needed to choose it; the REST surface keeps the full models.
 """
 
 from typing import TYPE_CHECKING, Any
@@ -101,17 +92,11 @@ def window_section(
 
 
 class _SearchToolMixin:
-  """Shared logic for search tools."""
-
   client: Any  # graph_client with .graph_id
 
   def _resolve_search_graph_id(self) -> str:
-    """Resolve to parent graph_id for search queries.
-
-    Search indexes use the parent graph_id (e.g. "sec" not "sec_historical").
-    Subgraphs are a storage optimization, not a search boundary.
-    For non-shared-repository graphs, returns the graph_id unchanged.
-    """
+    """A shared-repo subgraph searches its parent's index ("sec", not
+    "sec_historical"); other graphs search their own."""
     from robosystems.config.shared_repositories import (
       resolve_shared_repository_parent,
     )
@@ -120,7 +105,6 @@ class _SearchToolMixin:
     try:
       return resolve_shared_repository_parent(graph_id)
     except ValueError:
-      # Not a shared repository — use as-is
       return graph_id
 
 
@@ -241,7 +225,7 @@ class SearchDocumentsTool(_SearchToolMixin):
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    # Lazy import to avoid opensearch-py at module load time
+    # Lazy: keeps opensearch-py out of module load.
     from robosystems.models.api.search import SearchRequest
     from robosystems.operations.search import get_search_service
 
@@ -249,8 +233,6 @@ class SearchDocumentsTool(_SearchToolMixin):
     if service is None:
       return {"error": "Text search is not available"}
 
-    # Search indexes use the parent graph_id (e.g. "sec" not "sec_historical").
-    # Subgraphs are a storage split, not a search boundary.
     graph_id = self._resolve_search_graph_id()
 
     snippet_chars = int(arguments.get("snippet_chars") or SNIPPET_CHARS_DEFAULT)
@@ -273,8 +255,7 @@ class SearchDocumentsTool(_SearchToolMixin):
       response = service.search_documents(graph_id, request)
       return compact_search_response(response)
     except Exception as e:
-      # opensearch-py exception text embeds the endpoint hostname and query
-      # internals — the LLM-facing result gets the fixed message instead.
+      # opensearch-py error text embeds the endpoint hostname.
       logger.error(f"search-documents failed: {e}", exc_info=True)
       return {
         "error": "search_failed",
@@ -344,7 +325,6 @@ class GetDocumentSectionTool(_SearchToolMixin):
     if service is None:
       return {"error": "Text search is not available"}
 
-    # Search indexes use the parent graph_id (e.g. "sec" not "sec_historical")
     graph_id = self._resolve_search_graph_id()
     document_id = arguments["document_id"]
     offset = max(0, int(arguments.get("offset") or 0))

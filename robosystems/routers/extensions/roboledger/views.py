@@ -1,25 +1,11 @@
-"""RoboLedger analytical views — the read-shaped operations in the dispatcher.
+"""RoboLedger analytical views: `build-fact-grid`, `financial-statement-analysis`,
+and the `disclosures` / `information-block` pair.
 
-Hosts `build-fact-grid`, `financial-statement-analysis`, and the pair
-`disclosures` / `information-block`, all under
-`POST /extensions/roboledger/{graph_id}/operations/`. The first two read the
-LadybugDB graph; the pair reads the report whole from where the platform
-holds it (the published filing on a shared repository, the ledger's own
-report on a tenant) and runs xbrlkit's tools over it.
-
-It sits in its own router, separate from `operations.py`, so the mount
-gates on `FACT_GRID_ENABLED` rather than `ROBOLEDGER_ENABLED`: the fact
-grid queries the LadybugDB graph schema (the XBRL hypercube the SEC shared
-repository also uses), so a deployment hosting SEC research without
-RoboLedger tenants still gets the endpoint.
-
-It stays under `/extensions/roboledger/` because the grid is
-roboledger-schema-specific — it does not fit the schema-agnostic platform
-graph surface, and GraphQL's typed field selection cannot express an
-arbitrary slice across element, period, and entity. Being a dispatcher
-operation, it carries the `OperationEnvelope`, the idempotency-key cache
-(a useful deterministic cache for expensive analytical queries), and audit
-logging.
+The first two read the LadybugDB graph; the pair runs xbrlkit's tools over the
+report held whole (the published filing on a shared repository, the ledger's
+own report on a tenant). A separate router from the operations package so the
+mount gates on `FACT_GRID_ENABLED`: a deployment serving SEC research without
+RoboLedger tenants still gets these endpoints.
 """
 
 from __future__ import annotations
@@ -80,10 +66,8 @@ from robosystems.operations.roboledger.views import (
   summarize_by_element,
 )
 
-# Error translation (idempotency conflict → 409, etc.) is shared with the
-# command routers. Taken from `_common` rather than the operations package so
-# a FACT_GRID_ENABLED-only deployment does not import the ledger commands it
-# never mounts.
+# From `_common`, not the operations package, so a FACT_GRID_ENABLED-only
+# deployment doesn't import ledger commands it never mounts.
 from robosystems.routers.extensions.roboledger._common import _dispatch
 
 router = APIRouter()
@@ -99,18 +83,10 @@ def _require_readable_graph(
 ) -> None:
   """Lifecycle/subscription gate (read strength) for the analytical views.
 
-  The views are reads that serve shared repositories too, so they do not
-  pass through `require_graph_extension` (which refuses shared repos); this
-  is the same `require_graph_access` check that dependency and `/query` run,
-  so a suspended or expired graph is closed here too. Shared repositories
-  pass — their access is per-user, checked by `get_current_user_with_graph`.
-  The block pair reads a tenant's report from the extensions OLTP through
-  the exports' bundle builder; a graph with no ledger schema answers the
-  dispatcher's schema-missing 404 there.
-
-  Depends on the auth dependency so it can only run for an authenticated
-  member (route-level dependencies otherwise resolve before the handler's
-  own, and graph state must not be observable before authentication).
+  Not `require_graph_extension`, which refuses shared repos; this is the same
+  `require_graph_access` check, and shared repos pass (their access is
+  per-user). Depends on the auth dependency so graph state is never
+  observable before authentication.
   """
   require_graph_access(graph_id, session, require_write=False)
 
@@ -160,12 +136,9 @@ async def build_fact_grid_op(
       detail="Provide periods, period_type, or fiscal_year to scope the query",
     )
 
-  # Shared repositories host thousands of filers, so an entity-less query
-  # returns an arbitrary slice of facts from arbitrary companies. A tenant
-  # graph is already scoped to its entity by the URL — and that entity is
-  # often a private company with no ticker or CIK to filter on — so the
-  # requirement applies only to shared repos. Mirrors the asymmetry in
-  # financial-statement-analysis below.
+  # Only on shared repos, where an entity-less query returns an arbitrary
+  # slice across thousands of filers. A tenant graph is already scoped to its
+  # entity by the URL (often a private company with no ticker or CIK).
   if (
     is_shared_repository_or_subgraph(graph_id) and not body.entity and not body.entities
   ):
@@ -297,11 +270,8 @@ async def financial_statement_analysis_op(
       )
       report_id = resolved.get("identifier") if resolved else None
 
-      # A requested fiscal_year that resolves to nothing is a 404, not a
-      # licence to answer with a different year: the ticker path below
-      # sweeps the filer's whole history ordered by end_date DESC and never
-      # receives fiscal_year, so without this guard a scoped request would
-      # silently return the newest filing.
+      # An unresolved fiscal_year is a 404: the ticker path below never
+      # receives fiscal_year and would silently return the newest filing.
       if body.fiscal_year is not None and not report_id:
         raise HTTPException(
           status_code=404,
@@ -361,20 +331,13 @@ async def financial_statement_analysis_op(
 
 
 # ── Information blocks: the map and the block ──────────────────────────────
-#
-# The two shaped tools ``xbrlkit serve`` runs over a loaded filing, served
-# over a report the platform holds whole — the published filing on the SEC
-# shared repository, the ledger's own report on a tenant graph — read into
-# xbrlkit's model, over which xbrlkit's own ``disclosures`` /
-# ``information_block`` run, so the hosted tools and the local one answer
-# identically from one implementation. Reads, like the two views above; the
-# graph is not in the path.
+# xbrlkit's own ``disclosures`` / ``information_block`` over the report held
+# whole, so hosted and local tools answer identically. The graph is not in the path.
 
 
 def _report_selector_errors(exc: ValueError) -> HTTPException:
-  """The view's domain errors as HTTP: a caller's selector is a 400, a report
-  or block that does not exist a 404. Anything else falls through to the
-  dispatcher's policy."""
+  """Selector errors → 400, missing report/block → 404, too large → 422;
+  anything else falls through to the dispatcher's policy."""
   if isinstance(exc, ReportSelectorError):
     return HTTPException(status_code=400, detail=str(exc))
   if isinstance(exc, (ReportNotFoundError, BlockNotFoundError)):

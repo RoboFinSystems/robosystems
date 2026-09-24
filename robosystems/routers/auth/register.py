@@ -40,7 +40,6 @@ from ...security.input_validation import (
 from ...security.password import PasswordSecurity
 from .utils import detect_app_source, hash_password_async, require_password_auth
 
-# Create router for register endpoint
 router = APIRouter()
 
 
@@ -67,20 +66,10 @@ async def register(
   rate_limit: None = Depends(auth_rate_limit_dependency),
   _password_auth: None = Depends(require_password_auth),
 ) -> AuthResponse:
-  # Check if registration is enabled.
-  #
-  # Note the guard above outranks invitations: with password auth disabled,
-  # an invitation must not become a side door to a password account — invited
-  # staff arrive via the IdP instead.
-  #
-  # An invitation is itself the authorization to register, so closing
-  # registration stops *unsolicited* signups without also blocking the people
-  # an org admin deliberately invited. That composition — closed registration
-  # plus invitations — is invite-only mode.
-  #
-  # The token is resolved here rather than trusted as a mere presence check,
-  # so nothing downstream of this gate runs on an unverified token. It is
-  # validated again in full (email match, expiry) further down.
+  # Closed registration still admits invitations (invite-only mode). The
+  # password-auth guard above outranks this, so an invitation can't become a
+  # side door to a password account on an IdP deployment. The token is
+  # resolved here, not just checked for presence, and fully re-validated below.
   if not env.USER_REGISTRATION_ENABLED:
     has_valid_invitation = (
       request.invite_token is not None
@@ -88,7 +77,6 @@ async def register(
     )
 
     if not has_valid_invitation:
-      # Get client details for security logging
       client_ip = fastapi_request.client.host if fastapi_request.client else None
       user_agent = fastapi_request.headers.get("user-agent")
 
@@ -110,13 +98,12 @@ async def register(
         detail="Registration is temporarily disabled. Please check back later or contact support for early access.",
       )
 
-  # Validate and sanitize input
   if not validate_email(request.email):
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email format"
     )
 
-  # Validate password strength (uses same rules as /password/check endpoint)
+  # Same rules as the /password/check endpoint.
   password_result = PasswordSecurity.validate_password(request.password, request.email)
   if not password_result.is_valid:
     raise HTTPException(
@@ -124,11 +111,9 @@ async def register(
       detail=f"Password requirements not met: {', '.join(password_result.errors)}",
     )
 
-  # Sanitize inputs
   sanitized_email = sanitize_string(request.email, max_length=254)
   sanitized_name = sanitize_string(request.name, max_length=100)
 
-  # Record auth attempt
   record_auth_metrics(
     endpoint="/v1/auth/register",
     method="POST",
@@ -136,13 +121,10 @@ async def register(
     success=False,  # Will update on success
   )
 
-  # Get client details for security logging
   client_ip = fastapi_request.client.host if fastapi_request.client else None
   user_agent = fastapi_request.headers.get("user-agent")
 
-  # Advanced authentication protection checks
   if client_ip:
-    # Check if IP is currently blocked
     is_blocked, block_time = AdvancedAuthProtection.check_ip_blocked(client_ip)
     if is_blocked:
       SecurityAuditLogger.log_security_event(
@@ -158,7 +140,6 @@ async def register(
         risk_level="high",
       )
 
-      # Add security headers to response
       security_headers = AdvancedAuthProtection.get_security_headers(client_ip)
       for header, value in security_headers.items():
         response.headers[header] = value
@@ -169,7 +150,6 @@ async def register(
         headers=security_headers,
       )
 
-    # Check progressive delay
     delay = AdvancedAuthProtection.get_progressive_delay(client_ip)
     if delay > 0:
       SecurityAuditLogger.log_security_event(
@@ -191,7 +171,6 @@ async def register(
         headers={"Retry-After": str(delay)},
       )
 
-  # Environment-based security checks - CAPTCHA verification
   captcha_result = await captcha_service.verify_captcha_or_skip(
     token=request.captcha_token, remote_ip=client_ip
   )
@@ -213,7 +192,6 @@ async def register(
       risk_level="high",  # Failed CAPTCHA is high risk (potential bot)
     )
 
-    # Return user-friendly error message
     if "missing-input-response" in captcha_result.error_codes:
       detail = "CAPTCHA verification is required for registration"
     else:
@@ -221,7 +199,6 @@ async def register(
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
-  # Log successful CAPTCHA verification
   if captcha_service.is_captcha_required():
     logger.info(
       f"CAPTCHA verification successful for registration: {sanitized_email} (Environment: {env.ENVIRONMENT})"
@@ -231,7 +208,6 @@ async def register(
       f"CAPTCHA verification skipped for registration: {sanitized_email} (Environment: {env.ENVIRONMENT})"
     )
 
-  # Check if user already exists
   existing_user = User.get_by_email(sanitized_email, session)
   if existing_user:
     record_auth_metrics(
@@ -256,9 +232,8 @@ async def register(
       status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
     )
 
-  # Resolve an org invitation before creating anything, so an invalid token
-  # fails the registration outright. Falling back to a personal org would
-  # permanently strand the user outside the inviting org (one org per user).
+  # Resolve the invitation before creating anything: a personal-org fallback
+  # would strand the user outside the inviting org for good (one org per user).
   invitation = None
   invited_org = None
   if request.invite_token:
@@ -294,9 +269,8 @@ async def register(
 
   password_hash = await hash_password_async(request.password)
 
-  # Verification policy: possession of the emailed invitation token proves
-  # control of the invited mailbox, and dev environments skip verification
-  # for convenience — only the remaining case sends a verification email.
+  # The invitation token proves control of the mailbox, and dev skips
+  # verification; only the remaining case sends a verification email.
   needs_verification_email = invitation is None and env.EMAIL_VERIFICATION_ENABLED
 
   try:
@@ -361,9 +335,8 @@ async def register(
     logger.info(f"Email automatically verified for development user: {sanitized_email}")
 
   if invitation is not None:
-    # The org-side "member added" record for the invited-registration path.
-    # The joiner is the actor (they accepted); the inviter is carried so the
-    # grant chain is reconstructible from this one line.
+    # The joiner is the actor; the inviter is carried so the grant chain is
+    # reconstructible from this one record.
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.ORG_MEMBER_ADDED,
       user_id=user.id,
@@ -387,16 +360,12 @@ async def register(
       extra={"user_id": user.id, "org_id": org.id, "org_type": org.org_type.value},
     )
 
-  # Extract device fingerprint for token binding
   device_fingerprint = extract_device_fingerprint(fastapi_request)
 
-  # Create JWT token with device binding
   jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
-  # Bearer-token auth: the token is returned in the response body for the
-  # frontend to store. No auth cookie is set.
+  # Bearer-token auth: the token goes in the response body; no auth cookie.
 
-  # Record successful auth
   record_auth_metrics(
     endpoint="/v1/auth/register",
     method="POST",
@@ -405,7 +374,6 @@ async def register(
     user_id=user.id,
   )
 
-  # Log successful registration for security audit
   SecurityAuditLogger.log_security_event(
     event_type=SecurityEventType.AUTH_SUCCESS,
     user_id=user.id,
@@ -423,13 +391,11 @@ async def register(
     risk_level="low",
   )
 
-  # Record successful registration for protection system
   if client_ip:
     AdvancedAuthProtection.record_auth_attempt(
       ip_address=client_ip, success=True, email=sanitized_email, user_agent=user_agent
     )
 
-  # Prepare success message based on email verification requirement
   if invitation is not None:
     message = f"User registered successfully and joined {org.name}"
   else:

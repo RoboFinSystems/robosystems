@@ -1,9 +1,4 @@
-"""Investor (roboinvestor) GraphQL resolvers.
-
-Graph-scoped at `/extensions/{graph_id}/graphql`. Auth + per-graph
-access are validated by `get_context` before any resolver runs;
-`graph_id` is read from `info.context` via `require_graph_id`.
-"""
+"""Investor (roboinvestor) GraphQL resolvers."""
 
 from __future__ import annotations
 

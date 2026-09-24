@@ -1,9 +1,5 @@
-"""
-Subgraph read routes (list).
-
-Write operations (create, delete) live at
-``POST /v1/graphs/{graph_id}/operations/{create-subgraph,delete-subgraph}``.
-"""
+"""Subgraph read routes (list). Create/delete are graph operations at
+``POST /v1/graphs/{graph_id}/operations/{create,delete}-subgraph``."""
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.exc import SQLAlchemyError
@@ -46,21 +42,10 @@ router = APIRouter(dependencies=[Depends(subscription_aware_rate_limit_dependenc
 async def get_subgraph_sizes(parent_graph_id: str) -> dict[str, int]:
   """On-disk bytes per subgraph, from one instance-wide storage breakdown.
 
-  Replaces an N+1 of `get_database_metrics` calls that also measured
-  something different. Two problems came from that path, and both are fixed
-  by reading the breakdown the storage cap already reads:
-
-  - **It undercounted.** `get_database_metrics` reports `db_info.size_bytes`,
-    the primary `.lbug` only. Writes land in the write-ahead log first, so
-    during a write burst this page sat frozen while `/usage` — which scans
-    disk and counts `.lbug` + `.lbug.wal` — climbed. Same subgraph, two
-    numbers, and the smaller one looked stuck.
-  - **It rounded to a floor.** `round(bytes / 1024**2, 2)` cannot represent
-    less than ~10.24 KB, so a subgraph under ~5 KB reported 0.0 and rendered
-    as nothing at all.
-
-  Returns an empty mapping when the breakdown is unavailable; callers report
-  `None` rather than zero, because "not measured" is not "empty".
+  The same breakdown the storage cap reads, so the figure counts the WAL and
+  agrees with `/usage` (`db_info.size_bytes` counts only the primary `.lbug`).
+  Returns an empty mapping when unavailable; callers then report `None`, since
+  "not measured" is not "empty".
   """
   try:
     from robosystems.graph_api.client.factory import GraphClientFactory
@@ -73,10 +58,8 @@ async def get_subgraph_sizes(parent_graph_id: str) -> dict[str, int]:
     finally:
       await graph_client.close()
 
-    # A subgraph's footprint is spread across item types — its database
-    # (with WAL folded in) and its vector index share the subgraph's id, so
-    # summing by id rather than filtering to type="subgraph" is what makes
-    # this agree with the instance total.
+    # A subgraph's database and vector index share its id, so summing by id
+    # (not filtering to type="subgraph") agrees with the instance total.
     sizes: dict[str, int] = {}
     for item in breakdown.get("items", []):
       item_id = item.get("id")
@@ -115,7 +98,6 @@ async def list_subgraphs(
 
     parent_graph = verify_parent_graph_access(graph_id, current_user, db, "read")
 
-    # Log access event
     api_logger.info(
       f"User {current_user.id} listing subgraphs for graph {graph_id}",
       extra={
@@ -125,7 +107,6 @@ async def list_subgraphs(
       },
     )
 
-    # Get all subgraphs for the parent graph
     subgraphs = (
       db.query(Graph)
       .filter(Graph.parent_graph_id == parent_graph.graph_id)
@@ -133,9 +114,8 @@ async def list_subgraphs(
       .all()
     )
 
-    # One instance-wide breakdown covers every subgraph — they all live on
-    # the parent's box. Absent means "could not measure", which is reported
-    # as None per subgraph rather than 0.
+    # Every subgraph lives on the parent's box. Unmeasured is reported as
+    # None per subgraph, not 0.
     sizes = await get_subgraph_sizes(parent_graph.graph_id)
 
     subgraph_summaries = []
@@ -143,25 +123,20 @@ async def list_subgraphs(
     measured_any = False
     for subgraph in subgraphs:
       size_bytes = sizes.get(subgraph.graph_id)
-      # Extract subgraph name from graph_id (format: {parent_id}_{subgraph_name})
       subgraph_name = subgraph.subgraph_name
       if not subgraph_name and "_" in subgraph.graph_id:
-        # Fallback: extract from graph_id if subgraph_name is not set
         subgraph_name = subgraph.graph_id.split("_", 1)[1]
 
       if size_bytes is not None:
         total_size_bytes += size_bytes
         measured_any = True
 
-      # Determine status from graph_stale field
       subgraph_status = "stale" if subgraph.graph_stale else "active"
 
-      # Extract subgraph_type from metadata, default to "static"
       subgraph_type_str = "static"
       if subgraph.subgraph_metadata and isinstance(subgraph.subgraph_metadata, dict):
         subgraph_type_str = subgraph.subgraph_metadata.get("subgraph_type", "static")
 
-      # Convert string to SubgraphType enum
       try:
         subgraph_type = SubgraphType(subgraph_type_str)
       except ValueError:
@@ -176,8 +151,7 @@ async def list_subgraphs(
           status=subgraph_status,
           created_at=subgraph.created_at,
           size_bytes=size_bytes,
-          # Enough precision to stay non-zero at subgraph scale; the old
-          # 2-decimal rounding bottomed out at ~10.24 KB.
+          # Enough precision to stay non-zero at subgraph scale.
           size_mb=(
             round(size_bytes / (1024 * 1024), 6) if size_bytes is not None else None
           ),
@@ -185,14 +159,12 @@ async def list_subgraphs(
         )
       )
 
-    # Log metrics
     log_metric(
       "subgraph_list_count",
       len(subgraph_summaries),
       {"graph_id": graph_id, "user_id": str(current_user.id)},
     )
 
-    # Record success metrics
     record_operation_metrics(
       start_time=operation_start_time,
       operation_name="list_subgraphs",
@@ -214,8 +186,7 @@ async def list_subgraphs(
       subgraphs=subgraph_summaries,
       subgraph_count=len(subgraph_summaries),
       max_subgraphs=max_subgraphs,
-      # Null when nothing could be measured — distinct from a genuine zero,
-      # which is what a graph with empty subgraphs legitimately reports.
+      # Null when nothing was measured, distinct from a genuine zero.
       total_size_bytes=total_size_bytes if measured_any else None,
       total_size_mb=(
         round(total_size_bytes / (1024 * 1024), 6) if measured_any else None
@@ -256,10 +227,7 @@ async def list_subgraphs(
     )
 
 
-# ---------------------------------------------------------------------------
-# create_subgraph — not routed here; called by the graph operations router
-# at POST /v1/graphs/{graph_id}/operations/create-subgraph
-# ---------------------------------------------------------------------------
+# Not routed here: called by the graph operations router (create-subgraph).
 
 
 async def create_subgraph(
@@ -275,31 +243,25 @@ async def create_subgraph(
 
   handle_circuit_breaker_check(graph_id, "create_subgraph")
 
-  # Check if subgraph creation is enabled
   if not env.SUBGRAPH_CREATION_ENABLED:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Subgraph creation is currently disabled.",
     )
 
-  # 1. Verify parent graph access (requires admin)
   parent_graph = verify_parent_graph_access(graph_id, current_user, db, "admin")
 
-  # 2. Verify tier supports subgraphs
   verify_subgraph_tier_support(parent_graph)
 
-  # 3. Verify parent graph is active
   verify_parent_graph_active(parent_graph)
 
-  # 4. Check subgraph quota
   current_count, max_subgraphs, existing_subgraphs = check_subgraph_quota(
     parent_graph, db
   )
 
-  # 5. Validate name uniqueness
   validate_subgraph_name_unique(request.name, existing_subgraphs, graph_id)
 
-  # 6. Fork path: enqueue to worker for background execution
+  # Fork path: enqueue to the worker.
   if request.fork_parent:
     from robosystems.worker.client import enqueue_task
 
@@ -335,7 +297,6 @@ async def create_subgraph(
 
     return response
 
-  # Non-fork path: Create immediately
   service = get_subgraph_service()
   subgraph_result = await service.create_subgraph(
     parent_graph=parent_graph,

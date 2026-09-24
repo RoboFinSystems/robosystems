@@ -1,15 +1,9 @@
-"""Shared plumbing for the RoboLedger operation routers.
+"""Shared plumbing for the RoboLedger operation routers: context builder,
+dispatcher, schema-missing 404, registrar factory and write gate.
 
-The operation surface is split one module per OpenAPI tag (see
-`operations/__init__.py`), and `views.py` and `reads.py` are two more routers
-on the same URL prefix. All of them build the same operation context, run
-through the same dispatcher, and answer a missing tenant schema the same way
-— so that machinery lives here rather than in whichever module happened to
-define it first.
-
-Keeping it separate also keeps `views.py` honest: the fact-grid router mounts
-on `FACT_GRID_ENABLED` for SEC-only deployments, and importing it should not
-drag in the whole ledger command surface just to reach `_dispatch`.
+Kept apart from the operations package so `views.py` (mounted on
+`FACT_GRID_ENABLED` for SEC-only deployments) can reach `_dispatch` without
+importing the ledger command surface.
 """
 
 from __future__ import annotations
@@ -62,7 +56,6 @@ def _ctx(
   idempotency_key: str | None,
   body: object,
 ) -> OperationContext:
-  """Build the per-request operation context with body fingerprint."""
   return OperationContext(
     domain="roboledger",
     operation_name=op,
@@ -81,11 +74,9 @@ async def _dispatch(
 ) -> OperationEnvelope:
   """Run `execute_operation` and translate idempotency conflicts to 409.
 
-  Every hand-written runner reaches the operation through here, and is
-  wrapped in `guard_command_runner` on the way, so the registrar's error
-  policy (schema-missing → 404, other database faults → logged 500, unmapped
-  `ValueError` → 422) applies to both registration styles identically.
-  Handlers keep only their domain-specific mappings.
+  Wraps hand-written runners in `guard_command_runner` so the registrar's
+  error policy (schema-missing → 404, DB faults → 500, unmapped `ValueError`
+  → 422) applies identically to both registration styles.
   """
   guarded = guard_command_runner(
     runner,
@@ -102,13 +93,10 @@ async def _dispatch(
 
 
 def _result_payload(envelope: OperationEnvelope) -> dict[str, Any]:
-  """Return an `on_fresh_success` envelope's result as a plain dict.
+  """An `on_fresh_success` envelope's result as a plain dict.
 
-  `wrap_completed` runs every command result through
-  `model_dump(mode="json")`, so a hook that reaches for `envelope.result.foo`
-  reads absent rather than raising — the share, revoke, and purge hooks all
-  shipped that way and marked nothing stale. Going through this helper keeps
-  the normalization visible at each call site.
+  `wrap_completed` has already run `model_dump(mode="json")`, so attribute
+  access on `envelope.result` silently reads nothing.
   """
   result = envelope.result
   return result if isinstance(result, dict) else {}
@@ -122,17 +110,10 @@ def _ledger_404() -> HTTPException:
 
 
 def make_registrar(router: APIRouter, tag: str) -> OperationRegistrar:
-  """A registrar mounting on `router`, publishing under `tag`.
+  """A registrar mounting on `router`, publishing under OpenAPI `tag`.
 
-  One per operation module. The tag is the only thing that varies: every
-  registrar shares this package's context builder, dispatcher, session
-  factory and gates, so two operations differ in their OpenAPI grouping and
-  in nothing else.
-
-  Splitting the surface across registrars is safe for the MCP tool adapter —
-  `OperationRegistrar.specs_for_extension` walks every instantiated
-  registrar with a matching `extension`, so a spec is found wherever its
-  module lives.
+  One per operation module; only the tag varies. Safe for the MCP tool
+  adapter: `OperationRegistrar.specs_for_extension` walks every registrar.
   """
   return OperationRegistrar(
     router=router,
@@ -149,9 +130,7 @@ def make_registrar(router: APIRouter, tag: str) -> OperationRegistrar:
   )
 
 
-# Shared callable so every hand-written `@router.post` endpoint across the
-# operation modules participates in FastAPI's dependency-resolution cache
-# (one factory call at import, not one per endpoint).
+# One shared callable so FastAPI's dependency cache resolves it once per request.
 _require_roboledger = require_graph_extension("roboledger")
 
 
@@ -162,14 +141,9 @@ def _require_roboledger_write(
 ) -> User:
   """Membership + provisioning + write role for the hand-written ops.
 
-  Every `@router.post` in the operation modules is a command.
-  `get_current_user_with_graph`
-  proves graph *membership* and `_require_roboledger` proves *provisioning*;
-  neither consults the graph role, so a read-only `viewer` clears both on its
-  own. `require_graph_write_role` is the gate that stops that, and the
-  registrar applies it to every op it mounts (`middleware/extensions.py`).
-  Hand-written ops depend on this helper so both registration styles enforce
-  identically.
+  Neither `get_current_user_with_graph` nor `_require_roboledger` checks the
+  graph role, so a `viewer` would pass both; the registrar applies
+  `require_graph_write_role` to its ops, and hand-written ops use this.
   """
   require_graph_write_role(str(user.id), graph_id)
   return user

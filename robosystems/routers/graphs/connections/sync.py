@@ -1,6 +1,4 @@
-"""
-Connection sync endpoint.
-"""
+"""Connection sync endpoint."""
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from sqlalchemy.orm import Session
@@ -81,9 +79,8 @@ async def sync_connection(
   op_name = "sync-connection"
   user_id = str(current_user.id)
 
-  # A sync rewrites the graph's captured events (full_rebuild wipes and
-  # reloads them); membership alone is not enough. Same gate the MCP
-  # `sync-connection` tool clears through its write classification.
+  # A sync rewrites captured events (full_rebuild wipes them): a graph write,
+  # same gate as the `sync-connection` MCP tool.
   require_graph_write_role(user_id, graph_id)
 
   body_fp = fingerprint_body(request)
@@ -94,11 +91,9 @@ async def sync_connection(
     if idem.replay is not None:
       return idem.replay
 
-    # Initialize robustness components
     components = create_robustness_components()
     operation_timeout = None
 
-    # Record operation start metrics
     record_operation_start(
       operation_name="sync_connection",
       endpoint="/v1/graphs/{graph_id}/connections/{connection_id}/sync",
@@ -108,10 +103,9 @@ async def sync_connection(
     )
 
     try:
-      # Check circuit breaker before processing
       components["circuit_breaker"].check_circuit(graph_id, "connection_sync")
 
-      # Set up timeout coordination for sync operations (these can be long-running)
+      # Sync operations can be long-running.
       operation_timeout = components["timeout_coordinator"].calculate_timeout(
         operation_type="external_service",
         complexity_factors={
@@ -121,7 +115,6 @@ async def sync_connection(
         },
       )
 
-      # Log the request with operation logger
       components["operation_logger"].log_external_service_call(
         endpoint="/v1/graphs/{graph_id}/connections/{connection_id}/sync",
         service_name="connection_service",
@@ -133,9 +126,8 @@ async def sync_connection(
         metadata={"connection_id": connection_id},
       )
 
-      # Validate, lock, and dispatch via the shared kernel (also behind
-      # the `sync-connection` MCP tool); map domain exceptions to the
-      # HTTP contract this endpoint has always had.
+      # The shared kernel (also behind the `sync-connection` MCP tool) validates,
+      # locks and dispatches.
       try:
         dispatch = await dispatch_connection_sync(
           graph_id=graph_id,
@@ -163,7 +155,6 @@ async def sync_connection(
       task_id = dispatch["task_id"]
       dispatched = dispatch["dispatched"]
 
-      # Record successful operation
       record_operation_success(
         components=components,
         operation_name="sync_connection",
@@ -190,8 +181,7 @@ async def sync_connection(
           created_by=user_id,
         )
       else:
-        # Nothing was started, so there is nothing to poll. Reporting this as
-        # pending would invite the client to wait on a run that does not exist.
+        # Nothing started, so there is nothing to poll: not pending.
         envelope = wrap_completed(
           op_name,
           result={
@@ -203,9 +193,8 @@ async def sync_connection(
           created_by=user_id,
         )
 
-      # The task id here is the provider's Dagster run, not an SSE operation, so
-      # the pending envelope has no terminal-status hook to evict it; the
-      # reservation still keeps a concurrent retry from dispatching twice.
+      # The task id is a Dagster run, not an SSE operation, so no terminal hook
+      # evicts this envelope; the reservation still blocks a concurrent retry.
       await idem.record(envelope)
 
       log_operation_audit(
@@ -221,7 +210,6 @@ async def sync_connection(
       return envelope
 
     except TimeoutError:
-      # Record circuit breaker failure and timeout metrics
       record_operation_failure(
         components=components,
         operation_name="sync_connection",
@@ -240,7 +228,6 @@ async def sync_connection(
         code=ErrorCode.OPERATION_FAILED,
       )
     except HTTPException:
-      # Record circuit breaker failure for HTTP exceptions
       record_operation_failure(
         components=components,
         operation_name="sync_connection",
@@ -251,7 +238,6 @@ async def sync_connection(
       )
       raise
     except (ProviderUnavailableError, ValueError) as e:
-      # Handle disabled provider errors as client errors
       record_operation_failure(
         components=components,
         operation_name="sync_connection",
@@ -269,7 +255,6 @@ async def sync_connection(
         code=ErrorCode.FORBIDDEN,
       )
     except Exception as e:
-      # Record circuit breaker failure for general exceptions
       record_operation_failure(
         components=components,
         operation_name="sync_connection",

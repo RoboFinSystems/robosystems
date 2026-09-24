@@ -1,10 +1,5 @@
-"""
-Error handling that keeps internals out of client responses.
-
-Full exception detail goes to the logs; the client gets a generic message and
-a status code derived from the error's classification, so an error never
-reveals database, path, or configuration internals.
-"""
+"""Error handling that keeps internals out of client responses: full detail
+goes to the logs, the client gets a generic message and a mapped status."""
 
 import re
 from typing import Any, NoReturn
@@ -15,9 +10,6 @@ from robosystems.logger import logger
 
 
 class ErrorType:
-  """Standard error types for consistent handling."""
-
-  # Client errors (4xx)
   VALIDATION_ERROR = "validation_error"
   AUTHENTICATION_ERROR = "authentication_error"
   AUTHORIZATION_ERROR = "authorization_error"
@@ -25,14 +17,12 @@ class ErrorType:
   CONFLICT_ERROR = "conflict_error"
   RATE_LIMIT_ERROR = "rate_limit_error"
 
-  # Server errors (5xx)
   INTERNAL_ERROR = "internal_error"
   SERVICE_UNAVAILABLE = "service_unavailable"
   DATABASE_ERROR = "database_error"
   EXTERNAL_SERVICE_ERROR = "external_service_error"
 
 
-# Mapping of error types to HTTP status codes and generic messages
 ERROR_RESPONSES = {
   ErrorType.VALIDATION_ERROR: {
     "status_code": status.HTTP_400_BAD_REQUEST,
@@ -89,11 +79,8 @@ def raise_secure_error(
   Raise an HTTPException with a generic message while logging full details.
 
   ``error_type`` is a constant from :class:`ErrorType`; an unknown value falls
-  back to INTERNAL_ERROR. ``custom_detail`` bypasses the generic message — use
-  it sparingly, and only with text that carries no sensitive data.
-
-  Raises:
-      HTTPException: With the mapped status code.
+  back to INTERNAL_ERROR. ``custom_detail`` replaces the generic message and
+  must carry no sensitive data.
   """
   if error_type not in ERROR_RESPONSES:
     logger.warning(f"Unknown error type: {error_type}, defaulting to internal error")
@@ -101,7 +88,6 @@ def raise_secure_error(
 
   error_config = ERROR_RESPONSES[error_type]
 
-  # Log full error details for debugging
   log_context = {
     "error_type": error_type,
     "request_id": request_id,
@@ -121,7 +107,6 @@ def raise_secure_error(
   else:
     logger.error(f"Secure error handler - {error_type}", extra=log_context)
 
-  # Use custom detail if provided, otherwise use generic message
   detail = custom_detail if custom_detail else error_config["detail"]
 
   raise HTTPException(status_code=error_config["status_code"], detail=detail)
@@ -132,14 +117,12 @@ def classify_exception(exception: Exception) -> str:
   exception_str = str(exception).lower()
   exception_type = type(exception).__name__.lower()
 
-  # Database related errors
   if any(
     keyword in exception_str
     for keyword in ["database", "connection", "sql", "postgres", "ladybug"]
   ):
     return ErrorType.DATABASE_ERROR
 
-  # Authentication/Authorization errors
   if any(
     keyword in exception_str
     for keyword in ["unauthorized", "authentication", "token", "login"]
@@ -151,29 +134,24 @@ def classify_exception(exception: Exception) -> str:
   ):
     return ErrorType.AUTHORIZATION_ERROR
 
-  # Validation errors
   if any(keyword in exception_type for keyword in ["validation", "value", "type"]):
     return ErrorType.VALIDATION_ERROR
 
-  # Not found errors
   if any(
     keyword in exception_str for keyword in ["not found", "does not exist", "404"]
   ):
     return ErrorType.NOT_FOUND_ERROR
 
-  # Conflict errors
   if any(
     keyword in exception_str for keyword in ["conflict", "duplicate", "already exists"]
   ):
     return ErrorType.CONFLICT_ERROR
 
-  # Rate limiting
   if any(
     keyword in exception_str for keyword in ["rate limit", "too many", "throttle"]
   ):
     return ErrorType.RATE_LIMIT_ERROR
 
-  # External service errors
   if any(
     keyword in exception_str
     for keyword in [
@@ -186,7 +164,6 @@ def classify_exception(exception: Exception) -> str:
   ):
     return ErrorType.EXTERNAL_SERVICE_ERROR
 
-  # Default to internal error
   return ErrorType.INTERNAL_ERROR
 
 
@@ -196,12 +173,7 @@ def handle_exception_securely(
   user_id: str | None = None,
   additional_context: dict[str, Any] | None = None,
 ) -> NoReturn:
-  """
-  Classify an exception and raise the corresponding sanitized HTTPException.
-
-  Raises:
-      HTTPException: With a generic message and the mapped status code.
-  """
+  """Classify an exception and raise the corresponding sanitized HTTPException."""
   error_type = classify_exception(exception)
   raise_secure_error(
     error_type=error_type,
@@ -213,18 +185,13 @@ def handle_exception_securely(
 
 
 def is_safe_to_expose(detail_message: str) -> bool:
-  """
-  Check whether an error detail message is safe to expose to clients.
-
-  Rejects any message naming credentials, infrastructure, or internals — the
-  patterns below are matched as substrings, so this deliberately over-rejects.
-  """
+  """Whether an error message is safe to expose. Substring matching
+  deliberately over-rejects."""
   if not detail_message:
     return True
 
   detail_lower = detail_message.lower()
 
-  # Patterns that should never be exposed
   sensitive_patterns = [
     "password",
     "secret",
@@ -251,22 +218,16 @@ def is_safe_to_expose(detail_message: str) -> bool:
   return not any(pattern in detail_lower for pattern in sensitive_patterns)
 
 
-# Bounded quantifiers: the credential here is always our own RDS secret
-# (128 chars max), and unbounded runs let crafted error text drive the
-# scan quadratic (CodeQL py/polynomial-redos).
+# Bounded quantifiers avoid polynomial ReDoS on crafted error text.
 _CONNSTR_PASSWORD_RE = re.compile(r"password=\S{1,256}")
 _URL_CRED_RE = re.compile(r"(postgres(?:ql)?://[^:/@\s]{1,256}:)[^@\s]{1,256}@")
 
 
 def redact_connection_secrets(text: str) -> str:
-  """Redact database credentials from an error string, keeping the rest.
-
-  The extensions materializer interpolates a libpq connstr (``password=…``)
-  into the ``postgres_scan()`` SQL it ships to the graph_api; a DuckDB error
-  that echoes the failing statement would otherwise carry the RDS master
-  credential into a tenant-visible operation result (``result.errors``) and the
-  logs. This scrubs the secret and leaves the diagnostic text intact — unlike
-  :func:`sanitize_error_detail`, which would blank the whole message.
+  """Redact database credentials from an error string, keeping the rest of
+  the diagnostic (unlike :func:`sanitize_error_detail`, which blanks it).
+  Errors that echo a connection string must pass through this before they
+  reach a client or the logs.
   """
   if not text:
     return text
@@ -288,19 +249,15 @@ def sanitize_error_detail(detail_message: str) -> str:
   if is_safe_to_expose(detail_message):
     return detail_message
 
-  # Return generic message for potentially sensitive errors
   return "An error occurred while processing your request"
 
 
 def safe_error_message(exc: BaseException) -> str | None:
   """The exception's own message when it is safe to show the caller, else None.
 
-  Safe means the message is about the caller's own input — a query syntax
-  error, a client-side rejection from the graph API, or a domain validation
-  ``ValueError`` — scrubbed of connection secrets. Driver and infrastructure
-  exceptions (boto3, psycopg2, httpx, opensearch-py, redis, …) return None:
-  their text names hosts, indexes, SQL, and internals, and belongs in server
-  logs only. Callers substitute their sink's generic message on None.
+  Safe means about the caller's own input (a graph query error or a domain
+  ``ValueError``), scrubbed of secrets. Driver and infrastructure exceptions
+  return None; callers substitute a generic message.
   """
   from robosystems.graph_api.client.exceptions import (
     GraphClientError,
@@ -309,9 +266,7 @@ def safe_error_message(exc: BaseException) -> str | None:
 
   if isinstance(exc, GraphSyntaxError | GraphClientError):
     return redact_connection_secrets(str(exc))
-  # Plain ValueError is domain-validation text throughout the operations
-  # kernel; subclasses from third-party libs are excluded so a driver that
-  # subclasses ValueError cannot ride the whitelist.
+  # Exact type: a third-party ValueError subclass must not pass.
   if type(exc) is ValueError:
     return redact_connection_secrets(str(exc))
   return None

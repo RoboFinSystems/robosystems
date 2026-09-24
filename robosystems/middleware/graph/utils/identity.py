@@ -1,7 +1,4 @@
-"""Graph identity utilities.
-
-Functions for resolving graph identity, routing, and access patterns.
-"""
+"""Graph identity, routing and repository access checks."""
 
 from typing import Any
 
@@ -110,15 +107,11 @@ def validate_repository_access(
 
   from .database import get_repository_database_name
 
-  # Resolve subgraph to parent for permission check
   parent_repo_id = resolve_shared_repository_parent(graph_id)
   repository_name = get_repository_database_name(parent_repo_id)
 
-  # Use a short-lived session instead of the scoped session proxy.
-  # The scoped session is tied to the request lifecycle via
-  # DatabaseSessionMiddleware, which holds connections until the entire
-  # request completes.  For MCP endpoints that run for minutes, this
-  # exhausts the connection pool.
+  # Not the scoped session: it holds its connection for the whole request,
+  # and minutes-long MCP requests would exhaust the pool.
   _sess = SessionFactory()
   try:
     access_level = UserRepository.get_user_access_level(user_id, repository_name, _sess)

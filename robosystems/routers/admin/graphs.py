@@ -40,7 +40,6 @@ def _get_graph_status(graph: Graph) -> str:
   if graph.status and graph.status != "active":
     return graph.status
 
-  # For active repositories, show sync status if available
   if graph.is_repository and graph.sync_status:
     return graph.sync_status
 
@@ -67,7 +66,7 @@ async def list_graphs(
       query = query.filter(Graph.graph_tier == tier)
 
     if backend:
-      # Graph doesn't have a backend column — derive matching tiers from config
+      # No backend column: derive the matching tiers from config.
       matching_tiers = [
         tier_name
         for tier_name in [
@@ -159,10 +158,8 @@ async def list_graphs(
     session.close()
 
 
-# Declared ahead of `/{graph_id}`: routes match in registration order and
-# path params are validated only after a route is chosen, so a literal
-# segment registered after a param sibling is unreachable — every call
-# would resolve as graph_id="analytics" and 404.
+# Declared ahead of `/{graph_id}`: routes match in registration order, so
+# this would otherwise resolve as graph_id="analytics".
 @router.get("/analytics", response_model=GraphAnalyticsResponse)
 @require_admin(permissions=["graphs:read"])
 async def get_graph_analytics(
@@ -403,21 +400,17 @@ async def deprovision_graph(
       },
     )
 
-    # An already-deprovisioned graph is not an error: the call re-ran the
-    # idempotent data-disposal steps (extensions schema, search index, report
-    # bundles), which is how a partial teardown gets finished. The message
-    # says what, if anything, was still there.
+    # Not an error: re-running the idempotent disposal steps is how a partial
+    # teardown gets finished.
     return GraphDeprovisionResponse(
       graph_id=graph_id,
       previous_status=result.previous_status,
       status=(
         "already_deprovisioned"
         if result.status == "already_deprovisioned"
-        # A database-delete failure leaves the graph stranded (not flipped to
-        # DEPROVISIONED) for the teardown sensor to retry — reporting
-        # "deprovisioned" would misdescribe a graph that is still live. A
-        # "partial" whose database WAS deleted (e.g. a registry-dealloc lag) is
-        # genuinely deprovisioned.
+        # A database-delete failure leaves the graph live for the teardown
+        # sensor to retry, so don't report it deprovisioned. A partial whose
+        # database was deleted (e.g. registry-dealloc lag) is deprovisioned.
         else "partial"
         if not result.database_deleted
         else "deprovisioned"
@@ -474,9 +467,8 @@ async def get_graph_storage(request: Request, graph_id: str):
       else 0.0
     )
 
-    # Default to the tier's `instance_storage_limit_gb`, which is the limit
-    # ingestion enforces; a per-graph `storage_override_gb` on the credit
-    # pool takes precedence.
+    # The tier's `instance_storage_limit_gb` (what ingestion enforces), unless
+    # the credit pool carries a `storage_override_gb`.
     credits = GraphCredits.get_by_graph_id(graph_id, session)
     storage_limit = (
       float(credits.storage_override_gb)

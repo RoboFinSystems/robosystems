@@ -39,7 +39,6 @@ async def get_customer(
   try:
     from ...models.core import OrgRole, OrgUser
 
-    # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -109,8 +108,8 @@ async def create_portal_session(
 ):
   from ...config import env
 
-  # Same guard as checkout: with billing off there is no Stripe customer and
-  # no portal — calling the provider with empty keys would 500.
+  # With billing off there is no Stripe customer or portal; the provider call
+  # would 500.
   if not env.BILLING_ENABLED:
     return PortalSessionResponse(portal_url=None, billing_disabled=True)
 
@@ -142,8 +141,7 @@ async def create_portal_session(
         f"Created Stripe customer for org {org_id} during portal session",
         extra={"org_id": org_id, "user_id": current_user.id},
       )
-    # Billing lives on the org page's Billing tab; /billing still redirects here
-    # for older sessions, but returning directly avoids a redirect hop.
+    # Billing lives on the org page's Billing tab; return there directly.
     return_url = f"{env.ROBOSYSTEMS_URL}/organization?tab=billing"
     portal_url = provider.create_portal_session(customer.stripe_customer_id, return_url)
 

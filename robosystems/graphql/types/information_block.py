@@ -1,18 +1,8 @@
 """Strawberry types for the Information Block GraphQL surface.
 
-Leaf types wrap Pydantic response models via
-`@pydantic_type(model=..., all_fields=True)`
-— same pattern as :mod:`robosystems.graphql.types.library`. The
-top-level :class:`InformationBlock` is hand-written because its
-`artifact.mechanics` field is a discriminated union on `kind` and
-Strawberry's pydantic decorator can't unwrap union types cleanly; the
-`from_pydantic` classmethod does the construction explicitly.
-
-The `mechanics` field is exposed as `scalars.JSON` with a `kind`
-discriminator embedded in the payload. Promoting it to a typed
-`strawberry.union(...)` is deferred until each mechanics arm grows
-typed fields worth exposing as a union; until then, clients branch on
-the embedded `kind` tag.
+`InformationBlock` is hand-written because `artifact.mechanics` is a
+discriminated union Strawberry's pydantic decorator can't unwrap; it is
+exposed as JSON and clients branch on the embedded `kind` tag.
 """
 
 from __future__ import annotations
@@ -118,9 +108,7 @@ class InformationBlockFact:
 class InformationBlockFactSet:
   """Period-specific instantiation of the Structure."""
 
-  # The typed FactProvenance descriptor is a discriminated union on
-  # `origin`; exposed as `scalars.JSON` (same treatment as artifact
-  # mechanics) with the `origin` tag embedded in the payload.
+  # A discriminated union on `origin`, exposed as JSON with the tag embedded.
   provenance: strawberry.scalars.JSON | None
 
 
@@ -199,9 +187,6 @@ class InformationBlockViewProjections:
   """Charlie's six type-of View arms surfaced in the envelope."""
 
 
-# Mechanics + template are exposed as `scalars.JSON` with a `kind`
-# discriminator embedded in the payload — see the module docstring for
-# why this is preferred over a typed Strawberry union.
 MechanicsPayload = strawberry.scalars.JSON
 
 
@@ -223,8 +208,6 @@ class Artifact:
       topic=artifact.topic,
       renderer_note=artifact.renderer_note,
       template=artifact.template,
-      # Pydantic's discriminated union dumps cleanly to a JSON object
-      # including the `kind` tag; the client can branch on that.
       mechanics=artifact.mechanics.model_dump(mode="json"),
     )
 
@@ -258,9 +241,6 @@ class InformationBlock:
   facts: list[InformationBlockFact]
   rules: list[InformationBlockRule]
 
-  # Dimensions stay typed as JSON until the dimension catalog exposes
-  # typed fields worth promoting; fact_set + verification_results are
-  # typed leaves driven by their Pydantic models above.
   dimensions: list[MechanicsPayload]
   fact_set: InformationBlockFactSet | None
   verification_results: list[InformationBlockVerificationResult]
@@ -287,9 +267,6 @@ class InformationBlock:
       ],
       facts=[InformationBlockFact.from_pydantic(f) for f in envelope.facts],
       rules=[InformationBlockRule.from_pydantic(r) for r in envelope.rules],
-      # dimensions still passes through as JSON; fact_set and
-      # verification_results are typed leaves driven by their Pydantic
-      # arms.
       dimensions=list(envelope.dimensions),
       fact_set=(
         InformationBlockFactSet.from_pydantic(envelope.fact_set)
