@@ -289,6 +289,37 @@ class TestUserRepositoryCredits:
     assert Decimal(meta["shortfall"]) == Decimal("50")
     assert meta["note"] == "keep me"
 
+  def test_service_drain_survives_the_callers_session_closing(self):
+    """The AI worker closes its session without committing; a drain must
+    already be committed by then, or the pool is left full."""
+    from robosystems.operations.graph.credit_service import CreditService
+
+    credits = UserRepositoryCredits(
+      user_repository_id=self.repo_access.id,
+      current_balance=Decimal("50"),
+      monthly_allocation=Decimal("1000"),
+      is_active=True,
+    )
+    credits.user_repository = self.repo_access
+    self.session.add(credits)
+    self.session.commit()
+
+    result = CreditService(self.session).consume_shared_repository_credits(
+      user_id=self.user.id,
+      repository_name="sec",
+      operation_type="ai_tokens",
+      base_cost=Decimal("100"),
+      drain_on_shortfall=True,
+    )
+    self.session.rollback()
+    self.session.refresh(credits)
+
+    assert result["success"] is False
+    assert result["drained_to_zero"] is True
+    assert result["credits_consumed"] == 50.0
+    assert result["shortfall"] == 50.0
+    assert credits.current_balance == Decimal("0")
+
   def test_consume_credits_on_an_empty_pool_records_nothing(self):
     credits = UserRepositoryCredits(
       user_repository_id=self.repo_access.id,
