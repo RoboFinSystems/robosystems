@@ -521,3 +521,35 @@ class TestGetSSOLockManager:
 
     assert manager is None
     mock_logger.error.assert_called_once()
+
+
+class TestSSOLockDoesNotBlockTheEventLoop:
+  """Waiting on a contended lock must yield to other requests."""
+
+  @pytest.mark.asyncio
+  async def test_other_coroutines_run_while_the_lock_is_contended(self):
+    import asyncio
+
+    contended = Mock(spec=redis.Redis)
+    contended.set.return_value = None  # someone else always holds it
+    manager = SSOTokenLockManager(contended)
+    manager.lock_configs["token_exchange"] = {"ttl": 5, "timeout": 0.5}
+
+    ticks = 0
+
+    async def ticker():
+      nonlocal ticks
+      while True:
+        ticks += 1
+        await asyncio.sleep(0.02)
+
+    ticking = asyncio.create_task(ticker())
+    with (
+      patch("robosystems.middleware.auth.distributed_lock.SecurityAuditLogger"),
+      pytest.raises(RuntimeError),
+    ):
+      async with manager.lock_sso_token("tok_contended", "token_exchange"):
+        pass
+    ticking.cancel()
+
+    assert ticks >= 10

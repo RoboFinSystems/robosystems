@@ -6,6 +6,7 @@ an atomic compare-and-delete against the holder's lock_id so a lock that
 already expired and was re-acquired is never released by its previous owner.
 """
 
+import asyncio
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -326,7 +327,7 @@ class SSOTokenLockManager:
     }
 
   @asynccontextmanager
-  async def lock_sso_token(self, token_id: str, operation: str = "verification"):
+  async def lock_sso_token(self, token_id: str, operation: str = "token_verification"):
     """Hold a lock on an SSO token for the duration of the block.
 
     `operation` selects the TTL/timeout pair from `lock_configs`. Raises
@@ -340,7 +341,10 @@ class SSOTokenLockManager:
     )
 
     try:
-      result = lock.acquire(blocking=True, timeout=config["timeout"])
+      # acquire() backs off with time.sleep; keep that off the event loop.
+      result = await asyncio.to_thread(
+        lock.acquire, blocking=True, timeout=config["timeout"]
+      )
 
       if not result.acquired:
         SecurityAuditLogger.log_security_event(
@@ -376,7 +380,10 @@ class SSOTokenLockManager:
     )
 
     try:
-      result = lock.acquire(blocking=True, timeout=config["timeout"])
+      # acquire() backs off with time.sleep; keep that off the event loop.
+      result = await asyncio.to_thread(
+        lock.acquire, blocking=True, timeout=config["timeout"]
+      )
 
       if not result.acquired:
         SecurityAuditLogger.log_security_event(
