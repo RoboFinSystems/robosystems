@@ -173,6 +173,27 @@ class CypherSecurityAnalyzer:
     "YIELD",
   }
 
+  # Tokens that end a predicate (a WHERE or a lambda body) at depth zero.
+  PREDICATE_BOUNDARIES = {
+    "RETURN",
+    "WITH",
+    "MATCH",
+    "OPTIONAL",
+    "UNWIND",
+    "ORDER",
+    "SKIP",
+    "LIMIT",
+    "UNION",
+    "CALL",
+    "YIELD",
+    "CREATE",
+    "MERGE",
+    "SET",
+    "DELETE",
+    "DETACH",
+    "REMOVE",
+  }
+
   _TOKEN_PATTERN = re.compile(r"=~|[^\W\d]\w*|\d+(?:\.\d+)?|\S")
   _OPENERS = frozenset("([{")
   _CLOSERS = frozenset(")]}")
@@ -331,9 +352,16 @@ class CypherSecurityAnalyzer:
 
       tokens = self._TOKEN_PATTERN.findall(self._clean_query(query))
       labels_by_variable = self._labels_by_variable(tokens)
-      aliases = self._guarded_aliases(tokens, guarded, labels_by_variable)
+      self._carry_rebound_labels(tokens, labels_by_variable)
+      aliases, derived = self._guarded_aliases(tokens, guarded, labels_by_variable)
       for operand in self._string_match_operands(tokens):
         match = self._guarded_reference(operand, guarded, labels_by_variable, aliases)
+        if match:
+          return match
+      for predicate in self._predicates(tokens):
+        match = self._scan_in_predicate(
+          predicate, guarded, labels_by_variable, aliases, derived
+        )
         if match:
           return match
       return None
@@ -413,23 +441,154 @@ class CypherSecurityAnalyzer:
     tokens: list[str],
     guarded: dict[str, dict[str, str]],
     labels_by_variable: dict[str, set[str] | None],
-  ) -> dict[str, GuardedStringMatch]:
-    """Map each ``expression AS alias`` whose expression reads a guarded property.
+  ) -> tuple[dict[str, GuardedStringMatch], set[str]]:
+    """Map every name bound to a guarded value, and flag the derived ones.
 
-    Read in statement order, so an alias of an alias carries through. An
-    alias stays mapped even if a later clause reuses the name.
+    A name is bound by ``expression AS name``, by a list-comprehension or
+    quantifier variable (``x IN expression``), or by a lambda parameter
+    (``x -> …`` inside a call whose arguments read one). Read in statement
+    order, so an alias of an alias carries through; a name stays mapped even
+    if a later clause reuses it. A name is *derived* when its expression runs
+    a function over the guarded value, so using it in a predicate is a scan.
     """
     aliases: dict[str, GuardedStringMatch] = {}
+    derived: set[str] = set()
     for i, token in enumerate(tokens[:-1]):
-      if token.upper() != "AS":
+      upper = token.upper()
+      if upper == "AS":
+        expression = self._operand(tokens[:i][::-1], self._CLOSERS, self._OPENERS)[::-1]
+        name = tokens[i + 1].lower()
+      elif upper == "IN" and i >= 2 and tokens[i - 2] in ("(", "["):
+        expression = self._operand(tokens[i + 1 :], self._OPENERS, self._CLOSERS)
+        name = tokens[i - 1].lower()
+      elif token == "-" and tokens[i + 1] == ">" and i >= 1:
+        expression = self._enclosing_call_arguments(tokens, i)
+        name = tokens[i - 1].lower()
+      else:
         continue
-      expression = self._operand(tokens[:i][::-1], self._CLOSERS, self._OPENERS)
-      match = self._guarded_reference(
-        expression[::-1], guarded, labels_by_variable, aliases
-      )
+      match = self._guarded_reference(expression, guarded, labels_by_variable, aliases)
       if match:
-        aliases[tokens[i + 1].lower()] = match
-    return aliases
+        aliases[name] = match
+        if upper == "AS" and (
+          self._function_over_guarded(expression, guarded, labels_by_variable, aliases)
+          or any(t.lower() in derived for t in expression)
+        ):
+          derived.add(name)
+    return aliases, derived
+
+  def _carry_rebound_labels(
+    self, tokens: list[str], labels_by_variable: dict[str, set[str] | None]
+  ) -> None:
+    """``WITH g AS f`` makes ``f`` stand for ``g``: add ``g``'s labels to ``f``.
+
+    Labels are keyed by name for the whole statement, so a rebound name keeps
+    every label it was ever given (across ``UNION`` too) and a guarded label
+    is never lost to an earlier binding of the same name.
+    """
+    for _ in range(2):
+      for i in range(1, len(tokens) - 1):
+        if tokens[i].upper() != "AS":
+          continue
+        source, target = tokens[i - 1].lower(), tokens[i + 1].lower()
+        if i >= 2 and tokens[i - 2] == ".":
+          continue
+        if source not in labels_by_variable or source == target:
+          continue
+        source_labels = labels_by_variable[source]
+        if source_labels is None or labels_by_variable.get(target, set()) is None:
+          labels_by_variable[target] = None
+        else:
+          merged = set(labels_by_variable.get(target) or set())
+          labels_by_variable[target] = merged | source_labels
+
+  def _enclosing_call_arguments(self, tokens: list[str], position: int) -> list[str]:
+    """The argument tokens of the call that encloses ``position``."""
+    depth = 0
+    for j in range(position - 1, -1, -1):
+      if tokens[j] in self._CLOSERS:
+        depth += 1
+      elif tokens[j] in self._OPENERS:
+        if depth == 0:
+          return self._bracketed(tokens, j)
+        depth -= 1
+    return []
+
+  def _bracketed(self, tokens: list[str], opener: int) -> list[str]:
+    """The tokens between ``tokens[opener]`` and its matching closer."""
+    depth = 0
+    for j in range(opener, len(tokens)):
+      if tokens[j] in self._OPENERS:
+        depth += 1
+      elif tokens[j] in self._CLOSERS:
+        depth -= 1
+        if depth == 0:
+          return tokens[opener + 1 : j]
+    return tokens[opener + 1 :]
+
+  def _predicates(self, tokens: list[str]) -> list[list[str]]:
+    """Every WHERE expression and lambda body, each up to its clause end."""
+    predicates: list[list[str]] = []
+    for i, token in enumerate(tokens):
+      if token.upper() == "WHERE" or (token == ">" and i and tokens[i - 1] == "-"):
+        start = i + 1
+      else:
+        continue
+      depth = 0
+      predicate: list[str] = []
+      for part in tokens[start:]:
+        if part in self._OPENERS:
+          depth += 1
+        elif part in self._CLOSERS:
+          if depth == 0:
+            break
+          depth -= 1
+        elif depth == 0 and (
+          part == "|" or part == ";" or part.upper() in self.PREDICATE_BOUNDARIES
+        ):
+          break
+        predicate.append(part)
+      predicates.append(predicate)
+    return predicates
+
+  def _function_over_guarded(
+    self,
+    expression: list[str],
+    guarded: dict[str, dict[str, str]],
+    labels_by_variable: dict[str, set[str] | None],
+    aliases: dict[str, GuardedStringMatch],
+  ) -> GuardedStringMatch | None:
+    """A function call in ``expression`` whose arguments read a guarded value."""
+    for i in range(len(expression) - 1):
+      name, following = expression[i], expression[i + 1]
+      if following != "(" or not (name[0].isalpha() or name[0] == "_"):
+        continue
+      if name.upper() in self.OPERAND_BOUNDARIES or name.upper() in ("IN", "IS"):
+        continue
+      arguments = self._bracketed(expression, i + 1)
+      match = self._guarded_reference(arguments, guarded, labels_by_variable, aliases)
+      if match:
+        return match
+    return None
+
+  def _scan_in_predicate(
+    self,
+    predicate: list[str],
+    guarded: dict[str, dict[str, str]],
+    labels_by_variable: dict[str, set[str] | None],
+    aliases: dict[str, GuardedStringMatch],
+    derived: set[str],
+  ) -> GuardedStringMatch | None:
+    """A predicate that runs a function over a guarded value, directly or
+    through a derived alias. A bare comparison (``f.value = $v``) is not one."""
+    match = self._function_over_guarded(predicate, guarded, labels_by_variable, aliases)
+    if match:
+      return match
+    for i, token in enumerate(predicate):
+      before = predicate[i - 1] if i else ""
+      after = predicate[i + 1] if i + 1 < len(predicate) else ""
+      if token.lower() in derived and before not in (".", "$") and after != ".":
+        return aliases[token.lower()]
+    return None
 
   def _guarded_reference(
     self,
