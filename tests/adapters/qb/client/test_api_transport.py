@@ -16,7 +16,11 @@ import redis
 import requests
 
 from robosystems.adapters.quickbooks.client import api
-from robosystems.adapters.quickbooks.client.api import QBAuthFailedError, QBClient
+from robosystems.adapters.quickbooks.client.api import (
+  QBAuthFailedError,
+  QBAuthUnavailableError,
+  QBClient,
+)
 
 
 class _Intuit:
@@ -30,6 +34,7 @@ class _Intuit:
     self.issued = 1
     self.token_delay = 0.0
     self.token_calls = 0
+    self.discovery_status = 200
     self.lock = threading.Lock()
 
   def token(self, presented: str) -> tuple[int, dict]:
@@ -68,7 +73,9 @@ def intuit():
       self.wfile.write(payload)
 
     def do_GET(self):
-      if self.path == "/discovery":
+      if self.path == "/discovery" and state.discovery_status != 200:
+        self._send(state.discovery_status, {})
+      elif self.path == "/discovery":
         base = f"http://127.0.0.1:{self.server.server_port}"
         self._send(
           200,
@@ -107,6 +114,7 @@ def intuit():
     patch.object(api.env, "INTUIT_CLIENT_SECRET", "secret"),
     patch.object(api.env, "INTUIT_REDIRECT_URI", "http://localhost/cb"),
     patch.object(api, "QB_TIMEOUT", (1, 1), create=True),
+    patch.object(api, "QB_TOKEN_TIMEOUT", (1, 1), create=True),
     patch.object(QBClient, "_backoff", lambda self, attempt, reason: None, create=True),
   ):
     yield state
@@ -265,3 +273,57 @@ class TestConcurrentRefresh:
     assert errors == []
     marked.assert_not_called()
     assert bundle["refresh_token"] == intuit.valid_refresh == "R3"
+
+
+@pytest.mark.unit
+class TestReviewFindings:
+  def test_a_discovery_failure_is_recoverable(self, intuit, store):
+    _bundle, marked = store
+    intuit.discovery_status = 500
+
+    with pytest.raises(QBAuthUnavailableError):
+      _client()
+    marked.assert_not_called()
+
+  def test_the_lock_outlasts_the_slowest_refresh(self):
+    connect, read = api.QB_TOKEN_TIMEOUT
+    worst = api._REFRESH_ATTEMPTS * (connect + read) + sum(
+      2 ** (n - 1) + 1 for n in range(1, api._REFRESH_ATTEMPTS)
+    )
+    assert worst < api._TOKEN_LOCK_TTL_SECONDS
+
+  def test_a_recoverable_failure_is_not_a_reconnect_over_rest(self):
+    from fastapi import HTTPException
+
+    from robosystems.middleware.extensions import _raise_mapped
+    from robosystems.routers.extensions.roboledger.operations import ledger
+
+    spec = next(
+      s for s in ledger._registrar.registered_specs if s.name == "execute-event-block"
+    )
+    with pytest.raises(HTTPException) as busy:
+      _raise_mapped(QBAuthUnavailableError("busy"), spec.error_map)
+    with pytest.raises(HTTPException) as dead:
+      _raise_mapped(QBAuthFailedError("dead", recoverable=False), spec.error_map)
+
+    assert (busy.value.status_code, dead.value.status_code) == (503, 401)
+
+
+@pytest.mark.unit
+@pytest.mark.timeout(30)
+class TestLockContention:
+  def test_a_held_lock_is_waited_for_never_refreshed_past(
+    self, intuit, store, live_valkey
+  ):
+    """Refreshing past a holder presents the token it is about to supersede."""
+    _bundle, marked = store
+    live_valkey.set("lock:qb_token:conn-1", "someone-else", ex=30)
+
+    with (
+      patch.object(api, "_TOKEN_LOCK_WAIT_SECONDS", 0.5),
+      pytest.raises(QBAuthUnavailableError),
+    ):
+      _client()
+
+    assert intuit.token_calls == 0
+    marked.assert_not_called()

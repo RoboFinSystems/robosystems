@@ -4,6 +4,7 @@ import itertools
 from datetime import date, timedelta
 
 import pytest
+import requests
 
 from robosystems.adapters.quickbooks.pipeline.extract import fetch_journal_report
 from robosystems.adapters.quickbooks.pipeline.utils import (
@@ -79,13 +80,11 @@ class TestTruncationSignal:
     }
     assert journal_report_truncated(report) is True
 
-  def test_a_group_cut_before_its_summary_is_truncation(self):
-    report = {
-      "Rows": {
-        "Row": [*_transaction(date(2024, 1, 2)), _line("2024-01-03", "9", "10", dr="5")]
-      }
-    }
-    assert journal_report_truncated(report) is True
+  def test_a_small_open_group_alone_is_not_truncation(self):
+    """Far below the cap an open final group is an unfamiliar row, not a cut;
+    only the notice or a near-cap size decides."""
+    rows = [*_transaction(date(2024, 1, 2)), _line("2024-01-03", "9", "10", dr="5")]
+    assert journal_report_truncated({"Rows": {"Row": rows}}) is False
 
   def test_the_notice_in_the_header_is_truncation(self):
     report = {
@@ -138,3 +137,67 @@ class TestWindowedFetch:
     intuit = _CappedIntuit(cap=100)
     fetch_journal_report(intuit, "2024-01-01", "2024-02-29")
     assert intuit.windows == [("2024-01-01", "2024-02-29")]
+
+
+def _big_cut_report() -> dict:
+  """Near the cell cap, cut mid-transaction, with no notice at all."""
+  rows: list[dict] = []
+  day = date(2020, 1, 1)
+  while sum(len(r.get("ColData", [])) for r in rows) < 310_000:
+    rows.extend(_transaction(day))
+    day += timedelta(days=1)
+  rows.append(_line(day.isoformat(), "cut", "10", dr="1"))
+  return {"Rows": {"Row": rows}}
+
+
+@pytest.mark.unit
+class TestTruncationSignalEdges:
+  def test_the_notice_in_a_summary_row_is_truncation(self):
+    rows = [
+      *_transaction(date(2024, 1, 2)),
+      {"Summary": {"ColData": [{"value": NOTICE}]}},
+    ]
+    assert journal_report_truncated({"Rows": {"Row": rows}}) is True
+
+  def test_the_notice_in_a_section_header_is_truncation(self):
+    rows = [
+      *_transaction(date(2024, 1, 2)),
+      {"type": "Section", "Header": {"ColData": [{"value": NOTICE}]}},
+    ]
+    assert journal_report_truncated({"Rows": {"Row": rows}}) is True
+
+  def test_a_small_report_ending_in_a_total_row_is_complete(self):
+    """An unfamiliar final row far below the cap must not fail every sync."""
+    rows = [*_transaction(date(2024, 1, 2)), _line("", "", "TOTAL", dr="100", cr="100")]
+    report = {"Rows": {"Row": rows}}
+    assert journal_report_truncated(report) is False
+
+  def test_an_open_group_near_the_cap_is_truncation(self):
+    assert journal_report_truncated(_big_cut_report()) is True
+
+
+class _SlowIntuit(_CappedIntuit):
+  """Times out on any window longer than ``slow_over`` days."""
+
+  def __init__(self, slow_over: int) -> None:
+    super().__init__(cap=10_000)
+    self.slow_over = slow_over
+
+  def get_transactions(self, start_date: str, end_date: str) -> dict:
+    span = (date.fromisoformat(end_date) - date.fromisoformat(start_date)).days + 1
+    if span > self.slow_over:
+      self.windows.append((start_date, end_date))
+      raise requests.exceptions.ReadTimeout("report still generating")
+    return super().get_transactions(start_date, end_date)
+
+
+@pytest.mark.unit
+class TestSlowReports:
+  def test_a_report_too_slow_to_generate_is_split(self):
+    report = fetch_journal_report(_SlowIntuit(slow_over=60), "2023-01-01", "2023-12-31")
+    entries, _lines = parse_journal_report(report)
+    assert len(entries) == 365
+
+  def test_a_week_too_slow_to_generate_raises(self):
+    with pytest.raises(requests.exceptions.ReadTimeout):
+      fetch_journal_report(_SlowIntuit(slow_over=0), "2023-01-01", "2023-01-31")

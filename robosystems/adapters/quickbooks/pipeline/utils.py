@@ -60,32 +60,35 @@ class JournalReportTruncatedError(Exception):
 # Intuit caps a report at 400,000 cells and ends it early with this notice
 # instead of an error. The Reports API does not paginate.
 _TRUNCATION_NOTICE = "unable to display more data"
+# An unclosed final group only means truncation this close to the cap; below
+# it, it is some final row the parser has never seen, not a cut.
+_NEAR_CAP_CELLS = 300_000
 
 
 def journal_report_truncated(report: dict[str, Any] | None) -> bool:
-  """True when the report shows either sign of Intuit's cell cap.
+  """True when the report shows a sign of Intuit's cell cap.
 
-  The two signs are the notice text anywhere in the rows or header, and a
-  final transaction group with lines that never reaches its ``Summary`` row.
-  Every group of a complete report closes with one; the parser relies on it.
+  The notice text anywhere in the report is truncation. So is a final
+  transaction group that never reaches its ``Summary`` row, but only in a
+  report near the cap: every group of a complete report closes with one,
+  and a false positive here would fail every sync.
   """
   if not report:
     return False
-  if _TRUNCATION_NOTICE in json.dumps(report.get("Header") or {}).lower():
+  if _TRUNCATION_NOTICE in json.dumps(report).lower():
     return True
   rows = (report.get("Rows") or {}).get("Row") or []
+  cells = 0
   open_group = False
   for row in rows:
-    if "Summary" in row:
-      open_group = False
-      continue
     col_data = row.get("ColData") or []
-    for cell in col_data:
-      if _TRUNCATION_NOTICE in str(cell.get("value", "")).lower():
-        return True
-    if len(col_data) >= 8:
+    cells += len(col_data)
+    if "Summary" in row:
+      cells += len((row.get("Summary") or {}).get("ColData") or [])
+      open_group = False
+    elif len(col_data) >= 8:
       open_group = True
-  return open_group
+  return open_group and cells >= _NEAR_CAP_CELLS
 
 
 def parse_journal_report(

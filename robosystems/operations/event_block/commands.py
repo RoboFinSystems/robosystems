@@ -923,7 +923,7 @@ def execute_event_block(
 
   ``qb_clients`` is a per-caller cache keyed by connection id. Close passes
   one dict for the whole run, so it builds one client (one token refresh)
-  rather than one per entry.
+  rather than one per entry; a failed build is cached and re-raised too.
   """
   # Local imports keep the QB SDK and platform DB out of create/update callers.
   from robosystems.adapters.quickbooks.client.api import QBAuthFailedError, QBClient
@@ -1090,6 +1090,10 @@ def execute_event_block(
   # Constructing QBClient runs the auth path (persists rotated tokens, flags
   # needs_reauth on auth failure).
   qb_client = qb_clients.get(str(connection_id)) if qb_clients is not None else None
+  if isinstance(qb_client, QBAuthFailedError):
+    # This run already failed to authenticate; asking Intuit again per entry
+    # would repeat the same refresh (and, for invalid_grant, a dead token).
+    raise qb_client
   if qb_client is None:
     try:
       qb_client = QBClient(
@@ -1097,8 +1101,9 @@ def execute_event_block(
         qb_credentials=credentials,
         connection_id=str(connection_id),
       )
-    except QBAuthFailedError:
-      # Surface to the caller — the operator must reconnect via OAuth.
+    except QBAuthFailedError as e:
+      if qb_clients is not None:
+        qb_clients[str(connection_id)] = e
       raise
     if qb_clients is not None:
       qb_clients[str(connection_id)] = qb_client

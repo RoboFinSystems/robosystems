@@ -1,5 +1,6 @@
 """QuickBooks extract asset: QB API → raw parquet for dbt."""
 
+import requests
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
@@ -48,9 +49,18 @@ def fetch_journal_report(client, start_date: str, end_date: str, log=None) -> di
   rows: list[dict] = []
   while pending:
     lo, hi = pending.pop(0)
-    report = client.get_transactions(start_date=lo.isoformat(), end_date=hi.isoformat())
-    if journal_report_truncated(report):
-      span = (hi - lo).days + 1
+    span = (hi - lo).days + 1
+    try:
+      report = client.get_transactions(
+        start_date=lo.isoformat(), end_date=hi.isoformat()
+      )
+      cut = journal_report_truncated(report)
+    except requests.exceptions.ReadTimeout:
+      # Too large to generate in time; the same answer as a truncated one.
+      if span <= _MIN_WINDOW_DAYS:
+        raise
+      report, cut = None, True
+    if cut:
       if span <= _MIN_WINDOW_DAYS:
         raise JournalReportTruncatedError(
           f"QuickBooks truncated the JournalReport for {lo} to {hi} even at "
@@ -58,7 +68,7 @@ def fetch_journal_report(client, start_date: str, end_date: str, log=None) -> di
         )
       mid = lo + timedelta(days=span // 2 - 1)
       if log is not None:
-        log.warning(f"JournalReport {lo}..{hi} truncated by Intuit; splitting")
+        log.warning(f"JournalReport {lo}..{hi} too large for one call; splitting")
       pending[:0] = [(lo, mid), (mid + timedelta(days=1), hi)]
       continue
     rows.extend(((report or {}).get("Rows") or {}).get("Row") or [])

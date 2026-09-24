@@ -17,10 +17,14 @@ from robosystems.logger import logger
 # Neither library sets a timeout, so a stalled socket would block forever,
 # on the close path while it holds the ledger transaction.
 QB_TIMEOUT = (10, 120)  # (connect, read) seconds
+# Discovery and the token endpoint answer in well under a second; a short
+# read timeout bounds a whole refresh, which the token lock must outlast.
+QB_TOKEN_TIMEOUT = (10, 30)
 
 _REFRESH_ATTEMPTS = 3
 _REFRESH_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
-_TOKEN_LOCK_TTL_SECONDS = 60
+# Worst case: 3 x (10 + 30)s plus ~3s of backoff.
+_TOKEN_LOCK_TTL_SECONDS = 180
 _TOKEN_LOCK_WAIT_SECONDS = 30
 
 
@@ -36,11 +40,11 @@ def _with_default_timeout(session: requests.Session) -> None:
 
 
 class AuthClient(_IntuitAuthClient):
-  """intuitlib's client (a ``requests.Session``) with ``QB_TIMEOUT`` on every
-  call, including the discovery fetch its constructor makes."""
+  """intuitlib's client (a ``requests.Session``) with ``QB_TOKEN_TIMEOUT`` on
+  every call, including the discovery fetch its constructor makes."""
 
   def request(self, method, url, *args, **kwargs):  # type: ignore[override]
-    kwargs.setdefault("timeout", QB_TIMEOUT)
+    kwargs.setdefault("timeout", QB_TOKEN_TIMEOUT)
     return super().request(method, url, *args, **kwargs)
 
 
@@ -68,6 +72,15 @@ class QBAuthFailedError(Exception):
   def __init__(self, message: str, *, recoverable: bool) -> None:
     super().__init__(message)
     self.recoverable = recoverable
+
+
+class QBAuthUnavailableError(QBAuthFailedError):
+  """The recoverable case: Intuit was unreachable, slow, or asked us to wait,
+  or another process holds the refresh. Maps to 503, not the 401 that tells
+  the operator to reconnect."""
+
+  def __init__(self, message: str) -> None:
+    super().__init__(message, recoverable=True)
 
 
 def _is_retryable_qb_error(exc: BaseException) -> bool:
@@ -103,6 +116,23 @@ _QB_RETRY = retry(
 )
 
 
+def _is_retryable_report_error(exc: BaseException) -> bool:
+  """As `_is_retryable_qb_error`, except a read timeout: a report too slow to
+  generate is answered by a narrower window, not by asking again."""
+  if isinstance(exc, requests.exceptions.ReadTimeout):
+    return False
+  return _is_retryable_qb_error(exc)
+
+
+_QB_REPORT_RETRY = retry(
+  retry_on_exception=_is_retryable_report_error,
+  stop_max_attempt_number=5,
+  wait_exponential_multiplier=1000,
+  wait_exponential_max=60_000,
+  wait_jitter_max=1000,
+)
+
+
 class QBClient:
   def __init__(
     self,
@@ -129,14 +159,18 @@ class QBClient:
     self.refresh_token = refresh_token
     self.access_token = access_token
 
-    self.auth_client = AuthClient(
-      client_id=env.INTUIT_CLIENT_ID,
-      client_secret=env.INTUIT_CLIENT_SECRET,
-      environment=env.INTUIT_ENVIRONMENT,
-      redirect_uri=env.INTUIT_REDIRECT_URI,
-      refresh_token=refresh_token,
-      realm_id=self.realm_id,
-    )
+    try:
+      # The constructor fetches Intuit's discovery document.
+      self.auth_client = AuthClient(
+        client_id=env.INTUIT_CLIENT_ID,
+        client_secret=env.INTUIT_CLIENT_SECRET,
+        environment=env.INTUIT_ENVIRONMENT,
+        redirect_uri=env.INTUIT_REDIRECT_URI,
+        refresh_token=refresh_token,
+        realm_id=self.realm_id,
+      )
+    except (AuthClientError, requests.exceptions.RequestException) as e:
+      raise self._transient(e) from e
 
     if self.access_token:
       self.auth_client.access_token = self.access_token
@@ -232,10 +266,9 @@ class QBClient:
           f"{status} (intuit_tid={getattr(e, 'intuit_tid', None)}); "
           f"connection left as is"
         )
-        raise QBAuthFailedError(
+        raise QBAuthUnavailableError(
           f"Intuit's token endpoint answered HTTP {status} for realm "
-          f"{self.realm_id}; the next sync will retry.",
-          recoverable=True,
+          f"{self.realm_id}; the next sync will retry."
         ) from e
       except requests.exceptions.ConnectTimeout as e:
         if attempt < _REFRESH_ATTEMPTS:
@@ -253,21 +286,22 @@ class QBClient:
     )
     time.sleep(delay)
 
-  def _transient(self, e: Exception) -> "QBAuthFailedError":
+  def _transient(self, e: Exception) -> QBAuthUnavailableError:
     logger.warning(
       f"Transient network error during QB token refresh for realm {self.realm_id}: {e}"
     )
-    return QBAuthFailedError(
+    return QBAuthUnavailableError(
       f"Transient network error reaching Intuit for realm "
-      f"{self.realm_id}; the next sync will retry.",
-      recoverable=True,
+      f"{self.realm_id}; the next sync will retry."
     )
 
   def _acquire_token_lock(self) -> Any:
     """The per-connection refresh lock, or None to proceed unlocked.
 
-    Valkey being down, or a holder outliving the wait, must not stop a sync
-    or a close: unlocked is the behaviour before the lock existed.
+    Only an unavailable Valkey proceeds unlocked (the behaviour before the
+    lock existed). A holder that outlasts the wait is mid-refresh, and
+    refreshing past it would present the token it is about to supersede, so
+    that raises a recoverable error instead.
     """
     if not self.connection_id:
       return None
@@ -291,11 +325,16 @@ class QBClient:
       )
       return None
     if not result.acquired:
-      logger.warning(
-        f"QB token lock for connection {self.connection_id} not acquired "
-        f"({result.error_message}); refreshing unlocked"
+      if result.backend_error:
+        logger.warning(
+          f"QB token lock unavailable for connection {self.connection_id} "
+          f"({result.error_message}); refreshing unlocked"
+        )
+        return None
+      raise QBAuthUnavailableError(
+        f"Another process is refreshing the QuickBooks token for connection "
+        f"{self.connection_id}; retry shortly."
       )
-      return None
     return lock
 
   def _read_stored_credentials(self) -> dict[str, Any] | None:
@@ -523,7 +562,7 @@ class QBClient:
       return self._paginate(JournalEntry, where_clause=where)
     return self._paginate(JournalEntry)
 
-  @_QB_RETRY
+  @_QB_REPORT_RETRY
   def get_transactions(self, start_date=None, end_date=None):
     """Fetch JournalReport, the live GL posting source."""
     params = {}

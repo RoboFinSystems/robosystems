@@ -87,7 +87,9 @@ def _entry(db, event: Event, posting_date: date) -> str:
   return str(entry.id)
 
 
-def _execute(db, event_id: str, entry_ids: list[str], qb_clients=None):
+def _execute(
+  db, event_id: str, entry_ids: list[str], qb_clients=None, build_error=None
+):
   connection = MagicMock(
     graph_id=GRAPH_ID,
     write_policy="qb_authoritative",
@@ -111,22 +113,26 @@ def _execute(db, event_id: str, entry_ids: list[str], qb_clients=None):
       "robosystems.models.core.connection.connection_credentials.ConnectionCredentials.get_by_connection_id",
       return_value=cred,
     ),
-    patch("robosystems.adapters.quickbooks.client.api.QBClient") as qb_client_class,
+    patch(
+      "robosystems.adapters.quickbooks.client.api.QBClient", side_effect=build_error
+    ) as qb_client_class,
     patch(
       "robosystems.operations.event_block.qb_writeback._save_with_retry",
       side_effect=lambda *a, **k: next(saved),
     ) as save,
   ):
-    result = execute_event_block(
-      db,
-      ExecuteEventBlockRequest(event_id=event_id, connection_id="conn_qb"),
-      created_by="usr_test",
-      graph_id=GRAPH_ID,
-      acquire_period_fence=False,
-      entry_ids=entry_ids,
-      qb_clients=qb_clients,
-    )
-  _execute.clients_built = qb_client_class.call_count  # type: ignore[attr-defined]
+    try:
+      result = execute_event_block(
+        db,
+        ExecuteEventBlockRequest(event_id=event_id, connection_id="conn_qb"),
+        created_by="usr_test",
+        graph_id=GRAPH_ID,
+        acquire_period_fence=False,
+        entry_ids=entry_ids,
+        qb_clients=qb_clients,
+      )
+    finally:
+      _execute.clients_built = qb_client_class.call_count  # type: ignore[attr-defined]
   return result, save
 
 
@@ -215,3 +221,41 @@ def test_a_shared_client_cache_builds_one_client(session):
 
   assert (first, second) == (1, 0)
   assert list(cache) == ["conn_qb"]
+
+
+def test_a_failed_client_build_is_not_retried_per_entry(session):
+  """A close keeps going after a failed publish; each retry of the build is
+  another refresh against Intuit, inside the close's transaction."""
+  from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
+
+  session.add_all(
+    [
+      Element(id="elem_exp", name="Expense", code="6000", balance_type="debit"),
+      Element(id="elem_acc", name="Accrued", code="2100", balance_type="credit"),
+    ]
+  )
+  event = Event(
+    event_type="schedule_entry_due",
+    event_category="adjustment",
+    occurred_at=datetime(2026, 8, 31, tzinfo=UTC),
+    source="schedule",
+    status="committed",
+    created_by="usr_test",
+    metadata_={},
+  )
+  session.add(event)
+  session.flush()
+  august = _entry(session, event, date(2026, 8, 31))
+  september = _entry(session, event, date(2026, 9, 1))
+  session.commit()
+
+  dead = QBAuthFailedError("invalid_grant", recoverable=False)
+  cache: dict = {}
+  with pytest.raises(QBAuthFailedError):
+    _execute(session, str(event.id), [august], qb_clients=cache, build_error=dead)
+  first = _execute.clients_built  # type: ignore[attr-defined]
+  with pytest.raises(QBAuthFailedError):
+    _execute(session, str(event.id), [september], qb_clients=cache, build_error=dead)
+  second = _execute.clients_built  # type: ignore[attr-defined]
+
+  assert (first, second) == (1, 0)
