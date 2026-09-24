@@ -43,6 +43,10 @@ async def list_tables(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> TableListResponse:
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  require_graph_access(graph_id, db, require_write=False)
+
   start_time = datetime.now(UTC)
 
   try:

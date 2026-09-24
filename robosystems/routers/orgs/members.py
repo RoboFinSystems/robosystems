@@ -16,7 +16,7 @@ from ...models.api.orgs import (
   OrgMemberResponse,
   UpdateMemberRoleRequest,
 )
-from ...models.core import Graph, GraphUser, OrgRole, OrgUser, User
+from ...models.core import Graph, GraphRole, GraphUser, OrgRole, OrgUser, User
 from ...operations.billing import (
   ProviderCancellationError,
   cancel_user_repository_subscriptions,
@@ -163,6 +163,27 @@ async def update_member_role(
 
     previous_role = target_membership.role
     target_membership.role = request.role
+
+    # Explicit graph-admin rows (the creator's, or ones granted while an org
+    # admin) would otherwise keep admin access past the demotion.
+    admin_grants_downgraded = 0
+    if previous_role in (OrgRole.OWNER, OrgRole.ADMIN) and request.role == (
+      OrgRole.MEMBER
+    ):
+      org_graph_ids = [
+        row.graph_id
+        for row in db.query(Graph.graph_id).filter(Graph.org_id == org_id).all()
+      ]
+      if org_graph_ids:
+        admin_grants_downgraded = (
+          db.query(GraphUser)
+          .filter(
+            GraphUser.user_id == user_id,
+            GraphUser.graph_id.in_(org_graph_ids),
+            GraphUser.role == GraphRole.ADMIN.value,
+          )
+          .update({"role": GraphRole.MEMBER.value}, synchronize_session=False)
+        )
     db.commit()
     db.refresh(target_membership)
 
@@ -182,6 +203,7 @@ async def update_member_role(
         "target_user_id": user_id,
         "previous_role": previous_role.value,
         "new_role": request.role.value,
+        "graph_admin_grants_downgraded": admin_grants_downgraded,
       },
       risk_level="low",
     )

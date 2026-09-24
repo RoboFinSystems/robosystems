@@ -384,3 +384,38 @@ class TestGraphMembershipAuditEvents:
 
     assert response.status_code == 409
     audit.log_security_event.assert_not_called()
+
+
+class TestSelfGrantRefused:
+  async def test_admin_cannot_add_themselves(self, async_client, test_db, test_user):
+    _, graph = _setup_org_graph(test_db, test_user.id, OrgRole.ADMIN)
+
+    response = await async_client.post(
+      f"/v1/graphs/{graph.graph_id}/members",
+      json={"user_id": test_user.id, "role": "admin"},
+    )
+
+    assert response.status_code == 403
+    assert (
+      GraphUser.get_by_user_and_graph(test_user.id, graph.graph_id, test_db) is None
+    )
+
+  async def test_admin_cannot_change_their_own_role(
+    self, async_client, test_db, test_user
+  ):
+    _, graph = _setup_org_graph(test_db, test_user.id, OrgRole.ADMIN)
+    GraphUser.create(
+      user_id=test_user.id,
+      graph_id=graph.graph_id,
+      role=GraphRole.MEMBER,
+      session=test_db,
+    )
+
+    response = await async_client.put(
+      f"/v1/graphs/{graph.graph_id}/members/{test_user.id}",
+      json={"role": "admin"},
+    )
+
+    assert response.status_code == 403
+    row = GraphUser.get_by_user_and_graph(test_user.id, graph.graph_id, test_db)
+    assert GraphRole.coerce(row.role) == GraphRole.MEMBER

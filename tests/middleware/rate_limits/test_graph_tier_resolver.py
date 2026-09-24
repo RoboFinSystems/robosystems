@@ -353,9 +353,39 @@ class TestGraphBucketsAreMembersOnly:
       assert get_user_from_request(request) is None
     with patch(
       "robosystems.middleware.auth.cache.api_key_cache.get_cached_api_key_validation",
-      return_value={"user_id": "u1"},
+      return_value={"is_active": True, "user_data": {"id": "u1"}},
     ):
       assert get_user_from_request(request).startswith("apikey_")
+    with patch(
+      "robosystems.middleware.auth.cache.api_key_cache.get_cached_api_key_validation",
+      return_value={"is_active": False, "user_data": {}},
+    ):
+      assert get_user_from_request(request) is None
+
+  def test_a_negatively_cached_key_stays_anonymous_on_the_real_cache(self):
+    """The auth path caches an unknown key as a negative entry; from the
+    second request on, that entry must not read as a known identity."""
+    import hashlib
+    import uuid
+
+    from robosystems.middleware.auth.cache import api_key_cache
+    from robosystems.middleware.rate_limits.rate_limiting import get_user_from_request
+
+    junk = f"rfs_junk_{uuid.uuid4().hex}"
+    digest = hashlib.sha256(junk.encode()).hexdigest()
+    try:
+      api_key_cache.redis.ping()
+    except Exception:
+      pytest.skip("Valkey not reachable")
+    api_key_cache.cache_api_key_validation(digest, {}, is_active=False)
+    try:
+      assert api_key_cache.get_cached_api_key_validation(digest) is not None
+      request = self._request(
+        "/v1/graphs/kg1victim/memory/remember", {"X-API-Key": junk}
+      )
+      assert get_user_from_request(request) is None
+    finally:
+      api_key_cache.redis.delete(api_key_cache._get_api_key_cache_key(digest))
 
   def test_anonymous_requests_never_charge_the_graph_bucket(self):
     seen: list = []

@@ -9,6 +9,16 @@ from robosystems.operations.graph.commands import create_file_upload as files_up
 from robosystems.routers.graphs.tables import main as tables_main
 
 
+@pytest.fixture(autouse=True)
+def _graph_is_live(monkeypatch):
+  """Handler wiring only; the lifecycle gate is covered against a real DB in
+  test_staging_lifecycle_gate.py."""
+  monkeypatch.setattr(
+    "robosystems.middleware.billing.enforcement.require_graph_access",
+    lambda *args, **kwargs: None,
+  )
+
+
 @pytest.mark.asyncio
 async def test_list_tables_success(monkeypatch):
   async def fake_repo(*args, **kwargs):

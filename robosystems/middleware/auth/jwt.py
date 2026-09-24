@@ -19,6 +19,7 @@ from ...config.constants import (
   JWT_EXPIRY_HOURS,
   JWT_REVOCATION_GRACE_SECONDS,
   JWT_REVOCATION_KEY_PREFIX,
+  TOKEN_GRACE_PERIOD_MINUTES,
 )
 from ...config.logging import get_logger
 from ...config.valkey_registry import (
@@ -339,7 +340,11 @@ def decode_mfa_token(token: str, expected_purpose: str) -> dict[str, Any] | None
 
 
 def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
-  """Add a token's `jti` to the revocation list until its natural expiry.
+  """Add a token's `jti` to the revocation list for as long as it is usable.
+
+  A token stays refreshable for `TOKEN_GRACE_PERIOD_MINUTES` past `exp`, so
+  the entry outlives `exp` by that window, and a token already past `exp`
+  but still inside it is revoked too.
 
   `reason` is stored alongside; ``session_refresh`` triggers the grace
   period in `is_jwt_token_revoked`.
@@ -365,11 +370,13 @@ def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
       logger.warning("Cannot revoke token: missing jti or exp claim")
       return False
 
-    exp_datetime = datetime.fromtimestamp(exp, tz=UTC)
-    ttl_seconds = int((exp_datetime - datetime.now(UTC)).total_seconds())
+    usable_until = datetime.fromtimestamp(exp, tz=UTC) + timedelta(
+      minutes=TOKEN_GRACE_PERIOD_MINUTES
+    )
+    ttl_seconds = int((usable_until - datetime.now(UTC)).total_seconds()) + 60
 
-    if ttl_seconds <= 0:
-      logger.info("Token already expired, no need to revoke")
+    if ttl_seconds <= 60:
+      logger.info("Token is past its refresh window, no need to revoke")
       return True
 
     redis_client = get_redis_client()

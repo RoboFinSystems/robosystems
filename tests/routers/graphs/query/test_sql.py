@@ -17,6 +17,14 @@ MOD = "robosystems.routers.graphs.query.sql"
 KERNEL = "robosystems.middleware.graph.statement_kernel"
 
 
+@pytest.fixture(autouse=True)
+def _graph_is_live():
+  """Handler wiring only; the lifecycle gate is covered against a real DB in
+  test_staging_lifecycle_gate.py."""
+  with patch("robosystems.middleware.billing.enforcement.require_graph_access"):
+    yield
+
+
 def _user():
   u = MagicMock()
   u.id = "usr_1"

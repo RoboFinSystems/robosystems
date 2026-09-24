@@ -25,6 +25,8 @@ import ipaddress
 import json
 import re
 import socket
+import threading
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -37,6 +39,10 @@ from .clients import ClientError
 
 CIMD_MAX_BYTES = 64 * 1024
 CIMD_TIMEOUT_SECONDS = 5.0
+# Fetches hold a threadpool thread for their whole duration, so both the
+# wall-clock time of one fetch and the number in flight are bounded.
+CIMD_READ_TIMEOUT_SECONDS = 2.0
+CIMD_MAX_CONCURRENT_FETCHES = 4
 CIMD_CACHE_MIN_SECONDS = 60
 CIMD_CACHE_MAX_SECONDS = 24 * 3600
 CIMD_CACHE_DEFAULT_SECONDS = 3600
@@ -56,6 +62,7 @@ CIMD_TRUSTED_HOSTS = frozenset(
 )
 
 _CACHE_KEY_PREFIX = "oauth:cimd:"
+_fetch_slots = threading.BoundedSemaphore(CIMD_MAX_CONCURRENT_FETCHES)
 _MAX_AGE_RE = re.compile(r"max-age=(\d+)")
 
 
@@ -125,13 +132,27 @@ def fetch_client_metadata(
   """
   if not is_cimd_client_id(client_id):
     raise ClientError("invalid_client", "client_id is not a metadata document URL")
+  if not _fetch_slots.acquire(blocking=False):
+    raise ClientError(
+      "invalid_client", "client metadata document is not available, retry shortly"
+    )
+  try:
+    return _fetch(client_id, transport)
+  finally:
+    _fetch_slots.release()
+
+
+def _fetch(
+  client_id: str, transport: httpx.BaseTransport | None
+) -> tuple[dict[str, Any], int]:
   host = urlsplit(client_id).hostname or ""
   _assert_public_host(host)
+  deadline = time.monotonic() + CIMD_TIMEOUT_SECONDS
 
   try:
     with httpx.Client(
       follow_redirects=False,
-      timeout=CIMD_TIMEOUT_SECONDS,
+      timeout=httpx.Timeout(CIMD_READ_TIMEOUT_SECONDS),
       transport=transport,
       headers={"Accept": "application/json", "User-Agent": "robosystems-oauth/1"},
     ) as client:
@@ -145,6 +166,10 @@ def fetch_client_metadata(
           raise ClientError("invalid_client", "client metadata document is too large")
         body = bytearray()
         for chunk in response.iter_bytes():
+          if time.monotonic() > deadline:
+            raise ClientError(
+              "invalid_client", "client metadata document is not available"
+            )
           body.extend(chunk)
           if len(body) > CIMD_MAX_BYTES:
             raise ClientError("invalid_client", "client metadata document is too large")

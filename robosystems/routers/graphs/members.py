@@ -68,6 +68,14 @@ def _require_graph_admin(current_user: User, graph_id: str, db: Session) -> None
     )
 
 
+def _refuse_self_grant(current_user: User, user_id: str) -> None:
+  if str(current_user.id) == str(user_id):
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="You cannot grant or change your own graph access",
+    )
+
+
 def _invalidate_target_caches(user_id: str) -> None:
   api_key_cache.invalidate_user_jwt_graph_access(user_id)
   api_key_cache.invalidate_user_data(user_id)
@@ -150,6 +158,7 @@ async def add_graph_member(
 ) -> GraphMemberResponse:
   graph = _load_managed_graph(graph_id, db)
   _require_graph_admin(current_user, graph_id, db)
+  _refuse_self_grant(current_user, request.user_id)
 
   target = User.get_by_id(request.user_id, db)
   if target is None:
@@ -213,6 +222,7 @@ async def update_graph_member_role(
 ) -> GraphMemberResponse:
   _load_managed_graph(graph_id, db)
   _require_graph_admin(current_user, graph_id, db)
+  _refuse_self_grant(current_user, user_id)
 
   row = GraphUser.get_by_user_and_graph(user_id, graph_id, db)
   if row is None:
