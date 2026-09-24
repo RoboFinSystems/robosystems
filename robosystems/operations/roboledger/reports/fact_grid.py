@@ -143,7 +143,7 @@ def generate_report_facts(
           value=_natural_sign(balance.net_balance, balance.balance_type),
           period_start=period.start,
           period_end=period.end,
-          period_type=_infer_period_type(balance.classification),
+          period_type=balance.period_type or _infer_period_type(balance.classification),
           close_value=(
             _natural_sign(balance.close_net_balance, balance.balance_type)
             if balance.close_net_balance is not None
@@ -424,6 +424,8 @@ class _Balance:
   # The portion of ``net_balance`` from sources for which this target is
   # the close-primary mapping (see ``ReportFact.close_value``).
   close_net_balance: float | None = None
+  # The reporting element's XBRL periodType; None falls back to inference.
+  period_type: str | None = None
 
 
 @dataclass
@@ -563,6 +565,7 @@ def _read_mapped_balances(
         target.name AS reporting_name,
         tcls.identifier AS classification,
         target.balance_type,
+        target.period_type,
         COALESCE(SUM(li.debit_amount), 0) AS total_debits,
         COALESCE(SUM(li.credit_amount), 0) AS total_credits
       FROM elements source_elem
@@ -590,7 +593,7 @@ def _read_mapped_balances(
           OR :start_date IS NULL
         )
       GROUP BY source_elem.id, target.id, target.qname, target.name,
-               tcls.identifier, target.balance_type
+               tcls.identifier, target.balance_type, target.period_type
       ORDER BY target.qname
     """).bindparams(landed_entry_bindparam()),
     {
@@ -629,6 +632,7 @@ def _read_mapped_balances(
         name=row.reporting_name,
         classification=classification,
         balance_type=row.balance_type,
+        period_type=row.period_type,
         total_debits=0.0,
         total_credits=0.0,
         net_balance=0.0,
@@ -771,16 +775,13 @@ def _emit_net_income_facts(
     )
     if already_present:
       continue
-    revenue = 0.0
-    expense = 0.0
+    net_income = 0.0
     for f in facts:
       if f.period_start != period.start or f.period_end != period.end:
         continue
-      if f.classification == "revenue":
-        revenue += _close_value(f)
-      elif f.classification == "expense":
-        expense += _close_value(f)
-    net_income = revenue - expense
+      sign = _INCOME_SIGN.get(f.classification or "")
+      if sign is not None:
+        net_income += sign * _close_value(f)
     if net_income == 0.0:
       continue
     facts.append(
@@ -1152,18 +1153,41 @@ def _opening_date(period: PeriodSpec) -> date:
   return period.start - timedelta(days=1)
 
 
+def _one_column_per_date(facts: list[ReportFact]) -> list[ReportFact]:
+  """Keep one column's facts for each element and end date.
+
+  Two columns can end on the same day (a 10-Q's three- and nine-month
+  columns) and each carries the same balance-sheet facts; reading balances
+  "as of a date" across both counts them twice.
+  """
+  start_by_key: dict[tuple[str, date], date | None] = {}
+  for f in facts:
+    key = (f.element_id, f.period_end)
+    if key not in start_by_key:
+      start_by_key[key] = f.period_start
+      continue
+    kept = start_by_key[key]
+    # A fact with no start (a bare instant) sorts first.
+    if kept is not None and (f.period_start is None or f.period_start < kept):
+      start_by_key[key] = f.period_start
+  return [
+    f for f in facts if f.period_start == start_by_key[(f.element_id, f.period_end)]
+  ]
+
+
 def _load_opening_facts(
   session: Session,
   mapping_id: str,
   periods: list[PeriodSpec],
   arc_type: str,
 ) -> list[ReportFact]:
-  """Instant balances at each later period's opening, where that isn't
-  already another column's end."""
+  """Instant balances at each period's opening, where that isn't already
+  another column's end. The earliest column needs one too, or its cash flow
+  has nothing to move from."""
   ordered = sorted(periods, key=lambda p: p.end)
   loaded = {p.end for p in ordered}
   opening_facts: list[ReportFact] = []
-  for current in ordered[1:]:
+  for current in ordered:
     opening = _opening_date(current)
     if opening in loaded:
       continue
@@ -1182,7 +1206,7 @@ def _load_opening_facts(
           value=_natural_sign(balance.net_balance, balance.balance_type),
           period_start=opening,
           period_end=opening,
-          period_type=_infer_period_type(balance.classification),
+          period_type=balance.period_type or _infer_period_type(balance.classification),
         )
       )
   return opening_facts
@@ -1198,15 +1222,9 @@ def _derive_cash_flow_facts(
 
   Each ``derivation`` arc says "this CF leaf is the change in this BS
   element" with a signed weight (asset up = -1, liability up = +1). For each
-  period after the first, ``Σ weight * (BS_end - BS_opening)``, the opening
-  being the day before the period starts. Zero values are skipped.
+  period, ``Σ weight * (BS_end - BS_opening)``, the opening being the day
+  before the period starts. Zero values are skipped.
   """
-  if len(periods) < 2:
-    logger.debug(
-      "_derive_cash_flow_facts: skipped — indirect method needs ≥2 periods (got %d)",
-      len(periods),
-    )
-    return
 
   # Periods arrive in presentation order (often newest-first).
   ordered = sorted(periods, key=lambda p: p.end)
@@ -1251,21 +1269,23 @@ def _derive_cash_flow_facts(
     row[0]: (row[1], row[2], row[3] or "debit") for row in meta_rows
   }
 
-  # Sum on collision, as _facts_to_balance_dict does.
+  # Balances as of a date, from one column per date; sum on collision within
+  # it, as _facts_to_balance_dict does.
   fact_index: dict[tuple[str, date], float] = {}
-  for f in facts:
+  for f in _one_column_per_date(facts):
     key = (f.element_id, f.period_end)
     fact_index[key] = fact_index.get(key, 0.0) + f.value
   opening_index: dict[tuple[str, date], float] = dict(fact_index)
   for f in opening_facts or ():
     key = (f.element_id, f.period_end)
     opening_index[key] = opening_index.get(key, 0.0) + f.value
+  direct = {(f.element_id, f.period_start, f.period_end) for f in facts}
 
-  for current in ordered[1:]:
+  for current in ordered:
     opening = _opening_date(current)
     for cf_leaf_id, sources in derivations.items():
       # A direct fact wins (e.g. DDA mapped from Depreciation Expense).
-      if (cf_leaf_id, current.end) in fact_index:
+      if (cf_leaf_id, current.start, current.end) in direct:
         continue
       cf_value = 0.0
       for source_id, weight in sources:
@@ -1310,8 +1330,6 @@ def _reconcile_operating_to_cash(
   ``_check_cash_flow_tie_out``; a large plug relative to operating cash is
   logged as a warning instead. Skips periods with no cash-anchor balance.
   """
-  if len(periods) < 2:
-    return
 
   id_rows = session.execute(
     text("SELECT id, qname, name, balance_type FROM elements WHERE qname = ANY(:q)"),
@@ -1341,7 +1359,7 @@ def _reconcile_operating_to_cash(
   cash_by_date = _cash_by_date(facts, opening_facts)
 
   ordered = sorted(periods, key=lambda p: p.end)
-  for current in ordered[1:]:
+  for current in ordered:
     cash_end = cash_by_date.get(current.end)
     if cash_end is None:
       continue
@@ -1402,7 +1420,7 @@ def _cash_by_date(
   facts: list[ReportFact], opening_facts: list[ReportFact] | None
 ) -> dict[date, float]:
   cash_by_date: dict[date, float] = {}
-  for f in [*facts, *(opening_facts or ())]:
+  for f in [*_one_column_per_date(facts), *(opening_facts or ())]:
     if f.period_type == "instant" and f.element_qname in _CASH_ANCHOR_QNAMES:
       cash_by_date[f.period_end] = cash_by_date.get(f.period_end, 0.0) + f.value
   return cash_by_date
@@ -1417,19 +1435,17 @@ def _check_cash_flow_tie_out(
 
   A mismatch means investing/financing attribution is incomplete.
   """
-  if len(periods) < 2:
-    return
   cash_by_date = _cash_by_date(facts, opening_facts)
-  net_change_by_end: dict[date, float] = {}
+  # Per column: two columns ending the same day carry different net changes.
+  net_change_by_column: dict[tuple[date, date], float] = {}
   for f in facts:
     if f.element_qname == "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease":
-      net_change_by_end[f.period_end] = (
-        net_change_by_end.get(f.period_end, 0.0) + f.value
-      )
+      key = (f.period_start, f.period_end)
+      net_change_by_column[key] = net_change_by_column.get(key, 0.0) + f.value
 
   ordered = sorted(periods, key=lambda p: p.end)
-  for current in ordered[1:]:
-    net_change = net_change_by_end.get(current.end)
+  for current in ordered:
+    net_change = net_change_by_column.get((current.start, current.end))
     if net_change is None:
       continue
     cash_end = cash_by_date.get(current.end)
@@ -1646,7 +1662,7 @@ def _cumulative_closeable_sums(
     classified = []
     for r in rows:
       cls = r.classification or _infer_classification(r.qname, r.balance_type)
-      if cls in ("revenue", "expense"):
+      if cls in _INCOME_SIGN:
         classified.append((r.classification is None, r.qname, cls, r))
     if not classified:
       continue
@@ -1654,12 +1670,25 @@ def _cumulative_closeable_sums(
     _, _, cls, row = classified[0]
     net = cents_to_dollars(row.total_debits - row.total_credits)
     natural = _natural_sign(net, row.balance_type)
-    if cls == "revenue":
+    if _INCOME_SIGN[cls] > 0:
       total_revenue += natural
     else:
       total_expenses += natural
 
   return total_revenue, total_expenses, total_equity_reductions
+
+
+# Sign each income-statement class carries into net income, applied to its
+# natural-signed value (gain and expenseReversal are credit-natural, loss is
+# debit-natural). Every sum that feeds net income or the retained-earnings
+# close reads this one table.
+_INCOME_SIGN: dict[str, int] = {
+  "revenue": 1,
+  "gain": 1,
+  "expenseReversal": 1,
+  "expense": -1,
+  "loss": -1,
+}
 
 
 def _close_value(fact: ReportFact) -> float:
@@ -1686,10 +1715,12 @@ def _close_to_retained_earnings(
   for fact in facts:
     if fact.period_start != period_start or fact.period_end != period_end:
       continue
-    if fact.classification == "revenue":
-      total_revenue += _close_value(fact)
-    elif fact.classification == "expense":
-      total_expenses += _close_value(fact)
+    sign = _INCOME_SIGN.get(fact.classification or "")
+    if sign is not None:
+      if sign > 0:
+        total_revenue += _close_value(fact)
+      else:
+        total_expenses += _close_value(fact)
     elif _is_equity_flow_reducer(fact.element_qname):
       total_equity_reductions += _close_value(fact)
 
@@ -1756,10 +1787,12 @@ def _close_prior_periods_to_retained_earnings(
   for fact in facts:
     if fact.period_start != period_start or fact.period_end != period_end:
       continue
-    if fact.classification == "revenue":
-      current_revenue += _close_value(fact)
-    elif fact.classification == "expense":
-      current_expenses += _close_value(fact)
+    sign = _INCOME_SIGN.get(fact.classification or "")
+    if sign is not None:
+      if sign > 0:
+        current_revenue += _close_value(fact)
+      else:
+        current_expenses += _close_value(fact)
     elif _is_equity_flow_reducer(fact.element_qname):
       current_equity_reductions += _close_value(fact)
 
@@ -1798,10 +1831,22 @@ def _close_prior_periods_to_retained_earnings(
     )
 
 
-def _infer_period_type(classification: str) -> str:
-  if classification in ("asset", "liability", "equity"):
-    return "instant"
-  return "duration"
+_INSTANT_CLASSIFICATIONS = frozenset(
+  {
+    "asset",
+    "liability",
+    "equity",
+    "contraAsset",
+    "contraLiability",
+    "contraEquity",
+    "temporaryEquity",
+  }
+)
+
+
+def _infer_period_type(classification: str | None) -> str:
+  """Fallback only; the element's own ``period_type`` wins when it has one."""
+  return "instant" if classification in _INSTANT_CLASSIFICATIONS else "duration"
 
 
 def _load_reporting_structure(

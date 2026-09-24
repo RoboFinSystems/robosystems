@@ -19,14 +19,10 @@ from robosystems.operations.roboledger.reads.reports import (
   build_current_and_prior_periods,
   get_live_financial_statement,
   get_statement,
-  rendered_period_indexes,
   resolve_reporting_window,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   FactRow,
-)
-from robosystems.operations.roboledger.reports.fact_grid import (
-  PeriodSpec as FactPeriodSpec,
 )
 
 
@@ -379,50 +375,9 @@ class TestGetStatementNumericFilter:
     assert "rf.fact_type = 'Numeric'" in src
 
 
-class TestRenderedPeriodIndexes:
-  """The earliest period of a cash flow pivot is the indirect-method delta
-  basis, not a statement. ``_derive_cash_flow_facts`` and
-  ``_reconcile_operating_to_cash`` populate every period but the first, so
-  rendered it foots and is wrong — on a live tenant the comparative month
-  showed 2.19x the balance-sheet cash movement. The close-time stamp already
-  keeps only the close month (``statement_sets``); the read paths apply the
-  same rule here."""
-
+class TestLiveCashFlowRendersEveryColumn:
   @pytest.mark.unit
-  def test_cash_flow_drops_the_earliest_period(self):
-    periods = build_current_and_prior_periods(date(2026, 7, 1), date(2026, 7, 31))
-    assert rendered_period_indexes("cash_flow_statement", periods) == [0]
-
-  @pytest.mark.unit
-  def test_drops_by_date_not_position(self):
-    """Multi-period reports store periods in authored order; the basis is
-    whichever ends first, wherever it sits."""
-    periods = [
-      FactPeriodSpec(start=date(2026, 5, 1), end=date(2026, 5, 31), label="May"),
-      FactPeriodSpec(start=date(2026, 7, 1), end=date(2026, 7, 31), label="Jul"),
-      FactPeriodSpec(start=date(2026, 6, 1), end=date(2026, 6, 30), label="Jun"),
-    ]
-    assert rendered_period_indexes("cash_flow_statement", periods) == [1, 2]
-
-  @pytest.mark.unit
-  @pytest.mark.parametrize(
-    "statement_type", ["income_statement", "balance_sheet", "equity_statement"]
-  )
-  def test_other_statements_render_every_period(self, statement_type):
-    periods = build_current_and_prior_periods(date(2026, 7, 1), date(2026, 7, 31))
-    assert rendered_period_indexes(statement_type, periods) == [0, 1]
-
-  @pytest.mark.unit
-  def test_single_period_cash_flow_is_left_alone(self):
-    periods = [
-      FactPeriodSpec(start=date(2026, 7, 1), end=date(2026, 7, 31), label="Jul")
-    ]
-    assert rendered_period_indexes("cash_flow_statement", periods) == [0]
-
-
-class TestLiveCashFlowRendersCurrentOnly:
-  @pytest.mark.unit
-  def test_prior_column_is_pivoted_but_not_rendered(self):
+  def test_the_prior_column_renders_too(self):
     session = MagicMock()
 
     def _row(name, values):
@@ -439,9 +394,8 @@ class TestLiveCashFlowRendersCurrentOnly:
     mock_grid = MagicMock()
     mock_grid.rows = [
       _row("NetIncomeLoss", [1_000.0, 900.0]),
-      # Derived only for the current column — the basis period has none.
-      _row("IncreaseDecreaseInAccountsReceivable", [-250.0, None]),
-      # Non-zero only in the basis column: nothing to render.
+      _row("IncreaseDecreaseInAccountsReceivable", [-250.0, -100.0]),
+      # Non-zero only in the prior column: it still renders.
       _row("PaymentsToAcquirePropertyPlantAndEquipment", [0.0, -400.0]),
     ]
 
@@ -463,17 +417,15 @@ class TestLiveCashFlowRendersCurrentOnly:
         period_end=date(2026, 7, 31),
       )
 
-    # Both periods reach the generator — the prior month is the delta basis.
+    # Each column derives its own cash flow, so both render.
     pivoted = generate.call_args.kwargs["periods"]
     assert [p.label for p in pivoted] == ["Current", "Prior"]
-    # Only the current period is rendered, and every row is one column wide.
-    assert [p.label for p in resp.periods] == ["Current"]
-    assert resp.periods[0].end == date(2026, 7, 31)
-    assert [f.name for f in resp.facts] == [
-      "NetIncomeLoss",
-      "IncreaseDecreaseInAccountsReceivable",
+    assert [p.label for p in resp.periods] == ["Current", "Prior"]
+    assert [f.values for f in resp.facts] == [
+      [1_000.0, 900.0],
+      [-250.0, -100.0],
+      [0.0, -400.0],
     ]
-    assert [f.values for f in resp.facts] == [[1_000.0], [-250.0]]
 
   @pytest.mark.unit
   def test_income_statement_still_renders_both(self):
@@ -511,9 +463,9 @@ class TestLiveCashFlowRendersCurrentOnly:
     assert resp.facts[0].values == [500.0, 450.0]
 
 
-class TestSavedCashFlowRendersCurrentOnly:
-  """``get_statement`` on a comparative report: the persisted facts for the
-  prior period are the delta basis, so a cash flow renders one column."""
+class TestSavedComparativeStatements:
+  """``get_statement`` on a comparative report renders every column; each
+  column's cash flow is derived from its own opening balances."""
 
   def _report(self, comparative: bool):
     report = MagicMock()
@@ -525,7 +477,7 @@ class TestSavedCashFlowRendersCurrentOnly:
     return report
 
   @pytest.mark.unit
-  def test_comparative_cash_flow_renders_the_current_period(self):
+  def test_comparative_cash_flow_renders_both(self):
     session = MagicMock()
     session.get.return_value = self._report(comparative=True)
     session.execute.return_value = iter([])
@@ -539,7 +491,7 @@ class TestSavedCashFlowRendersCurrentOnly:
     )
 
     assert resp is not None
-    assert [p.label for p in resp.periods] == ["Current"]
+    assert [p.label for p in resp.periods] == ["Current", "Prior"]
 
   @pytest.mark.unit
   def test_comparative_balance_sheet_renders_both(self):
@@ -644,9 +596,9 @@ class TestLiveStatementValidation:
     assert resp.validation.failures == []
 
   @pytest.mark.unit
-  def test_cash_flow_validates_only_the_rendered_column(self):
-    """The prior period rides the pivot as the delta basis and is not a
-    statement; its plug must not be reported against the rendered column."""
+  def test_cash_flow_validates_every_column(self):
+    """Each column is a real statement now, so a loud plug in the prior
+    column is reported like one in the current column."""
     op = "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
     plug = "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
     grid = MagicMock()
@@ -657,11 +609,10 @@ class TestLiveStatementValidation:
     ]
     resp = _live(MagicMock(), "cash_flow_statement", grid)
 
-    assert [p.label for p in resp.periods] == ["Current"]
+    assert [p.label for p in resp.periods] == ["Current", "Prior"]
     assert resp.validation is not None
-    assert resp.validation.status == "passed"
     assert "operating_plug" in resp.validation.checks
-    assert not any("Other operating capital" in w for w in resp.validation.warnings)
+    assert any("Other operating capital" in w for w in resp.validation.warnings)
 
   @pytest.mark.unit
   def test_cash_flow_plug_in_the_rendered_column_warns(self):

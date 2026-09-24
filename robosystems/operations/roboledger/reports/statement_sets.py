@@ -16,7 +16,6 @@ except the leaf ``_guards`` module.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, text
@@ -453,23 +452,15 @@ def stamp_canonical_statement_sets(
     return StatementStampResult(stamped=False, note="no_taxonomy")
 
   period_label = period_end.strftime("%Y-%m")
-  # The prior month rides the pivot only as the indirect cash flow's delta
-  # basis (the derivation no-ops below two periods); its facts are dropped.
-  prior_end = period_start - timedelta(days=1)
-  prior_start = prior_end.replace(day=1)
   try:
     close_target = load_close_target_concept(session, reporting_style_id)
     facts = generate_report_facts(
       session=session,
       taxonomy_id=taxonomy_row.id,
       mapping_id=mapping.id,
-      periods=[
-        PeriodSpec(start=prior_start, end=prior_end, label=prior_end.strftime("%Y-%m")),
-        PeriodSpec(start=period_start, end=period_end, label=period_label),
-      ],
+      periods=[PeriodSpec(start=period_start, end=period_end, label=period_label)],
       close_target_qname=close_target,
     )
-    facts.facts = [f for f in facts.facts if f.period_end == period_end]
     retract_canonical_statement_sets(
       session, period_start=period_start, period_end=period_end
     )
