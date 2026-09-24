@@ -657,12 +657,80 @@ class TestFindGuardedStringMatch:
   @pytest.mark.parametrize(
     "query",
     [
+      # A rebound node keeps its label.
+      "MATCH (f:Fact) WITH f AS g WHERE g.uri CONTAINS 'a' RETURN g",
+      # Any function that reads the text, in a predicate.
+      "MATCH (f:Fact) WHERE size(regexp_extract_all(f.value, 'g')) > 0 RETURN f",
+      "MATCH (f:Fact) WHERE regexp_extract(f.value, 'g') <> '' RETURN f",
+      "MATCH (f:Fact) WHERE regexp_replace(f.value, 'g', '') <> f.value RETURN f",
+      "MATCH (f:Fact) WHERE size(regexp_split_to_array(f.value, 'g')) > 1 RETURN f",
+      "MATCH (f:Fact) WHERE list_contains(string_split(f.value, ' '), 'g') RETURN f",
+      "MATCH (f:Fact) WHERE levenshtein(f.value, 'goodwill') < 3 RETURN f",
+      "MATCH (f:Fact) WHERE substring(f.value, 1, 8) = 'goodwill' RETURN f",
+      # A derived alias used in a predicate.
+      (
+        "MATCH (f:Fact) WITH f, regexp_extract(f.value, 'g') AS r "
+        "WHERE r <> '' RETURN f"
+      ),
+      # List-comprehension, quantifier and lambda variables.
+      "MATCH (f:Fact) WHERE any(x IN [f.value] WHERE x CONTAINS 'g') RETURN f",
+      "MATCH (f:Fact) RETURN [x IN [f.value] WHERE x CONTAINS 'g'] LIMIT 5",
+      "MATCH (f:Fact) RETURN list_filter([f.value], x -> x CONTAINS 'g') LIMIT 5",
+      # A function-derived alias read again, outside any WHERE (PR #1508).
+      (
+        "MATCH (f:Fact) WITH f, regexp_extract(f.value, 'p') <> '' AS hit "
+        "RETURN f.identifier, hit"
+      ),
+      # A CASE WHEN condition is a predicate.
+      (
+        "MATCH (f:Fact) "
+        "RETURN CASE WHEN regexp_extract(f.value, 'p') <> '' THEN 1 ELSE 0 END AS x"
+      ),
+      # A name reused across UNION or WITH still resolves to the Fact label.
+      (
+        "MATCH (f:Element) RETURN f.name AS n LIMIT 1 UNION "
+        "MATCH (g:Fact) WITH g AS f WHERE f.value CONTAINS 'g' RETURN f.uri AS n"
+      ),
+      (
+        "MATCH (f:Element) WITH f LIMIT 1 MATCH (g:Fact) WITH g AS f "
+        "WHERE f.value CONTAINS 'g' RETURN f"
+      ),
+    ],
+  )
+  def test_scan_shapes_are_refused(self, query):
+    match = find_guarded_string_match(query, self.GUARDED)
+    assert match is not None, query
+    assert match.label_resolved is True
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      # Returning the text, even through a function, is not a scan predicate.
+      "MATCH (f:Fact) WHERE f.identifier = $id RETURN substring(f.value, 0, 200)",
+      "MATCH (f:Fact) WHERE f.identifier = $id RETURN f.value, size(f.value)",
+      # Bare comparisons and null checks.
+      "MATCH (f:Fact) WHERE f.value = $v RETURN f.identifier LIMIT 5",
+      "MATCH (f:Fact) WHERE f.value IS NOT NULL RETURN f.identifier LIMIT 5",
+      # Functions over other properties, beside a guarded one.
+      "MATCH (f:Fact) WHERE lower(f.identifier) = 'x' RETURN f.value LIMIT 5",
+      # A rebound node of an unguarded label.
+      "MATCH (e:Element) WITH e AS x WHERE lower(x.uri) CONTAINS 'us-gaap' RETURN x",
+      # A CASE WHEN over another property, returning the guarded one.
+      "MATCH (f:Fact) RETURN CASE WHEN f.identifier = 'x' THEN f.value END LIMIT 5",
+      # A lambda over something else.
+      "MATCH (f:Fact) RETURN list_filter([1, 2], x -> x > 1), f.value LIMIT 5",
+    ],
+  )
+  def test_reads_that_do_not_scan_are_served(self, query):
+    assert find_guarded_string_match(query, self.GUARDED) is None
+
+  @pytest.mark.parametrize(
+    "query",
+    [
       # No label on the pattern.
       "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f) WHERE f.value CONTAINS 'a' RETURN f",
       # A backtick-quoted label is masked.
       "MATCH (f:`Fact`) WHERE f.value CONTAINS 'a' RETURN f",
-      # Rebound through WITH.
-      "MATCH (f:Fact) WITH f AS g WHERE g.uri CONTAINS 'a' RETURN g",
     ],
   )
   def test_unresolved_label_falls_back_to_the_property_name(self, query):
