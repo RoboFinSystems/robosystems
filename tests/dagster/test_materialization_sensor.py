@@ -118,6 +118,27 @@ class TestStaleGraphSensor:
 
     assert len(result) == 1
 
+  def test_retry_after_expiry_uses_a_new_run_key(self):
+    """Dagster dedupes on run_key, so a retry that reuses it never runs."""
+    stale_at = datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
+    first_tick = stale_at + timedelta(minutes=1)
+    retry_tick = first_tick + timedelta(hours=3)
+    graphs = [_make_graph("kg123", stale_at=stale_at)]
+
+    def tick(now, cursor=None):
+      with (
+        patch("robosystems.dagster.sensors.materialization.db_session_factory") as db,
+        patch("robosystems.dagster.sensors.materialization._now", return_value=now),
+      ):
+        db.return_value.query.return_value.filter.return_value.all.return_value = graphs
+        context = build_sensor_context(cursor=cursor)
+        return list(stale_graph_materialization_sensor(context)), context.cursor
+
+    (first,), cursor = tick(first_tick)
+    (retry,), _ = tick(retry_tick, cursor)
+
+    assert first.run_key != retry.run_key
+
   def test_handles_multiple_stale_graphs(self):
     stale_at = datetime.now(UTC) - timedelta(seconds=120)
     graphs = [

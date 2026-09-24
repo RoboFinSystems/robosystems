@@ -1,6 +1,7 @@
 """Sensor that rematerializes stale entity graphs, batching bursts of OLTP writes."""
 
 import json
+from datetime import UTC, datetime, timedelta
 
 from dagster import (
   DefaultSensorStatus,
@@ -23,6 +24,10 @@ _MIN_STALE_AGE_SECONDS = 30
 _CURSOR_EXPIRY_SECONDS = 7200  # 2 hours
 
 
+def _now() -> datetime:
+  return datetime.now(UTC)
+
+
 @sensor(
   job=extensions_materialize_job,
   minimum_interval_seconds=60,
@@ -34,13 +39,11 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
 
   Only entity graphs have extensions OLTP. Graphs already in the cursor are skipped.
   """
-  from datetime import UTC, datetime, timedelta
-
   from robosystems.models.core.graph import Graph
 
   db = db_session_factory()
   try:
-    now = datetime.now(UTC)
+    now = _now()
     cutoff = now - timedelta(seconds=_MIN_STALE_AGE_SECONDS)
 
     # Cursor: {graph_id: submitted_at_iso} for in-progress materializations.
@@ -86,10 +89,13 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
         logger.debug(f"Skipping {graph_id}: materialization already in progress")
         continue
 
-      # run_key on graph_stale_at dedupes per staleness event, not per tick.
+      # One run per staleness event per expiry window: the cursor blocks
+      # resubmission inside a window, and the window index lets a failed run
+      # retry once its entry expires instead of deduping against itself.
       stale_at_str = (
         graph.graph_stale_at.isoformat() if graph.graph_stale_at else "unknown"
       )
+      window = int(now.timestamp() // _CURSOR_EXPIRY_SECONDS)
 
       logger.info(
         f"Submitting materialization for stale graph {graph_id} "
@@ -98,7 +104,7 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
 
       run_requests.append(
         RunRequest(
-          run_key=f"stale_materialize_{graph_id}_{stale_at_str}",
+          run_key=f"stale_materialize_{graph_id}_{stale_at_str}_{window}",
           run_config={
             "ops": {
               "materialize_extensions_to_graph": {
