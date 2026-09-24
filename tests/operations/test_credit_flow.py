@@ -96,26 +96,6 @@ class TestCreditServiceFlow:
     )
     assert result["has_sufficient_credits"] is False
 
-  def test_get_subscription_tier_limits(self, test_db):
-    """Get limits for each subscription tier."""
-    service = CreditService(test_db)
-    for tier in ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]:
-      limits = service.get_subscription_tier_limits(tier)
-      assert limits["subscription_tier"] == tier
-      assert limits["monthly_credits"] > 0
-      assert len(limits["allowed_graph_tiers"]) > 0
-
-  def test_upgrade_graph_tier_not_supported(self, test_db, test_graph_with_credits):
-    """Graph tier upgrades are not supported."""
-    from robosystems.config.graph_tier import GraphTier
-
-    graph = test_graph_with_credits["graph"]
-    service = CreditService(test_db)
-    result = service.upgrade_graph_tier(
-      graph.graph_id, GraphTier.LADYBUG_LARGE, "ladybug-large"
-    )
-    assert result["success"] is False
-
   def test_can_create_graph_tier_validation(self, test_db):
     """Subscription tier restricts which graph tiers can be created."""
     from robosystems.config.graph_tier import GraphTier
@@ -151,13 +131,6 @@ class TestCreditServiceFlow:
     )
     assert result["success"] is True
     assert result["credits_added"] == 500.0
-
-  def test_get_credit_transactions(self, test_db, test_graph_with_credits):
-    """Get credit transactions for a graph."""
-    graph = test_graph_with_credits["graph"]
-    service = CreditService(test_db)
-    transactions = service.get_credit_transactions(graph.graph_id)
-    assert isinstance(transactions, list)
 
   def test_consume_ai_tokens(self, test_db, test_graph_with_credits):
     """Consume credits based on AI token usage."""

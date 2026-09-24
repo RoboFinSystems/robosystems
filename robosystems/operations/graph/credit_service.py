@@ -32,10 +32,8 @@ from ...models.core import (
   GraphCredits,
   GraphCreditTransaction,
   GraphUsage,
-  GraphUser,
 )
 from ...models.core.graph.graph_credits import CreditTransactionType
-from ...models.core.user.user_repository import UserRepository
 from ...models.core.user.user_repository_credits import (
   UserRepositoryCredits,
   UserRepositoryCreditTransaction,
@@ -507,38 +505,6 @@ class CreditService:
       "new_balance": float(credits.current_balance),
     }
 
-  def get_credit_transactions(
-    self,
-    graph_id: str,
-    transaction_type: CreditTransactionType | None = None,
-    limit: int = 100,
-  ) -> list[dict[str, Any]]:
-    """Ledger entries for the graph's pool, newest first."""
-    parent_graph_id = self._get_parent_graph_id(graph_id)
-
-    credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
-    if not credits:
-      return []
-
-    transactions = GraphCreditTransaction.get_transactions_for_graph(
-      graph_credits_id=credits.id,
-      transaction_type=transaction_type,
-      limit=limit,
-      session=self.session,
-    )
-
-    return [
-      {
-        "id": t.id,
-        "type": t.transaction_type,
-        "amount": float(t.amount),
-        "description": t.description,
-        "metadata": t.get_metadata(),
-        "created_at": t.created_at.isoformat(),
-      }
-      for t in transactions
-    ]
-
   def check_credit_balance(
     self,
     graph_id: str,
@@ -639,81 +605,6 @@ class CreditService:
       "repository_type": "graph",
     }
 
-  def get_subscription_tier_limits(self, subscription_tier: str) -> dict[str, Any]:
-    """Get limits and features for a subscription tier."""
-    allowed_tiers = {
-      "ladybug-standard": [GraphTier.LADYBUG_STANDARD],
-      "ladybug-large": [GraphTier.LADYBUG_STANDARD, GraphTier.LADYBUG_LARGE],
-      "ladybug-xlarge": [
-        GraphTier.LADYBUG_STANDARD,
-        GraphTier.LADYBUG_LARGE,
-        GraphTier.LADYBUG_XLARGE,
-      ],
-    }
-
-    plan_config = BillingConfig.get_subscription_plan(subscription_tier)
-
-    from robosystems.config.graph_tier import GraphTierConfig
-
-    backup_limits = GraphTierConfig.get_backup_limits(subscription_tier)
-
-    return {
-      "subscription_tier": subscription_tier,
-      "monthly_price": plan_config["base_price_cents"] / 100 if plan_config else 0,
-      "monthly_credits": plan_config["monthly_credit_allocation"] if plan_config else 0,
-      "allowed_graph_tiers": [
-        tier.value for tier in allowed_tiers.get(subscription_tier, [])
-      ],
-      "features": {
-        "backup_retention_days": backup_limits.get("backup_retention_days", 0),
-        "priority_support": plan_config["priority_support"] if plan_config else False,
-        "storage_included": True,
-      },
-    }
-
-  def upgrade_graph_tier(
-    self, graph_id: str, new_tier: GraphTier, user_subscription_tier: str
-  ) -> dict[str, Any]:
-    """Always refuses. A graph's tier is fixed at creation.
-
-    Kept as the explicit answer to "can I change a tier in place?"; use the
-    change-tier operation, which provisions a new graph.
-    """
-    return {
-      "success": False,
-      "error": "Graph tier upgrades are not supported",
-      "message": "Each graph tier is architecturally optimized and cannot be changed after creation",
-    }
-
-  def _get_consumed_this_month(self, graph_id: str) -> Decimal:
-    """Sum of this calendar month's consumption, as a positive number."""
-    from datetime import datetime
-
-    from sqlalchemy import func
-
-    now = datetime.now(UTC)
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-    parent_graph_id = self._get_parent_graph_id(graph_id)
-
-    credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
-    if not credits:
-      return Decimal("0")
-
-    result = (
-      self.session.query(func.sum(GraphCreditTransaction.amount))
-      .filter(
-        GraphCreditTransaction.graph_credits_id == credits.id,
-        GraphCreditTransaction.transaction_type
-        == CreditTransactionType.CONSUMPTION.value,
-        GraphCreditTransaction.created_at >= month_start,
-      )
-      .scalar()
-    )
-
-    # Consumption rows are stored negative.
-    return abs(result) if result else Decimal("0")
-
   def _can_create_graph_tier(
     self, subscription_tier: str, graph_tier: GraphTier
   ) -> bool:
@@ -775,22 +666,6 @@ class CreditService:
       "total_credits_allocated": float(total_credits),
       "allocation_date": now.isoformat(),
     }
-
-  def get_all_credit_summaries(self, user_id: str) -> list[dict[str, Any]]:
-    """Get credit summaries for all graphs owned by a user."""
-    user_graphs = (
-      self.session.query(GraphUser).filter(GraphUser.user_id == user_id).all()
-    )
-
-    summaries = []
-    for user_graph in user_graphs:
-      summary = self.get_credit_summary(user_graph.graph_id)
-      if "error" not in summary:
-        summary["graph_name"] = user_graph.graph.graph_name
-        summary["role"] = user_graph.role
-        summaries.append(summary)
-
-    return summaries
 
   def consume_shared_repository_credits(
     self,
@@ -881,24 +756,6 @@ class CreditService:
         result["drained_to_zero"] = True
         result["shortfall"] = float(base_cost) - float(drained)
       return result
-
-  def get_shared_repository_summary(self, user_id: str) -> dict[str, Any]:
-    """Every repository pool the user holds, keyed by repository type."""
-    access_records = UserRepository.get_user_repositories(user_id, self.session)
-
-    summaries = {}
-    for access_record in access_records:
-      if access_record.user_credits:
-        repo_type = access_record.repository_type
-        summaries[repo_type] = {
-          "access_id": access_record.id,
-          "repository_type": access_record.repository_type,
-          "subscription_tier": access_record.repository_plan,
-          "access_level": access_record.access_level.value,
-          "credits": access_record.user_credits.get_summary(),
-        }
-
-    return summaries
 
   def check_shared_repository_access(
     self,

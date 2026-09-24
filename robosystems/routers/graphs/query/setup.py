@@ -8,16 +8,7 @@ from robosystems.middleware.graph.query_queue import get_query_queue
 from robosystems.middleware.graph.router import GraphRouter
 from robosystems.middleware.robustness import CircuitBreakerManager
 
-
-def _get_query_operation_type(graph_id: str) -> str:
-  """User graphs route to the writer ('write'); shared repositories and their
-  subgraphs to readers ('read')."""
-  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
-
-  if is_shared_repository_or_subgraph(graph_id):
-    return "read"
-  else:
-    return "write"
+from .handlers import get_query_operation_type
 
 
 def setup_query_executor():
@@ -31,7 +22,7 @@ def setup_query_executor():
     """Execute a queued query, returning results plus metadata."""
     try:
       graph_router = GraphRouter()
-      operation_type = _get_query_operation_type(graph_id)
+      operation_type = get_query_operation_type(graph_id)
       repository = await graph_router.get_repository(graph_id, operation_type)
 
       if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(

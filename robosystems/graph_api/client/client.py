@@ -789,53 +789,6 @@ class GraphClient(BaseGraphClient):
     )
     return response.json()
 
-  async def ingest(
-    self,
-    graph_id: str,
-    file_path: str | None = None,
-    table_name: str | None = None,
-    pipeline_run_id: str | None = None,
-    bucket: str | None = None,
-    files: list[str] | None = None,
-    mode: str = "sync",
-    priority: int = 5,
-    ignore_errors: bool = True,
-  ) -> dict[str, Any]:
-    """Ingest data, either inline or as a queued background task.
-
-    ``mode="sync"`` ingests a local file and requires ``file_path`` and
-    ``table_name``; ``mode="async"`` queues an S3 batch and requires
-    ``pipeline_run_id``, ``bucket`` and ``files``. Sync mode gets 30x the
-    configured timeout because it blocks on the load itself.
-    """
-    payload = {
-      "mode": mode,
-      "priority": priority,
-      "ignore_errors": ignore_errors,
-    }
-
-    if mode == "sync":
-      if not file_path or not table_name:
-        raise ValueError("Sync mode requires file_path and table_name")
-      payload["file_path"] = file_path
-      payload["table_name"] = table_name
-    else:  # async
-      if not pipeline_run_id or not bucket or not files:
-        raise ValueError("Async mode requires pipeline_run_id, bucket, and files")
-      payload["pipeline_run_id"] = pipeline_run_id
-      payload["bucket"] = bucket
-      payload["files"] = files
-
-    timeout = self.config.timeout * 30 if mode == "sync" else self.config.timeout
-
-    response = await self._request(
-      "POST",
-      f"/databases/{graph_id}/ingest",
-      json_data=payload,
-      timeout=timeout,
-    )
-    return response.json()
-
   async def get_task_status(self, task_id: str) -> dict[str, Any]:
     """Get background task status."""
     response = await self._request("GET", f"/tasks/{task_id}/status")
@@ -850,16 +803,6 @@ class GraphClient(BaseGraphClient):
       params["status"] = status
 
     response = await self._request("GET", "/tasks", params=params)
-    return response.json()
-
-  async def cancel_task(self, task_id: str) -> dict[str, Any]:
-    """Cancel a pending task."""
-    response = await self._request("DELETE", f"/tasks/{task_id}")
-    return response.json()
-
-  async def get_queue_info(self) -> dict[str, Any]:
-    """Get ingestion queue information."""
-    response = await self._request("GET", "/tasks/queue/info")
     return response.json()
 
   # APIRepository-compatible surface
@@ -1109,11 +1052,6 @@ class GraphClient(BaseGraphClient):
       "POST", f"/databases/{graph_id}/schema", json_data=payload
     )
     return response.json()
-
-  async def export_database(self, graph_id: str) -> bytes:
-    """Export a database file and return its raw bytes."""
-    response = await self._request("GET", f"/databases/{graph_id}/backup")
-    return response.content
 
   async def get_storage_breakdown(self, graph_id: str) -> dict[str, Any]:
     """Get itemized disk usage for a graph and everything it owns.

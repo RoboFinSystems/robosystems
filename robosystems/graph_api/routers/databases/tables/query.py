@@ -51,12 +51,11 @@ async def query_tables(
   - `streaming=true`: Force streaming (NDJSON or SSE based on Accept header)
 
   **When to use streaming:**
-  - Queries on external tables (reading from thousands of S3 files)
   - Queries returning > 10,000 rows
-  - Long-running aggregations over S3 data
+  - Long-running aggregations over large staging tables
 
-  **Note:** External tables query S3 directly and can take minutes for thousands of files.
-  Use streaming to get progressive results. For repeated queries, ingest data into LadybugDB graph.
+  Staging tables are DuckDB tables loaded from the uploaded S3 files; queries
+  read the local DuckDB copy, not S3.
   """
   start_time = datetime.now(UTC)
 

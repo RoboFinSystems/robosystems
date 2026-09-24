@@ -1,16 +1,9 @@
 """Subgraph ID parsing and validation (`{parent}_{name}`)."""
 
 import re
-from enum import Enum
 from typing import NamedTuple
 
 from ..types import SUBGRAPH_NAME_PATTERN as SUBGRAPH_NAME_PATTERN_STR
-
-
-class SubgraphType(Enum):
-  """Unused; the live SubgraphType is in models/api/graphs/subgraphs.py."""
-
-  STATIC = "static"
 
 
 class SubgraphInfo(NamedTuple):
@@ -93,11 +86,6 @@ def construct_subgraph_id(parent_graph_id: str, subgraph_name: str) -> str:
     )
 
   return f"{parent_graph_id}_{subgraph_name}"
-
-
-def get_database_name(graph_id: str) -> str:
-  """The on-disk database name, which is the graph ID for graphs and subgraphs."""
-  return graph_id
 
 
 def split_graph_hierarchy(graph_id: str) -> tuple[str, str | None]:

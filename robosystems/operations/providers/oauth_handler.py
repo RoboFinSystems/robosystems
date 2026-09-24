@@ -302,7 +302,3 @@ class OAuthHandler:
         expires_at=expires_at,
       )
       logger.info(f"Created OAuth tokens for connection {connection_id}")
-
-  async def validate_connection(self, access_token: str) -> bool:
-    """Only checks that a token is present."""
-    return bool(access_token)

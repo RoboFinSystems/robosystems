@@ -185,7 +185,7 @@ class TestTrackedAIClient:
 
   @pytest.mark.asyncio
   async def test_with_real_credit_consumer(self, mock_ai_client):
-    """SessionCreditConsumer is called with correct args."""
+    """The credit consumer is called with correct args."""
     consumer = MagicMock()
     consumer.consume = AsyncMock(return_value=5.0)
 
@@ -346,21 +346,6 @@ class TestProgress:
   async def test_noop_progress(self):
     progress = NoOpProgress()
     await progress.report("test", percent=50)
-    assert not await progress.is_cancelled()
-
-  @pytest.mark.asyncio
-  async def test_callback_progress(self):
-    from robosystems.operations.operators.progress import CallbackProgress
-
-    calls = []
-
-    def callback(msg, pct, detail):
-      return calls.append((msg, pct))
-
-    progress = CallbackProgress(callback)
-    await progress.report("step 1", percent=25)
-    assert len(calls) == 1
-    assert calls[0] == ("step 1", 25)
     assert not await progress.is_cancelled()
 
 

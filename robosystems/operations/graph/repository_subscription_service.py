@@ -188,54 +188,6 @@ class RepositorySubscriptionService:
       logger.error(f"Failed to create repository subscription: {e}")
       raise
 
-  def upgrade_repository_subscription(
-    self,
-    user_id: str,
-    repository_type: RepositoryType,
-    new_plan: str,
-  ) -> UserRepository:
-    """Move an existing subscription to a different plan.
-
-    Raises ValueError when there is no subscription, the repository has since
-    been disabled, or the plan is not offered for it.
-    """
-    access_record = UserRepository.get_by_user_and_repository(
-      user_id=user_id, repository_name=repository_type.value, session=self.session
-    )
-
-    if not access_record:
-      raise ValueError(f"No subscription found for repository {repository_type.value}")
-
-    if not _is_repository_enabled(repository_type.value):
-      raise ValueError(f"Repository {repository_type.value} is no longer available")
-
-    available_plans = get_available_plans_for_repository(repository_type)
-    if new_plan not in available_plans:
-      raise ValueError(
-        f"Plan {new_plan} not available for repository {repository_type.value}"
-      )
-
-    plan_details = _get_plan_details(new_plan, repo_id=repository_type.value)
-    if not plan_details:
-      raise ValueError(f"Repository {repository_type.value} configuration not found")
-    new_price_cents = int(plan_details["price_monthly"] * 100)
-
-    try:
-      access_record.upgrade_tier(
-        new_plan=new_plan, session=self.session, new_price_cents=new_price_cents
-      )
-
-      logger.info(
-        f"Upgraded repository subscription for user {user_id}, "
-        f"repository {repository_type.value} to plan {new_plan}"
-      )
-      return access_record
-
-    except SQLAlchemyError as e:
-      self.session.rollback()
-      logger.error(f"Failed to upgrade repository subscription: {e}")
-      raise
-
   def cancel_repository_subscription(
     self,
     user_id: str,
@@ -262,47 +214,6 @@ class RepositorySubscriptionService:
       self.session.rollback()
       logger.error(f"Failed to cancel repository subscription: {e}")
       raise
-
-  def get_user_repository_subscriptions(
-    self, user_id: str, active_only: bool = True
-  ) -> list[UserRepository]:
-    """List a user's repository subscriptions."""
-    return list(
-      UserRepository.get_user_repositories(
-        user_id=user_id, session=self.session, active_only=active_only
-      )
-    )
-
-  def get_repository_credits_summary(
-    self, user_id: str, repository_type: RepositoryType | None = None
-  ) -> dict:
-    """Credit balances for one repository, or a roll-up across all of them.
-
-    The per-repository shape is `UserRepositoryCredits.get_summary()`; the
-    roll-up shape is `{repositories, total_credits, total_subscriptions}`.
-    """
-    if repository_type:
-      credits = UserRepositoryCredits.get_user_repository_credits(
-        user_id=user_id, repository_type=repository_type.value, session=self.session
-      )
-      return credits.get_summary() if credits else {}
-    else:
-      access_records = self.get_user_repository_subscriptions(user_id, active_only=True)
-      summary = {
-        "repositories": [],
-        "total_credits": 0,
-        "total_subscriptions": len(access_records),
-      }
-
-      for access_record in access_records:
-        if access_record.user_credits:
-          credit_info = access_record.user_credits.get_summary()
-          credit_info["repository_type"] = access_record.repository_type
-          credit_info["repository_plan"] = access_record.repository_plan
-          summary["repositories"].append(credit_info)
-          summary["total_credits"] += credit_info["current_balance"]
-
-      return summary
 
   def allocate_credits(
     self,

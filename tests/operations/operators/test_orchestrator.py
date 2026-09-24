@@ -1,10 +1,5 @@
-"""Test suite for agent orchestrator and routing logic.
+"""Tests for operator selection: config, and confidence-ranked recommendations."""
 
-Tests dynamic agent selection, routing, and multi-agent coordination.
-Uses the new unified Operator protocol.
-"""
-
-import asyncio
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -14,14 +9,12 @@ from robosystems.models.core import User
 from robosystems.operations.operators.base import (
   Operator,
   OperatorCapability,
-  OperatorMode,
   OperatorResult,
   OperatorSpec,
 )
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.orchestrator import (
   OperatorOrchestrator,
-  OperatorSelectionCriteria,
   OrchestratorConfig,
   RoutingStrategy,
 )
@@ -34,26 +27,6 @@ class TestRoutingStrategy:
     assert RoutingStrategy.CAPABILITY_BASED.value == "capability_based"
     assert RoutingStrategy.LOAD_BALANCED.value == "load_balanced"
     assert RoutingStrategy.ENSEMBLE.value == "ensemble"
-
-
-class TestOperatorSelectionCriteria:
-  def test_criteria_creation(self):
-    criteria = OperatorSelectionCriteria(
-      min_confidence=0.7,
-      required_capabilities=[OperatorCapability.FINANCIAL_ANALYSIS],
-      preferred_mode=OperatorMode.STANDARD,
-      max_response_time=30.0,
-    )
-    assert criteria.min_confidence == 0.7
-    assert OperatorCapability.FINANCIAL_ANALYSIS in criteria.required_capabilities
-    assert criteria.preferred_mode == OperatorMode.STANDARD
-
-  def test_criteria_defaults(self):
-    criteria = OperatorSelectionCriteria()
-    assert criteria.min_confidence == 0.3
-    assert criteria.required_capabilities == []
-    assert criteria.preferred_mode is None
-    assert criteria.max_response_time == 60.0
 
 
 class TestOrchestratorConfig:
@@ -188,31 +161,6 @@ class TestOperatorOrchestrator:
     ):
       yield
 
-  @pytest.fixture(autouse=True)
-  def mock_run_operator_api(self):
-    """Patch run_operator_api to run agent directly without real tools/credits."""
-
-    async def _fake_run_operator_api(operator, graph_id, user, query, mode, **kwargs):
-      from robosystems.operations.operators.operator_context import OperatorContext
-      from robosystems.operations.operators.progress import NoOpProgress
-
-      ctx = OperatorContext(
-        graph_id=graph_id,
-        user_id=str(user.id),
-        query=query,
-        mode=mode,
-        history=kwargs.get("history") or [],
-        extra=kwargs.get("context") or {},
-        progress=NoOpProgress(),
-      )
-      return await operator.run(ctx)
-
-    with patch(
-      "robosystems.operations.operators.orchestrator.run_operator_api",
-      side_effect=_fake_run_operator_api,
-    ):
-      yield
-
   @pytest.fixture
   def orchestrator(self, mock_user):
     config = OrchestratorConfig(fallback_operator="rag")
@@ -228,125 +176,6 @@ class TestOperatorOrchestrator:
     assert orchestrator.user == mock_user
     assert orchestrator.config.routing_strategy == RoutingStrategy.CAPABILITY_BASED
 
-  @pytest.mark.asyncio
-  async def test_route_query_explicit_agent(self, orchestrator):
-    response = await orchestrator.route_query(
-      query="Test query", operator_type="financial", mode=OperatorMode.STANDARD
-    )
-    assert response.operator_name == "financial"
-    assert response.content == "financial response: Test query"
-    assert response.metadata["routing_strategy"] == "explicit"
-
-  @pytest.mark.asyncio
-  async def test_route_query_best_match(self, orchestrator):
-    response = await orchestrator.route_query(
-      query="Financial analysis needed", mode=OperatorMode.STANDARD
-    )
-    assert response.operator_name == "financial"
-    assert response.metadata["routing_strategy"] == "best_match"
-    assert "confidence_scores" in response.metadata
-
-  @pytest.mark.asyncio
-  async def test_route_query_with_fallback(self, orchestrator):
-    """Test fallback when no agent meets confidence threshold."""
-    criteria = OperatorSelectionCriteria(min_confidence=0.99)
-    response = await orchestrator.route_query(
-      query="Unknown query type",
-      mode=OperatorMode.STANDARD,
-      selection_criteria=criteria,
-    )
-    assert response.operator_name == "rag"
-    assert response.metadata["used_fallback"] is True
-
-  @pytest.mark.asyncio
-  async def test_route_query_capability_based(self, orchestrator):
-    orchestrator.config.routing_strategy = RoutingStrategy.CAPABILITY_BASED
-    criteria = OperatorSelectionCriteria(
-      required_capabilities=[OperatorCapability.DEEP_RESEARCH]
-    )
-    response = await orchestrator.route_query(
-      query="Research this topic",
-      mode=OperatorMode.EXTENDED,
-      selection_criteria=criteria,
-    )
-    assert response.operator_name == "research"
-    assert response.metadata["routing_strategy"] == "capability_based"
-
-  @pytest.mark.asyncio
-  async def test_route_query_with_history(self, orchestrator):
-    history = [
-      {"role": "user", "content": "Previous question"},
-      {"role": "assistant", "content": "Previous answer"},
-    ]
-    response = await orchestrator.route_query(
-      query="Follow-up question", history=history, mode=OperatorMode.STANDARD
-    )
-    assert response is not None
-    assert response.metadata.get("has_history") is True
-
-  @pytest.mark.asyncio
-  async def test_route_query_error_handling(self, orchestrator):
-    """Test error handling when agent raises an exception."""
-    with patch(
-      "robosystems.operations.operators.orchestrator.run_operator_api",
-      side_effect=Exception("Operator failed"),
-    ):
-      response = await orchestrator.route_query(
-        query="Test query", operator_type="financial", mode=OperatorMode.STANDARD
-      )
-      assert response.error_details is not None
-      assert "Operator failed" in response.error_details["message"]
-
-  @pytest.mark.asyncio
-  async def test_route_query_timeout(self, orchestrator):
-    orchestrator.config.timeout = 0.1
-
-    async def slow_run(*args, **kwargs):
-      await asyncio.sleep(1)
-      return OperatorResult(content="Too late")
-
-    with patch(
-      "robosystems.operations.operators.orchestrator.run_operator_api",
-      side_effect=slow_run,
-    ):
-      response = await orchestrator.route_query(
-        query="Test query", operator_type="financial", mode=OperatorMode.STANDARD
-      )
-      assert response.error_details is not None
-      assert "timeout" in response.error_details["message"].lower()
-
-  @pytest.mark.asyncio
-  async def test_ensemble_routing(self, orchestrator):
-    orchestrator.config.routing_strategy = RoutingStrategy.ENSEMBLE
-    response = await orchestrator.route_query(
-      query="Complex analysis needed", mode=OperatorMode.EXTENDED, ensemble_size=2
-    )
-    assert response.metadata["routing_strategy"] == "ensemble"
-    assert "ensemble_operators" in response.metadata
-    assert len(response.metadata["ensemble_operators"]) >= 2
-
-  @pytest.mark.asyncio
-  async def test_multi_agent_coordination(self, orchestrator):
-    response = await orchestrator.coordinate_operators(
-      query="Complex multi-part question",
-      operator_sequence=["rag", "financial", "research"],
-      mode=OperatorMode.EXTENDED,
-    )
-    assert response.metadata["coordination_type"] == "sequential"
-    assert len(response.metadata["operator_sequence"]) == 3
-    assert response.content is not None
-
-  @pytest.mark.asyncio
-  async def test_parallel_agent_execution(self, orchestrator):
-    response = await orchestrator.coordinate_operators(
-      query="Analyze from multiple perspectives",
-      operator_sequence=["financial", "research"],
-      mode=OperatorMode.STANDARD,
-      coordination_type="parallel",
-    )
-    assert response.metadata["coordination_type"] == "parallel"
-    assert "execution_time" in response.metadata
-
   def test_get_agent_recommendations(self, orchestrator):
     recommendations = orchestrator.get_operator_recommendations(
       query="Financial analysis of SEC filings"
@@ -354,99 +183,3 @@ class TestOperatorOrchestrator:
     assert len(recommendations) > 0
     assert recommendations[0]["operator_type"] == "financial"
     assert 0.0 <= recommendations[0]["confidence"] <= 1.0
-
-  @pytest.mark.asyncio
-  async def test_route_with_streaming(self, orchestrator):
-    response = await orchestrator.route_query(
-      query="Stream this response", mode=OperatorMode.STREAMING
-    )
-    assert response.mode_used == OperatorMode.STREAMING
-
-  @pytest.mark.asyncio
-  async def test_load_balanced_routing(self, orchestrator):
-    orchestrator.config.routing_strategy = RoutingStrategy.LOAD_BALANCED
-    responses = []
-    for _ in range(3):
-      response = await orchestrator.route_query(
-        query="Test query", mode=OperatorMode.QUICK
-      )
-      responses.append(response.operator_name)
-    assert len(set(responses)) > 1
-
-  @pytest.mark.asyncio
-  async def test_agent_metrics_collection(self, orchestrator):
-    await orchestrator.route_query(
-      query="Test query", operator_type="financial", mode=OperatorMode.STANDARD
-    )
-    metrics = orchestrator.get_metrics()
-    assert "financial" in metrics["operator_usage"]
-    assert metrics["operator_usage"]["financial"]["calls"] >= 1
-    assert metrics["total_queries"] >= 1
-
-  @pytest.mark.asyncio
-  async def test_credit_check_insufficient(self, mock_user):
-    """The orchestrator renders a refusal raised by the adapter.
-
-    The pre-flight itself moved into the execution adapters, because the SSE
-    and background-queue strategies bypass the orchestrator entirely. What
-    remains here is the sync path's graceful rendering — a body with an
-    INSUFFICIENT_CREDITS code rather than an error status. That the adapter
-    actually raises is asserted in
-    `tests/operations/operators/test_credit_preflight.py`.
-    """
-    from robosystems.operations.operators.credit_preflight import (
-      InsufficientOperatorCreditsError,
-    )
-
-    mock_db = Mock()
-    orchestrator = OperatorOrchestrator("test-graph", mock_user, mock_db)
-
-    with patch(
-      "robosystems.operations.operators.orchestrator.run_operator_api",
-      side_effect=InsufficientOperatorCreditsError(
-        operator_name="financial",
-        estimated_credits=10.0,
-        available_credits=5.0,
-      ),
-    ):
-      agent = FinancialOperator()
-      response = await orchestrator._execute_operator(
-        agent, "test query", OperatorMode.STANDARD, None, {}
-      )
-
-    assert "Insufficient credits" in response.content
-    assert response.error_details["code"] == "INSUFFICIENT_CREDITS"
-    assert response.error_details["required_credits"] == 10.0
-    assert response.error_details["available_credits"] == 5.0
-
-  @pytest.mark.asyncio
-  async def test_credit_check_passes(self, mock_user):
-    mock_db = Mock()
-    orchestrator = OperatorOrchestrator("test-graph", mock_user, mock_db)
-
-    with patch(
-      "robosystems.operations.graph.credit_service.CreditService"
-    ) as mock_credit_service:
-      mock_instance = Mock()
-      mock_credit_service.return_value = mock_instance
-      mock_instance.check_credit_balance.return_value = {
-        "has_sufficient_credits": True,
-        "estimated_credits": 10.0,
-        "available_credits": 100.0,
-      }
-
-      agent = FinancialOperator()
-      response = await orchestrator._execute_operator(
-        agent, "test query", OperatorMode.STANDARD, None, {}
-      )
-
-      assert "financial response" in response.content
-
-  @pytest.mark.asyncio
-  async def test_credit_check_skipped_for_non_credit_agents(self, mock_user):
-    orchestrator = OperatorOrchestrator("test-graph", mock_user, None)
-    agent = RagOperator()
-    response = await orchestrator._execute_operator(
-      agent, "test query", OperatorMode.QUICK, None, {}
-    )
-    assert "rag response" in response.content

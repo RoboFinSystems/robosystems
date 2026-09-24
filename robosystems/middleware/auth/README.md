@@ -313,8 +313,7 @@ TTLs come from `TuningConfig` (`get_cache_api_key_ttl()`,
 Valkey database numbers come from `config/valkey_registry.py` — never hardcode
 one.
 
-`cache_validator.py` re-checks cached entries against the database and refreshes
-stale ones. `distributed_lock.py` provides a Valkey-backed lock used to prevent
+`distributed_lock.py` provides a Valkey-backed lock used to prevent
 cache stampedes when many requests miss the same key at once.
 
 The cache is the reason a permission change may not take effect instantly.
@@ -342,13 +341,6 @@ required, at least 8 unique characters, a minimum strength score of 60, and a
 weak-pattern blocklist. Hashing is bcrypt at 14 rounds; passwords are truncated
 to bcrypt's 72-byte input explicitly so long passwords keep working under
 bcrypt 5.x.
-
-## Maintenance
-
-`maintenance.py` holds cleanup helpers, not request middleware:
-`cleanup_expired_api_keys` deactivates keys past their `expires_at`, and
-`cleanup_jwt_cache_expired` reports JWT cache statistics (JWT cache entries
-expire on their own via Valkey TTL).
 
 ## Configuration
 

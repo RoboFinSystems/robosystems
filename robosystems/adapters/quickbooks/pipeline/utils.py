@@ -2,7 +2,6 @@
 
 import json
 import tempfile
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +75,6 @@ def parse_journal_report(
   tx_type: str | None = None
   tx_id: str | None = None
   tx_li_num = 1
-  tx_total = 0.0
 
   for row in report["Rows"]["Row"]:
     if "Summary" in row:
@@ -84,7 +82,6 @@ def parse_journal_report(
       tx_type = None
       tx_id = None
       tx_li_num = 1
-      tx_total = 0.0
       continue
 
     col_data = row.get("ColData", [])
@@ -113,8 +110,6 @@ def parse_journal_report(
     credit_amt = float(credit_str) if credit_str else 0.0
     amount = debit_amt or credit_amt
     posting_type = "Debit" if debit_amt else "Credit"
-
-    tx_total += debit_amt
 
     account_id = col_data[5].get("id", "")
     account_name = col_data[5].get("value", "")
@@ -162,47 +157,6 @@ def parse_journal_report(
 
   logger.info(f"Parsed JournalReport: {len(entries)} transactions, {len(lines)} lines")
   return entries, lines
-
-
-def flatten_journal_lines(
-  journal_entries: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-  """One row per journal entry Line (debit or credit)."""
-  lines = []
-  for entry in journal_entries:
-    entry_id = str(entry.get("Id", ""))
-    for line_num, line in enumerate(entry.get("Line", []), start=1):
-      detail = line.get("JournalEntryLineDetail", {})
-      account_ref = detail.get("AccountRef", {}) or {}
-      department_ref = detail.get("DepartmentRef", {}) or {}
-      class_ref = detail.get("ClassRef", {}) or {}
-      location_ref = detail.get("LocationRef", {}) or {}
-
-      lines.append(
-        {
-          "journal_entry_id": entry_id,
-          "line_num": line_num,
-          "Amount": float(line.get("Amount", 0)),
-          "PostingType": detail.get("PostingType", ""),
-          "AccountRef_value": str(account_ref.get("value", "")),
-          "AccountRef_name": account_ref.get("name", ""),
-          "Description": line.get("Description", ""),
-          "DetailType": line.get("DetailType", ""),
-          "DepartmentRef_value": str(department_ref.get("value", ""))
-          if department_ref.get("value")
-          else "",
-          "DepartmentRef_name": department_ref.get("name", ""),
-          "ClassRef_value": str(class_ref.get("value", ""))
-          if class_ref.get("value")
-          else "",
-          "ClassRef_name": class_ref.get("name", ""),
-          "LocationRef_value": str(location_ref.get("value", ""))
-          if location_ref.get("value")
-          else "",
-          "LocationRef_name": location_ref.get("name", ""),
-        }
-      )
-  return lines
 
 
 def _flatten_address(addr: dict[str, Any] | None) -> dict[str, Any]:
@@ -432,38 +386,6 @@ def flatten_company_info(company_info_list: list) -> list[dict[str, Any]]:
       }
     )
   return rows
-
-
-def flatten_journal_entries(
-  journal_entries: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-  """Rows matching the raw_journal_entries schema."""
-  rows = []
-  for entry in journal_entries:
-    rows.append(
-      {
-        "Id": str(entry.get("Id", "")),
-        "TxnDate": entry.get("TxnDate", ""),
-        "DocNumber": entry.get("DocNumber", ""),
-        "TotalAmt": float(entry.get("TotalAmt", 0)),
-        "PrivateNote": entry.get("PrivateNote", ""),
-        "Adjustment": entry.get("Adjustment", False),
-      }
-    )
-  return rows
-
-
-def filter_entries_by_date(
-  journal_entries: list[dict[str, Any]],
-  lookback_days: int = 60,
-) -> list[dict[str, Any]]:
-  cutoff = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
-  filtered = [e for e in journal_entries if (e.get("TxnDate", "") or "") >= cutoff]
-  logger.info(
-    f"Filtered journal entries: {len(filtered)}/{len(journal_entries)} "
-    f"(cutoff: {cutoff})"
-  )
-  return filtered
 
 
 # Schemas for empty DataFrames: a zero-column parquet is unreadable by DuckDB.

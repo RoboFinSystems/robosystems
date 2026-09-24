@@ -29,15 +29,11 @@ async with await get_graph_client("kg1a2b3c4d5", operation_type="write") as clie
 ```
 
 `get_graph_client(graph_id, operation_type="read", environment=None, tier=None)`
-delegates to `GraphClientFactory.create_client`. Two other entry points exist:
+delegates to `GraphClientFactory.create_client`. One other entry point exists:
 
 - `get_graph_client_for_instance(instance_ip, api_key=None)` — bypasses routing
   entirely and connects to one instance. Used during allocation, when the graph
   isn't in the registry yet.
-- `get_graph_client_sync(...)` — for genuinely synchronous callers. It wraps
-  `asyncio.run`, so it **raises `RuntimeError` if an event loop is already
-  running**. The client it returns is still async: `async with`, `await`. It is
-  not a synchronous context manager.
 
 ## Routing
 
@@ -130,10 +126,6 @@ await client.health_check()
 await client.get_storage_breakdown(graph_id)
 await client.boost_memory(graph_id)      # and restore_memory / release_memory
 ```
-
-Note that `client.ingest()` posts to `/databases/{graph_id}/ingest`, which the
-service does not expose. Use the staging-table path — `create_table` →
-`query_table` → `materialize_table` — instead.
 
 ### Streaming
 

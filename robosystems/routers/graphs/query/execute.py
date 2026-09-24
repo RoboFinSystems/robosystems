@@ -66,9 +66,6 @@ from robosystems.models.core import User
 from robosystems.security.error_handling import safe_error_message
 
 from .handlers import (
-  get_query_operation_type,
-)
-from .handlers import (
   get_user_priority as get_user_priority_from_handler,
 )
 from .strategies import (
@@ -90,7 +87,6 @@ circuit_breaker = CircuitBreakerManager()
 
 
 _get_user_priority = get_user_priority_from_handler
-_get_query_operation_type = get_query_operation_type
 
 
 router = APIRouter()

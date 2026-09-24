@@ -409,7 +409,7 @@ def resync_library_into_tenant(
     raise RuntimeError(
       "resync_library_into_tenant must run inside a transaction that has "
       f"executed `{SET_LIBRARY_RESYNC}`; the immutability triggers reject the "
-      "DO UPDATE otherwise. Use operations/taxonomy_block/resync.py."
+      "DO UPDATE otherwise. Resync with a resync_library_into_tenant migration."
     )
 
   pin_values_sql, pin_params = _build_pin_clause(resolved_pin)

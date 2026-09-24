@@ -289,7 +289,7 @@ class TestGraphMCPTools:
     assert "query" in cypher_tool["inputSchema"]["properties"]
 
     schema_tool = next(t for t in definitions if t["name"] == "get-graph-schema")
-    assert "Get the complete database schema" in schema_tool["description"]
+    assert "Get the graph schema" in schema_tool["description"]
 
   @pytest.mark.unit
   def test_get_tool_definitions_with_roboledger(self, mock_graph_client):
@@ -347,8 +347,6 @@ class TestGraphMCPTools:
   async def test_call_tool_cypher_write_blocked(self, mock_graph_client):
     """Test that write operations are blocked."""
     mock_graph_client.graph_id = "test_graph"  # Add missing graph_id attribute
-    # Add the _is_read_only_query method to the mock
-    mock_graph_client._is_read_only_query = MagicMock(return_value=False)
 
     tools = GraphMCPTools(mock_graph_client)
 
@@ -380,32 +378,6 @@ class TestGraphMCPTools:
 
     result = await tools.call_tool("unknown-tool", {})
     assert "Unknown tool" in result
-
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_execute_cypher_tool(self, mock_graph_client):
-    """Test Cypher tool wrapper method."""
-    mock_graph_client.graph_id = "test_graph"  # Add missing graph_id attribute
-    mock_graph_client.execute_query.return_value = [{"count": 5}]
-
-    tools = GraphMCPTools(mock_graph_client)
-    result = await tools.execute_cypher_tool(
-      "MATCH (c:Entity) RETURN count(c) as count"
-    )
-
-    assert result[0]["count"] == 5
-
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_execute_schema_tool(self, mock_graph_client):
-    """Test schema tool wrapper method."""
-    mock_schema = [{"label": "Entity", "type": "node"}]
-    mock_graph_client.get_schema.return_value = mock_schema
-
-    tools = GraphMCPTools(mock_graph_client)
-    result = await tools.execute_schema_tool()
-
-    assert result == mock_schema
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -861,91 +833,6 @@ class TestGraphMCPErrorSanitization:
       assert "test.db" not in error_msg
       # Should get generic 500 error message instead
       assert "server error" in error_msg.lower()
-
-
-class TestGraphMCPReadOnlyValidation:
-  """Test the enhanced read-only query validation."""
-
-  @pytest.fixture
-  def mock_async_graph_client(self):
-    """Create a mock GraphClient."""
-    mock = AsyncMock()
-    return mock
-
-  @pytest.mark.unit
-  def test_read_only_validation_allows_valid_queries(self):
-    """Test that valid read-only queries are allowed."""
-    with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
-
-      valid_queries = [
-        "MATCH (n) RETURN n",
-        "MATCH (c:Entity) WHERE c.name = 'Apple' RETURN c",
-        "MATCH (c:Entity)-[:HAS_REPORT]->(r:Report) RETURN c, r",
-        "MATCH (n) WHERE n.created_at > date('2024-01-01') RETURN n",
-        "WITH 'test' as value MATCH (n) WHERE n.name = value RETURN n",
-        "MATCH (n) RETURN n ORDER BY n.created_at DESC LIMIT 10",
-        "MATCH (n) RETURN count(n) as total",
-        "CALL SHOW_TABLES() RETURN name, type",
-      ]
-
-      for query in valid_queries:
-        # Should not raise an exception
-        assert client._is_read_only_query(query), f"Query should be valid: {query}"
-
-  @pytest.mark.unit
-  def test_read_only_validation_blocks_write_queries(self):
-    """Test that write operations are blocked."""
-    with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
-
-      write_queries = [
-        "CREATE (n:Person {name: 'John'})",
-        "MATCH (n) SET n.name = 'NewName'",
-        "MATCH (n) DELETE n",
-        "MATCH (n) REMOVE n.property",
-        "MERGE (n:Entity {name: 'Test'})",
-        "DROP INDEX idx_name",
-        "CREATE INDEX idx_name FOR (n:Person) ON (n.name)",
-        "MATCH (a), (b) CREATE (a)-[:KNOWS]->(b)",
-        "CALL db.createLabel('NewLabel')",
-        "CALL apoc.refactor.rename.label('Old', 'New')",
-      ]
-
-      for query in write_queries:
-        assert not client._is_read_only_query(query), (
-          f"Query should be blocked: {query}"
-        )
-
-  @pytest.mark.unit
-  def test_read_only_validation_handles_edge_cases(self):
-    """Test edge cases and tricky patterns."""
-    with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
-
-      # These should be allowed (field names that look like keywords)
-      allowed_edge_cases = [
-        "MATCH (n) WHERE n.created_at > date('2024-01-01') RETURN n",
-        "MATCH (n) WHERE n.set_name = 'test' RETURN n",
-        "MATCH (n) WHERE n.delete_flag = false RETURN n",
-        "MATCH (n) RETURN n.created_at, n.updated_at",
-      ]
-
-      for query in allowed_edge_cases:
-        assert client._is_read_only_query(query), f"Query should be valid: {query}"
-
-      # These should be blocked (sneaky write attempts)
-      blocked_edge_cases = [
-        "MATCH (n) SET n.value = 123",  # SET with property
-        "match (n) create (m:Node) return n, m",  # lowercase keywords
-        "MATCH (n) /* comment */ DELETE n",  # with comments
-        "MATCH (a), (b) WHERE a.id = 1 AND b.id = 2 CREATE (a)-[:KNOWS]->(b)",
-      ]
-
-      for query in blocked_edge_cases:
-        assert not client._is_read_only_query(query), (
-          f"Query should be blocked: {query}"
-        )
 
 
 class TestGraphMCPAutoLimit:

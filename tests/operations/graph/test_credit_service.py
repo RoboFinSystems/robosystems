@@ -146,17 +146,13 @@ class TestCreditService:
           }
         )
 
-        # Mock _get_consumed_this_month to return 0
-        with patch.object(
-          credit_service, "_get_consumed_this_month", return_value=Decimal("0")
-        ):
-          # Consume AI credits
-          result = credit_service.consume_credits(
-            graph_id="graph123",
-            operation_type="agent_call",
-            base_cost=Decimal("100.0"),
-            metadata={"test": "data"},
-          )
+        # Consume AI credits
+        result = credit_service.consume_credits(
+          graph_id="graph123",
+          operation_type="agent_call",
+          base_cost=Decimal("100.0"),
+          metadata={"test": "data"},
+        )
 
         # Verify result
         assert result["success"] is True
@@ -380,20 +376,6 @@ class TestCreditService:
 
     # Test unknown operation (should return 0 in simplified model)
     assert get_operation_cost("unknown_op") == Decimal("0")
-
-  def test_upgrade_graph_tier(self, credit_service, mock_session):
-    """Test that graph tier upgrades are not supported."""
-    # Attempt to upgrade tier
-    result = credit_service.upgrade_graph_tier(
-      graph_id="graph123",
-      new_tier=GraphTier.LADYBUG_LARGE,
-      user_subscription_tier="enterprise",
-    )
-
-    # Verify result shows it's not supported
-    assert result["success"] is False
-    assert result["error"] == "Graph tier upgrades are not supported"
-    assert "architecturally optimized" in result["message"]
 
   def test_get_operation_cost_with_unknown_type(self):
     """Test get_operation_cost with unknown operation type."""
@@ -753,22 +735,6 @@ class TestSharedRepositoryPlanIsAPlainString:
 
     assert result["operation_included"] is True
     assert result["addon_tier"] == "starter"
-
-  def test_repository_summary_reports_the_plan_string(self, credit_service):
-    from robosystems.models.core.user.user_repository import RepositoryAccessLevel
-
-    record = MagicMock()
-    record.id = "ur_1"
-    record.repository_type = "sec"
-    record.repository_plan = "starter"
-    record.access_level = RepositoryAccessLevel.READ
-    record.user_credits.get_summary.return_value = {"balance": 1.0}
-    with patch("robosystems.operations.graph.credit_service.UserRepository") as mock_ur:
-      mock_ur.get_user_repositories.return_value = [record]
-      summary = credit_service.get_shared_repository_summary("user123")
-
-    assert summary["sec"]["subscription_tier"] == "starter"
-    assert summary["sec"]["access_level"] == "read"
 
 
 class TestCreditConsumptionWritesUsageLedger:

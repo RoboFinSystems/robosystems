@@ -10,7 +10,6 @@ from robosystems.middleware.mcp.client import GraphMCPClient
 from robosystems.models.api.graphs.mcp import MCPToolCall
 from robosystems.routers.graphs.mcp.handlers import MCPHandler
 from robosystems.routers.graphs.mcp.strategies import (
-  MCPClientDetector,
   MCPExecutionStrategy,
   MCPStrategySelector,
 )
@@ -53,53 +52,6 @@ def mock_mcp_handler(mock_mcp_client):
 
 class TestMCPStrategies:
   """Test MCP execution strategy selection."""
-
-  @pytest.mark.unit
-  def test_client_detection_claude(self):
-    """Test detecting Claude as the client."""
-    detector = MCPClientDetector()
-
-    # Headers need to be lowercase for the detector
-    headers = {"user-agent": "Claude-MCP/1.0"}
-    client_info = detector.detect_client_type(headers)
-    assert client_info["is_mcp_client"] is True
-
-    headers = {"user-agent": "Mozilla/5.0 Claude"}
-    client_info = detector.detect_client_type(headers)
-    # Not an MCP client just because it has Claude in user agent
-    assert "is_mcp_client" in client_info
-
-    headers = {"x-mcp-client": "claude"}
-    client_info = detector.detect_client_type(headers)
-    assert client_info["is_mcp_client"] is True
-
-  @pytest.mark.unit
-  def test_client_detection_cursor(self):
-    """Test detecting Cursor as the client."""
-    detector = MCPClientDetector()
-
-    headers = {"user-agent": "Cursor/1.0"}
-    client_info = detector.detect_client_type(headers)
-    # Cursor without 'mcp' is not an MCP client
-    assert client_info["is_mcp_client"] is False
-
-    headers = {"x-mcp-client": "cursor"}
-    client_info = detector.detect_client_type(headers)
-    assert client_info["is_mcp_client"] is True
-
-  @pytest.mark.unit
-  def test_client_detection_unknown(self):
-    """Test unknown client detection."""
-    detector = MCPClientDetector()
-
-    headers = {"user-agent": "Mozilla/5.0"}
-    client_info = detector.detect_client_type(headers)
-    assert client_info["is_mcp_client"] is False
-    assert client_info["is_browser"] is True
-
-    headers = {}
-    client_info = detector.detect_client_type(headers)
-    assert client_info["is_mcp_client"] is False
 
   @pytest.mark.unit
   def test_strategy_selection_for_claude(self):

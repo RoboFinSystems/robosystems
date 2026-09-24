@@ -76,9 +76,3 @@ def strip_html_tags(text: str) -> str:
   """Remove all HTML tags from text."""
   clean = re.compile("<.*?>")
   return re.sub(clean, "", text)
-
-
-def validate_api_key(api_key: str) -> bool:
-  """Validate API key format (shape only — this is not authentication)."""
-  pattern = r"^rsk_[a-zA-Z0-9]{60,}$"
-  return bool(re.match(pattern, api_key))

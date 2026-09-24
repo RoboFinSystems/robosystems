@@ -1,8 +1,7 @@
 """Tests for the MCP extension-gate helpers.
 
-`require_graph_extension_mcp` and `require_not_repository_mcp` are the
-call-time equivalents of the REST `require_graph_extension` dependency.
-Every MCP write tool goes through one of them, and the error codes
+`require_graph_extension_mcp` is the call-time equivalent of the REST
+`require_graph_extension` dependency. The error codes
 (`repository_write_forbidden`, `extension_not_provisioned`,
 `access_denied`) are the stable wire contract that agents branch on.
 
@@ -21,7 +20,6 @@ from robosystems.middleware.extensions import GraphExtensionContext
 from robosystems.middleware.mcp.tools._gate import (
   MCPExtensionGateError,
   require_graph_extension_mcp,
-  require_not_repository_mcp,
 )
 
 
@@ -141,33 +139,6 @@ class TestRequireGraphExtensionMCP:
         meta=None,
       )
     loader.assert_called_once_with("kg01ABC")
-    assert result is loaded
-
-
-# ── require_not_repository_mcp ────────────────────────────────────────────
-
-
-class TestRequireNotRepositoryMCP:
-  """Subset gate for tools that aren't extension-bound but still must
-  reject repos (e.g., document / memory writes)."""
-
-  def test_allows_entity_graph(self) -> None:
-    meta = _entity_meta(extensions=())  # no extensions, still not a repo
-    result = require_not_repository_mcp(graph_id="kg01ABC", meta=meta)
-    assert result is meta
-
-  def test_rejects_repository(self) -> None:
-    with pytest.raises(MCPExtensionGateError) as exc:
-      require_not_repository_mcp(graph_id="sec", meta=_repo_meta())
-    assert exc.value.code == "repository_write_forbidden"
-
-  def test_loads_meta_when_not_provided(self) -> None:
-    loaded = _entity_meta()
-    with patch(
-      "robosystems.middleware.mcp.tools._gate._load_with_short_lived_session",
-      return_value=loaded,
-    ):
-      result = require_not_repository_mcp(graph_id="kg_01", meta=None)
     assert result is loaded
 
 

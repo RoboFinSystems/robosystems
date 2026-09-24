@@ -472,35 +472,6 @@ class TestSchemaInference:
 
 
 @pytest.mark.unit
-class TestIsReadOnlyQuery:
-  """Tests for _is_read_only_query method."""
-
-  def test_read_queries_allowed(self):
-    client = _create_client()
-    read_queries = [
-      "MATCH (n) RETURN n",
-      "MATCH (n:Entity) WHERE n.name = 'Test' RETURN n",
-      "CALL SHOW_TABLES() RETURN name",
-      "WITH 'test' AS val MATCH (n) RETURN n",
-    ]
-    for query in read_queries:
-      assert client._is_read_only_query(query) is True, f"Should allow: {query}"
-
-  def test_write_queries_blocked(self):
-    client = _create_client()
-    write_queries = [
-      "CREATE (n:Person {name: 'John'})",
-      "MATCH (n) SET n.name = 'new'",
-      "MATCH (n) DELETE n",
-      "MATCH (n) REMOVE n.prop",
-      "MERGE (n:Entity {name: 'test'})",
-      "DROP INDEX idx",
-    ]
-    for query in write_queries:
-      assert client._is_read_only_query(query) is False, f"Should block: {query}"
-
-
-@pytest.mark.unit
 class TestConfigCacheTTL:
   """Tests for configuration cache TTL logic."""
 

@@ -14,7 +14,6 @@ from .factory import (
   GraphClientFactory,
   get_graph_client,
   get_graph_client_for_instance,
-  get_graph_client_sync,
 )
 
 __all__ = [
@@ -29,5 +28,4 @@ __all__ = [
   "GraphTransientError",
   "get_graph_client",
   "get_graph_client_for_instance",
-  "get_graph_client_sync",
 ]

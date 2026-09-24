@@ -24,7 +24,7 @@ async def swap_database(
   x_materialization_lock_token: str | None = Header(
     default=None,
     description="Lock token from the materialization caller. "
-    "If provided, the swap verifies against this token. "
+    "If provided, the swap trusts this token and passes it through. "
     "If not provided, the swap acquires its own lock.",
   ),
   ladybug_service=Depends(get_ladybug_service),

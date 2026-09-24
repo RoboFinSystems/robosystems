@@ -91,21 +91,7 @@ never branch on which one they got. It offers `execute_query`,
 `with`. Build one through `create_universal_repository()` /
 `get_universal_repository()` rather than instantiating the class.
 
-In FastAPI routes, prefer the dependencies in `dependencies/` — they resolve the
-graph and check access in one step:
-
-```python
-from robosystems.middleware.graph.dependencies import get_graph_repository_with_auth
-
-@router.post("/v1/graphs/{graph_id}/query")
-async def execute_query(repo=Depends(get_graph_repository_with_auth)):
-    return await repo.execute_query(cypher)
-```
-
-Available dependencies include `get_graph_database`,
-`get_graph_repository_with_auth`, `get_universal_repository_with_auth`,
-`get_user_graph_repository`, `get_shared_repository`, `get_main_repository`,
-`get_graph_repository_dependency`, and the path-param helpers `require_entity`,
+`dependencies/` holds the path-param helpers `require_entity`,
 `require_user_graph`, `require_graph_category` (each with an `optional_*`
 variant).
 

@@ -11,7 +11,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import cast
 
 import redis
 from redis.exceptions import RedisError
@@ -407,71 +407,6 @@ class SSOTokenLockManager:
       if lock.acquired:
         lock.release()
         logger.debug(f"Released SSO session lock for {operation}: {session_id[:8]}...")
-
-  def cleanup_expired_locks(self) -> dict[str, Any]:
-    """Delete SSO locks that somehow have no TTL, and report the counts.
-
-    Locks with a live TTL are left alone — Redis expires those itself.
-    """
-    try:
-      stats = {
-        "sso_token_locks_cleaned": 0,
-        "sso_session_locks_cleaned": 0,
-        "total_locks_cleaned": 0,
-      }
-
-      sso_token_pattern = "lock:sso_token:*"
-      sso_session_pattern = "lock:sso_session:*"
-
-      for pattern, stat_key in [
-        (sso_token_pattern, "sso_token_locks_cleaned"),
-        (sso_session_pattern, "sso_session_locks_cleaned"),
-      ]:
-        lock_keys = cast(list, self.redis.keys(pattern))
-
-        for lock_key in lock_keys:
-          try:
-            ttl = cast(int, self.redis.ttl(lock_key))
-            if ttl == -1:  # no expiry
-              self.redis.delete(lock_key)
-              stats[stat_key] += 1
-            elif ttl == -2:  # already gone
-              continue
-          except RedisError:
-            continue
-
-      stats["total_locks_cleaned"] = (
-        stats["sso_token_locks_cleaned"] + stats["sso_session_locks_cleaned"]
-      )
-
-      if stats["total_locks_cleaned"] > 0:
-        SecurityAuditLogger.log_security_event(
-          event_type=SecurityEventType.AUTH_SUCCESS,
-          details={
-            "action": "sso_lock_cleanup",
-            "stats": stats,
-          },
-          risk_level="low",
-        )
-
-      return stats
-
-    except RedisError as e:
-      logger.error(f"Error during SSO lock cleanup: {e}")
-      SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
-        details={
-          "action": "sso_lock_cleanup_failed",
-          "error": str(e),
-        },
-        risk_level="medium",
-      )
-      return {
-        "error": str(e),
-        "sso_token_locks_cleaned": 0,
-        "sso_session_locks_cleaned": 0,
-        "total_locks_cleaned": 0,
-      }
 
 
 def get_sso_lock_manager() -> SSOTokenLockManager | None:

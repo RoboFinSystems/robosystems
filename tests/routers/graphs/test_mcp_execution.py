@@ -12,30 +12,6 @@ class TestMCPStrategies:
   """Test MCP execution strategies."""
 
   @pytest.mark.unit
-  def test_strategy_detection_from_headers(self):
-    """Test detecting client and strategy from headers."""
-    from robosystems.routers.graphs.mcp.strategies import MCPClientDetector
-
-    detector = MCPClientDetector()
-
-    # Test MCP client detection (Claude-MCP would be an MCP client)
-    # Headers are case-insensitive in HTTP, but dict keys need lowercase
-    headers = {"user-agent": "Claude-MCP/1.0"}
-    client_info = detector.detect_client_type(headers)
-    assert client_info["is_mcp_client"] is True
-
-    # Test non-MCP client detection (cursor doesn't contain 'mcp')
-    headers = {"user-agent": "Cursor/1.0"}
-    client_info = detector.detect_client_type(headers)
-    assert client_info["is_mcp_client"] is False
-
-    # Test browser detection
-    headers = {"user-agent": "Mozilla/5.0"}
-    client_info = detector.detect_client_type(headers)
-    assert client_info["is_mcp_client"] is False
-    assert client_info["is_browser"] is True
-
-  @pytest.mark.unit
   def test_strategy_selection_logic(self):
     """Test strategy selection based on tool and client."""
     from robosystems.routers.graphs.mcp.strategies import (

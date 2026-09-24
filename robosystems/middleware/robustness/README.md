@@ -33,7 +33,6 @@ to recover.
 CircuitBreakerManager(
     failure_threshold: int | None = None,   # default: TuningConfig.get_circuit_breaker_threshold() → 5
     recovery_timeout: int | None = None,    # default: TuningConfig.get_circuit_breaker_timeout() → 60s
-    half_open_max_calls: int = 3,
 )
 ```
 

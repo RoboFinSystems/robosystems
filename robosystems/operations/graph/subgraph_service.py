@@ -736,43 +736,6 @@ class SubgraphService:
 
     return ddl
 
-  async def _install_schema_with_extensions(
-    self,
-    client: "GraphClient",
-    database_name: str,
-    extensions: list[str],
-  ) -> None:
-    """Install the entity base schema plus ``extensions`` in one call."""
-    try:
-      logger.info(
-        f"Installing entity schema with extensions {extensions} for {database_name}"
-      )
-      await client.install_schema(
-        graph_id=database_name, base_schema="entity", extensions=extensions
-      )
-
-      logger.info(
-        f"Successfully installed schema with extensions {extensions} for {database_name}"
-      )
-    except Exception as e:
-      logger.error(f"Failed to install schema with extensions for {database_name}: {e}")
-      raise
-
-  async def _install_base_schema(
-    self,
-    client: "GraphClient",
-    database_name: str,
-  ) -> None:
-    """Install the entity base schema — the only base a subgraph uses."""
-    try:
-      await client.install_schema(
-        graph_id=database_name, base_schema="entity", extensions=[]
-      )
-      logger.info(f"Successfully installed base entity schema for {database_name}")
-    except Exception as e:
-      logger.error(f"Failed to install base entity schema for {database_name}: {e}")
-      raise
-
   @staticmethod
   async def _count(client: "GraphClient", database_name: str, cypher: str) -> int:
     result = await client.query(cypher=cypher, graph_id=database_name)

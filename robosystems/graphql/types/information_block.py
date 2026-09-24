@@ -184,7 +184,7 @@ class InformationBlockChart:
 
 @pydantic_type(model=PydanticViewProjections, all_fields=True)
 class InformationBlockViewProjections:
-  """Charlie's six type-of View arms surfaced in the envelope."""
+  """The six `type-of` View projections surfaced in the envelope."""
 
 
 MechanicsPayload = strawberry.scalars.JSON

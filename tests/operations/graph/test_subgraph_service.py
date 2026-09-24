@@ -804,29 +804,6 @@ class TestSubgraphService:
     assert result is None
 
   @pytest.mark.asyncio
-  async def test_private_install_schema_with_extensions(
-    self, service, mock_lbug_client
-  ):
-    """Test private method _install_schema_with_extensions."""
-    await service._install_schema_with_extensions(
-      mock_lbug_client, "test_db", ["ext1", "ext2"]
-    )
-
-    # Should call install_schema once with base_schema and extensions
-    mock_lbug_client.install_schema.assert_called_once_with(
-      graph_id="test_db", base_schema="entity", extensions=["ext1", "ext2"]
-    )
-
-  @pytest.mark.asyncio
-  async def test_private_install_base_schema(self, service, mock_lbug_client):
-    """Test private method _install_base_schema."""
-    await service._install_base_schema(mock_lbug_client, "test_db")
-
-    mock_lbug_client.install_schema.assert_called_once_with(
-      graph_id="test_db", base_schema="entity", extensions=[]
-    )
-
-  @pytest.mark.asyncio
   async def test_private_check_database_has_data(self, service, mock_lbug_client):
     """Test private method _check_database_has_data."""
     mock_lbug_client.query.return_value = {"data": [{"node_count": 50}]}

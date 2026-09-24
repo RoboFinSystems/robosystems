@@ -31,7 +31,6 @@ class UnifiedTaskManager:
 
   def __init__(self):
     self._redis_client = None
-    self._redis_url = None
     # Task-ID prefix -> owning manager
     self.managers = {
       "backup": backup_task_manager,

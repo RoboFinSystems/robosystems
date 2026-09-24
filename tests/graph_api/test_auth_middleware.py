@@ -11,8 +11,6 @@ from starlette.datastructures import Headers
 
 from robosystems.graph_api.middleware.auth import (
   LadybugAuthMiddleware,
-  clear_api_key_cache,
-  create_api_key,
   get_api_key_from_secrets_manager,
 )
 
@@ -282,8 +280,6 @@ class TestSecretsManagerIntegration:
   @patch("robosystems.config.secrets_manager.get_secret_value")
   def test_get_api_key_from_secrets_manager_success(self, mock_get_secret):
     """Test successful API key retrieval from Secrets Manager."""
-    clear_api_key_cache()
-
     mock_get_secret.return_value = "secret-key-123"
 
     api_key = get_api_key_from_secrets_manager(key_type="writer")
@@ -293,8 +289,6 @@ class TestSecretsManagerIntegration:
   @patch("robosystems.config.secrets_manager.get_secret_value")
   def test_get_api_key_from_secrets_manager_not_found(self, mock_get_secret):
     """Test handling of missing secret in Secrets Manager."""
-    clear_api_key_cache()
-
     mock_get_secret.return_value = ""
 
     api_key = get_api_key_from_secrets_manager()
@@ -303,66 +297,7 @@ class TestSecretsManagerIntegration:
   @patch("robosystems.config.secrets_manager.get_secret_value")
   def test_get_api_key_from_secrets_manager_exception(self, mock_get_secret):
     """Test handling when centralized secrets manager raises exception."""
-    clear_api_key_cache()
-
     mock_get_secret.side_effect = Exception("Connection error")
 
     api_key = get_api_key_from_secrets_manager()
     assert api_key is None
-
-  @patch("robosystems.config.secrets_manager.get_secrets_manager")
-  def test_clear_api_key_cache(self, mock_get_manager):
-    """Test that cache clearing calls centralized secrets manager refresh."""
-    mock_manager = MagicMock()
-    mock_get_manager.return_value = mock_manager
-
-    clear_api_key_cache()
-
-    mock_manager.refresh.assert_called_once_with("graph-api")
-
-
-class TestAPIKeyGeneration:
-  """Test cases for API key generation."""
-
-  def test_create_api_key(self):
-    """Test secure API key generation."""
-    with patch(
-      "robosystems.graph_api.middleware.auth.SecurityAuditLogger"
-    ) as mock_logger:
-      api_key, key_hash = create_api_key(prefix="test")
-
-      # Check API key format
-      assert api_key.startswith("test_")
-      assert len(api_key) > 50  # Should be long enough
-
-      # Check that hash is different from key
-      assert key_hash != api_key
-      assert len(key_hash) > 50
-
-      # Verify security logging
-      mock_logger.log_security_event.assert_called_once()
-
-  def test_create_api_key_unique(self):
-    """Test that generated API keys are unique."""
-    keys = set()
-    for _ in range(10):
-      api_key, _ = create_api_key()
-      keys.add(api_key)
-
-    # All keys should be unique
-    assert len(keys) == 10
-
-  @patch("robosystems.graph_api.middleware.auth.bcrypt")
-  def test_create_api_key_bcrypt_hashing(self, mock_bcrypt):
-    """Test that bcrypt is used for hashing."""
-    mock_salt = b"$2b$12$test_salt"
-    mock_hash = b"$2b$12$hashed_value"
-    mock_bcrypt.gensalt.return_value = mock_salt
-    mock_bcrypt.hashpw.return_value = mock_hash
-
-    api_key, key_hash = create_api_key(prefix="ladybug")
-
-    # Verify bcrypt was called correctly
-    mock_bcrypt.gensalt.assert_called_once_with(rounds=12)
-    mock_bcrypt.hashpw.assert_called_once()
-    assert key_hash == mock_hash.decode("utf-8")

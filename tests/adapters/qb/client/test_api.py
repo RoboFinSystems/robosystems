@@ -2,7 +2,6 @@
 
 from unittest.mock import Mock, patch
 
-import pandas as pd
 import pytest
 import requests
 from intuitlib.client import AuthClient
@@ -235,66 +234,6 @@ class TestQBClient:
     assert result == []
     # Query is still invoked once (we don't know it's empty until we ask).
     assert mock_account.query.call_count == 1
-
-  @patch("robosystems.adapters.quickbooks.client.api.QBClient.get_accounts")
-  def test_get_accounts_df_processing(self, mock_get_accounts, mock_qb_client):
-    """Test accounts DataFrame processing and categorization."""
-    # Setup mock client
-    client = QBClient.__new__(QBClient)
-    client.client = mock_qb_client
-
-    # Mock raw account data
-    mock_accounts = [
-      {
-        "Id": "1",
-        "Name": "Checking Account",
-        "AccountType": "Bank",
-        "Classification": "Asset",
-        "FullyQualifiedName": "Checking Account",
-        "ParentRef": None,
-      },
-      {
-        "Id": "2",
-        "Name": "Service Revenue",
-        "AccountType": "Income",
-        "Classification": "Revenue",
-        "FullyQualifiedName": "Service Revenue",
-        "ParentRef": None,
-      },
-      {
-        "Id": "3",
-        "Name": "Office Supplies",
-        "AccountType": "NaN",  # Test NaN handling
-        "Classification": "Expense",
-        "FullyQualifiedName": "Office Supplies",
-        "ParentRef": None,
-      },
-    ]
-    mock_get_accounts.return_value = mock_accounts
-
-    # Execute
-    result = client.get_accounts_df()
-
-    # Verify DataFrame creation
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3
-
-    # Verify AccountType processing for NaN values
-    office_supplies_row = result[result["Name"] == "Office Supplies"].iloc[0]
-    assert office_supplies_row["AccountType"] == "Other Expense"
-
-    # Verify categorical columns
-    assert pd.api.types.is_categorical_dtype(result["Classification"])
-    assert pd.api.types.is_categorical_dtype(result["AccountType"])
-
-    # Verify sorting (by Classification order: Asset, Revenue, Other Expense)
-    assert result.iloc[0]["Classification"] == "Asset"
-    assert result.iloc[1]["Classification"] == "Revenue"
-    assert result.iloc[2]["Classification"] == "Other Expense"
-
-    # Verify sequence and order columns added
-    assert "Order" in result.columns
-    assert "Sequence" in result.columns
 
   @patch("quickbooks.objects.account.Account")
   def test_get_account_by_id(self, mock_account, mock_qb_client):
@@ -675,63 +614,6 @@ class TestQBClient:
     second_query = mock_account.query.call_args_list[1][0][0]
     assert "STARTPOSITION 1 " in first_query
     assert "STARTPOSITION 101 " in second_query
-
-  @patch("robosystems.adapters.quickbooks.client.api.QBClient.get_accounts")
-  def test_get_accounts_df_complex_hierarchy(self, mock_get_accounts, mock_qb_client):
-    """Test accounts DataFrame with complex parent-child hierarchy."""
-    # Setup mock client
-    client = QBClient.__new__(QBClient)
-    client.client = mock_qb_client
-
-    # Mock hierarchical account data
-    mock_accounts = [
-      {
-        "Id": "1",
-        "Name": "Assets",
-        "AccountType": "Asset",
-        "Classification": "Asset",
-        "FullyQualifiedName": "Assets",
-        "ParentRef": None,
-      },
-      {
-        "Id": "2",
-        "Name": "Current Assets",
-        "AccountType": "Asset",
-        "Classification": "Asset",
-        "FullyQualifiedName": "Assets:Current Assets",
-        "ParentRef": "1",
-      },
-      {
-        "Id": "3",
-        "Name": "Checking",
-        "AccountType": "Bank",
-        "Classification": "Asset",
-        "FullyQualifiedName": "Assets:Current Assets:Checking",
-        "ParentRef": "2",
-      },
-    ]
-    mock_get_accounts.return_value = mock_accounts
-
-    # Execute
-    result = client.get_accounts_df()
-
-    # Verify hierarchy processing
-    assert len(result) == 3
-
-    # Verify parent-child relationships
-    parent_row = result[result["Id"] == "1"].iloc[0]
-    child_row = result[result["Id"] == "2"].iloc[0]
-    grandchild_row = result[result["Id"] == "3"].iloc[0]
-
-    # Verify ordering columns are set
-    assert pd.notna(parent_row["Order"])
-    assert pd.notna(child_row["Order"])
-    assert pd.notna(grandchild_row["Order"])
-
-    # Verify sequences are assigned
-    assert pd.notna(parent_row["Sequence"])
-    assert pd.notna(child_row["Sequence"])
-    assert pd.notna(grandchild_row["Sequence"])
 
 
 class TestTokenPersistence:

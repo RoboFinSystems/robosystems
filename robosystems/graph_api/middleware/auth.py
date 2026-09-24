@@ -2,14 +2,12 @@
 
 import time
 
-import bcrypt
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from robosystems.config import env
 from robosystems.logger import logger
-from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 
 class GraphAuthMiddleware(BaseHTTPMiddleware):
@@ -168,45 +166,6 @@ def get_api_key_from_secrets_manager(
   except Exception as e:
     logger.error(f"Error retrieving Graph API key: {e}")
     return None
-
-
-def clear_api_key_cache():
-  """Drop the cached API key so the next read picks up a rotated secret."""
-  try:
-    from robosystems.config.secrets_manager import get_secrets_manager
-
-    manager = get_secrets_manager()
-    manager.refresh("graph-api")
-    logger.info("Graph API key cache cleared successfully")
-  except Exception as e:
-    logger.warning(f"Failed to clear API key cache: {e}")
-
-
-def create_api_key(prefix: str = "ladybug") -> tuple[str, str]:
-  """Generate an API key and its bcrypt hash.
-
-  Returns ``(api_key, bcrypt_hash)``. Store the hash; the key itself is
-  returned once and is not recoverable afterwards.
-  """
-  import secrets
-
-  key_bytes = secrets.token_bytes(32)
-  api_key = f"{prefix}_{key_bytes.hex()}"
-
-  salt = bcrypt.gensalt(rounds=12)
-  key_hash = bcrypt.hashpw(api_key.encode("utf-8"), salt).decode("utf-8")
-
-  SecurityAuditLogger.log_security_event(
-    event_type=SecurityEventType.AUTH_SUCCESS,
-    details={
-      "action": "secure_graph_api_key_generated",
-      "prefix": prefix,
-      "hash_algorithm": "bcrypt",
-    },
-    risk_level="low",
-  )
-
-  return api_key, key_hash
 
 
 LadybugAuthMiddleware = GraphAuthMiddleware

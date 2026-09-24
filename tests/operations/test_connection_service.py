@@ -426,43 +426,6 @@ class TestListConnections:
     assert result == []
 
 
-class TestUpdateConnectionCredentials:
-  @pytest.mark.unit
-  def test_updates_existing_credentials(self):
-    mock_session = MagicMock()
-    mock_cred = _make_mock_credentials()
-
-    with patch(f"{MODULE}.ConnectionCredentials") as MockCreds:
-      MockCreds.get_by_connection_id.return_value = mock_cred
-
-      result = ConnectionService.update_connection_credentials(
-        connection_id="conn_1",
-        user_id="usr_123",
-        credentials={"new_token": "abc"},
-        db_session=mock_session,
-      )
-
-    assert result is True
-    mock_cred.update_credentials.assert_called_once()
-
-  @pytest.mark.unit
-  def test_creates_if_not_exists(self):
-    mock_session = MagicMock()
-
-    with patch(f"{MODULE}.ConnectionCredentials") as MockCreds:
-      MockCreds.get_by_connection_id.return_value = None
-
-      result = ConnectionService.update_connection_credentials(
-        connection_id="conn_1",
-        user_id="usr_123",
-        credentials={"new_token": "abc"},
-        db_session=mock_session,
-      )
-
-    assert result is True
-    MockCreds.create.assert_called_once()
-
-
 class TestDeleteConnection:
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -549,91 +512,6 @@ class TestDeleteConnection:
       result = await ConnectionService.delete_connection(
         connection_id="nonexistent",
         user_id="usr_123",
-        db_session=mock_session,
-      )
-
-    assert result is False
-
-
-class TestMarkConnectionStatus:
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_mark_error(self):
-    mock_session = MagicMock()
-    mock_conn = _make_mock_connection()
-
-    with patch(f"{MODULE}.Connection") as MockConn:
-      MockConn.get_by_id.return_value = mock_conn
-
-      result = await ConnectionService.mark_connection_error(
-        connection_id="conn_1",
-        db_session=mock_session,
-      )
-
-    assert result is True
-    mock_conn.update_status.assert_called_once_with("error", mock_session)
-
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_mark_connected(self):
-    mock_session = MagicMock()
-    mock_conn = _make_mock_connection()
-
-    with patch(f"{MODULE}.Connection") as MockConn:
-      MockConn.get_by_id.return_value = mock_conn
-
-      result = await ConnectionService.mark_connection_connected(
-        connection_id="conn_1",
-        db_session=mock_session,
-      )
-
-    assert result is True
-    mock_conn.update_status.assert_called_once_with("connected", mock_session)
-
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_not_found_returns_false(self):
-    mock_session = MagicMock()
-
-    with patch(f"{MODULE}.Connection") as MockConn:
-      MockConn.get_by_id.return_value = None
-
-      result = await ConnectionService.mark_connection_error(
-        connection_id="nonexistent",
-        db_session=mock_session,
-      )
-
-    assert result is False
-
-
-class TestUpdateLastSync:
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_success(self):
-    mock_session = MagicMock()
-    mock_conn = _make_mock_connection()
-
-    with patch(f"{MODULE}.Connection") as MockConn:
-      MockConn.get_by_id.return_value = mock_conn
-
-      result = await ConnectionService.update_last_sync(
-        connection_id="conn_1",
-        db_session=mock_session,
-      )
-
-    assert result is True
-    mock_conn.update_last_sync.assert_called_once()
-
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_not_found_returns_false(self):
-    mock_session = MagicMock()
-
-    with patch(f"{MODULE}.Connection") as MockConn:
-      MockConn.get_by_id.return_value = None
-
-      result = await ConnectionService.update_last_sync(
-        connection_id="nonexistent",
         db_session=mock_session,
       )
 
@@ -910,37 +788,6 @@ class TestConnectionServiceErrorHandling:
     assert len(result) == 1
     assert result[0]["is_expired"] is False
 
-  @pytest.mark.unit
-  def test_update_credentials_exception_returns_false(self):
-    mock_session = MagicMock()
-
-    with patch(f"{MODULE}.ConnectionCredentials") as MockCreds:
-      MockCreds.get_by_connection_id.side_effect = Exception("db error")
-
-      result = ConnectionService.update_connection_credentials(
-        connection_id="conn_1",
-        user_id="usr_123",
-        credentials={"token": "tok"},
-        db_session=mock_session,
-      )
-
-    assert result is False
-
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_update_last_sync_exception_returns_false(self):
-    mock_session = MagicMock()
-
-    with patch(f"{MODULE}.Connection") as MockConn:
-      MockConn.get_by_id.side_effect = Exception("db error")
-
-      result = await ConnectionService.update_last_sync(
-        connection_id="conn_1",
-        db_session=mock_session,
-      )
-
-    assert result is False
-
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_delete_connection_exception_returns_false(self):
@@ -979,51 +826,6 @@ class TestConnectionServiceErrorHandling:
     assert result is True
     mock_conn.soft_delete.assert_called_once()
 
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_mark_error_exception_returns_false(self):
-    mock_session = MagicMock()
-
-    with patch(f"{MODULE}.Connection") as MockConn:
-      MockConn.get_by_id.side_effect = Exception("db error")
-
-      result = await ConnectionService.mark_connection_error(
-        connection_id="conn_1",
-        db_session=mock_session,
-      )
-
-    assert result is False
-
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_mark_connected_exception_returns_false(self):
-    mock_session = MagicMock()
-
-    with patch(f"{MODULE}.Connection") as MockConn:
-      MockConn.get_by_id.side_effect = Exception("db error")
-
-      result = await ConnectionService.mark_connection_connected(
-        connection_id="conn_1",
-        db_session=mock_session,
-      )
-
-    assert result is False
-
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_mark_connected_not_found(self):
-    mock_session = MagicMock()
-
-    with patch(f"{MODULE}.Connection") as MockConn:
-      MockConn.get_by_id.return_value = None
-
-      result = await ConnectionService.mark_connection_connected(
-        connection_id="nonexistent",
-        db_session=mock_session,
-      )
-
-    assert result is False
-
 
 class TestConnectionServiceSessionManagement:
   """Test that sessions are created/closed properly when not provided."""
@@ -1043,24 +845,6 @@ class TestConnectionServiceSessionManagement:
       await ConnectionService.get_connection(
         connection_id="conn_1",
         user_id="usr_123",
-      )
-
-    mock_session.close.assert_called_once()
-
-  @pytest.mark.unit
-  def test_update_credentials_creates_session(self):
-    mock_session = MagicMock()
-
-    with (
-      patch(f"{MODULE}.SessionFactory", return_value=mock_session),
-      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
-    ):
-      MockCreds.get_by_connection_id.return_value = None
-
-      ConnectionService.update_connection_credentials(
-        connection_id="conn_1",
-        user_id="usr_123",
-        credentials={"token": "tok"},
       )
 
     mock_session.close.assert_called_once()

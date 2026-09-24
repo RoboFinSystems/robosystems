@@ -64,31 +64,6 @@ class TestSubgraphOperations:
     """Create SubgraphService instance."""
     return SubgraphService()
 
-  async def test_install_schema_with_extensions(
-    self, subgraph_service, mock_lbug_client
-  ):
-    """Test schema installation with extensions."""
-    await subgraph_service._install_schema_with_extensions(
-      mock_lbug_client, "test_db", ["financial", "quickbooks"]
-    )
-
-    # Should install base schema + extensions in a single call
-    assert mock_lbug_client.install_schema.call_count == 1
-
-    # Check that schema was installed with extensions
-    call_args = mock_lbug_client.install_schema.call_args
-    assert call_args[1]["graph_id"] == "test_db"
-    assert call_args[1]["base_schema"] == "entity"
-    assert call_args[1]["extensions"] == ["financial", "quickbooks"]
-
-  async def test_install_base_schema(self, subgraph_service, mock_lbug_client):
-    """Test base schema installation."""
-    await subgraph_service._install_base_schema(mock_lbug_client, "test_db")
-
-    mock_lbug_client.install_schema.assert_called_once_with(
-      graph_id="test_db", base_schema="entity", extensions=[]
-    )
-
   async def test_check_database_has_data(self, subgraph_service, mock_lbug_client):
     """Test database data validation."""
     # Test empty database
@@ -132,17 +107,6 @@ class TestSubgraphOperations:
     # This test would also need database mocking
     # Skip for now as it requires session mocking
     pass
-
-  async def test_schema_installation_error_handling(
-    self, subgraph_service, mock_lbug_client
-  ):
-    """Test error handling in schema installation."""
-    mock_lbug_client.install_schema.side_effect = Exception(
-      "Schema installation failed"
-    )
-
-    with pytest.raises(Exception, match="Schema installation failed"):
-      await subgraph_service._install_base_schema(mock_lbug_client, "test_db")
 
   async def test_stats_error_handling(self, subgraph_service, mock_lbug_client):
     """Test statistics collection error handling."""

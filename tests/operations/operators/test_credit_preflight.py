@@ -137,30 +137,6 @@ class TestAdaptersRunThePreflight:
   constructed — the check has to happen before anything can spend."""
 
   @pytest.mark.asyncio
-  async def test_api_adapter_denies_an_underfunded_graph(self) -> None:
-    from robosystems.operations.operators.adapters import api
-
-    user = MagicMock()
-    user.id = USER_ID
-
-    with (
-      patch.object(
-        api,
-        "enforce_operator_credits",
-        side_effect=InsufficientOperatorCreditsError("Test Operator", 10.0, 1.0),
-      ),
-      patch.object(api, "HttpToolAccess") as tool_access,
-      patch.object(api, "get_ai_client"),
-      patch.object(api, "TrackedAIClient"),
-    ):
-      with pytest.raises(InsufficientOperatorCreditsError):
-        await api.run_operator_api(
-          operator=_operator(), graph_id=GRAPH_ID, user=user, query="anything"
-        )
-
-    tool_access.assert_not_called()
-
-  @pytest.mark.asyncio
   async def test_worker_adapter_denies_an_underfunded_graph(self) -> None:
     from robosystems.operations.operators.adapters import worker
 
@@ -286,82 +262,5 @@ class TestUnbilledCallsStopTheLoop:
       "cache_write": 24,
     }
     kwargs = consumer.consume.await_args.kwargs
-    assert kwargs["cache_read_input_tokens"] == 3905
-    assert kwargs["cache_creation_input_tokens"] == 12
-
-
-class TestConsumersSignalFailureByRaising:
-  @pytest.mark.asyncio
-  async def test_session_consumer_raises_on_failure(self) -> None:
-    from robosystems.operations.operators.credit_consumer import (
-      CreditConsumptionError,
-      SessionCreditConsumer,
-    )
-
-    service = MagicMock()
-    service.consume_ai_tokens.return_value = {"success": False, "error": "no pool"}
-
-    with patch(
-      "robosystems.operations.graph.credit_service.CreditService",
-      return_value=service,
-    ):
-      with pytest.raises(CreditConsumptionError, match="no pool"):
-        await SessionCreditConsumer(MagicMock()).consume(
-          graph_id=GRAPH_ID,
-          user_id=USER_ID,
-          input_tokens=100,
-          output_tokens=50,
-          model="claude-sonnet",
-          operation_description="test",
-        )
-
-  @pytest.mark.asyncio
-  async def test_session_consumer_returns_the_amount_on_success(self) -> None:
-    from robosystems.operations.operators.credit_consumer import SessionCreditConsumer
-
-    service = MagicMock()
-    service.consume_ai_tokens.return_value = {
-      "success": True,
-      "credits_consumed": 12.5,
-    }
-
-    with patch(
-      "robosystems.operations.graph.credit_service.CreditService",
-      return_value=service,
-    ):
-      credits = await SessionCreditConsumer(MagicMock()).consume(
-        graph_id=GRAPH_ID,
-        user_id=USER_ID,
-        input_tokens=100,
-        output_tokens=50,
-        model="claude-sonnet",
-        operation_description="test",
-      )
-
-    assert credits == 12.5
-
-  @pytest.mark.asyncio
-  async def test_session_consumer_forwards_cache_counts_to_the_meter(self) -> None:
-    from robosystems.operations.operators.credit_consumer import SessionCreditConsumer
-
-    service = MagicMock()
-    service.consume_ai_tokens.return_value = {"success": True, "credits_consumed": 2.0}
-
-    with patch(
-      "robosystems.operations.graph.credit_service.CreditService",
-      return_value=service,
-    ):
-      await SessionCreditConsumer(MagicMock()).consume(
-        graph_id=GRAPH_ID,
-        user_id=USER_ID,
-        input_tokens=337,
-        output_tokens=50,
-        model="claude-sonnet",
-        operation_description="test",
-        cache_read_input_tokens=3905,
-        cache_creation_input_tokens=12,
-      )
-
-    kwargs = service.consume_ai_tokens.call_args.kwargs
     assert kwargs["cache_read_input_tokens"] == 3905
     assert kwargs["cache_creation_input_tokens"] == 12

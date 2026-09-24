@@ -4,30 +4,6 @@ from fastapi import APIRouter
 
 from robosystems.config import env
 
-from .admin import (
-  cache_router as admin_cache_router,
-)
-from .admin import (
-  credits_router as admin_credits_router,
-)
-from .admin import (
-  graphs_router as admin_graphs_router,
-)
-from .admin import (
-  invoice_router as admin_invoice_router,
-)
-from .admin import (
-  orgs_router as admin_orgs_router,
-)
-from .admin import (
-  subscription_router as admin_subscription_router,
-)
-from .admin import (
-  users_router as admin_users_router,
-)
-from .admin import (
-  webhooks_router as admin_webhooks_router,
-)
 from .auth import router as auth_router
 from .billing import (
   checkout_router,
@@ -160,20 +136,9 @@ billing_router_v1.include_router(billing_subscriptions_router)
 billing_router_v1.include_router(invoices_router)
 billing_router_v1.include_router(checkout_router)
 
-admin_router_v1 = APIRouter(prefix="")
-admin_router_v1.include_router(admin_cache_router)
-admin_router_v1.include_router(admin_subscription_router)
-admin_router_v1.include_router(admin_invoice_router)
-admin_router_v1.include_router(admin_webhooks_router)
-admin_router_v1.include_router(admin_credits_router)
-admin_router_v1.include_router(admin_graphs_router)
-admin_router_v1.include_router(admin_users_router)
-admin_router_v1.include_router(admin_orgs_router)
-
 # Extensions routers mount directly in main.py.
 
 __all__ = [
-  "admin_router_v1",
   "auth_router_v1",
   "billing_router_v1",
   "graph_router",

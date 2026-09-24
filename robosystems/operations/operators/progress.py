@@ -5,29 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-  from collections.abc import Callable
-
   from robosystems.middleware.sse.operation_manager import OperationManager
-
-
-class CallbackProgress:
-  """API context: calls `callback(message, percent, message)`. Never reports
-  cancellation; the in-process path has no channel for it."""
-
-  def __init__(self, callback: Callable | None = None) -> None:
-    self._callback = callback
-
-  async def report(
-    self,
-    message: str,
-    percent: float | None = None,
-    details: dict[str, Any] | None = None,
-  ) -> None:
-    if self._callback:
-      self._callback(message, percent, message)
-
-  async def is_cancelled(self) -> bool:
-    return False
 
 
 class OperationManagerProgress:

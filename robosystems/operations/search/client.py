@@ -607,34 +607,6 @@ class OpenSearchClient:
     )
     return result.get("count", 0)
 
-  def knn_search(
-    self,
-    query_embedding: list[float],
-    graph_id: str,
-    filters: dict[str, Any] | None = None,
-    size: int = 10,
-  ) -> dict[str, Any]:
-    """Pure kNN vector search (no BM25) with mandatory graph_id filtering."""
-    filter_clauses = self._build_filter_clauses(graph_id, filters)
-
-    search_body: dict[str, Any] = {
-      "query": {
-        "knn": {
-          "embedding": {
-            "vector": query_embedding,
-            "k": min(size, 100),
-            "filter": {"bool": {"filter": filter_clauses}},
-          }
-        }
-      },
-      "size": size,
-      "_source": {
-        "excludes": ["embedding"],
-      },
-    }
-
-    return self.client.search(index=self.index_name, body=search_body)
-
   def list_documents(
     self,
     graph_id: str,

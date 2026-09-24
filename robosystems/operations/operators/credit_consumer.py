@@ -31,47 +31,6 @@ class CreditConsumer(Protocol):
     """Return credits consumed; raise `CreditConsumptionError` if not recorded."""
 
 
-class SessionCreditConsumer:
-  """API context: bills on the request's own session.
-
-  The debit commits (or, on failure, rolls back) that session itself, so it
-  does not share the request's transaction and takes any pending work with it.
-  """
-
-  def __init__(self, db_session) -> None:
-    self._session = db_session
-
-  async def consume(
-    self,
-    graph_id: str,
-    user_id: str,
-    input_tokens: int,
-    output_tokens: int,
-    model: str,
-    operation_description: str,
-    cache_read_input_tokens: int = 0,
-    cache_creation_input_tokens: int = 0,
-  ) -> float:
-    from robosystems.operations.graph.credit_service import CreditService
-
-    service = CreditService(self._session)
-    result = service.consume_ai_tokens(
-      graph_id=graph_id,
-      input_tokens=input_tokens,
-      output_tokens=output_tokens,
-      model=model,
-      operation_description=operation_description,
-      user_id=user_id,
-      cache_read_input_tokens=cache_read_input_tokens,
-      cache_creation_input_tokens=cache_creation_input_tokens,
-    )
-
-    if result.get("success"):
-      return float(result.get("credits_consumed", 0))
-
-    raise CreditConsumptionError(str(result.get("error", "Unknown")))
-
-
 class FactoryCreditConsumer:
   """Worker context: one short-lived session, and one transaction, per call,
   so a run that dies partway is still billed for the calls it made."""

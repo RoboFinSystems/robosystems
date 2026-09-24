@@ -18,15 +18,9 @@ from .commands import (
   update_event_block,
 )
 
-# Deprecated alias — import `RowLockedError` from
-# `robosystems.operations.locking`, which owns the lock policy for entries,
-# fiscal periods and reports as well as events.
-EventLockedError = RowLockedError
-
 __all__ = [
   "DuplicateEventError",
   "EventEffectsAlreadyLandedError",
-  "EventLockedError",  # deprecated alias for RowLockedError
   "EventNotFoundError",
   "EventNotPublishableError",
   "InvalidEventTransitionError",

@@ -31,7 +31,6 @@ class CircuitBreakerManager:
     self,
     failure_threshold: int | None = None,
     recovery_timeout: int | None = None,
-    half_open_max_calls: int = 3,
   ):
     self.failure_threshold = (
       failure_threshold
@@ -43,7 +42,6 @@ class CircuitBreakerManager:
       if recovery_timeout is not None
       else TuningConfig.get_circuit_breaker_timeout()
     )
-    self.half_open_max_calls = half_open_max_calls
 
     # Only circuits with a recorded failure are stored, so caller-supplied
     # operation names can't grow this map.

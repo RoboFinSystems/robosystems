@@ -3,7 +3,6 @@
 import random
 import time
 from typing import Any, TypeVar
-from urllib.parse import urljoin
 
 from robosystems.logger import logger
 
@@ -63,11 +62,6 @@ class BaseGraphClient:
 
     # Default graph for methods that do not take one; set by the factory.
     self.graph_id: str | None = None
-
-  def _build_url(self, path: str) -> str:
-    if path.startswith("/"):
-      path = path[1:]
-    return urljoin(self.config.base_url + "/", path)
 
   def _should_retry(self, error: Exception, attempt: int) -> bool:
     """Decide whether to retry after ``error`` on 0-based ``attempt``.

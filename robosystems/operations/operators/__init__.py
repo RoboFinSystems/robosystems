@@ -3,10 +3,7 @@ README in this directory."""
 
 # Registers the operators; must precede any registry use.
 from robosystems.operations.operators import implementations  # noqa: F401
-from robosystems.operations.operators.adapters import (
-  run_operator_api,
-  run_operator_worker,
-)
+from robosystems.operations.operators.adapters import run_operator_worker
 from robosystems.operations.operators.ai_client import AIClient
 from robosystems.operations.operators.base import (
   BaseOperator,
@@ -27,7 +24,6 @@ from robosystems.operations.operators.credit_consumer import (
   CreditConsumer,
   FactoryCreditConsumer,
   NoOpCreditConsumer,
-  SessionCreditConsumer,
 )
 from robosystems.operations.operators.operator_context import (
   OperatorContext,
@@ -43,12 +39,10 @@ from robosystems.operations.operators.operator_registry import (
 )
 from robosystems.operations.operators.orchestrator import (
   OperatorOrchestrator,
-  OperatorSelectionCriteria,
   OrchestratorConfig,
   RoutingStrategy,
 )
 from robosystems.operations.operators.progress import (
-  CallbackProgress,
   NoOpProgress,
   OperationManagerProgress,
 )
@@ -64,7 +58,6 @@ load_adapter_operators()
 __all__ = [
   "AIClient",
   "BaseOperator",
-  "CallbackProgress",
   "CreditConsumer",
   "DirectToolAccess",
   "ExecutionProfile",
@@ -82,12 +75,10 @@ __all__ = [
   "OperatorOrchestrator",
   "OperatorResponse",
   "OperatorResult",
-  "OperatorSelectionCriteria",
   "OperatorSpec",
   "OrchestratorConfig",
   "ProgressReporter",
   "RoutingStrategy",
-  "SessionCreditConsumer",
   "ToolAccess",
   "TrackedAIClient",
   "enforce_operator_graph_scope",
@@ -98,6 +89,5 @@ __all__ = [
   "load_adapter_operators",
   "matches_graph_scope",
   "register_operator",
-  "run_operator_api",
   "run_operator_worker",
 ]

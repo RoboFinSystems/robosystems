@@ -1363,20 +1363,6 @@ class GraphMCPTools:
         raise GraphAPIError(f"Tool execution failed: {error_msg}")
       return f"Error: {error_msg}"
 
-  async def execute_cypher_tool(
-    self, query: str, parameters: dict[str, Any] | None = None
-  ) -> list[dict[str, Any]]:
-    """Execute the Cypher tool directly, bypassing name dispatch."""
-    arguments: dict[str, Any] = {"query": query}
-    if parameters:
-      arguments["parameters"] = parameters
-
-    return await self.call_tool("read-graph-cypher", arguments, return_raw=True)
-
-  async def execute_schema_tool(self) -> list[dict[str, Any]]:
-    """Execute the schema tool directly, bypassing name dispatch."""
-    return await self.call_tool("get-graph-schema", {}, return_raw=True)
-
   def _build_error_context(
     self, tool_name: str, arguments: dict[str, Any], exception: Exception
   ) -> dict[str, Any]:
