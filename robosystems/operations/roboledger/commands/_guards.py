@@ -81,40 +81,52 @@ def _period_covering(session: Session, posting_date: date):
 
 
 def assert_period_not_closed(session: Session, *posting_dates: date) -> None:
-  """Raise `ClosedPeriodError` if any period covering the dates is closed.
+  """Raise `ClosedPeriodError` if any of the dates falls in a closed period.
 
-  Takes the shared, transaction-scoped period fence on each distinct period in
-  sorted order (so overlapping writers cannot deadlock) and re-reads status
-  under it; close holds the exclusive side, so a writer cannot see `open` and
-  commit after the close. Dates with no `FiscalPeriod` pass.
+  A date is closed when its month is on or before the calendar's
+  ``closed_through_period``, or its ``FiscalPeriod`` row says ``closed``. A
+  month with no row is not open: rows reach back only so far, and
+  ``closed_through`` closes every month before it.
+
+  Takes the shared, transaction-scoped period fence on each distinct month in
+  sorted order, keyed by the month itself rather than by a row, and re-reads
+  under it. Close holds the exclusive side from before it creates the month's
+  row, so a writer cannot slip into a month while it is being closed.
   """
   dates = [d for d in posting_dates if d is not None]
   if not dates:
     return
+  ledger = session.execute(
+    text(
+      "SELECT graph_id FROM fiscal_calendar "
+      "UNION ALL SELECT graph_id FROM fiscal_periods LIMIT 1"
+    )
+  ).first()
+  if ledger is None:
+    return
 
-  found: list[tuple[tuple[str, str], date]] = []
-  seen: set[tuple[str, str]] = set()
-  for posting_date in dates:
-    row = _period_covering(session, posting_date)
-    if row is None:
-      continue
-    key = (row.graph_id, row.name)
-    if key in seen:
-      continue
-    seen.add(key)
-    found.append((key, posting_date))
+  first_date_by_month: dict[str, date] = {}
+  for posting_date in sorted(dates):
+    first_date_by_month.setdefault(f"{posting_date:%Y-%m}", posting_date)
 
-  found.sort(key=lambda item: item[0])
-  for (graph_id, name), posting_date in found:
+  for month in sorted(first_date_by_month):
     acquire_shared_period_fence(
       session,
-      graph_id,
-      name,
+      ledger.graph_id,
+      month,
       detail=(
-        f"Period {name} is being closed or reopened by another process. "
+        f"Period {month} is being closed or reopened by another process. "
         "Retry in a moment."
       ),
     )
+
+  closed_through = session.execute(
+    text("SELECT closed_through_period FROM fiscal_calendar LIMIT 1")
+  ).scalar()
+  for month, posting_date in sorted(first_date_by_month.items()):
+    if closed_through and month <= closed_through:
+      raise ClosedPeriodError(month, posting_date)
+  for posting_date in dates:
     row = _period_covering(session, posting_date)
     if row is not None and row.status == "closed":
       raise ClosedPeriodError(row.name, posting_date)

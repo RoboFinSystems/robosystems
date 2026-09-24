@@ -41,6 +41,17 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   validate_and_normalize_lines,
 )
 
+
+@pytest.fixture(autouse=True)
+def _period_gate_open():
+  """Mock sessions cannot answer the period gate; it runs against a real
+  database in test_guards_db.py and test_state_transition_locks_db.py."""
+  with patch(
+    "robosystems.operations.roboledger.commands.journal_entries.assert_period_not_closed"
+  ):
+    yield
+
+
 MODULE = "robosystems.operations.roboledger.commands.journal_entries"
 
 _DATE = date(2026, 1, 15)

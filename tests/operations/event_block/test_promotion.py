@@ -6,12 +6,22 @@ from datetime import UTC, date, datetime, time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.promotion import (
   PromotionResult,
   promote_pending_obligations,
 )
+
+
+@pytest.fixture(autouse=True)
+def _period_gate_open():
+  """Mock sessions cannot answer the period gate; it runs against a real
+  database in test_guards_db.py and test_state_transition_locks_db.py."""
+  with patch("robosystems.operations.event_block.promotion.assert_period_not_closed"):
+    yield
 
 
 def _pending_event(

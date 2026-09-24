@@ -55,6 +55,7 @@ def _service_closed_through(period: str | None) -> MagicMock:
   """A calendar service whose calendar reports ``period`` as closed_through."""
   service = MagicMock()
   service.require.return_value.closed_through_period = period
+  service.require_locked.return_value.closed_through_period = period
   return service
 
 

@@ -17,6 +17,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _period_gate_open():
+  """Mock sessions cannot answer the period gate; it runs against a real
+  database in test_guards_db.py and test_state_transition_locks_db.py."""
+  with patch("robosystems.operations.event_block.commands.assert_period_not_closed"):
+    yield
+
+
 COMMANDS_MODULE = "robosystems.operations.event_block.commands"
 GRAPH_ID = "kg00000000000000aa"
 
