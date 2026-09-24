@@ -1,14 +1,6 @@
-"""Knowledge artifact builders for graph-based confidence refinement.
-
-Generates precomputed Parquet artifacts from the full DuckDB staging database:
-  - element_knowledge.parquet: Graph-structural signals per element qname
-  - structure_profiles.parquet: Element frequency distributions per canonical_type
-  - structure_consensus.parquet: Cross-filing majority-vote for identical structures
-  - disclosure_profiles.parquet: Element frequency distributions per disclosure type
-  - disclosure_consensus.parquet: Cross-filing majority-vote for disclosure types
-
-These artifacts are lazy-loaded by the SemanticEnricher during per-filing
-processing to refine confidence scores using graph-structural signals.
+"""Builds the Parquet knowledge artifacts that SemanticEnricher uses to refine
+confidence scores, from the full DuckDB staging database: element_knowledge,
+structure_profiles/consensus, and disclosure_profiles/consensus.
 """
 
 from __future__ import annotations
@@ -32,15 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 def _log_memory(label: str) -> None:
-  """Log current and peak process RSS memory usage.
-
-  On Linux (ECS/Fargate), reads /proc/self/status for current VmRSS and peak VmHWM.
-  Falls back to resource.getrusage for peak RSS on macOS.
-  """
+  """Log current and peak RSS (from /proc on Linux; peak only elsewhere)."""
   try:
     proc_status = Path("/proc/self/status")
     if proc_status.exists():
-      # Linux: read current and peak RSS from /proc
       status = proc_status.read_text()
       vm_rss = vm_hwm = None
       for line in status.splitlines():
@@ -54,7 +41,7 @@ def _log_memory(label: str) -> None:
         logger.info(f"[memory] {label}: {vm_rss:.2f} GB current")
       return
 
-    # macOS fallback: only peak RSS available
+    # ru_maxrss is bytes on macOS, kilobytes on Linux.
     import resource
 
     rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -68,33 +55,20 @@ def _log_memory(label: str) -> None:
 
 
 class ElementKnowledgeBuilder:
-  """Generates the element knowledge artifact from a DuckDB staging database.
-
-  Uses SQL-side deduplication to keep Python memory under ~2.2 GB
-  regardless of corpus size.
-
-  Output schema:
-    qname (STRING), primary_statement (STRING), bfs_depth (INT32),
-    pagerank (FLOAT), core_number (INT32), neighborhood_agreement (FLOAT),
-    filing_count (INT32), disclosure_type (STRING)
+  """Builds element_knowledge.parquet: per-qname graph signals (primary
+  statement, BFS depth, PageRank, core number, neighborhood agreement, filing
+  count, disclosure type). Deduplicates in SQL to bound Python memory.
   """
 
   def __init__(self, memory_limit: str = "16GB") -> None:
     self._memory_limit = memory_limit
 
   def build(self, db_path: str | Path) -> Path:
-    """Build the element knowledge artifact and write to ARTIFACT_PATH.
-
-    Memory-conscious: frees intermediate results aggressively between steps.
-    DuckDB uses spill-to-disk with a low memory limit; Python objects are
-    deleted and gc.collect()'d as soon as they're no longer needed.
-    """
+    """Build and write the artifact, freeing each intermediate as soon as it is spent."""
     from robosystems.config.storage.shared import get_artifact_path
 
     _log_memory("start")
     extractor = ArcExtractor(db_path, memory_limit=self._memory_limit)
-
-    # --- Phase 1: Extract from DuckDB (connections open/close per call) ---
 
     logger.info("Extracting graph via Arrow zero-copy path")
     nodes, edges_arrow = extractor.extract_graph_arrow()
@@ -122,12 +96,9 @@ class ElementKnowledgeBuilder:
     )
     _log_memory("after structure membership extraction")
 
-    # Done with DuckDB — extractor holds no state
     del extractor
     gc.collect()
     _log_memory("after extractor cleanup")
-
-    # --- Phase 2: Build graph (frees Arrow arrays immediately after) ---
 
     logger.info("Building element graph (Arrow → CSR)")
     element_graph = build_element_graph_from_arrow(nodes, edges_arrow)
@@ -135,12 +106,10 @@ class ElementKnowledgeBuilder:
       f"Graph: {element_graph.num_nodes} nodes, {element_graph.num_edges} edges"
     )
 
-    # Arrow arrays are copied into the CSR — free them
+    # The CSR holds copies; free the Arrow arrays.
     del nodes, edges_arrow
     gc.collect()
     _log_memory("after graph build + arrow cleanup")
-
-    # --- Phase 3: Structural analysis (free each result before next) ---
 
     logger.info("Running PageRank")
     pagerank_scores = self._run_pagerank(element_graph)
@@ -174,8 +143,6 @@ class ElementKnowledgeBuilder:
     )
     _log_memory("after neighborhood agreement")
 
-    # --- Phase 4: Build output rows (then free graph + analysis dicts) ---
-
     logger.info(
       f"Building output rows: {len(element_graph.elements)} elements, "
       f"{len(membership_statements)} membership-classified, "
@@ -193,10 +160,9 @@ class ElementKnowledgeBuilder:
     for qname in element_graph.elements:
       qnames.append(qname)
 
-      # primary_statement from structure membership (not BFS)
+      # primary_statement comes from structure membership, bfs_depth from BFS.
       primary_statements.append(membership_statements.get(qname))
 
-      # bfs_depth still from BFS (useful as secondary signal)
       min_depth = classifications.get_min_depth(qname)
       bfs_depths.append(min_depth)
 
@@ -207,13 +173,11 @@ class ElementKnowledgeBuilder:
       f_counts.append(filing_counts.get(qname, 0))
       d_types.append(disclosure_types.get(qname))
 
-    # Free all analysis objects — only column lists needed for Parquet write
     del element_graph, pagerank_scores, core_numbers, classifications
     del agreement_scores, filing_counts, disclosure_types, membership_statements
     gc.collect()
     _log_memory("after building output rows + cleanup")
 
-    # --- Phase 5: Write Parquet ---
     logger.info(f"Writing parquet with {len(qnames)} rows")
 
     table = pa.table(
@@ -239,13 +203,10 @@ class ElementKnowledgeBuilder:
     return output_path
 
   def _run_pagerank(self, element_graph) -> dict[int, float]:
-    """Run PageRank on the element graph.
+    """PageRank, log-normalized to [0, 1].
 
-    Uses log-normalization to spread the heavy-tailed distribution.
-    Raw PageRank is extremely concentrated (top element is 1000x the 99th
-    percentile), so max-normalization compresses 98%+ of elements to near-zero.
-    Log-transform preserves relative ordering while distributing signal
-    across the full [0, 1] range.
+    Raw scores are so heavy-tailed that max-normalization pushes nearly every
+    element to ~0; the log keeps order while spreading the signal.
     """
     graph = element_graph.graph
     if graph.numberOfNodes() == 0:
@@ -255,7 +216,6 @@ class ElementKnowledgeBuilder:
     pr.run()
     scores = pr.scores()
 
-    # Log-normalize to spread the heavy-tailed distribution
     nonzero = [s for s in scores if s > 0]
     if not nonzero:
       result = dict.fromkeys(range(len(scores)), 0.0)
@@ -276,7 +236,6 @@ class ElementKnowledgeBuilder:
     return result
 
   def _run_core_decomposition(self, element_graph) -> dict[int, int]:
-    """Run k-core decomposition on the element graph."""
     graph = element_graph.graph
     if graph.numberOfNodes() == 0:
       return {}
@@ -286,7 +245,7 @@ class ElementKnowledgeBuilder:
     core.run()
     scores = {i: int(s) for i, s in enumerate(core.scores())}
 
-    # Free the undirected copy immediately (can be as large as the original graph)
+    # The undirected copy can be as large as the graph.
     del undirected, core
     gc.collect()
 
@@ -297,11 +256,10 @@ class ElementKnowledgeBuilder:
     element_graph,
     primary_statements: dict[str, str],
   ) -> dict[str, float]:
-    """Compute fraction of neighbors sharing the same primary statement.
+    """Fraction of neighbors sharing the element's primary statement.
 
-    Counts both outgoing AND incoming neighbors: most elements are leaves with
-    zero outgoing edges in the directed graph, so an outgoing-only walk scores
-    92%+ of them at agreement=0.0.
+    Counts incoming neighbors too: most elements are leaves with no outgoing
+    edges, so an outgoing-only walk would score them all 0.
     """
     graph = element_graph.graph
     result = {}
@@ -316,7 +274,6 @@ class ElementKnowledgeBuilder:
         result[qname] = 0.0
         continue
 
-      # Bidirectional: both outgoing and incoming neighbors
       neighbors = set(graph.iterNeighbors(idx))
       neighbors.update(graph.iterInNeighbors(idx))
 
@@ -334,17 +291,15 @@ class ElementKnowledgeBuilder:
 
     return result
 
-  # Mapping from structure canonical_type to StatementType string value.
-  # Only statement-relevant types are included; disclosure types like
-  # DocumentInformation, NetBenefitCosts, etc. are ignored.
+  # Structure canonical_type → StatementType value; other disclosure types are ignored.
   _CANONICAL_TO_STATEMENT: dict[str, str] = {
-    # Primary statement types (lowercase)
+    # Statement types
     "income_statement": "IncomeStatement",
     "balance_sheet": "BalanceSheet",
     "cash_flow_statement": "CashFlow",
     "equity_statement": "Equity",
     "comprehensive_income": "IncomeStatement",
-    # Disclosure types that map to statements (CamelCase)
+    # Disclosure types
     "IncomeStatement": "IncomeStatement",
     "AssetsRollUp": "BalanceSheet",
     "LiabilitiesAndEquityRollUp": "BalanceSheet",
@@ -354,16 +309,10 @@ class ElementKnowledgeBuilder:
   def _classify_by_structure_membership(
     membership: dict[str, dict[str, int]],
   ) -> dict[str, str]:
-    """Classify elements by majority vote of structure canonical_type membership.
+    """Each element's statement by majority vote over its structures' canonical types.
 
-    For each element, maps its structure canonical_types to statement types
-    and picks the statement with the highest total structure count.
-
-    Structure membership rather than BFS traversal, because the deduped graph
-    has cross-statement arc pollution: the indirect cash flow method creates
-    calculation arcs from IS roots (NetIncomeLoss) to CF elements, so an IS BFS
-    reaches every cash flow element before the CF BFS does. Structure-level
-    classifications carry no such arcs.
+    Not BFS: indirect-method cash flows add calculation arcs from NetIncomeLoss
+    to CF elements, so an income-statement BFS claims every cash flow element.
     """
     mapping = ElementKnowledgeBuilder._CANONICAL_TO_STATEMENT
     result: dict[str, str] = {}
@@ -382,12 +331,8 @@ class ElementKnowledgeBuilder:
 
 
 class StructureKnowledgeBuilder:
-  """Generates structure classification artifacts from a DuckDB staging database.
-
-  Produces two artifacts:
-  1. structure_profiles.parquet — element frequency distributions per canonical_type
-  2. structure_consensus.parquet — cross-filing majority-vote for identical structures
-  """
+  """Builds structure_profiles (element frequency per canonical_type) and
+  structure_consensus (majority canonical_type per definition hash)."""
 
   def __init__(self, memory_limit: str = "16GB") -> None:
     self._memory_limit = memory_limit
@@ -412,21 +357,15 @@ class StructureKnowledgeBuilder:
     self,
     compositions: list[tuple[str, str | None, str, list[str]]],
   ) -> Path:
-    """Compute element frequency distributions per canonical_type.
-
-    For each canonical_type, compute how often each element qname appears
-    across all structures of that type.
-    """
+    """Share of each canonical_type's structures that contain each element."""
     from robosystems.config.storage.shared import get_artifact_path
 
-    # Group structures by canonical_type
     type_structures: dict[str, list[list[str]]] = {}
     for _sid, canonical_type, _def_hash, element_qnames in compositions:
       if canonical_type is None:
         continue
       type_structures.setdefault(canonical_type, []).append(element_qnames)
 
-    # Compute frequency of each element per type
     canonical_types = []
     qnames = []
     frequencies = []
@@ -437,10 +376,9 @@ class StructureKnowledgeBuilder:
       if total == 0:
         continue
 
-      # Count how many structures contain each element
       element_counts: Counter[str] = Counter()
       for elements in structure_lists:
-        for qname in set(elements):  # set() to count presence, not multiplicity
+        for qname in set(elements):  # presence, not multiplicity
           element_counts[qname] += 1
 
       for qname, count in element_counts.items():
@@ -474,14 +412,9 @@ class StructureKnowledgeBuilder:
     self,
     compositions: list[tuple[str, str | None, str, list[str]]],
   ) -> Path:
-    """Compute cross-filing majority-vote for identical structure definitions.
-
-    Groups structures by definition_hash and finds the majority-vote
-    canonical_type for each group.
-    """
+    """Majority canonical_type per definition_hash."""
     from robosystems.config.storage.shared import get_artifact_path
 
-    # Group by definition_hash
     hash_votes: dict[str, list[str | None]] = {}
     for _sid, canonical_type, def_hash, _elements in compositions:
       hash_votes.setdefault(def_hash, []).append(canonical_type)
@@ -527,17 +460,11 @@ class StructureKnowledgeBuilder:
 
 
 class DisclosureProfileBuilder:
-  """Generates disclosure classification artifacts from a DuckDB staging database.
+  """Builds disclosure_profiles and disclosure_consensus from structures that
+  DISCLOSURE_CONCEPT_MAP labeled.
 
-  Uses structures where DISCLOSURE_CONCEPT_MAP matched (labeled training data)
-  to build element composition profiles per disclosure type. Element importance
-  is weighted by PageRank from the element_knowledge artifact, making
-  high-centrality elements more discriminative.
-
-  Produces two artifacts:
-  1. disclosure_profiles.parquet — element frequency distributions per disclosure type,
-     weighted by element_knowledge PageRank scores
-  2. disclosure_consensus.parquet — cross-filing majority-vote using disclosure type
+  Profile scores weight frequency by element_knowledge PageRank when that
+  artifact exists.
   """
 
   def __init__(self, memory_limit: str = "16GB") -> None:
@@ -566,14 +493,7 @@ class DisclosureProfileBuilder:
     return profiles_path, consensus_path
 
   def _load_pagerank_scores(self) -> dict[str, float]:
-    """Load PageRank scores from element_knowledge artifact.
-
-    Reads directly via file I/O to avoid circular imports with enrichment.py.
-
-    Returns:
-        Dict mapping qname to normalized PageRank score.
-        Empty dict if artifact not available.
-    """
+    """qname → PageRank from element_knowledge, or {} if the artifact is missing."""
     from robosystems.config.storage.shared import get_artifact_path
 
     path = Path(get_artifact_path("element_knowledge"))
@@ -598,20 +518,13 @@ class DisclosureProfileBuilder:
     compositions: list[tuple[str, str, str, list[str]]],
     pagerank_scores: dict[str, float],
   ) -> Path:
-    """Compute element frequency distributions per disclosure type.
-
-    For each disclosure type, compute how often each element qname appears
-    across all structures of that type. Weighted scores incorporate
-    PageRank centrality to make important elements more discriminative.
-    """
+    """Per disclosure type: element frequency and frequency * (1 + PageRank)."""
     from robosystems.config.storage.shared import get_artifact_path
 
-    # Group structures by disclosure_type
     type_structures: dict[str, list[list[str]]] = {}
     for _sid, disclosure_type, _def_hash, element_qnames in compositions:
       type_structures.setdefault(disclosure_type, []).append(element_qnames)
 
-    # Compute frequency and weighted score per element per type
     disclosure_types = []
     qnames = []
     frequencies = []
@@ -663,11 +576,7 @@ class DisclosureProfileBuilder:
     self,
     compositions: list[tuple[str, str, str, list[str]]],
   ) -> Path:
-    """Compute cross-filing majority-vote for identical structure definitions.
-
-    Groups structures by definition_hash and finds the majority-vote
-    disclosure_type for each group.
-    """
+    """Majority disclosure_type per definition_hash."""
     from robosystems.config.storage.shared import get_artifact_path
 
     hash_votes: dict[str, list[str]] = {}

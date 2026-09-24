@@ -1,23 +1,9 @@
-"""
-Semantic memory endpoints for Graph API.
+"""Semantic-memory endpoints: CRUD over a graph's LanceDB "memory" table.
 
-Per-graph incremental CRUD over a single LanceDB "memory" table — the storage
-half of the AI-memory feature. This is an INTERNAL surface: only the platform
-API (via GraphClient) calls it; the main-API MemoryService is the trust boundary
-that builds recall/list predicates from allowlisted fields. All memory ops route
-to the writer/master instance (the memory table is not part of replica sync).
-
-Distinct from ``databases/memory.py`` (RAM boost) and the subgraph-Cypher
-"memory" MCP tools — this is the LanceDB semantic-vector store.
-
-Endpoints (prefix /databases):
-
-  POST   /{graph_id}/semantic-memory/rows          Add memory rows (pre-embedded)
-  POST   /{graph_id}/semantic-memory/search        Vector recall (cosine top-k)
-  POST   /{graph_id}/semantic-memory/list          List/filter (metadata scan)
-  GET    /{graph_id}/semantic-memory/rows/{id}      Get one by id
-  PATCH  /{graph_id}/semantic-memory/rows/{id}      Full-row upsert on id
-  DELETE /{graph_id}/semantic-memory/rows/{id}      Delete by id
+Internal only — the platform API's MemoryService is the trust boundary that
+builds ``where`` predicates from allowlisted fields. Writes route to the
+writer; the table is not replicated. Not to be confused with ``memory.py``
+(RAM boost).
 """
 
 import asyncio
@@ -34,8 +20,8 @@ router = APIRouter(prefix="/databases", tags=["Semantic Memory"])
 
 _memory_store = None
 
-# Per-graph write serialization (LanceDB uses optimistic concurrency; concurrent
-# add/merge_insert on the same table can raise commit conflicts).
+# Per-graph write serialization: concurrent LanceDB writes to one table can
+# raise commit conflicts.
 _locks: dict[str, asyncio.Lock] = {}
 
 
@@ -65,11 +51,6 @@ def _require_writer() -> None:
       status_code=status.HTTP_501_NOT_IMPLEMENTED,
       detail="Semantic memory writes are not available on read-only replicas",
     )
-
-
-# ---------------------------------------------------------------------------
-# Request / response models
-# ---------------------------------------------------------------------------
 
 
 class MemoryRowIn(BaseModel):
@@ -147,11 +128,6 @@ class MemoryDeleteResponse(BaseModel):
 class MemoryUpdateResponse(BaseModel):
   id: str
   updated: bool
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.post("/{graph_id}/semantic-memory/rows", response_model=MemoryAddResponse)

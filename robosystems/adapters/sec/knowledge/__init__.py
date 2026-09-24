@@ -1,20 +1,10 @@
-"""SEC graph knowledge for XBRL financial data.
+"""Graph analytics over SEC staging data: statement classification and the
+knowledge artifacts used for confidence refinement.
 
-Provides statement classification using graph analytics algorithms
-from icebug (networkit), a DuckDB analytics framework for running
-queries on SEC staging data, and knowledge artifact builders for
-graph-based confidence refinement.
-
-**Re-exports are lazy.** `artifact` and `graphs` import `networkit`, and
-importing networkit registers the ``file`` URI scheme in the Arrow registry
-that `pyarrow` also registers — after which *every* pyarrow local-file
-operation in that process raises ``ArrowKeyError: Attempted to register
-factory for scheme 'file'``, including ``pq.write_table`` and
-``pq.read_metadata``. Eager re-exports here meant that importing any module
-in this package — `framework`, which only needs duckdb, or `classifiers`,
-for a constant dict — pulled networkit in and poisoned pyarrow for the rest
-of the process. Resolving names on demand keeps networkit confined to the
-callers that actually run graph analytics.
+Re-exports are lazy because importing networkit (``artifact``, ``graphs``)
+registers the ``file`` URI scheme in Arrow's registry, after which every
+pyarrow local-file operation by path raises ``ArrowKeyError``. Pass pyarrow
+file handles, not paths, anywhere networkit may be loaded.
 """
 
 _LAZY_IMPORTS = {
@@ -28,7 +18,6 @@ _LAZY_IMPORTS = {
 
 
 def __getattr__(name: str):
-  """Lazy import knowledge classes on first access."""
   if name in _LAZY_IMPORTS:
     import importlib
 

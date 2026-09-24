@@ -1,8 +1,4 @@
-"""
-Graph API Client - Async client for graph database access.
-
-This module provides an asynchronous client for interacting with the Graph API.
-"""
+"""Async client for the Graph API, plus the factory that routes it."""
 
 from .client import GraphClient
 from .config import GraphClientConfig

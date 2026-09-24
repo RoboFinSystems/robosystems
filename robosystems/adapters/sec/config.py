@@ -1,17 +1,7 @@
-"""
-SEC adapter configuration constants.
-
-These are processing-specific constants for the SEC/XBRL pipeline.
-They are not runtime-configurable - change them here if needed.
-"""
+"""SEC/XBRL pipeline constants; not runtime-configurable."""
 
 from robosystems.config import env
 from robosystems.config.constants import MAX_CONCURRENT_DOWNLOADS
-
-# =============================================================================
-# SEC EDGAR API CONFIGURATION
-# =============================================================================
-# Configuration for SEC EDGAR API access and rate limiting
 
 SEC_CONFIG = {
   "base_url": "https://www.sec.gov",
@@ -34,24 +24,14 @@ SEC_CONFIG = {
   "headers": {"User-Agent": env.SEC_GOV_USER_AGENT},
 }
 
-# =============================================================================
-# ARELLE CONFIGURATION
-# =============================================================================
-# The load itself is xbrlkit's (cache-first, per-host spacing, Retry-After
-# backoff, no re-validation of cached files); these are the platform's
-# settings for it. The cache directory is env.ARELLE_CACHE_DIR.
+# Platform settings for xbrlkit's Arelle load; the cache is env.ARELLE_CACHE_DIR.
+ARELLE_TIMEOUT = 30  # seconds per DTS document fetch
 
-# Per-fetch timeout for a DTS document (seconds)
-ARELLE_TIMEOUT = 30
-
-# Work offline: serve the DTS from the cache only, never fetch. A miss is then
-# a DtsResolutionError, not a fetch.
+# Serve the DTS from cache only; a miss raises DtsResolutionError.
 ARELLE_WORK_OFFLINE = False
 
 
 def xbrlkit_config():
-  """xbrlkit's :class:`~xbrlkit.config.Config` with the platform's settings:
-  the SEC User-Agent, the request timeout, and the Arelle fetch policy."""
   from xbrlkit.config import Config
 
   return Config(
@@ -62,55 +42,27 @@ def xbrlkit_config():
   )
 
 
-# =============================================================================
-# XBRL PROCESSING CONFIGURATION
-# =============================================================================
-# Configuration for XBRL graph extraction and transformation
+# XBRL processing
+XBRL_EXTERNALIZE_LARGE_VALUES = True  # move large text values to the public bucket
+XBRL_EXTERNALIZATION_THRESHOLD = 1024  # characters
 
-# Externalize large text values to S3 (reduces database size)
-XBRL_EXTERNALIZE_LARGE_VALUES = True
-
-# Character threshold for externalizing values
-XBRL_EXTERNALIZATION_THRESHOLD = 1024
-
-# Keep the externalized value in the graph too (local control experiments only;
-# see env.XBRL_KEEP_TEXTBLOCKS_INLINE for why it is off everywhere real)
+# Also keep externalized values in the graph; local experiments only.
 XBRL_KEEP_TEXTBLOCKS_INLINE = env.XBRL_KEEP_TEXTBLOCKS_INLINE
 
-# Publish the filing's public artifacts (holon, Tavi, primary document, manifest)
-# to the public-data bucket at process time; see processors/artifacts.py
+# Publish holon, Tavi, primary document and manifest at process time.
 XBRL_FILING_ARTIFACTS = env.SEC_FILING_ARTIFACTS_ENABLED
 
-# Skip textblock facts entirely (for historical data where text isn't needed)
 XBRL_SKIP_TEXTBLOCK_FACTS = False
 
-# Feature flags for upstream simplification (disabled by default)
 XBRL_STANDARDIZED_FILENAMES = False
 XBRL_TYPE_PREFIXES = False
 XBRL_COLUMN_STANDARDIZATION = False
 
-# Semantic enrichment: embedding-based canonical concept matching
-XBRL_SEMANTIC_ENRICHMENT = True
-
-# Graph-based confidence refinement: uses precomputed artifacts to adjust scores
-XBRL_GRAPH_REFINEMENT = True
-
-# Association classification: Cypher-based pattern detection using temp embedded LadybugDB
+XBRL_SEMANTIC_ENRICHMENT = True  # embedding-based canonical concepts
+XBRL_GRAPH_REFINEMENT = True  # adjust scores with precomputed graph artifacts
 XBRL_ASSOCIATION_CLASSIFICATION = True
 
-# =============================================================================
-# SEC PIPELINE CONFIGURATION
-# =============================================================================
-# Configuration for SEC EDGAR data fetching and processing
-
-# Maximum concurrent downloads from SEC.gov
 SEC_MAX_CONCURRENT_DOWNLOADS = 5
-
-# Validate CIK with SEC API before processing
 SEC_VALIDATE_CIK = True
-
-# Allow partial failures in pipeline (continue if some filings fail)
-SEC_PIPELINE_PARTIAL_TOLERANCE = True
-
-# Clean up temporary files after processing
+SEC_PIPELINE_PARTIAL_TOLERANCE = True  # continue when some filings fail
 SEC_PIPELINE_CLEANUP_TEMP_FILES = True

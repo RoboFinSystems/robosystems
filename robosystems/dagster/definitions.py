@@ -1,19 +1,7 @@
-"""Dagster definitions entry point for RoboSystems.
+"""Dagster definitions entry point: platform jobs plus adapter pipelines.
 
-This module collects Dagster components from two sources:
-1. Platform operations (billing, infrastructure, provisioning, graph ops)
-2. Adapter pipelines (SEC, future adapters)
-
-Adapter-specific pipelines live inside their adapter packages
-(e.g., adapters/sec/pipeline/) and expose a get_dagster_components() function.
-This module collects those components alongside platform operations.
-
-Usage:
-    # Local development
-    dagster dev -m robosystems.dagster
-
-    # Production (via dagster-webserver)
-    dagster-webserver -m robosystems.dagster
+Each adapter exposes ``get_dagster_components()`` from its pipeline package,
+loaded here behind its feature flag. Run with ``dagster dev -m robosystems.dagster``.
 """
 
 from dagster import Definitions
@@ -120,12 +108,7 @@ from robosystems.dagster.sensors.worker_reaper import (
   worker_inflight_reaper_sensor,
 )
 
-# === FORK: Add your adapter pipelines here ===
-# from robosystems.adapters.custom_erp.pipeline import get_dagster_components as erp_pipeline
-
-# ============================================================================
-# Adapter Pipeline Components (conditionally loaded via feature flags)
-# ============================================================================
+# FORK: add your adapter pipelines here, following the pattern below.
 
 _empty_pipeline: dict = {"assets": [], "jobs": [], "schedules": [], "sensors": []}
 
@@ -181,31 +164,18 @@ if env.EXTENSIONS_ENABLED:
 else:
   _extensions_jobs = []
   _extensions_sensors = []
-# erp = erp_pipeline()
 
-# Collect shared replica deps from all enabled adapter pipelines
 _shared_replica_deps: list[str] = [
   *sec.get("shared_replica_deps", []),
-  # *erp.get("shared_replica_deps", []),
 ]
 shared_replicas_refreshed = build_shared_replicas_refreshed(deps=_shared_replica_deps)
 
-# ============================================================================
-# Resource Configuration
-# ============================================================================
-
-# Resources use internal fallback logic to fetch configuration from
-# env.* (which uses secrets_manager for prod/staging). This ensures
-# consistency with how the rest of the application fetches secrets.
+# Resources read their configuration from env.* (Secrets Manager in prod/staging).
 resources = {
   "db": DatabaseResource(),  # Falls back to env.DATABASE_URL
   "s3": S3Resource(),  # Falls back to env.USER_DATA_BUCKET, env.AWS_REGION
   "graph": GraphResource(),  # Falls back to env.GRAPH_API_URL
 }
-
-# ============================================================================
-# Collect All Components (Platform + Adapter Pipelines)
-# ============================================================================
 
 all_assets = [
   # Platform: User graph operations
@@ -315,10 +285,6 @@ all_sensors = [
   # Adapter: SEC pipeline
   *sec["sensors"],
 ]
-
-# ============================================================================
-# Definitions Export
-# ============================================================================
 
 defs = Definitions(
   assets=all_assets,

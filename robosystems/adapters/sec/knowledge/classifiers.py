@@ -1,9 +1,4 @@
-"""Statement classification for XBRL elements.
-
-Classifies elements into financial statement categories (Income Statement,
-Balance Sheet, Cash Flow Statement, Statement of Equity) using BFS
-traversal from known root elements through calculation/presentation graphs.
-"""
+"""Classify XBRL elements into financial statements by BFS from known root elements."""
 
 from __future__ import annotations
 
@@ -22,8 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 class StatementType(str, Enum):
-  """Financial statement categories."""
-
   INCOME_STATEMENT = "IncomeStatement"
   BALANCE_SHEET = "BalanceSheet"
   CASH_FLOW = "CashFlow"
@@ -32,8 +25,6 @@ class StatementType(str, Enum):
 
 @dataclass
 class Classification:
-  """Classification result for a single element."""
-
   statement: StatementType
   depth: int
   weight: float
@@ -42,14 +33,9 @@ class Classification:
 
 @dataclass
 class ClassificationResult:
-  """Complete classification results.
+  """At most one Classification per (qname, StatementType), the shallowest,
+  bounding memory at O(nodes x 4) rather than O(nodes x roots)."""
 
-  Stores at most one Classification per (qname, StatementType) pair —
-  the shallowest path wins. This keeps memory bounded at O(nodes x 4)
-  instead of O(nodes x roots).
-  """
-
-  # qname -> {StatementType -> best Classification}
   classifications: dict[str, dict[StatementType, Classification]] = field(
     default_factory=dict
   )
@@ -64,7 +50,6 @@ class ClassificationResult:
     return len(self.unclassified)
 
   def get_primary_statement(self, qname: str) -> StatementType | None:
-    """Get the primary (shallowest) statement for an element."""
     by_type = self.classifications.get(qname)
     if not by_type:
       return None
@@ -72,21 +57,18 @@ class ClassificationResult:
     return best.statement
 
   def get_min_depth(self, qname: str) -> int | None:
-    """Get the minimum BFS depth across all statement types."""
     by_type = self.classifications.get(qname)
     if not by_type:
       return None
     return min(c.depth for c in by_type.values())
 
   def get_all_classifications(self, qname: str) -> list[Classification]:
-    """Get all classifications for an element (one per statement type)."""
     by_type = self.classifications.get(qname)
     if not by_type:
       return []
     return list(by_type.values())
 
 
-# Known root elements for each financial statement
 STATEMENT_ROOTS: dict[StatementType, list[str]] = {
   StatementType.INCOME_STATEMENT: [
     "us-gaap:NetIncomeLoss",
@@ -111,37 +93,23 @@ STATEMENT_ROOTS: dict[StatementType, list[str]] = {
 }
 
 
-# Authoritative mapping from Seattle Method disclosure-isSECType StatementType
-# disclosures to our StatementType enum. Only the 8 disclosures that the
-# Seattle Method classifies as StatementType (face of financial statement) are
-# included. All other disclosures (~987) are DisclosureType (notes) — their raw
-# Seattle Method names flow through the disclosure_type column in element_knowledge.parquet
-# for downstream use, but are NOT mapped to statements.
-# Source: disclosure-isSECType arcrole from disclosure-mechanics_ALL.xsd
+# The Seattle Method disclosures whose disclosure-isSECType is StatementType
+# (face statements). Note disclosures are deliberately absent; their names
+# still reach element_knowledge's disclosure_type column.
 DISCLOSURE_TO_STATEMENT: dict[str, StatementType] = {
-  # Income Statement
   "IncomeStatement": StatementType.INCOME_STATEMENT,
   "EarningsPerShareDisclosuresHierarchy": StatementType.INCOME_STATEMENT,
   "StatementOfComprehensiveIncome": StatementType.INCOME_STATEMENT,
-  # Balance Sheet (BalanceSheet + its two required sub-disclosures)
   "BalanceSheet": StatementType.BALANCE_SHEET,
   "AssetsRollUp": StatementType.BALANCE_SHEET,
   "LiabilitiesAndEquityRollUp": StatementType.BALANCE_SHEET,
-  # Cash Flow
   "CashFlowStatement": StatementType.CASH_FLOW,
-  # Equity
   "StatementOfChangesInEquity": StatementType.EQUITY,
 }
 
 
 class StatementClassifier:
-  """Classifies XBRL elements into financial statement categories.
-
-  Uses BFS from known root elements to propagate statement classification
-  through the calculation/presentation graph. For each (element, statement_type)
-  pair, only the shallowest classification is kept to bound memory at
-  O(nodes x 4 statement types) regardless of how many roots are used.
-  """
+  """Propagates statement classification by BFS from root elements."""
 
   def __init__(
     self,
@@ -154,24 +122,14 @@ class StatementClassifier:
     element_graph: ElementGraph,
     disclosure_roots: dict[str, set[str]] | None = None,
   ) -> ClassificationResult:
-    """Run statement classification on the element graph.
+    """BFS from STATEMENT_ROOTS (weight 1.0), then from disclosure roots
+    (qname → disclosure types, weight 0.9) mapped via DISCLOSURE_TO_STATEMENT.
 
-    Phase 1: BFS from hardcoded STATEMENT_ROOTS (weight 1.0).
-    Phase 2: BFS from disclosure root elements (weight 0.9), using
-    DISCLOSURE_TO_STATEMENT mapping. Only unclassified elements benefit.
-
-    Args:
-        element_graph: The element graph with index mappings.
-        disclosure_roots: Optional dict from extract_disclosure_root_elements().
-            Maps element qname to set of disclosure type names.
-
-    Returns:
-        ClassificationResult with per-element classifications.
+    A later pass only replaces a classification it reaches at a shallower depth.
     """
     result = ClassificationResult()
     graph = element_graph.graph
 
-    # Phase 1: BFS from hardcoded roots
     hardcoded_count = 0
     for stmt_type, root_qnames in self._roots.items():
       for root_qname in root_qnames:
@@ -188,7 +146,6 @@ class StatementClassifier:
       f"{result.total_classified} elements classified"
     )
 
-    # Phase 2: BFS from disclosure root elements
     if disclosure_roots:
       pre_count = result.total_classified
       self._classify_from_disclosure_roots(element_graph, disclosure_roots, result)
@@ -197,7 +154,6 @@ class StatementClassifier:
         f"classified from disclosure roots, {result.total_classified} total"
       )
 
-    # Identify unclassified elements
     all_qnames = set(element_graph.elements)
     classified_qnames = set(result.classifications.keys())
     result.unclassified = sorted(all_qnames - classified_qnames)
@@ -214,12 +170,6 @@ class StatementClassifier:
     disclosure_roots: dict[str, set[str]],
     result: ClassificationResult,
   ) -> None:
-    """Phase 2: BFS from disclosure root elements with reduced weight.
-
-    For each disclosure root, maps its disclosure types to StatementType
-    via DISCLOSURE_TO_STATEMENT. Uses weight 0.9 to preserve priority of
-    hardcoded roots.
-    """
     graph = element_graph.graph
     seen_seeds: set[tuple[str, StatementType]] = set()
     total_roots = len(disclosure_roots)
@@ -271,16 +221,11 @@ class StatementClassifier:
     result: ClassificationResult,
     initial_weight: float = 1.0,
   ) -> None:
-    """BFS from a root node, classifying all reachable descendants.
-
-    Only updates a node's classification if the new path is shallower
-    than any existing classification for the same statement type.
-    Skips subtrees where all nodes already have shallower classifications.
-    """
+    """Classify every descendant of a root, keeping only shallower paths and
+    pruning subtrees already reached shallower for this statement type."""
     visited: set[int] = set()
     queue: deque[tuple[int, int, float]] = deque()
 
-    # Seed the root itself
     queue.append((root_idx, 0, initial_weight))
     visited.add(root_idx)
 
@@ -288,12 +233,10 @@ class StatementClassifier:
       node_idx, depth, cum_weight = queue.popleft()
       qname = element_graph.get_qname(node_idx)
 
-      # Only store if this is the shallowest path for this (qname, stmt_type)
       by_type = result.classifications.get(qname)
       if by_type is not None:
         existing = by_type.get(stmt_type)
         if existing is not None and existing.depth <= depth:
-          # Already have a shallower classification — skip this subtree
           continue
       else:
         by_type = {}
@@ -306,7 +249,6 @@ class StatementClassifier:
         via_root=root_qname,
       )
 
-      # Traverse outgoing edges (parent -> child)
       for neighbor in graph.iterNeighbors(node_idx):
         if neighbor not in visited:
           edge_weight = graph.weight(node_idx, neighbor)

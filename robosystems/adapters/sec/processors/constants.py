@@ -1,13 +1,7 @@
-"""
-SEC Processing Constants.
+"""Constants shared by SEC processing, consolidation and ingestion."""
 
-Centralized constants used across SEC processing, consolidation, and ingestion operations.
-"""
-
-# Shared node tables that should be deduplicated across filings during consolidation.
-# These tables have deterministic IDs (UUID5 based on content) so same content = same identifier.
-# Deduplication reduces memory pressure during DuckDB staging by removing duplicates
-# that would otherwise need to be handled via memory-intensive window functions.
+# Node tables shared across filings, deduplicated during consolidation. Their
+# ids are content-derived UUID5s, so equal content means equal identifier.
 SHARED_NODE_TABLES = frozenset(
   {
     "nodes/Element",
@@ -18,7 +12,6 @@ SHARED_NODE_TABLES = frozenset(
   }
 )
 
-# Quarter end dates mapping for partitioning
 QUARTER_END_DAYS = {
   1: "-03-31",
   2: "-06-30",

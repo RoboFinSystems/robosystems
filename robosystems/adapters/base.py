@@ -1,13 +1,7 @@
-"""
-Base adapter types for shared repository manifests.
+"""Shared repository manifest type.
 
-A SharedRepositoryManifest is the single source of truth for everything about
-a shared repository: identity, data source, schema, capabilities, rate limits,
-and infrastructure metadata.
-
-This module has no imports from the rest of the codebase to avoid circular
-dependencies. The import chain is:
-    config/shared_repositories.py -> adapters/{name}/manifest.py -> adapters/base.py
+Imports nothing from the codebase: config/shared_repositories.py imports the
+adapter manifests, which import this module.
 """
 
 from dataclasses import dataclass
@@ -16,12 +10,8 @@ from typing import Any
 
 @dataclass(frozen=True)
 class SharedRepositoryManifest:
-  """Complete definition of a shared repository.
-
-  Adapters declare one of these to register a shared repository with the platform.
-  The registry in config/shared_repositories.py collects all manifests and provides
-  the query API used by billing, middleware, and operations.
-  """
+  """Everything about one shared repository; collected by the registry in
+  config/shared_repositories.py."""
 
   # Identity (id is also graph_id)
   id: str  # "sec"
@@ -40,17 +30,12 @@ class SharedRepositoryManifest:
   # MCP Capabilities
   has_semantic_enrichment: bool = False
 
-  # Agent-facing routing guidance handed to MCP clients via the server's
-  # `instructions` handshake field. Authored per-repo (shared repos have a
-  # fixed, curated tool set, so the text is stable). When None, the MCP layer
-  # falls back to generating instructions from the graph's live tool surface.
+  # MCP server `instructions`; None means generate from the live tool surface.
   agent_instructions: str | None = None
 
-  # Query guidance appended to `read-graph-cypher`'s tool description for this
-  # repository: the data-model rules a raw Cypher query must honour to return
-  # a correct number (consolidation, period shape, deduplication). The tool
-  # description is the one place every MCP client reads — `agent_instructions`
-  # is the routing layer, and client-side skills reach only our own Claude.
+  # Appended to `read-graph-cypher`'s description: the rules a raw query must
+  # follow to return a correct number. The tool description is the one text
+  # every MCP client reads.
   cypher_query_guidance: str | None = None
 
   # Large text columns, as "Label.property", that this repository does not
@@ -66,19 +51,16 @@ class SharedRepositoryManifest:
   graph_tier: str = "ladybug-shared"
   graph_instance_id: str = "ladybug-shared-prod"
 
-  # Rate limits per plan (keys are plan name strings, e.g. "starter", "advanced")
-  # None = use default limits
+  # Keyed by plan name; None = default limits.
   rate_limits: dict[str, dict[str, int]] | None = None
 
-  # Billing: plans keyed by plan name (e.g. "starter", "advanced")
-  # Each plan dict: name, price_cents, price_monthly, price_display,
-  #   monthly_credits, access_level, description, features
+  # Keyed by plan name. Each: name, price_cents, price_monthly, price_display,
+  # monthly_credits, access_level, description, features.
   plans: dict[str, dict[str, Any]] | None = None
 
   # Endpoint access control (defaults apply if None)
   allowed_endpoints: tuple[str, ...] | None = None
   blocked_endpoints: tuple[str, ...] | None = None
 
-  # Per-operation credit costs (Decimal values or None for dynamic pricing)
-  # Operations not listed default to Decimal("1.0") in the credit service.
+  # Decimal per operation, or None for dynamic pricing; unlisted → Decimal("1.0").
   credit_costs: dict[str, Any] | None = None

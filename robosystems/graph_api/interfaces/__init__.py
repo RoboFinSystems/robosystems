@@ -1,10 +1,4 @@
-"""
-Shared interfaces for graph database engines.
-
-This package contains abstract base classes and types that are shared
-between the graph API core and middleware layers, preventing circular
-dependencies.
-"""
+"""Graph engine interfaces, shared by core and middleware without an import cycle."""
 
 from .engine import GraphEngineInterface, GraphOperation
 

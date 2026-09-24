@@ -1,9 +1,5 @@
-"""
-Migration endpoints for LadybugDB version upgrades.
-
-Instance-level endpoints called by Dagster jobs to orchestrate
-export (pre-deploy) and import (post-deploy) of all databases.
-"""
+"""Instance-level LadybugDB version-migration endpoints: export pre-deploy,
+import post-deploy."""
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 

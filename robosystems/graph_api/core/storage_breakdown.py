@@ -1,16 +1,9 @@
-"""Itemized, instance-scoped storage measurement for a graph.
+"""Itemized, instance-scoped disk usage for a graph.
 
-The single source of truth for "how much disk does this graph occupy". Every
-consumer — live display, cap enforcement, historical metering — reads this
-rather than measuring its own way, because measuring it several ways is
-exactly how the number came to be wrong several different ways.
-
-A graph's footprint is not just its ``.lbug`` file. It spans three
-instance-local roots, and the pieces outside the primary database routinely
-outweigh it — staging alone is frequently larger than the graph. Counting only
-the primary file undercounts real COGS by a wide margin.
-
-Backups live in S3, off-instance, and are deliberately out of scope.
+The single source of truth for display, cap enforcement and metering. A
+graph's footprint spans three instance-local roots (LadybugDB, LanceDB,
+DuckDB staging), and staging is often larger than the graph itself. Backups
+live in S3 and are out of scope.
 """
 
 from pathlib import Path
@@ -42,9 +35,8 @@ TRANSIENT_SUFFIXES = ("-wip", "-prev")
 def path_size_bytes(path: Path) -> int:
   """Size of a file or directory, recursing into directories.
 
-  Both shapes must be handled: a LadybugDB database is a single file in some
-  engine versions and a directory in others, and a caller that sizes only
-  files reports zero for the directory form.
+  A LadybugDB database is a single file in some engine versions and a
+  directory in others.
   """
   total = 0
   try:
@@ -56,8 +48,7 @@ def path_size_bytes(path: Path) -> int:
           if item.is_file():
             total += item.stat().st_size
         except OSError:
-          # A file vanishing mid-walk (compaction, WAL rotation) is normal;
-          # skip it rather than failing the whole measurement.
+          # A file vanishing mid-walk (compaction, WAL rotation) is normal.
           continue
   except OSError as e:
     logger.debug(f"Could not size {path}: {e}")
@@ -79,11 +70,8 @@ def _owns(name: str, graph_id: str) -> bool:
   database and subgraphs. Top-level ids are fixed-length ``kg`` + hex, so the
   prefix cannot collide with a different tenant's graph.
 
-  The comparison is against the *base* name, which is what brings the graph's
-  own build artifacts into scope: ``{graph_id}-wip`` is hyphen-separated and
-  matches neither arm on its raw name, while a subgraph's
-  ``{graph_id}_{name}-wip`` matches the ``_`` prefix regardless. Stripping the
-  suffix first is what makes both count the same way.
+  Compared on the base name so the graph's own ``{graph_id}-wip`` artifacts
+  count too.
   """
   base = _base_name(name)
   return base == graph_id or base.startswith(f"{graph_id}_")
@@ -92,9 +80,8 @@ def _owns(name: str, graph_id: str) -> bool:
 def _classify_lbug(stem: str, graph_id: str) -> str:
   """Classify a `.lbug` database by its name.
 
-  Order matters: the transient check must come first, because a subgraph's
-  build artifact also matches the subgraph fallthrough, and classifying it as
-  a subgraph makes this report disagree with the subgraph list.
+  The transient check must come first: a subgraph's build artifact would
+  otherwise fall through to TYPE_SUBGRAPH.
   """
   if stem.endswith(TRANSIENT_SUFFIXES):
     return TYPE_TRANSIENT
@@ -148,9 +135,8 @@ def _collect_vectors(root: Path, graph_id: str) -> list[dict[str, Any]]:
 def _collect_staging(root: Path, graph_id: str) -> list[dict[str, Any]]:
   """DuckDB staging file — the Data Lake's physical footprint.
 
-  Surfaced elsewhere as logical table bytes, which is a much smaller number
-  than the file on disk. This counts the file, because that is what occupies
-  the volume.
+  Counts the file on disk, which is much larger than the logical table bytes
+  reported elsewhere.
   """
   if not root.is_dir():
     return []

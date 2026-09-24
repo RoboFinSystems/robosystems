@@ -1,19 +1,12 @@
 """Link or create — one chart account per bank account the feed exposes.
 
-The bank feed owns no chart (``ref/adapters.md`` §2.9). A company cannot be
-assumed to have added a chart account for every bank account it brings —
-checking, savings, every card — so at sync each account the feed exposes is
-either **linked** to an existing chart account (the customer initialized a
-template, authored a chart through the taxonomy block, or kept the chart a
-severed QuickBooks connection created) or, when nothing matches, **created**
-as an ordinary tenant ``coa:*`` element through the TaxonomyBlock envelope,
-exactly as if the customer had added it with ``update-taxonomy-block``.
+Each account is **linked** to a matching chart account or, when nothing
+matches, **created** as an ordinary tenant ``coa:*`` element through the
+TaxonomyBlock envelope, as if the customer had added it.
 
-The link lives on the element as ``metadata.bank_feed`` — never as an
-element ``source`` (which stays ``native`` / ``quickbooks``) and never as a
-provider-prefixed qname, so the loader's vocabulary learns nothing and the
-chart stays the tenant's. An element the feed created additionally carries
-``external_source=<provider>`` + ``external_id`` for provenance.
+The link lives in the element's ``metadata.bank_feed`` — never in its
+``source`` or its qname — so the chart stays the tenant's. A created element
+also carries ``external_source`` + ``external_id`` for provenance.
 """
 
 from __future__ import annotations

@@ -1,19 +1,9 @@
-"""SEC-specific natural-language → XBRL element resolution.
+"""Natural-language → SEC XBRL element resolution, behind the ``resolve-element`` tool.
 
-Backing logic for the ``resolve-element`` MCP tool. Lives in the SEC
-adapter because it relies on the **canonical concept taxonomy** curated
-inside ``adapters/sec/enrichment`` (us-gaap-oriented) — a small, in-memory
-set of concept embeddings, not a persisted per-element vector index.
-
-Resolution is canonical-first with a text-label fallback. There is no
-per-element vector index: the SEC corpus carries ~8M elements dominated by
-single-filing filer extensions, so embedding search over all of them returns
-low-signal noise for anything outside the curated concept set. The tool is
-manifest-gated to ``has_semantic_enrichment`` repos, which only SEC sets.
-
-Takes a duck-typed ``graph_client`` that exposes an ``execute_query``
-coroutine (the MCP client today). Returns a dict — variable number of
-matches + optional canonical / query-hint fields.
+Canonical concepts first (the small curated embedding set), then a text search
+on labels. There is deliberately no per-element vector index: the corpus is
+millions of mostly single-filing extensions, and embedding search over them is
+noise.
 """
 
 from __future__ import annotations
@@ -24,11 +14,6 @@ from robosystems.logger import logger
 
 
 class _GraphClientLike(Protocol):
-  """Duck-typed interface for clients this module accepts.
-
-  Just the methods we need; implementations don't have to subclass.
-  """
-
   graph_id: str
 
   async def execute_query(
@@ -40,7 +25,6 @@ _enricher: Any = None
 
 
 def _get_enricher():
-  """Lazy-load the SemanticEnricher (avoids import cost at module load)."""
   global _enricher
   if _enricher is None:
     from robosystems.adapters.sec.enrichment import SemanticEnricher
@@ -56,25 +40,10 @@ async def resolve_sec_element(
   ticker: str | None = None,
   report_id: str | None = None,
 ) -> dict[str, Any]:
-  """Resolve a natural-language concept to matching SEC XBRL elements.
+  """Resolve ``concept`` (e.g. "revenue") to matching elements, optionally scoped.
 
-  Resolution order:
-
-  1. Canonical concept matching — curated concepts, deterministic.
-  2. Text search on element labels — final fallback.
-
-  Args:
-      graph_client: Duck-typed client exposing ``execute_query``.
-        Usually a ``GraphMCPClient``.
-      concept: Natural-language concept to resolve (e.g. ``"revenue"``).
-      ticker: Optional entity ticker filter (e.g. ``"NVDA"``).
-      report_id: Optional report identifier filter.
-
-  Returns:
-      A dict with keys: ``concept``, ``ticker``, ``report_id``,
-      ``canonical_id``, ``canonical_name``, ``matches`` (list of match
-      dicts), ``query_hint`` (Cypher template), ``query_hint_params``
-      (dict to pass alongside the hint).
+  The result carries the matches, the canonical concept when one matched, and
+  a parameterized Cypher ``query_hint`` built from the top match.
   """
   enricher = _get_enricher()
   result: dict[str, Any] = {
@@ -275,11 +244,7 @@ async def _fetch_labels_by_qname(
 def _build_query_hint(
   result: dict[str, Any], ticker: str | None, report_id: str | None
 ) -> None:
-  """Build a ready-to-use Cypher query hint from the top match.
-
-  Uses ``$param`` syntax so the hint is safe to pass directly to
-  ``read-graph-cypher`` (or any parameterized Cypher executor).
-  """
+  """Set a parameterized Cypher hint for the top match, ready for ``read-graph-cypher``."""
   if not result["matches"]:
     return
   top = result["matches"][0]

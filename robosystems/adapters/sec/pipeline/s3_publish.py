@@ -1,18 +1,5 @@
-"""SEC S3 Publish Asset.
-
-Publishes the SEC shared repository database to S3 for replica cluster
-consumption. Runs after SEC materialization completes.
-
-This is a thin wrapper around the shared publish_to_s3() helper.
-Each shared repository defines its own
-publish asset with deps on its own materialization asset.
-
-The nightly chain (sensor-driven):
-  materialize → sec_lbug_s3_published → sec_duckdb_s3_published → replica refresh
-
-This asset creates the raw .lbug source-of-truth for the replica fleet.
-Replicas download this file from S3 to local disk on boot.
-"""
+"""Publish the sec and sec_historical .lbug databases to S3; replicas download
+them to local disk on boot."""
 
 from dagster import (
   AssetExecutionContext,
@@ -37,13 +24,7 @@ from robosystems.dagster.assets.shared_repositories.publish import publish_to_s3
 def sec_lbug_s3_published(
   context: AssetExecutionContext,
 ) -> MaterializeResult:
-  """Publish SEC database to S3 for replica fleet.
-
-  Delegates to the shared publish_to_s3() helper which handles:
-  - Graph Client Factory (auth, routing, circuit breakers)
-  - CHECKPOINT + S3 multipart upload on-instance
-  - Upload verification
-  """
+  """Publish the SEC database to S3 for the replica fleet."""
   return publish_to_s3(context, graph_id="sec")
 
 

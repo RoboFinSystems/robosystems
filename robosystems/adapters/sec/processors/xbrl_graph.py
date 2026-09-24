@@ -1,15 +1,9 @@
 """One XBRL filing to graph parquet, on xbrlkit's model and projection.
 
-The load and everything that reads the loaded filing are xbrlkit's — the
-platform supplies the cache directory and its settings
-(``client/arelle.py``); ``to_xbrl_model`` walks the
-``ModelXbrl`` into the neutral ``XbrlModel`` and ``to_graph_tables`` projects
-it into the property graph's rows with the platform's own ids, so a filing
-projected by ``xbrlkit build --format lpg`` and a filing processed here are
-the same rows. What runs on top of those rows stays here because it needs
-the platform: text-block externalization to the CDN, semantic enrichment of
-elements and structures, the schema-aware parquet writer, and association
-classification.
+xbrlkit loads, parses and projects the filing (so its rows match
+``xbrlkit build --format lpg``); this module adds the platform steps on top:
+text-block externalization to the CDN, semantic enrichment, the schema-aware
+parquet writer, and association classification.
 """
 
 import gc
@@ -226,10 +220,9 @@ class XBRLGraphProcessor:
       gc.collect()
 
   async def process_async(self):
-    """Async version of process method for use in async contexts."""
+    """Runs ``process`` synchronously; nothing in it awaits."""
     logger.info(f"Starting async XBRL processing for report: {self.report_uri}")
 
-    # Nothing here awaits — the whole pipeline is synchronous DataFrame work.
     self.process()
 
   def output_parquet_files(self):
@@ -237,11 +230,9 @@ class XBRLGraphProcessor:
     self.parquet_writer.write_all_dataframes(self.schema_to_dataframe_mapping, self)
 
   def classify_associations(self):
-    """Classify associations using Cypher pattern detection on temp embedded LadybugDB.
+    """Classify the written parquet and add Classification and FactSet parquets.
 
-    Runs after parquet output. Loads the filing's parquets into a temporary
-    LadybugDB, detects structural patterns (RollUp, RollForward, etc.),
-    and writes Classification nodes + relationships as additional parquets.
+    Runs after parquet output; failures are logged, never raised.
     """
     from robosystems.adapters.sec.config import XBRL_ASSOCIATION_CLASSIFICATION
 
@@ -255,10 +246,6 @@ class XBRLGraphProcessor:
       )
 
       classifier = AssociationClassifier()
-      # Source filing coordinates from the enriched report/entity metadata the
-      # processor already holds — classify can't read them from its
-      # identifier-only Report table. Feeds FactSet `filed` provenance +
-      # REPORT_HAS_FACT_SET edges.
       filing_meta = FilingMeta(
         report_id=self.report_data.get("identifier") if self.report_data else None,
         accession=self.report_data.get("accession_number")
@@ -282,7 +269,6 @@ class XBRLGraphProcessor:
           f"Wrote {len(result.classifications_df)} association classifications"
         )
 
-      # Write structure-level FactSets
       if not result.factsets_df.empty:
         self.parquet_writer.write_dataframe(result.factsets_df, "nodes/FactSet.parquet")
         self.parquet_writer.write_dataframe(
@@ -303,7 +289,8 @@ class XBRLGraphProcessor:
           f"with {len(result.factset_fact_rels_df)} fact links"
         )
 
-      # Apply disclosure-root canonical hints to elements
+      # Disclosure-root hints upgrade an element's canonical concept only when
+      # more confident than the embedding match.
       if (
         result.canonical_hints
         and hasattr(self, "elements_df")
@@ -325,7 +312,6 @@ class XBRLGraphProcessor:
             f"Upgraded {upgraded} elements with disclosure-root canonical concepts"
           )
     except Exception as e:
-      # Classification is non-critical — log and continue
       logger.warning(f"Association classification failed (non-critical): {e}")
 
   def enrich_dataframes(self):
@@ -352,13 +338,11 @@ class XBRLGraphProcessor:
     if hasattr(self, "elements_df") and not self.elements_df.empty:
       logger.info(f"Enriching {len(self.elements_df)} elements")
 
-      # Column order must match schema: canonical_concept, canonical_confidence
-      # LadybugDB COPY FROM uses positional matching, not column names
+      # LadybugDB COPY FROM is positional; these columns must exist in schema order.
       for col in ("canonical_concept", "canonical_confidence"):
         if col not in self.elements_df.columns:
           self.elements_df[col] = None
 
-      # Parse names and compose texts
       texts = []
       for _, row in self.elements_df.iterrows():
         parsed_name = camel_case_to_words(row.get("name", "") or "")
@@ -372,10 +356,8 @@ class XBRLGraphProcessor:
         )
         texts.append(text)
 
-      # Batch embed
       embeddings = enricher.embed_batch(texts)
 
-      # Match canonical for each element
       canonical_concepts = []
       canonical_confidences = []
       for i, row in self.elements_df.iterrows():
@@ -398,20 +380,16 @@ class XBRLGraphProcessor:
         f"Element enrichment complete: {matched}/{len(self.elements_df)} matched to canonical concepts"
       )
 
-    # Labels are deliberately skipped: they carry no canonical concept, and
-    # nothing downstream consumes a label embedding.
-
     # ----- Structures ------------------------------------------------------
     if hasattr(self, "structures_df") and not self.structures_df.empty:
       logger.info(f"Enriching {len(self.structures_df)} structures")
 
-      # Column order must match schema: canonical_type, canonical_confidence
-      # LadybugDB COPY FROM uses positional matching, not column names
+      # LadybugDB COPY FROM is positional; these columns must exist in schema order.
       for col in ("canonical_type", "canonical_confidence"):
         if col not in self.structures_df.columns:
           self.structures_df[col] = None
 
-      # Re-parse definitions to fix potentially empty names
+      # Re-parse definitions to fill names the stored row left empty.
       texts = []
       parsed_names = []
       for _, row in self.structures_df.iterrows():
@@ -420,14 +398,12 @@ class XBRLGraphProcessor:
         text = compose_structure_text(parsed_name, row.get("definition", ""))
         texts.append(text)
 
-      # Fill in names the stored row left empty
       for idx, name in enumerate(parsed_names):
         if name and not self.structures_df.iloc[idx].get("name"):
           self.structures_df.iloc[idx, self.structures_df.columns.get_loc("name")] = (
             name
           )
 
-      # Batch embed
       non_empty_mask = [bool(t.strip()) for t in texts]
       non_empty_texts = [t for t, m in zip(texts, non_empty_mask, strict=True) if m]
 
@@ -443,7 +419,7 @@ class XBRLGraphProcessor:
       else:
         all_embeddings = [None] * len(texts)
 
-      # Pre-compute structure → element qnames mapping for graph refinement
+      # structure id → element qnames, and definition hashes, for refinement.
       from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
 
       structure_element_map: dict[str, list[str]] = {}
@@ -458,7 +434,6 @@ class XBRLGraphProcessor:
       ):
         import hashlib
 
-        # Build association_id → element_qname mapping
         assoc_to_qname: dict[str, str] = {}
         elem_id_to_qname: dict[str, str] = {}
         for _, erow in self.elements_df.iterrows():
@@ -473,7 +448,6 @@ class XBRLGraphProcessor:
           if assoc_id and elem_id and elem_id in elem_id_to_qname:
             assoc_to_qname[assoc_id] = elem_id_to_qname[elem_id]
 
-        # Build structure_id → [element_qnames]
         for _, srow in self.structure_associations_df.iterrows():
           struct_id = srow.get("from")
           assoc_id = srow.get("to")
@@ -482,7 +456,6 @@ class XBRLGraphProcessor:
               assoc_to_qname[assoc_id]
             )
 
-        # Pre-compute definition hashes for consensus lookup
         for _, row in self.structures_df.iterrows():
           struct_id = row.get("identifier")
           definition = row.get("definition", "") or ""
@@ -491,9 +464,8 @@ class XBRLGraphProcessor:
               definition.encode()
             ).hexdigest()
 
-      # Classify structures (heuristic first, then embedding fallback)
-      # Statements use keyword heuristics + embeddings; Disclosures use
-      # composition profiles from disclosure_mechanics training data
+      # Keyword heuristic first. Disclosures then try DEI, balance-sheet
+      # rollup, and composition profiles; Statements fall back to embeddings.
       canonical_types = []
       canonical_confidences = []
 
@@ -508,24 +480,20 @@ class XBRLGraphProcessor:
           canonical_types.append(heuristic_type)
           canonical_confidences.append(heuristic_conf)
         elif block_type != "Statement":
-          # For Disclosure structures, attempt disclosure composition classification
           disc_type = None
           disc_conf = None
           if block_type == "Disclosure" and XBRL_GRAPH_REFINEMENT:
             struct_id = row.get("identifier")
             elements = structure_element_map.get(struct_id, []) if struct_id else []
             if elements:
-              # DEI detection first (deterministic, high confidence)
               dei_type, dei_conf = enricher.detect_dei_structure(elements)
               if dei_type:
                 disc_type, disc_conf = dei_type, dei_conf
               else:
-                # Balance sheet rollup detection (deterministic)
                 bs_type, bs_conf = enricher.detect_balance_sheet_rollup(elements)
                 if bs_type:
                   disc_type, disc_conf = bs_type, bs_conf
                 else:
-                  # Disclosure composition classification (probabilistic fallback)
                   d_type, d_score = enricher.classify_disclosure_by_composition(
                     elements
                   )
@@ -543,7 +511,6 @@ class XBRLGraphProcessor:
           canonical_types.append(None)
           canonical_confidences.append(None)
 
-      # Apply graph-based refinement
       statement_types = {
         "income_statement",
         "balance_sheet",
@@ -565,20 +532,16 @@ class XBRLGraphProcessor:
           def_hash = structure_def_hashes.get(struct_id, "")
 
           if ct in statement_types:
-            # Statement refinement (existing pipeline)
             refined_type, refined_conf = enricher.refine_structure_confidence(
               ct, cc, elements, def_hash
             )
           else:
-            # Disclosure refinement
             refined_type, refined_conf = enricher.refine_disclosure_confidence(
               ct, cc, elements, def_hash
             )
           canonical_types[i] = refined_type
           canonical_confidences[i] = refined_conf
 
-      # `all_embeddings` is used transiently above for canonical_type matching
-      # (match_structure_canonical); the vector itself is not persisted.
       self.structures_df["canonical_type"] = canonical_types
       self.structures_df["canonical_confidence"] = canonical_confidences
 

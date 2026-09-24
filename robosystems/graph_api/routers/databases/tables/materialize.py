@@ -32,18 +32,11 @@ from robosystems.middleware.graph.instance_busy import (
   instance_busy,
 )
 
-# Max rows per Arrow record batch streamed from DuckDB into a single LadybugDB
-# COPY. Sized at/above the outer batchers (SEC hash-batching at
-# MATERIALIZATION_BATCH_SIZE = 20M/call; tenant/direct chunked_materialization at
-# the tier chunk_size_rows) so each already-bounded call materializes in ONE COPY.
-# Per-table cost is dominated by COPY COUNT, not row throughput — each COPY is its
-# own transaction + WAL commit + checkpoint check, roughly 8s regardless of size.
-# Safe at this size only because the materialize connections SET
-# arrow_large_buffer_size=true (in the get_connection blocks below): DuckDB then
-# emits 64-bit LargeString offsets, lifting Arrow's 2 GiB (2^31) regular-string-
-# buffer cap that a wide column like Fact.uri (~128 B/row XBRL concept URIs, not
-# externalizable) otherwise overflows at ~19M rows, ABORTING the process.
-# LadybugDB's COPY reader accepts Arrow LargeString.
+# Rows per Arrow record batch, and so per LadybugDB COPY. Sized above the
+# callers' own batch sizes so each call is ONE COPY: cost scales with COPY
+# count (~8s each), not rows. Safe only with arrow_large_buffer_size=true
+# (64-bit string offsets); otherwise a wide column like Fact.uri overflows
+# Arrow's 2 GiB string buffer at ~19M rows and aborts the process.
 ARROW_STREAM_BATCH_ROWS = 25_000_000
 
 
@@ -63,9 +56,7 @@ def _copy_result_rows(result, fallback: int) -> int:
   return fallback
 
 
-# graph_id and table_name reach the path builder from URL path params; both are
-# registry/schema identifiers (alphanumeric + _ / -). Validate before using them
-# to construct a filesystem path so a crafted value cannot escape the staging dir.
+# graph_id and table_name come from URL path params and build a filesystem path.
 _SAFE_PATH_COMPONENT = re.compile(r"[A-Za-z0-9_-]+")
 
 
@@ -96,11 +87,9 @@ def _export_incremental_keyset(
   snapshot the DuckDB export SELECT can anti-join against, so only new rows are
   COPYed.
 
-  Node keyset = ``identifier``; relationship keyset = ``(src, dst)`` via a
-  traversal. Uses LadybugDB's server-side ``COPY (query) TO parquet`` so the
-  whole keyset never materializes in Python — a 200M-edge keyset would be ~15 GB.
-  An empty graph writes a 0-row parquet, so the anti-join passes every staged row
-  and the first run degrades cleanly to a full load.
+  Node keyset = ``identifier``; relationship keyset = ``(src, dst)``. The
+  server-side ``COPY (query) TO`` keeps the keyset out of Python memory. An
+  empty graph writes a 0-row parquet, so the first run is a full load.
   """
   snapshot_path.parent.mkdir(parents=True, exist_ok=True)
   esc_path = str(snapshot_path).replace("'", "''")
@@ -118,7 +107,6 @@ def _export_incremental_keyset(
       conn.execute("CALL timeout=120000")  # reset to 2 minutes
 
 
-# Type mapping from LadybugDB types to DuckDB-compatible cast types
 _LBUG_TO_DUCK_TYPE = {
   "STRING": "VARCHAR",
   "INT64": "BIGINT",
@@ -239,7 +227,6 @@ def _build_reconciled_select(
   return ", ".join(parts)
 
 
-# Constants for checkpoint retry logic
 CHECKPOINT_MAX_RETRIES = 3
 CHECKPOINT_RETRY_DELAY_SECONDS = 1
 
@@ -293,9 +280,7 @@ async def materialize_table(
       detail="Materialization not allowed on read-only nodes",
     )
 
-  # Mark this instance busy so GHA pre-refresh workflows don't cycle the
-  # container mid-materialization. Wraps the full body so the counter
-  # decrements on exception too.
+  # Keeps pre-refresh workflows from cycling the container mid-run.
   async with instance_busy(env.INSTANCE_ID, OP_KIND_MATERIALIZATION):
     return await _materialize_table_impl(
       graph_id=graph_id,
@@ -315,8 +300,7 @@ async def _materialize_table_impl(
 ) -> TableMaterializationResponse:
   import time
 
-  # Incremental keyset snapshot (assigned only in incremental mode); referenced
-  # again in the cleanup section, so bind it up front.
+  # Bound up front: the cleanup section reads both.
   incremental = False
   snapshot_path: FilePath | None = None
 
@@ -328,17 +312,13 @@ async def _materialize_table_impl(
 
     duckdb_pool = get_duckdb_pool()
 
-    # Target schema drives column reconciliation, which absorbs schema
-    # evolution: staging tables missing new columns, or mistyped NULL columns
-    # (DuckDB infers an all-NULL column as INT32 where the target wants
-    # FLOAT[384]).
+    # Reconciling to the target schema absorbs staging tables missing new
+    # columns and all-NULL columns DuckDB inferred as INT32.
     target_columns = _get_target_columns(ladybug_service, graph_id, table_name)
 
     try:
       with duckdb_pool.get_connection(duckdb_graph_id) as duck_conn:
-        # 64-bit Arrow string offsets: wide columns (e.g. Fact.uri ~128 B/row)
-        # otherwise overflow Arrow's 2 GiB regular-string-buffer cap when a large
-        # batch streams as one record batch, aborting the process.
+        # See ARROW_STREAM_BATCH_ROWS.
         duck_conn.execute("SET arrow_large_buffer_size=true")
         # Flush WAL so the parquet export sees all committed staging data
         checkpoint_with_retry(duck_conn, duckdb_graph_id, context="DuckDB")
@@ -371,9 +351,8 @@ async def _materialize_table_impl(
         is_rel = "src" in column_names and "dst" in column_names
         incremental = request.incremental and (is_node or is_rel)
 
-        # Columns to NULL out (keep column for schema match, but skip data).
-        # Embeddings stay in DuckDB staging for LanceDB vector search; materializing
-        # them to LadybugDB is optional. Pass materialize_embeddings=true to include them.
+        # NULLed columns keep the schema but skip the data. Embeddings are
+        # opt-in via materialize_embeddings.
         null_cols: set[str] = set()
         if "embedding" in column_names and not request.materialize_embeddings:
           null_cols.add("embedding")
@@ -408,19 +387,12 @@ async def _materialize_table_impl(
           file_filter = f"file_id IN ({file_ids_placeholders})"
           query_params.extend(request.file_ids)
 
-        # Incremental: export the target graph's existing keys to a parquet
-        # snapshot (once per table, reused across hash batches) and anti-join the
-        # export SELECT against it so ONLY new rows are COPYed. Mandatory for
-        # correctness against a POPULATED graph — a duplicate node PK COPY
-        # hard-fails, and a duplicate (src,dst) edge COPY silently duplicates.
-        # An empty graph yields an empty snapshot, so the anti-join passes
-        # everything and the first run is a full load.
-        #
-        # Mutable-attribute tables ride the same anti-join: NEW rows are added,
-        # but a CHANGED attribute on an ALREADY-materialized node is NOT
-        # refreshed here, and a node-level DELETE+re-COPY cannot fix it because
-        # DETACH DELETE drops the node's edges. Attribute refresh belongs to the
-        # periodic full reconciliation rebuild.
+        # Incremental: anti-join against a snapshot of the target's existing
+        # keys (exported once per table, reused across hash batches) so only
+        # new rows are COPYed. Required against a populated graph — a duplicate
+        # node PK hard-fails the COPY and a duplicate edge silently duplicates.
+        # A changed attribute on an existing node is NOT refreshed here; that
+        # is the full rebuild's job.
         incr_clause = ""
         if incremental:
           snapshot_path = _incr_keyset_path(graph_id, table_name)
@@ -447,7 +419,6 @@ async def _materialize_table_impl(
               "WHERE k.identifier = t.identifier)"
             )
 
-        # Combine file-filter, hash-batch, and incremental anti-join predicates.
         where_fragments: list[str] = []
         if file_filter:
           where_fragments.append(file_filter)
@@ -465,10 +436,6 @@ async def _materialize_table_impl(
         if has_file_id:
           exclude_cols.add("file_id")
 
-        # Build the export SELECT. When the LadybugDB target schema is known,
-        # reconcile to it — target column order, NULLs for missing columns, and
-        # casts to the target types (which also normalize postgres_scan-staged
-        # NUMERIC to DOUBLE, since LadybugDB has no DECIMAL type).
         if target_columns:
           select_expr = _build_reconciled_select(
             target_columns,
@@ -484,15 +451,7 @@ async def _materialize_table_impl(
             null_cols=null_cols,
           )
 
-        # Stream DuckDB → Arrow record batches → LadybugDB COPY, no intermediate
-        # file. DuckDB hands its result vectors to Arrow (zero-copy for most
-        # types) and LadybugDB reads those buffers directly, avoiding a parquet
-        # serialization + disk round-trip; the write into LadybugDB's CSR storage
-        # is still a copy, unavoidable for a persistent traversable graph.
-        # Batching bounds peak memory.
-        # The source is aliased `t` so the incremental anti-join subquery can
-        # qualify outer columns (t.identifier / t.src / t.dst); single-table FROM,
-        # so unqualified columns elsewhere still resolve to `t`.
+        # Aliased `t` so the incremental anti-join can qualify outer columns.
         select_sql = f"SELECT {select_expr} FROM {table_name} AS t{where}"
         if query_params:
           arrow_reader = duck_conn.execute(select_sql, query_params).fetch_record_batch(
@@ -524,16 +483,12 @@ async def _materialize_table_impl(
           try:
             conn.execute("CALL timeout=3600000")  # 60 minutes
             for arrow_batch in arrow_reader:
-              # `copy_batch` is resolved BY NAME from this frame — LadybugDB
-              # scans the Arrow object via a Python replacement scan, so the
-              # local's name MUST match the identifier in the COPY statement.
-              # The F841 suppression is load-bearing: the engine reads the
-              # binding, the linter cannot see that.
+              # LadybugDB resolves `copy_batch` BY NAME from this frame (a
+              # replacement scan), so the name must match the COPY statement.
               copy_batch = pa.Table.from_batches([arrow_batch])  # noqa: F841
-              # No ignore_errors: LadybugDB's COPY (ignore_errors=true) silently
-              # drops VALID rows in proportion to batch size (~37% at 20M).
-              # Staging dedupes and all nodes load before any relationship, so a
-              # plain COPY is both correct and complete. Do NOT re-add it.
+              # Never ignore_errors: LadybugDB then silently drops VALID rows
+              # in proportion to batch size. Staging dedupes, so a plain COPY
+              # is safe.
               result = conn.execute(f"COPY {table_name} FROM copy_batch")
               rows_ingested += _copy_result_rows(result, arrow_batch.num_rows)
           finally:
@@ -555,9 +510,7 @@ async def _materialize_table_impl(
         conn.execute("CHECKPOINT")
         logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
 
-        # Build vector index when embeddings are materialized (single-pass only).
-        # For batched requests, the caller rebuilds the index after all batches
-        # complete — creating it on batch 1 would only index partial data.
+        # Batched callers rebuild the index after the last batch instead.
         is_batched = request.batch_num is not None
         if request.materialize_embeddings and not is_batched:
           ladybug_service.db_manager.create_vector_index(conn, table_name)
@@ -654,9 +607,7 @@ async def fork_from_parent_duckdb(
       detail="Fork not allowed on read-only nodes",
     )
 
-  # Mark this instance busy so GHA pre-refresh workflows don't cycle the
-  # container mid-fork: a fork is a multi-table DuckDB → LadybugDB COPY, as
-  # destructive to interrupt as a materialization.
+  # A fork is as destructive to interrupt as a materialization.
   async with instance_busy(env.INSTANCE_ID, OP_KIND_MATERIALIZATION):
     return await _fork_from_parent_duckdb_impl(
       parent_graph_id=parent_graph_id,
@@ -679,7 +630,6 @@ async def _fork_from_parent_duckdb_impl(
   try:
     parent_duck_path = f"{env.DUCKDB_STAGING_PATH}/{parent_graph_id}.duckdb"
 
-    # Checkpoint parent DuckDB to flush WAL and create views
     logger.info(f"Checkpointing parent DuckDB before fork: {parent_duck_path}")
     from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
@@ -713,10 +663,8 @@ async def _fork_from_parent_duckdb_impl(
         detail="No tables to copy",
       )
 
-    # Stream each parent table (excluding file_id) DuckDB → Arrow → subgraph
-    # LadybugDB, no intermediate file. Do not use DuckDB ATTACH here: LadybugDB
-    # writes persistent shadow catalog entries on ATTACH that collide with the
-    # installed schema.
+    # Streamed via Arrow, not DuckDB ATTACH: ATTACH writes persistent shadow
+    # catalog entries in LadybugDB that collide with the installed schema.
     total_rows = 0
     tables_copied: list[str] = []
     try:
@@ -724,7 +672,7 @@ async def _fork_from_parent_duckdb_impl(
         duckdb_pool.get_connection(parent_graph_id) as duck_conn,
         ladybug_service.db_manager.connection_pool.get_connection(subgraph_id) as conn,
       ):
-        # See main path: 64-bit Arrow string offsets to avoid the 2 GiB cap.
+        # See ARROW_STREAM_BATCH_ROWS.
         duck_conn.execute("SET arrow_large_buffer_size=true")
         for table_name in tables_to_copy:
           source_columns = duck_conn.execute(
@@ -748,15 +696,14 @@ async def _fork_from_parent_duckdb_impl(
           try:
             conn.execute("CALL timeout=3600000")  # 60 minutes
             for arrow_batch in arrow_reader:
-              # `copy_batch` is resolved by name from this frame (replacement scan).
+              # Resolved by name from this frame; see materialize_table.
               copy_batch = pa.Table.from_batches([arrow_batch])  # noqa: F841
               # Plain COPY — see the note in materialize_table: LadybugDB's
               # ignore_errors path silently drops valid rows.
               result = conn.execute(f"COPY {table_name} FROM copy_batch")
               table_rows += _copy_result_rows(result, arrow_batch.num_rows)
           except Exception as table_err:
-            # Fail fast: a copy error on clean, ordered staging is a real problem,
-            # not something to swallow (that would silently lose a whole table).
+            # Fail fast: swallowing would silently lose a whole table.
             logger.error(f"Failed to copy {table_name}: {table_err}")
             raise
           finally:

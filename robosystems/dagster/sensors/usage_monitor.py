@@ -1,9 +1,4 @@
-"""Dagster sensor for monitoring graph instance storage usage.
-
-Periodically checks all active user graphs against their tier storage limits
-and sends email alerts when approaching (80%) or exceeding (100%) capacity.
-Uses Valkey for dedup to avoid spamming users with repeat alerts.
-"""
+"""Sensor that records graph storage usage and emails admins at 80% / 100% of tier limits."""
 
 import asyncio
 
@@ -18,51 +13,33 @@ from robosystems.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Valkey key TTL for dedup: re-alert after 7 days if still over threshold
+# Re-alert after 7 days if still over threshold.
 _ALERT_DEDUP_TTL_SECONDS = 7 * 24 * 3600
 
-# Thresholds that trigger alerts
 _ALERT_STATUSES = ("approaching", "over_limit")
 
-# The storage cap is a hard block (materialize 413s above 100%), so the 80%
-# warning this sensor sends is what gives customers runway before that hits.
-#
-# NOTE: this status only applies when the Dagster instance first sees the
-# sensor. On/off state then persists in Dagster's Postgres storage, so a UI
-# toggle outlives this value — which is why the runtime kill switch below is an
-# SSM flag rather than a redeploy of this constant.
+# The storage cap is a hard block (materialize 413s above 100%); the 80% warning
+# gives customers runway. Default status applies only on first sight; after that
+# Dagster persists on/off, hence the SSM kill switch below.
 _SENSOR_STATUS = DefaultSensorStatus.RUNNING
 
-# Runtime kill switch, read per tick (SSM, 5-min TTL cache) so alerting can be
-# stopped immediately without a deploy or a Dagster UI login:
-#   just ssm-set prod features/GRAPH_USAGE_ALERTS_ENABLED false
-# Defaults on — an alerting sensor should fail toward telling you.
+# SSM kill switch, read per tick. Defaults on: an alerting sensor should fail
+# toward telling you.
 _ALERTS_ENABLED_FLAG = "GRAPH_USAGE_ALERTS_ENABLED"
 
-# Storage is a property of the graph, not of whoever happened to be its first
-# explicit admin: snapshots are recorded under this principal so the row is
-# attributable to the measurement, not to a member who may later leave. Every
-# reader of STORAGE_SNAPSHOT rows keys by graph_id; ``GraphUsage.user_id`` has
-# no foreign key, so a non-user principal is safe.
+# Storage snapshots are attributed to this principal, not a member who may
+# leave. Readers key by graph_id and ``GraphUsage.user_id`` has no FK.
 USAGE_MONITOR_PRINCIPAL = "system:usage-monitor"
 
 
 def _alert_dedup_key(graph_id: str, instance_status: str, user_id: str) -> str:
-  """Valkey key recording that *this* admin was told about *this* graph at
-  *this* status. Per recipient so a failed delivery is retried without
-  re-emailing the admins who already received it."""
+  """Per-recipient dedup key, so a failed delivery retries without re-emailing others."""
   return f"usage_alert:{graph_id}:{instance_status}:{user_id}"
 
 
 def _capacity_alert_recipients(db, graph) -> list:
-  """Everyone who administers the graph: explicit ``GraphUser`` admins plus
-  the owning org's owners and admins, who hold implicit graph admin with no
-  ``GraphUser`` row at all. Deduplicated; only active users with an email.
-
-  The previous ``.filter(role == "admin").first()`` picked one arbitrary
-  explicit admin, so an org-owned graph whose only admins were implicit got
-  no capacity email — exactly where multi-member orgs live.
-  """
+  """Explicit ``GraphUser`` admins plus the org's owners/admins (implicit graph
+  admins with no ``GraphUser`` row). Deduplicated; active users with an email."""
   from robosystems.models.core.graph.graph_user import GraphUser
   from robosystems.models.core.org import OrgRole, OrgUser
   from robosystems.models.core.user import User
@@ -96,22 +73,10 @@ def _capacity_alert_recipients(db, graph) -> list:
   description="Monitors graph instance storage and sends email alerts at 80%/100% thresholds",
 )
 def graph_usage_monitor_sensor(context: SensorEvaluationContext):
-  """Check all active user graphs for storage usage and send alerts.
+  """Check active, tiered parent user graphs for storage usage and send alerts.
 
-  Query: parent graphs where:
-  - is_repository = false (skip shared repos)
-  - parent_graph_id IS NULL (only parent graphs, not subgraphs)
-  - status = 'active'
-  - graph_tier IS NOT NULL (skip untiered internal/test graphs)
-
-  For each graph over threshold:
-  - Check Valkey dedup key to avoid repeat alerts
-  - Look up graph owner's email
-  - Send capacity warning email via SES
-
-  Note: This sensor makes async Graph API calls per graph (1 + N subgraphs).
-  With many active graphs, consider the cumulative latency. The 6-hour
-  interval keeps this manageable.
+  Makes 1 + N-subgraphs Graph API calls per graph; the 6-hour interval keeps the
+  cumulative latency manageable.
   """
   from robosystems.config.parameter_store import get_parameter_value
   from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
@@ -119,8 +84,6 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
   from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
   from robosystems.models.core.graph import Graph
 
-  # Read per tick rather than at import, so flipping the flag takes effect on the
-  # next evaluation instead of the next deploy.
   if get_parameter_value(_ALERTS_ENABLED_FLAG, "true").lower() != "true":
     return SkipReason(f"Storage alerts disabled via {_ALERTS_ENABLED_FLAG}")
 
@@ -142,7 +105,7 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
 
     context.log.info(f"Checking storage usage for {len(parent_graphs)} graphs")
 
-    # Use MCP_CACHE for dedup keys (TTL-based cache, not LOCKS which is for short-lived mutexes)
+    # TTL cache DB; LOCKS is for short-lived mutexes.
     redis_client = create_redis_client(ValkeyDatabase.MCP_CACHE)
     alerts_sent = 0
 
@@ -163,11 +126,8 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
 
       instance_status = storage_check["status"]
 
-      # Persist the measurement as a STORAGE_SNAPSHOT row — this sensor is the
-      # only writer, and the admin and org usage surfaces read those rows.
-      # Recorded for every measured status, not just alert-worthy ones; skipped
-      # when the check returned "unknown" (nothing was measured). Attributed to
-      # the monitor itself, never to a member (see USAGE_MONITOR_PRINCIPAL).
+      # Sole writer of STORAGE_SNAPSHOT rows (read by the usage surfaces).
+      # Recorded for every measured status; skipped when nothing was measured.
       if storage_check.get("total_storage_gb") is not None:
         try:
           from robosystems.models.core.graph.graph_usage import GraphUsage
@@ -184,7 +144,6 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
             f"Could not record storage snapshot for {graph.graph_id}: {e}"
           )
 
-      # Only alert for approaching or over_limit
       if instance_status not in _ALERT_STATUSES:
         continue
 
@@ -195,11 +154,7 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
         )
         continue
 
-      # Dedup per recipient, not per graph: the key is set only for a user
-      # whose delivery succeeded, so an admin whose send failed is retried on
-      # the next tick while the ones already told are not emailed again. A
-      # single graph-level key set on "any delivery succeeded" silenced the
-      # failed recipients for the whole TTL.
+      # Keys are set only on successful delivery, so failed recipients retry.
       pending = [
         user
         for user in recipients

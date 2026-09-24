@@ -1,17 +1,4 @@
-"""
-LadybugDB Materialization Operations for XBRL Graph Ingestion.
-
-This module handles Stage 2 of the ingestion pipeline: materializing data
-from DuckDB staging tables into the LadybugDB graph database.
-
-Key features:
-- Schema-driven: Table names come from RoboLedgerContext
-- Batch materialization: Large tables are materialized in batches to prevent OOM
-- Entity updates: MERGE-based updates for mutable Entity attributes
-
-Classes:
-    LadybugMaterializer: Handles all LadybugDB materialization operations
-"""
+"""Ingestion stage 2: materialize DuckDB staging tables into the LadybugDB graph."""
 
 import time
 from typing import TYPE_CHECKING, Any
@@ -37,12 +24,7 @@ from .models import (
 
 
 class LadybugMaterializer:
-  """
-  Stage 2: copies DuckDB staging tables into the LadybugDB graph.
-
-  All data reaches the graph this way — nothing is written to LadybugDB
-  without passing through DuckDB staging first.
-  """
+  """Copies DuckDB staging tables into LadybugDB; the graph's only write path."""
 
   def __init__(self, graph_id: str = "sec", source_prefix: str | None = None):
     """`source_prefix` is the S3 prefix for source files ("sec/processed")."""
@@ -60,33 +42,18 @@ class LadybugMaterializer:
     progress_callback: ProgressCallback | None = None,
     materialize_mode: str = "full",
   ) -> MaterializeResult:
-    """
-    Materialize LadybugDB graph from existing DuckDB staging.
+    """Materialize the graph from existing DuckDB staging (tables default to the schema's).
 
-    This is Stage 2 of the decoupled pipeline. It uses the schema to determine
-    which tables to materialize and triggers ingestion for each table.
-
-    Schema-Driven Design:
-    - Table names come from RoboLedgerContext.get_all_table_names_for_context()
-    - No manifest file needed - schema is the source of truth
-
-    Precondition: stage_to_duckdb() must have been run successfully, creating
-    DuckDB staging tables.
-
-    `materialize_mode` selects the strategy: "full" (default) rebuilds the
-    graph then COPYs every table, assuming an empty target; "incremental"
-    skips the rebuild and COPYs only rows not already present, via a per-table
-    keyset anti-join in the Graph API.
-
-    `table_names` narrows the run to specific tables; `rebuild` forces a
-    delete-and-recreate; `batch_materialization` keeps large tables under the
-    OOM ceiling by splitting them into `batch_size`-row hash batches.
+    "full" mode COPYs every table assuming an empty target (pair it with
+    `rebuild=True`); "incremental" never rebuilds and COPYs only rows not
+    already present, via a keyset anti-join in the Graph API.
+    `batch_materialization` splits tables over `batch_size` rows into hash
+    batches to stay under the OOM ceiling.
     """
     start_time = time.time()
     log_progress = make_progress_logger(progress_callback)
 
     incremental = materialize_mode == "incremental"
-    # Incremental never rebuilds — it appends into the existing populated graph.
     do_rebuild = rebuild and not incremental
 
     log_progress(
@@ -95,7 +62,6 @@ class LadybugMaterializer:
     )
 
     try:
-      # Step 1: Determine which tables to materialize (schema-driven)
       if table_names is None:
         logger.info("Step 1: Getting table names from schema...")
         tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
@@ -113,7 +79,6 @@ class LadybugMaterializer:
 
       logger.info(f"Materializing {len(table_names)} tables...")
 
-      # Step 2: Get graph client
       try:
         client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
       except Exception as client_err:
@@ -126,7 +91,6 @@ class LadybugMaterializer:
           error=f"Graph client initialization failed: {client_err!s}",
         )
 
-      # Step 3: Rebuild or ensure LadybugDB database exists
       if do_rebuild:
         logger.info(
           "Step 3: Rebuilding LadybugDB database (DuckDB staging preserved)..."
@@ -148,7 +112,6 @@ class LadybugMaterializer:
         )
         logger.info(f"Repository ensure result: {repo_result.get('status', 'unknown')}")
 
-      # Step 4: Trigger ingestion for each table
       log_progress(f"Step 4: Materializing {len(table_names)} tables to LadybugDB...")
       ingestion_results = await self._trigger_ingestion(
         table_names,
@@ -180,10 +143,6 @@ class LadybugMaterializer:
         status="error",
         error=str(e),
       )
-
-  # =========================================================================
-  # Private Helper Methods
-  # =========================================================================
 
   async def _rebuild_ladybug_database(
     self, client: "GraphClient", reset_staging: bool = False
@@ -223,9 +182,7 @@ class LadybugMaterializer:
         else:
           raise
 
-      # For shared repos, always use the contextual schema compile (codebase
-      # source of truth — same helper as SharedRepositoryService creation).
-      # Stored GraphSchema records can become stale when the schema evolves.
+      # Compile the schema from code; the stored GraphSchema can be stale.
       from robosystems.schemas.loader import compile_repository_schema
 
       subgraph_info = parse_subgraph_id(self.graph_id)
@@ -239,7 +196,6 @@ class LadybugMaterializer:
         f"({len(compiled.nodes)} nodes, {len(compiled.relationships)} relationships)"
       )
 
-      # Update the stored GraphSchema record so it stays in sync
       existing_schema = GraphSchema.get_active_schema(self.graph_id, db)
       if existing_schema:
         existing_schema.schema_ddl = schema_ddl
@@ -254,7 +210,6 @@ class LadybugMaterializer:
         )
         logger.info(f"Created new GraphSchema record for {self.graph_id}")
 
-      # Create database (without schema DDL — subgraphs skip schema application)
       create_db_kwargs: dict[str, Any] = {
         "graph_id": self.graph_id,
         "schema_type": schema_type,
@@ -267,7 +222,7 @@ class LadybugMaterializer:
       await client.create_database(**create_db_kwargs)
       logger.info(f"Recreated LadybugDB database with schema type: {schema_type}")
 
-      # Install schema separately (create_database skips schema for subgraphs)
+      # create_database skips schema for subgraphs, so install it explicitly.
       result = await client.install_schema(
         graph_id=self.graph_id, custom_ddl=schema_ddl
       )
@@ -284,15 +239,8 @@ class LadybugMaterializer:
     progress_callback: ProgressCallback | None = None,
     incremental: bool = False,
   ) -> dict[str, Any]:
-    """
-    Trigger ingestion for all tables into LadybugDB graph via Graph API.
-
-    Tables above `batch_size` rows are materialized in chunks to avoid OOM.
-
-    `incremental=True` makes each table's COPY anti-join against the existing
-    graph, so only new rows are ingested (populated-graph append). The default
-    assumes an empty target, as on the full-rebuild path.
-    """
+    """Materialize each table via the Graph API; large tables over `batch_size`
+    rows go in hash batches. `incremental` anti-joins against the existing graph."""
     log_progress = make_progress_logger(progress_callback)
 
     total_rows = 0
@@ -305,7 +253,6 @@ class LadybugMaterializer:
       timeout = get_materialization_timeout(table_name)
 
       try:
-        # Get row count to determine if chunking is needed
         row_count = 0
         if is_large:
           try:
@@ -319,7 +266,6 @@ class LadybugMaterializer:
             logger.warning(f"Could not get row count for {table_name}: {count_err}")
             row_count = 0
 
-        # Use hash-based batched materialization for very large tables
         if batch_materialization and row_count > batch_size:
           num_batches = (row_count + batch_size - 1) // batch_size
           log_progress(
@@ -372,7 +318,6 @@ class LadybugMaterializer:
           )
 
         else:
-          # Standard single-pass materialization
           size_hint = f" (large table, timeout={timeout:.0f}s)" if is_large else ""
           log_progress(f"[{i}/{total_tables}] Materializing {table_name}{size_hint}...")
 
@@ -411,7 +356,6 @@ class LadybugMaterializer:
           }
         )
 
-    # Log summary of any failures so they're easy to find in logs
     failed = [r for r in results if r.get("status") == "error"]
     succeeded = [r for r in results if r.get("status") != "error"]
 

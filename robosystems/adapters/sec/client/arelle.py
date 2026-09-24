@@ -1,15 +1,9 @@
-"""The platform's Arelle load: xbrlkit's cache-first loader on the platform's
-cache directory.
+"""xbrlkit's cache-first Arelle loader, on the platform's cache directory.
 
-Everything that keeps a corpus run alive against the taxonomy hosts is
-xbrlkit's — the DTS served from a persistent cache in Arelle's layout, fetches
-spaced per host with a bounded ``Retry-After`` wait, no re-validation of a
-cached file, and a loud ``DtsResolutionError`` when a document cannot be
-resolved (``ref/adapters.md`` §2.8). What is the platform's is where the
-cache lives: ``env.ARELLE_CACHE_DIR`` in a deployment, seeded from the schema
-bundle at image build (``Dockerfile``: ``xbrlkit cache extract``); the repo's
-``arelle/cache`` locally. A directory the process cannot write to falls back
-to ``/tmp``, seeded from it, so a read-only mount still serves the bundle.
+The fetch policy (per-host spacing, bounded ``Retry-After``, no re-validation)
+is xbrlkit's. The cache is ``env.ARELLE_CACHE_DIR`` in a deployment, seeded
+at image build by ``xbrlkit cache extract``, or the repo's ``arelle/cache``
+locally.
 """
 
 from __future__ import annotations

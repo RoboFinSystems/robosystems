@@ -48,8 +48,8 @@ async def create_database(
       detail="Database creation not allowed on read-only nodes",
     )
 
-  # Any node can host any database type — shared repositories are identified by
-  # metadata, not by node type. Only the repository name has to be present.
+  # Any node can host any schema type; shared repositories are identified by
+  # metadata, not node type.
   if request.schema_type == "shared" and not request.repository_name:
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -138,18 +138,10 @@ async def delete_database(
   if ladybug_service.node_type == NodeType.SHARED_MASTER:
     logger.warning(f"Attempting to delete shared database: {graph_id}")
 
-  # Every delete here can touch a blue-green artifact: a `-wip`/`-prev` name
-  # is one, and a base-name delete sweeps its own `-wip`/`-prev` alongside.
-  # The base may be mid-materialization right now, and deleting the WIP under
-  # an active build destroys the copy the build is writing into. So hold the
-  # base's materialization lock across the delete, same protocol as
-  # `swap_database`: acquiring (not just checking) closes the window where a
-  # build starts between the check and the unlink, and a caller that cannot
-  # get it — a rebuild or a teardown racing an extensions build — is refused
-  # and retries, rather than pulling the WIP out from under the build. The
-  # materialize flow deletes its own WIP (leftover and failure cleanup) and
-  # its own base (a rebuild) while already holding this lock; it passes its
-  # token through so those deletes don't 409 against itself.
+  # Every delete can touch a blue-green artifact (a base-name delete sweeps
+  # its `-wip`/`-prev`), so hold the base's materialization lock across it —
+  # acquiring, not checking, so a build cannot start in between. Callers that
+  # already hold it pass their token.
   lock = None
   if not x_materialization_lock_token:
     try:
@@ -174,17 +166,12 @@ async def delete_database(
     except HTTPException:
       raise
     except Exception as e:
-      # Degraded mode mirrors swap_database: an unreachable Valkey should not
-      # make artifacts undeletable forever. In that state materialize also
-      # runs unlocked, so both sides accept the same residual race — and the
-      # active database is never the target either way.
+      # Degraded mode, as in swap_database: an unreachable Valkey must not
+      # make databases undeletable; materialize also runs unlocked then.
       logger.warning(f"Could not acquire materialization lock for delete: {e}")
       lock = None
 
   try:
-    # The manager's result carries `existed` and `removed`: a delete of a
-    # graph whose .lbug was already gone still disposes its side stores and
-    # says so, rather than 404ing before any cleanup.
     return ladybug_service.db_manager.delete_database(
       graph_id, preserve_duckdb=preserve_duckdb
     )

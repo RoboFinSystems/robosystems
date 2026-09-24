@@ -37,13 +37,7 @@ class ConnectionInfo:
 
 
 class LadybugConnectionPool:
-  """Thread-safe connection pool for the node's LadybugDB databases.
-
-  Bounds connections per database, expires them on a TTL, and drops
-  connections that fail a health check. All connections for one database share
-  a single ``lbug.Database`` object so writes committed on one are visible on
-  the others.
-  """
+  """Thread-safe connection pool for the node's LadybugDB databases."""
 
   def __init__(
     self,
@@ -96,10 +90,6 @@ class LadybugConnectionPool:
 
     Fully consume (and close) any result inside the block — a QueryResult
     holds Arrow buffers that outlive the block otherwise.
-
-    Example:
-        with pool.get_connection("my_db") as conn:
-            result = conn.execute("MATCH (n) RETURN count(n)")
     """
     connection_info = None
     try:
@@ -649,18 +639,8 @@ class LadybugConnectionPool:
     """Drop a database's handles so the next access reopens it.
 
     Buffer pool size is fixed when the Database object is created, so this is
-    how a memory override takes effect on an already-open database.
-
-    Example:
-        from robosystems.graph_api.core.ladybug.config import set_ladybug_memory_override
-
-        old_limit = set_ladybug_memory_override(50000, graph_id="sec")
-        pool.recreate_database("sec")  # reopens with a 50GB buffer pool
-
-        # ... perform materialization ...
-
-        set_ladybug_memory_override(old_limit, graph_id="sec")
-        pool.recreate_database("sec")
+    how a memory override (``set_ladybug_memory_override``) takes effect on an
+    already-open database.
     """
     logger.info(f"Recreating database {database_name} to apply new memory settings")
     self.close_database_connections(database_name)

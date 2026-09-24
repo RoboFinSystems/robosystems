@@ -1,17 +1,9 @@
-"""Nightly system backups for customer graphs.
+"""Nightly backups of customer graphs and their subgraphs, one run per graph.
 
-Fans one ``backup_graph_job`` run out per graph rather than looping inside a
-single run, so one graph failing does not take the rest of the fleet's backups
-with it and each shows up separately in the Dagster UI.
-
-Backups are a *download* capability: every graph type with an upstream rebuilds
-from that upstream rather than from a snapshot, so this exists to give customers
-a retrievable record of what their graph held — and to cover the two things that
-have no upstream at all, entity subgraphs and the semantic memory store.
-
-Scope is customer graphs and their subgraphs. Shared repositories are excluded:
-they are large, re-ingestible from their public source, and already have a
-last-known-good volume snapshot from the instance lifecycle.
+Graphs with an upstream rebuild from it, so backups mainly give customers a
+retrievable record and cover what has no upstream (entity subgraphs, the
+semantic memory store). Shared repositories are excluded: large, re-ingestible,
+and snapshotted by the instance lifecycle.
 """
 
 from datetime import UTC, datetime
@@ -31,8 +23,7 @@ from robosystems.dagster.jobs.graph import backup_graph_job
 from robosystems.database import session as db_session_factory
 from robosystems.logger import logger
 
-# Schedule status: RUNNING in prod/staging, STOPPED in dev — matching
-# daily_backup_cleanup_schedule, whose retention this creation side balances.
+# Matches daily_backup_cleanup_schedule, whose retention this balances.
 _SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
   if env.ENVIRONMENT != "dev"
@@ -42,19 +33,14 @@ _SCHEDULE_STATUS = (
 # Graph types that belong to a customer and carry an expectation of backups.
 _BACKED_UP_GRAPH_TYPES = ("entity", "generic")
 
-# Statuses that mean the graph is real and reachable. A graph still
-# provisioning has nothing to back up, and one that failed provisioning may
-# have no database at all.
 _ACTIVE_GRAPH_STATUSES = ("active",)
 
 
 def _graphs_to_back_up(session) -> list[str]:
   """Graph ids in scope, parents and subgraphs alike.
 
-  Enumerated from the platform ``graphs`` table rather than the DynamoDB volume
-  registry: the registry's ``databases`` list records only parent ids, so a
-  subgraph — one of the two classes that has no upstream and therefore needs
-  this most — would be invisible to a registry-driven sweep.
+  Read from the ``graphs`` table: the DynamoDB volume registry lists only parent
+  ids, and subgraphs need backups most.
   """
   from robosystems.models.core import Graph
 
@@ -70,9 +56,7 @@ def _graphs_to_back_up(session) -> list[str]:
   return [
     graph_id
     for (graph_id,) in rows
-    # Belt to the graph_type filter: shared repositories are platform-managed
-    # and re-ingestible, and backing up a 300 GB corpus nightly is the expensive
-    # mistake this scope exists to avoid.
+    # Belt-and-braces over the graph_type filter.
     if not is_shared_repository_or_subgraph(graph_id)
   ]
 
@@ -87,8 +71,7 @@ def _run_config_for(graph_id: str, retention_days: int) -> dict[str, Any]:
           "backup_format": "full_dump",
           "retention_days": retention_days,
           "compression": True,
-          # Keeps the run out of the customer's daily allowance and badges it
-          # in the listing as taken on their behalf.
+          # Outside the customer's daily allowance; badged in the listing.
           "initiated_by": "scheduled",
         }
       }
@@ -98,11 +81,7 @@ def _run_config_for(graph_id: str, retention_days: int) -> dict[str, Any]:
 
 @schedule(
   job=backup_graph_job,
-  # Deep night in the platform's primary operating timezone: the fleet is
-  # quietest and a backup
-  # checkpoints and copies the whole database. Pinned to a zone rather than a
-  # fixed UTC hour so it stays at 3am local across daylight-saving changes
-  # instead of drifting an hour twice a year.
+  # 3am local when the fleet is quietest; zone-pinned so DST doesn't shift it.
   cron_schedule="0 3 * * *",
   execution_timezone="America/New_York",
   default_status=_SCHEDULE_STATUS,
@@ -111,19 +90,13 @@ def _run_config_for(graph_id: str, retention_days: int) -> dict[str, Any]:
 def nightly_graph_backup_schedule(context: ScheduleEvaluationContext):
   """One backup run per in-scope graph, nightly.
 
-  Note the ordering against ``daily_backup_cleanup_schedule``, which runs at
-  05:00 **UTC** — that is 01:00 local, so retention is enforced *before* the
-  night's backup is taken rather than after. This is harmless only because
-  retention is long relative to the cadence: at the entry tier's 7 days there
-  are always six other backups standing when the sweep runs. Shortening tier
-  retention toward the backup cadence would make the order matter, so revisit
-  this comment if that ever changes.
+  ``daily_backup_cleanup_schedule`` (05:00 UTC, ~01:00 local) runs before this.
+  Harmless while tier retention is well above the daily cadence; revisit if it
+  ever shrinks toward it.
   """
   from robosystems.models.core import Graph
 
-  # The same kill switch both manual paths check. A flag honoured on two of
-  # three paths that create backups is not a kill switch — and this is the one
-  # path nobody is watching when they flip it during an incident.
+  # The same kill switch the manual backup paths honour.
   if not env.BACKUP_CREATION_ENABLED:
     context.log.info("Backup creation is disabled; skipping nightly backups")
     return []
@@ -134,9 +107,7 @@ def nightly_graph_backup_schedule(context: ScheduleEvaluationContext):
   db = db_session_factory()
   try:
     for graph_id in _graphs_to_back_up(db):
-      # Retention is the graph's own tier maximum. The nightly backup is the
-      # baseline the tier advertises, so it should live exactly as long as the
-      # tier says a backup does.
+      # Retention is the graph's tier maximum.
       graph = Graph.get_by_id(graph_id, db)
       tier = str(graph.graph_tier) if graph and graph.graph_tier else "ladybug-standard"
       retention_days = GraphTierConfig.get_backup_limits(tier).get(
@@ -145,9 +116,7 @@ def nightly_graph_backup_schedule(context: ScheduleEvaluationContext):
 
       requests.append(
         RunRequest(
-          # One run per graph per day. A re-evaluation within the same day
-          # dedupes against this rather than taking a second backup and
-          # eating into the tier's daily ceiling.
+          # One run per graph per day; re-evaluations dedupe.
           run_key=f"nightly_backup_{graph_id}_{run_date}",
           run_config=_run_config_for(graph_id, retention_days),
           tags={"graph_id": graph_id, "trigger": "nightly_backup"},

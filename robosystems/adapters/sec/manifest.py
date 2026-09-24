@@ -1,9 +1,4 @@
-"""
-SEC shared repository manifest.
-
-Declares the SEC EDGAR shared repository with its complete configuration:
-identity, data source, schema, MCP capabilities, rate limits, and credit costs.
-"""
+"""SEC EDGAR shared repository manifest."""
 
 from decimal import Decimal
 
@@ -44,10 +39,8 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "- Raw graph traversal → `read-graph-cypher`.\n"
     "\n"
     "NOTES\n"
-    # The `sec_historical` subgraph was advertised here until 2026-08-14 and is
-    # not served: the replica stack carries `sec` only, master reads are off,
-    # and the master is parked at desired 0, so every read for it fails. Do not
-    # restore this line until a read actually succeeds against that graph.
+    # Don't advertise `sec_historical` here until a read against it succeeds;
+    # the replicas serve `sec` only.
     "- Raw Cypher on this graph has four rules that decide whether a number is "
     "right: `Fact {has_dimensions: false}` for consolidated totals, "
     "`Element.canonical_concept` over a single qname, a pinned `Period` shape "

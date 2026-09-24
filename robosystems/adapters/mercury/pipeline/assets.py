@@ -1,11 +1,8 @@
 """The one Dagster asset — pull the feed, link the accounts, capture the events.
 
-No dbt and no DuckDB, so three assets buy nothing: the ``mercury_feed`` asset
-(job ``mercury_sync``) is extract, transform and load in one body. The body
-keeps the shared bank-feed discipline (``adapters/bank_feed/sync.py``): any
-failure — a refused token, a Mercury 5xx, a chart with no room for a new
-account — is recorded on the connection and releases the per-connection sync
-lock. The job carries ``dagster/max_retries: 3`` from birth.
+No dbt and no DuckDB, so ``mercury_feed`` (job ``mercury_sync``) is extract,
+transform and load in one body, wrapped in the shared ``bank_feed.sync``
+failure handling.
 """
 
 from datetime import UTC, date, datetime, timedelta

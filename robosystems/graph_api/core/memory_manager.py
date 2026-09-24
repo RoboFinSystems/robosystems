@@ -4,25 +4,10 @@ Both engines share one box, so both run with conservative defaults and only
 the engine doing the heavy work is boosted — DuckDB during staging, LadybugDB
 during materialization — with the default restored afterwards.
 
-Two shapes, matching two call patterns:
-
-- ``boost_*_memory`` context managers, for a single batch call.
-- ``ensure_*_memory_boosted`` / ``restore_*_memory``, for per-table endpoints
-  invoked many times in a row (SEC materializes ~36 tables); the boost is
-  applied on the first call only, since recreating the LadybugDB database is
-  expensive.
-
-Raising a limit and lowering it back is not the same as freeing memory:
-``release_duckdb_memory`` closes connections, which is what actually returns
-DuckDB's buffers to the OS.
-
-Usage:
-    with boost_duckdb_memory("sec"):
-        create_all_staging_tables(...)
-
-    ensure_ladybug_memory_boosted("sec")  # boosts on the first call only
-    materialize_table(...)
-    restore_ladybug_memory("sec")  # once the batch is done
+``boost_*_memory`` context managers suit a single batch call;
+``ensure_*_memory_boosted`` / ``restore_*_memory`` suit per-table endpoints
+called many times in a row, boosting on the first call only. Lowering a limit
+does not free memory — ``release_duckdb_memory`` closing connections does.
 """
 
 from collections.abc import AsyncGenerator, Generator
@@ -32,7 +17,7 @@ from robosystems.config import env
 from robosystems.config.graph_tier import GraphTierConfig
 from robosystems.logger import logger
 
-# Track which graphs have active memory boosts to avoid redundant boost/restore cycles
+# Graphs with an active boost, so repeated per-table calls don't re-boost.
 _active_duckdb_boosts: set[str] = set()
 _active_ladybug_boosts: set[str] = set()
 
@@ -43,10 +28,6 @@ def boost_duckdb_memory(graph_id: str) -> Generator[str | None]:
   reconfiguring open connections, and restore it on exit.
 
   Yields the applied limit, or None when the tier configures no boost.
-
-  Example:
-      with boost_duckdb_memory("sec"):
-          create_staging_tables(...)
   """
   from robosystems.graph_api.core.duckdb.pool import (
     get_duckdb_pool,
@@ -95,10 +76,6 @@ def boost_ladybug_memory(graph_id: str) -> Generator[int | None]:
   available.
 
   Yields the applied limit in MB, or None when the tier configures no boost.
-
-  Example:
-      with boost_ladybug_memory("sec"):
-          materialize_tables(...)
   """
   from robosystems.graph_api.core.ladybug.config import set_ladybug_memory_override
   from robosystems.graph_api.core.ladybug.pool import get_connection_pool
@@ -110,9 +87,7 @@ def boost_ladybug_memory(graph_id: str) -> Generator[int | None]:
     boost_mb = GraphTierConfig.get_ladybug_memory_boost_mb(tier)
 
   if boost_mb:
-    # Free memory before boosting. Safe only because a boost is configured on
-    # the shared tier alone, which serves no concurrent API traffic — see
-    # ensure_ladybug_memory_boosted.
+    # Safe only on the shared tier — see ensure_ladybug_memory_boosted.
     try:
       release_duckdb_memory(graph_id)
     except Exception as e:
@@ -268,7 +243,6 @@ def _evict_idle_subgraph_databases(pool, target_graph_id: str) -> list[str]:
       continue
     if "_" not in db_name:
       continue
-    # Someone is querying it.
     if pool.has_active_connections(db_name):
       continue
     try:
@@ -322,15 +296,10 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
       f"(override was cleared but tracking set was not). Re-applying boost."
     )
 
-  # The DuckDB release and subgraph eviction below are reachable only on the
-  # shared tier, the only one with ladybug_memory_boost_mb configured, whose
-  # master serves no API traffic during Dagster builds. Adding a boost config
-  # to a customer tier (standard/large/xlarge) requires API-aware guards here
-  # first: those instances serve live queries during materialization.
-
-  # Staging is finished by the time materialization starts, so these DuckDB
-  # connections are idle but still holding buffer memory. Closing them is what
-  # hands it back.
+  # The DuckDB release and subgraph eviction below are safe only because
+  # ladybug_memory_boost_mb is configured on the shared tier alone, whose
+  # master serves no API traffic during builds. A customer tier needs
+  # API-aware guards here before it gets a boost config.
   try:
     result = release_duckdb_memory(graph_id)
     if result.get("connections_closed", 0) > 0:
@@ -341,8 +310,8 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   except Exception as e:
     logger.warning(f"Could not release DuckDB memory before boost: {e}")
 
-  # Only subgraphs are evicted: the target graph is recreated with the boost,
-  # and there is only one primary graph per instance.
+  # Only subgraphs: the target is recreated with the boost, and an instance
+  # holds one primary graph.
   try:
     pool = get_connection_pool()
     evicted = _evict_idle_subgraph_databases(pool, graph_id)
@@ -357,7 +326,6 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   set_ladybug_memory_override(boost_mb, graph_id=graph_id)
   _active_ladybug_boosts.add(graph_id)
 
-  # Buffer pool size is fixed at open, so the database must be recreated.
   try:
     pool = get_connection_pool()
     pool.recreate_database(graph_id)

@@ -1,7 +1,4 @@
-"""Dagster jobs for graph lifecycle management.
-
-Handles suspension and deprovisioning of graphs with expired subscriptions.
-"""
+"""Dagster jobs that suspend, deprovision, and reap stalled provisioning for graphs."""
 
 from dagster import Config, OpExecutionContext, job, op
 
@@ -108,12 +105,9 @@ def deprovision_suspended_graphs(
         error_msg = f"Failed to deprovision {graph_id}: {e}"
         errors.append(error_msg)
         context.log.error(error_msg)
-        # A DBAPI error leaves this shared session in a failed transaction
-        # (e.g. a delete in _clean_pg_records). Without a rollback the NEXT
-        # graph's first statement raises PendingRollbackError and the whole
-        # run cascades — one poison graph took down every graph after it.
-        # Reset so each graph is independent; the failed one is left stranded
-        # (deleted_at set, status not deprovisioned) for the sensor to retry.
+        # A DBAPI error poisons the shared session; roll back so the next
+        # graph isn't hit by PendingRollbackError. The failed graph stays
+        # stranded for the sensor to retry.
         try:
           session.rollback()
         except Exception:
@@ -159,17 +153,9 @@ def reap_stalled_provisioning(
 ) -> dict:
   """Write off subscriptions stuck mid-provisioning.
 
-  A provisioning attempt that dies — a killed worker, an exception, a provider
-  event that was never redelivered — leaves the row in ``provisioning``, which
-  is not terminal and which neither lifecycle sensor looks at. Nothing else in
-  the system ever revisits that state, so this is the only place it ends.
-
-  Marking the row ``failed`` does two things: it makes the attempt visible to
-  ``admin subscriptions list``, and it puts the row in a state the lifecycle
-  sensors act on, so any graph the attempt managed to create is suspended and
-  then reclaimed on the ordinary retention schedule rather than running
-  unbilled forever. ``failed`` is also terminal, so the customer's route back
-  — a fresh checkout — is already open.
+  ``failed`` is terminal and visible to the lifecycle sensors, so any graph the
+  attempt created is suspended and reclaimed on the normal retention schedule,
+  and the customer can check out afresh.
   """
   from robosystems.models.core.billing.subscription import BillingSubscription
 
@@ -192,10 +178,8 @@ def reap_stalled_provisioning(
         )
         continue
 
-      # The write-off re-checks staleness atomically at write time. Between
-      # the sensor's read and this run a redelivery may have re-claimed the
-      # row — status still "provisioning" but heartbeat fresh — and that run
-      # is live, not stalled.
+      # Re-checks staleness atomically: a redelivery may have re-claimed the
+      # row since the sensor's read.
       if not subscription.write_off_stalled_provisioning(session):
         context.log.info(
           f"Subscription {subscription_id} completed or was re-claimed since "
@@ -204,9 +188,8 @@ def reap_stalled_provisioning(
         continue
 
       reaped.append(subscription_id)
-      # The marker is what the CloudWatch metric filter matches
-      # (cloudformation/dagster.yaml, StalledProvisioningWriteOff): this is a
-      # paid customer with no resource, and detection here is the only page.
+      # Matched by the StalledProvisioningWriteOff metric filter; this is the
+      # only page for a paid customer with no resource.
       context.log.error(
         f"STALLED PROVISIONING WRITTEN OFF: subscription {subscription_id} "
         f"(org={subscription.org_id}, resource_type={subscription.resource_type}, "

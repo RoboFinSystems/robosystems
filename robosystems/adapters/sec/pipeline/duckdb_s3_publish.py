@@ -1,16 +1,5 @@
-"""SEC DuckDB S3 Publish Assets.
-
-Publishes DuckDB staging databases to S3 as raw .duckdb files.
-Runs VACUUM before upload to compact the database and reclaim space
-from incremental staging operations.
-
-Two assets for the two DuckDB staging databases:
-- sec_duckdb_s3_published: Publishes sec.duckdb (2024+ data)
-- sec_historical_duckdb_s3_published: Publishes sec_historical.duckdb (2009-2023)
-
-These complement the .lbug publish assets (sec_lbug_s3_published,
-sec_historical_lbug_s3_published) which serve the replica cluster.
-"""
+"""Publish the sec and sec_historical DuckDB staging databases to S3 as raw
+.duckdb files (VACUUMed first to reclaim space from incremental staging)."""
 
 from dagster import (
   AssetExecutionContext,
@@ -34,13 +23,7 @@ from robosystems.dagster.assets.shared_repositories.publish import publish_duckd
 def sec_duckdb_s3_published(
   context: AssetExecutionContext,
 ) -> MaterializeResult:
-  """Publish SEC DuckDB staging database to S3.
-
-  Delegates to the shared publish_duckdb_to_s3() helper which handles:
-  - Graph Client Factory (auth, routing, circuit breakers)
-  - DuckDB VACUUM + CHECKPOINT + S3 multipart upload on-instance
-  - Upload verification
-  """
+  """Publish the sec DuckDB staging database to S3."""
   return publish_duckdb_to_s3(context, graph_id="sec")
 
 
@@ -57,8 +40,5 @@ def sec_duckdb_s3_published(
 def sec_historical_duckdb_s3_published(
   context: AssetExecutionContext,
 ) -> MaterializeResult:
-  """Publish SEC historical DuckDB staging database to S3.
-
-  Runs VACUUM + CHECKPOINT on-instance before S3 multipart upload.
-  """
+  """Publish the sec_historical DuckDB staging database to S3."""
   return publish_duckdb_to_s3(context, graph_id="sec_historical")

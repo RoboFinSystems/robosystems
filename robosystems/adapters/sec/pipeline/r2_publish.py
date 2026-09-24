@@ -1,15 +1,5 @@
-"""SEC R2 Publish Asset.
-
-Publishes the SEC shared repository .lbug database to Cloudflare R2 for
-zero-egress subscriber downloads. Runs after SEC materialization completes.
-
-This is a thin wrapper around the shared publish_to_r2() helper.
-The lineage chain:
-  sec_graph_materialized -> sec_lbug_r2_published
-
-This complements sec_lbug_s3_published (which serves the replica fleet).
-R2 provides the same raw .lbug file but with zero download egress costs.
-"""
+"""sec_lbug_r2_published: the raw .lbug on Cloudflare R2 for zero-egress
+subscriber downloads."""
 
 import asyncio
 from typing import Any
@@ -67,14 +57,7 @@ def sec_lbug_r2_published(
   context: AssetExecutionContext,
   db: DatabaseResource,
 ) -> MaterializeResult:
-  """Publish SEC database to R2 for subscriber downloads.
-
-  Delegates to the shared publish_to_r2() helper which handles:
-  - Graph Client Factory (auth, routing, circuit breakers)
-  - CHECKPOINT + R2 multipart upload on-instance
-  - Upload verification
-  - GraphBackup record upsert
-  - The snapshot stats file, counted here just before the cut
-  """
+  """Publish the SEC database to R2, with the stats file counted just before
+  the cut."""
   stats = _capture_stats(context)
   return publish_to_r2(context, graph_id="sec", db_resource=db, stats=stats)

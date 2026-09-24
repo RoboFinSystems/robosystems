@@ -1,11 +1,5 @@
-"""SEC-specific report resolution.
-
-Auto-resolves the latest matching filing for a ticker by EDGAR form
-codes. Extracted from the old `GetFinancialStatementTool` so the
-generic `financial-statement-analysis` view op can stay
-schema-agnostic and call this helper only when the graph is a shared
-SEC repository.
-"""
+"""Resolve a ticker's latest SEC filing by EDGAR form code, for views that run
+on the shared SEC repository."""
 
 from __future__ import annotations
 
@@ -14,9 +8,8 @@ from typing import Any
 from robosystems.logger import logger
 from robosystems.middleware.graph import get_graph_repository
 
-# Forms used by domestic filers
 ANNUAL_FORMS: tuple[str, ...] = ("10-K", "20-F", "40-F")
-# Quarterly forms — include annual since international filers may only have annual
+# Includes annual forms: foreign filers may file only annually.
 QUARTERLY_FORMS: tuple[str, ...] = ("10-K", "20-F", "40-F", "10-Q")
 
 
@@ -36,17 +29,10 @@ async def resolve_sec_report(
   period_type: str | None = None,
   fiscal_year: int | None = None,
 ) -> dict[str, Any] | None:
-  """Resolve the most recent SEC filing for a ticker.
+  """The most recent filing for a ticker, or None when nothing matches.
 
-  ``period_type`` selects which form codes to consider:
-
-  - ``annual`` → only ``10-K`` / ``20-F`` / ``40-F``
-  - ``quarterly`` / ``instant`` → include ``10-Q`` plus annual forms
-    (international filers may only have annual)
-  - ``None`` → defaults to annual
-
-  Returns a dict with ``identifier``, ``form``, ``filing_date``,
-  ``fiscal_year``, ``fiscal_period`` — or ``None`` if no match.
+  ``period_type`` "quarterly" or "instant" adds 10-Q to the annual forms;
+  anything else means annual only.
   """
   if period_type == "annual":
     forms: tuple[str, ...] = ANNUAL_FORMS
@@ -72,17 +58,13 @@ async def resolve_sec_report(
   )
 
   try:
-    # Read-only resolution against the shared SEC repo — route to the replica
-    # ALB via operation_type="read"; the default "write" path resolves the
-    # shared master (DynamoDB discovery + retry) and times out the MCP tool.
+    # "read" routes to the replicas; the default "write" path resolves the
+    # shared master and times out the MCP tool.
     repository = await get_graph_repository(graph_id, operation_type="read")
     rows = await repository.execute_query(query, parameters)
   except Exception as e:
-    # Do NOT collapse an infrastructure failure into "no match". Callers
-    # fall back to an unscoped ticker sweep when this returns None, so
-    # swallowing here turned a transient graph timeout into a confident
-    # wrong answer — the caller's fiscal_year silently became "whatever is
-    # newest". A failed lookup must be distinguishable from an empty one.
+    # Never return None here: callers fall back to an unscoped sweep on None,
+    # turning a transient failure into a confidently wrong filing.
     logger.warning(f"SEC report auto-resolve failed for {ticker}: {e}")
     raise SECReportResolutionError(
       f"Could not resolve an SEC filing for {ticker}: the report lookup failed."

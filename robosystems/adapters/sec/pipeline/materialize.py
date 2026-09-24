@@ -1,9 +1,4 @@
-"""SEC Materialization Assets.
-
-This module contains the graph materialization assets:
-- sec_graph_materialized: Full DuckDB → LadybugDB materialization
-- sec_historical_materialized: Full DuckDB → LadybugDB materialization for sec_historical
-"""
+"""SEC DuckDB → LadybugDB materialization assets for sec and sec_historical."""
 
 from dagster import AssetExecutionContext, Failure, MaterializeResult, asset
 
@@ -28,21 +23,10 @@ def sec_graph_materialized(
   context: AssetExecutionContext,
   config: SECMaterializeConfig,
 ) -> MaterializeResult:
-  """Materialize LadybugDB graph from DuckDB staging.
+  """Materialize the sec graph from the persisted DuckDB staging.
 
-  This is Stage 2 of the pipeline. It reads from the persistent
-  DuckDB staging tables and materializes to LadybugDB.
-
-  Precondition: sec_duckdb_staged must have completed successfully,
-  creating a valid staging manifest.
-
-  Key features:
-  - Reads from persisted DuckDB (no S3 access needed)
-  - Can be retried independently if materialization fails
-  - Uses manifest to verify staging completeness
-
-  Run with:
-    uv run dagster asset materialize -m robosystems.dagster --select sec_graph_materialized
+  Retryable on its own. A partial result fails the run, which blocks the S3
+  publish so bad data never reaches replicas.
   """
   import asyncio
 
@@ -59,7 +43,7 @@ def sec_graph_materialized(
   elif config.rebuild_graph:
     context.log.info("Rebuild requested - will delete and recreate LadybugDB database")
 
-  # Boost LadybugDB memory before materialization (only applies to ladybug-shared tier)
+  # Only takes effect on the ladybug-shared tier.
   try:
     from robosystems.graph_api.client.factory import boost_graph_memory
 
@@ -70,15 +54,11 @@ def sec_graph_materialized(
 
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
-  # Progress callback for Dagster logging (visible in Dagster UI)
   def dagster_progress(msg: str) -> None:
     context.log.info(msg)
 
   async def run_materialization():
-    # Publish the busy counter against the shared-tier master that runs
-    # the LadybugDB COPY, so GHA pre-refresh waits before cycling it.
-    # Mirrors the wrapping in stage.py. Lazy imports keep boto3 /
-    # GraphClientFactory out of every SEC module's import chain.
+    # Busy counter so a deploy's pre-refresh waits; see stage.py.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_DAGSTER_MATERIALIZATION,
       begin_destructive_op,
@@ -138,15 +118,12 @@ def sec_graph_materialized(
     f"{result.duration_ms / 1000:.2f}s"
   )
 
-  # Release memory after materialization (closes connections, frees buffers to OS)
-  # This is more aggressive than restore - it actually releases the memory
   try:
     from robosystems.graph_api.client.factory import release_graph_memory
 
     release_result = asyncio.run(release_graph_memory(config.graph_id, target="both"))
     context.log.info(f"Memory release: {release_result.get('message', 'done')}")
   except Exception as release_err:
-    # Don't fail the job if release fails - materialization succeeded
     context.log.warning(f"Could not release memory (non-fatal): {release_err}")
 
   return MaterializeResult(
@@ -178,17 +155,7 @@ def sec_historical_materialized(
   context: AssetExecutionContext,
   config: SECMaterializeConfig,
 ) -> MaterializeResult:
-  """Materialize sec_historical LadybugDB graph from DuckDB staging.
-
-  This is Stage 2 of the historical pipeline. It reads from the persistent
-  DuckDB staging tables (sec_historical.duckdb) and materializes to the
-  sec_historical LadybugDB subgraph.
-
-  Precondition: sec_historical_duckdb_staged must have completed successfully.
-
-  Run with:
-    uv run dagster asset materialize -m robosystems.dagster --select sec_historical_materialized
-  """
+  """Materialize the sec_historical subgraph from its own DuckDB staging."""
   import asyncio
 
   from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
@@ -196,14 +163,13 @@ def sec_historical_materialized(
     ensure_shared_subgraph_exists,
   )
 
-  # Apply defaults for historical graph
+  # SECMaterializeConfig defaults graph_id to "sec".
   graph_id = config.graph_id if config.graph_id != "sec" else "sec_historical"
 
   context.log.info(f"Materializing historical graph from DuckDB staging: {graph_id}")
   if config.rebuild_graph:
     context.log.info("Rebuild requested - will delete and recreate LadybugDB database")
 
-  # Boost LadybugDB memory before materialization
   try:
     from robosystems.graph_api.client.factory import boost_graph_memory
 
@@ -218,7 +184,6 @@ def sec_historical_materialized(
     context.log.info(msg)
 
   async def run_materialization():
-    # Ensure the sec_historical subgraph exists
     subgraph_result = await ensure_shared_subgraph_exists(
       parent_repository_name="sec",
       subgraph_name="historical",
@@ -228,9 +193,7 @@ def sec_historical_materialized(
     )
     context.log.info(f"Subgraph status: {subgraph_result.get('status')}")
 
-    # Publish the busy counter against the shared-tier master that runs
-    # the LadybugDB COPY, so GHA pre-refresh waits before cycling it.
-    # Mirrors the wrapping in stage.py.
+    # Busy counter so a deploy's pre-refresh waits; see stage.py.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_DAGSTER_MATERIALIZATION,
       begin_destructive_op,
@@ -290,7 +253,6 @@ def sec_historical_materialized(
     f"{result.duration_ms / 1000:.2f}s"
   )
 
-  # Release memory after materialization
   try:
     from robosystems.graph_api.client.factory import release_graph_memory
 

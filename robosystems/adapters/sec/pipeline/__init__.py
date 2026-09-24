@@ -1,62 +1,9 @@
-"""SEC Pipeline Dagster Components.
+"""Dagster assets, jobs, sensors and schedules for the SEC pipeline.
 
-This package contains all Dagster orchestration for the SEC adapter:
-assets, jobs, sensors, and schedules.
-
-Pipeline stages (run independently via separate jobs):
-
-1. DOWNLOAD (sec_download job):
-   - sec_raw_filings - Discover via EFTS, download XBRL ZIPs (quarterly partitions)
-   - Creates SourceFile records in PostgreSQL for processing tracking
-
-2. PROCESS (sec_process job, quarterly partitions):
-   - sec_processed_filings - Process entire quarter's filings as batch
-   - Outputs consolidated parquet files (one per table per quarter)
-
-3. MATERIALIZE (two-stage pipeline):
-   - sec_stage job: sec_duckdb_staged - Stage processed files to persistent DuckDB
-   - sec_materialize job: sec_graph_materialized - Materialize from DuckDB to LadybugDB
-
-3b. HISTORICAL MATERIALIZE (two-stage pipeline for sec_historical):
-   - sec_historical_stage job: sec_historical_duckdb_staged - Stage historical data to DuckDB
-   - sec_historical_materialize job: sec_historical_materialized - Materialize to LadybugDB
-
-4. INCREMENTAL (nightly updates, sec graph only):
-   - sec_duckdb_incremental_staged - Stage current quarter to DuckDB (INSERT with dedup,
-     DELETE+INSERT upsert for Entity)
-   - sec_graph_materialized - Full LadybugDB rebuild from DuckDB
-
-5. PUBLISH (post-materialization):
-   - sec_lbug_s3_published - Publish raw .lbug to S3 for replica cluster
-   - sec_historical_lbug_s3_published - Publish historical .lbug to S3 for replica cluster
-   - sec_duckdb_s3_published - Publish raw .duckdb to S3
-   - sec_historical_duckdb_s3_published - Publish historical .duckdb to S3
-   - sec_lbug_r2_published - Publish raw .lbug to R2 for zero-egress subscriber downloads
-   - sec_lbug_hf_published - Copy the R2 snapshot to the public Hugging Face dataset (manual)
-
-6. ARTIFACTS (graph-based confidence refinement):
-   - sec_knowledge_artifacts - Generate element + structure knowledge artifacts
-
-7. CATALOG (the public pages' index, no database):
-   - sec_filing_catalog - Per-filer catalog + corpus index on the public CDN, a fold
-     over the processed Report/Entity tables and each filing's artifact manifest
-     (the artifacts themselves are written by the processor at process time)
-
-Nightly incremental chain (sensor-driven):
-  download → process (250 batch loop) → stage (DuckDB INSERT)
-  → materialize (full LadybugDB rebuild) → lbug S3 publish
-  → duckdb S3 publish → replica refresh
-  → text index (parallel with materialize: textblocks + narratives → OpenSearch)
-  → filer catalog (parallel with the text index)
-
-Usage:
-    from robosystems.adapters.sec.pipeline import get_dagster_components
-
-    components = get_dagster_components()
-    # components["assets"] - list of Dagster assets
-    # components["jobs"] - list of Dagster jobs
-    # components["sensors"] - list of Dagster sensors
-    # components["schedules"] - list of Dagster schedules
+Stages: download → process → DuckDB stage → LadybugDB materialize → publish
+(S3, R2, Hugging Face), plus text indexing, knowledge artifacts and the public
+filer catalog. See README.md in this directory; ``get_dagster_components()``
+is what dagster/definitions.py collects.
 """
 
 from robosystems.adapters.sec.pipeline.artifact import (
@@ -141,11 +88,8 @@ from robosystems.adapters.sec.pipeline.text_index import (
 
 
 def get_dagster_components():
-  """Return all Dagster components for the SEC adapter.
-
-  Returns a dictionary with keys: assets, jobs, sensors, schedules.
-  Used by dagster/definitions.py to collect SEC pipeline components.
-  """
+  """assets, jobs, sensors, schedules and shared_replica_deps, for
+  dagster/definitions.py."""
   return {
     "shared_replica_deps": [
       "sec_lbug_s3_published",

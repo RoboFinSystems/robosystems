@@ -1,9 +1,4 @@
-"""Dagster sensor for automatic graph rematerialization.
-
-Polls for graphs marked as stale and submits materialization jobs.
-Batches writes within a window to avoid excessive rebuilds
-(e.g., 5 OLTP writes in 10 seconds don't trigger 5 materializations).
-"""
+"""Sensor that rematerializes stale entity graphs, batching bursts of OLTP writes."""
 
 import json
 
@@ -20,13 +15,11 @@ from robosystems.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Minimum staleness age before triggering (seconds).
-# Prevents materializing immediately after every single OLTP write.
+# Batch window: don't materialize after every single OLTP write.
 _MIN_STALE_AGE_SECONDS = 30
 
-# How long a graph stays in the "in-progress" cursor before being eligible
-# for re-submission (seconds). Prevents permanent blocking if a Dagster job
-# fails without calling mark_fresh().
+# In-progress cursor entries expire so a run that never calls mark_fresh()
+# can't block the graph forever.
 _CURSOR_EXPIRY_SECONDS = 7200  # 2 hours
 
 
@@ -37,16 +30,9 @@ _CURSOR_EXPIRY_SECONDS = 7200  # 2 hours
   description="Polls for stale graphs and submits materialization jobs",
 )
 def stale_graph_materialization_sensor(context: SensorEvaluationContext):
-  """Find stale entity graphs and submit materialization jobs.
+  """Submit materialization for active entity graphs stale past the batch window.
 
-  Query: graphs where:
-  - graph_stale = true
-  - graph_stale_at older than _MIN_STALE_AGE_SECONDS (batch window)
-  - graph_type = 'entity' (only entity graphs have extensions OLTP)
-  - status = 'active'
-  - is_repository = false (shared repos use their own pipeline)
-
-  Skips graphs that are already materializing (checked via cursor with expiry).
+  Only entity graphs have extensions OLTP. Graphs already in the cursor are skipped.
   """
   from datetime import UTC, datetime, timedelta
 
@@ -57,8 +43,7 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
     now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=_MIN_STALE_AGE_SECONDS)
 
-    # Cursor stores {graph_id: submitted_at_iso} for in-progress materializations.
-    # Entries expire after _CURSOR_EXPIRY_SECONDS to prevent permanent blocking.
+    # Cursor: {graph_id: submitted_at_iso} for in-progress materializations.
     in_progress: dict[str, str] = {}
     if context.cursor:
       try:
@@ -66,7 +51,6 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
       except (json.JSONDecodeError, TypeError):
         in_progress = {}
 
-    # Expire stale cursor entries
     from dateutil import parser as date_parser
 
     active_in_progress: dict[str, str] = {}
@@ -102,8 +86,7 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
         logger.debug(f"Skipping {graph_id}: materialization already in progress")
         continue
 
-      # Use graph_stale_at as run_key so Dagster deduplicates on the same
-      # staleness event (not on sensor tick time).
+      # run_key on graph_stale_at dedupes per staleness event, not per tick.
       stale_at_str = (
         graph.graph_stale_at.isoformat() if graph.graph_stale_at else "unknown"
       )
@@ -126,12 +109,8 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
               }
             }
           },
-          # materialize_db is the key dagster.yaml's tag_concurrency_limits
-          # serializes on (limit 1 per unique value): two runs COPYing into the
-          # same tenant graph would interleave writes into rel tables that have
-          # no primary key. Queuing the duplicate makes the worst case a
-          # redundant run rather than duplicate edges. sec_materialize carries
-          # the same key as a job-level tag; tenant runs must set it per graph.
+          # dagster.yaml limits materialize_db to 1 run per value: concurrent
+          # COPYs into rel tables without a primary key would duplicate edges.
           tags={
             "graph_id": graph_id,
             "trigger": "stale_sensor",
@@ -141,7 +120,6 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
       )
       new_cursor[graph_id] = now.isoformat()
 
-    # Remove cursor entries for graphs that are no longer stale
     still_stale = {str(g.graph_id) for g in stale_graphs}
     new_cursor = {gid: ts for gid, ts in new_cursor.items() if gid in still_stale}
 

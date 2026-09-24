@@ -13,9 +13,6 @@ class QBSyncConfig(Config):
   full_rebuild: bool = False
   lookback_days: int = 60
   since_date: str = ""
-  # Distributed-lock token acquired at the API endpoint;
-  # qb_load releases the lock on completion so the next sync can
-  # proceed immediately rather than waiting for the 30-min TTL. Empty
-  # string means no lock was acquired (rare — defensive fallback path
-  # when Valkey is down).
+  # Lock token acquired by the API; qb_load releases it. Empty when Valkey
+  # was down at acquire time.
   sync_lock_id: str = ""

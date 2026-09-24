@@ -1,15 +1,8 @@
-"""DuckDB Analytics Framework for SEC data.
+"""Context manager for read-only analytics over a DuckDB staging file.
 
-Provides a sync context manager for running analytics on DuckDB staging files.
-
-- Dev: opens local file at {DUCKDB_STAGING_PATH}/{source}.duckdb
-- Prod: downloads from S3 first, then opens locally
-
-Usage:
-    with DuckDBAnalyticsContext("sec") as ctx:
-        result = ctx.query("SELECT * FROM Entity LIMIT 10")
-        ctx.write_parquet(result, "Entity")
-        uploaded = ctx.upload_outputs("my_analysis")
+with DuckDBAnalyticsContext("sec") as ctx:
+    ctx.write_parquet(ctx.query("SELECT * FROM Entity LIMIT 10"), "Entity")
+    uploaded = ctx.upload_outputs("my_analysis")
 """
 
 import logging
@@ -25,12 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 class DuckDBAnalyticsContext:
-  """Opens a read-only DuckDB connection for analytics.
-
-  In dev, opens the local staging file directly. In staging/prod, downloads
-  from S3 to an ephemeral directory first. Output parquet files are written
-  to a local output directory and optionally uploaded to S3.
-  """
+  """Opens the staging file read-only: the local file in dev, otherwise a copy
+  downloaded from S3 to a temp directory (removed on exit)."""
 
   def __init__(
     self,
@@ -70,7 +59,6 @@ class DuckDBAnalyticsContext:
     if self._threads is not None:
       self._conn.execute(f"SET threads = {self._threads}")
 
-    # Set up output directory
     if self._local_dir:
       self._output_dir = self._local_dir / "output"
     else:
@@ -91,7 +79,6 @@ class DuckDBAnalyticsContext:
         self._conn.close()
         self._conn = None
     finally:
-      # In prod: clean up downloaded DuckDB file
       if self._tmpdir is not None:
         self._tmpdir.cleanup()
         self._tmpdir = None
@@ -115,7 +102,6 @@ class DuckDBAnalyticsContext:
     return self._db_path
 
   def query(self, sql: str) -> duckdb.DuckDBPyRelation:
-    """Execute a SQL query and return a DuckDB relation."""
     return self.conn.sql(sql)
 
   def write_parquet(
@@ -174,7 +160,6 @@ class DuckDBAnalyticsContext:
 
     for pf in parquet_files:
       rel_path = pf.relative_to(self._output_dir)
-      # Convention: sec/analytics/{analysis_name}/{table_type}/{table_name}.parquet
       s3_key = f"sec/analytics/{analysis_name}/{rel_path}"
       s3_uri = f"s3://{target_bucket}/{s3_key}"
 
@@ -193,7 +178,6 @@ class DuckDBAnalyticsContext:
     return results
 
   def _download_from_s3(self, dest_path: Path) -> None:
-    """Download DuckDB file from S3 to local path."""
     import boto3
     from boto3.s3.transfer import TransferConfig
 

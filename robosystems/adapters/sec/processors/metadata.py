@@ -1,9 +1,4 @@
-"""
-SEC Metadata Loading.
-
-This module provides the SECMetadataLoader class for loading SEC filer and report
-metadata from S3 snapshots with fallback to SEC API.
-"""
+"""SEC filer and report metadata from S3 submissions snapshots, with an API fallback."""
 
 import json
 from typing import Any, cast
@@ -15,19 +10,12 @@ logger = get_logger(__name__)
 
 
 class SECMetadataLoader:
-  """Loader for SEC filer and report metadata with caching.
-
-  Fetches SEC metadata from S3 snapshots (stored during download phase),
-  with fallback to SEC API if no snapshot exists. Uses an in-memory cache
-  to avoid redundant S3/API calls for the same CIK during a processing run.
-  """
+  """Caches each CIK's submissions in memory for the processing run."""
 
   def __init__(self):
-    """Initialize the metadata loader with an empty cache."""
     self._cache: dict[str, dict] = {}
 
   def clear_cache(self) -> None:
-    """Clear the in-memory submissions cache."""
     self._cache.clear()
 
   def _load_submissions_from_s3(self, s3_client, bucket: str, cik: str) -> dict | None:
@@ -37,7 +25,6 @@ class SECMetadataLoader:
       response = s3_client.get_object(Bucket=bucket, Key=s3_key)
       return json.loads(response["Body"].read().decode("utf-8"))
     except s3_client.exceptions.NoSuchKey:
-      # Expected when snapshot doesn't exist yet
       return None
     except Exception as e:
       logger.debug("Failed to load submissions from S3 for CIK %s: %s", cik, e)
@@ -50,33 +37,27 @@ class SECMetadataLoader:
     s3_client=None,
     bucket: str | None = None,
   ) -> tuple[dict, dict]:
-    """Fetch SEC filer and report metadata for a given CIK and accession number.
+    """``(sec_filer, sec_report)`` for a filing; ``accession`` carries dashes.
 
-    Reads the S3 snapshot stored during the download phase, falling back to a
-    live SEC API call only when no snapshot exists. `accession` carries dashes.
-    Returns `(sec_filer, sec_report)`.
+    Uses the download phase's S3 snapshot, calling the SEC API only without one.
     """
     from robosystems.adapters.sec.client.edgar import edgar_client
 
     submissions: dict[str, Any] | None = None
 
-    # Check in-memory cache first
     if cik in self._cache:
       submissions = self._cache[cik]
 
-    # Try loading from S3 snapshot
     if submissions is None and s3_client is not None and bucket is not None:
       submissions = self._load_submissions_from_s3(s3_client, bucket, cik)
       if submissions:
         self._cache[cik] = submissions
 
-    # Fallback to SEC API if no snapshot
     if submissions is None:
       logger.warning("No S3 snapshot for CIK %s, falling back to SEC API", cik)
       submissions = cast(dict[str, Any], edgar_client().submissions(cik))
       self._cache[cik] = submissions
 
-    # Build sec_filer from company-level data
     sec_filer = {
       "cik": cik,
       "name": submissions.get("name"),

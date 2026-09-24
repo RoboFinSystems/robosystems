@@ -1,22 +1,12 @@
-"""LanceDB Semantic Memory Store for Graph API.
+"""Per-graph incremental CRUD over one LanceDB "memory" table (AI memory).
 
-Incremental, per-graph CRUD over a single "memory" LanceDB table — the semantic
-modality's first workload (AI memory). Distinct from ``LanceManager``, which is a
-batch/overwrite/export index builder: this store is mutated row-by-row, never
-overwritten, and is NOT part of the tar.gz replica-sync pipeline (all memory ops
-route to the writer/master instance).
+Unlike ``LanceManager`` this is mutated row by row and never replicated; all
+memory ops route to the writer. On disk:
+``{LANCE_INDEX_PATH}/{graph_id}/memory/memory.lance/``.
 
-Directory structure on disk:
-  {LANCE_INDEX_PATH}/{graph_id}/memory/memory.lance/
-
-Timestamps are stored as int64 epoch-milliseconds (``*_ms``) rather than Arrow
-timestamps, because rows cross a JSON boundary (main API → graph_api) where
-datetimes would arrive as strings; epoch-ms round-trips cleanly and range-filters
-trivially. The kernel derives ISO datetimes for API responses.
-
-Predicate safety: memory ids are server-generated and matched against a strict
-regex before interpolation; callers never pass raw WHERE strings for id lookups.
-Recall/list predicates are built by the kernel from allowlisted typed fields only.
+Timestamps are int64 epoch-ms (``*_ms``) because rows cross a JSON boundary.
+Memory ids are regex-checked before interpolation into predicates; recall/list
+``where`` strings are built by the caller from allowlisted typed fields only.
 """
 
 from __future__ import annotations
@@ -57,12 +47,7 @@ _PUBLIC_COLUMNS = [c for c in _ALL_COLUMNS if c != "vector"]
 
 
 class LanceMemoryStore:
-  """Per-graph incremental CRUD over a single LanceDB "memory" table.
-
-  One table per graph at ``{base}/{graph_id}/memory/``. Read methods tolerate an
-  absent or empty table (return empty). Write methods create the table on first
-  use with a fixed schema.
-  """
+  """Reads tolerate an absent or empty table; writes create it on first use."""
 
   MEMORY_TABLE = MEMORY_TABLE
   VECTOR_DIM = VECTOR_DIM
@@ -74,10 +59,6 @@ class LanceMemoryStore:
       base_path = env.LANCE_INDEX_PATH
     self.base_path = Path(base_path)
     self.base_path.mkdir(parents=True, exist_ok=True)
-
-  # ---------------------------------------------------------------------------
-  # Paths & schema
-  # ---------------------------------------------------------------------------
 
   def _table_dir(self, graph_id: str) -> Path:
     """Path-validated lance directory for this graph's memory table."""
@@ -105,10 +86,6 @@ class LanceMemoryStore:
       ]
     )
 
-  # ---------------------------------------------------------------------------
-  # Predicate / input safety
-  # ---------------------------------------------------------------------------
-
   @staticmethod
   def _validate_id(memory_id: str) -> str:
     # fullmatch (not match) so a trailing newline can't sneak through Python's
@@ -124,10 +101,6 @@ class LanceMemoryStore:
   def _check_vector(self, vec) -> None:
     if not isinstance(vec, list) or len(vec) != VECTOR_DIM:
       raise ValueError(f"vector must be a list of {VECTOR_DIM} floats")
-
-  # ---------------------------------------------------------------------------
-  # Connection
-  # ---------------------------------------------------------------------------
 
   def _connect(self, graph_id: str, *, create: bool):
     """Return (db, table). When create=False and the table is absent, table=None."""
@@ -157,10 +130,6 @@ class LanceMemoryStore:
   def count(self, graph_id: str) -> int:
     _, table = self._connect(graph_id, create=False)
     return table.count_rows() if table is not None else 0
-
-  # ---------------------------------------------------------------------------
-  # Writes
-  # ---------------------------------------------------------------------------
 
   def add_rows(self, graph_id: str, rows: list[dict]) -> dict:
     if not rows:
@@ -205,10 +174,6 @@ class LanceMemoryStore:
     before = table.count_rows()
     table.delete(where)
     return {"deleted": before - table.count_rows()}
-
-  # ---------------------------------------------------------------------------
-  # Reads
-  # ---------------------------------------------------------------------------
 
   def search(
     self,
@@ -268,10 +233,6 @@ class LanceMemoryStore:
       query = query.where(where)
     query = query.limit(limit).offset(offset)
     return {"results": self._normalize(query.to_list()), "total": total}
-
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
 
   @staticmethod
   def _normalize(rows: list[dict]) -> list[dict]:

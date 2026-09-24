@@ -43,7 +43,6 @@ class UnifiedTaskManager:
   async def get_redis(self) -> redis_async.Redis:
     """Async Redis client for task status storage."""
     if not self._redis_client:
-      # The async factory handles SSL params correctly.
       from robosystems.config.valkey_registry import create_async_redis_client
 
       self._redis_client = create_async_redis_client(

@@ -1,15 +1,8 @@
-"""
-Graph client factory — routes a graph ID to the instance that holds it.
+"""Graph client factory — routes a graph ID to the instance that holds it.
 
-Builds :class:`~robosystems.graph_api.client.GraphClient` instances aimed at
-one of three targets, chosen from the graph ID, the operation type and the
-tier:
-
-1. User graph writers — per-graph LadybugDB instances (Standard/Large/XLarge),
-   located through the allocation manager and cached in Valkey.
-2. Shared repository master — source of truth for shared data (all writes, and
-   reads when no replica ALB is configured), discovered from DynamoDB.
-3. Shared repository replica ALB — read-only replicas for high-volume reads.
+Three targets: a user graph's allocated instance (via the allocation manager,
+cached in Valkey); the shared-repository master (all shared writes, discovered
+from DynamoDB); and the shared replica ALB (shared reads).
 """
 
 import asyncio
@@ -176,8 +169,8 @@ def with_retry(
 class GraphClientFactory:
   """Creates graph clients routed to the backend that holds the graph.
 
-  All state is class-level and shared process-wide: the connection pools, the
-  Valkey client used for route caching, and the shared-master circuit breaker.
+  State is class-level and process-wide, notably the shared-master circuit
+  breaker.
   """
 
   _instance_cache_ttl = GRAPH_INSTANCE_CACHE_TTL
@@ -188,8 +181,6 @@ class GraphClientFactory:
   _connection_pools: dict[str, httpx.AsyncClient] = {}
   _pool_stats: dict[str, dict[str, Any]] = {}
 
-  # Guarded by a threading lock rather than an asyncio one: the pool is shared
-  # across event loops, and each loop builds its own client from it.
   _redis_pool: redis.ConnectionPool | None = None
   _redis_client_lock = threading.Lock()
 
@@ -460,10 +451,6 @@ class GraphClientFactory:
               await cls._master_circuit_breaker.record_success()
             return url
 
-      # The registry is the only source of master liveness here. In-flight
-      # destructive operations are tracked by the DynamoDB busy counter on
-      # instance-registry (see instance_busy.py), which the GHA pre-refresh
-      # workflows read directly — routing does not consult it.
       logger.warning(
         f"No healthy shared master found in DynamoDB after scanning "
         f"{env.ENVIRONMENT} environment"
@@ -538,10 +525,8 @@ class GraphClientFactory:
     cache_key = cls._get_cache_key("location", actual_graph_id)
     redis_client = await cls._get_redis()
 
-    # Routing needs only the instance's private IP and ID, cached as plain
-    # scalars. Do not round-trip a DatabaseLocation through this cache: its
-    # required fields (graph_id, availability_zone, status, created_at) are not
-    # stored, so reconstruction raises and silently disables caching.
+    # Cache plain scalars only: a DatabaseLocation cannot be rebuilt from what
+    # is stored here.
     private_ip: str | None = None
     instance_id: str | None = None
     if redis_client:
@@ -713,21 +698,13 @@ class GraphClientFactory:
     logger.info("GraphClientFactory cleanup completed")
 
 
-# Convenience functions
-
-
 async def get_graph_client(
   graph_id: str,
   operation_type: str = "read",
   environment: str | None = None,
   tier: GraphTier | None = None,
 ) -> GraphClient:
-  """Get a routed graph client. Preferred entry point in async contexts.
-
-  Example:
-      async with await get_graph_client("sec", "read") as client:
-          result = await client.query("MATCH (c:Company) RETURN c LIMIT 10")
-  """
+  """Get a routed graph client. Preferred entry point in async contexts."""
   return await GraphClientFactory.create_client(
     graph_id, operation_type, environment, tier
   )
@@ -739,12 +716,7 @@ def get_graph_client_sync(
   environment: str | None = None,
   tier: GraphTier | None = None,
 ) -> GraphClient:
-  """Get a routed graph client from sync code (no event loop running).
-
-  Example:
-      with get_graph_client_sync("kg1a2b3c") as client:
-          result = client.query("MATCH (c:Entity) RETURN c")
-  """
+  """Get a routed graph client from sync code (no event loop running)."""
   return GraphClientFactory.create_client_sync(
     graph_id, operation_type, environment, tier
   )
@@ -757,10 +729,6 @@ async def get_graph_client_for_instance(
 
   Used by allocation, where the target instance is chosen before any database
   exists on it for the router to find.
-
-  Example:
-      client = await get_graph_client_for_instance("<instance-private-ip>")
-      await client.create_database("entity_456")
   """
   if api_key is None:
     api_key = env.GRAPH_API_KEY
@@ -774,9 +742,8 @@ async def get_graph_client_for_instance(
 async def get_graph_client_for_sec_ingestion() -> GraphClient:
   """Get a client pinned to the shared master, for SEC ingestion.
 
-  SEC ingestion must land on the shared master: that instance is the one
-  snapshotted to S3 and synced out to the read replicas, so a write anywhere
-  else would be invisible to readers and lost on the next sync.
+  Only the master is snapshotted out to the replicas, so a write anywhere
+  else would be lost.
   """
   logger.info("Creating graph client for SEC ingestion (direct to shared master)")
 
@@ -811,13 +778,6 @@ async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, A
 
   The boost stays active until :func:`release_graph_memory`. Never raises — a
   failed boost degrades to default limits rather than blocking the operation.
-
-  Example:
-      await boost_graph_memory("sec", target="duckdb")
-      # ... run staging ...
-      await boost_graph_memory("sec", target="ladybug")
-      # ... run materialization ...
-      await release_graph_memory("sec", target="both")
   """
   client = await get_graph_client(graph_id, operation_type="write")
 
@@ -841,15 +801,9 @@ async def release_graph_memory(
 ) -> dict[str, Any]:
   """Close connections and return buffer memory to the OS.
 
-  Closing connections is what forces the engines to give buffers back; the
-  graph API's ``restore-memory`` endpoint (:meth:`GraphClient.restore_memory`)
-  only lowers the configured ceiling, which is why every boost in the SEC
-  pipeline pairs with *this* function. ``aggressive`` additionally runs GC and
-  ``malloc_trim`` on the LadybugDB side. Never raises; this is cleanup.
-
-  Example:
-      await release_graph_memory("sec", target="duckdb")
-      await release_graph_memory("sec", target="both", aggressive=True)
+  Unlike :meth:`GraphClient.restore_memory`, which only lowers the ceiling,
+  this frees the buffers. ``aggressive`` adds GC and ``malloc_trim`` on the
+  LadybugDB side. Never raises.
   """
   client = await get_graph_client(graph_id, operation_type="write")
 

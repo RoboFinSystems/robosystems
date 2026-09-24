@@ -1,15 +1,8 @@
-"""Shared Replica Fleet Refresh Asset.
+"""Rolling refresh of the shared replica fleet after a database is published to S3.
 
-This asset triggers and monitors the rolling refresh of the shared replica fleet
-after a new database has been published to S3. Replicas download .lbug and .duckdb
-files from S3 to local disk on boot, so a refresh cycles instances to pick up the
-new version.
-
-The replica fleet is a single shared ASG that serves all shared repositories.
-Refreshing it cycles all instances regardless of which repository was published.
-
-At scale (100+ replicas), this can take hours. The asset monitors progress and
-logs each stage of the refresh for visibility.
+Replicas pull their databases from S3 on boot, so an ASG instance refresh picks
+up the new version. One ASG serves every shared repository, so every refresh
+cycles all instances.
 """
 
 import time
@@ -28,41 +21,28 @@ from robosystems.config import env
 class SharedReplicaRefreshConfig(Config):
   """Configuration for replica fleet refresh."""
 
-  # Minimum percentage of healthy instances during refresh.
-  # 100 = never terminate an old instance until its replacement is healthy.
-  # This prevents downtime even with a single-instance fleet.
+  # 100: never terminate an old instance before its replacement is healthy, so
+  # even a single-instance fleet has no downtime.
   min_healthy_percentage: int = 100
 
-  # Maximum percentage of healthy instances allowed during refresh.
-  # 200 = allow temporarily doubling the fleet so new instances launch
-  # alongside old ones before any termination occurs.
+  # 200: the fleet may double so replacements launch alongside old instances.
   max_healthy_percentage: int = 200
 
-  # Seconds to wait for new instance to become healthy
-  # S3 download to local disk + warmup takes ~10-15 min for 85GB database
+  # S3 download + warmup of an ~85 GB database takes ~10-15 min.
   instance_warmup_seconds: int = 900
 
-  # How often to poll for refresh status (seconds)
   poll_interval_seconds: int = 30
 
-  # Maximum time to wait for refresh completion (seconds)
-  # With 100 replicas at 40 min each and 50% parallel, expect ~80 min
   max_wait_seconds: int = 7200  # 2 hours
 
-  # Whether to wait for completion or just start the refresh
   wait_for_completion: bool = True
 
 
 def build_shared_replicas_refreshed(deps: list[str] | None = None):
-  """Build the shared_replicas_refreshed asset with dynamic upstream deps.
+  """Build the shared_replicas_refreshed asset.
 
-  Each adapter pipeline declares which publish assets should trigger a replica
-  refresh via a "shared_replica_deps" key in its get_dagster_components() return.
-  definitions.py collects these and passes them here.
-
-  Args:
-      deps: Asset names that trigger replica refresh. If empty/None, the asset
-            has no upstream deps but can still be triggered manually via its job.
+  ``deps`` are the publish assets adapters declare under "shared_replica_deps";
+  with none, the asset runs only when triggered via its job.
   """
 
   @asset(
@@ -82,7 +62,6 @@ def build_shared_replicas_refreshed(deps: list[str] | None = None):
     """Trigger and monitor rolling refresh of shared replica fleet."""
     import boto3
 
-    # Skip in dev environment
     if env.ENVIRONMENT == "dev":
       context.log.info("Skipping replica refresh in dev environment")
       return MaterializeResult(
@@ -98,9 +77,6 @@ def build_shared_replicas_refreshed(deps: list[str] | None = None):
     start_time = datetime.now(UTC)
     context.log.info(f"Starting replica fleet refresh for {asg_name}")
 
-    # =========================================================================
-    # Step 1: Check ASG exists and has instances
-    # =========================================================================
     try:
       asg_response = autoscaling.describe_auto_scaling_groups(
         AutoScalingGroupNames=[asg_name]
@@ -136,9 +112,6 @@ def build_shared_replicas_refreshed(deps: list[str] | None = None):
         }
       )
 
-    # =========================================================================
-    # Step 2: Check for existing in-progress refresh
-    # =========================================================================
     context.log.info("Checking for existing instance refresh...")
 
     refresh_check = autoscaling.describe_instance_refreshes(
@@ -159,7 +132,6 @@ def build_shared_replicas_refreshed(deps: list[str] | None = None):
 
       if config.wait_for_completion:
         context.log.info("Will monitor existing refresh instead of starting new one")
-        # Fall through to monitoring loop
       else:
         return MaterializeResult(
           metadata={
@@ -170,9 +142,6 @@ def build_shared_replicas_refreshed(deps: list[str] | None = None):
           }
         )
     else:
-      # =========================================================================
-      # Step 3: Start new instance refresh
-      # =========================================================================
       context.log.info(
         f"Starting rolling instance refresh with {config.min_healthy_percentage}% "
         f"min healthy, {config.max_healthy_percentage}% max healthy, "
@@ -194,9 +163,6 @@ def build_shared_replicas_refreshed(deps: list[str] | None = None):
       except Exception as e:
         raise RuntimeError(f"Failed to start instance refresh: {e}")
 
-    # =========================================================================
-    # Step 4: Monitor refresh progress
-    # =========================================================================
     if not config.wait_for_completion:
       return MaterializeResult(
         metadata={
@@ -244,7 +210,6 @@ def build_shared_replicas_refreshed(deps: list[str] | None = None):
       progress = refresh.get("PercentageComplete", 0)
       instances_to_update = refresh.get("InstancesToUpdate", 0)
 
-      # Log progress changes
       if progress != last_progress or status != last_status:
         elapsed = (datetime.now(UTC) - start_time).total_seconds()
         elapsed_min = int(elapsed // 60)
@@ -265,7 +230,6 @@ def build_shared_replicas_refreshed(deps: list[str] | None = None):
         last_progress = progress
         last_status = status
 
-      # Check terminal states
       if status == "Successful":
         end_time = datetime.now(UTC)
         duration = (end_time - start_time).total_seconds()
@@ -291,7 +255,6 @@ def build_shared_replicas_refreshed(deps: list[str] | None = None):
         status_reason = refresh.get("StatusReason", "Unknown")
         raise RuntimeError(f"Instance refresh {status}: {status_reason}")
 
-    # Timeout
     elapsed = (datetime.now(UTC) - start_time).total_seconds()
     raise RuntimeError(
       f"Instance refresh timed out after {int(elapsed // 60)}m. "

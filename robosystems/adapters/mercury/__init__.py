@@ -1,21 +1,7 @@
-"""Mercury adapter — the bank as a first-class source.
+"""Mercury adapter — a bank feed on the ``bank_feed`` contract.
 
-A bank feed is native accounting: it captures every posted bank transaction
-into the inbox of books the tenant keeps natively, against a chart of
-accounts that already exists. It authors no chart, no elements and no GL
-rows; posting is a classification a person (or Claude over MCP) makes once.
-
-- ``client/api.py`` — ``MercuryClient`` over a ``TokenSource`` (the partner
-  OAuth client's rotating tokens, or a personal read-only key on self-hosted
-  deployments).
-- ``pipeline/`` — ``tier0.py`` (Mercury's category tables), ``transform.py``
-  (transactions → captured events with a Tier-0 suggestion), ``load.py``,
-  ``assets.py`` (the one Dagster asset ``mercury_feed``, job
-  ``mercury_sync``). Link-or-create, the chart index, the load kernel and the
-  sync bookkeeping are the shared bank-feed lane (``adapters/bank_feed/``).
-
-Design: ``local/RoboSystems/specs/adapters/mercury-adapter.md`` §3;
-doctrine in ``ref/adapters.md`` §2.9.
+Captures every posted bank transaction into the inbox, against the tenant's
+existing chart. It authors no chart and no GL rows.
 """
 
 from robosystems.adapters.mercury.client import MercuryClient

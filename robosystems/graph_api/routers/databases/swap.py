@@ -1,11 +1,5 @@
-"""Blue-green swap endpoint for LadybugDB databases.
-
-POST /databases/{graph_id}/swap — promote WIP to active (one-way)
-
-The swap is a one-way promotion: WIP becomes the new active database,
-the old active is deleted. There is no rollback mechanism — the goal is
-to allow a new graph to be fully materialized without disrupting the
-active graph, then replace it atomically when ready.
+"""Blue-green swap: promote ``{graph_id}-wip`` to active and delete the old
+active. One-way — there is no rollback once it succeeds.
 """
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
@@ -47,7 +41,6 @@ async def swap_database(
       detail="Swap not allowed on read-only nodes",
     )
 
-  # Acquire or verify the materialization lock
   lock = None
   try:
     from robosystems.config.valkey_registry import (
@@ -61,12 +54,11 @@ async def swap_database(
     redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
 
     if x_materialization_lock_token:
-      # Caller already holds the lock — verify by using their token
+      # Trusted, not verified against Valkey.
       lock = MaterializationLock.from_trusted_token(
         redis_client, graph_id, x_materialization_lock_token
       )
     else:
-      # Acquire our own lock for the swap
       lock = MaterializationLock(redis_client, graph_id)
       acquired = await lock.acquire(timeout_seconds=5)
       if not acquired:
@@ -78,7 +70,7 @@ async def swap_database(
     raise
   except Exception as e:
     logger.warning(f"Could not acquire materialization lock for swap: {e}")
-    # Proceed without lock if Valkey is unavailable (degraded mode)
+    # Degraded mode: proceed unlocked when Valkey is unavailable.
 
   try:
     logger.info(f"Swap requested for graph {graph_id}")
@@ -90,6 +82,6 @@ async def swap_database(
       message=result["message"],
     )
   finally:
-    # Release lock only if we acquired it ourselves (not passthrough)
+    # Only a lock this call acquired itself.
     if lock is not None and not x_materialization_lock_token and lock.acquired:
       await lock.release()

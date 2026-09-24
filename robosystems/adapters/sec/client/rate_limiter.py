@@ -1,10 +1,4 @@
-"""
-Async rate limiter for SEC API requests.
-
-SEC enforces a 10 requests/second limit, but in practice 5 req/sec is safer.
-This module provides a proactive token-bucket style rate limiter that prevents
-hitting rate limits rather than reacting to them.
-"""
+"""Proactive async rate limiting for SEC requests (SEC allows 10/s; 5/s is safer)."""
 
 import asyncio
 import time
@@ -14,8 +8,6 @@ from dataclasses import dataclass, field
 
 @dataclass
 class RateStats:
-  """Statistics from rate monitoring."""
-
   requests_per_second: float
   mb_per_second: float
   total_requests: int
@@ -23,18 +15,9 @@ class RateStats:
 
 
 class AsyncRateLimiter:
-  """
-  Token-bucket style async rate limiter.
+  """Spaces requests at least ``interval / rate`` seconds apart (no bursts).
 
-  Usage:
-      limiter = AsyncRateLimiter(rate=5.0)
-
-      async with limiter:
-          await fetch_something()
-
-  Or:
-      await limiter.acquire()
-      await fetch_something()
+  Use ``async with limiter:`` or ``await limiter.acquire()``.
   """
 
   def __init__(self, rate: float = 5.0, interval: float = 1.0):
@@ -45,7 +28,6 @@ class AsyncRateLimiter:
     self._lock = asyncio.Lock()
 
   async def acquire(self) -> None:
-    """Acquire a rate limit token, waiting if necessary."""
     async with self._lock:
       token_time = self.interval / self.rate
       now = time.monotonic()
@@ -64,11 +46,7 @@ class AsyncRateLimiter:
 
 @dataclass
 class RateMonitor:
-  """
-  Monitor request rates and bandwidth.
-
-  Tracks requests over a sliding window to calculate current rates.
-  """
+  """Request and bandwidth rates over a sliding window."""
 
   window_size: float = 10.0
   _requests: deque = field(default_factory=deque)
@@ -77,19 +55,16 @@ class RateMonitor:
   _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
   async def record(self, bytes_transferred: int = 0) -> None:
-    """Record a request with optional bytes transferred."""
     async with self._lock:
       now = time.monotonic()
       self._requests.append((now, bytes_transferred))
       self._total_requests += 1
       self._total_bytes += bytes_transferred
 
-      # Prune old entries outside the window
       while self._requests and now - self._requests[0][0] > self.window_size:
         self._requests.popleft()
 
   def get_stats(self) -> RateStats:
-    """Get current rate statistics."""
     if not self._requests:
       return RateStats(
         requests_per_second=0.0,
@@ -99,7 +74,6 @@ class RateMonitor:
       )
 
     now = time.monotonic()
-    # Filter to requests within window
     window_requests = [(t, b) for t, b in self._requests if now - t <= self.window_size]
 
     if len(window_requests) < 2:

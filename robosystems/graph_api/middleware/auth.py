@@ -1,9 +1,4 @@
-"""
-Authentication middleware for Graph API with environment-based security.
-
-Provides API key authentication for production/staging environments while
-allowing unrestricted access in development.
-"""
+"""API key authentication for the Graph API (prod/staging only)."""
 
 import time
 
@@ -109,7 +104,6 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
     """Compare two strings in constant time to prevent timing attacks."""
     import hmac
 
-    # Use hmac.compare_digest for cryptographically secure constant-time comparison
     return hmac.compare_digest(a, b)
 
   def _is_rate_limited(self, client_ip: str) -> bool:
@@ -155,10 +149,9 @@ def get_api_key_from_secrets_manager(
 ) -> str | None:
   """Read the Graph API key from Secrets Manager (``robosystems/{env}/graph-api``).
 
-  ``key_type`` selects the key (``writer``, ``shared_writer``,
-  ``shared_master``, ``shared_replica``). ``secret_name`` and ``region`` are
-  resolved by the central secrets manager and ignored here. Returns None on
-  any failure rather than raising.
+  All arguments are ignored: every node type reads the single
+  ``GRAPH_API_KEY`` through the central secrets manager. Returns None on any
+  failure rather than raising.
   """
   try:
     from robosystems.config.secrets_manager import get_secret_value

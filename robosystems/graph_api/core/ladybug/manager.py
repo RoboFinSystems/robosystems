@@ -39,16 +39,10 @@ BLUE_GREEN_SUFFIXES = ("-wip", "-prev")
 def counts_toward_capacity(db_name: str) -> bool:
   """Whether ``db_name`` occupies one of a node's ``max_databases`` slots.
 
-  The single predicate behind both halves of capacity accounting: what
-  ``list_databases`` counts, and what ``create_database`` charges. They must
-  not diverge — a name exempt from the cap but present in the count would let
-  a node overfill, and a name counted but not exempt would be refused a slot
-  it already effectively holds.
-
-  Not a primary: a subgraph (``{parent}_{name}``), which rides its parent's
-  slot, and the blue-green temporaries, which exist only for the length of a
-  swap. A shared repository *does* count — ``sec`` occupies a slot like any
-  other primary; only its subgraphs (``sec_historical``) are exempt.
+  The one predicate for both what is counted and what is charged, so the two
+  cannot diverge. Subgraphs (``{parent}_{name}``) ride their parent's slot and
+  blue-green temporaries last only a swap; a shared repository like ``sec``
+  counts like any primary.
   """
   return "_" not in db_name and not db_name.endswith(BLUE_GREEN_SUFFIXES)
 
@@ -127,9 +121,6 @@ class LadybugDatabaseManager:
         status_code=status.HTTP_400_BAD_REQUEST, detail="Graph ID is required"
       )
 
-    # One predicate decides both halves of the capacity accounting, so a
-    # database can never be exempt from a cap the count would still charge it
-    # against.
     all_databases = self.list_databases()
     current_count = len([db for db in all_databases if counts_toward_capacity(db)])
     exempt_from_cap = not counts_toward_capacity(request.graph_id)
@@ -265,21 +256,14 @@ class LadybugDatabaseManager:
     ``preserve_duckdb`` keeps the staging database *and* the LanceDB indexes
     built from it, so LadybugDB can be rebuilt without re-running staging.
 
-    A missing ``.lbug`` is not a refusal. The graph file is the first thing
-    a delete removes, so a teardown that died between it and the side stores
-    comes back to exactly this state — and refusing it (a 404 before any
-    cleanup) left the Lance directory, the DuckDB staging and any blue-green
-    temporary on a volume the registry was about to hand to the next tenant.
-    Disposal continues from wherever the previous attempt stopped;
-    ``existed`` in the response says whether the graph file was there this
-    time, and ``removed`` lists what this call took off the disk.
+    A missing ``.lbug`` is not a refusal: the graph file goes first, so a
+    teardown that died partway must still be able to dispose of the side
+    stores before the volume is reused. ``existed`` says whether the graph
+    file was there this time; ``removed`` lists what this call deleted.
 
-    Deleting a base name also removes its ``-wip``/``-prev`` temporaries: a
-    build that was mid-flight when the graph was torn down, or a swap that
-    died between its renames, is dead once the base is gone, and both share
-    the base's staging and indexes rather than owning any. A temporary
-    deleted by its own name — the materialize flow cleaning up its WIP under
-    its lock — removes only itself.
+    Deleting a base name also removes its ``-wip``/``-prev`` temporaries,
+    which are dead once the base is gone. A temporary deleted by its own name
+    removes only itself.
     """
     db_path = self.base_path / f"{graph_id}.lbug"
     existed = db_path.exists()
@@ -518,17 +502,13 @@ class LadybugDatabaseManager:
       )
 
     try:
-      # A LadybugDB database is a single file in some engine versions and a
-      # directory in others. Sizing only the file case reported 0 for every
-      # directory-shaped database, which is why storage read as empty.
+      # A database is a single file in some engine versions, a directory in others.
       size_bytes = path_size_bytes(db_path)
       created_at = datetime.fromtimestamp(db_path.stat().st_ctime).isoformat()
       database_path = str(db_path)
 
-      # Check if database is healthy
       is_healthy = self._check_database_health(graph_id)
 
-      # Get last access time from connection pool
       last_accessed = None
       if self.connection_pool.has_active_connections(graph_id):
         last_accessed = datetime.now().isoformat()
@@ -551,12 +531,7 @@ class LadybugDatabaseManager:
       )
 
   def get_all_databases_info(self) -> DatabaseListResponse:
-    """
-    Get information about all databases on this node.
-
-    Returns:
-        Complete database listing with metadata
-    """
+    """List every database on this node with its metadata and node capacity."""
     databases = []
     total_size = 0
 
@@ -792,10 +767,8 @@ class LadybugDatabaseManager:
     Uses LadybugDB's vector extension CALL syntax (not DuckDB's CREATE HNSW INDEX).
     Must be called AFTER data is loaded — indexes on empty tables are empty.
 
-    Works for any table with an embedding column (SEC Element/Label/Structure,
-    custom schema Product, etc.). Tables without the column fail silently.
-
-    Returns True if index was created or already exists.
+    A table without the column returns False; True means the index was
+    created or already exists.
     """
     index_name = f"{table_name.lower()}_vec_index"
 
@@ -1136,9 +1109,7 @@ class LadybugDatabaseManager:
         TableName=table_name, Key={"instance_id": {"S": instance_id}}
       )
 
-      # Update or create the instance entry with the shared repository
       if "Item" in response:
-        # Instance exists, add to allocated_databases
         current_dbs = response["Item"].get("allocated_databases", {}).get("SS", [])
         if graph_id not in current_dbs:
           current_dbs.append(graph_id)
@@ -1153,7 +1124,6 @@ class LadybugDatabaseManager:
           },
         )
       else:
-        # New instance, create entry
         dynamodb.put_item(
           TableName=table_name,
           Item={

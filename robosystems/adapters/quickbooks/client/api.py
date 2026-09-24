@@ -15,17 +15,11 @@ from robosystems.logger import logger
 
 
 class QBAuthFailedError(Exception):
-  """QB auth refresh failed in a way that's worth surfacing cleanly.
+  """QB token refresh failed.
 
-  Wraps both `AuthClientError` (Intuit-side credential rejection — bad,
-  revoked, scope-insufficient) and transient network failures, so the
-  Dagster job logs a single typed error rather than a stack-trace dump
-  from the underlying intuitlib / requests stack.
-
-  When `recoverable=True` the caller should leave the connection state
-  alone (e.g., transient network blip — retry next sync). When False the
-  connection has been marked `needs_reauth` and the operator must
-  reconnect via OAuth.
+  ``recoverable=True``: transient network error; connection state untouched,
+  the next sync retries. ``False``: Intuit rejected the credential and the
+  connection has been marked ``needs_reauth``.
   """
 
   def __init__(self, message: str, *, recoverable: bool) -> None:
@@ -34,37 +28,16 @@ class QBAuthFailedError(Exception):
 
 
 def _is_retryable_qb_error(exc: BaseException) -> bool:
-  """Predicate for `retrying` — decides whether a QB API exception is
-  worth retrying.
-
-  Retry on:
-  - Network/transport errors (`ConnectionError`, `Timeout`, generic
-    `RequestException`) — always transient.
-  - QuickbooksException variants whose underlying HTTP status was 429
-    or 5xx. The QB SDK wraps non-200/non-Fault responses as
-    ``QuickbooksException(error_code=10000)`` and embeds the original
-    status in the message (`"Error returned with status code '429': ..."`).
-    Match on that pattern.
-
-  Don't retry on:
-  - ``AuthorizationException`` (HTTP 401 from Intuit — auth-side,
-    won't get better with retry).
-  - Other ``QuickbooksException`` variants (validation, object not
-    found, fault-payload application errors).
-  """
+  """Retry network errors and HTTP 429/5xx; never auth (401) or other QB faults."""
   if isinstance(exc, AuthorizationException):
     return False
   if isinstance(exc, requests.exceptions.RequestException):
-    # HTTPError carries response.status_code; everything else is
-    # network-side and worth retrying outright.
     if isinstance(exc, requests.exceptions.HTTPError):
       status = getattr(exc.response, "status_code", None) if exc.response else None
       return status in (429, 500, 502, 503, 504)
     return True
   if isinstance(exc, QuickbooksException):
-    # SDK wraps non-200 responses as `error_code=10000` with the HTTP
-    # status embedded in the message text. Pattern-match because the
-    # SDK doesn't surface the status code as a typed attribute.
+    # The SDK embeds the HTTP status only in the message text.
     msg = str(exc)
     return (
       "status code '429'" in msg
@@ -76,9 +49,7 @@ def _is_retryable_qb_error(exc: BaseException) -> bool:
   return False
 
 
-# Exponential backoff capped at 60s with up to 1s of jitter to spread
-# concurrent syncs against the same realm. 5 attempts ≈ worst case
-# 1+2+4+8+16 = 31s of backoff plus jitter before giving up.
+# Jitter spreads concurrent syncs against the same realm.
 _QB_RETRY = retry(
   retry_on_exception=_is_retryable_qb_error,
   stop_max_attempt_number=5,
@@ -95,17 +66,10 @@ class QBClient:
     qb_credentials: dict[str, Any],
     connection_id: str | None = None,
   ):
-    """
-    Initializes the QuickBooks client using the new connection credentials system.
+    """Refreshes the token on construction (skipped for ``mock_`` tokens).
 
-    Args:
-      realm_id: The QuickBooks realm ID.
-      qb_credentials: A dictionary containing 'refresh_token' and 'access_token'.
-      connection_id: Optional connection ID used to persist rotated tokens
-        back to ``ConnectionCredentials`` after Intuit rotates them on
-        refresh. Without it, rotated tokens die with the
-        QBClient instance and the next sync uses pre-rotation tokens —
-        eventually failing once Intuit's grace window expires.
+    ``connection_id`` enables persisting the rotated tokens and flipping the
+    connection to ``needs_reauth`` on a rejected refresh.
     """
     if not realm_id or not qb_credentials:
       raise ValueError("realm_id and qb_credentials are required.")
@@ -130,17 +94,11 @@ class QBClient:
       realm_id=self.realm_id,
     )
 
-    # Set access token if we have it
     if self.access_token:
       self.auth_client.access_token = self.access_token
 
     if not refresh_token.startswith("mock_"):
       logger.info(f"Refreshing QuickBooks token for realm {self.realm_id}")
-      # Wrap refresh in typed error handling. AuthClientError
-      # is auth-side (revoked / expired-beyond-grace / scope-insufficient)
-      # and flips the connection to needs_reauth so the operator sees a
-      # "Reconnect" CTA instead of a generic "sync failed". Transient
-      # network errors don't flip state — they retry next sync.
       try:
         self.auth_client.refresh(refresh_token=refresh_token)
       except AuthClientError as e:
@@ -156,8 +114,6 @@ class QBClient:
           recoverable=False,
         ) from e
       except requests.exceptions.RequestException as e:
-        # Transient — network failure between us and Intuit. Don't flip
-        # connection state; the next sync will retry the refresh.
         logger.warning(
           f"Transient network error during QB token refresh for realm "
           f"{self.realm_id}: {e}"
@@ -168,7 +124,6 @@ class QBClient:
           recoverable=True,
         ) from e
 
-    # Capture updated tokens after refresh
     self.refresh_token = self.auth_client.refresh_token
     self.access_token = self.auth_client.access_token
     logger.info(
@@ -176,11 +131,8 @@ class QBClient:
       f"refresh_token={'yes' if self.refresh_token else 'no'}"
     )
 
-    # Persist rotated tokens back to ConnectionCredentials.
-    # Intuit rotates the refresh_token on every refresh; without this,
-    # the rotated value dies when the QBClient instance goes out of
-    # scope and the next sync uses the pre-rotation token. Eventually
-    # the rotation grace window expires and the connection locks out.
+    # Intuit rotates the refresh_token on every refresh; an unpersisted
+    # rotation locks the connection out once the grace window expires.
     if connection_id and (
       self.refresh_token != refresh_token or self.access_token != access_token
     ):
@@ -194,12 +146,7 @@ class QBClient:
     )
 
   def _mark_needs_reauth(self) -> None:
-    """Flip the connection's status to ``needs_reauth``.
-
-    Best-effort: a failure to update the status row is logged but
-    swallowed — the QBAuthFailedError raised by the caller is the
-    operator-visible signal even if this side effect didn't land.
-    """
+    """Best-effort: the caller's QBAuthFailedError is the real signal."""
     if not self.connection_id:
       return
     try:
@@ -213,17 +160,7 @@ class QBClient:
       )
 
   def _persist_rotated_tokens(self, prior_credentials: dict[str, Any]) -> None:
-    """Write rotated tokens back to ``ConnectionCredentials``.
-
-    Scoped session lifecycle — opens a fresh platform-DB session just
-    for this update and closes it immediately. Don't hold the session
-    open for the whole sync.
-
-    Best-effort: persistence failure is logged but swallowed. The
-    QBClient still has the rotated tokens in-memory for this run; the
-    next sync will refresh again and either re-rotate (and re-persist)
-    or hit the rotation grace window.
-    """
+    """Best-effort write of rotated tokens, on a short-lived session."""
     if not self.connection_id:
       return
     try:
@@ -241,10 +178,8 @@ class QBClient:
             f"found for connection {self.connection_id}"
           )
           return
-        # Pull the live bundle from the DB rather than `prior_credentials`
-        # (the QBClient caller may have passed only refresh/access). Extra
-        # keys (realm_id, scope, ...) that the DB carries survive the
-        # rotation write.
+        # Merge onto the stored bundle, not prior_credentials, so extra
+        # stored keys (realm_id, scope, ...) survive.
         live = cred.get_credentials()
         updated = {
           **live,
@@ -269,8 +204,7 @@ class QBClient:
 
   @_QB_RETRY
   def _fetch_accounts_page(self, start: int, page_size: int):
-    """Single page of accounts — decorated so 429/5xx retry doesn't redo
-    the whole paginated walk."""
+    """Per-page so a retry doesn't redo the whole walk."""
     from quickbooks.objects.account import Account
 
     return Account.query(
@@ -280,12 +214,8 @@ class QBClient:
     )
 
   def get_accounts(self):
-    # QB Online's Account endpoint defaults to Active=true. Historical journal
-    # lines can reference accounts that were later deactivated, so we must
-    # pull both active and inactive — otherwise dbt's accounting-equation
-    # test fails on lines that hit accounts missing from the elements table.
-    # Paginate until empty rather than calling count() first (count() in this
-    # library version doesn't accept a where clause).
+    # Include inactive accounts: historical lines can reference them.
+    # count() in this library takes no where clause, so page until empty.
     page_size = 100
     start = 1
     all_accounts: list[dict] = []
@@ -296,9 +226,6 @@ class QBClient:
         break
       for a in page:
         d = a.to_dict()
-        # Dedup by Id rather than full-dict membership (O(1) vs O(n))
-        # so tenants with thousands of accounts don't pay an O(n²)
-        # tax on the import path.
         ext_id = str(d.get("Id", ""))
         if ext_id and ext_id not in seen_ids:
           seen_ids.add(ext_id)
@@ -400,8 +327,7 @@ class QBClient:
     page_size: int,
     where_clause: str | None,
   ):
-    """Single page fetch for `_paginate` — decorated so 429/5xx retry
-    doesn't redo the whole paginated walk."""
+    """Per-page so a retry doesn't redo the whole walk."""
     if where_clause:
       return entity_class.where(
         where_clause,
@@ -416,12 +342,7 @@ class QBClient:
     )
 
   def _paginate(self, entity_class, where_clause: str | None = None):
-    """Paginate over a QB entity, returning a list of dicts.
-
-    Used by per-class methods. Date-filtering callers pass a `where_clause`
-    matching QBO's SQL syntax (e.g., "TxnDate >= '2024-01-01'") — the
-    quickbooks lib's .where() method handles the WHERE prefix.
-    """
+    """``where_clause`` is QBO SQL without the WHERE keyword."""
     page_size = 100
     page = 0
     all_rows: list[dict] = []
@@ -485,12 +406,8 @@ class QBClient:
     return self._paginate(SalesReceipt, where_clause=where)
 
   def get_purchases(self, start_date: str, end_date: str):
-    """Fetch Purchase entities — covers QB's Expense / Check / Cash Expense /
-    Credit Card Expense in JournalReport. Each carries an EntityRef (the
-    vendor or customer paid) plus a PaymentType discriminator
-    ("Cash" | "Check" | "CreditCard"). Used to populate `agent_external_id`
-    on the JournalReport-derived events the cmd_create_event handler
-    captures."""
+    """Expense / Check / Credit Card Expense rows; their EntityRef supplies
+    the counterparty for JournalReport-derived events."""
     from quickbooks.objects.purchase import Purchase
 
     where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
@@ -508,15 +425,11 @@ class QBClient:
 
   @_QB_RETRY
   def get_transactions(self, start_date=None, end_date=None, testing_migration=None):
-    """Fetch JournalReport — still the live GL posting source (extract.py).
+    """Fetch JournalReport, the live GL posting source.
 
-    When ``testing_migration`` is True — or, when left None, the
-    ``INTUIT_REPORTS_TESTING_MIGRATION`` config flag is set — the request is
-    routed through Intuit's modernized "v2" reporting service via the
-    ``testing_migration`` query param. This is a temporary Intuit-side
-    migration switch: after the 2026-08-31 cutover the v2 service serves all
-    Reports API responses unconditionally and the param becomes a no-op.
-    See https://medium.com/intuitdev/upcoming-changes-to-reports-apis-5083ec9aadce
+    ``testing_migration`` (default: ``INTUIT_REPORTS_TESTING_MIGRATION``)
+    routes to Intuit's v2 reporting service; a no-op once Intuit's cutover
+    completes. https://medium.com/intuitdev/upcoming-changes-to-reports-apis-5083ec9aadce
     """
     params = {}
     if start_date:
@@ -526,7 +439,7 @@ class QBClient:
     if testing_migration is None:
       testing_migration = env.INTUIT_REPORTS_TESTING_MIGRATION
     if testing_migration:
-      # Presence of the key is what routes to v2; value is ignored by Intuit.
+      # Intuit checks only for the key's presence.
       params["testing_migration"] = "true"
     transactions = self.client.get_report("JournalReport", params)
     return transactions
@@ -534,8 +447,6 @@ class QBClient:
   # -- CDC (Change Data Capture) ----------------------------------------
 
   def _cdc_base_url(self) -> str:
-    """QB CDC endpoint base URL — switches between sandbox + production
-    per ``INTUIT_ENVIRONMENT``."""
     if env.INTUIT_ENVIRONMENT.lower() == "production":
       host = "https://quickbooks.api.intuit.com"
     else:
@@ -546,39 +457,13 @@ class QBClient:
   def cdc(
     self, changed_since: datetime | str, entities: list[str]
   ) -> tuple[dict[str, list[Any]], bool]:
-    """Fetch entity changes since ``changed_since`` via QB's CDC endpoint.
+    """Fetch entity changes since ``changed_since`` (naive datetimes are UTC;
+    a string is passed through as-is).
 
-    Args:
-        changed_since: tz-aware or naive datetime (naive interpreted as
-            UTC), or a pre-formatted ISO 8601 string. Datetime input is
-            the normal path; the string escape hatch exists for replay
-            of recorded fixtures.
-        entities: list of QB entity names (Invoice, Bill, Payment,
-                  BillPayment, JournalEntry, SalesReceipt, Customer,
-                  Vendor, Employee, Account, ...).
-
-    Returns:
-        Tuple of ``(entities_by_type, watermark_too_old)``.
-        - ``entities_by_type`` maps entity name → list of raw entity dicts
-          (each dict carries the QB API's representation including
-          ``Id`` and ``SyncToken``). Entity types with no changes return
-          empty lists. **NOTE on deletions**: CDC returns deleted entities
-          with ``status='Deleted'`` in the same per-entity list. Handler
-          dispatch for these is **not yet implemented** — the loader has
-          no soft-delete path for QB-side deletions. Until that lands,
-          a row that was deleted on the QB side after our initial sync
-          will remain present in our extensions DB until the next full
-          rebuild.
-        - ``watermark_too_old`` is True when QB rejects the
-          ``changedSince`` value (typically > 30 days back). Callers
-          should reset the watermark and fall through to full lookback.
-
-    The retry decorator handles transient 429 / 5xx; the 400 ``too old``
-    response surfaces here as a non-retryable signal so the caller can
-    fall through. Other 400s (malformed entity name, invalid format,
-    quota faults, etc.) propagate as ``HTTPError`` rather than being
-    silently masked as a watermark fallback — those are real bugs the
-    operator needs to see.
+    Returns ``(entities_by_type, watermark_too_old)``. Deleted entities come
+    back with ``status='Deleted'`` in the same lists. ``watermark_too_old``
+    means QB rejected the window (~30 days); the caller should fall back to a
+    full lookback. Any other 400 raises ``HTTPError``.
     """
     if isinstance(changed_since, datetime):
       if changed_since.tzinfo is None:
@@ -586,9 +471,6 @@ class QBClient:
       else:
         ts = changed_since.astimezone(UTC)
       changed_since_iso = ts.strftime("%Y-%m-%dT%H:%M:%S%z")
-      # Intuit accepts ISO 8601 with offset; ensure formatting matches their
-      # docs (no colon in the offset is also fine, but we normalise to
-      # "+0000" form which the strftime gives us).
     else:
       changed_since_iso = str(changed_since)
 
@@ -609,13 +491,8 @@ class QBClient:
     )
     resp = requests.get(url, headers=headers, params=params, timeout=60)
     if resp.status_code == 400:
-      # QB returns 400 with a Fault payload when changedSince is older
-      # than the supported window (~30 days). Detect by the structured
-      # error message ONLY — we don't broadly treat all 400s as
-      # "watermark too old" because malformed entity names, invalid
-      # format, quota faults, etc. also surface as 400 and the caller
-      # would silently fall back to a full lookback while masking the
-      # real bug. Those propagate via raise_for_status() below.
+      # Match the fault message only: other 400s are real bugs and must
+      # not be masked as a watermark fallback.
       try:
         payload = resp.json()
       except ValueError:
@@ -633,19 +510,11 @@ class QBClient:
           messages[:200],
         )
         return {}, True
-      # 400 for some other reason — let it raise as an HTTPError so the
-      # operator sees the actual fault instead of a silent watermark reset.
       resp.raise_for_status()
     resp.raise_for_status()
 
     data = resp.json()
-    # CDCResponse shape:
-    # {
-    #   "CDCResponse": [
-    #     { "QueryResponse": [ {"Customer": [...]}, {"Vendor": [...]}, ... ] }
-    #   ],
-    #   "time": "..."
-    # }
+    # {"CDCResponse": [{"QueryResponse": [{"Customer": [...]}, ...]}], ...}
     entities_by_type: dict[str, list[Any]] = {name: [] for name in entities}
     for cdc_block in data.get("CDCResponse", []):
       for query_resp in cdc_block.get("QueryResponse", []):

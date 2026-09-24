@@ -1,10 +1,4 @@
-"""Dagster infrastructure jobs.
-
-These jobs handle system maintenance:
-- Auth cleanup (expired and long-revoked API keys)
-- Health checks (credit allocation, graph credits)
-- Graph instance monitoring
-"""
+"""Dagster infrastructure jobs: auth cleanup, credit health checks, graph instance monitoring."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -22,12 +16,7 @@ from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
 from robosystems.models.core import OAuthClient, OAuthToken, UserAPIKey
 
-# ============================================================================
-# Environment-based Schedule Status
-# ============================================================================
-
-# Instance infrastructure schedules require real AWS resources (DynamoDB, EC2, CloudWatch)
-# RUNNING in prod/staging, STOPPED in dev (no AWS resources locally)
+# Instance schedules need real AWS resources, so they are stopped in dev.
 INSTANCE_SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
   if env.ENVIRONMENT != "dev"
@@ -39,10 +28,8 @@ INSTANCE_SCHEDULE_STATUS = (
 # Auth Cleanup Job
 # ============================================================================
 
-# Revoked keys are held briefly rather than dropped on revocation, so an
-# accidental revocation can still be traced and so the row outlives the
-# validation cache entry it must invalidate. Past that, the row is only
-# clutter — nothing can reactivate a key from the user-facing surface.
+# Revoked rows are kept long enough to trace an accidental revocation and to
+# outlive the validation cache entry they invalidate.
 REVOKED_KEY_RETENTION_DAYS = 30
 
 
@@ -50,11 +37,9 @@ REVOKED_KEY_RETENTION_DAYS = 30
 def cleanup_stale_api_keys(context: OpExecutionContext, db: DatabaseResource) -> dict:
   """Delete API keys that are past their expiry or long revoked.
 
-  A key that lapsed by date is cleared from the validation cache before its
-  row is dropped: the cache is keyed on the row's fingerprint, so once the
-  row is gone a surviving entry can never be targeted and would keep the key
-  authenticating until its TTL with nothing left to revoke. A key whose cache
-  clear fails is left in place for the next run rather than deleted blind.
+  A date-lapsed key's validation-cache entry is cleared first: once the row is
+  gone the entry can't be targeted and would authenticate until its TTL. If the
+  clear fails, the key is left for the next run.
   """
   with db.get_session() as session:
     now = datetime.now(UTC)
@@ -81,11 +66,8 @@ def cleanup_stale_api_keys(context: OpExecutionContext, db: DatabaseResource) ->
     deferred_count = 0
 
     for key in stale_keys:
-      # A key revoked long ago has no cache entry left to strand: the
-      # validation cache lives for minutes against a retention window of
-      # days, and clearing it costs two keyspace scans against the shared
-      # cache — not worth spending where it cannot pay. Only a key still
-      # active at the point it lapsed by date can hold a live entry.
+      # Only a still-active key can hold a live cache entry (the cache lives
+      # minutes, retention is days), so skip the costly scan for revoked ones.
       if key.is_active and not key.invalidate_cache():
         deferred_count += 1
         continue
@@ -110,14 +92,10 @@ def cleanup_stale_oauth_artifacts(
 ) -> dict:
   """Drop OAuth rows that can no longer authenticate anything.
 
-  Tokens: expired or revoked longer ago than the retention window. Refresh
-  rotation mints two rows an hour per always-on connector, so the table
-  grows by ~50 dead rows a day per connector; the recently dead are kept
-  so a late refresh replay is still detectable. Clients: dynamic
-  registrations that never reached a consent — a client that consented had
-  its expiry cleared, so nothing holding a grant is touched. Neither kind
-  can hold a live validation-cache entry (access tokens outlive their cache
-  entry by days before they qualify), so no cache scan is needed.
+  Tokens: expired or revoked past the retention window (recent ones are kept so
+  a late refresh replay is still detectable). Clients: dynamic registrations
+  that never consented. Neither can hold a live validation-cache entry, so no
+  cache scan is needed.
   """
   with db.get_session() as session:
     tokens_deleted = OAuthToken.cleanup_expired(
@@ -145,7 +123,7 @@ def hourly_auth_cleanup_job():
 
 
 # ============================================================================
-# Health Check Jobs
+# Health Checks
 # ============================================================================
 
 
@@ -159,7 +137,6 @@ def check_shared_credit_allocation_health(
   issues = []
 
   with db.get_session() as session:
-    # Check for repository subscriptions without credit records
     repos_without_credits = (
       session.query(UserRepositoryCredits)
       .filter(UserRepositoryCredits.current_balance.is_(None))
@@ -169,7 +146,7 @@ def check_shared_credit_allocation_health(
     if repos_without_credits > 0:
       issues.append(f"{repos_without_credits} repository subscriptions without credits")
 
-    # Check for negative balances (shouldn't happen for shared repos)
+    # Shouldn't happen for shared repos.
     negative_balances = (
       session.query(UserRepositoryCredits)
       .filter(UserRepositoryCredits.current_balance < 0)
@@ -205,7 +182,6 @@ def check_graph_credit_health(
   issues = []
 
   with db.get_session() as session:
-    # Check for graphs without monthly allocations
     no_allocation = (
       session.query(GraphCredits).filter(GraphCredits.monthly_allocation == 0).count()
     )
@@ -213,7 +189,7 @@ def check_graph_credit_health(
     if no_allocation > 0:
       issues.append(f"{no_allocation} graphs without monthly allocation")
 
-    # Count graphs with negative balances (warning, not error)
+    # Overages: logged, not an issue.
     negative_count = (
       session.query(GraphCredits).filter(GraphCredits.current_balance < 0).count()
     )
@@ -287,14 +263,7 @@ weekly_health_check_schedule = ScheduleDefinition(
 
 @op
 def check_instance_health(context: OpExecutionContext) -> dict[str, Any]:
-  """Check health of Graph EC2 instances and update registry.
-
-  This operation:
-  1. Queries all instances from DynamoDB registry
-  2. Checks actual EC2 instance states
-  3. Updates instance health status in registry
-  4. Removes instances that have been terminated
-  """
+  """Reconcile the DynamoDB instance registry with EC2 state; drop terminated instances."""
   from robosystems.operations.graph.infrastructure import InstanceMonitor
 
   monitor = InstanceMonitor()
@@ -324,13 +293,7 @@ def instance_health_check_job():
 
 @op
 def collect_instance_metrics(context: OpExecutionContext) -> dict[str, Any]:
-  """Collect and publish cluster metrics to CloudWatch.
-
-  This operation:
-  1. Queries instance and graph registries
-  2. Calculates capacity, utilization, and health metrics
-  3. Publishes metrics to CloudWatch for monitoring and auto-scaling
-  """
+  """Publish cluster capacity, utilization and health metrics to CloudWatch."""
   from robosystems.operations.graph.infrastructure import InstanceMonitor
 
   monitor = InstanceMonitor()
@@ -355,12 +318,10 @@ def instance_metrics_collection_job():
 def cleanup_stale_registry_entries(context: OpExecutionContext) -> dict[str, Any]:
   """Sweep the graph registry.
 
-  Removes entries marked deleted more than 7 days ago. Entries whose
-  instance_id is missing from the instance registry are marked and counted
-  (``OrphanedGraphRegistrations``), never removed — the row is a live graph's
-  routing and the instance registry drifts on ASG cycling. Shared
-  repositories are exempt: they route via ALB, not via their registry row,
-  and their master is parked to zero between ingestion runs.
+  Removes entries marked deleted over 7 days ago. Entries pointing at a missing
+  instance are counted (``OrphanedGraphRegistrations``), never removed: the row
+  is a live graph's routing and the instance registry drifts on ASG cycling.
+  Shared repositories are exempt (ALB-routed; master parked between runs).
   """
   from robosystems.operations.graph.infrastructure import InstanceMonitor
 
@@ -388,13 +349,10 @@ def instance_registry_cleanup_job():
 
 @op
 def cleanup_stale_volume_entries(context: OpExecutionContext) -> dict[str, Any]:
-  """Clean up stale entries from volume registry.
+  """Clean up stale volume registry entries.
 
-  Removes or updates:
-  - Volumes stuck in 'attaching' state to non-existent instances
-  - Volumes with missing instance references
-  - Empty volumes unattached for more than 30 days (rows carrying databases
-    are never dropped)
+  Rows carrying databases are never dropped; empty volumes go after 30 days
+  unattached.
   """
   from robosystems.operations.graph.infrastructure import InstanceMonitor
 
@@ -422,14 +380,7 @@ def volume_registry_cleanup_job():
 
 @op
 def run_full_instance_maintenance(context: OpExecutionContext) -> dict[str, Any]:
-  """Run all instance maintenance tasks in sequence.
-
-  This combines:
-  - Instance health check
-  - Metrics collection
-  - Instance registry cleanup
-  - Volume registry cleanup
-  """
+  """Run health check, metrics, and instance/volume registry cleanup in sequence."""
   from robosystems.operations.graph.infrastructure import InstanceMonitor
 
   monitor = InstanceMonitor()
@@ -441,7 +392,6 @@ def run_full_instance_maintenance(context: OpExecutionContext) -> dict[str, Any]
     "volume_cleanup": {},
   }
 
-  # Health check
   health_result = monitor.check_instance_health()
   results["health_check"] = {
     "healthy": health_result.healthy,
@@ -450,14 +400,12 @@ def run_full_instance_maintenance(context: OpExecutionContext) -> dict[str, Any]
   }
   context.log.info(f"Health check: {health_result.healthy} healthy instances")
 
-  # Metrics collection
   metrics_result = monitor.collect_metrics()
   results["metrics"] = {
     "metrics_published": metrics_result.metrics_published,
   }
   context.log.info(f"Metrics: {metrics_result.metrics_published} published")
 
-  # Instance registry cleanup
   instance_cleanup_result = monitor.cleanup_stale_graphs()
   results["instance_cleanup"] = {
     "removed_count": instance_cleanup_result.removed_count,
@@ -468,7 +416,6 @@ def run_full_instance_maintenance(context: OpExecutionContext) -> dict[str, Any]
     f"{instance_cleanup_result.orphaned_count} orphaned"
   )
 
-  # Volume cleanup
   volume_cleanup_result = monitor.cleanup_stale_volumes()
   results["volume_cleanup"] = {
     "updated_count": volume_cleanup_result.updated_count,
@@ -495,14 +442,12 @@ def full_instance_maintenance_job():
 # Instance Infrastructure Schedules
 # ============================================================================
 
-# Auto-enabled in prod/staging only (requires AWS: DynamoDB, EC2)
 instance_health_check_schedule = ScheduleDefinition(
   job=instance_health_check_job,
   cron_schedule="0 * * * *",  # Every hour at :00
   default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
-# Auto-enabled in prod/staging only (requires AWS: DynamoDB, EC2, CloudWatch).
 # Drives graph-tier autoscaling, so the 5-minute cadence is load-bearing.
 instance_metrics_collection_schedule = ScheduleDefinition(
   job=instance_metrics_collection_job,
@@ -510,21 +455,18 @@ instance_metrics_collection_schedule = ScheduleDefinition(
   default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
-# Auto-enabled in prod/staging only (requires AWS: DynamoDB)
 instance_registry_cleanup_schedule = ScheduleDefinition(
   job=instance_registry_cleanup_job,
   cron_schedule="0 3 * * *",  # 3 AM UTC daily
   default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
-# Auto-enabled in prod/staging only (requires AWS: DynamoDB)
 volume_registry_cleanup_schedule = ScheduleDefinition(
   job=volume_registry_cleanup_job,
   cron_schedule="0 4 * * *",  # 4 AM UTC daily
   default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
-# Auto-enabled in prod/staging only (requires AWS: DynamoDB, EC2, CloudWatch)
 full_instance_maintenance_schedule = ScheduleDefinition(
   job=full_instance_maintenance_job,
   cron_schedule="0 2 * * 0",  # Sundays at 2 AM UTC

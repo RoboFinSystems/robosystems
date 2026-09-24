@@ -1,9 +1,4 @@
-"""
-Database-specific metrics endpoints for Graph API.
-
-This module provides endpoints for retrieving metrics for individual databases,
-primarily used for billing and monitoring purposes.
-"""
+"""Per-database size and storage metrics, used for billing and monitoring."""
 
 import datetime
 import os
@@ -49,7 +44,6 @@ async def get_database_metrics(
   try:
     validated_graph_id = validate_database_name(graph_id)
 
-    # Check if database exists
     databases = service.db_manager.list_databases()
     if validated_graph_id not in databases:
       raise HTTPException(
@@ -57,10 +51,8 @@ async def get_database_metrics(
         detail=f"Database '{validated_graph_id}' not found",
       )
 
-    # Get database info from manager
     db_info = service.db_manager.get_database_info(validated_graph_id)
 
-    # Node and relationship counts are full scans — opt-in only.
     node_count = None
     relationship_count = None
     if include_counts:
@@ -81,9 +73,7 @@ async def get_database_metrics(
       except Exception as e:
         logger.warning(f"Failed to get graph counts for {validated_graph_id}: {e}")
 
-    # Get modification time
     last_modified = None
-    # Safe: validated_graph_id has been sanitized by validate_database_name() (alphanumeric + hyphens only)
     db_path = Path(service.db_manager.base_path) / f"{validated_graph_id}.lbug"
     if db_path.exists():
       mtime = os.path.getmtime(db_path)

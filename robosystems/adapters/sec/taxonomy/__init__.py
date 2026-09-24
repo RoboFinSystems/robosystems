@@ -1,12 +1,6 @@
-"""
-Canonical taxonomy for XBRL semantic enrichment.
+"""Canonical financial concepts for semantic enrichment, embedded once per process.
 
-Provides ~40 core financial concepts with pre-computed embeddings.
-Accepts an optional fastembed model to avoid redundant model instantiation.
-
-Usage:
-    from robosystems.adapters.sec.taxonomy import get_element_taxonomy, get_structure_taxonomy
-    concepts = get_element_taxonomy()  # list[CanonicalConcept] with embeddings
+Pass an already-loaded fastembed model to avoid loading a second one.
 """
 
 from __future__ import annotations
@@ -28,18 +22,12 @@ def _compute_embeddings(
   concepts: tuple[CanonicalConcept, ...],
   model: TextEmbedding | None = None,
 ) -> list[CanonicalConcept]:
-  """Compute embeddings for all concepts using fastembed.
 
-  Args:
-      concepts: Tuple of canonical concepts to embed.
-      model: Optional pre-loaded TextEmbedding model. If None, creates one.
-  """
   if model is None:
     from fastembed import TextEmbedding as _TextEmbedding
 
     model = _TextEmbedding("BAAI/bge-small-en-v1.5")
 
-  # Build text representations for embedding
   texts = []
   for c in concepts:
     parts = [c.display_name, c.description]
@@ -72,11 +60,7 @@ def _compute_embeddings(
 def get_element_taxonomy(
   model: TextEmbedding | None = None,
 ) -> list[CanonicalConcept]:
-  """Get all element-level canonical concepts with embeddings.
 
-  Args:
-      model: Optional pre-loaded TextEmbedding model to avoid redundant instantiation.
-  """
   global _element_taxonomy
   if _element_taxonomy is not None:
     return _element_taxonomy
@@ -94,11 +78,7 @@ def get_element_taxonomy(
 def get_structure_taxonomy(
   model: TextEmbedding | None = None,
 ) -> list[CanonicalConcept]:
-  """Get all structure-level canonical concepts with embeddings.
 
-  Args:
-      model: Optional pre-loaded TextEmbedding model to avoid redundant instantiation.
-  """
   global _structure_taxonomy
   if _structure_taxonomy is not None:
     return _structure_taxonomy

@@ -1,12 +1,5 @@
-"""Dagster sensor for reaping stale worker inflight tasks.
-
-Runs in the dagster-daemon process (always-on, no cold start). Scans
-all worker:inflight:* keys in Valkey DB 6 for tasks that have been
-in-flight longer than their timeout — indicating the worker crashed.
-
-Stale tasks are requeued with an incremented attempt count, or moved
-to the DLQ if max retries are exceeded.
-"""
+"""Sensor that requeues worker tasks in-flight past their timeout (a crashed worker),
+or moves them to the DLQ after max retries. Runs in the always-on daemon."""
 
 import json
 import time
@@ -29,11 +22,10 @@ from robosystems.worker.constants import (
 
 logger = get_logger(__name__)
 
-# Grace period added to task timeout before considering it stale.
-# Prevents reaping a task that's still legitimately running near its timeout.
+# Added to the task timeout so a task finishing near its limit isn't reaped.
 STALE_GRACE_SECONDS = 30
 
-# SSE metadata key prefix (matches event_storage.py)
+# Must match event_storage.py.
 SSE_META_PREFIX = "sse:operation:meta:"
 
 
@@ -75,7 +67,7 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
   sse = create_redis_client(ValkeyDatabase.SSE, decode_responses=True)
 
   try:
-    # Find all inflight lists (one per worker)
+    # One inflight list per worker.
     inflight_keys = list(queue.scan_iter(match="worker:inflight:*", count=100))
 
     if not inflight_keys:
@@ -100,13 +92,10 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
         task_type = task_data.get("task_type", "unknown")
         attempt = task_data.get("attempt", 1)
 
-        # Single fetch for both status and age
         meta = _get_operation_metadata(sse, task_id)
 
         if meta is None:
-          # No SSE metadata — operation expired from storage. Requeue with
-          # incremented attempt rather than immediately DLQ-ing, since this
-          # could be caused by Valkey memory pressure or short TTL.
+          # Metadata expired (memory pressure or short TTL): retry, don't DLQ.
           queue.lrem(inflight_key, 1, task_json)
           if attempt >= MAX_RETRIES:
             task_data["dlq_reason"] = "no_sse_metadata"
@@ -128,27 +117,22 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
             )
           continue
 
-        # If operation already completed/failed, just clean up inflight entry
         status = meta.get("status")
         if status is not None and status not in ("pending", "running"):
           queue.lrem(inflight_key, 1, task_json)
           cleaned += 1
           continue
 
-        # Check staleness: task age > timeout + grace period
         timeout = TASK_TIMEOUTS.get(task_type, DEFAULT_TASK_TIMEOUT)
         stale_threshold = timeout + STALE_GRACE_SECONDS
 
         age = _get_age_from_metadata(meta)
         if age is None or age < stale_threshold:
-          # Can't determine age, or not stale yet — skip
           continue
 
-        # Task is stale — remove from inflight
         queue.lrem(inflight_key, 1, task_json)
 
         if attempt >= MAX_RETRIES:
-          # Exceeded retries — move to DLQ and mark failed
           task_data["dlq_reason"] = f"stale_after_{attempt}_attempts"
           task_data["dlq_at"] = datetime.now(UTC).isoformat()
           task_data["dlq_attempts"] = attempt
@@ -159,7 +143,6 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
             f"Task {task_id} ({task_type}) moved to DLQ after {attempt} attempts"
           )
         else:
-          # Requeue with incremented attempt
           task_data["attempt"] = attempt + 1
           queue.rpush("worker:tasks", json.dumps(task_data))
           requeued += 1
@@ -167,7 +150,6 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
             f"Requeued stale task {task_id} ({task_type}), attempt {attempt + 1}"
           )
 
-    # Clean up empty inflight lists
     for inflight_key in inflight_keys:
       if queue.llen(inflight_key) == 0:
         queue.delete(inflight_key)
@@ -188,15 +170,10 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
 def _fail_operation_sync(sse_client: Any, task_id: str, attempts: int) -> None:
   """Mark an SSE operation as failed by updating its metadata directly.
 
-  Compare-and-set on the metadata key: the sensor's staleness decision was
-  made from a snapshot taken earlier in the tick, and a worker can finish
-  the task in between. A terminal status already written by the worker —
-  ``completed`` above all — wins; this only ever moves ``pending`` /
-  ``running`` to ``failed``, and only when it does so does it evict the
-  cached idempotency envelope (this path writes the status directly rather
-  than through the SSE store, so the store's own eviction hook does not
-  run). Without the guard a DLQ'd-but-actually-finished backup would show
-  as failed and become re-dispatchable under its Idempotency-Key.
+  Compare-and-set: a worker may finish the task after the staleness snapshot,
+  and its terminal status wins. Only on an actual pending/running -> failed
+  write is the idempotency envelope evicted (this bypasses the SSE store's own
+  eviction hook); otherwise a finished task would become re-dispatchable.
   """
   meta_key = f"{SSE_META_PREFIX}{task_id}"
   try:
@@ -220,8 +197,7 @@ def _fail_operation_sync(sse_client: Any, task_id: str, attempts: int) -> None:
       pipe.set(meta_key, json.dumps(meta), keepttl=True)
       pipe.execute()
   except Exception as e:
-    # A WatchError here means the worker wrote first; either way nothing
-    # was changed by us, so there is nothing to evict.
+    # Includes WatchError (the worker wrote first); nothing changed, nothing to evict.
     logger.warning(f"Failed to update SSE metadata for {task_id}: {e}")
     return
 

@@ -1,9 +1,4 @@
-"""
-Core business logic for the Graph API server.
-
-Note: Engine and Repository are available from robosystems.graph_api.core.ladybug
-but are not imported here to avoid circular imports with middleware.graph.
-"""
+"""Core business logic for the Graph API server."""
 
 from .ladybug import (
   LadybugConnectionPool,

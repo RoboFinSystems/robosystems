@@ -1,26 +1,10 @@
-"""SEC pipeline sensors for automated incremental updates.
+"""SEC pipeline sensors and the nightly download schedule.
 
-Sensors trigger jobs based on SourceFile queue state and job completion.
-All sensors start STOPPED by default - enable in Dagster UI when ready.
-
-Nightly Pipeline (enable all for automated daily updates):
-- Phase 1 (Download): sec_incremental_download_schedule triggers at 9pm EST weekdays
-- Phase 2+3 (Process+Stage): sec_incremental_pipeline_sensor chains
-  download → process (batched loop) → stage (DuckDB INSERT)
-- Phase 4 (Materialize): sec_stage_to_materialize_sensor chains stage → materialize
-  (full rebuild nightly; incremental mode is parked — see the sensor docstring)
-- Phase 5 (Publish+Refresh): sec_post_materialize_publish_sensor chains
-  materialize → lbug S3 publish → duckdb S3 publish → replica refresh → master sleep
-- Phase 5c (Text Index): sec_post_stage_index_sensor chains
-  stage → textblocks index + narratives index (parallel, incremental)
-
-Backfill Processing (enable for bulk/manual processing):
-- sec_processing_sensor: Discovers pending SourceFiles, triggers batch processing per quarter
-
-Nightly flow: New data is added to existing DuckDB tables (INSERT with dedup),
-then the LadybugDB graph is fully rebuilt from DuckDB (the staging source of
-truth). The whole chain wakes the master at the start and sleeps it after
-publish.
+All start STOPPED; enable them in the Dagster UI. Nightly chain (every run
+tagged ``mode=incremental``): download → process (batched) → wake master →
+incremental DuckDB stage → full LadybugDB rebuild → lbug S3 → duckdb S3 →
+replica refresh + master sleep; text indexing and the filer catalog branch off
+staging. ``sec_processing_sensor`` is the separate backfill driver.
 """
 
 import re
@@ -64,41 +48,17 @@ from .jobs import (
 
 @sensor(
   job=sec_process_job,
-  minimum_interval_seconds=300,  # Check every 5 minutes
-  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  minimum_interval_seconds=300,
+  default_status=DefaultSensorStatus.STOPPED,
   description="Discover quarters with pending SourceFiles and trigger batch processing runs",
 )
 def sec_processing_sensor(context: SensorEvaluationContext):
-  """Discover quarters with pending SEC filings and trigger batch processing.
+  """Trigger one batch run per quarter with pending SourceFiles.
 
-  Each Dagster run processes up to SEC_PROCESS_BATCH_SIZE filings then exits.
-  This sensor continuously triggers new runs while pending files remain,
-  enabling natural memory release between batches and crash resilience.
-
-  Batch Processing Model:
-  1. Job processes batch, flushes part files to S3, exits
-  2. Sensor runs every 5 minutes, detects remaining pending files
-  3. Triggers another batch if pending files exist and no active run
-  4. Repeats until all files processed
-
-  Parallelism across quarters is controlled by DAGSTER_MAX_CONCURRENT_RUNS.
-  Individual filing failures are tracked in SourceFile; jobs continue processing.
-
-  Flow:
-  1. Query distinct quarters from pending SourceFiles
-  2. Skip quarters that already have in-progress runs
-  3. Yield one RunRequest per quarter with pending files
-  4. Dagster's run coordinator controls concurrent quarter processing
-
-  Output Structure:
-  - All filings output to quarterly partitions (filed=YYYY-QN)
-  - Part files per table per quarter (part_{uuid}.parquet, additive)
-  - Shared tables deduped within batch; DuckDB handles cross-batch dedup
-
-  Deduplication:
-  - No run_key used - allows retries after failures
-  - Active run check prevents concurrent runs for same quarter
-  - After batch completes, sensor re-triggers if pending files remain
+  The single recovery path for sec_process: a quarter is re-triggered every
+  tick while it has pending files and no active run. No run_key, so a quarter
+  can be re-triggered after a failure; the active-run check is what prevents
+  concurrent runs.
   """
 
   from sqlalchemy import func
@@ -106,21 +66,17 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   from robosystems.database import session as SessionLocal
   from robosystems.models.core import SourceFile
 
-  # Partition key format: "2024-Q1_cik_accession" -> captures "2024-Q1"
+  # SourceFile.partition_key is "YYYY-QN_cik_accession".
   quarter_pattern = re.compile(r"^(\d{4}-Q[1-4])_")
 
-  # Skip in dev - use manual job triggers for testing
   if env.ENVIRONMENT == "dev":
     yield SkipReason("Skipped in dev - use Dagster UI to trigger sec_process manually")
     return
 
-  # Query for distinct quarters with pending files
   session = None
   try:
     session = SessionLocal()
 
-    # Extract quarter from partition_key (format: "YYYY-QN_cik_accession")
-    # Group by quarter prefix to find which quarters have pending files
     pending_files = (
       session.query(SourceFile.partition_key)
       .filter(
@@ -138,7 +94,6 @@ def sec_processing_sensor(context: SensorEvaluationContext):
         if match:
           quarters_with_pending.add(match.group(1))
 
-    # Get error count for logging
     error_count = (
       session.query(func.count(SourceFile.id))
       .filter(SourceFile.graph_id == "sec", SourceFile.status == "error")
@@ -166,9 +121,7 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     f"Quarters: {sorted(quarters_with_pending)}"
   )
 
-  # Yield RunRequest for each quarter with pending files
   for quarter in sorted(quarters_with_pending):
-    # Check for in-progress runs to prevent duplicate processing triggers
     active_runs = context.instance.get_runs(
       filters=RunsFilter(
         job_name="sec_process",
@@ -181,8 +134,7 @@ def sec_processing_sensor(context: SensorEvaluationContext):
       context.log.info(f"Skipping {quarter} - already has an active run")
       continue
 
-    # Apply annual-only form type filter for pre-2024 partitions
-    # Historical data excludes 10-Q to reduce graph size (~75% fewer filings)
+    # Pre-2024 (historical) quarters process annual reports only.
     partition_year = int(quarter.split("-")[0])
     run_config: dict = {}
     if partition_year < SEC_PRIMARY_START_YEAR:
@@ -199,10 +151,8 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     else:
       context.log.info(f"Triggering {quarter} for processing")
 
-    # No run_key - rely on active runs check to prevent concurrent runs.
-    # This allows re-triggering after failures when pending files remain.
     yield RunRequest(
-      partition_key=quarter,  # Use Dagster's partition system
+      partition_key=quarter,
       run_config=run_config,
       tags={
         "quarter": quarter,
@@ -212,30 +162,14 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     )
 
 
-# ============================================================================
-# SEC Incremental Pipeline (Automated Chain)
-# ============================================================================
-# A fully automated chain, off until you start it:
-#   download → process → stage → materialize → S3 sync
-# The schedule below is declared STOPPED and the sensors that chain it are
-# too, so enabling the pipeline means starting them in the Dagster UI. There
-# is no environment variable for it.
-#
-# Each step is chained via run_status_sensor, only proceeding on success.
-# Keep disabled during backfills; enable for production incremental updates.
-# ============================================================================
+# The nightly chain. Keep it stopped during backfills.
 
 
 def _get_quarters_to_scan(now: datetime | None = None) -> list[str]:
-  """Get the single quarter to scan for the incremental nightly download.
+  """The one quarter for the nightly download, keyed off Eastern time.
 
-  Hard cut-over: one quarter per run, keyed off Eastern time. Pass the
-  schedule's ``scheduled_execution_time`` so the last-day-of-quarter run
-  (21:00 ET, already next-day in UTC) stays on the correct quarter instead of
-  rolling to the next quarter by the container's UTC clock.
-
-  Returns:
-      Single-element list of partition keys like ["2026-Q2"]
+  Pass the schedule's ``scheduled_execution_time``: the last-day-of-quarter
+  run (21:00 ET) is already the next day in UTC.
   """
   from robosystems.adapters.sec import get_quarters_to_scan
 
@@ -244,29 +178,18 @@ def _get_quarters_to_scan(now: datetime | None = None) -> list[str]:
 
 @schedule(
   job=sec_download_job,
-  cron_schedule="0 21 * * 1-5",  # 9pm EST, Monday-Friday
-  default_status=DefaultScheduleStatus.STOPPED,  # Enable in Dagster UI when ready
+  cron_schedule="0 21 * * 1-5",
+  default_status=DefaultScheduleStatus.STOPPED,
   execution_timezone="America/New_York",
 )
 def sec_incremental_download_schedule(context):
-  """Incremental SEC download at 9pm ET on weekdays.
-
-  Part of the automated incremental pipeline. Downloads new filings for the
-  current quarter only (hard cut-over). The quarter is keyed off the schedule's
-  Eastern execution time, so the last-day-of-quarter run stays on the correct
-  quarter instead of rolling forward by the container's UTC clock.
-
-  Chain: download → process → stage → materialize → S3 sync
-
-  Declared STOPPED — start it in the Dagster UI to enable.
-  """
+  """Nightly download of the current quarter, weekdays at 9pm ET."""
   from robosystems.adapters.sec.pipeline.configs import SECDownloadConfig
 
   quarters = _get_quarters_to_scan(context.scheduled_execution_time)
   context.log.info(f"Incremental download for quarter: {quarters[0]}")
 
-  # Generate batch_id to track all jobs from this schedule tick
-  # Used by downstream sensors to wait for all quarters to complete
+  # Ties together every run descended from this tick.
   batch_id = context.scheduled_execution_time.strftime("%Y%m%d-%H")
 
   for partition_key in quarters:
@@ -287,7 +210,7 @@ def sec_incremental_download_schedule(context):
         "pipeline": "sec",
         "phase": "download",
         "mode": "incremental",
-        "batch_id": batch_id or "",  # Track jobs from same schedule tick
+        "batch_id": batch_id or "",
       },
     )
 
@@ -296,30 +219,16 @@ def sec_incremental_download_schedule(context):
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[sec_download_job, sec_process_job],
   request_jobs=[sec_process_job, shared_master_wake_job],
-  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
   description="Chain: download → process (batched) → stage. Self-contained incremental pipeline.",
 )
 def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
-  """Orchestrate the full incremental SEC pipeline: download → process → stage.
+  """Chain download → process batches → master wake.
 
-  Monitors both download and process job completions:
-  - On download success: triggers first process batch for the partition
-  - On process success: checks for remaining pending files
-    - If pending remain in this partition: triggers next process batch
-    - If this partition drained but others still pending: waits
-    - If all partitions drained: triggers incremental DuckDB staging
-
-  Each process run handles SEC_PROCESS_BATCH_SIZE filings (default 250) then
-  exits, enabling natural memory release between batches and spot resilience
-  via the S3 filing cache. This sensor re-triggers process runs until the
-  queue is drained across all partitions, then hands off to staging.
-
-  The download schedule scans exactly one quarter per run (hard cut-over, keyed
-  off Eastern time), so there is normally a single partition to drain before
-  staging.
-
-  The stage_to_materialize_sensor handles the next step (stage → materialize).
+  After a download, or a process batch that leaves files pending in its
+  partition, trigger the next batch. Once every partition is drained, wake the
+  shared master; sec_wake_to_stage_sensor takes it from there.
   """
 
   from robosystems.database import session as SessionLocal
@@ -331,13 +240,11 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
 
   dagster_run = context.dagster_run
 
-  # Only chain incremental pipeline runs (tagged with mode=incremental)
   run_tags = dagster_run.tags or {}
   if run_tags.get("mode") != "incremental":
     context.log.info("Skipping - not an incremental pipeline run")
     return
 
-  # Get partition from the completed run
   partition_key = dagster_run.tags.get("dagster/partition")
   if not partition_key:
     context.log.warning("No partition key found on completed run")
@@ -345,7 +252,6 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
 
   batch_id = run_tags.get("batch_id")
 
-  # When triggered by a process job completion, check if pending files remain
   if dagster_run.job_name == "sec_process":
     quarter_pattern = re.compile(r"^(\d{4}-Q[1-4])_")
     session = None
@@ -361,7 +267,6 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
         .all()
       )
 
-      # Count pending in this partition and total across all partitions
       pending_in_partition = 0
       total_pending = len(pending_files)
       for (pk,) in pending_files:
@@ -376,28 +281,21 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
         session.close()
 
     if pending_in_partition > 0:
-      # Fall through to yield another process RunRequest below
       context.log.info(
         f"Process batch completed for {partition_key}, "
         f"{pending_in_partition} files still pending, triggering next batch"
       )
     elif total_pending > 0:
-      # This partition is done but other partitions from the same batch
-      # (e.g., quarter boundary scan) still have pending files.
-      # Wait for all partitions to drain before triggering staging.
       context.log.info(
         f"Partition {partition_key} fully processed, but {total_pending} files "
         f"pending in other partitions — waiting for batch to complete"
       )
       return
     else:
-      # All partitions drained — wake the shared master; staging is triggered
-      # once it is healthy (sec_wake_to_stage_sensor).
       context.log.info(
         "All pending files processed across all partitions, waking shared master"
       )
 
-      # Check if a wake is already running (avoids double-wake on races)
       active_wake_runs = context.instance.get_runs(
         filters=RunsFilter(
           job_name="shared_master_wake",
@@ -426,7 +324,6 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
   else:
     context.log.info(f"Download completed for {partition_key}, triggering processing")
 
-  # Check for already running process job for this partition
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
       job_name="sec_process",
@@ -453,17 +350,11 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
   )
 
 
-# ============================================================================
-# SEC Wake to Stage Sensor (Chains Master Wake → DuckDB Staging)
-# ============================================================================
-# The master is awake and healthy; trigger the first master-dependent step.
-
-
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[shared_master_wake_job],
   request_job=sec_incremental_stage_job,
-  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
   description="Trigger incremental DuckDB staging after the shared master is awake",
 )
@@ -520,43 +411,19 @@ def sec_wake_to_stage_sensor(context: RunStatusSensorContext):
   )
 
 
-# ============================================================================
-# SEC Stage to Materialize Sensor (Chains Stage → Full Graph Rebuild)
-# ============================================================================
-# After DuckDB incremental staging adds new rows, triggers a full LadybugDB
-# rebuild from DuckDB. The sec graph (2024+ only) is small enough for nightly
-# rebuilds, and this ensures the graph is always consistent with DuckDB.
-#
-# Chain: stage (DuckDB INSERT) → materialize (full rebuild) → S3 publish
-# S3 publishes are handled by sec_post_materialize_publish_sensor.
-
-
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[sec_incremental_stage_job],
   request_job=sec_materialize_job,
-  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
   description="Trigger incremental graph materialization after DuckDB staging completes",
 )
 def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
-  """Trigger LadybugDB materialization after DuckDB staging completes.
+  """Trigger a full LadybugDB rebuild from DuckDB after incremental staging.
 
-  Part of the nightly pipeline chain:
-    process → stage (DuckDB INSERT) → materialize → S3 publish
-
-  Every night does a **full rebuild** from the same DuckDB staging (source of
-  truth): rebuild-from-scratch erases any drift (partial batch failures,
-  un-refreshed mutable Entity attributes), and its streaming COPY into an empty
-  database has a far smaller memory working set than incremental mode, whose
-  keyset-export + anti-join scales with the accumulated graph. Incremental
-  (per-table keyset anti-join, no rebuild) is not used nightly — at current
-  corpus scale it exceeds the shared master's memory budget and OOM-kills the
-  Graph API mid-run — but remains available for manual runs via
-  SECMaterializeConfig. The chain — wake → stage → materialize → publish →
-  sleep — is unchanged. S3 publishes are handled by
-  sec_post_materialize_publish_sensor (which keys off the mode:incremental tag,
-  set on every nightly run).
+  A nightly rebuild erases drift (partial batch failures, stale mutable Entity
+  attributes), and the sec graph (2024+) is small enough for it.
   """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")
@@ -564,13 +431,11 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
 
   dagster_run = context.dagster_run
 
-  # Only chain incremental pipeline runs
   run_tags = dagster_run.tags or {}
   if run_tags.get("mode") != "incremental":
     context.log.info("Run is not incremental mode, skipping chain")
     return
 
-  # Check if materialize job is already running
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
       job_name="sec_materialize",
@@ -584,12 +449,9 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
     )
     return
 
-  # Full rebuild every night; incremental mode is manual-only. At
-  # current corpus scale its keyset-export + anti-join phase runs DuckDB and
-  # LadybugDB hot simultaneously and exceeds the shared master's memory budget,
-  # OOM-killing the Graph API mid-run. The machinery remains available for
-  # manual runs via SECMaterializeConfig; revisit when nightly full-rebuild
-  # duration threatens the wake window.
+  # Incremental mode is manual-only: its keyset export + anti-join runs DuckDB
+  # and LadybugDB hot at once and OOMs the shared master at current corpus
+  # size. Revisit if the full rebuild outgrows the wake window.
   materialize_mode = "full"
 
   context.log.info(
@@ -612,24 +474,11 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
     tags={
       "pipeline": "sec",
       "phase": "materialize",
-      # mode:incremental marks the chain lineage (the publish + sleep sensors key
-      # off it) for every nightly run regardless of materialize_mode.
+      # Chain lineage marker, independent of materialize_mode.
       "mode": "incremental",
       "materialize_mode": materialize_mode,
     },
   )
-
-
-# ============================================================================
-# SEC Post-Materialize Publish Sensor (Sequential S3 Uploads)
-# ============================================================================
-# After materialization, publish both databases to S3 sequentially:
-#   materialize → lbug S3 publish → duckdb S3 publish
-#
-# Sequential to avoid overloading the instance with concurrent uploads.
-# LadybugDB publish serves the replica fleet (downloaded to local disk on boot).
-# DuckDB publish serves the offline knowledge-artifacts build.
-# Replica refresh cycles instances to pick up new S3 databases.
 
 
 @run_status_sensor(
@@ -645,21 +494,15 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
     shared_replicas_refresh_job,
     shared_master_sleep_job,
   ],
-  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
   description=("Chain: materialize → lbug S3 → duckdb S3 → replica refresh"),
 )
 def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
-  """Publish databases to S3 and refresh replicas after materialization.
+  """Chain materialize → lbug S3 → duckdb S3 → replica refresh + master sleep.
 
-  Sequential chain to avoid overloading the instance:
-  - On materialize success: triggers lbug S3 publish
-  - On lbug publish success: triggers duckdb S3 publish
-  - On duckdb publish success: triggers rolling replica refresh
-
-  The replica refresh uses conservative policies (min_healthy=100%,
-  max_healthy=200%) so old instances stay alive serving traffic until
-  new instances finish downloading (~15 min) and pass health checks.
+  Sequential so concurrent uploads don't overload the instance. The lbug copy
+  feeds the replica fleet; the duckdb copy feeds the knowledge-artifacts build.
   """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping publish sensor in dev environment")
@@ -667,7 +510,6 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
 
   dagster_run = context.dagster_run
 
-  # Only chain incremental pipeline runs
   run_tags = dagster_run.tags or {}
   if run_tags.get("mode") != "incremental":
     context.log.info("Skipping - not an incremental pipeline run")
@@ -684,9 +526,8 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
     context.log.info("LadybugDB S3 publish complete, triggering DuckDB S3 publish")
 
   elif dagster_run.job_name == "sec_duckdb_s3_publish":
-    # Final publish done — the master is now dead weight (replicas refresh from
-    # S3, never from the master). Trigger the replica refresh AND sleep the
-    # master, in parallel; sleep does not depend on the refresh outcome.
+    # Replicas refresh from S3, never the master, so the master can sleep in
+    # parallel with the refresh.
     context.log.info(
       "DuckDB S3 publish complete, triggering replica refresh and master sleep"
     )
@@ -716,7 +557,6 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
   else:
     return
 
-  # Check if next job is already running
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
       job_name=next_job_name,
@@ -741,13 +581,6 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
   )
 
 
-# ============================================================================
-# SEC Master Sleep-on-Failure Sensor (never strand the master awake)
-# ============================================================================
-# If any incremental master-dependent job fails, the terminal sleep never runs,
-# so scale the master back to 0 here. Sleep is idempotent.
-
-
 @run_status_sensor(
   run_status=DagsterRunStatus.FAILURE,
   monitored_jobs=[
@@ -758,13 +591,12 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
     sec_duckdb_s3_publish_job,
   ],
   request_job=shared_master_sleep_job,
-  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
   description="Sleep the shared master if any incremental master-dependent job fails",
 )
 def sec_master_sleep_on_failure_sensor(context: RunStatusSensorContext):
-  """Never strand the master awake: on any incremental master-dependent job
-  failure, scale it back to 0."""
+  """A failed chain step never reaches the terminal sleep, so sleep here."""
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping failure sleep sensor in dev environment")
     return
@@ -803,16 +635,6 @@ def sec_master_sleep_on_failure_sensor(context: RunStatusSensorContext):
   )
 
 
-# ============================================================================
-# SEC Post-Stage Text Index Sensor (OpenSearch Indexing)
-# ============================================================================
-# After staging completes, index text content into OpenSearch in parallel
-# with the materialization branch. Both index jobs are independent and
-# idempotent (OpenSearch upserts by document_id).
-#
-# Chain: stage → text index (parallel with materialize branch)
-
-
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[
@@ -829,11 +651,10 @@ def sec_master_sleep_on_failure_sensor(context: RunStatusSensorContext):
   description="Chain: stage → text search indexing (narratives + iXBRL disclosures) + filer catalog",
 )
 def sec_post_stage_index_sensor(context: RunStatusSensorContext):
-  """Trigger text search indexing after staging completes.
+  """After staging, run the two text indexes and the filer catalog in parallel.
 
-  Runs all three indexing jobs in parallel since they're independent.
-  Each job is partitioned by quarter. The sensor derives the current
-  quarter from the upstream run tags or the current date.
+  Runs alongside the materialize branch; the index jobs are idempotent
+  (OpenSearch upserts by document_id).
   """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping text index sensor in dev environment")
@@ -841,7 +662,6 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
 
   dagster_run = context.dagster_run
 
-  # Only chain incremental pipeline runs
   run_tags = dagster_run.tags or {}
   if run_tags.get("mode") != "incremental":
     context.log.info("Skipping - not an incremental pipeline run")
@@ -860,7 +680,6 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
 
   context.log.info(f"Will index partition {partition_key}")
 
-  # Job name → asset op name mapping
   index_jobs = {
     "sec_narratives_index": "sec_narratives_indexed",
     "sec_ixbrl_index": "sec_ixbrl_disclosures_indexed",
@@ -869,7 +688,6 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
   }
 
   for job_name, asset_name in index_jobs.items():
-    # Skip if already running
     active_runs = context.instance.get_runs(
       filters=RunsFilter(
         job_name=job_name,
@@ -908,7 +726,6 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
     )
 
 
-# Maximum number of automatic retries before giving up
 _INDEX_RETRY_MAX = 3
 
 
@@ -933,13 +750,10 @@ _INDEX_RETRY_MAX = 3
   ),
 )
 def sec_index_retry_sensor(context: RunStatusSensorContext):
-  """Retry failed indexing jobs with the same partition and config.
+  """Relaunch a failed index run (typically a Spot reclaim) with its config.
 
-  Designed for Spot resilience: when a Fargate Spot task is reclaimed,
-  the Dagster run fails. This sensor detects the failure and re-launches
-  with the same partition key and run config. The OpenSearch incremental
-  skip (_get_indexed_accessions) ensures already-indexed batches are not
-  reprocessed, so retries only do the remaining work.
+  The OpenSearch incremental skip (_get_indexed_accessions) means a retry
+  only does the remaining work.
   """
   dagster_run = context.dagster_run
   job_name = dagster_run.job_name
@@ -952,7 +766,6 @@ def sec_index_retry_sensor(context: RunStatusSensorContext):
     )
     return
 
-  # Track retry count to cap retries
   retry_count = int(run_tags.get("retry_count", "0"))
   if retry_count >= _INDEX_RETRY_MAX:
     context.log.warning(
@@ -961,7 +774,6 @@ def sec_index_retry_sensor(context: RunStatusSensorContext):
     )
     return
 
-  # Check if the job is already running for this specific partition
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
       job_name=job_name,

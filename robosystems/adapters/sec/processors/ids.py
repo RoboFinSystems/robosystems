@@ -1,10 +1,6 @@
-"""
-XBRL Naming Utilities
+"""Naming helpers for the processor's DataFrames and parquet files.
 
-String conversion and naming helpers for the processor's DataFrames and
-parquet files. Graph identifiers are minted by xbrlkit's projection
-(``xbrlkit.serialize.lpg.graph_id``), which shares the platform's UUID5
-namespace, so nothing here derives an id.
+Graph ids are minted by xbrlkit's projection, not here.
 """
 
 import re
@@ -13,28 +9,13 @@ import pandas as pd
 
 
 def camel_to_snake(name: str) -> str:
-  """
-  Convert PascalCase to snake_case.
-
-  Examples:
-    EntityReport -> entity_report
-    LineItem -> line_item
-    HTTPSConnection -> https_connection
-  """
+  """PascalCase to snake_case; HTTPSConnection -> https_connection."""
   s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
   return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
 
 
 def make_plural(word: str) -> str:
-  """
-  Convert word to plural form following simple English rules.
-
-  Examples:
-    entity -> entities
-    fact -> facts
-    taxonomy -> taxonomies
-    box -> boxes
-  """
+  """Naive English plural: entity -> entities, box -> boxes."""
   if word.endswith("y"):
     return word[:-1] + "ies"
   elif word.endswith(("s", "x", "z", "ch", "sh")):
@@ -63,12 +44,9 @@ def safe_concat(existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame
   if existing_df.empty:
     return new_df.copy()
 
-  # Ensure consistent dtypes between DataFrames before concatenation
   for col in new_df.columns:
     if col in existing_df.columns:
-      # Convert to common dtype if they differ
       if existing_df[col].dtype != new_df[col].dtype:
-        # Use object dtype as fallback for mixed types
         common_dtype = (
           "object"
           if existing_df[col].dtype == "object" or new_df[col].dtype == "object"

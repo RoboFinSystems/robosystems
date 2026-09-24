@@ -1,9 +1,5 @@
-"""DuckDB data extraction for SEC graph knowledge artifacts.
-
-Extracts deduplicated edges, element metadata, filing counts, and
-structure compositions from DuckDB staging databases. All heavy
-deduplication happens in DuckDB SQL to keep Python memory low.
-"""
+"""Read-only DuckDB extractions for the knowledge artifacts; dedup happens in SQL
+to keep Python memory low."""
 
 from __future__ import annotations
 
@@ -19,18 +15,10 @@ if TYPE_CHECKING:
 
 
 class ArcExtractor:
-  """Extracts arc relationships and element metadata from a DuckDB database.
+  """Each call opens its own read-only connection.
 
-  Opens the database read-only and provides methods to extract
-  deduplicated edges, element metadata, filing counts, and
-  structure compositions for knowledge artifact generation.
-
-  Args:
-      db_path: Path to the DuckDB database file.
-      memory_limit: DuckDB memory limit (default "4GB"). Lower for large databases.
-      threads: DuckDB thread count. Lower = less memory for hash joins.
-          Default 1 to minimize peak memory on large corpora (each thread
-          creates its own hash table partition for joins).
+  ``threads`` defaults to 1: every thread builds its own hash-join partition,
+  so fewer threads means lower peak memory.
   """
 
   def __init__(
@@ -49,27 +37,15 @@ class ArcExtractor:
     conn = duckdb.connect(str(self._db_path), read_only=True)
     conn.execute(f"SET memory_limit = '{self._memory_limit}'")
     conn.execute(f"SET threads = {self._threads}")
-    # Ensure spill-to-disk uses the same directory as the database file
     temp_dir = str(self._db_path.parent)
     conn.execute(f"SET temp_directory = '{temp_dir}'")
-    # Let the hash aggregations (LIST(DISTINCT ...) over the large STRUCTURE/
-    # ASSOCIATION joins) spill to temp_directory instead of holding the whole
-    # grouping in RAM. Without this the aggregate cannot spill and dies with an
-    # internal OutOfMemoryException on the full corpus; the extractions here are
-    # all grouped/deduplicated downstream, so result row order is irrelevant.
+    # Lets the LIST(DISTINCT ...) aggregates spill instead of OOMing on the
+    # full corpus; no caller depends on row order.
     conn.execute("SET preserve_insertion_order = false")
     return conn
 
   def extract_deduplicated_edges(self) -> list[tuple[str, str, float, str]]:
-    """Extract unique (parent, child) edges with aggregated metadata.
-
-    Deduplicates across all filings in DuckDB SQL, reducing ~48.5M rows
-    to ~1-3M unique edges. DuckDB handles the heavy GROUP BY with
-    spill-to-disk; Python receives only the compact result.
-
-    Returns:
-        List of (parent_qname, child_qname, weight, association_type) tuples.
-    """
+    """Unique (parent_qname, child_qname, weight, association_type) edges across filings."""
     sql = """
       SELECT
         parent_el.qname AS parent_qname,
@@ -92,21 +68,15 @@ class ArcExtractor:
       conn.close()
 
   def extract_graph_arrow(self) -> tuple[pa.Array, pa.Table]:
-    """Extract node index and deduped edges as Arrow arrays for zero-copy CSR.
+    """(nodes, edges) as Arrow for a zero-copy CSR build.
 
-    Pushes node indexing, deduplication, and calc-first priority into DuckDB SQL.
-    Returns Arrow arrays ready for Graph.fromCSR() — no Python per-element loops.
-
-    Returns:
-        Tuple of (nodes, edges) where:
-          - nodes: Arrow string array of qnames ordered by node ID
-          - edges: Arrow table with (src: int64, dst: int64, weight: float64),
-                   deduped with calc-first priority, sorted by (src, dst)
+    ``nodes`` is qnames in node-id order; ``edges`` is (src, dst, weight) sorted
+    by (src, dst). A calculation arc wins over a presentation arc (weight 0.5)
+    between the same pair.
     """
     conn = self._connect()
     try:
-      # Materialize deduplicated edges once — both node index and edge
-      # queries read from this temp table instead of re-running the 4-table join.
+      # Materialized once so both queries below skip the 4-table join.
       conn.execute("""
         CREATE TEMPORARY TABLE _raw_edges AS
         SELECT
@@ -123,7 +93,6 @@ class ArcExtractor:
         GROUP BY parent_el.qname, child_el.qname, a.association_type
       """)
 
-      # Build node index from materialized edges
       conn.execute("""
         CREATE TEMPORARY TABLE _node_index AS
         WITH all_qnames AS (
@@ -137,13 +106,11 @@ class ArcExtractor:
         FROM all_qnames
       """)
 
-      # Get node list
       nodes_arrow = conn.execute(
         "SELECT qname FROM _node_index ORDER BY node_id"
       ).fetch_arrow_table()
       nodes = nodes_arrow.column("qname")
 
-      # Get edges with integer IDs, calc-first priority, sorted
       edges_arrow = conn.execute("""
         WITH calc_edges AS (
           SELECT ni_p.node_id AS src, ni_c.node_id AS dst,
@@ -182,15 +149,8 @@ class ArcExtractor:
       conn.close()
 
   def extract_element_filing_counts(self) -> dict[str, int]:
-    """Count distinct filings per element qname.
-
-    Uses relationship tables as bridges (FACT_HAS_ELEMENT.src = fact identifier,
-    REPORT_HAS_FACT.dst = fact identifier, REPORT_HAS_FACT.src = report identifier)
-    to count filings without scanning the Fact or Report tables themselves.
-
-    Returns:
-        Dict mapping qname to filing count.
-    """
+    """Distinct filings per qname, bridged through the relationship tables so the
+    Fact and Report tables are never scanned."""
     sql = """
       SELECT
         e.qname,
@@ -211,13 +171,7 @@ class ArcExtractor:
   def extract_structure_compositions(
     self,
   ) -> list[tuple[str, str | None, str, list[str]]]:
-    """Extract each structure's element composition for fingerprinting.
-
-    Returns:
-        List of (structure_identifier, canonical_type, definition_hash, [element_qnames]).
-        Groups elements per structure using STRUCTURE_HAS_ASSOCIATION ->
-        Association -> Element.
-    """
+    """(structure_id, canonical_type, definition_hash, [element_qnames]) per structure."""
     sql = """
       SELECT
         s.identifier,
@@ -240,16 +194,7 @@ class ArcExtractor:
       conn.close()
 
   def extract_element_disclosure_types(self) -> dict[str, str]:
-    """Extract the primary disclosure type for each element.
-
-    Joins Classification (disclosure_mechanics) through associations to elements.
-    For elements appearing in multiple disclosure structures, returns the most
-    frequent disclosure type.
-
-    Returns:
-        Dict mapping qname to primary disclosure type (e.g., "AssetsRollUp").
-        Empty dict when the staging DB has no Classification table.
-    """
+    """qname → its most frequent disclosure_mechanics type; {} without a Classification table."""
     sql = """
       WITH element_disclosures AS (
         SELECT e.qname, c.type AS disclosure_type, COUNT(*) AS freq
@@ -304,21 +249,11 @@ class ArcExtractor:
   def extract_disclosure_compositions(
     self,
   ) -> list[tuple[str, str, str, list[str]]]:
-    """Extract structure element compositions grouped by disclosure type.
+    """(structure_id, disclosure_type, definition_hash, [element_qnames]) for
+    disclosure_mechanics-labeled structures; [] without a Classification table.
 
-    Finds Disclosure-typed structures that have disclosure_mechanics
-    classifications, then collects all element qnames per
-    (structure, disclosure_type). This provides labeled training data
-    for disclosure-level composition profiles.
-
-    Only includes structures with type='Disclosure' to avoid polluting
-    profiles with Statement-typed structures (e.g., balance sheets)
-    whose elements would cause false matches in the Disclosure classifier.
-
-    Returns:
-        List of (structure_id, disclosure_type, definition_hash, [element_qnames]).
-        Only includes Disclosure structures with disclosure_mechanics classifications.
-        Empty list when the staging DB has no Classification table.
+    Disclosure-typed structures only: Statement elements would cause false
+    matches in the disclosure classifier.
     """
     sql = """
       WITH disclosure_structures AS (
@@ -364,15 +299,8 @@ class ArcExtractor:
       conn.close()
 
   def extract_disclosure_root_elements(self) -> dict[str, set[str]]:
-    """Extract elements that are roots of disclosure-mechanics structures.
-
-    Finds calculation root elements (root='True') connected to disclosure_mechanics
-    classifications. These serve as BFS seed candidates for statement classification.
-
-    Returns:
-        Dict mapping root element qname to set of disclosure types.
-        Empty dict when the staging DB has no Classification table.
-    """
+    """Calculation-root qname → disclosure types, the BFS seeds for statement
+    classification; {} without a Classification table."""
     sql = """
       SELECT DISTINCT e.qname, c.type AS disclosure_type
       FROM Classification c
@@ -405,16 +333,7 @@ class ArcExtractor:
       conn.close()
 
   def extract_element_structure_membership(self) -> dict[str, dict[str, int]]:
-    """Extract structure canonical_type membership counts per element.
-
-    For each element, counts how many structures of each canonical_type
-    contain it. `primary_statement` comes from a majority vote over these
-    counts rather than a graph BFS: the deduped graph has cross-statement arc
-    pollution (the indirect cash flow method creates IS→CF calculation arcs).
-
-    Returns qname → {canonical_type: structure_count}, covering only elements
-    that appear in a structure with a non-null canonical_type.
-    """
+    """qname → {canonical_type: structure count}, for the primary_statement vote."""
     sql = """
       WITH element_structures AS (
         SELECT e.qname, s.canonical_type, s.identifier

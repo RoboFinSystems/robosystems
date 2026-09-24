@@ -22,15 +22,6 @@ def set_ladybug_memory_override(
 
   ``graph_id`` is required when setting; passing neither argument clears every
   override.
-
-  Example:
-      old_limit = set_ladybug_memory_override(50000, graph_id="sec")
-      try:
-          pool.recreate_database("sec")
-          # ... perform materialization ...
-      finally:
-          set_ladybug_memory_override(old_limit, graph_id="sec")
-          pool.recreate_database("sec")
   """
   if graph_id:
     old_value = _memory_overrides.get(graph_id)

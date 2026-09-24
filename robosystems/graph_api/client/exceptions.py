@@ -1,8 +1,4 @@
-"""
-Graph API Client Exceptions.
-
-Defines exception hierarchy for Graph API operations.
-"""
+"""Graph API client exception hierarchy."""
 
 from typing import Any
 
@@ -22,11 +18,7 @@ class GraphAPIError(Exception):
 
 
 class GraphTransientError(GraphAPIError):
-  """
-  Transient errors that can be retried.
-
-  Examples: Network timeouts, 503 Service Unavailable, 502 Bad Gateway
-  """
+  """Retryable: network timeouts, 502/503/504."""
 
   pass
 
@@ -38,31 +30,18 @@ class GraphTimeoutError(GraphTransientError):
 
 
 class GraphClientError(GraphAPIError):
-  """
-  Client errors that should not be retried.
-
-  Examples: 400 Bad Request, 404 Not Found, 422 Unprocessable Entity
-  """
+  """Not retried: 4xx responses."""
 
   pass
 
 
 class GraphSyntaxError(GraphClientError):
-  """
-  Query syntax/schema errors that should never be retried.
-
-  Examples: Parser exceptions, Binder exceptions, Invalid input, Missing properties/tables
-  These errors indicate fundamental issues with the query that will never succeed.
-  """
+  """Query syntax or schema errors; never retried, even when sent as a 500."""
 
   pass
 
 
 class GraphServerError(GraphAPIError):
-  """
-  Server errors that might be retriable.
-
-  Examples: 500 Internal Server Error
-  """
+  """Other 5xx responses; retried."""
 
   pass

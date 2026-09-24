@@ -1,25 +1,10 @@
-"""Batch LanceDB IVF-PQ vector index builder for graph instances.
+"""Batch LanceDB IVF-PQ vector index builder, one index per graph + table.
 
-DORMANT — NOT DEAD CODE. Only ``delete`` is on a live path (called when a
-database is dropped, to tear down the graph's whole lance directory including
-memory). ``build``/``search``/``export`` have no caller: the live vector path
-is LadybugDB-native in-graph HNSW (``CALL QUERY_VECTOR_INDEX``). This is kept
-as the IVF-PQ foundation for the planned ``lance`` vector-store subgraph,
-which pairs this batch side with the incremental-CRUD side of
-``LanceMemoryStore``. Do not remove without retiring that plan.
+Dormant, kept deliberately: only ``delete`` is live (database drop). The live
+vector path is LadybugDB's in-graph HNSW; ``build``/``search``/``export`` are
+the batch side of a planned lance vector-store subgraph.
 
-Per-graph, per-table indexes with a lifecycle mirroring DuckDB staging:
-
-  build:  DuckDB staging query → IVF-PQ lance index (atomic directory swap)
-  search: query the index by embedding similarity
-  export: package as tar.gz for S3 publish / replica download
-  delete: remove the index when a graph is deleted or rebuilt
-
-On disk:
-  {LANCE_INDEX_PATH}/{graph_id}/{table_name}/{table_name}.lance/
-
-Embedding column convention: one column named "embedding", type FLOAT[] with
-the dimension auto-detected; rows with NULL embeddings are excluded.
+On disk: ``{LANCE_INDEX_PATH}/{graph_id}/{table_name}/{table_name}.lance/``
 """
 
 from __future__ import annotations
@@ -38,16 +23,12 @@ from robosystems.utils.path_validation import (
 
 logger = logging.getLogger(__name__)
 
-# Minimum rows to build IVF-PQ index; below this brute-force is fine
+# Below this row count brute-force search is fine and no index is built.
 _MIN_ROWS_FOR_INDEX = 1000
 
 
 class LanceManager:
-  """Build, search, export and delete LanceDB vector indexes.
-
-  Each graph + table pair gets its own lance directory, built from a DuckDB
-  staging table carrying an embedding column.
-  """
+  """Build, search, export and delete LanceDB vector indexes."""
 
   def __init__(self, base_path: str | None = None) -> None:
     if base_path is None:
@@ -57,20 +38,12 @@ class LanceManager:
     self.base_path = Path(base_path)
     self.base_path.mkdir(parents=True, exist_ok=True)
 
-  # ---------------------------------------------------------------------------
-  # Path helpers
-  # ---------------------------------------------------------------------------
-
   def _graph_dir(self, graph_id: str) -> Path:
     """Get the lance directory for a graph (path-validated)."""
     return get_lance_index_path(graph_id, base_path=str(self.base_path))
 
   def _table_dir(self, graph_id: str, table_name: str) -> Path:
-    """Get the lance DB directory for a specific table's index (path-validated).
-
-    LanceDB creates {table_name}.lance/ inside this directory, so the full
-    on-disk path is: {base_path}/{graph_id}/{table_name}/{table_name}.lance/
-    """
+    """Path-validated directory LanceDB creates ``{table_name}.lance/`` in."""
     return get_lance_index_path(graph_id, table_name, base_path=str(self.base_path))
 
   def _build_dir(self, graph_id: str, table_name: str) -> Path:
@@ -105,10 +78,6 @@ class LanceManager:
     except Exception as e:
       logger.warning(f"Could not read index info for {graph_id}/{table_name}: {e}")
       return None
-
-  # ---------------------------------------------------------------------------
-  # Build: DuckDB staging → LanceDB index
-  # ---------------------------------------------------------------------------
 
   def build(
     self,
@@ -162,10 +131,8 @@ class LanceManager:
 
     logger.info(f"Building lance index for {graph_id}/{table_name} from {duckdb_path}")
 
-    # Borrow the pool's connection rather than opening our own: DuckDB refuses
-    # a second connection with a different config (read_only vs read_write, a
-    # different memory_limit) on the same file, and the pool already holds the
-    # one staging used.
+    # DuckDB refuses a second, differently configured connection to the same
+    # file, and the pool already holds one.
     try:
       from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
@@ -266,10 +233,6 @@ class LanceManager:
       "path": str(final_dir),
     }
 
-  # ---------------------------------------------------------------------------
-  # Search: query the lance index
-  # ---------------------------------------------------------------------------
-
   def search(
     self,
     graph_id: str,
@@ -321,10 +284,6 @@ class LanceManager:
       "total": len(normalized),
       "execution_time_ms": round(elapsed_ms, 2),
     }
-
-  # ---------------------------------------------------------------------------
-  # Export: package index as tar.gz for S3 publish
-  # ---------------------------------------------------------------------------
 
   def export(
     self,
@@ -397,10 +356,6 @@ class LanceManager:
       output_path.unlink(missing_ok=True)
 
     return result
-
-  # ---------------------------------------------------------------------------
-  # Delete: clean up lance index
-  # ---------------------------------------------------------------------------
 
   def delete(self, graph_id: str, table_name: str | None = None) -> dict:
     """Delete one table's lance index, or the graph's whole lance directory
