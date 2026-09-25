@@ -64,20 +64,7 @@ def cancel_repository_subscription(
     session, immediate=immediate or subscription.current_period_end is None
   )
 
-  if subscriber_id and repository_id:
-    user_repo = UserRepository.get_by_user_and_repository(
-      user_id=subscriber_id,
-      repository_name=repository_id,
-      session=session,
-    )
-    if user_repo:
-      if subscription.ends_at and not immediate:
-        user_repo.expires_at = subscription.ends_at
-        user_repo.next_billing_at = None
-        user_repo.updated_at = subscription.updated_at
-        session.commit()
-      else:
-        user_repo.revoke_access(session, reason="Subscription canceled")
+  reconcile_repository_grant(subscription, session)
 
   BillingAuditLog.log_event(
     session=session,
@@ -158,3 +145,144 @@ def cancel_user_repository_subscriptions(
     )
 
   return canceled
+
+
+# The suspension reason `reconcile_repository_grant` writes, so it restores
+# only a suspension of its own, never an admin or off-boarding revoke. Kept on
+# the grant as well as its credit pool, since a plan may have no pool.
+UNPAID_SUSPENSION = "subscription_unpaid"
+
+
+def _grant_suspension(grant: UserRepository) -> str | None:
+  import json
+
+  try:
+    meta = json.loads(grant.extra_metadata) if grant.extra_metadata else {}
+  except (TypeError, ValueError):
+    return None
+  return meta.get("suspended_by") if isinstance(meta, dict) else None
+
+
+def _set_grant_suspension(grant: UserRepository, reason: str | None) -> None:
+  import json
+
+  try:
+    meta = json.loads(grant.extra_metadata) if grant.extra_metadata else {}
+  except (TypeError, ValueError):
+    meta = {}
+  if not isinstance(meta, dict):
+    meta = {}
+  if reason is None:
+    meta.pop("suspended_by", None)
+  else:
+    meta["suspended_by"] = reason
+  grant.extra_metadata = json.dumps(meta) if meta else None
+
+
+def _as_utc(value):
+  from datetime import UTC
+
+  if value is not None and value.tzinfo is None:
+    return value.replace(tzinfo=UTC)
+  return value
+
+
+def _current_subscription(
+  session: Session, user_id: str, repository: str
+) -> BillingSubscription | None:
+  """The member's most recent subscription to this repository: the one the
+  grant answers to. An older subscription's late events must not move it."""
+  return (
+    session.query(BillingSubscription)
+    .filter(
+      BillingSubscription.resource_type == "repository",
+      BillingSubscription.user_id == user_id,
+      BillingSubscription.resource_id == repository,
+    )
+    .order_by(BillingSubscription.created_at.desc(), BillingSubscription.id.desc())
+    .first()
+  )
+
+
+def reconcile_repository_grant(
+  subscription: BillingSubscription, session: Session
+) -> None:
+  """Make the member's repository grant and credit pool agree with the
+  subscription's status, whichever side of Stripe changed it.
+
+  Acts only for the member's current subscription to the repository. Active:
+  access with no expiry, lifting a suspension this function made or any revoke
+  from before this subscription started (a re-subscribe). Canceled with a
+  future ``ends_at``: access until then. Canceled otherwise: revoked.
+  ``unpaid`` (retries exhausted): suspended until a payment revives it.
+  ``past_due`` leaves the grant as it is: the grace policy is still open.
+  """
+  from datetime import UTC, datetime
+
+  if subscription.resource_type != "repository":
+    return
+  user_id, repository = subscription.user_id, subscription.resource_id
+  if not user_id or not repository:
+    return
+  current = _current_subscription(session, user_id, repository)
+  if current is None or current.id != subscription.id:
+    return
+  grant = UserRepository.get_by_user_and_repository(
+    user_id=user_id, repository_name=repository, session=session
+  )
+  if grant is None:
+    return
+
+  now = datetime.now(UTC)
+  status = subscription.status
+  credits = grant.user_credits
+  ends_at = _as_utc(subscription.ends_at)
+  started_at = _as_utc(subscription.started_at)
+
+  def _before_this_subscription(moment) -> bool:
+    moment = _as_utc(moment)
+    return bool(started_at and moment and moment <= started_at)
+
+  if status == "active":
+    ours = _grant_suspension(grant) == UNPAID_SUSPENSION or (
+      credits is not None and credits.suspension_reason == UNPAID_SUSPENSION
+    )
+    if not grant.is_active and not (
+      ours or _before_this_subscription(grant.expires_at)
+    ):
+      return
+    changed = not grant.is_active or grant.expires_at is not None or ours
+    grant.is_active = True
+    grant.expires_at = None
+    _set_grant_suspension(grant, None)
+    if (
+      credits is not None
+      and not credits.is_active
+      and (
+        ours
+        or credits.suspension_reason == UNPAID_SUSPENSION
+        or _before_this_subscription(credits.suspended_at)
+      )
+    ):
+      credits.is_active = True
+      credits.suspended_at = None
+      credits.suspension_reason = None
+      changed = True
+    if changed:
+      grant.updated_at = now
+      session.commit()
+      grant.invalidate_access_cache()
+  elif status == "canceled" and ends_at is not None and ends_at > now:
+    if grant.is_active and _as_utc(grant.expires_at) != ends_at:
+      grant.expires_at = ends_at
+      grant.next_billing_at = None
+      grant.updated_at = now
+      session.commit()
+      grant.invalidate_access_cache()
+  elif status == "canceled":
+    if grant.is_active:
+      grant.revoke_access(session, reason="Subscription ended")
+  elif status == "unpaid":
+    if grant.is_active:
+      _set_grant_suspension(grant, UNPAID_SUSPENSION)
+      grant.revoke_access(session, reason=UNPAID_SUSPENSION)

@@ -358,6 +358,12 @@ async def run_user_repository_provisioning(
 
       subscription.resource_id = repository_name
       subscription.activate(db)
+      # A re-subscribe inherits the grant an earlier subscription ended.
+      from robosystems.operations.billing.repository_subscriptions import (
+        reconcile_repository_grant,
+      )
+
+      reconcile_repository_grant(subscription, db)
 
       BillingAuditLog.log_event(
         session=db,
