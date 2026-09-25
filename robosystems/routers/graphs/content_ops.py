@@ -503,7 +503,9 @@ async def create_file_upload_op(
   description="Mark an uploaded file ready and stage it into DuckDB. Small files "
   "stage directly (sync); large files stage via a background job (returns a "
   "pending envelope with an `operation_id` to monitor). Set `ingest_to_graph` to "
-  "auto-materialize into the graph after staging.",
+  "auto-materialize into the graph after staging; that write takes the graph's "
+  "materialize lock, so it returns 409 while another materialization of the "
+  "graph is running.",
   tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
