@@ -17,10 +17,14 @@ class SECMetadataLoader:
     # The live SEC header per CIK, read once when its snapshot missed an
     # accession and searched for every later miss from that filer.
     self._live: dict[str, dict] = {}
+    # Every page of a CIK's history, read once when a miss is older than the
+    # live header's recent page.
+    self._complete: dict[str, dict] = {}
 
   def clear_cache(self) -> None:
     self._cache.clear()
     self._live.clear()
+    self._complete.clear()
 
   def _load_submissions_from_s3(self, s3_client, bucket: str, cik: str) -> dict | None:
     """Load a CIK's submissions snapshot from S3, or None if absent."""
@@ -46,7 +50,10 @@ class SECMetadataLoader:
     Uses the download phase's S3 snapshot, calling the SEC API without one,
     or once per CIK when the snapshot does not hold the accession.
     """
-    from robosystems.adapters.sec.client.edgar import edgar_client
+    from robosystems.adapters.sec.client.edgar import (
+      complete_submissions_strict,
+      edgar_client,
+    )
 
     submissions: dict[str, Any] | None = None
 
@@ -99,10 +106,23 @@ class SECMetadataLoader:
         )
         self._live[cik] = cast(dict[str, Any], edgar_client().submissions(cik))
       sec_report = _find_report(self._live[cik], accession)
+    if sec_report is None and _declares_pages(self._live[cik]):
+      # An older filing lives only in a pagination page. A page that fails
+      # raises, so the filing fails as retryable instead of losing its form.
+      if cik not in self._complete:
+        self._complete[cik] = complete_submissions_strict(cik)
+      sec_report = _find_report(self._complete[cik], accession)
     if sec_report is None:
       sec_report = {"accessionNumber": accession}
 
     return sec_filer, sec_report
+
+
+def _declares_pages(submissions: dict) -> bool:
+  """Whether a live submissions header lists pagination files beyond its
+  recent page."""
+  filings = submissions.get("filings")
+  return isinstance(filings, dict) and bool(filings.get("files"))
 
 
 def _find_report(submissions: dict, accession: str) -> dict | None:
