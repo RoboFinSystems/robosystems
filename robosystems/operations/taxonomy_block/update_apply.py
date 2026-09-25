@@ -208,6 +208,8 @@ def apply_associations_to_add(
       raise ValueError(f"association from_ref {req.from_ref!r} did not resolve.")
     if to_id is None:
       raise ValueError(f"association to_ref {req.to_ref!r} did not resolve.")
+    if req.association_type == "mapping":
+      _assert_mapping_leaf(session, to_id)
     assoc = Association(
       structure_id=structure_id,
       from_element_id=from_id,
@@ -549,3 +551,15 @@ __all__ = [
   "apply_structures_to_update",
   "apply_top_level_fields",
 ]
+
+
+def _assert_mapping_leaf(session: Session, to_element_id: str) -> None:
+  """A mapping arc written here obeys the same leaf rule as
+  ``create-mapping-association``."""
+  from robosystems.operations.roboledger.commands.taxonomies import (
+    _assert_leaf_target,
+  )
+
+  target = session.get(Element, to_element_id)
+  if target is not None:
+    _assert_leaf_target(session, target)

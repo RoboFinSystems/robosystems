@@ -102,8 +102,16 @@ def _build_entity_match(
 _REPORT_STANDING = {"filed": 3, None: 2, "draft": 1, "under_review": 1, "archived": 0}
 
 
-def _report_standing(graph_id: str, fact_ids: list[str]) -> dict[str, tuple]:
-  """``fact_id -> (standing, last_generated)`` from the tenant's OLTP."""
+def _tenant_fact_context(
+  graph_id: str, fact_ids: list[str]
+) -> tuple[dict[str, tuple], set[str]]:
+  """From the tenant's OLTP: ``fact_id -> (standing, last_generated)``, and the
+  ids of schedule facts.
+
+  A schedule fact is one schedule's planned amount, not the account's value:
+  two schedules on one account would otherwise dedup to one of them, and
+  projections years out would crowd the actuals.
+  """
   from sqlalchemy import text
 
   from robosystems.db.extensions import extensions_session
@@ -111,7 +119,7 @@ def _report_standing(graph_id: str, fact_ids: list[str]) -> dict[str, tuple]:
   with extensions_session(graph_id) as session:
     rows = session.execute(
       text("""
-        SELECT f.id, r.filing_status, r.last_generated
+        SELECT f.id, r.filing_status, r.last_generated, fs.factset_type
         FROM facts f
         LEFT JOIN fact_sets fs ON fs.id = f.fact_set_id
         LEFT JOIN reports r ON r.id = fs.report_id
@@ -119,10 +127,12 @@ def _report_standing(graph_id: str, fact_ids: list[str]) -> dict[str, tuple]:
       """),
       {"ids": fact_ids},
     ).fetchall()
-  return {
+  standing = {
     row.id: (_REPORT_STANDING.get(row.filing_status, 1), str(row.last_generated or ""))
     for row in rows
   }
+  schedule_ids = {row.id for row in rows if row.factset_type == "schedule"}
+  return standing, schedule_ids
 
 
 def _deduplicate_fact_rows(
@@ -268,7 +278,10 @@ async def query_fact_grid(
   fact_ids = [row["fact_id"] for row in results if row.get("fact_id")]
   if fact_ids and not is_shared_repository_or_subgraph(graph_id):
     try:
-      standing = await run_off_loop(_report_standing, graph_id, fact_ids)
+      standing, schedule_ids = await run_off_loop(
+        _tenant_fact_context, graph_id, fact_ids
+      )
+      results = [row for row in results if row.get("fact_id") not in schedule_ids]
     except Exception as exc:
       # A graph with no ledger schema (a generic subgraph) keeps the precision rule.
       logger.warning(f"Report standing unavailable for {graph_id}: {exc}")

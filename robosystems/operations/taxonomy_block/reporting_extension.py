@@ -221,6 +221,8 @@ def create(
         f"association to_ref {req.to_ref!r} does not resolve in this "
         f"envelope or in parent_taxonomy_id {payload.parent_taxonomy_id!r}."
       )
+    if req.association_type == "mapping":
+      _assert_mapping_leaf(session, to_id)
     association = Association(
       structure_id=structure.id,
       from_element_id=from_id,
@@ -539,3 +541,15 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
     structure_count=len(structures),
     association_count=len(associations),
   )
+
+
+def _assert_mapping_leaf(session: Session, to_element_id: str) -> None:
+  """A mapping arc written here obeys the same leaf rule as
+  ``create-mapping-association``."""
+  from robosystems.operations.roboledger.commands.taxonomies import (
+    _assert_leaf_target,
+  )
+
+  target = session.get(Element, to_element_id)
+  if target is not None:
+    _assert_leaf_target(session, target)

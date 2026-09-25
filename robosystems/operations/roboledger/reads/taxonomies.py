@@ -225,7 +225,6 @@ def suggest_mapping_candidates(
     return []
 
   from robosystems.operations.operators.implementations.mapping.constants import (
-    RS_GAAP_SUBTOTAL_DENYLIST,
     RS_GAAP_SYNTHESIZED_DETAIL_ALLOW,
   )
 
@@ -261,16 +260,15 @@ def suggest_mapping_candidates(
     candidate_liquidity = _liquidity_by_element(session, [r.id for r in rows])
     rows = [r for r in rows if candidate_liquidity.get(r.id) in (None, liquidity)]
 
-  # With a seeded Style, deny only targets that roll up on it (on a thin Style
-  # the concept may be the leaf); otherwise fall back to the static denylist.
-  rollup_set = (
-    _load_rollup_concepts(session, reporting_style_id) if reporting_style_id else set()
+  # Same rule as the mapping write path (``_assert_leaf_target``).
+  from robosystems.operations.roboledger.reports.network_picker import (
+    DEFAULT_STYLE_ID,
   )
 
+  subtotals = load_subtotal_concepts(session, reporting_style_id or DEFAULT_STYLE_ID)
+
   def _denied(r) -> bool:
-    if rollup_set:
-      return r.id in rollup_set
-    return r.qname in RS_GAAP_SUBTOTAL_DENYLIST
+    return is_subtotal_target(r, subtotals)
 
   # PP&E gross and accumulated depreciation are absorbed into a synthesized
   # PP&E Net at render, but are the right grain for fixed-asset and contra
@@ -413,6 +411,50 @@ def _load_rollup_concepts(
   except (AttributeError, TypeError):
     pass
   return result
+
+
+_SUBTOTAL_CONCEPTS_ATTR_PREFIX = "_subtotal_concepts_cache_"
+
+# The renderer emits net income itself (``fact_grid._emit_net_income_facts``),
+# whether or not a calculation arc names it.
+_NET_INCOME_QNAME = "rs-gaap:NetIncomeLoss"
+
+
+def load_subtotal_concepts(session: Session, reporting_style_id: str) -> set[str]:
+  """Element ids a statement computes rather than reads: presentation parents
+  on the Style's networks, and parents of any rs-gaap calculation arc. A direct
+  fact on either overrides the computed value, so neither is a mapping target.
+
+  Empty means nothing is seeded (callers use the static denylist). Cached on
+  the session per style id.
+  """
+  from robosystems.operations.roboledger.reports.calc_dag import (
+    load_rs_gaap_calculations,
+  )
+
+  cache_attr = f"{_SUBTOTAL_CONCEPTS_ATTR_PREFIX}{reporting_style_id}"
+  cached = getattr(session, cache_attr, None)
+  if isinstance(cached, set):
+    return cached
+  result = _load_rollup_concepts(session, reporting_style_id) | set(
+    load_rs_gaap_calculations(session)
+  )
+  try:
+    setattr(session, cache_attr, result)
+  except (AttributeError, TypeError):
+    pass
+  return result
+
+
+def is_subtotal_target(element: Element, subtotals: set[str]) -> bool:
+  """Whether mapping an account to ``element`` would override a computed total."""
+  from robosystems.operations.operators.implementations.mapping.constants import (
+    RS_GAAP_SUBTOTAL_DENYLIST,
+  )
+
+  if subtotals:
+    return element.id in subtotals or element.qname == _NET_INCOME_QNAME
+  return element.qname in RS_GAAP_SUBTOTAL_DENYLIST
 
 
 def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
