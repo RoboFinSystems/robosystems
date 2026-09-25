@@ -225,3 +225,61 @@ class TestCreditAllocation:
 
     test_db.refresh(pool)
     assert pool.next_allocation_date == due_before
+
+
+def _resubscribe(session, member, test_org):
+  """A second subscription to the same repository, provisioned the way the
+  provisioning service does it: the grant reactivated, then reconciled."""
+  from robosystems.operations.billing.repository_subscriptions import (
+    reconcile_repository_grant,
+  )
+
+  newer = BillingSubscription.create_subscription(
+    org_id=test_org.id,
+    resource_type="repository",
+    resource_id="sec",
+    plan_name="sec-starter",
+    base_price_cents=4900,
+    session=session,
+    user_id=member.id,
+  )
+  newer.activate(session)
+  newer.stripe_subscription_id = f"sub_test_{uuid4().hex[:10]}"
+  session.commit()
+  grant = UserRepository.get_by_user_and_repository(member.id, "sec", session)
+  grant.is_active = True
+  session.commit()
+  reconcile_repository_grant(newer, session)
+  return newer
+
+
+class TestResubscribe:
+  async def test_the_old_subscriptions_late_end_leaves_the_new_one_alone(
+    self, test_db, test_user, test_org
+  ):
+    member, older, _grant = _subscribed(test_db, test_user, test_org)
+    with patch(PROVIDER, return_value=MagicMock()):
+      cancel_repository_subscription(
+        older, session=test_db, actor_user_id=member.id, immediate=False
+      )
+    _resubscribe(test_db, member, test_org)
+    assert _has_access(test_db, member)
+
+    past = datetime.now(UTC) - timedelta(minutes=1)
+    await _handle_subscription_deleted(
+      _event(older, "canceled", period_end=past), test_db, MagicMock()
+    )
+    assert _has_access(test_db, member)
+
+  async def test_a_resubscribe_restores_access_and_credits_an_ended_one_took(
+    self, test_db, test_user, test_org
+  ):
+    member, older, grant = _subscribed(test_db, test_user, test_org)
+    await _handle_subscription_deleted(_event(older, "canceled"), test_db, MagicMock())
+    assert not _has_access(test_db, member)
+
+    _resubscribe(test_db, member, test_org)
+    test_db.refresh(grant)
+    assert _has_access(test_db, member)
+    assert grant.expires_at is None
+    assert grant.user_credits.is_active is True

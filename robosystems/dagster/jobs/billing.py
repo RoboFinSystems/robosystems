@@ -21,6 +21,7 @@ from robosystems.models.core import (
   UserRepositoryCredits,
 )
 from robosystems.models.core.graph.graph_credits import CreditTransactionType
+from robosystems.models.core.user.user_repository import RepositoryAccessLevel
 from robosystems.operations.graph.credit_service import CreditService
 
 BILLING_SCHEDULE_STATUS = (
@@ -510,6 +511,7 @@ async def _handle_payment_failed(
 
     db_session.commit()
     subscription._invalidate_access_cache()
+    _reconcile_repository_grant(subscription, db_session)
 
   BillingAuditLog.log_event(
     session=db_session,
@@ -1176,6 +1178,7 @@ def allocate_user_repository_credits(
         UserRepositoryCredits.is_active.is_(True),
         # A grant that ran out (a period-end cancel) earns no more credits.
         UserRepository.is_active.is_(True),
+        UserRepository.access_level != RepositoryAccessLevel.NONE,
         (UserRepository.expires_at.is_(None)) | (UserRepository.expires_at > now),
         (UserRepositoryCredits.next_allocation_date.is_(None))
         | (UserRepositoryCredits.next_allocation_date <= now),
