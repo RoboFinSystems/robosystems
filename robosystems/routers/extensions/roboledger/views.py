@@ -76,19 +76,32 @@ _OP_TAG = "RoboLedger: Analytical Views"
 _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 
 
-def _require_readable_graph(
+async def _require_readable_graph(
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  _user: User = Depends(get_current_user_with_graph),
+  user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_db_session),
 ) -> None:
-  """Lifecycle/subscription gate (read strength) for the analytical views.
+  """Lifecycle/subscription gate (read strength) for the analytical views,
+  then the shared repositories' per-plan read limits.
 
   Not `require_graph_extension`, which refuses shared repos; this is the same
   `require_graph_access` check, and shared repos pass (their access is
-  per-user). Depends on the auth dependency so graph state is never
-  observable before authentication.
+  per-user). A view read counts as a query, like the REST Cypher route.
+  Depends on the auth dependency so graph state is never observable before
+  authentication.
+
+  Views accept an Idempotency-Key and do not use it: a read has nothing to
+  deduplicate, and a replay record would hold the whole result in the shared
+  cache for a day.
   """
+  from robosystems.routers.graphs.query.execute import (
+    _check_shared_repository_limits,
+  )
+
   require_graph_access(graph_id, session, require_write=False)
+  await _check_shared_repository_limits(
+    graph_id, user, session, endpoint="query", operation="query"
+  )
 
 
 _READABLE_GRAPH = Depends(_require_readable_graph)
@@ -121,7 +134,7 @@ async def build_fact_grid_op(
     operation_name="build-fact-grid",
     graph_id=graph_id,
     user_id=str(user.id),
-    idempotency_key=idempotency_key,
+    idempotency_key=None,  # see _require_readable_graph: reads keep no replay
     body_fingerprint=fingerprint_body(body),
   )
 
@@ -228,7 +241,7 @@ async def financial_statement_analysis_op(
     operation_name="financial-statement-analysis",
     graph_id=graph_id,
     user_id=str(user.id),
-    idempotency_key=idempotency_key,
+    idempotency_key=None,  # see _require_readable_graph: reads keep no replay
     body_fingerprint=fingerprint_body(body),
   )
 
@@ -386,7 +399,7 @@ async def disclosures_op(
     operation_name="disclosures",
     graph_id=graph_id,
     user_id=str(user.id),
-    idempotency_key=idempotency_key,
+    idempotency_key=None,  # see _require_readable_graph: reads keep no replay
     body_fingerprint=fingerprint_body(body),
   )
 
@@ -449,7 +462,7 @@ async def information_block_op(
     operation_name="information-block",
     graph_id=graph_id,
     user_id=str(user.id),
-    idempotency_key=idempotency_key,
+    idempotency_key=None,  # see _require_readable_graph: reads keep no replay
     body_fingerprint=fingerprint_body(body),
   )
 
