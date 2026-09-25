@@ -182,7 +182,9 @@ class MaterializeOp(BaseModel):
       "Rebuild the graph from scratch, dropping existing data. Required "
       "(staged source) when materializing new uploads into a graph that "
       "already contains materialized data — staging replays all uploaded "
-      "files, so a non-rebuild pass would re-copy ingested rows (409)."
+      "files, so a non-rebuild pass would re-copy ingested rows (409). An "
+      "extensions source always rebuilds a graph that already exists: the "
+      "new copy is built alongside and swapped in, regardless of this flag."
     ),
   )
   dry_run: bool = Field(
