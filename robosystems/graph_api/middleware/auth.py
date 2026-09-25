@@ -92,6 +92,8 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
       self.key_source is not None
       and now - self.keys_loaded_at > self.KEY_REFRESH_SECONDS
     ):
+      # Stamped before the read so concurrent requests do not all reload.
+      self.keys_loaded_at = now
       await asyncio.to_thread(self._load_keys)
 
     try:
@@ -104,6 +106,7 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
           or time.time() - self.keys_loaded_at < self.KEY_MISS_REFRESH_SECONDS
         ):
           raise
+        self.keys_loaded_at = time.time()
         await asyncio.to_thread(self._load_keys)
         self._validate_api_key(request)
       if client_ip in self.failed_attempts:
@@ -223,8 +226,14 @@ def read_graph_api_keys() -> tuple[str | None, str | None]:
   import json
 
   import boto3
+  from botocore.config import Config
 
-  client = boto3.client("secretsmanager", region_name=env.AWS_REGION)
+  # Called on the request path: a slow Secrets Manager must fail fast.
+  client = boto3.client(
+    "secretsmanager",
+    region_name=env.AWS_REGION,
+    config=Config(connect_timeout=2, read_timeout=5, retries={"max_attempts": 2}),
+  )
   secret_id = f"robosystems/{env.ENVIRONMENT}/graph-api"
 
   def _key(stage: str) -> str | None:
