@@ -171,6 +171,15 @@ class TestRoboLedgerRouteToolProfile:
     unmatched = ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS - real
     assert unmatched == set(), f"exclusions matching no real tool: {sorted(unmatched)}"
 
+  def test_the_report_bundle_link_stays_off_the_chat_route(self, all_flags_on):
+    from robosystems.middleware.mcp.tools.manager import (
+      ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
+    )
+
+    real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
+    assert "get-report-bundle" in real
+    assert "get-report-bundle" in ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
+
   def test_the_accounting_surface_survives_the_cut(self, all_flags_on):
     from robosystems.middleware.mcp.tools.manager import (
       ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,

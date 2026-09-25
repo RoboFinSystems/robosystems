@@ -159,6 +159,7 @@ delegates to `robosystems.operations.roboledger.{reads,commands}.*`.
 | `backfill-plan-history` | `commands/fiscal_calendar.backfill_plan_history` |
 | `get-period-close-status` | `reads/schedules.get_period_close_status` |
 | `list-period-drafts` | `reads/period_drafts.list_period_drafts` |
+| `get-report-bundle` | `reads/reports.get_report_download_url` |
 | `get-information-block` | `operations/information_block/reads.get_information_block` |
 | `list-information-blocks` | `operations/information_block/reads.list_information_blocks` |
 | `create-information-block` | `operations/information_block/commands.create_information_block` |
