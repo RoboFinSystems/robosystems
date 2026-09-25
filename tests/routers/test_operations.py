@@ -263,7 +263,9 @@ class TestCancelOperation:
   @pytest.mark.unit
   async def test_cancel_running_operation(self):
     """Cancelling a running operation calls event_storage.cancel_operation."""
-    metadata = _make_mock_metadata(status=OperationStatus.RUNNING)
+    metadata = _make_mock_metadata(
+      operation_type="operator", status=OperationStatus.RUNNING
+    )
     mock_storage = AsyncMock()
     mock_storage.get_operation_metadata.return_value = metadata
     mock_user = _make_mock_user()
@@ -333,6 +335,40 @@ class TestCancelOperation:
         )
 
     assert exc_info.value.status_code == 409
+
+  @pytest.mark.unit
+  async def test_a_running_tier_change_cannot_be_cancelled(self):
+    """A tier migration runs to the end; recording CANCELLED mid-migration
+    left a sticky status over one that then completed."""
+    metadata = _make_mock_metadata(
+      operation_type="graph_tier_upgrade", status=OperationStatus.RUNNING
+    )
+    mock_storage = AsyncMock()
+    mock_storage.get_operation_metadata.return_value = metadata
+
+    p_storage, p_metrics = _make_patches(mock_storage)
+    with p_storage, p_metrics:
+      with pytest.raises(HTTPException) as exc_info:
+        await cancel_operation(operation_id="op_123", current_user=_make_mock_user())
+
+    assert exc_info.value.status_code == 409
+    mock_storage.cancel_operation.assert_not_called()
+
+  @pytest.mark.unit
+  async def test_a_queued_tier_change_can_still_be_cancelled(self):
+    metadata = _make_mock_metadata(
+      operation_type="graph_tier_upgrade", status=OperationStatus.PENDING
+    )
+    mock_storage = AsyncMock()
+    mock_storage.get_operation_metadata.return_value = metadata
+
+    p_storage, p_metrics = _make_patches(mock_storage)
+    with p_storage, p_metrics:
+      result = await cancel_operation(
+        operation_id="op_123", current_user=_make_mock_user()
+      )
+
+    assert result["status"] == "cancelled"
 
 
 @pytest.mark.asyncio
