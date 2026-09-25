@@ -12,11 +12,16 @@ from robosystems.adapters.sec.pipeline.catalog import (
   filers,
   filings_by_cik,
   index_row,
+  read_corpus,
   read_manifests,
   read_prior_renderable,
   renderable,
   renderable_summary,
   viewer_link,
+)
+from robosystems.adapters.sec.pipeline.configs import (
+  SEC_START_YEAR,
+  SECFilingCatalogConfig,
 )
 from robosystems.config.storage.shared import (
   get_filing_artifact_key,
@@ -309,6 +314,19 @@ class TestReads:
     partitions = corpus_partitions(2025)
     assert partitions[0] == "2025-Q1"
     assert all(int(p[:4]) >= 2025 for p in partitions)
+
+  def test_catalog_spans_every_processed_year_not_the_graphs_range(self):
+    # The graph starts at 2024; the CDN artifacts go back further and are
+    # only reachable through the catalog.
+    config = SECFilingCatalogConfig()
+    assert config.start_year == SEC_START_YEAR
+    assert corpus_partitions(config.start_year)[0] == f"{SEC_START_YEAR}-Q1"
+
+  def test_a_year_with_nothing_processed_folds_empty(self):
+    s3 = MagicMock()
+    s3.get_paginator.return_value.paginate.return_value = [{}]
+    reports, entities, relationships = read_corpus(s3, "bucket", ["2009-Q1"])
+    assert reports.empty and entities.empty and relationships.empty
 
   def test_read_manifests_returns_none_for_a_missing_manifest(self):
     s3 = MagicMock()
