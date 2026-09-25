@@ -1,5 +1,9 @@
-"""Sensor that requeues worker tasks in-flight past their timeout (a crashed worker),
-or moves them to the DLQ after max retries. Runs in the always-on daemon."""
+"""Sensor that requeues worker tasks left in-flight by a crashed worker, or moves
+them to the DLQ after max retries. Runs in the always-on daemon.
+
+A worker whose heartbeat key is live still owns its inflight list and removes
+each task itself, however long it runs; requeuing one would run it twice.
+"""
 
 import json
 import time
@@ -18,6 +22,7 @@ from robosystems.worker.constants import (
   DEFAULT_TASK_TIMEOUT,
   MAX_RETRIES,
   TASK_TIMEOUTS,
+  worker_heartbeat_key,
 )
 
 logger = get_logger(__name__)
@@ -78,6 +83,9 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
     cleaned = 0
 
     for inflight_key in inflight_keys:
+      worker_id = inflight_key.removeprefix("worker:inflight:")
+      if queue.exists(worker_heartbeat_key(worker_id)):
+        continue
       tasks = queue.lrange(inflight_key, 0, -1)
 
       for task_json in tasks:

@@ -33,3 +33,12 @@ DEFAULT_TASK_TIMEOUT = 120
 
 # Attempts before a task moves to the DLQ
 MAX_RETRIES = 3
+
+# A live worker refreshes its heartbeat key; the reaper never takes a task from
+# a worker that is still beating, since that worker removes its own tasks.
+WORKER_HEARTBEAT_INTERVAL = 30
+WORKER_HEARTBEAT_TTL = 90
+
+
+def worker_heartbeat_key(worker_id: str) -> str:
+  return f"worker:alive:{worker_id}"
