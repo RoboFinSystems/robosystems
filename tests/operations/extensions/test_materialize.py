@@ -1112,6 +1112,38 @@ class TestScenarioExclusion:
         )
 
 
+class TestAnExistingGraphAlwaysRebuildsBlueGreen:
+  """``rebuild`` defaults to false on the API and the MCP tool. In place into a
+  populated graph, the ledger's COPY collides on primary keys."""
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize("rebuild", [True, False])
+  async def test_a_populated_graph_is_rebuilt_alongside(self, rebuild):
+    from robosystems.operations.extensions.materialize import (
+      ExtensionsMaterializer,
+    )
+
+    materializer = ExtensionsMaterializer()
+    client = AsyncMock()
+    client.database_exists.return_value = True
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        return_value=client,
+      ),
+      patch.object(materializer, "_acquire_lock", new=AsyncMock()),
+      patch.object(materializer, "_materialize_blue_green", new=AsyncMock()) as bg,
+      patch.object(materializer, "_materialize_direct", new=AsyncMock()) as direct,
+    ):
+      await materializer.materialize(GRAPH_ID, rebuild=rebuild)
+
+    bg.assert_awaited_once()
+    direct.assert_not_awaited()
+
+
 class TestRebuildDeleteCarriesTheLock:
   """The node guards every delete with the base's materialization lock, and
   a rebuild deletes the base name. The run already holds that lock, so its
