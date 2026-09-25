@@ -301,3 +301,61 @@ class TestSecretsManagerIntegration:
 
     api_key = get_api_key_from_secrets_manager()
     assert api_key is None
+
+
+class TestKeyRotation:
+  """Every process picks a rotated key up at a different moment, so a writer
+  accepts the current and the previous key and re-reads both."""
+
+  @pytest.fixture
+  def secrets(self, monkeypatch):
+    import boto3
+    from moto import mock_aws
+
+    monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    with mock_aws():
+      client = boto3.client("secretsmanager", region_name="us-east-1")
+      client.create_secret(
+        Name="robosystems/staging/graph-api",
+        SecretString=json.dumps({"GRAPH_API_KEY": "key-one"}),
+      )
+      yield client
+
+  def _rotate(self, client, key):
+    client.put_secret_value(
+      SecretId="robosystems/staging/graph-api",
+      SecretString=json.dumps({"GRAPH_API_KEY": key}),
+    )
+
+  @pytest.fixture
+  def staging_env(self):
+    with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
+      mock_env.ENVIRONMENT = "staging"
+      mock_env.AWS_REGION = "us-east-1"
+      mock_env.GRAPH_API_KEY = None
+      yield mock_env
+
+  async def _status(self, middleware, key):
+    request = MagicMock(spec=Request)
+    request.url.path = "/databases"
+    request.client.host = "10.0.0.9"
+    request.headers = Headers({"X-Graph-API-Key": key})
+    call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
+    return (await middleware.dispatch(request, call_next)).status_code
+
+  @pytest.mark.asyncio
+  async def test_a_rotated_key_and_the_previous_one_are_both_accepted(
+    self, secrets, staging_env
+  ):
+    from robosystems.graph_api.middleware.auth import read_graph_api_keys
+
+    middleware = LadybugAuthMiddleware(MagicMock(), key_source=read_graph_api_keys)
+    self._rotate(secrets, "key-two")
+    middleware.KEY_MISS_REFRESH_SECONDS = 0
+
+    # A caller restarted after the rotation, and one that has not restarted.
+    assert await self._status(middleware, "key-two") == 200
+    assert await self._status(middleware, "key-one") == 200
+    assert await self._status(middleware, "key-zero") == 401

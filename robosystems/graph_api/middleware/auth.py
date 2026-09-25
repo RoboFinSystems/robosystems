@@ -1,6 +1,8 @@
 """API key authentication for the Graph API (prod/staging only)."""
 
+import asyncio
 import time
+from collections.abc import Callable
 
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -19,8 +21,19 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
   """
 
   EXEMPT_PATHS = frozenset({"/health"})
+  # A rotated key reaches every process at a different moment, so both the
+  # current and the previous key are accepted, and re-read on this interval.
+  KEY_REFRESH_SECONDS = 300
+  # A rejected key triggers an early re-read, at most this often.
+  KEY_MISS_REFRESH_SECONDS = 30
 
-  def __init__(self, app, api_key: str | None = None, key_type: str = "writer"):
+  def __init__(
+    self,
+    app,
+    api_key: str | None = None,
+    key_type: str = "writer",
+    key_source: Callable[[], tuple[str | None, str | None]] | None = None,
+  ):
     super().__init__(app)
     self.environment = env.ENVIRONMENT
     self.auth_enabled = self.environment in ["prod", "staging"]
@@ -31,13 +44,17 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
     self.max_failed_attempts = 10
     self.lockout_duration = 300  # 5 minutes
 
-    # Explicit argument, then centralized config, then Secrets Manager.
-    self.api_key = None
-    if api_key:
-      self.api_key = api_key
-    elif env.GRAPH_API_KEY:
+    # Explicit argument, then the rotating key source, then centralized
+    # config, then Secrets Manager.
+    self.api_key = api_key or None
+    self.previous_api_key: str | None = None
+    self.key_source = None if api_key else key_source
+    self.keys_loaded_at = 0.0
+    if self.key_source is not None and self.auth_enabled:
+      self._load_keys()
+    if not self.api_key and env.GRAPH_API_KEY:
       self.api_key = env.GRAPH_API_KEY
-    elif self.auth_enabled:
+    if not self.api_key and self.auth_enabled:
       self.api_key = get_api_key_from_secrets_manager(key_type=self.key_type)
 
     if self.auth_enabled and not self.api_key:
@@ -70,8 +87,25 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
         content={"detail": "Too many failed authentication attempts"},
       )
 
+    now = time.time()
+    if (
+      self.key_source is not None
+      and now - self.keys_loaded_at > self.KEY_REFRESH_SECONDS
+    ):
+      await asyncio.to_thread(self._load_keys)
+
     try:
-      self._validate_api_key(request)
+      try:
+        self._validate_api_key(request)
+      except HTTPException:
+        # A key rotated since the last read: re-read once, rate-limited.
+        if (
+          self.key_source is None
+          or time.time() - self.keys_loaded_at < self.KEY_MISS_REFRESH_SECONDS
+        ):
+          raise
+        await asyncio.to_thread(self._load_keys)
+        self._validate_api_key(request)
       if client_ip in self.failed_attempts:
         del self.failed_attempts[client_ip]
       return await call_next(request)
@@ -93,10 +127,25 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing API key"
       )
 
-    if not self.api_key or not self._constant_time_compare(api_key, self.api_key):
+    accepted = [k for k in (self.api_key, self.previous_api_key) if k]
+    # Every key is compared, so the time taken does not say which one matched.
+    matches = [self._constant_time_compare(api_key, k) for k in accepted]
+    if not any(matches):
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key"
       )
+
+  def _load_keys(self) -> None:
+    """Re-read the current and previous keys; a failed read keeps the last."""
+    self.keys_loaded_at = time.time()
+    try:
+      current, previous = self.key_source()  # type: ignore[misc]
+    except Exception as e:
+      logger.error(f"Reading the Graph API keys failed; keeping the last read: {e}")
+      return
+    if current:
+      self.api_key = current
+      self.previous_api_key = previous
 
   def _constant_time_compare(self, a: str, b: str) -> bool:
     """Compare two strings in constant time to prevent timing attacks."""
@@ -166,6 +215,26 @@ def get_api_key_from_secrets_manager(
   except Exception as e:
     logger.error(f"Error retrieving Graph API key: {e}")
     return None
+
+
+def read_graph_api_keys() -> tuple[str | None, str | None]:
+  """The current and previous Graph API keys, read from Secrets Manager
+  (``robosystems/{env}/graph-api``) past the process-wide secret cache."""
+  import json
+
+  import boto3
+
+  client = boto3.client("secretsmanager", region_name=env.AWS_REGION)
+  secret_id = f"robosystems/{env.ENVIRONMENT}/graph-api"
+
+  def _key(stage: str) -> str | None:
+    try:
+      value = client.get_secret_value(SecretId=secret_id, VersionStage=stage)
+    except client.exceptions.ResourceNotFoundException:
+      return None
+    return json.loads(value["SecretString"]).get("GRAPH_API_KEY") or None
+
+  return _key("AWSCURRENT"), _key("AWSPREVIOUS")
 
 
 LadybugAuthMiddleware = GraphAuthMiddleware
