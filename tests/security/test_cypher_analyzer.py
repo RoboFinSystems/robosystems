@@ -820,6 +820,21 @@ class TestGuardedStringMatchCost:
     find_guarded_string_match(query, self.GUARDED)
     assert time.perf_counter() - started < 2.0
 
+  @pytest.mark.parametrize("distinct_targets", [True, False])
+  def test_many_labels_rebound_many_times_stay_linear(self, distinct_targets):
+    labels = ":".join(f"L{i}" for i in range(6000))
+    head = f"MATCH (a:{labels}) WITH "
+    names = (f"a AS n{i}" if distinct_targets else "a AS b" for i in range(10**6))
+    query = head
+    for rebind in names:
+      if len(query) + len(rebind) + 2 > self.SIZE:
+        break
+      query += rebind + ", "
+    query += "1 AS z RETURN z"
+    started = time.perf_counter()
+    find_guarded_string_match(query, self.GUARDED)
+    assert time.perf_counter() - started < 2.0
+
   def test_a_scan_buried_in_a_long_statement_is_still_found(self):
     query = self._repeat(
       "WHEN x.a = 1 THEN 1 ",

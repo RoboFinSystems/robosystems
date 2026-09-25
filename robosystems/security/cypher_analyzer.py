@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 # What `_clean_query` substitutes for a backtick-quoted identifier.
 _IDENTIFIER_PLACEHOLDER = "IDENTIFIER"
 
+# Stands for every label the guard does not declare; no real label spells it.
+_OTHER_LABEL = " other"
+
 
 class GuardedStringMatch(NamedTuple):
   """A string-match predicate applied to a guarded ``Label.property``.
@@ -354,7 +357,8 @@ class CypherSecurityAnalyzer:
         return None
 
       tokens = self._TOKEN_PATTERN.findall(self._clean_query(query))
-      labels_by_variable = self._labels_by_variable(tokens)
+      guarded_labels = {label for labels in guarded.values() for label in labels}
+      labels_by_variable = self._labels_by_variable(tokens, guarded_labels)
       self._carry_rebound_labels(tokens, labels_by_variable)
       index = _SpanIndex(self, tokens, guarded, labels_by_variable)
       index.bind_aliases()
@@ -371,8 +375,15 @@ class CypherSecurityAnalyzer:
       logger.warning(f"Guarded string-match analysis failed: {e}")
       return None
 
-  def _labels_by_variable(self, tokens: list[str]) -> dict[str, set[str] | None]:
-    """Map each pattern variable to its labels; None when a label is quoted."""
+  def _labels_by_variable(
+    self, tokens: list[str], guarded_labels: set[str]
+  ) -> dict[str, set[str] | None]:
+    """Map each pattern variable to its labels; None when a label is quoted.
+
+    Only guarded labels are kept by name; any other label is recorded as one
+    sentinel, which is all the guard needs, so the sets stay small however
+    many labels a pattern names.
+    """
     labels: dict[str, set[str] | None] = {}
     for i in range(len(tokens) - 3):
       if tokens[i] not in ("(", "[") or tokens[i + 2] != ":":
@@ -388,7 +399,8 @@ class CypherSecurityAnalyzer:
         elif name[0].isalpha() or name[0] == "_":
           known = labels.setdefault(variable, set())
           if known is not None:
-            known.add(name.lower())
+            label = name.lower()
+            known.add(label if label in guarded_labels else _OTHER_LABEL)
         else:
           break
         if j + 1 < len(tokens) and tokens[j + 1] in (":", "|"):
