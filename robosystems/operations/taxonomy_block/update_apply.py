@@ -26,6 +26,9 @@ from robosystems.models.extensions import (
   VerificationResult,
 )
 from robosystems.models.extensions.roboledger.fact import Fact
+from robosystems.operations.roboledger.commands.taxonomies import (
+  assert_mapping_leaf,
+)
 from robosystems.operations.taxonomy_block._helpers import structure_from_request
 from robosystems.operations.taxonomy_block.immutability import (
   assert_history_undisturbed,
@@ -209,7 +212,7 @@ def apply_associations_to_add(
     if to_id is None:
       raise ValueError(f"association to_ref {req.to_ref!r} did not resolve.")
     if req.association_type == "mapping":
-      _assert_mapping_leaf(session, to_id)
+      assert_mapping_leaf(session, to_id)
     assoc = Association(
       structure_id=structure_id,
       from_element_id=from_id,
@@ -551,15 +554,3 @@ __all__ = [
   "apply_structures_to_update",
   "apply_top_level_fields",
 ]
-
-
-def _assert_mapping_leaf(session: Session, to_element_id: str) -> None:
-  """A mapping arc written here obeys the same leaf rule as
-  ``create-mapping-association``."""
-  from robosystems.operations.roboledger.commands.taxonomies import (
-    _assert_leaf_target,
-  )
-
-  target = session.get(Element, to_element_id)
-  if target is not None:
-    _assert_leaf_target(session, target)

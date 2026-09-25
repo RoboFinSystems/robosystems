@@ -97,7 +97,7 @@ class MappingTargetIsRollupError(ValueError):
     self.qname = qname
 
 
-def _assert_leaf_target(session: Session, target: Element) -> None:
+def assert_leaf_target(session: Session, target: Element) -> None:
   """Refuse a mapping target the graph's statements compute from children.
 
   A direct fact on a computed concept overrides it at render, so the
@@ -119,6 +119,13 @@ def _assert_leaf_target(session: Session, target: Element) -> None:
     style_id = DEFAULT_STYLE_ID
   if is_subtotal_target(target, load_subtotal_concepts(session, style_id)):
     raise MappingTargetIsRollupError(target.qname)
+
+
+def assert_mapping_leaf(session: Session, to_element_id: str) -> None:
+  """``assert_leaf_target`` for a write path that holds only the target's id."""
+  target = session.get(Element, to_element_id)
+  if target is not None:
+    assert_leaf_target(session, target)
 
 
 class MappingAssociationExistsError(ValueError):
@@ -170,7 +177,7 @@ def create_mapping_association(
   if to_elem is None:
     raise ElementNotFoundError("target", body.to_element_id)
   if body.association_type == "mapping":
-    _assert_leaf_target(session, to_elem)
+    assert_leaf_target(session, to_elem)
 
   existing = session.execute(
     select(Association).where(

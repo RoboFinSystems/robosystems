@@ -260,7 +260,7 @@ def suggest_mapping_candidates(
     candidate_liquidity = _liquidity_by_element(session, [r.id for r in rows])
     rows = [r for r in rows if candidate_liquidity.get(r.id) in (None, liquidity)]
 
-  # Same rule as the mapping write path (``_assert_leaf_target``).
+  # Same rule as the mapping write path (``assert_leaf_target``).
   from robosystems.operations.roboledger.reports.network_picker import (
     DEFAULT_STYLE_ID,
   )
