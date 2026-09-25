@@ -24,7 +24,7 @@ from robosystems.operations.roboledger.views.fact_query import (
 
 pytestmark = pytest.mark.integration
 
-GRAPH = "kgdddddddddddddddd08"
+GRAPH = "kgdddddddddddddddd22"
 ENTITY = "ent_sr2"
 
 

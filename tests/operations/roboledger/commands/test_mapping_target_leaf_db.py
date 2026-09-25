@@ -24,7 +24,7 @@ from robosystems.operations.roboledger.commands.taxonomies import (
 
 pytestmark = pytest.mark.integration
 
-GRAPH = "kgdddddddddddddddd07"
+GRAPH = "kgdddddddddddddddd21"
 STYLE = "style_sr3"
 
 
