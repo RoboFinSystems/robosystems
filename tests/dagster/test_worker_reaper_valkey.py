@@ -113,3 +113,33 @@ async def test_the_consumer_keeps_its_heartbeat_alive(valkey):
   finally:
     beating.cancel()
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_worker_hands_back_a_task_whose_blmove_reply_it_lost(valkey):
+  """The heartbeat shields a live worker's list from the reaper, so the worker
+  itself returns what a dropped BLMOVE reply left there."""
+  import redis.asyncio as redis_async
+
+  from robosystems.worker.consumer import _requeue_own_inflight
+
+  queue, _, worker_id, task_id = valkey
+  inflight_key = f"worker:inflight:{worker_id}"
+  queue.lpush(inflight_key, json.dumps({"task_id": task_id}))
+  kwargs = queue.connection_pool.connection_kwargs
+  client = redis_async.Redis(
+    host=kwargs["host"],
+    port=kwargs["port"],
+    db=14,
+    password=kwargs.get("password"),
+    decode_responses=True,
+  )
+  try:
+    await _requeue_own_inflight(client, inflight_key)
+  finally:
+    await client.aclose()
+
+  assert queue.llen(inflight_key) == 0
+  assert [json.loads(t)["task_id"] for t in queue.lrange("worker:tasks", 0, -1)] == [
+    task_id
+  ]

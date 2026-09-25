@@ -17,6 +17,7 @@ import os
 import signal
 import socket
 import time
+import uuid
 from typing import Any
 
 import redis.exceptions
@@ -62,7 +63,9 @@ async def run() -> None:
   for sig in (signal.SIGTERM, signal.SIGINT):
     loop.add_signal_handler(sig, shutdown.set)
 
-  worker_id = f"worker-{socket.gethostname()}-{os.getpid()}"
+  # Unique per process start: a reused hostname and pid would otherwise keep a
+  # dead worker's inflight list looking alive.
+  worker_id = f"worker-{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
   inflight_key = f"worker:inflight:{worker_id}"
   depth_publisher = QueueDepthPublisher()
   depth_publisher.start()
@@ -71,8 +74,19 @@ async def run() -> None:
   logger.info(f"Worker started: {worker_id}")
 
   shutdown_wait = asyncio.create_task(shutdown.wait())
+  requeue_orphans = False
   try:
     while not shutdown.is_set():
+      if requeue_orphans:
+        # BLMOVE can move a task and then lose the reply. Between tasks this
+        # worker holds nothing, so anything in its list goes back to the queue.
+        try:
+          await _requeue_own_inflight(queue, inflight_key)
+          requeue_orphans = False
+        except redis.exceptions.ConnectionError as e:
+          logger.warning(f"Valkey connection lost, retrying: {e}")
+          await asyncio.sleep(1)
+          continue
       # BLMOVE atomically pops from main queue and pushes to inflight list.
       # If the worker crashes, the task stays in inflight for the reaper.
       # Race against shutdown so SIGTERM exits without waiting for BLMOVE timeout.
@@ -90,6 +104,7 @@ async def run() -> None:
         task_json = blmove_task.result()
       except redis.exceptions.ConnectionError as e:
         logger.warning(f"Valkey connection lost, retrying: {e}")
+        requeue_orphans = True
         await asyncio.sleep(1)
         continue
       if task_json is None:
@@ -130,6 +145,11 @@ async def run() -> None:
       # server-side close will release any remaining resources.
       logger.debug(f"Connection error during queue close (expected on shutdown): {exc}")
     logger.info(f"Worker terminated: {worker_id}")
+
+
+async def _requeue_own_inflight(queue: Any, inflight_key: str) -> None:
+  while await queue.lmove(inflight_key, "worker:tasks", "RIGHT", "LEFT"):
+    logger.warning(f"Requeued a task orphaned in {inflight_key}")
 
 
 async def _heartbeat(queue: Any, worker_id: str) -> None:
