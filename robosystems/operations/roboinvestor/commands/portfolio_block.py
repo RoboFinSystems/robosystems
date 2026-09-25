@@ -236,6 +236,9 @@ def delete_portfolio_block(
   )
   for row in positions_to_delete:
     session.delete(row)
+  # No ORM relationship orders these deletes, so the positions must reach the
+  # database before the portfolio their foreign key names.
+  session.flush()
 
   session.delete(portfolio)
   session.flush()
