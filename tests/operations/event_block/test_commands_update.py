@@ -908,6 +908,10 @@ class TestFieldCorrections:
       "drift_payload",
       "reconciliation_history",
       "dispatch_attempts",
+      "qb_round_trip_baseline",
+      "qb_sync_confirmed_at",
+      "reconciles_event_id",
+      "round_trip_duplicate_of",
     ],
   )
   def test_system_metadata_cannot_be_patched(self, key) -> None:

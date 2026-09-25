@@ -47,6 +47,7 @@ from robosystems.operations.event_block.commands import (
   create_event_block_in_session,
   fire_handler_on_commit,
 )
+from robosystems.operations.event_block.qb_writeback import ROUND_TRIP_BASELINE_KEY
 from robosystems.operations.locking import RowLockedError, bounded_lock_wait
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
@@ -144,6 +145,43 @@ def _net_posted_lines(
   for element_id, debit, credit in rows:
     nets[(element_id, None)] += int(debit or 0) - int(credit or 0)
   return nets
+
+
+def _round_trip(accepted: dict) -> dict | None:
+  """The round-trip record of a flagged written-back entry, else ``None``."""
+  round_trip = accepted.get("round_trip")
+  return round_trip if isinstance(round_trip, dict) else None
+
+
+def _net_shape_lines(shape: dict | None) -> dict[tuple[str | None, str | None], int]:
+  """Net a round-trip shape's ``[account, debit, credit]`` lines per QB account."""
+  nets: dict[tuple[str | None, str | None], int] = defaultdict(int)
+  for external_id, debit, credit in (shape or {}).get("lines") or []:
+    nets[(None, external_id)] += int(debit or 0) - int(credit or 0)
+  return nets
+
+
+def _catch_up_entry_ids(session: Session, event_id: str) -> list[str]:
+  """Entries already posted to level this event: earlier catch-ups, and any
+  reversal of the event's or those catch-ups' entries."""
+  catch_up_events = select(Event.id).where(
+    Event.metadata_["reconciles_event_id"].astext == event_id,
+    Event.status.notin_(("voided", "superseded")),
+  )
+  own = select(Entry.id).where(Entry.triggered_by_event_id == event_id)
+  ids = set(
+    session.execute(
+      select(Entry.id).where(Entry.triggered_by_event_id.in_(catch_up_events))
+    ).scalars()
+  )
+  ids |= set(
+    session.execute(
+      select(Entry.id).where(
+        Entry.reversal_of.in_(own.union(select(Entry.id).where(Entry.id.in_(ids))))
+      )
+    ).scalars()
+  )
+  return sorted(str(i) for i in ids)
 
 
 def _resolve_element_labels(
@@ -280,6 +318,17 @@ def _restate_blockers(
   disagreeing with its rows."""
   blockers: list[str] = []
   entry_ids = [str(e.id) for e in entries]
+
+  if _round_trip(accepted) is not None:
+    blockers.append(
+      "this entry was published to QuickBooks and edited there — QuickBooks "
+      "already holds the change; catch up or acknowledge"
+    )
+  elif _catch_up_entry_ids(session, str(event.id)):
+    blockers.append(
+      "an earlier catch-up entry levels this event, and restating would leave "
+      "it counted twice — catch up instead"
+    )
 
   # The handler never downgrades `fulfilled`, so drafting its entries would
   # leave a fulfilled event over draft rows. Unreachable via QuickBooks (it
@@ -435,9 +484,18 @@ def _plan_with_stamp(
 
   entries = _event_entries(session, str(event.id))
   entry_ids = [str(e.id) for e in entries]
+  round_trip = _round_trip(accepted)
 
-  prior_nets = _net_posted_lines(session, entry_ids)
-  accepted_nets = _net_accepted_lines(accepted)
+  if round_trip is not None:
+    # Measured from the version the ledger last accepted, so a second edit in
+    # QuickBooks posts only its own change.
+    prior_nets = _net_shape_lines(round_trip.get("baseline"))
+    accepted_nets = _net_shape_lines(round_trip.get("accepted"))
+  else:
+    prior_nets = _net_posted_lines(
+      session, entry_ids + _catch_up_entry_ids(session, str(event.id))
+    )
+    accepted_nets = _net_accepted_lines(accepted)
 
   labels, by_external = _resolve_element_labels(
     session,
@@ -446,8 +504,13 @@ def _plan_with_stamp(
       for element_id, _ in list(prior_nets) + list(accepted_nets)
       if element_id
     },
-    external_ids={external_id for _, external_id in accepted_nets if external_id},
-    source=str(event.source),
+    external_ids={
+      external_id
+      for _, external_id in list(prior_nets) + list(accepted_nets)
+      if external_id
+    },
+    # A written-back entry's accounts are named by their QuickBooks ids.
+    source="quickbooks" if round_trip is not None else str(event.source),
     connection_id=accepted.get("connection_id") or metadata.get("connection_id"),
   )
 
@@ -547,6 +610,20 @@ def _accepted_metadata(
   history = live.get(RECONCILIATION_HISTORY_KEY)
   history = list(history) if isinstance(history, list) else []
   history.append(record)
+  round_trip = _round_trip(accepted)
+  if round_trip is not None:
+    # A written-back event keeps its own payload and QuickBooks markers; what
+    # it accepts is the new baseline its next round trip is measured from.
+    kept = {
+      k: v for k, v in live.items() if k not in ("drift_payload", "drift_detected_at")
+    }
+    baselines = dict(kept.get(ROUND_TRIP_BASELINE_KEY) or {})
+    baselines[str(round_trip["qb_id"])] = round_trip.get("accepted")
+    return {
+      **kept,
+      ROUND_TRIP_BASELINE_KEY: baselines,
+      RECONCILIATION_HISTORY_KEY: history,
+    }
   return {**accepted, RECONCILIATION_HISTORY_KEY: history}
 
 
