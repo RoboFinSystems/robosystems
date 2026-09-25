@@ -382,6 +382,10 @@ class GraphDeprovisionService:
     await self._release_subgraph(subgraph_id, session, result)
     if result.errors:
       result.status = "partial"
+      logger.warning(
+        f"Subgraph {subgraph_id} release incomplete",
+        extra={"graph_id": subgraph_id, "errors": result.errors},
+      )
     return result
 
   async def _release_subgraph(
