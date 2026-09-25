@@ -115,6 +115,20 @@ async def create_checkout_session(
         detail=f"Invalid plan '{request.plan_name}' for {request.resource_type}",
       )
 
+    # Checked before payment: provisioning builds the graph from it afterwards.
+    custom_schema = request.resource_config.get("custom_schema")
+    if request.resource_type == "graph" and custom_schema is not None:
+      from pydantic import ValidationError
+
+      from ...models.api.graphs.schema import CustomSchemaDefinition
+
+      try:
+        CustomSchemaDefinition.model_validate(custom_schema)
+      except ValidationError as exc:
+        raise HTTPException(
+          status_code=422, detail=f"Invalid custom_schema: {exc.errors()}"
+        ) from exc
+
     # Same refuse-the-sale rule for writer capacity on the tier. Fails closed:
     # unknown capacity refuses the sale.
     if request.resource_type == "graph":
