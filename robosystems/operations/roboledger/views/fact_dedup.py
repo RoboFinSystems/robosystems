@@ -28,25 +28,29 @@ def precision_rank(decimals: Any) -> float:
 
 
 def keep_most_precise(
-  rows: list[dict[str, Any]], key: Callable[[dict[str, Any]], Hashable]
+  rows: list[dict[str, Any]],
+  key: Callable[[dict[str, Any]], Hashable],
+  rank: Callable[[dict[str, Any]], Any] | None = None,
 ) -> list[dict[str, Any]]:
-  """Collapse ``rows`` to one per ``key(row)``, keeping the most precise.
+  """Collapse ``rows`` to one per ``key(row)``, keeping the highest ``rank``
+  (by default the most precise).
 
   Ties keep the first row seen. Output keeps first-seen key order, so a
   query's ``ORDER BY`` survives.
   """
+  rank_of = rank or (lambda row: precision_rank(row.get("decimals")))
   position: dict[Hashable, int] = {}
-  ranks: list[float] = []
+  ranks: list[Any] = []
   deduped: list[dict[str, Any]] = []
   for row in rows:
     k = key(row)
-    rank = precision_rank(row.get("decimals"))
+    row_rank = rank_of(row)
     slot = position.get(k)
     if slot is None:
       position[k] = len(deduped)
-      ranks.append(rank)
+      ranks.append(row_rank)
       deduped.append(row)
-    elif rank > ranks[slot]:
-      ranks[slot] = rank
+    elif row_rank > ranks[slot]:
+      ranks[slot] = row_rank
       deduped[slot] = row
   return deduped
