@@ -14,15 +14,20 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from sqlalchemy.exc import DBAPIError
+
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.logger import logger
 from robosystems.middleware.graph import get_graph_repository
+from robosystems.middleware.graph.utils.subgraph import is_subgraph
 from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.views.view_config import DEFAULT_FACT_LIMIT
 from robosystems.operations.roboledger.views.fact_dedup import (
   keep_most_precise,
   precision_rank,
 )
+
+_INVALID_SCHEMA_NAME = "3F000"
 
 # Pre-compiled patterns for inline Cypher node filter sanitization.
 _SAFE_STR_RE = re.compile(r"[\w:\-]+")
@@ -102,16 +107,8 @@ def _build_entity_match(
 _REPORT_STANDING = {"filed": 3, None: 2, "draft": 1, "under_review": 1, "archived": 0}
 
 
-def _tenant_fact_context(
-  graph_id: str, fact_ids: list[str]
-) -> tuple[dict[str, tuple], set[str]]:
-  """From the tenant's OLTP: ``fact_id -> (standing, last_generated)``, and the
-  ids of schedule facts.
-
-  A schedule fact is one schedule's planned amount, not the account's value:
-  two schedules on one account would otherwise dedup to one of them, and
-  projections years out would crowd the actuals.
-  """
+def _report_standing(graph_id: str, fact_ids: list[str]) -> dict[str, tuple]:
+  """``fact_id -> (standing, last_generated)`` from the tenant's OLTP."""
   from sqlalchemy import text
 
   from robosystems.db.extensions import extensions_session
@@ -119,7 +116,7 @@ def _tenant_fact_context(
   with extensions_session(graph_id) as session:
     rows = session.execute(
       text("""
-        SELECT f.id, r.filing_status, r.last_generated, fs.factset_type
+        SELECT f.id, r.filing_status, r.last_generated
         FROM facts f
         LEFT JOIN fact_sets fs ON fs.id = f.fact_set_id
         LEFT JOIN reports r ON r.id = fs.report_id
@@ -127,12 +124,32 @@ def _tenant_fact_context(
       """),
       {"ids": fact_ids},
     ).fetchall()
-  standing = {
+  return {
     row.id: (_REPORT_STANDING.get(row.filing_status, 1), str(row.last_generated or ""))
     for row in rows
   }
-  schedule_ids = {row.id for row in rows if row.factset_type == "schedule"}
-  return standing, schedule_ids
+
+
+def _has_ledger_schema(graph_id: str) -> bool:
+  """Whether the graph carries the roboledger schema, and so ``FactSet``."""
+  from robosystems.database import SessionFactory
+  from robosystems.middleware.extensions import load_graph_metadata
+
+  session = SessionFactory()
+  try:
+    return "roboledger" in load_graph_metadata(graph_id, session).schema_extensions
+  finally:
+    session.close()
+
+
+# A schedule fact is one schedule's planned amount, never the account's value:
+# two schedules on one account would dedup to one of them, and projections
+# years out would crowd the actuals. Filtered in the graph because that is the
+# snapshot being read; OLTP ids change on every schedule rebuild.
+_NOT_A_SCHEDULE_FACT = (
+  "NOT EXISTS { MATCH (sfs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f) "
+  "WHERE sfs.factset_type = 'schedule' }"
+)
 
 
 def _deduplicate_fact_rows(
@@ -221,6 +238,10 @@ async def query_fact_grid(
 
   where_clauses = ["f.has_dimensions = false", *element_where, *entity_where]
 
+  tenant = not is_shared_repository_or_subgraph(graph_id) and not is_subgraph(graph_id)
+  if tenant and await run_off_loop(_has_ledger_schema, graph_id):
+    where_clauses.append(_NOT_A_SCHEDULE_FACT)
+
   if periods:
     where_clauses.append("p.end_date IN $periods")
     parameters["periods"] = periods
@@ -276,15 +297,15 @@ async def query_fact_grid(
 
   standing = None
   fact_ids = [row["fact_id"] for row in results if row.get("fact_id")]
-  if fact_ids and not is_shared_repository_or_subgraph(graph_id):
+  if fact_ids and tenant:
     try:
-      standing, schedule_ids = await run_off_loop(
-        _tenant_fact_context, graph_id, fact_ids
-      )
-      results = [row for row in results if row.get("fact_id") not in schedule_ids]
-    except Exception as exc:
-      # A graph with no ledger schema (a generic subgraph) keeps the precision rule.
-      logger.warning(f"Report standing unavailable for {graph_id}: {exc}")
+      standing = await run_off_loop(_report_standing, graph_id, fact_ids)
+    except DBAPIError as exc:
+      # Only a graph with no ledger schema keeps the precision rule; any other
+      # failure would return wrong numbers as if nothing happened.
+      if getattr(exc.orig, "pgcode", None) != _INVALID_SCHEMA_NAME:
+        raise
+      logger.warning(f"No ledger schema for {graph_id}; report standing skipped")
   deduped = _deduplicate_fact_rows(results, standing)
   for row in deduped:
     row.pop("fact_id", None)

@@ -383,7 +383,8 @@ def _load_rollup_concepts(
 ) -> set[str]:
   """Element ids that are the parent of a ``presentation`` arc on the Style's
   rendering structures, i.e. summed at render; mapping a CoA account to one
-  would double-count.
+  would double-count. A roll-forward's parent is the balance its flows move,
+  not their sum (``PartnersCapital``, ``MembersEquity``), so it doesn't count.
 
   Empty means no Style seeded (callers use the static denylist). Cached on
   the session per style id.
@@ -398,10 +399,12 @@ def _load_rollup_concepts(
       SELECT DISTINCT a.from_element_id AS element_id
       FROM reporting_style_networks rsn
       JOIN associations a ON a.structure_id = rsn.network_id
+      JOIN structures st ON st.id = rsn.network_id
       WHERE rsn.reporting_style_id = :rsid
         AND a.association_type = 'presentation'
         AND a.from_element_id IS NOT NULL
         AND a.to_element_id IS NOT NULL
+        AND st.concept_arrangement IS DISTINCT FROM 'roll_forward'
     """),
     {"rsid": reporting_style_id},
   ).fetchall()

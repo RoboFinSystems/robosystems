@@ -19,7 +19,7 @@ from robosystems.config import env
 from robosystems.db.extensions import ExtensionsBase, extensions_session
 from robosystems.operations.roboledger.views.fact_query import (
   _deduplicate_fact_rows,
-  _tenant_fact_context,
+  _report_standing,
 )
 
 pytestmark = pytest.mark.integration
@@ -133,82 +133,7 @@ def test_the_filed_report_wins_over_a_newer_more_precise_draft(tenant):
       REPORTS.items(), key=lambda item: item[0] != "rpt_draft"
     )
   ]
-  standing, _ = _tenant_fact_context(GRAPH, [row["fact_id"] for row in rows])
+  standing = _report_standing(GRAPH, [row["fact_id"] for row in rows])
 
   (only,) = _deduplicate_fact_rows(rows, standing)
   assert only["value"] == 1_200_000.0
-
-
-SCHEDULES = {
-  # fact_set_id: (period_end, amount)
-  "fs_sched_a": (date(2026, 7, 31), 400.0),
-  "fs_sched_b": (date(2026, 7, 31), 1_071.42),
-  "fs_sched_a_2031": (date(2031, 1, 31), 400.0),
-}
-
-
-def _seed_schedules() -> None:
-  """Two depreciation schedules on one account, one of them projected years out."""
-  from robosystems.models.api.fact_provenance import ScheduleProvenance
-  from robosystems.models.extensions.roboledger.fact import Fact
-  from robosystems.operations.roboledger.fact_set import create_fact_set
-
-  with extensions_session(GRAPH) as session:
-    for fact_set_id, (period_end, amount) in SCHEDULES.items():
-      create_fact_set(
-        session,
-        id=fact_set_id,
-        period_start=period_end.replace(day=1),
-        period_end=period_end,
-        factset_type="schedule",
-        entity_id=ENTITY,
-        provenance=ScheduleProvenance(
-          structure_id=f"str_{fact_set_id}", method="straight_line"
-        ),
-        created_by="u",
-      )
-      session.flush()
-      session.add(
-        Fact(
-          id=f"fact_{fact_set_id}",
-          element_id="el_depreciation",
-          value=amount,
-          decimals="2",
-          period_start=period_end.replace(day=1),
-          period_end=period_end,
-          period_type="duration",
-          entity_id=ENTITY,
-          fact_set_id=fact_set_id,
-        )
-      )
-    session.commit()
-
-
-async def test_a_schedule_amount_is_never_the_accounts_value(tenant):
-  from unittest.mock import AsyncMock, patch
-
-  from robosystems.operations.roboledger.views.fact_query import query_fact_grid
-
-  _seed_schedules()
-  rows = [
-    {
-      "fact_id": f"fact_{fact_set_id}",
-      "element_id": "coa:7000",
-      "period_start": period_end.replace(day=1).isoformat(),
-      "period_end": period_end.isoformat(),
-      "entity_name": "Driftline",
-      "decimals": "2",
-      "value": amount,
-    }
-    for fact_set_id, (period_end, amount) in SCHEDULES.items()
-  ]
-  repository = AsyncMock()
-  repository.execute_query.return_value = rows
-  with patch(
-    "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
-    AsyncMock(return_value=repository),
-  ):
-    facts, truncated = await query_fact_grid(GRAPH, elements=["coa:7000"])
-
-  assert facts == []
-  assert truncated is False

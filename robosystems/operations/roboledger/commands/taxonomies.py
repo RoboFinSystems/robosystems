@@ -97,14 +97,34 @@ class MappingTargetIsRollupError(ValueError):
     self.qname = qname
 
 
+class MappingTargetNotRenderedError(MappingTargetIsRollupError):
+  """The target is off the entity's statements, so its amount lands on the
+  subtotal above it."""
+
+  def __init__(self, qname: str | None) -> None:
+    ValueError.__init__(
+      self,
+      f"{qname} is not on this entity's statements, so its amount would land "
+      "on the subtotal above it; map the account to a concept the statements "
+      "show (suggest-mapping lists them).",
+    )
+    self.qname = qname
+
+
 def _assert_leaf_target(session: Session, target: Element) -> None:
-  """Refuse a mapping target the graph's statements compute from children.
+  """Refuse a mapping target the graph's statements compute from children, or
+  an rs-gaap concept they don't show (it would roll up into a subtotal).
 
   A direct fact on a computed concept overrides it at render, so the
   statement no longer articulates. Same rule as the suggester. A graph with
-  no entity yet is judged on the default Style.
+  no entity yet is judged on the default Style's subtotals only, since its
+  legal form, and so its Style, is not known.
   """
+  from robosystems.operations.operators.implementations.mapping.constants import (
+    RS_GAAP_SYNTHESIZED_DETAIL_ALLOW,
+  )
   from robosystems.operations.roboledger.reads.taxonomies import (
+    _load_renderable_concepts,
     is_subtotal_target,
     load_subtotal_concepts,
   )
@@ -114,11 +134,22 @@ def _assert_leaf_target(session: Session, target: Element) -> None:
   )
 
   try:
-    style_id = load_primary_reporting_style(session)
+    style_id: str | None = load_primary_reporting_style(session)
   except LookupError:
-    style_id = DEFAULT_STYLE_ID
-  if is_subtotal_target(target, load_subtotal_concepts(session, style_id)):
+    style_id = None
+  if is_subtotal_target(
+    target, load_subtotal_concepts(session, style_id or DEFAULT_STYLE_ID)
+  ):
     raise MappingTargetIsRollupError(target.qname)
+  if style_id is None or not (target.qname or "").startswith("rs-gaap:"):
+    return
+  renderable = _load_renderable_concepts(session, style_id)
+  if (
+    renderable
+    and target.id not in renderable
+    and target.qname not in RS_GAAP_SYNTHESIZED_DETAIL_ALLOW
+  ):
+    raise MappingTargetNotRenderedError(target.qname)
 
 
 class MappingAssociationExistsError(ValueError):
