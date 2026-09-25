@@ -264,6 +264,14 @@ async def delete_subgraph_op(
     )
     backup_location = deletion_result.get("backup_location")
 
+    from robosystems.config import env
+    from robosystems.operations.graph.deprovision_service import (
+      GraphDeprovisionService,
+    )
+
+    await GraphDeprovisionService(env.ENVIRONMENT).release_subgraph_records(
+      subgraph_id, db
+    )
     subgraph.delete(db)
 
     SecurityAuditLogger.log_security_event(
