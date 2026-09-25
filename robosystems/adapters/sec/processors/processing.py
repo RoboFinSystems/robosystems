@@ -149,8 +149,18 @@ def process_single_filing_to_memory(
       if not sec_report.get("primaryDocument"):
         sec_report["primaryDocument"] = xbrl_files[0]
 
+      form_type = sec_report.get("form", "")
+      if not form_type:
+        # Without its form a filing drops out of the catalog and search, and
+        # "unknown" is not "not wanted": this retries, where a skip is final.
+        return ProcessedFilingResult(
+          success=False,
+          source_file_id=source_file_id,
+          partition_key=partition_key,
+          tables={},
+          error="filing metadata unavailable: form type unknown",
+        )
       if allowed_form_types:
-        form_type = sec_report.get("form", "")
         if form_type not in allowed_form_types:
           return ProcessedFilingResult(
             success=True,

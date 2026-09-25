@@ -10,6 +10,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_live_sec_api():
+  """Nothing here reaches the SEC; a test that needs a live header stubs one."""
+  offline = MagicMock()
+  offline.submissions.return_value = {"filings": {"recent": {}}}
+  with patch(
+    "robosystems.adapters.sec.client.edgar.edgar_client", return_value=offline
+  ):
+    yield offline
+
+
 @pytest.mark.unit
 class TestSECMetadataLoaderInit:
   """Tests for SECMetadataLoader initialization."""
@@ -277,10 +288,16 @@ class TestGetMetadataFilingLookup:
       },
     }
 
-    sec_filer, sec_report = loader.get_metadata("12345", "0000012345-24-000001")
+    live = MagicMock()
+    live.submissions.return_value = {"name": "Test Corp", "filings": {"recent": {}}}
+    with patch("robosystems.adapters.sec.client.edgar.edgar_client", return_value=live):
+      sec_filer, sec_report = loader.get_metadata("12345", "0000012345-24-000001")
 
+    # Not in the snapshot nor the live header: a minimal report, and the
+    # processor treats its unknown form as a retryable error.
     assert sec_report["accessionNumber"] == "0000012345-24-000001"
     assert "form" not in sec_report or sec_report.get("form") is None
+    live.submissions.assert_called_once_with("12345")
 
   def test_empty_submissions_filings(self):
     """Handles submissions with empty filings."""
@@ -373,3 +390,56 @@ class TestGetMetadataFilerFields:
     sec_filer, _ = loader.get_metadata("12345", "0000012345-24-000001")
 
     assert sec_filer["website"] == "https://ir.investorcorp.com"
+
+
+@pytest.mark.unit
+def test_an_accession_missing_from_the_snapshot_is_read_from_the_api():
+  """A snapshot that predates the filing must not leave it with no form."""
+  from robosystems.adapters.sec.processors.metadata import SECMetadataLoader
+
+  loader = SECMetadataLoader()
+  loader._cache["1045810"] = {
+    "name": "Example Corp",
+    "filings": {"accessionNumber": ["0001045810-24-000001"], "form": ["10-Q"]},
+  }
+  live = MagicMock()
+  live.submissions.return_value = {
+    "name": "Example Corp",
+    "filings": {
+      "recent": {
+        "accessionNumber": ["0001045810-24-000009", "0001045810-24-000001"],
+        "form": ["10-K", "10-Q"],
+        "filingDate": ["2024-11-01", "2024-08-01"],
+      }
+    },
+  }
+  with patch("robosystems.adapters.sec.client.edgar.edgar_client", return_value=live):
+    _filer, report = loader.get_metadata("1045810", "0001045810-24-000009")
+    loader.get_metadata("1045810", "0001045810-24-000404")
+
+  assert report["form"] == "10-K"
+  # Re-read once per CIK, not once per missing accession.
+  assert live.submissions.call_count == 1
+
+
+@pytest.mark.unit
+def test_every_accession_missing_from_a_stale_snapshot_is_found_live():
+  from robosystems.adapters.sec.processors.metadata import SECMetadataLoader
+
+  loader = SECMetadataLoader()
+  loader._cache["1045810"] = {
+    "name": "Example Corp",
+    "filings": {"accessionNumber": []},
+  }
+  live = MagicMock()
+  live.submissions.return_value = {
+    "filings": {
+      "recent": {"accessionNumber": ["acc-a", "acc-b"], "form": ["10-Q", "8-K"]}
+    }
+  }
+  with patch("robosystems.adapters.sec.client.edgar.edgar_client", return_value=live):
+    _f, first = loader.get_metadata("1045810", "acc-a")
+    _f, second = loader.get_metadata("1045810", "acc-b")
+
+  assert (first["form"], second["form"]) == ("10-Q", "8-K")
+  assert live.submissions.call_count == 1
