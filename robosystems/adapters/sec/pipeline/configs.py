@@ -188,12 +188,17 @@ class SECFilingCatalogConfig(Config):
   A run rewrites the catalog file of every filer
   with a filing in its partitions and the corpus index always; the corpus
   view it folds spans every partition from ``start_year`` on.
+
+  The catalog lists everything processed, not the graph's range: the files it
+  points at are read off the CDN, never the graph, so a filing that is only on
+  the CDN would otherwise sit there unlisted. Years with nothing processed fold
+  as empty.
   """
 
   graph_id: str = "sec"
   start_year: int = Field(
-    default=SEC_PRIMARY_START_YEAR,
-    description="First filing year in the catalog (the shared sec graph's range)",
+    default=SEC_START_YEAR,
+    description="First filing year in the catalog (every processed year)",
   )
   form_types: list[str] = Field(
     default=["10-K", "10-Q", "20-F", "40-F"],
