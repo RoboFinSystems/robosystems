@@ -281,6 +281,9 @@ class TestSecIncrementalPipelineSensor:
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
+    # Another partition's process run is still draining them.
+    in_flight = MagicMock()
+    in_flight.run_id = "run-proc-q4-draining"
     context = _build_run_status_context(
       sensor_name="sec_incremental_pipeline_sensor",
       job_name="sec_process",
@@ -291,6 +294,7 @@ class TestSecIncrementalPipelineSensor:
         "quarter": "2025-Q1",
         "batch_id": "20250401-21",
       },
+      get_runs_return=[in_flight],
     )
 
     result = list(sec_incremental_pipeline_sensor(context))
