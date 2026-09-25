@@ -960,9 +960,12 @@ def _fact_to_bundle(
       content_type=getattr(f, "content_type", None),
       unit_ref=None,
     )
+  # The stored precision; a row stamped before facts carried one reads as INF,
+  # which is what every export of it has always claimed.
+  decimals = getattr(f, "decimals", None)
   return BundleFact(
     **common,
     value=float(f.value),
     unit_ref=unit_ref,
-    decimals="INF",
+    decimals=str(decimals) if decimals else "INF",
   )

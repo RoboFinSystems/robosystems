@@ -49,6 +49,7 @@ def _make_bundle(
   facts: list[tuple[str, float, str, str]],
   period_nodes: list[tuple[str, date | None, date, str]],
   units: list[tuple[str, str]],
+  decimals: str = "INF",
 ) -> StatementBundle:
   """``facts``=(qname, value, period_ref, unit_ref); ``period_nodes``=
   (id, start, end, period_type); ``units``=(id, measure)."""
@@ -90,6 +91,7 @@ def _make_bundle(
         period_ref=pref,
         unit_ref=uref,
         entity_ref="ent_01",
+        decimals=decimals,
       )
       for i, (q, v, pref, uref) in enumerate(facts)
     ],
@@ -273,3 +275,15 @@ class TestCrossEncoderEquivalence:
     assert fact.value == 295_183_000.0
     assert fact.unit == "USD"
     assert fact in xb
+
+  def test_a_stored_precision_reaches_every_projection(self) -> None:
+    """A report fact stamped at cents says `decimals = 2` in all three files."""
+    b = _make_bundle(
+      facts=[("rs-gaap:Assets", 57_985.02, "p_1", "u_USD")],
+      period_nodes=[("p_1", None, date(2024, 12, 31), "instant")],
+      units=[("u_USD", "iso4217:USD")],
+      decimals="2",
+    )
+    holon, xbrl = _both(b)
+    assert {f.decimals for f in holon} == {"2"}
+    assert {f.decimals for f in xbrl} == {"2"}

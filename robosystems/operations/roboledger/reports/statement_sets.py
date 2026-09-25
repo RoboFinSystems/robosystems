@@ -290,6 +290,10 @@ def to_cents_precision(value: float) -> float:
   return round(value, 2)
 
 
+# XBRL @decimals for a value rounded to cents: what the stored value claims.
+CENTS_DECIMALS = "2"
+
+
 def _stamp_facts_into_sets(
   session: Session,
   facts,
@@ -302,7 +306,8 @@ def _stamp_facts_into_sets(
   One Fact row per owning structure; facts no picked structure reaches are
   skipped. Values are dollars rounded to cents: the pivot adds in float and
   ``facts.value`` is a double, so this strips float noise the ledger (integer
-  cents) never had.
+  cents) never had — and ``decimals`` says so, so the graph and every export
+  state the precision the value has.
   """
   for fact in facts.facts:
     for structure_id in element_to_structures.get(fact.element_id, ()):
@@ -312,6 +317,7 @@ def _stamp_facts_into_sets(
       rf = Fact(
         element_id=fact.element_id,
         value=to_cents_precision(fact.value),
+        decimals=CENTS_DECIMALS,
         period_start=fact.period_start,
         period_end=fact.period_end,
         period_type=fact.period_type,
