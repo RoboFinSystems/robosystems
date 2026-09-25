@@ -43,6 +43,9 @@ class QBWritebackError(Exception):
 
 
 QB_ENTRY_IDS_KEY = "qb_entry_ids"
+# QB id → the last version of that JournalEntry the ledger accepted; a round
+# trip's drift is measured from it, never from the original ledger rows alone.
+ROUND_TRIP_BASELINE_KEY = "qb_round_trip_baseline"
 
 
 def published_entry_ids(metadata: dict[str, Any] | None) -> dict[str, str]:

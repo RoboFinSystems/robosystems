@@ -188,45 +188,8 @@ class TestCrossSourceMatcher:
       "line_items": [],
     }
 
-  def test_match_skips_insert_and_stamps_confirmation(self):
-    from unittest.mock import MagicMock
-
-    from robosystems.operations.extensions.loader import OLTPLoader
-
-    # Pre-existing RL event that wrote-back to QB; matches the incoming
-    # external_id via metadata.qb_external_id.
-    rl_event = MagicMock()
-    rl_event.id = "evt_rl_origin"
-    rl_event.source = "manual"
-    rl_event.external_id = "evt_rl_origin"  # local UUID
-    rl_event.metadata_ = {"qb_external_id": "QB_TXN_99001"}
-
-    # Two consecutive query chains:
-    #  1. existing-lookup: session.query(Event).filter(...).all() → []
-    #  2. cross-source:    session.query(Event).filter(...).filter(...).all() → [rl_event]
-    existing_chain = MagicMock()
-    existing_chain.filter.return_value.all.return_value = []
-    cross_chain = MagicMock()
-    cross_chain.filter.return_value.filter.return_value.all.return_value = [rl_event]
-
-    session = MagicMock()
-    session.query.side_effect = [existing_chain, cross_chain]
-
-    loader = OLTPLoader()
-    result = loader._capture_transactions_as_events(
-      session,
-      self._dbt_data(),
-      source="quickbooks",
-      connection_id="conn_1",
-      created_by="user_1",
-      now=datetime.now(UTC),
-    )
-
-    # The cross-source matcher fired: confirmation stamped, no INSERT.
-    assert result.cross_source_matched == 1
-    assert result.inserted == 0
-    assert "qb_sync_confirmed_at" in rl_event.metadata_
-    assert rl_event.metadata_["qb_external_id"] == "QB_TXN_99001"  # unchanged
+  # A match, and what it writes, runs against real rows in
+  # test_loader_round_trip_db.py.
 
   def test_no_match_falls_through_to_normal_insert(self):
     """An incoming QB row with NO RL-originated counterpart goes
