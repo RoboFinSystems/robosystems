@@ -44,9 +44,16 @@ Parameters:
     Description: Route53 Hosted Zone ID for the domain
     Default: ""
 
+  # Browser origins allowed to PUT to presigned upload URLs on the user bucket
+  UserUploadCorsOrigin:
+    Type: String
+    Description: App origin that uploads directly to the user bucket (e.g., https://robosystems.ai). Empty disables browser uploads.
+    Default: ""
+
 Conditions:
   HasNamespace: !Not [!Equals [!Ref Namespace, ""]]
   HasCustomDomain: !Not [!Equals [!Ref PublicDomainName, ""]]
+  HasUserUploadCorsOrigin: !Not [!Equals [!Ref UserUploadCorsOrigin, ""]]
 
 Resources:
   # ============================================================================
@@ -196,6 +203,21 @@ Resources:
           - BucketKeyEnabled: false
             ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      # The app PUTs file uploads straight to presigned URLs from the browser.
+      CorsConfiguration: !If
+        - HasUserUploadCorsOrigin
+        - CorsRules:
+            - AllowedOrigins:
+                - !Ref UserUploadCorsOrigin
+              AllowedMethods:
+                - PUT
+                - HEAD
+              AllowedHeaders:
+                - "*"
+              ExposedHeaders:
+                - ETag
+              MaxAge: 3600
+        - !Ref AWS::NoValue
       # Versioning protects user data against accidental delete/overwrite.
       # With versioning on, the expiration rules below produce delete markers
       # rather than removing data — the ExpireNoncurrentVersions rule is what
