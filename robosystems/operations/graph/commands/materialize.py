@@ -226,6 +226,10 @@ async def materialize_cmd(
         params={
           "job_name": "materialize_graph_job",
           "run_config": run_config,
+          # dagster.yaml runs one materialize_db value at a time: a backstop
+          # for any exit that frees the lock under a live run.
+          "tags": {"materialize_db": graph_id},
+          "pass_operation_id": True,
           "lock_key": lock_key,
           "lock_id": lock_id,
         },

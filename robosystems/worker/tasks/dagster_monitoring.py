@@ -23,12 +23,17 @@ class DagsterJobMonitorTask(BaseTask):
   """Submit a Dagster job and monitor its progress, relaying to SSE.
 
   Params: ``job_name`` (required), plus optional ``run_config``, ``tags``,
-  and ``lock_key``. The lock is released when the monitor exits, except when a
-  cancelled run will not confirm it has stopped: releasing then would let a
-  second run write alongside it, so the lock is left to its TTL.
+  ``pass_operation_id`` (for jobs whose ops accept ``operation_id``) and
+  ``lock_key``. Once a run is submitted, the lock is released only after
+  Dagster reports the run stopped. Any other exit (a status it cannot read, a
+  budget cancel, a cancel the run does not confirm) leaves the lock to its
+  TTL: releasing then would let a second run write alongside this one.
   """
 
   CANCEL_SETTLE_SECONDS = 120
+  # Status reads can fail for a while (the webserver restarts on every
+  # deploy); keep polling through that rather than give up on the run.
+  STATUS_READ_GRACE_SECONDS = 600
 
   async def execute(self) -> dict[str, Any]:
     import asyncio
@@ -38,14 +43,22 @@ class DagsterJobMonitorTask(BaseTask):
     job_name = self.params["job_name"]
     run_config = self.params.get("run_config")
     tags = self.params.get("tags")
+    if self.params.get("pass_operation_id") and run_config:
+      # The job reports its result to this operation; the id only exists
+      # once the task is enqueued. Opt-in: Dagster refuses unknown config keys.
+      for op in run_config.get("ops", {}).values():
+        op.setdefault("config", {})["operation_id"] = self.task_id
     lock_key = self.params.get("lock_key")
 
     monitor = DagsterRunMonitor()
+    # Until a run exists nothing can be writing, so a failed submit releases.
     release = True
 
     try:
       run_id = await asyncio.to_thread(monitor.submit_job, job_name, run_config, tags)
+      release = False
       await self.report_progress(f"Submitted {job_name}", percent=5)
+      unreadable_since: float | None = None
 
       # Our own poll loop (not DagsterRunMonitor.monitor_run) so a user can
       # cancel a long monitor between iterations.
@@ -55,8 +68,24 @@ class DagsterJobMonitorTask(BaseTask):
           release = await self._stop_run(monitor, run_id)
           return {"status": "cancelled", "run_id": run_id, "job_name": job_name}
 
-        status_info = await asyncio.to_thread(monitor.get_run_status, run_id)
+        try:
+          status_info = await asyncio.to_thread(monitor.get_run_status, run_id)
+        except Exception as e:
+          now = asyncio.get_running_loop().time()
+          unreadable_since = unreadable_since or now
+          if now - unreadable_since > self.STATUS_READ_GRACE_SECONDS:
+            logger.error(
+              f"Dagster run {run_id} unreadable for "
+              f"{self.STATUS_READ_GRACE_SECONDS}s; leaving its lock to expire"
+            )
+            raise
+          logger.warning(f"Reading Dagster run {run_id} status failed: {e}")
+          await asyncio.sleep(monitor.poll_interval)
+          continue
+        unreadable_since = None
         current_status = status_info["status"]
+        if current_status in ("completed", "failed", "cancelled"):
+          release = True
 
         if current_status == "completed":
           await monitor.emit_completion(self.task_id, status_info)
