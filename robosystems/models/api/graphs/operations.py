@@ -292,7 +292,10 @@ class IngestFileOp(BaseModel):
   file_id: str = Field(..., min_length=1, description="Uploaded file id to ingest")
   ingest_to_graph: bool = Field(
     default=False,
-    description="Auto-materialize into the graph after DuckDB staging",
+    description=(
+      "Auto-materialize into the graph after DuckDB staging. Refused with 409 "
+      "while another materialization of the graph is running."
+    ),
   )
 
 

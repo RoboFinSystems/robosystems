@@ -29,6 +29,7 @@ from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.graphs.tables import FileUploadStatus
 from robosystems.models.core import Graph, GraphFile, GraphTable, User
 from robosystems.operations.aws.s3 import S3Client
+from robosystems.operations.graph.commands.materialize import acquire_materialize_lock
 
 __all__ = ["ingest_file_cmd"]
 
@@ -255,6 +256,31 @@ def _measure_row_count(
     return file_size // _FALLBACK_BYTES_PER_ROW[file_format], False
 
 
+async def _launch_graph_write(
+  job_name: str, run_config: dict, graph_id: str, current_user: User, lock: Any
+) -> str:
+  """Run a Dagster job that writes into the graph, under the graph's lock.
+
+  The worker frees the lock only once Dagster reports the run stopped, and
+  the ``materialize_db`` tag queues the run behind any other graph writer.
+  """
+  from robosystems.worker.client import enqueue_task
+
+  response = await enqueue_task(
+    task_type="dagster_job_monitor",
+    graph_id=graph_id,
+    user_id=str(current_user.id),
+    params={
+      "job_name": job_name,
+      "run_config": run_config,
+      "tags": {"materialize_db": graph_id},
+      "lock_key": f"graph_materialize:{graph_id}",
+      "lock_id": lock.lock_id,
+    },
+  )
+  return response["operation_id"]
+
+
 async def ingest_file_cmd(
   graph_id: str,
   file_id: str,
@@ -387,176 +413,174 @@ async def ingest_file_cmd(
     f"{graph_file.file_name} ({file_format}): {actual_row_count}"
   )
 
-  graph_file.file_size_bytes = actual_file_size
-  graph_file.row_count = actual_row_count
-  graph_file.upload_status = FileUploadStatus.UPLOADED.value
-  db.commit()
-  db.refresh(graph_file)
+  # Every write into the graph database holds the graph's materialize lock,
+  # taken before any state changes so a refusal leaves the upload untouched.
+  lock = acquire_materialize_lock(graph_id) if ingest_to_graph else None
+  handed_off = False
+  try:
+    graph_file.file_size_bytes = actual_file_size
+    graph_file.row_count = actual_row_count
+    graph_file.upload_status = FileUploadStatus.UPLOADED.value
+    db.commit()
+    db.refresh(graph_file)
 
-  table = (
-    db.query(GraphTable)
-    .filter(GraphTable.id == graph_file.table_id)
-    .with_for_update()
-    .first()
-  )
-  if table:
-    all_files = GraphFile.get_all_for_table(table.id, db)
-    uploaded_files = [
-      f for f in all_files if f.upload_status == FileUploadStatus.UPLOADED.value
-    ]
-
-    new_file_count = len(uploaded_files)
-
-    table.update_stats(
-      session=db,
-      file_count=new_file_count,
-      total_size_bytes=sum(f.file_size_bytes for f in uploaded_files),
-      row_count=sum(f.row_count for f in uploaded_files if f.row_count is not None),
+    table = (
+      db.query(GraphTable)
+      .filter(GraphTable.id == graph_file.table_id)
+      .with_for_update()
+      .first()
     )
+    if table:
+      all_files = GraphFile.get_all_for_table(table.id, db)
+      uploaded_files = [
+        f for f in all_files if f.upload_status == FileUploadStatus.UPLOADED.value
+      ]
 
-    if new_file_count > 0:
-      # Small files stage inline; large ones go to a Dagster job.
-      small_file_threshold_bytes = SMALL_FILE_STAGING_THRESHOLD_MB * 1024 * 1024
+      new_file_count = len(uploaded_files)
 
-      if actual_file_size < small_file_threshold_bytes:
-        from robosystems.operations.graph.engine.direct_staging import (
-          stage_file_directly,
-        )
+      table.update_stats(
+        session=db,
+        file_count=new_file_count,
+        total_size_bytes=sum(f.file_size_bytes for f in uploaded_files),
+        row_count=sum(f.row_count for f in uploaded_files if f.row_count is not None),
+      )
 
-        logger.info(
-          f"Small file detected ({actual_file_size / (1024 * 1024):.2f} MB < {SMALL_FILE_STAGING_THRESHOLD_MB} MB). "
-          f"Using direct staging for file {file_id}"
-        )
+      if new_file_count > 0:
+        # Small files stage inline; large ones go to a Dagster job.
+        small_file_threshold_bytes = SMALL_FILE_STAGING_THRESHOLD_MB * 1024 * 1024
 
-        try:
-          staging_result = await stage_file_directly(
-            db=db,
-            file_id=file_id,
-            graph_id=graph_id,
-            table_id=str(table.id),
-            s3_key=graph_file.s3_key,
-            file_size_bytes=actual_file_size,
-            row_count=actual_row_count,
+        if actual_file_size < small_file_threshold_bytes:
+          from robosystems.operations.graph.engine.direct_staging import (
+            stage_file_directly,
           )
 
-          if staging_result.get("status") == "success":
-            graph_file.duckdb_status = "staged"
-            db.commit()
-            db.refresh(graph_file)
+          logger.info(
+            f"Small file detected ({actual_file_size / (1024 * 1024):.2f} MB < {SMALL_FILE_STAGING_THRESHOLD_MB} MB). "
+            f"Using direct staging for file {file_id}"
+          )
 
-            logger.info(
-              f"Direct staging completed for file {file_id} in {staging_result.get('duration_ms', 0):.2f}ms"
+          try:
+            staging_result = await stage_file_directly(
+              db=db,
+              file_id=file_id,
+              graph_id=graph_id,
+              table_id=str(table.id),
+              s3_key=graph_file.s3_key,
+              file_size_bytes=actual_file_size,
+              row_count=actual_row_count,
             )
 
-            if ingest_to_graph:
-              from robosystems.middleware.sse import (
-                build_graph_job_config,
-                run_and_monitor_dagster_job,
-              )
-              from robosystems.middleware.sse.event_storage import get_event_storage
-
-              operation_id = str(uuid.uuid4())
-              event_storage = get_event_storage()
-              await event_storage.create_operation(
-                operation_type="graph_ingestion",
-                user_id=str(current_user.id),
-                graph_id=graph_id,
-                operation_id=operation_id,
-              )
-
-              run_config = build_graph_job_config(
-                "materialize_file_job",
-                file_id=file_id,
-                graph_id=graph_id,
-                table_name=table.table_name,
-              )
-
-              background_tasks.add_task(
-                run_and_monitor_dagster_job,
-                job_name="materialize_file_job",
-                operation_id=operation_id,
-                run_config=run_config,
-              )
-
-              graph_file.operation_id = operation_id
+            if staging_result.get("status") == "success":
+              graph_file.duckdb_status = "staged"
               db.commit()
               db.refresh(graph_file)
 
               logger.info(
-                f"Direct staging done, graph ingestion job started for file {file_id}. "
-                f"Monitor at /v1/operations/{operation_id}/stream"
+                f"Direct staging completed for file {file_id} in {staging_result.get('duration_ms', 0):.2f}ms"
               )
-          else:
+
+              if ingest_to_graph and lock is not None:
+                from robosystems.middleware.sse import build_graph_job_config
+
+                run_config = build_graph_job_config(
+                  "materialize_file_job",
+                  file_id=file_id,
+                  graph_id=graph_id,
+                  table_name=table.table_name,
+                )
+                operation_id = await _launch_graph_write(
+                  "materialize_file_job", run_config, graph_id, current_user, lock
+                )
+                handed_off = True
+
+                graph_file.operation_id = operation_id
+                db.commit()
+                db.refresh(graph_file)
+
+                logger.info(
+                  f"Direct staging done, graph ingestion job started for file {file_id}. "
+                  f"Monitor at /v1/operations/{operation_id}/stream"
+                )
+            else:
+              logger.warning(
+                f"Direct staging failed for file {file_id}: {staging_result.get('message')}. "
+                f"File will be staged on next upload or query attempt."
+              )
+
+          except Exception as e:
             logger.warning(
-              f"Direct staging failed for file {file_id}: {staging_result.get('message')}. "
+              f"Direct staging error for file {file_id}: {e}. "
               f"File will be staged on next upload or query attempt."
             )
 
-        except Exception as e:
-          logger.warning(
-            f"Direct staging error for file {file_id}: {e}. "
-            f"File will be staged on next upload or query attempt."
-          )
-
-      else:
-        from robosystems.middleware.sse import (
-          build_graph_job_config,
-          run_and_monitor_dagster_job,
-        )
-        from robosystems.middleware.sse.event_storage import get_event_storage
-
-        operation_id = str(uuid.uuid4())
-
-        logger.info(
-          f"Large file detected ({actual_file_size / (1024 * 1024):.2f} MB >= {SMALL_FILE_STAGING_THRESHOLD_MB} MB). "
-          f"Using Dagster job for file {file_id}"
-        )
-
-        try:
-          event_storage = get_event_storage()
-          await event_storage.create_operation(
-            operation_type="duckdb_staging",
-            user_id=str(current_user.id),
-            graph_id=graph_id,
-            operation_id=operation_id,
-          )
-
-          run_config = build_graph_job_config(
-            "stage_file_job",
-            file_id=file_id,
-            graph_id=graph_id,
-            table_id=str(table.id),
-            ingest_to_graph=ingest_to_graph,
-          )
-
-          background_tasks.add_task(
+        else:
+          from robosystems.middleware.sse import (
+            build_graph_job_config,
             run_and_monitor_dagster_job,
-            job_name="stage_file_job",
-            operation_id=operation_id,
-            run_config=run_config,
+          )
+          from robosystems.middleware.sse.event_storage import get_event_storage
+
+          operation_id = str(uuid.uuid4())
+
+          logger.info(
+            f"Large file detected ({actual_file_size / (1024 * 1024):.2f} MB >= {SMALL_FILE_STAGING_THRESHOLD_MB} MB). "
+            f"Using Dagster job for file {file_id}"
           )
 
-          graph_file.operation_id = operation_id
-
-          db.commit()
-          db.refresh(graph_file)
-
-          if ingest_to_graph:
-            logger.info(
-              f"v2 Incremental Ingestion: Dagster staging job started for file {file_id} "
-              f"with auto-ingest to graph enabled. Monitor at /v1/operations/{operation_id}/stream"
-            )
-          else:
-            logger.info(
-              f"v2 Incremental Ingestion: Dagster staging job started for file {file_id}. "
-              f"Monitor at /v1/operations/{operation_id}/stream"
+          try:
+            run_config = build_graph_job_config(
+              "stage_file_job",
+              file_id=file_id,
+              graph_id=graph_id,
+              table_id=str(table.id),
+              ingest_to_graph=ingest_to_graph,
             )
 
-        except Exception as e:
-          logger.warning(
-            f"Failed to start Dagster staging job for file {file_id}: {e}. "
-            f"File will be staged on next upload or query attempt."
-          )
+            if ingest_to_graph and lock is not None:
+              operation_id = await _launch_graph_write(
+                "stage_file_job", run_config, graph_id, current_user, lock
+              )
+              handed_off = True
+            else:
+              event_storage = get_event_storage()
+              await event_storage.create_operation(
+                operation_type="duckdb_staging",
+                user_id=str(current_user.id),
+                graph_id=graph_id,
+                operation_id=operation_id,
+              )
+              background_tasks.add_task(
+                run_and_monitor_dagster_job,
+                job_name="stage_file_job",
+                operation_id=operation_id,
+                run_config=run_config,
+              )
+
+            graph_file.operation_id = operation_id
+
+            db.commit()
+            db.refresh(graph_file)
+
+            if ingest_to_graph:
+              logger.info(
+                f"v2 Incremental Ingestion: Dagster staging job started for file {file_id} "
+                f"with auto-ingest to graph enabled. Monitor at /v1/operations/{operation_id}/stream"
+              )
+            else:
+              logger.info(
+                f"v2 Incremental Ingestion: Dagster staging job started for file {file_id}. "
+                f"Monitor at /v1/operations/{operation_id}/stream"
+              )
+
+          except Exception as e:
+            logger.warning(
+              f"Failed to start Dagster staging job for file {file_id}: {e}. "
+              f"File will be staged on next upload or query attempt."
+            )
+
+  finally:
+    if lock is not None and not handed_off:
+      lock.release()
 
   logger.info(
     f"File {file_id} marked as uploaded: {graph_file.file_size_bytes or 0:,} bytes, {graph_file.row_count or 0:,} rows"

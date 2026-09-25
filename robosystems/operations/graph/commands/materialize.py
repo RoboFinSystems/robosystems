@@ -6,11 +6,16 @@ Returns ``operation_id`` and ``status`` for the router to wrap in an
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.graphs.operations import MaterializeOp
 from robosystems.models.core import User
+
+if TYPE_CHECKING:
+  from robosystems.middleware.auth.distributed_lock import DistributedLock
 
 
 async def materialize_cmd(
@@ -24,11 +29,8 @@ async def materialize_cmd(
   The per-graph lock fails closed: 409 when held, 503 + Retry-After when the
   lock service is down. A dry run checks limits and takes no lock.
   """
-  from robosystems.config.constants import INGESTION_LOCK_TTL
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
-  from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
   from robosystems.logger import api_logger, logger
-  from robosystems.middleware.auth.distributed_lock import DistributedLock
   from robosystems.middleware.billing.enforcement import require_graph_access
   from robosystems.middleware.graph.types import SHARED_REPO_WRITE_ERROR_MESSAGE
   from robosystems.middleware.robustness import CircuitBreakerManager
@@ -78,36 +80,7 @@ async def materialize_cmd(
       "limit_check": limit_check,
     }
 
-  # Fails closed: a retry is cheap, while an unlocked double-writer silently
-  # duplicates relationship edges.
-  lock_unavailable = HTTPException(
-    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-    detail=(
-      "Materialization lock service unavailable; retry shortly "
-      "(materialization refuses to run unlocked)"
-    ),
-    headers={"Retry-After": "30"},
-  )
-  try:
-    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
-    lock = DistributedLock(
-      redis_client, f"graph_materialize:{graph_id}", ttl_seconds=INGESTION_LOCK_TTL
-    )
-    lock_result = lock.acquire(blocking=False)
-  except Exception as e:
-    logger.warning(f"Could not acquire distributed lock for {graph_id}: {e}")
-    raise lock_unavailable from e
-
-  if not lock_result.acquired:
-    if lock_result.backend_error:
-      logger.warning(
-        f"Distributed lock backend error for {graph_id}: {lock_result.error_message}"
-      )
-      raise lock_unavailable
-    raise HTTPException(
-      status_code=status.HTTP_409_CONFLICT,
-      detail="Materialization already in progress for this graph",
-    )
+  lock = acquire_materialize_lock(graph_id)
 
   # The worker releases the lock by lock_id (compare-and-delete), so a task
   # that outlives the TTL cannot strip a successor's lock. It is never
@@ -244,6 +217,49 @@ async def materialize_cmd(
   except Exception:
     lock.release()
     raise
+
+
+def acquire_materialize_lock(graph_id: str) -> DistributedLock:
+  """Take the per-graph lock every writer into a graph database holds.
+
+  Fails closed: 409 when held, 503 + Retry-After when the lock service is
+  down. A retry is cheap, while an unlocked double-writer silently duplicates
+  relationship edges.
+  """
+  from robosystems.config.constants import INGESTION_LOCK_TTL
+  from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+  from robosystems.logger import logger
+  from robosystems.middleware.auth.distributed_lock import DistributedLock
+
+  lock_unavailable = HTTPException(
+    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    detail=(
+      "Materialization lock service unavailable; retry shortly "
+      "(materialization refuses to run unlocked)"
+    ),
+    headers={"Retry-After": "30"},
+  )
+  try:
+    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+    lock = DistributedLock(
+      redis_client, f"graph_materialize:{graph_id}", ttl_seconds=INGESTION_LOCK_TTL
+    )
+    lock_result = lock.acquire(blocking=False)
+  except Exception as e:
+    logger.warning(f"Could not acquire distributed lock for {graph_id}: {e}")
+    raise lock_unavailable from e
+
+  if not lock_result.acquired:
+    if lock_result.backend_error:
+      logger.warning(
+        f"Distributed lock backend error for {graph_id}: {lock_result.error_message}"
+      )
+      raise lock_unavailable
+    raise HTTPException(
+      status_code=status.HTTP_409_CONFLICT,
+      detail="Materialization already in progress for this graph",
+    )
+  return lock
 
 
 def _resolve_source(source: str | None, graph_type: str) -> str:
