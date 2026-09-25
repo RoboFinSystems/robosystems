@@ -65,12 +65,12 @@ class TestPartialBuildNotMarkedFresh:
         "robosystems.database.get_db_session",
         return_value=_db_session_gen(db),
       ),
+      pytest.raises(ValueError, match="partial"),
     ):
-      result = await task.execute()
+      await task.execute()
 
-    assert result["status"] == "partial"
-    assert result["errors"]
-    # The graph row must never be touched: no query, no mark_fresh.
+    # The operation fails (the consumer completes any task that returns), and
+    # the graph row is never touched: no query, no mark_fresh.
     db.query.assert_not_called()
 
   @pytest.mark.asyncio
@@ -90,10 +90,10 @@ class TestPartialBuildNotMarkedFresh:
         "robosystems.database.get_db_session",
         return_value=_db_session_gen(db),
       ),
+      pytest.raises(ValueError, match="error"),
     ):
-      result = await task.execute()
+      await task.execute()
 
-    assert result["status"] == "error"
     db.query.assert_not_called()
 
   @pytest.mark.asyncio
