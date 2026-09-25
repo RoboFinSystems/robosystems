@@ -4,6 +4,7 @@ import json
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 import jwt
 import redis
@@ -467,6 +468,32 @@ async def sso_token_exchange(
     )
 
 
+def _assert_completing_app(request: Request, session_data: dict) -> None:
+  """A handoff is redeemed only by the app it was minted for.
+
+  Browsers send ``Origin`` on this cross-site POST; a caller without one is not
+  a browser, and there is no browser session to protect.
+  """
+  origin = request.headers.get("origin")
+  if not origin:
+    return
+  base_url = Config.get_app_urls().get(session_data.get("target_app") or "")
+  expected = urlsplit(base_url or "")
+  if origin.rstrip("/").lower() != f"{expected.scheme}://{expected.netloc}".lower():
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.AUTHORIZATION_DENIED,
+      details={
+        "action": "sso_completion_wrong_app",
+        "target_app": session_data.get("target_app"),
+        "origin": origin,
+      },
+      risk_level="medium",
+    )
+    raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid"
+    )
+
+
 @router.post(
   "/sso-complete",
   response_model=AuthResponse,
@@ -525,6 +552,8 @@ async def sso_complete(
               status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session data"
             )
 
+          _assert_completing_app(request, session_data)
+
           # Single use: delete the session and related tokens atomically.
           await redis_client.delete(f"sso_session:{session_id}")
           await redis_client.delete(f"sso_token:{token_id}")
@@ -559,6 +588,8 @@ async def sso_complete(
           raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session data"
           )
+
+        _assert_completing_app(request, session_data)
 
         await redis_client.delete(f"sso_session:{session_id}")
         await redis_client.delete(f"sso_token:{token_id}")
