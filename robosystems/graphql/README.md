@@ -288,6 +288,6 @@ Both sides call into `operations/{domain}/*`. Whether a caller hits GraphQL, a n
 
 Serialization-bundle downloads live here as the `reportDownloadUrl(reportId, format)` field on the `Report` query — not as a REST resource and not as a `download-report` operation. A download is a read of stored state, so it belongs on the read surface.
 
-The catch: neither a GraphQL JSON response nor an `OperationEnvelope` can carry a raw binary zip. So **every flavor resolves to a presigned S3 URL** — JSON-LD is stamped at publish time, XBRL is materialized and cached on first request (`operations/roboledger/reads/reports.py:get_report_download_url`). The resolver only ever returns a URL string; the client follows it to S3.
+The catch: neither a GraphQL JSON response nor an `OperationEnvelope` can carry a raw binary zip. So **every flavor resolves to a presigned S3 URL** — the Tavi model is stamped at publish time; the holon and XBRL 2.1 are materialized and cached on first request (`operations/roboledger/reads/reports.py:get_report_download_url`). The resolver only ever returns a URL string; the client follows it to S3.
 
 There is no analytical view-operation home for it either: view operations (`build-fact-grid`, `live-financial-statement`) are LadybugDB-backed analytical queries, whereas a presigned-URL lookup is a plain OLTP read.
