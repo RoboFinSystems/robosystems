@@ -20,13 +20,14 @@ Documents are cached in Valkey per the response's ``Cache-Control`` (clamped),
 so a client that reconnects reuses the validated document without a fetch.
 """
 
+import asyncio
 import hashlib
 import ipaddress
 import json
 import re
 import socket
 import threading
-import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -38,11 +39,13 @@ from robosystems.logger import logger
 from .clients import ClientError
 
 CIMD_MAX_BYTES = 64 * 1024
+# A hard wall-clock bound on the whole exchange, headers included.
 CIMD_TIMEOUT_SECONDS = 5.0
-# Fetches hold a threadpool thread for their whole duration, so both the
-# wall-clock time of one fetch and the number in flight are bounded.
 CIMD_READ_TIMEOUT_SECONDS = 2.0
+# Fetches in flight are bounded, and trusted hosts draw on their own slots so
+# slow unknown hosts cannot crowd them out.
 CIMD_MAX_CONCURRENT_FETCHES = 4
+CIMD_MAX_CONCURRENT_TRUSTED_FETCHES = 2
 CIMD_CACHE_MIN_SECONDS = 60
 CIMD_CACHE_MAX_SECONDS = 24 * 3600
 CIMD_CACHE_DEFAULT_SECONDS = 3600
@@ -63,6 +66,11 @@ CIMD_TRUSTED_HOSTS = frozenset(
 
 _CACHE_KEY_PREFIX = "oauth:cimd:"
 _fetch_slots = threading.BoundedSemaphore(CIMD_MAX_CONCURRENT_FETCHES)
+_trusted_fetch_slots = threading.BoundedSemaphore(CIMD_MAX_CONCURRENT_TRUSTED_FETCHES)
+_fetch_executor = ThreadPoolExecutor(
+  max_workers=CIMD_MAX_CONCURRENT_FETCHES + CIMD_MAX_CONCURRENT_TRUSTED_FETCHES,
+  thread_name_prefix="cimd-fetch",
+)
 _MAX_AGE_RE = re.compile(r"max-age=(\d+)")
 
 
@@ -124,7 +132,7 @@ def _cache_ttl(cache_control: str | None) -> int:
 
 
 def fetch_client_metadata(
-  client_id: str, *, transport: httpx.BaseTransport | None = None
+  client_id: str, *, transport: Any = None
 ) -> tuple[dict[str, Any], int]:
   """Fetch and validate a metadata document. Returns ``(document, cache_ttl)``.
 
@@ -132,31 +140,42 @@ def fetch_client_metadata(
   """
   if not is_cimd_client_id(client_id):
     raise ClientError("invalid_client", "client_id is not a metadata document URL")
-  if not _fetch_slots.acquire(blocking=False):
+  slots = _trusted_fetch_slots if trusted_cimd_host(client_id) else _fetch_slots
+  if not slots.acquire(blocking=False):
     raise ClientError(
       "invalid_client", "client metadata document is not available, retry shortly"
     )
   try:
-    return _fetch(client_id, transport)
+    host = urlsplit(client_id).hostname or ""
+    _assert_public_host(host)
+    # On its own thread and event loop, so the deadline can cancel a read in
+    # progress whatever thread (or loop) the caller is on.
+    return _fetch_executor.submit(_fetch_with_deadline, client_id, transport).result()
   finally:
-    _fetch_slots.release()
+    slots.release()
 
 
-def _fetch(
-  client_id: str, transport: httpx.BaseTransport | None
-) -> tuple[dict[str, Any], int]:
-  host = urlsplit(client_id).hostname or ""
-  _assert_public_host(host)
-  deadline = time.monotonic() + CIMD_TIMEOUT_SECONDS
-
+def _fetch_with_deadline(client_id: str, transport: Any) -> tuple[dict[str, Any], int]:
   try:
-    with httpx.Client(
+    return asyncio.run(
+      asyncio.wait_for(_fetch(client_id, transport), CIMD_TIMEOUT_SECONDS)
+    )
+  except TimeoutError as exc:
+    logger.warning(f"CIMD fetch for {client_id} exceeded {CIMD_TIMEOUT_SECONDS}s")
+    raise ClientError(
+      "invalid_client", "client metadata document is not available"
+    ) from exc
+
+
+async def _fetch(client_id: str, transport: Any) -> tuple[dict[str, Any], int]:
+  try:
+    async with httpx.AsyncClient(
       follow_redirects=False,
       timeout=httpx.Timeout(CIMD_READ_TIMEOUT_SECONDS),
       transport=transport,
       headers={"Accept": "application/json", "User-Agent": "robosystems-oauth/1"},
     ) as client:
-      with client.stream("GET", client_id) as response:
+      async with client.stream("GET", client_id) as response:
         if response.status_code != 200:
           raise ClientError(
             "invalid_client", "client metadata document is not available"
@@ -165,11 +184,7 @@ def _fetch(
         if declared and declared.isdigit() and int(declared) > CIMD_MAX_BYTES:
           raise ClientError("invalid_client", "client metadata document is too large")
         body = bytearray()
-        for chunk in response.iter_bytes():
-          if time.monotonic() > deadline:
-            raise ClientError(
-              "invalid_client", "client metadata document is not available"
-            )
+        async for chunk in response.aiter_bytes():
           body.extend(chunk)
           if len(body) > CIMD_MAX_BYTES:
             raise ClientError("invalid_client", "client metadata document is too large")
@@ -199,9 +214,7 @@ def _cache_key(client_id: str) -> str:
   return f"{_CACHE_KEY_PREFIX}{hashlib.sha256(client_id.encode()).hexdigest()}"
 
 
-def get_client_metadata(
-  client_id: str, *, transport: httpx.BaseTransport | None = None
-) -> dict[str, Any]:
+def get_client_metadata(client_id: str, *, transport: Any = None) -> dict[str, Any]:
   """The validated document for a CIMD ``client_id``, from cache when fresh."""
   key = _cache_key(client_id)
   try:
