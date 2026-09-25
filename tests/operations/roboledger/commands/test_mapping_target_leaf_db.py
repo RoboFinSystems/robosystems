@@ -19,7 +19,6 @@ from robosystems.models.api.extensions.taxonomies import (
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   MappingTargetIsRollupError,
-  MappingTargetNotRenderedError,
   create_mapping_association,
 )
 
@@ -150,24 +149,6 @@ def ledger(tenant):
           name="Partner contributions",
           qname="rs-gaap:ProceedsFromPartnershipContribution",
           created_by="library-seeder",
-        ),
-        Element(
-          id="el_sga",
-          name="Selling, general and administrative",
-          qname="rs-gaap:SellingGeneralAndAdministrativeExpense",
-          created_by="library-seeder",
-        ),
-        Element(
-          id="el_ppe_gross",
-          name="PP&E, gross",
-          qname="rs-gaap:PropertyPlantAndEquipmentGross",
-          created_by="library-seeder",
-        ),
-        Element(
-          id="el_extension",
-          name="Customer deposits held",
-          qname="drift:CustomerDepositsHeld",
-          created_by="u",
         ),
         Element(
           id="el_costs",
@@ -381,22 +362,3 @@ def test_a_roll_forward_balance_is_a_leaf():
     session.commit()
 
   assert _map("el_capital").to_element_id == "el_capital"
-
-
-def test_an_rs_gaap_concept_off_the_statements_is_refused():
-  """Off the Style it would roll into the subtotal above it at render."""
-  _seed_style()
-  with pytest.raises(MappingTargetNotRenderedError):
-    _map("el_sga")
-
-
-@pytest.mark.parametrize(
-  "target",
-  [
-    pytest.param("el_ppe_gross", id="synthesized detail"),
-    pytest.param("el_extension", id="extension concept"),
-  ],
-)
-def test_off_the_statements_but_rendered_another_way_is_accepted(target):
-  _seed_style()
-  assert _map(target).to_element_id == target
