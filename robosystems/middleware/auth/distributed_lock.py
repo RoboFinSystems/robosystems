@@ -279,6 +279,32 @@ class DistributedLock:
     self.release()
 
 
+def extend_lock_by_id(
+  redis_client: redis.Redis,
+  lock_key: str,
+  lock_id: str,
+  ttl_seconds: int,
+) -> bool:
+  """Reset a lock's TTL to ``ttl_seconds`` while ``lock_id`` still holds it.
+
+  The cross-process counterpart of `DistributedLock.extend`, for a holder that
+  outlives the TTL the acquirer set. `lock_key` is unprefixed.
+  """
+  full_key = f"lock:{lock_key}"
+  lua_script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("expire", KEYS[1], ARGV[2])
+        else
+            return 0
+        end
+        """
+  try:
+    return bool(redis_client.eval(lua_script, 1, full_key, lock_id, str(ttl_seconds)))
+  except RedisError as e:
+    logger.warning(f"extend_lock_by_id failed for {full_key}: {e}")
+    return False
+
+
 def release_lock_by_id(
   redis_client: redis.Redis,
   lock_key: str,

@@ -10,6 +10,28 @@ import pytest
 from robosystems.worker.tasks.dagster_monitoring import DagsterJobMonitorTask
 
 
+class _MemoryRecord:
+  def __init__(self):
+    self.value = None
+
+  async def get(self):
+    return self.value
+
+  async def set(self, value):
+    self.value = value
+
+  async def delete(self):
+    self.value = None
+
+
+@pytest.fixture(autouse=True)
+def _run_record():
+  with patch.object(
+    DagsterJobMonitorTask, "_run_record", side_effect=lambda: _MemoryRecord()
+  ):
+    yield
+
+
 def _task():
   task = DagsterJobMonitorTask(
     task_id="op_test",
