@@ -7,9 +7,10 @@ mapping is iterative AI-assisted craft, not a curation envelope.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, Path
+from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field
 
+from robosystems.config import env
 from robosystems.middleware.extensions import OperationSpec
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
@@ -316,6 +317,13 @@ async def auto_map_elements_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
   from robosystems.worker.client import enqueue_task
+
+  # The operator surface's kill switch covers this AI-spending dispatch too.
+  if not env.OPERATOR_POST_ENABLED:
+    raise HTTPException(
+      status_code=403,
+      detail="Operator operations are currently disabled.",
+    )
 
   op_name = "auto-map-elements"
   user_id = str(user.id)
