@@ -289,6 +289,8 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
       # Pending rows in other partitions hold the wake only while a process
       # run is draining them. Left by a failed or abandoned run, nothing would
       # ever drain them, and waiting on them stalls the nightly chain for good.
+      # Assumes the backfill sensor is stopped: while it runs, a quarter it has
+      # not yet picked up looks stranded here and may wake the master early.
       other_process_runs = [
         run
         for run in context.instance.get_runs(
