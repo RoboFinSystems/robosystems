@@ -14,9 +14,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+from robosystems.logger import logger
 from robosystems.middleware.graph import get_graph_repository
+from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.views.view_config import DEFAULT_FACT_LIMIT
-from robosystems.operations.roboledger.views.fact_dedup import keep_most_precise
+from robosystems.operations.roboledger.views.fact_dedup import (
+  keep_most_precise,
+  precision_rank,
+)
 
 # Pre-compiled patterns for inline Cypher node filter sanitization.
 _SAFE_STR_RE = re.compile(r"[\w:\-]+")
@@ -91,14 +97,53 @@ def _build_entity_match(
   )
 
 
-def _deduplicate_fact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-  """Dedup on ``(element, period_start, period_end, entity)`` keeping the most
-  precise fact, then sort by ``period_end`` descending.
+# A tenant period's value comes from the report of record: a filed report,
+# then the books' own close stamps (no report), then drafts, then archived.
+_REPORT_STANDING = {"filed": 3, None: 2, "draft": 1, "under_review": 1, "archived": 0}
+
+
+def _report_standing(graph_id: str, fact_ids: list[str]) -> dict[str, tuple]:
+  """``fact_id -> (standing, last_generated)`` from the tenant's OLTP."""
+  from sqlalchemy import text
+
+  from robosystems.db.extensions import extensions_session
+
+  with extensions_session(graph_id) as session:
+    rows = session.execute(
+      text("""
+        SELECT f.id, r.filing_status, r.last_generated
+        FROM facts f
+        LEFT JOIN fact_sets fs ON fs.id = f.fact_set_id
+        LEFT JOIN reports r ON r.id = fs.report_id
+        WHERE f.id = ANY(:ids)
+      """),
+      {"ids": fact_ids},
+    ).fetchall()
+  return {
+    row.id: (_REPORT_STANDING.get(row.filing_status, 1), str(row.last_generated or ""))
+    for row in rows
+  }
+
+
+def _deduplicate_fact_rows(
+  rows: list[dict[str, Any]], standing: dict[str, tuple] | None = None
+) -> list[dict[str, Any]]:
+  """Dedup on ``(element, period_start, period_end, entity)``, then sort by
+  ``period_end`` descending.
 
   Both period ends are in the key because a 10-Q reports the same element for
   the 3-month and 9-month windows ending on the same day; entity is in it so
-  two filers never collapse into one row.
+  two filers never collapse into one row. The most precise fact wins, unless
+  ``standing`` (a tenant's report state per fact) says which report is of
+  record: that decides first, and precision only breaks its ties.
   """
+
+  def rank(row: dict[str, Any]) -> tuple:
+    precision = precision_rank(row.get("decimals"))
+    if standing is None:
+      return (precision,)
+    return (*standing.get(row.get("fact_id"), (_REPORT_STANDING[None], "")), precision)
+
   deduped = keep_most_precise(
     rows,
     key=lambda row: (
@@ -107,6 +152,7 @@ def _deduplicate_fact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
       row.get("period_end", ""),
       row.get("entity_ticker") or row.get("entity_name", ""),
     ),
+    rank=rank,
   )
   deduped.sort(key=lambda r: r.get("period_end", "") or "", reverse=True)
   return deduped
@@ -189,8 +235,9 @@ async def query_fact_grid(
       parameters["fiscal_period"] = fiscal_period
 
   # No DISTINCT / ORDER BY / LIMIT: dedup and sort run in Python (see module
-  # docstring). Every Fact has a FACT_HAS_ENTITY edge, so the entity join
-  # drops nothing. period_start is projected because the dedup key needs it.
+  # docstring). Every materialized Fact has a FACT_HAS_ENTITY edge, report-owned
+  # or not, so the entity join drops nothing. period_start is projected because
+  # the dedup key needs it.
   return_clause = (
     "\n      RETURN\n"
     "        el.qname as element_id,\n"
@@ -202,7 +249,8 @@ async def query_fact_grid(
     "        f.decimals as decimals,\n"
     "        u.value as unit,\n"
     "        ent.ticker as entity_ticker,\n"
-    "        ent.name as entity_name\n      "
+    "        ent.name as entity_name,\n"
+    "        f.identifier as fact_id\n      "
   )
 
   query = "MATCH " + ", ".join(match_parts)
@@ -216,7 +264,17 @@ async def query_fact_grid(
   if not results:
     return [], False
 
-  deduped = _deduplicate_fact_rows(results)
+  standing = None
+  fact_ids = [row["fact_id"] for row in results if row.get("fact_id")]
+  if fact_ids and not is_shared_repository_or_subgraph(graph_id):
+    try:
+      standing = await run_off_loop(_report_standing, graph_id, fact_ids)
+    except Exception as exc:
+      # A graph with no ledger schema (a generic subgraph) keeps the precision rule.
+      logger.warning(f"Report standing unavailable for {graph_id}: {exc}")
+  deduped = _deduplicate_fact_rows(results, standing)
+  for row in deduped:
+    row.pop("fact_id", None)
   if len(deduped) > limit:
     return deduped[:limit], True
   return deduped, False

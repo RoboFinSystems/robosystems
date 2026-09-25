@@ -1132,17 +1132,19 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
 
   tables["FACT_HAS_ENTITY"] = f"""
     CREATE OR REPLACE TABLE FACT_HAS_ENTITY AS
-    -- Native facts: entity_id references a local entity directly
+    -- Native facts, report-owned or not (close stamps, schedules and metrics
+    -- have no report): entity_id references a local entity directly
     SELECT
       rf.id                           AS src,
       rf.entity_id                    AS dst
-    FROM postgres_scan('{c}', '{s}', 'facts') rf
-    JOIN postgres_scan('{c}', '{s}', 'fact_sets') fs
+    FROM {actual_facts} rf
+    JOIN postgres_scan('{c}', '{s}', 'entities') en
+      ON en.id = rf.entity_id
+    LEFT JOIN postgres_scan('{c}', '{s}', 'fact_sets') fs
       ON fs.id = rf.fact_set_id
-    JOIN postgres_scan('{c}', '{s}', 'reports') rd
+    LEFT JOIN postgres_scan('{c}', '{s}', 'reports') rd
       ON fs.report_id = rd.id
     WHERE rd.source_graph_id IS NULL
-      AND fs.scenario_id IS NULL
     UNION ALL
     -- Shared facts: remap entity_id to the linked entity on this graph
     SELECT
