@@ -26,6 +26,9 @@ from robosystems.models.extensions import (
   VerificationResult,
 )
 from robosystems.models.extensions.roboledger.fact import Fact
+from robosystems.operations.roboledger.commands.taxonomies import (
+  assert_mapping_leaf,
+)
 from robosystems.operations.taxonomy_block._helpers import structure_from_request
 from robosystems.operations.taxonomy_block.immutability import (
   assert_history_undisturbed,
@@ -208,6 +211,8 @@ def apply_associations_to_add(
       raise ValueError(f"association from_ref {req.from_ref!r} did not resolve.")
     if to_id is None:
       raise ValueError(f"association to_ref {req.to_ref!r} did not resolve.")
+    if req.association_type == "mapping":
+      assert_mapping_leaf(session, to_id)
     assoc = Association(
       structure_id=structure_id,
       from_element_id=from_id,

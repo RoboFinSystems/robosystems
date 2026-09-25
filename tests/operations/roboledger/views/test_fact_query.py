@@ -27,6 +27,16 @@ MOCK_GRAPH_ID = "kg_test123"
 PATCH_REPO = "robosystems.operations.roboledger.views.fact_query.get_graph_repository"
 
 
+@pytest.fixture(autouse=True)
+def no_ledger_schema():
+  """The query shape tests use a made-up graph the platform DB doesn't know."""
+  with patch(
+    "robosystems.operations.roboledger.views.fact_query._has_ledger_schema",
+    return_value=False,
+  ):
+    yield
+
+
 @pytest.fixture
 def mock_repository():
   repo = AsyncMock()

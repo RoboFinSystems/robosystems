@@ -20,7 +20,6 @@ RS_GAAP_SUBTOTAL_DENYLIST: frozenset[str] = frozenset(
     "rs-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
     # Income Statement — Top-line revenue rollups
     "rs-gaap:Revenues",
-    "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
     "rs-gaap:RevenueFromContractWithCustomerIncludingAssessedTax",
     # Income Statement — Cost / margin rollups
     "rs-gaap:CostOfRevenue",

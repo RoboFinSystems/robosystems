@@ -97,32 +97,35 @@ class MappingTargetIsRollupError(ValueError):
     self.qname = qname
 
 
-def _assert_leaf_target(session: Session, target: Element) -> None:
-  """Refuse a mapping target that rolls up on the graph's Reporting Style.
+def assert_leaf_target(session: Session, target: Element) -> None:
+  """Refuse a mapping target the graph's statements compute from children.
 
-  A direct fact on a rolled-up concept overrides the sum of its children at
-  render, so the statement no longer articulates. Same rule as the suggester:
-  the Style's presentation parents when seeded, else the static denylist.
+  A direct fact on a computed concept overrides it at render, so the
+  statement no longer articulates. Same rule as the suggester. A graph with
+  no entity yet is judged on the default Style.
   """
-  from robosystems.operations.operators.implementations.mapping.constants import (
-    RS_GAAP_SUBTOTAL_DENYLIST,
-  )
   from robosystems.operations.roboledger.reads.taxonomies import (
-    _load_rollup_concepts,
+    is_subtotal_target,
+    load_subtotal_concepts,
   )
   from robosystems.operations.roboledger.reports.network_picker import (
+    DEFAULT_STYLE_ID,
     load_primary_reporting_style,
   )
 
   try:
-    rollups = _load_rollup_concepts(session, load_primary_reporting_style(session))
+    style_id = load_primary_reporting_style(session)
   except LookupError:
-    rollups = set()
-  denied = (
-    target.id in rollups if rollups else target.qname in RS_GAAP_SUBTOTAL_DENYLIST
-  )
-  if denied:
+    style_id = DEFAULT_STYLE_ID
+  if is_subtotal_target(target, load_subtotal_concepts(session, style_id)):
     raise MappingTargetIsRollupError(target.qname)
+
+
+def assert_mapping_leaf(session: Session, to_element_id: str) -> None:
+  """``assert_leaf_target`` for a write path that holds only the target's id."""
+  target = session.get(Element, to_element_id)
+  if target is not None:
+    assert_leaf_target(session, target)
 
 
 class MappingAssociationExistsError(ValueError):
@@ -174,7 +177,7 @@ def create_mapping_association(
   if to_elem is None:
     raise ElementNotFoundError("target", body.to_element_id)
   if body.association_type == "mapping":
-    _assert_leaf_target(session, to_elem)
+    assert_leaf_target(session, to_elem)
 
   existing = session.execute(
     select(Association).where(

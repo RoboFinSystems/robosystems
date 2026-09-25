@@ -26,6 +26,9 @@ from robosystems.models.extensions import (
   Taxonomy,
   Trait,
 )
+from robosystems.operations.roboledger.commands.taxonomies import (
+  assert_mapping_leaf,
+)
 from robosystems.operations.taxonomy_block._helpers import (
   qname_for,
   structure_from_request,
@@ -221,6 +224,8 @@ def create(
         f"association to_ref {req.to_ref!r} does not resolve in this "
         f"envelope or in parent_taxonomy_id {payload.parent_taxonomy_id!r}."
       )
+    if req.association_type == "mapping":
+      assert_mapping_leaf(session, to_id)
     association = Association(
       structure_id=structure.id,
       from_element_id=from_id,
