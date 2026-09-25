@@ -239,3 +239,63 @@ class TestSSOComplete:
 
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "User not found or inactive"
+
+
+class TestSSOCompleteRedeemingApp:
+  """A handoff minted for one app is redeemed only by that app's origin."""
+
+  def _args(self, origin):
+    args = _call_args()
+    args["request"].headers = {"origin": origin} if origin else {}
+    return args
+
+  async def _complete(self, origin):
+    redis_instance = AsyncMock()
+    redis_instance.get.return_value = json.dumps(SESSION_DATA)
+    user = Mock(spec=User)
+    user.id, user.name, user.email = "user_123", "Test", "t@example.com"
+    user.email_verified, user.is_active, user.session_version = True, True, 0
+    with (
+      patch("robosystems.routers.auth.sso.get_sso_lock_manager", return_value=None),
+      patch(
+        "robosystems.routers.auth.sso.get_async_redis_client",
+        return_value=redis_instance,
+      ),
+      patch("robosystems.routers.auth.sso.User.get_by_id", return_value=user),
+      patch("robosystems.routers.auth.sso.extract_device_fingerprint"),
+      patch("robosystems.routers.auth.sso.create_jwt_token", return_value="jwt"),
+      patch(
+        "robosystems.routers.auth.sso.Config.get_app_urls",
+        return_value={
+          "roboledger": "https://roboledger.ai",
+          "roboinvestor": "https://roboinvestor.ai",
+        },
+      ),
+    ):
+      return await sso_complete(**self._args(origin)), redis_instance
+
+  @pytest.mark.parametrize(
+    "origin", ["https://roboledger.ai", "https://RoboLedger.ai/", None]
+  )
+  async def test_the_minting_app_redeems(self, origin):
+    result, _ = await self._complete(origin)
+    assert result.token == "jwt"
+
+  async def test_another_origin_is_refused_and_consumes_nothing(self):
+    redis_instance = AsyncMock()
+    redis_instance.get.return_value = json.dumps(SESSION_DATA)
+    with (
+      patch("robosystems.routers.auth.sso.get_sso_lock_manager", return_value=None),
+      patch(
+        "robosystems.routers.auth.sso.get_async_redis_client",
+        return_value=redis_instance,
+      ),
+      patch(
+        "robosystems.routers.auth.sso.Config.get_app_urls",
+        return_value={"roboledger": "https://roboledger.ai"},
+      ),
+      pytest.raises(HTTPException) as exc,
+    ):
+      await sso_complete(**self._args("https://roboinvestor.ai"))
+    assert exc.value.status_code == status.HTTP_401_UNAUTHORIZED
+    redis_instance.delete.assert_not_called()
