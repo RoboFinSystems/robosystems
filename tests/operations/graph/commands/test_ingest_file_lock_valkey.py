@@ -38,7 +38,9 @@ def _lock_holder(graph_id: str) -> str | None:
     client.close()
 
 
-async def _ingest(graph_id: str, *, staged: bool, enqueue: AsyncMock):
+async def _ingest(
+  graph_id: str, *, staged: bool, enqueue: AsyncMock, size: int = 1 * MB
+):
   graph_file = MagicMock()
   graph_file.graph_id = graph_id
   graph_file.upload_status = "pending"
@@ -48,7 +50,7 @@ async def _ingest(graph_id: str, *, staged: bool, enqueue: AsyncMock):
   graph_file.row_count = 10
 
   s3 = MagicMock()
-  s3.s3_client.head_object.return_value = {"ContentLength": 1 * MB}
+  s3.s3_client.head_object.return_value = {"ContentLength": size}
   graph = MagicMock(parent_graph_id=None, graph_tier="ladybug-standard")
   storage = {
     "allowed": True,
@@ -138,3 +140,18 @@ async def test_a_failed_staging_frees_the_lock(graph_id):
 
   enqueue.assert_not_awaited()
   assert _lock_holder(graph_id) is None
+
+
+@pytest.mark.asyncio
+async def test_a_large_file_stages_and_writes_under_the_lock(graph_id):
+  """Above the direct-staging threshold, staging and the graph write run as one
+  Dagster job, and that job carries the lock too."""
+  enqueue = AsyncMock(return_value={"operation_id": "op_x"})
+
+  result = await _ingest(graph_id, staged=True, enqueue=enqueue, size=60 * MB)
+
+  assert result["operation_id"] == "op_x"
+  params = enqueue.await_args.kwargs["params"]
+  assert params["job_name"] == "stage_file_job"
+  assert params["tags"] == {"materialize_db": graph_id}
+  assert _lock_holder(graph_id) == params["lock_id"]

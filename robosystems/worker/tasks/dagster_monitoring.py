@@ -79,7 +79,8 @@ class DagsterJobMonitorTask(BaseTask):
           )
         except Exception:
           # A refused submit started nothing. A cancel mid-submit may have,
-          # so it keeps both the lock and the marker.
+          # so it keeps both the lock and the marker: CancelledError is not an
+          # Exception, and must never be caught here.
           await record.delete()
           release = True
           raise
