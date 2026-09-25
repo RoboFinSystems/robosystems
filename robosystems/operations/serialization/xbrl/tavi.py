@@ -20,13 +20,12 @@ from robosystems.operations.serialization.model import (
 
 TAVI_MEDIA_TYPE = "application/json"
 
-# The holon keeps all of it.
+# The holon keeps all of it. The reporting style and the fact-set partition
+# ride the Tavi as `rs:` properties since xbrlkit 0.18.1.
 TAVI_OMITTED_CONTENT: tuple[str, ...] = (
   "ib_envelopes",
   "definition_links",
-  "reporting_style",
   "framework_pins",
-  "fact_sets",
   "filing_lifecycle",
 )
 

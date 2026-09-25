@@ -203,7 +203,7 @@ Because tenancy is enforced at the graph rather than in application predicates, 
 
 ### Identity & Access
 
-Programmatic access uses `X-API-Key`; the browser apps use short-lived JWTs. How a person *logs in* is a deployment decision — password, WebAuthn passkey, or an enterprise identity provider — published at `GET /v1/auth/providers`, so one frontend build renders whichever posture the backend is configured for.
+Programmatic access uses `X-API-Key`; the browser apps use short-lived JWTs. How a person _logs in_ is a deployment decision — password, WebAuthn passkey, or an enterprise identity provider — published at `GET /v1/auth/providers`, so one frontend build renders whichever posture the backend is configured for.
 
 Enterprise SSO (OIDC) and SCIM 2.0 provisioning ship in the repository, off by default — available to any fork without a license gate. Provisioning is link-only: SCIM creates accounts and OIDC only resolves already-provisioned ones, so the identity provider owns the account lifecycle in both directions.
 
@@ -341,7 +341,7 @@ pip install robosystems-client
 
 ## Documentation
 
-### Documentation
+### Technical Documentation
 
 **Getting Started & Platform:**
 
@@ -367,7 +367,7 @@ pip install robosystems-client
 
 - [RoboLedger Demo Walkthrough](https://robosystems.ai/docs/technical/roboledger-demo-walkthrough) · [SEC XBRL Pipeline](https://robosystems.ai/docs/technical/sec-xbrl-pipeline) · [Custom Graph Schema](https://robosystems.ai/docs/technical/custom-graph-schema)
 
-### Developer Documentation (Codebase)
+### Codebase Documentation
 
 Each package documents itself — read the README for a directory before working in it.
 
