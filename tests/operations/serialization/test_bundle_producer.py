@@ -86,6 +86,7 @@ class _FakeFact:
   value: float = 100.0
   fact_set_id: str | None = "fs_01"
   structure_id: str | None = "struct_01"
+  decimals: str | None = None
 
 
 @dataclass
@@ -579,6 +580,31 @@ class TestFactToBundle:
     assert b.entity_ref == "e"
     assert b.value == 295_000_000.0
     assert b.decimals == "INF"
+
+  def test_reads_the_stored_precision(self) -> None:
+    """A fact stamped at cents is exported at cents; a row stamped before
+    facts carried a precision keeps the INF every export has always claimed."""
+    element = _FakeElement(id="elem_A", qname="rs-gaap:Assets", name="Assets")
+    stamped = _FakeFact(
+      id="fact_01",
+      element_id="elem_A",
+      period_start=None,
+      period_end=date(2024, 12, 31),
+      period_type="instant",
+      decimals="2",
+    )
+    legacy = _FakeFact(
+      id="fact_02",
+      element_id="elem_A",
+      period_start=None,
+      period_end=date(2024, 12, 31),
+      period_type="instant",
+    )
+    for fact, expected in ((stamped, "2"), (legacy, "INF")):
+      b = _fact_to_bundle(
+        fact, element, period_ref="p_1", unit_ref="u_USD", entity_ref="e"
+      )
+      assert b.decimals == expected
 
   def test_missing_element_falls_back_to_element_id_for_qname(self) -> None:
     """When the element row isn't in the bundle's slice (rare; only

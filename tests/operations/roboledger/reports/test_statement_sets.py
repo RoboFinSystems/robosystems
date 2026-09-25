@@ -354,6 +354,9 @@ class TestStampRoundsToCents:
     )
     (row,) = [call.args[0] for call in session.add.call_args_list]
     assert row.unit == "USD"
+    # The value is rounded to cents, and says so: the graph and every export
+    # read this rather than claiming exact or hundreds.
+    assert row.decimals == "2"
     return row.value
 
   def test_a_float_summed_subtotal_persists_as_cents(self):
