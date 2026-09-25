@@ -237,3 +237,35 @@ async def test_failed_repository_provisioning_leaves_the_claim_held(
   row = _reload(db_session, subscription_id)
   assert row.status == SubscriptionStatus.PROVISIONING.value
   assert row.ends_at is None
+
+
+async def test_a_checkout_generic_graph_keeps_its_custom_schema(
+  db_session: Session, provisioning_fixture: tuple[str, str]
+):
+  """Checkout stores the create form in resource_config, which lands in
+  subscription_metadata; the pasted schema must reach graph creation."""
+  subscription_id, user_id = provisioning_fixture
+  schema = {"name": "supply", "nodes": [], "relationships": []}
+  row = _reload(db_session, subscription_id)
+  row.subscription_metadata = {"graph_type": "generic", "custom_schema": schema}
+  db_session.commit()
+
+  with (
+    patch(
+      "robosystems.operations.graph.graph_creation_service.GraphCreationService"
+    ) as mock_service_cls,
+    patch(
+      "robosystems.operations.graph.provisioning_service.report_asset_materialization",
+      new=AsyncMock(),
+    ),
+  ):
+    create = AsyncMock(return_value=MagicMock(graph_id="kg" + uuid.uuid4().hex[:20]))
+    mock_service_cls.return_value = MagicMock(create=create)
+    await run_graph_provisioning(
+      operation_id=None,
+      subscription_id=subscription_id,
+      user_id=user_id,
+      tier="ladybug-standard",
+    )
+
+  assert create.await_args.args[0].custom_schema == schema

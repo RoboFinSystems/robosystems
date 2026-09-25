@@ -237,6 +237,40 @@ class TestCreateCheckoutSession:
   @patch("robosystems.models.core.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
+  @patch("robosystems.routers.billing.checkout.get_payment_provider")
+  async def test_an_invalid_custom_schema_is_refused_before_payment(
+    self,
+    mock_get_provider,
+    mock_get_plan,
+    mock_get_customer,
+    mock_get_user_orgs,
+    mock_user,
+    mock_db,
+  ):
+    from robosystems.models.core import OrgRole
+
+    mock_org_user = Mock(org_id="org_123", role=OrgRole.OWNER)
+    mock_get_user_orgs.return_value = [mock_org_user]
+    mock_get_customer.return_value = Mock(
+      spec=BillingCustomer, invoice_billing_enabled=False, has_payment_method=False
+    )
+    mock_get_plan.return_value = {"name": "standard"}
+    request = CreateCheckoutRequest(
+      resource_type="graph",
+      plan_name="standard",
+      resource_config={"graph_type": "generic", "custom_schema": {"nodes": "x"}},
+    )
+
+    with pytest.raises(HTTPException) as exc:
+      await create_checkout_session(request, mock_user, mock_db, None)
+
+    assert exc.value.status_code == 422
+    mock_get_provider.return_value.create_checkout_session.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
+  @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
   @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
   @patch("robosystems.routers.billing.checkout.get_payment_provider")
   async def test_create_checkout_session_creates_stripe_customer(

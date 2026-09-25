@@ -158,6 +158,7 @@ async def run_graph_provisioning(
       entity_identifier = graph_config.get("entity_identifier")
       entity_identifier_type = graph_config.get("entity_identifier_type")
       create_entity = graph_config.get("create_entity", True)
+      custom_schema = graph_config.get("custom_schema")
 
       if operation_id:
         await manager.emit_progress(operation_id, "Creating graph database...", 30)
@@ -184,6 +185,7 @@ async def run_graph_provisioning(
           create_entity=create_entity if has_entity else False,
           description=description,
           tags=tags,
+          custom_schema=None if has_entity else custom_schema,
         )
       )
       graph_id = creation_result.graph_id
