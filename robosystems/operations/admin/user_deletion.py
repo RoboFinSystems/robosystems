@@ -101,6 +101,40 @@ def _org_must_be_retained(org_id: str, session: Session) -> bool:
   return bool(session.query(Graph).filter_by(org_id=org_id).count())
 
 
+def _pool_successors(user_id: str, session: Session) -> dict[str, str | None]:
+  """``GraphCredits.id -> successor`` for every pool that names the user.
+
+  A pool on a graph whose org has another owner passes to that owner: the org
+  keeps the graph, and member removal reassigns nothing. None marks a pool
+  with no one to take it (the user's own org, or no org), which blocks.
+  """
+  pools = (
+    session.query(GraphCredits.id, Graph.org_id)
+    .outerjoin(Graph, Graph.graph_id == GraphCredits.graph_id)
+    .filter(
+      (GraphCredits.user_id == user_id) | (GraphCredits.billing_admin_id == user_id)
+    )
+    .all()
+  )
+  successors: dict[str, str | None] = {}
+  for pool_id, org_id in pools:
+    owner = None
+    if org_id is not None:
+      owner = (
+        session.query(OrgUser.user_id)
+        .filter(
+          OrgUser.org_id == org_id,
+          OrgUser.role == OrgRole.OWNER,
+          OrgUser.user_id != user_id,
+        )
+        .order_by(OrgUser.user_id)
+        .limit(1)
+        .scalar()
+      )
+    successors[pool_id] = owner
+  return successors
+
+
 def plan_user_deletion(user_id: str, session: Session) -> UserDeletionPlan:
   """Assess a deletion: what blocks it, and what it would remove.
 
@@ -197,12 +231,8 @@ def plan_user_deletion(user_id: str, session: Session) -> UserDeletionPlan:
       )
     )
 
-  credit_pools = (
-    session.query(GraphCredits)
-    .filter(
-      (GraphCredits.user_id == user_id) | (GraphCredits.billing_admin_id == user_id)
-    )
-    .count()
+  credit_pools = sum(
+    1 for successor in _pool_successors(user_id, session).values() if successor is None
   )
   if credit_pools:
     blockers.append(
@@ -326,6 +356,16 @@ def execute_user_deletion(
   session.query(OrgInvitation).filter_by(accepted_user_id=user_id).update(
     {"accepted_user_id": None}, synchronize_session=False
   )
+  # Pools on graphs the org keeps pass to its owner (the plan refused any
+  # pool without one).
+  for pool_id, successor in _pool_successors(user_id, session).items():
+    pool = session.get(GraphCredits, pool_id)
+    if pool is None or successor is None:
+      continue
+    if pool.user_id == user_id:
+      pool.user_id = successor
+    if pool.billing_admin_id == user_id:
+      pool.billing_admin_id = successor
 
   # Repository access, deepest child first.
   repo_ids = [
