@@ -17,6 +17,7 @@ from robosystems.dagster.resources import DatabaseResource
 from robosystems.models.core import (
   GraphCredits,
   GraphCreditTransaction,
+  UserRepository,
   UserRepositoryCredits,
 )
 from robosystems.models.core.graph.graph_credits import CreditTransactionType
@@ -679,18 +680,17 @@ async def _handle_charge_refunded(
   )
 
 
-async def _handle_subscription_updated(
-  subscription_data: dict, db_session: Any, context: OpExecutionContext
+async def _apply_subscription_updated(
+  subscription_data: dict,
+  db_session: Any,
+  context: OpExecutionContext,
+  subscription: Any,
 ) -> None:
   """Handle customer.subscription.updated: portal cancel/reactivate and status sync."""
   from datetime import UTC, datetime
 
   status = subscription_data.get("status")
   cancel_at_period_end = subscription_data.get("cancel_at_period_end", False)
-
-  subscription = _resolve_subscription(
-    subscription_data, db_session, context, allow_customer_fallback=False
-  )
 
   # Newer Stripe API versions moved these to items.data[].
   period_start = subscription_data.get("current_period_start")
@@ -802,15 +802,14 @@ async def _handle_subscription_updated(
     db_session.commit()
 
 
-async def _handle_subscription_deleted(
-  subscription_data: dict, db_session: Any, context: OpExecutionContext
+async def _apply_subscription_deleted(
+  subscription_data: dict,
+  db_session: Any,
+  context: OpExecutionContext,
+  subscription: Any,
 ) -> None:
   """Handle customer.subscription.deleted: the Stripe subscription fully terminated."""
   from datetime import UTC, datetime
-
-  subscription = _resolve_subscription(
-    subscription_data, db_session, context, allow_customer_fallback=False
-  )
 
   if subscription.status == "canceled":
     # Already canceled locally; keep the original canceled_at.
@@ -844,6 +843,43 @@ async def _handle_subscription_deleted(
   else:
     subscription.cancel(db_session, immediate=True)
     context.log.info(f"Subscription {subscription.id} canceled via Stripe deletion")
+
+
+async def _handle_subscription_updated(
+  subscription_data: dict, db_session: Any, context: OpExecutionContext
+) -> None:
+  """Handle customer.subscription.updated, then bring a repository grant
+  into line with the resulting status."""
+  subscription = _resolve_subscription(
+    subscription_data, db_session, context, allow_customer_fallback=False
+  )
+  await _apply_subscription_updated(
+    subscription_data, db_session, context, subscription
+  )
+  _reconcile_repository_grant(subscription, db_session)
+
+
+async def _handle_subscription_deleted(
+  subscription_data: dict, db_session: Any, context: OpExecutionContext
+) -> None:
+  """Handle customer.subscription.deleted, then bring a repository grant
+  into line with the resulting status."""
+  subscription = _resolve_subscription(
+    subscription_data, db_session, context, allow_customer_fallback=False
+  )
+  await _apply_subscription_deleted(
+    subscription_data, db_session, context, subscription
+  )
+  _reconcile_repository_grant(subscription, db_session)
+
+
+def _reconcile_repository_grant(subscription: Any, db_session: Any) -> None:
+  from robosystems.operations.billing.repository_subscriptions import (
+    reconcile_repository_grant,
+  )
+
+  db_session.refresh(subscription)
+  reconcile_repository_grant(subscription, db_session)
 
 
 async def _handle_setup_intent_succeeded(
@@ -1133,8 +1169,14 @@ def allocate_user_repository_credits(
   with db.get_session() as session:
     due_pools = (
       session.query(UserRepositoryCredits)
+      .join(
+        UserRepository, UserRepository.id == UserRepositoryCredits.user_repository_id
+      )
       .filter(
         UserRepositoryCredits.is_active.is_(True),
+        # A grant that ran out (a period-end cancel) earns no more credits.
+        UserRepository.is_active.is_(True),
+        (UserRepository.expires_at.is_(None)) | (UserRepository.expires_at > now),
         (UserRepositoryCredits.next_allocation_date.is_(None))
         | (UserRepositoryCredits.next_allocation_date <= now),
       )

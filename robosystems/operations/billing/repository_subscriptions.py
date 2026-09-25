@@ -158,3 +158,72 @@ def cancel_user_repository_subscriptions(
     )
 
   return canceled
+
+
+# The suspension reason `reconcile_repository_grant` writes, so it restores
+# only a suspension of its own, never an admin or off-boarding revoke.
+UNPAID_SUSPENSION = "subscription_unpaid"
+
+
+def reconcile_repository_grant(
+  subscription: BillingSubscription, session: Session
+) -> None:
+  """Make the member's repository grant and credit pool agree with the
+  subscription's status, whichever side of Stripe changed it.
+
+  Live (``active``, or ``past_due`` while Stripe retries the card): access
+  with no expiry, lifting a suspension this function made. Canceled with a
+  future ``ends_at``: access until then. Canceled otherwise: revoked.
+  ``unpaid`` (retries exhausted): suspended until a payment revives it.
+  """
+  from datetime import UTC, datetime
+
+  if subscription.resource_type != "repository":
+    return
+  if not subscription.user_id or not subscription.resource_id:
+    return
+  grant = UserRepository.get_by_user_and_repository(
+    user_id=subscription.user_id,
+    repository_name=subscription.resource_id,
+    session=session,
+  )
+  if grant is None:
+    return
+
+  now = datetime.now(UTC)
+  status = subscription.status
+  credits = grant.user_credits
+  ends_at = subscription.ends_at
+  if ends_at is not None and ends_at.tzinfo is None:
+    ends_at = ends_at.replace(tzinfo=UTC)
+
+  if status in ("active", "past_due"):
+    suspended_by_us = (
+      not grant.is_active
+      and credits is not None
+      and credits.suspension_reason == UNPAID_SUSPENSION
+    )
+    if not grant.is_active and not suspended_by_us:
+      return
+    grant.is_active = True
+    grant.expires_at = None
+    grant.updated_at = now
+    if credits is not None and credits.suspension_reason == UNPAID_SUSPENSION:
+      credits.is_active = True
+      credits.suspended_at = None
+      credits.suspension_reason = None
+    session.commit()
+    grant.invalidate_access_cache()
+  elif status == "canceled" and ends_at is not None and ends_at > now:
+    if grant.is_active and grant.expires_at != ends_at:
+      grant.expires_at = ends_at
+      grant.next_billing_at = None
+      grant.updated_at = now
+      session.commit()
+      grant.invalidate_access_cache()
+  elif status == "canceled":
+    if grant.is_active:
+      grant.revoke_access(session, reason="Subscription ended")
+  elif status == "unpaid":
+    if grant.is_active:
+      grant.revoke_access(session, reason=UNPAID_SUSPENSION)
