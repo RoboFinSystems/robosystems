@@ -14,9 +14,12 @@ class SECMetadataLoader:
 
   def __init__(self):
     self._cache: dict[str, dict] = {}
+    # CIKs whose snapshot missed an accession and were re-read from the API.
+    self._refetched: set[str] = set()
 
   def clear_cache(self) -> None:
     self._cache.clear()
+    self._refetched.clear()
 
   def _load_submissions_from_s3(self, s3_client, bucket: str, cik: str) -> dict | None:
     """Load a CIK's submissions snapshot from S3, or None if absent."""
@@ -39,7 +42,8 @@ class SECMetadataLoader:
   ) -> tuple[dict, dict]:
     """``(sec_filer, sec_report)`` for a filing; ``accession`` carries dashes.
 
-    Uses the download phase's S3 snapshot, calling the SEC API only without one.
+    Uses the download phase's S3 snapshot, calling the SEC API without one,
+    or once per CIK when the snapshot does not hold the accession.
     """
     from robosystems.adapters.sec.client.edgar import edgar_client
 
@@ -57,6 +61,7 @@ class SECMetadataLoader:
       logger.warning("No S3 snapshot for CIK %s, falling back to SEC API", cik)
       submissions = cast(dict[str, Any], edgar_client().submissions(cik))
       self._cache[cik] = submissions
+      self._refetched.add(cik)
 
     sec_filer = {
       "cik": cik,
@@ -81,37 +86,53 @@ class SECMetadataLoader:
       "phone": submissions.get("phone"),
     }
 
-    # Two shapes appear here: the merged snapshot written by the download
-    # phase puts the filing columns directly under "filings", while a raw SEC
-    # submissions.json nests the first page under "filings"."recent".
-    sec_report: dict = {"accessionNumber": accession}
-    filings_data = submissions.get("filings", {})
-
-    if "accessionNumber" in filings_data:
-      filings = filings_data
-    else:
-      filings = filings_data.get("recent", {})
-
-    def safe_get(field: str, idx: int, default=None):
-      """Safely get value from filings list with bounds checking."""
-      lst = filings.get(field, [])
-      return lst[idx] if idx < len(lst) else default
-
-    if filings and "accessionNumber" in filings:
-      accession_numbers = filings["accessionNumber"]
-      for i, acc_num in enumerate(accession_numbers):
-        if acc_num == accession:
-          sec_report = {
-            "accessionNumber": accession,
-            "form": safe_get("form", i),
-            "filingDate": safe_get("filingDate", i),
-            "reportDate": safe_get("reportDate", i),
-            "acceptanceDateTime": safe_get("acceptanceDateTime", i),
-            "primaryDocument": safe_get("primaryDocument", i),
-            "periodOfReport": safe_get("periodOfReport", i),
-            "isXBRL": bool(safe_get("isXBRL", i, False)),
-            "isInlineXBRL": bool(safe_get("isInlineXBRL", i, False)),
-          }
-          break
+    sec_report = _find_report(submissions, accession)
+    if sec_report is None and cik not in self._refetched:
+      # A snapshot can predate the filing (a failed refresh, a short master);
+      # the live header's recent page carries every new filing.
+      self._refetched.add(cik)
+      logger.warning(
+        "Accession %s not in the submissions snapshot for CIK %s; re-reading the SEC API",
+        accession,
+        cik,
+      )
+      live = cast(dict[str, Any], edgar_client().submissions(cik))
+      sec_report = _find_report(live, accession)
+    if sec_report is None:
+      sec_report = {"accessionNumber": accession}
 
     return sec_filer, sec_report
+
+
+def _find_report(submissions: dict, accession: str) -> dict | None:
+  """The filing's row from a submissions document, or None when absent.
+
+  Two shapes appear here: the merged snapshot written by the download phase
+  puts the filing columns directly under "filings", while a raw SEC
+  submissions.json nests the first page under "filings"."recent".
+  """
+  filings_data = submissions.get("filings", {})
+  filings = (
+    filings_data
+    if "accessionNumber" in filings_data
+    else filings_data.get("recent", {})
+  )
+
+  def safe_get(field: str, idx: int, default=None):
+    lst = filings.get(field, [])
+    return lst[idx] if idx < len(lst) else default
+
+  for i, acc_num in enumerate(filings.get("accessionNumber", []) if filings else []):
+    if acc_num == accession:
+      return {
+        "accessionNumber": accession,
+        "form": safe_get("form", i),
+        "filingDate": safe_get("filingDate", i),
+        "reportDate": safe_get("reportDate", i),
+        "acceptanceDateTime": safe_get("acceptanceDateTime", i),
+        "primaryDocument": safe_get("primaryDocument", i),
+        "periodOfReport": safe_get("periodOfReport", i),
+        "isXBRL": bool(safe_get("isXBRL", i, False)),
+        "isInlineXBRL": bool(safe_get("isInlineXBRL", i, False)),
+      }
+  return None

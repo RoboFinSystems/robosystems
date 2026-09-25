@@ -189,8 +189,13 @@ def sec_raw_filings(
         submissions_semaphore = asyncio.Semaphore(config.submissions_concurrency)
 
         def build_complete_submissions_sync(cik: str) -> dict:
-          """Every page of the filer's submissions, as one master file."""
-          return edgar_client().complete_submissions(cik)
+          """Every page of the filer's submissions, as one master file. A
+          missing page fails the CIK: a short master is never repaired."""
+          from robosystems.adapters.sec.client.edgar import (
+            complete_submissions_strict,
+          )
+
+          return complete_submissions_strict(cik)
 
         def incremental_update_submissions(
           existing: dict, cik: str, new_recent: dict
@@ -268,7 +273,7 @@ def sec_raw_filings(
                 return True
 
               except Exception as e:
-                context.log.debug(f"Failed to fetch submissions for CIK {cik}: {e}")
+                context.log.warning(f"Failed to fetch submissions for CIK {cik}: {e}")
                 submissions_failed += 1
                 return False
 

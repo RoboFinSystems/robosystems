@@ -662,3 +662,32 @@ class TestProcessorOrchestration:
     assert result.success is False
     assert "zero facts" in result.error
     assert result.tables == {}
+
+  @patch("robosystems.adapters.sec.processors.processing.XBRLGraphProcessor")
+  def test_an_unknown_form_type_is_a_retryable_error_not_a_skip(
+    self, mock_processor_cls
+  ):
+    """A filing whose metadata could not be found must not be filtered out
+    for good: a skip is never re-selected, an error can be retried."""
+    zip_data = self._make_zip_bytes(["filing.htm"])
+    mock_s3 = MagicMock()
+    mock_s3.download_fileobj.side_effect = lambda bucket, key, buf: buf.write(zip_data)
+    mock_loader = MagicMock()
+    mock_loader.get_metadata.return_value = (
+      {"cik": "1045810"},
+      {"accessionNumber": "0001045810-24-000001"},
+    )
+
+    result = process_single_filing_to_memory(
+      storage_key="sec/raw/file.zip",
+      partition_key="2024_1045810_0001045810-24-000001",
+      source_file_id="sf1",
+      s3_client=mock_s3,
+      raw_bucket="bucket",
+      metadata_loader=mock_loader,
+      allowed_form_types=["10-K", "10-Q"],
+    )
+
+    assert result.success is False
+    assert result.skipped_reason is None
+    mock_processor_cls.assert_not_called()

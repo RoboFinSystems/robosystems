@@ -151,6 +151,15 @@ def process_single_filing_to_memory(
 
       if allowed_form_types:
         form_type = sec_report.get("form", "")
+        if not form_type:
+          # Unknown is not "not wanted": a skip is permanent, an error retries.
+          return ProcessedFilingResult(
+            success=False,
+            source_file_id=source_file_id,
+            partition_key=partition_key,
+            tables={},
+            error="filing metadata unavailable: form type unknown",
+          )
         if form_type not in allowed_form_types:
           return ProcessedFilingResult(
             success=True,
