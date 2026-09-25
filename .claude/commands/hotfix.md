@@ -1,6 +1,7 @@
 ---
 description: Ship a fix to production ahead of the next release — the two-PR pattern (main + release-branch twin). Runs only when the user invokes it explicitly.
 argument-hint: "<name> [release/x.y.z] [main-pr-number-or-branch]"
+disable-model-invocation: true
 ---
 
 Ship a fix to production ahead of the next release using the two-PR pattern: one PR to `main` (reviewed; makes the fix permanent) and one PR carrying the same commits to the current `release/<x.y.z>` branch (CI on the exact ref that will be deployed).
