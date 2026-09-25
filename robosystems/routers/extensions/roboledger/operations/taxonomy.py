@@ -47,6 +47,7 @@ from robosystems.operations.roboledger.commands.taxonomies import (
   EntityTaxonomyConflictError,
   MappingAssociationExistsError,
   MappingStructureNotFoundError,
+  MappingTargetIsRollupError,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   TaxonomyNotFoundError as TaxonomyMissingError,  # alias: avoids collision with commands.reports.TaxonomyNotFoundError
@@ -216,6 +217,8 @@ create_mapping_association_op = _registrar.register(
       "Link a chart-of-accounts element to a US GAAP reporting concept. "
       "One mapping edge per call — use `auto-map-elements` for bulk "
       "AI-assisted mapping. Duplicate (from, to, type) tuples return 409. "
+      "The target must be a leaf concept: a subtotal the statement sums from "
+      "its children is refused (422). "
       "Map before you close: an account with landed history in a closed "
       "month cannot be re-mapped (422) — the closed month's stamped "
       "statements were computed through the old arcs. Reopen latest-first "
@@ -235,6 +238,7 @@ create_mapping_association_op = _registrar.register(
         409,
         lambda _e: "Mapping association already exists",
       ),
+      MappingTargetIsRollupError: 422,
       ProtectedFactsError: 422,
     },
     mark_stale_reason="mapping_association_created",
