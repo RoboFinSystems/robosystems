@@ -407,8 +407,8 @@ def regenerate_report(
 ) -> ReportResponse:
   """Regenerate a report with new period dates.
 
-  ``filed`` and ``archived`` reports are immutable; the path past ``filed`` is
-  a restatement (a new Report with ``supersedes_id``).
+  ``filed`` and ``archived`` reports are immutable; a wrong filed report is
+  archived and a new report created for the period.
 
   Raises:
     ReportNotFoundError, NotAuthorizedError.
@@ -430,9 +430,9 @@ def regenerate_report(
   _assert_report_mutable_by(report_def, created_by, "modify")
   if report_def.filing_status in {"filed", "archived"}:
     raise InvalidFilingTransitionError(
-      f"Report '{body.report_id}' is in '{report_def.filing_status}'; "
-      f"create a restatement (new Report with supersedes_id) instead of "
-      f"regenerating."
+      f"Report '{body.report_id}' is '{report_def.filing_status}' and cannot "
+      f"be regenerated. To replace it, archive it and create a new report "
+      f"for the period."
     )
 
   if body.periods:
@@ -532,12 +532,14 @@ class InvalidFilingTransitionError(Exception):
   """Raised when a filing-status transition isn't on the legal lifecycle graph."""
 
 
-# draft ↔ under_review → filed → archived. ``filed`` is reached only through
-# :func:`file_report` (it stamps the audit fields); this map is everything else.
+# draft ↔ under_review → filed ↔ archived. A draft reaches ``filed`` only
+# through :func:`file_report` (it stamps the audit fields); unarchiving returns
+# a report that was already filed, so its original stamps stand.
 _LEGAL_NON_FILE_TRANSITIONS: dict[str, set[str]] = {
   "draft": {"under_review"},
   "under_review": {"draft"},
   "filed": {"archived"},
+  "archived": {"filed"},
 }
 
 
@@ -603,7 +605,8 @@ def transition_filing_status(
 ) -> ReportResponse:
   """Move a Report along the non-file legs of the filing lifecycle.
 
-  Use :func:`file_report` to reach ``filed``. Same actor rule as filing.
+  Use :func:`file_report` to file a draft; the only way back to ``filed``
+  here is unarchiving. Same actor rule as filing.
   """
   # Locked: unlocked, a concurrent file could be overwritten, leaving
   # `filed_at` / `filed_by` set on a report back in `draft`.

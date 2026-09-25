@@ -53,6 +53,7 @@ from robosystems.graphql.types.ledger import (
   Report,
   ReportBundleDownload,
   ReportDownloadFormat,
+  ReportLifecycle,
   ReportList,
   Statement,
   StructureList,
@@ -62,6 +63,9 @@ from robosystems.graphql.types.ledger import (
   UnmappedElement,
 )
 from robosystems.graphql.types.report_package import ReportPackage
+from robosystems.models.api.extensions.reports import (
+  ReportLifecycle as PydanticReportLifecycle,
+)
 from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
 from robosystems.operations.roboledger.reads import (
   account_rollups as reads_account_rollups,
@@ -995,11 +999,22 @@ class LedgerQuery:
   # Reads gate on `_REPORT_EXTENSIONS` (see its definition).
 
   @strawberry.field
-  def reports(self, info: Info[GraphQLContext, None]) -> ReportList | None:
-    """List all report definitions for this graph."""
+  def reports(
+    self,
+    info: Info[GraphQLContext, None],
+    lifecycle: ReportLifecycle = ReportLifecycle.CURRENT,
+  ) -> ReportList | None:
+    """List report definitions for this graph, newest first.
+
+    Args:
+      lifecycle: `CURRENT` (the default) leaves out archived reports,
+        `ARCHIVED` returns only those, `ALL` returns every report.
+    """
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
-        response = reads_reports.list_reports(session)
+        response = reads_reports.list_reports(
+          session, lifecycle=PydanticReportLifecycle(lifecycle.value)
+        )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return ReportList.from_pydantic(response)

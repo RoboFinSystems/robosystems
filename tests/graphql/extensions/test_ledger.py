@@ -919,6 +919,34 @@ class TestReportPackageResolver:
     assert err.extensions == {"code": "LEDGER_NOT_INITIALIZED"}
 
 
+class TestReportsLifecycle:
+  """`reports(lifecycle:)` forwards the filter; the default hides archived."""
+
+  _TARGET = "robosystems.operations.roboledger.reads.reports.list_reports"
+
+  def _run(self, query: str):
+    from robosystems.models.api.extensions.reports import ReportListResponse
+
+    with (
+      _patch_session(),
+      patch(self._TARGET, return_value=ReportListResponse(reports=[])) as mock,
+    ):
+      result = schema.execute_sync(query, context_value=_ctx())
+    assert result.errors is None
+    return mock.call_args.kwargs["lifecycle"]
+
+  def test_default_is_current(self) -> None:
+    from robosystems.models.api.extensions.reports import ReportLifecycle
+
+    assert self._run("{ reports { reports { id } } }") == ReportLifecycle.CURRENT
+
+  def test_archived_is_forwarded(self) -> None:
+    from robosystems.models.api.extensions.reports import ReportLifecycle
+
+    lifecycle = self._run("{ reports(lifecycle: ARCHIVED) { reports { id } } }")
+    assert lifecycle == ReportLifecycle.ARCHIVED
+
+
 class TestReportDownloadUrl:
   """`reportDownloadUrl` resolver — presigned-URL read that replaced the
   retired `GET .../reports/{id}/download` REST endpoint."""

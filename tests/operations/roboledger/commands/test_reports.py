@@ -771,7 +771,8 @@ def test_regenerate_report_refuses_a_shared_in_copy_even_for_its_sender() -> Non
 
 def test_regenerate_report_raises_on_filed_report() -> None:
   """Filed Reports are immutable — regenerate would silently mutate
-  stamped facts + published bundle. Restate instead."""
+  stamped facts + published bundle. The refusal points at archive + a new
+  report, the path that exists."""
   report = _FakeReport("rpt_01", created_by="usr_test", filing_status="filed")
   session = _session_with_report(report)
   body = MagicMock()
@@ -780,7 +781,8 @@ def test_regenerate_report_raises_on_filed_report() -> None:
       session, _body_with_id(body, "rpt_01"), graph_id="kg_demo", created_by="usr_test"
     )
   assert "filed" in str(exc.value)
-  assert "supersedes_id" in str(exc.value)
+  assert "archive it and create a new report" in str(exc.value)
+  assert "supersedes_id" not in str(exc.value)
 
 
 def test_regenerate_report_raises_on_archived_report() -> None:
