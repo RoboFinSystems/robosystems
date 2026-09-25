@@ -193,3 +193,18 @@ def test_period_close_budget_covers_one_slow_publish_and_the_locks() -> None:
     "QuickBooks entry per draft, any of which can hit that retry ladder, and a "
     "close past its budget is reported late at best."
   )
+
+
+@pytest.mark.unit
+def test_direct_materialization_budget_covers_a_chunk_and_fits_its_lock() -> None:
+  """The direct path COPYs in chunks of up to CHUNK_TIMEOUT; a shorter budget
+  cancelled the task mid-copy while the Graph API kept writing. The lock the
+  router took must outlive the budget, or a retry is admitted mid-copy."""
+  from robosystems.config.constants import INGESTION_LOCK_TTL
+  from robosystems.operations.graph.engine.chunked_materialization import (
+    CHUNK_TIMEOUT,
+  )
+
+  budget = TASK_TIMEOUTS["graph_materialization"]
+  assert budget >= CHUNK_TIMEOUT
+  assert budget <= INGESTION_LOCK_TTL / 2

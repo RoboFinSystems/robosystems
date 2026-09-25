@@ -17,7 +17,9 @@ TASK_TIMEOUTS: dict[str, int] = {
   "extensions_materialize": 1800,
   "graph_creation": 600,
   "subgraph_creation": 900,
-  "graph_materialization": 120,
+  # At least one Graph API chunk (CHUNK_TIMEOUT, 600s) and at most half the
+  # materialize lock's TTL; the same test pins both.
+  "graph_materialization": 1800,
   "dagster_job_monitor": 3600,  # backup/restore can be long
   # Drain (120s) + reattach (300s) precede verification; under 420s would kill
   # the migration with the volume detached.
