@@ -1,9 +1,11 @@
 """Worker task for direct (non-Dagster) graph materialization.
 
 Copies the DuckDB staging tables into LadybugDB. The distributed lock is
-acquired by the router *before* enqueue and released here on completion or
-failure — this task must always release it, or the graph stays locked for the
-lock's full TTL.
+acquired by the router *before* enqueue and released here when the copy has
+finished or failed outright. It is kept, to expire on its TTL, when the copy
+may still be running: the Graph API's COPY is synchronous and carries on after
+the client goes away (a budget cancel, a timed-out chunk), and releasing then
+would admit a second copy into the same database.
 """
 
 from __future__ import annotations
@@ -32,8 +34,13 @@ class GraphMaterializationTask(BaseTask):
     materialize_embeddings = self.params.get("materialize_embeddings", False)
     lock_key = self.params.get("lock_key")
 
+    import asyncio
+
+    from robosystems.graph_api.client.exceptions import GraphTransientError
+
     db_gen = get_db_session()
     db = next(db_gen)
+    release = True
 
     try:
       result = await materialize_graph_directly(
@@ -44,12 +51,18 @@ class GraphMaterializationTask(BaseTask):
         materialize_embeddings=materialize_embeddings,
         operation_id=self.task_id,
       )
-
+      if isinstance(result, dict) and result.get("copy_may_still_run"):
+        release = False
       return result
+
+    except (asyncio.CancelledError, GraphTransientError):
+      release = False
+      raise
 
     finally:
       try:
         next(db_gen)
       except StopIteration:
         pass
-      self.release_lock(lock_key)
+      if release:
+        self.release_lock(lock_key)

@@ -133,6 +133,9 @@ sec_staged_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "full",
+    # One materialization per target database (dagster.yaml), whichever job
+    # selects the asset.
+    "materialize_db": "sec",
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
@@ -191,6 +194,7 @@ sec_historical_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "historical_materialize",
+    "materialize_db": "sec_historical",
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
@@ -211,6 +215,7 @@ sec_historical_staged_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "historical_full",
+    "materialize_db": "sec_historical",
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",

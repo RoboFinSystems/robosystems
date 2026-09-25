@@ -52,14 +52,12 @@ class ExtensionsMaterializeTask(BaseTask):
           f"Extensions materialization {result.status} for "
           f"{self.graph_id}: {result.errors}"
         )
-        await self.report_progress(f"Materialization {result.status}.", percent=100)
-        return {
-          "graph_id": self.graph_id,
-          "status": result.status,
-          "errors": result.errors,
-          "duration_ms": result.duration_ms,
-          "execution_time_ms": result.duration_ms,
-        }
+        # Raised, not returned: the consumer completes any operation whose
+        # task returns, and a caller must not read this as a rebuilt graph.
+        raise ValueError(
+          f"Materialization {result.status}; the graph was not rebuilt and "
+          "stays marked stale for a retry."
+        )
 
       await self.report_progress("Marking graph fresh...", percent=95)
 

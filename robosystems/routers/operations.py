@@ -316,10 +316,23 @@ async def get_operation_status(
     )
 
 
+# Worker tasks that do not stop on a cancel once they are running.
+_RUNS_TO_COMPLETION = frozenset(
+  {
+    "graph_tier_upgrade",
+    "graph_creation",
+    "subgraph_creation",
+    "graph_materialization",
+    "extensions_materialize",
+    "period_close",
+  }
+)
+
+
 @router.delete(
   "/operations/{operation_id}",
   summary="Cancel Operation",
-  description="Cancels a pending or running operation. Emits a cancellation event to any active SSE connections. Cannot cancel completed or failed operations.",
+  description="Cancels a pending or running operation. Emits a cancellation event to any active SSE connections. Cannot cancel completed or failed operations, or a running operation that cannot be stopped (graph creation, tier changes, materialization, period close), which returns 409.",
   operation_id="cancelOperation",
   responses={
     **RESOURCE_ERROR_RESPONSES,
@@ -363,6 +376,17 @@ async def cancel_operation(
       raise HTTPException(
         status_code=http_status.HTTP_409_CONFLICT,
         detail=f"Operation cannot be cancelled - current status is {metadata.status}",
+      )
+
+    # These run to the end once started. Recording CANCELLED would misreport
+    # an operation that then finishes, and refuse its real outcome.
+    if (
+      metadata.status == OperationStatus.RUNNING
+      and metadata.operation_type in _RUNS_TO_COMPLETION
+    ):
+      raise HTTPException(
+        status_code=http_status.HTTP_409_CONFLICT,
+        detail="This operation cannot be stopped once running; it will finish on its own.",
       )
 
     await event_storage.cancel_operation(

@@ -97,3 +97,38 @@ async def test_a_status_read_that_recovers_still_releases_the_lock():
     await task.execute()
 
   task.release_lock.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_operation_id_reaches_a_job_that_asks_for_it():
+  """The materialize job reports its result (tables, rows) to the operation;
+  without its id the SDK saw an empty result for every Dagster-path run."""
+  task = DagsterJobMonitorTask(
+    task_id="op_test",
+    graph_id="kg0000000000000001",
+    user_id="usr_test",
+    params={
+      "job_name": "materialize_graph_job",
+      "run_config": {
+        "ops": {"materialize_graph_tables": {"config": {"graph_id": "g"}}}
+      },
+      "pass_operation_id": True,
+    },
+    manager=MagicMock(),
+  )
+  task.is_cancelled = AsyncMock(return_value=False)
+  task.report_progress = AsyncMock()
+  task.release_lock = MagicMock()
+  monitor = _monitor(["completed"])
+  monitor.emit_completion = AsyncMock()
+  with patch(
+    "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor",
+    return_value=monitor,
+  ):
+    await task.execute()
+
+  run_config = monitor.submit_job.call_args.args[1]
+  assert (
+    run_config["ops"]["materialize_graph_tables"]["config"]["operation_id"] == "op_test"
+  )

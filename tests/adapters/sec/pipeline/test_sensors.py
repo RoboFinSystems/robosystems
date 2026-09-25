@@ -1045,3 +1045,26 @@ class TestSensorRequestJobsDeclared:
   def test_failure_sensor_declares_sleep(self):
     names = {j.name for j in sec_master_sleep_on_failure_sensor.jobs}
     assert "shared_master_sleep" in names
+
+
+@pytest.mark.unit
+def test_every_job_that_materializes_a_sec_graph_is_serialized():
+  """dagster.yaml runs one materialize_db value at a time. A job that writes
+  a sec graph without the tag (a runbook launch) could copy alongside the
+  nightly run and duplicate edges."""
+  from robosystems.adapters.sec.pipeline import jobs
+
+  materializers = {
+    "sec_materialize": "sec",
+    "sec_staged_materialize": "sec",
+    "sec_historical_materialize": "sec_historical",
+    "sec_historical_staged_materialize": "sec_historical",
+  }
+  defined = {
+    job.name: job
+    for job in vars(jobs).values()
+    if getattr(job, "name", None) in materializers
+  }
+  assert set(defined) == set(materializers)
+  for name, db in materializers.items():
+    assert defined[name].tags.get("materialize_db") == db, name

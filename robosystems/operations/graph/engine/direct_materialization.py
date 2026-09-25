@@ -351,12 +351,16 @@ async def materialize_graph_directly(
     duration_ms = (time.time() - start_time) * 1000
     logger.error(f"Direct materialization failed for {graph_id}: {e}")
 
+    from robosystems.graph_api.client.exceptions import GraphTransientError
+
     error_result = {
       "status": "error",
       "graph_id": graph_id,
       "message": str(e),
       "duration_ms": duration_ms,
       "method": "direct",
+      # A timed-out or dropped chunk request may still be copying server-side.
+      "copy_may_still_run": isinstance(e, GraphTransientError),
     }
 
     if operation_id:
