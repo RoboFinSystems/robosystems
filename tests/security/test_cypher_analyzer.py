@@ -1,5 +1,7 @@
 """Cypher security analyzer tests."""
 
+import time
+
 import pytest
 
 from robosystems.security.cypher_analyzer import (
@@ -787,3 +789,59 @@ class TestFindGuardedStringMatch:
     monkeypatch.setattr(analyzer, "_clean_query", boom)
     query = "MATCH (f:Fact) WHERE f.value CONTAINS 'abc' RETURN f"
     assert analyzer.find_guarded_string_match(query, self.GUARDED) is None
+
+
+class TestGuardedStringMatchCost:
+  """The guard runs on the request path, so its cost must grow with the
+  statement's length, not with a power of it. 100 KB is the MCP size cap."""
+
+  GUARDED = ("Fact.value", "Fact.uri")
+  SIZE = 100_000
+
+  @staticmethod
+  def _repeat(unit: str, prefix: str = "", suffix: str = "", size: int = 100_000):
+    return prefix + unit * ((size - len(prefix) - len(suffix)) // len(unit)) + suffix
+
+  @pytest.mark.parametrize(
+    "prefix, unit, suffix",
+    [
+      ("RETURN ", "x->", "x"),
+      ("RETURN CASE ", "WHEN a( ", ""),
+      ("RETURN f(", "x -> x, ", "x)"),
+      ("RETURN ", "[x IN ", "y"),
+      ("MATCH (f:Fact) WHERE ", "a(", "f.x"),
+      ("MATCH (e:Entity) WHERE ", "e.name CONTAINS ", "'a'"),
+      ("MATCH (f:Fact) WITH ", "f.x AS a, ", "1 AS b RETURN b"),
+    ],
+  )
+  def test_adversarial_shapes_stay_linear(self, prefix, unit, suffix):
+    query = self._repeat(unit, prefix, suffix, self.SIZE)
+    started = time.perf_counter()
+    find_guarded_string_match(query, self.GUARDED)
+    assert time.perf_counter() - started < 2.0
+
+  @pytest.mark.parametrize("distinct_targets", [True, False])
+  def test_many_labels_rebound_many_times_stay_linear(self, distinct_targets):
+    labels = ":".join(f"L{i}" for i in range(6000))
+    head = f"MATCH (a:{labels}) WITH "
+    names = (f"a AS n{i}" if distinct_targets else "a AS b" for i in range(10**6))
+    query = head
+    for rebind in names:
+      if len(query) + len(rebind) + 2 > self.SIZE:
+        break
+      query += rebind + ", "
+    query += "1 AS z RETURN z"
+    started = time.perf_counter()
+    find_guarded_string_match(query, self.GUARDED)
+    assert time.perf_counter() - started < 2.0
+
+  def test_a_scan_buried_in_a_long_statement_is_still_found(self):
+    query = self._repeat(
+      "WHEN x.a = 1 THEN 1 ",
+      "MATCH (f:Fact) RETURN CASE ",
+      "WHEN lower(f.value) = 'a' THEN 2 END",
+      self.SIZE,
+    )
+    match = find_guarded_string_match(query, self.GUARDED)
+    assert match is not None
+    assert match.guarded_property == "Fact.value"
