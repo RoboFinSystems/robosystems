@@ -44,11 +44,6 @@ MCP_EXPOSURE_HOLDS: dict[str, str] = {
     "owner rather than a half-exposed lifecycle."
   ),
   # ── Destructive ────────────────────────────────────────────────────────
-  "delete-report": (
-    "Destroys generated statement facts. The regenerate-report path covers "
-    "the operator's legitimate need (refresh against newer ledger state) "
-    "without the destructive edge."
-  ),
   "delete-publish-list": "Destructive, and paired with the publish-list holds below.",
   # ── Distribution lists: follow the sharing decision ────────────────────
   "create-publish-list": (

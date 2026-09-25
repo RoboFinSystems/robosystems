@@ -682,6 +682,20 @@ class ReportList:
 
 
 @strawberry.enum
+class ReportLifecycle(Enum):
+  """Which reports a list returns, by filing status.
+
+  `CURRENT` leaves out archived reports, `ARCHIVED` returns only those, and
+  `ALL` returns every report. A filed report is archived rather than deleted
+  when it should leave the current list, and can be unarchived.
+  """
+
+  CURRENT = "current"
+  ARCHIVED = "archived"
+  ALL = "all"
+
+
+@strawberry.enum
 class ReportDownloadFormat(Enum):
   """Serialization flavor for a Report bundle download.
 

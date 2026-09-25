@@ -1,6 +1,7 @@
 """Report request and response models."""
 
 from datetime import date, datetime
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -518,6 +519,18 @@ class StatementResponse(BaseModel):
       "destination concept. Indicates mapping gaps."
     ),
   )
+
+
+class ReportLifecycle(str, Enum):
+  """Which reports a list returns, by filing status.
+
+  A filed report is a record, so it is archived rather than deleted when it
+  should leave the primary view; archiving is reversible.
+  """
+
+  CURRENT = "current"
+  ARCHIVED = "archived"
+  ALL = "all"
 
 
 class ReportListResponse(BaseModel):

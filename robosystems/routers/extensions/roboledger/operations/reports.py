@@ -302,8 +302,10 @@ async def file_report_op(
   summary="Transition Filing Status",
   description=(
     "Move a Report along the non-file legs of the filing lifecycle "
-    "(draft ↔ under_review, filed → archived). Use 'file-report' to "
-    "reach 'filed' so audit fields land cleanly."
+    "(draft ↔ under_review, filed ↔ archived). Archiving takes a filed "
+    "report off the current list without deleting it; unarchiving "
+    "returns it to 'filed'. Use 'file-report' to file a draft so audit "
+    "fields land cleanly."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],

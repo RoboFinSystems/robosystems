@@ -21,6 +21,7 @@ from robosystems.models.api.extensions.reports import (
   LiveStatementFactRow,
   PeriodSpec,
   ReportBundleDownloadResponse,
+  ReportLifecycle,
   ReportListResponse,
   ReportResponse,
   StatementResponse,
@@ -277,11 +278,20 @@ def report_to_response(
   )
 
 
-def list_reports(session: Session) -> ReportListResponse:
-  """List all report definitions, most recent first."""
-  rows = (
-    session.execute(select(Report).order_by(Report.created_at.desc())).scalars().all()
-  )
+def list_reports(
+  session: Session, lifecycle: ReportLifecycle = ReportLifecycle.CURRENT
+) -> ReportListResponse:
+  """List report definitions, most recent first.
+
+  ``current`` (the default) leaves out archived reports, ``archived`` returns
+  only those, and ``all`` returns every report.
+  """
+  query = select(Report).order_by(Report.created_at.desc())
+  if lifecycle == ReportLifecycle.CURRENT:
+    query = query.where(Report.filing_status != "archived")
+  elif lifecycle == ReportLifecycle.ARCHIVED:
+    query = query.where(Report.filing_status == "archived")
+  rows = session.execute(query).scalars().all()
 
   structure_cache: dict[str, list[StructureSummary]] = {}
   reports = []

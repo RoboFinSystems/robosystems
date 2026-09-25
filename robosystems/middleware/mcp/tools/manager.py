@@ -454,6 +454,18 @@ class GraphMCPTools:
 
       self.bind_text_block_tool = BindTextBlockTool(graph_client)
 
+    # Hand-written: removes the report's published artifacts after the rows
+    # commit, which the registrar runner doesn't do.
+    self.delete_report_tool = None
+    if (
+      not read_only
+      and not self._is_shared_repository()
+      and "roboledger" in self.schema_extensions
+    ):
+      from .report_tools import DeleteReportTool
+
+      self.delete_report_tool = DeleteReportTool(graph_client)
+
     self._cache_hits = 0
     self._cache_misses = 0
 
@@ -755,6 +767,8 @@ class GraphMCPTools:
       tools.append(self.list_documents_tool.get_tool_definition())
     if self.bind_text_block_tool is not None:
       tools.append(self.bind_text_block_tool.get_tool_definition())
+    if self.delete_report_tool is not None:
+      tools.append(self.delete_report_tool.get_tool_definition())
     return tools
 
   async def call_tool(
@@ -1239,6 +1253,15 @@ class GraphMCPTools:
             "(not available on shared repositories or read-only access)"
           )
         result = await self.bind_text_block_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "delete-report":
+        if self.delete_report_tool is None:
+          raise ValueError(
+            "delete-report requires a writable roboledger graph "
+            "(not available on shared repositories or read-only access)"
+          )
+        result = await self.delete_report_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "create-document":
