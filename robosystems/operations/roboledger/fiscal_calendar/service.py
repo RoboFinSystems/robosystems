@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -654,9 +654,7 @@ class FiscalCalendarService:
     from robosystems.models.extensions.roboledger.entry import Entry
 
     posting_date = func.date(func.coalesce(Event.effective_at, Event.occurred_at))
-    has_rows = (
-      session.query(Entry.id).filter(Entry.triggered_by_event_id == Event.id).exists()
-    )
+    has_rows = select(Entry.id).where(Entry.triggered_by_event_id == Event.id).exists()
     unposted_query = session.query(Event).filter(
       Event.status.in_(("captured", "classified")),
       Event.event_type != "schedule_entry_due",
