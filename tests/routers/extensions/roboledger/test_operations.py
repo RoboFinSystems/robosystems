@@ -418,9 +418,7 @@ class TestAutoMapElementsOp:
     from fastapi import HTTPException
 
     with (
-      patch(
-        "robosystems.routers.extensions.roboledger.operations.taxonomy.env"
-      ) as mock_env,
+      patch("robosystems.routers.graphs.operator.execute.env") as mock_env,
       patch("robosystems.worker.client.enqueue_task") as mock_enqueue,
     ):
       mock_env.OPERATOR_POST_ENABLED = False
