@@ -1137,24 +1137,15 @@ class OLTPLoader:
     # `metadata.qb_external_id` is a round trip of our own write-back. It is
     # never inserted or dispatched again; an edit made to it in QuickBooks is
     # flagged on the event that published it.
-    cross_source_external_ids: set[str] = set()
+    cross_source_external_ids: dict[str, str] = {}
     if source == "quickbooks":
       cross_source_external_ids = _match_round_trips(
         session, txns_by_ext, connection_id=connection_id, now=now, out=out
       )
       for ext_id in sorted(cross_source_external_ids):
         copy = existing.get(ext_id)
-        if copy is not None and copy.status in ("captured", "classified"):
-          # A copy that landed before the match (a sync overlapping close's
-          # publish, or a lost marker) holds no ledger rows; booking it would
-          # post the entry twice.
-          copy.status = "voided"
-          copy.metadata_ = {
-            **(copy.metadata_ or {}),
-            "void_reason": "round_trip",
-            "voided_at": now.isoformat(),
-          }
-          logger.warning(f"Voided QuickBooks copy {ext_id} of a round-tripped entry")
+        if copy is not None:
+          _retire_round_trip_copy(copy, cross_source_external_ids[ext_id], now, out)
 
     for ext_id, txn in txns_by_ext.items():
       if ext_id in cross_source_external_ids:
@@ -1705,9 +1696,11 @@ def _lock_round_trip_events(session, event_ids: list[str]) -> list:
 
 def _round_trip_update(
   event, txns_by_ext: dict[str, dict], session, *, connection_id, now
-) -> tuple[dict | None, bool]:
-  """The metadata the matcher would write for one matched event, and whether
-  it newly flags drift. ``None`` when nothing needs writing."""
+) -> tuple[dict | None, str | None]:
+  """The metadata the matcher would write for one matched event, and the
+  drift change it makes: ``"flag"``, ``"clear"`` or ``None``. ``(None, None)``
+  when nothing needs writing."""
+  from robosystems.models.extensions.roboledger.entry import Entry
   from robosystems.operations.event_block.qb_writeback import (
     QB_ENTRY_IDS_KEY,
     ROUND_TRIP_BASELINE_KEY,
@@ -1715,106 +1708,122 @@ def _round_trip_update(
 
   meta = dict(event.metadata_ or {})
   all_ids = [q for q in str(meta.get("qb_external_id") or "").split(",") if q]
-  matched = [q for q in all_ids if q in txns_by_ext]
   entry_ids_by_qb: dict[str, list[str]] = {}
   for entry_id, qb_id in (meta.get(QB_ENTRY_IDS_KEY) or {}).items():
     entry_ids_by_qb.setdefault(str(qb_id), []).append(str(entry_id))
+  pending = meta.get("drift_payload") if event.payload_drift else None
+  pending_trip = pending.get("round_trip") if isinstance(pending, dict) else None
+  pending_id = pending_trip.get("qb_id") if isinstance(pending_trip, dict) else None
 
   baselines = dict(meta.get(ROUND_TRIP_BASELINE_KEY) or {})
   changed = False
-  drift: dict | None = None
-  for qb_id in matched:
+  change: str | None = None
+  for qb_id in (q for q in all_ids if q in txns_by_ext):
     incoming = _round_trip_shape(txns_by_ext[qb_id]["entries"])
     baseline = baselines.get(qb_id)
     if baseline is None:
       entry_ids = entry_ids_by_qb.get(qb_id)
       if entry_ids is None and len(all_ids) == 1:
         # Published before per-entry ids were recorded: the event is one JE.
-        from robosystems.models.extensions.roboledger.entry import Entry
-
         entry_ids = [
           str(entry_id)
           for (entry_id,) in session.query(Entry.id).filter(
             Entry.triggered_by_event_id == event.id
           )
         ]
-      baseline = _local_round_trip_shape(session, entry_ids or [])
-      if baseline is None:
-        continue
+      baseline = _local_round_trip_shape(session, entry_ids or []) or {
+        # An older multi-entry event records no entry per QB id; its entries
+        # cannot be told apart, so it is recorded once and not compared.
+        "unverifiable": True
+      }
+      if baseline.get("unverifiable"):
+        logger.warning(
+          f"Round trip {qb_id} of event {event.id} names no ledger entry; "
+          "edits to it in QuickBooks cannot be compared"
+        )
       baselines[qb_id] = baseline
       changed = True
-    if incoming != baseline and drift is None:
-      pending = meta.get("drift_payload") if event.payload_drift else None
-      round_trip = (
-        (pending or {}).get("round_trip") if isinstance(pending, dict) else None
-      )
-      if (
-        round_trip
-        and round_trip.get("qb_id") == qb_id
-        and round_trip.get("accepted") == incoming
-      ):
-        continue
-      drift = {
-        "round_trip": {
-          "qb_id": qb_id,
-          "entry_ids": entry_ids_by_qb.get(qb_id, []),
-          "baseline": baseline,
-          "accepted": incoming,
-        },
-        "entries": [
-          {
-            "external_id": str(e["external_id"]),
-            "type": str(e.get("type", "standard")),
-            "posting_date": e["posting_date"].isoformat()
-            if hasattr(e.get("posting_date"), "isoformat")
-            else e.get("posting_date"),
-            "memo": str(e.get("memo") or ""),
-            "line_items": e.get("line_items") or [],
-          }
-          for e in txns_by_ext[qb_id]["entries"]
-        ],
-        "connection_id": connection_id,
-      }
+    if baseline.get("unverifiable"):
+      continue
+    # Lines only: a catch-up can level an amount or an account, not a date.
+    if incoming["lines"] == baseline["lines"]:
+      if pending_id == qb_id:
+        # Reverted in QuickBooks before anyone resolved it.
+        meta.pop("drift_payload", None)
+        meta.pop("drift_detected_at", None)
+        change = "clear"
+        changed = True
+      continue
+    if pending_id is not None and (
+      pending_id != qb_id or pending_trip.get("accepted") == incoming
+    ):
+      # One item at a time per event; another id's edit waits for its turn.
+      continue
+    if change == "flag":
+      continue
+    meta["drift_payload"] = {
+      "round_trip": {
+        "qb_id": qb_id,
+        "entry_ids": entry_ids_by_qb.get(qb_id, []),
+        "baseline": baseline,
+        "accepted": incoming,
+      },
+      "entries": [
+        {
+          "external_id": str(e["external_id"]),
+          "type": str(e.get("type", "standard")),
+          "posting_date": e["posting_date"].isoformat()
+          if hasattr(e.get("posting_date"), "isoformat")
+          else e.get("posting_date"),
+          "memo": str(e.get("memo") or ""),
+          "line_items": e.get("line_items") or [],
+        }
+        for e in txns_by_ext[qb_id]["entries"]
+      ],
+      "connection_id": connection_id,
+    }
+    meta["drift_detected_at"] = now.isoformat()
+    change = "flag"
+    changed = True
 
   if "qb_sync_confirmed_at" not in meta:
     meta["qb_sync_confirmed_at"] = now.isoformat()
     changed = True
-  if drift is not None:
-    meta["drift_payload"] = drift
-    meta["drift_detected_at"] = now.isoformat()
-    changed = True
   if not changed:
-    return None, False
+    return None, None
   meta[ROUND_TRIP_BASELINE_KEY] = baselines
-  return meta, drift is not None
+  return meta, change
 
 
 def _match_round_trips(
   session, txns_by_ext: dict[str, dict], *, connection_id, now, out
-) -> set[str]:
-  """Recognise incoming QB ids that are our own write-back.
+) -> dict[str, str]:
+  """Recognise incoming QB ids that are our own write-back: ``{qb_id: event_id}``.
 
   The scan is unlocked; only an event that needs a write (its first
-  confirmation, or an edit made in QuickBooks) is locked and re-read before
-  the write, so a steady-state sync never holds a published event's row.
+  confirmation, an edit made in QuickBooks, or one reverted) is locked and
+  re-read before the write, so a steady-state sync never holds its row.
   """
+  from sqlalchemy import Text, cast, func
+  from sqlalchemy.dialects.postgresql import ARRAY
+
   from robosystems.models.extensions.roboledger.event import Event
 
   incoming = set(txns_by_ext)
-  matched_ids: set[str] = set()
+  origin_by_qb: dict[str, str] = {}
   to_write: list[str] = []
-  for event in (
-    session.query(Event)
-    .filter(Event.metadata_["qb_external_id"].astext.isnot(None))
-    .all()
-  ):
+  names_incoming = func.string_to_array(
+    Event.metadata_["qb_external_id"].astext, ","
+  ).op("&&")(cast(sorted(incoming), ARRAY(Text)))
+  for event in session.query(Event).filter(names_incoming).all():
     ids = {
       q for q in str((event.metadata_ or {}).get("qb_external_id")).split(",") if q
     }
     hits = ids & incoming
     if not hits:
       continue
-    matched_ids |= hits
+    for qb_id in hits:
+      origin_by_qb[qb_id] = str(event.id)
     out.cross_source_matched += 1
     if (
       _round_trip_update(
@@ -1824,20 +1833,64 @@ def _match_round_trips(
     ):
       to_write.append(str(event.id))
 
-  if to_write:
-    for event in _lock_round_trip_events(session, to_write):
-      new_meta, flagged = _round_trip_update(
-        event, txns_by_ext, session, connection_id=connection_id, now=now
-      )
-      if new_meta is None:
-        continue
-      event.metadata_ = new_meta
-      if flagged:
-        event.payload_drift = True
-        out.drift_detected += 1
-  if matched_ids:
-    logger.info(
-      f"Cross-source matcher recognised {len(matched_ids)} round-tripped "
-      f"entr{'y' if len(matched_ids) == 1 else 'ies'}; not inserting them"
+  for event in _lock_round_trip_events(session, to_write) if to_write else []:
+    new_meta, change = _round_trip_update(
+      event, txns_by_ext, session, connection_id=connection_id, now=now
     )
-  return matched_ids
+    if new_meta is None:
+      continue
+    event.metadata_ = new_meta
+    if change == "flag":
+      event.payload_drift = True
+      out.drift_detected += 1
+    elif change == "clear":
+      event.payload_drift = False
+  if origin_by_qb:
+    logger.info(
+      f"Cross-source matcher recognised {len(origin_by_qb)} round-tripped "
+      f"entr{'y' if len(origin_by_qb) == 1 else 'ies'}; not inserting them"
+    )
+  return origin_by_qb
+
+
+ROUND_TRIP_DUPLICATE_KEY = "round_trip_duplicate_of"
+
+
+def _retire_round_trip_copy(copy, origin_event_id: str, now, out) -> None:
+  """A QuickBooks-sourced copy of an entry we published.
+
+  One that landed before the match (a sync overlapping close's publish, or a
+  lost marker) books the entry twice. Unposted, it is voided. Already posted,
+  it becomes a reconciling item whose accepted payload carries no entry, so
+  its catch-up reverses it; the close gate holds its period until then.
+  """
+  meta = dict(copy.metadata_ or {})
+  if copy.status in ("captured", "classified"):
+    copy.status = "voided"
+    copy.metadata_ = {**meta, "void_reason": "round_trip", "voided_at": now.isoformat()}
+    logger.warning(
+      f"Voided QuickBooks copy {copy.external_id} of event {origin_event_id}"
+    )
+    return
+  if copy.status not in ("committed", "fulfilled") or ROUND_TRIP_DUPLICATE_KEY in meta:
+    return
+  accepted = {
+    k: v
+    for k, v in meta.items()
+    if k not in ("drift_payload", "drift_detected_at", "reconciliation_history")
+  }
+  accepted.update(
+    {"entries": [], "source_removed": True, ROUND_TRIP_DUPLICATE_KEY: origin_event_id}
+  )
+  copy.metadata_ = {
+    **meta,
+    ROUND_TRIP_DUPLICATE_KEY: origin_event_id,
+    "drift_payload": accepted,
+    "drift_detected_at": now.isoformat(),
+  }
+  copy.payload_drift = True
+  out.drift_detected += 1
+  logger.warning(
+    f"QuickBooks copy {copy.external_id} of event {origin_event_id} is posted; "
+    "flagged as a reconciling item to reverse"
+  )

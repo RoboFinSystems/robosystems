@@ -418,3 +418,125 @@ def test_a_captured_copy_of_a_round_trip_is_voided_not_booked(db):
   assert copy.status == "voided"
   assert copy.metadata_["void_reason"] == "round_trip"
   assert _net(db, ids[EXP_A]) == 10000
+
+
+def test_a_posted_copy_booked_before_the_match_is_raised_to_reverse(db):
+  """A sync that ran while close was publishing booked QuickBooks' copy before
+  close's marker was committed. The next sync raises it; its catch-up reverses
+  the copy."""
+  ids = _seed(db)
+  copy_result = _sync(db, _dbt("JournalEntry_77", 10000, EXP_A, "0"))
+  assert copy_result.handler_dispatched == 1
+  _written_back_event(db, ids)
+  assert _net(db, ids[EXP_A]) == 20000
+
+  result = _sync(db, _dbt("JournalEntry_77", 10000, EXP_A, "0"))
+  copy = (
+    db.query(Event)
+    .filter(Event.source == "quickbooks", Event.external_id == "JournalEntry_77")
+    .one()
+  )
+  assert (result.cross_source_matched, result.drift_detected) == (1, 1)
+  assert copy.payload_drift is True
+  _catch_up(db, str(copy.id))
+  assert _net(db, ids[EXP_A]) == 10000
+  # Raised once: a later sync leaves the resolved copy alone.
+  assert _sync(db, _dbt("JournalEntry_77", 10000, EXP_A, "0")).drift_detected == 0
+
+
+def test_an_edit_reverted_in_quickbooks_clears_its_item(db):
+  ids = _seed(db)
+  event = _written_back_event(db, ids)
+  _sync(db, _dbt("JournalEntry_77", 10000, EXP_A, "0"))
+  _sync(db, _dbt("JournalEntry_77", 12000, EXP_A, "1"))
+  db.refresh(event)
+  assert event.payload_drift is True
+
+  _sync(db, _dbt("JournalEntry_77", 10000, EXP_A, "2"))
+  db.refresh(event)
+  assert event.payload_drift is False
+  assert "drift_payload" not in event.metadata_
+
+
+def _two_entry_event(db, ids):
+  event = _written_back_event(db, ids)
+  create_event_block_in_session(
+    db,
+    CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      event_class="economic",
+      event_action="transfer",
+      source="manual",
+      occurred_at=datetime(2026, 7, 15),
+      amount=10000,
+      apply_handlers=True,
+      metadata={
+        "posting_date": "2026-07-15",
+        "memo": "second",
+        "status": "draft",
+        "line_items": [
+          {"element_id": ids[EXP_A], "debit_amount": 10000, "credit_amount": 0},
+          {"element_id": ids[CASH], "debit_amount": 0, "credit_amount": 10000},
+        ],
+      },
+    ),
+    "user",
+    graph_id=GRAPH_ID,
+  )
+  db.flush()
+  second = db.query(Entry).filter(Entry.memo == "second").one()
+  second.triggered_by_event_id = event.id
+  second.status = "posted"
+  meta = dict(event.metadata_)
+  meta["qb_entry_ids"] = {**meta["qb_entry_ids"], str(second.id): "JournalEntry_78"}
+  meta["qb_external_id"] = "JournalEntry_77,JournalEntry_78"
+  event.metadata_ = meta
+  db.flush()
+  return event
+
+
+def test_two_edited_entries_of_one_event_are_raised_one_at_a_time(db):
+  ids = _seed(db)
+  event = _two_entry_event(db, ids)
+  both = {
+    key: _dbt("JournalEntry_77", 10000, EXP_A, "0")[key]
+    + _dbt("JournalEntry_78", 10000, EXP_A, "0")[key]
+    for key in ("transactions", "entries", "line_items")
+  }
+  _sync(db, both)
+  edited = {
+    key: _dbt("JournalEntry_77", 11000, EXP_A, "1")[key]
+    + _dbt("JournalEntry_78", 12000, EXP_A, "1")[key]
+    for key in ("transactions", "entries", "line_items")
+  }
+  raised = []
+  for _ in range(3):
+    result = _sync(db, edited)
+    db.refresh(event)
+    raised.append(
+      (result.drift_detected, event.metadata_["drift_payload"]["round_trip"]["qb_id"])
+    )
+  assert raised == [
+    (1, "JournalEntry_77"),
+    (0, "JournalEntry_77"),
+    (0, "JournalEntry_77"),
+  ]
+
+  _catch_up(db, str(event.id))
+  _sync(db, edited)
+  db.refresh(event)
+  assert event.metadata_["drift_payload"]["round_trip"]["qb_id"] == "JournalEntry_78"
+  _catch_up(db, str(event.id))
+  assert _net(db, ids[EXP_A]) == 23000
+
+
+def test_a_date_move_alone_raises_nothing(db):
+  ids = _seed(db)
+  event = _written_back_event(db, ids)
+  _sync(db, _dbt("JournalEntry_77", 10000, EXP_A, "0"))
+  moved = _dbt("JournalEntry_77", 10000, EXP_A, "1")
+  moved["entries"][0]["posting_date"] = date(2026, 8, 3)
+  assert _sync(db, moved).drift_detected == 0
+  db.refresh(event)
+  assert event.payload_drift is False
