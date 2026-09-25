@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -70,6 +71,9 @@ class CloseableGateResult:
   reconciling_item_count: int = 0
   reconciling_item_sample: list[str] = field(default_factory=list)
 
+  unposted_source_event_count: int = 0
+  unposted_source_event_sample: list[str] = field(default_factory=list)
+
   SEQUENCE = "sequence_violation"
   PERIOD_INCOMPLETE = "period_incomplete"
   SYNC_STALE = "sync_stale"
@@ -78,6 +82,7 @@ class CloseableGateResult:
   PENDING_OBLIGATIONS = "pending_obligations"
   STRANDED_OBLIGATIONS = "stranded_obligations"
   RECONCILING_ITEMS = "reconciling_items"
+  UNPOSTED_SOURCE_EVENTS = "unposted_source_events"
 
 
 class FiscalCalendarError(ValueError):
@@ -512,13 +517,16 @@ class FiscalCalendarService:
     allow_stale_sync: bool = False,
     allow_stranded_obligations: bool = False,
     allow_reconciling_items: bool = False,
+    allow_unposted_source_events: bool = False,
   ) -> CloseableGateResult:
     """Check whether `period` can be closed now. Read-only; every blocker is
     returned, not just the first.
 
     Gates: sequence; period complete; sync current; no pending obligations;
     no stranded obligations (bypass: `allow_stranded_obligations`); no
-    unresolved reconciling items (bypass: `allow_reconciling_items`).
+    unresolved reconciling items (bypass: `allow_reconciling_items`); no
+    source event dated in the period left uncommitted (bypass:
+    `allow_unposted_source_events`).
 
     `has_sync_connection` and `last_sync_at` come from the platform DB and
     are distinct: no connection passes the sync gate, but a connection that
@@ -638,6 +646,32 @@ class FiscalCalendarService:
         str(external_id or event_id) for event_id, external_id in reconciling_rows[:5]
       ]
 
+    # Events dated in the period that produced no ledger rows (a bank line
+    # never committed, a QuickBooks bill whose auto-commit failed): once the
+    # period closes, commit is fenced out of it, so they could never post. A
+    # drafted entry (a manual journal entry) has rows, which close posts.
+    # Obligations are counted above.
+    from robosystems.models.extensions.roboledger.entry import Entry
+
+    posting_date = func.date(func.coalesce(Event.effective_at, Event.occurred_at))
+    has_rows = select(Entry.id).where(Entry.triggered_by_event_id == Event.id).exists()
+    unposted_query = session.query(Event).filter(
+      Event.status.in_(("captured", "classified")),
+      Event.event_type != "schedule_entry_due",
+      posting_date >= period_start,
+      posting_date <= period_end,
+      ~has_rows,
+    )
+    unposted_count = unposted_query.count()
+    unposted_sample: list[str] = []
+    if unposted_count > 0:
+      if not allow_unposted_source_events:
+        blockers.append(CloseableGateResult.UNPOSTED_SOURCE_EVENTS)
+      unposted_sample = [
+        str(event.external_id or event.id)
+        for event in unposted_query.order_by(posting_date.asc()).limit(5)
+      ]
+
     return CloseableGateResult(
       is_closeable=not blockers,
       blockers=blockers,
@@ -649,6 +683,8 @@ class FiscalCalendarService:
       stranded_obligation_sample=stranded_sample,
       reconciling_item_count=reconciling_count,
       reconciling_item_sample=reconciling_sample,
+      unposted_source_event_count=unposted_count,
+      unposted_source_event_sample=unposted_sample,
     )
 
   @staticmethod

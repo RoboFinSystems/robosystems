@@ -170,6 +170,17 @@ class ClosePeriodRequest(BaseModel):
       "is recorded in the close audit note."
     ),
   )
+  allow_unposted_source_events: bool = Field(
+    False,
+    description=(
+      "Override the unposted-source-event gate — close even though source "
+      "events dated in the period (bank-feed lines, QuickBooks transactions "
+      "whose automatic posting failed) were never committed. Once the period "
+      "closes they cannot post into it, so the stamped statements leave them "
+      "out. Prefer classifying and committing, or voiding, each first. The "
+      "override is recorded in the close audit note."
+    ),
+  )
 
 
 class ReopenPeriodRequest(BaseModel):
@@ -253,6 +264,14 @@ class BackfillPlanHistoryRequest(BaseModel):
       "Override the reconciling-item gate on each reclose. Only needed "
       "when an event inside the backfill window is still flagged as "
       "changed upstream and you have decided not to resolve it first."
+    ),
+  )
+  allow_unposted_source_events: bool = Field(
+    False,
+    description=(
+      "Override the unposted-source-event gate on each reclose. Only needed "
+      "when a source event inside the backfill window was never committed "
+      "and you have decided not to commit or void it first."
     ),
   )
   restamp: bool = Field(
@@ -421,6 +440,22 @@ class FiscalCalendarResponse(BaseModel):
     description=(
       "Source identifiers (or event ids) of up to 5 unresolved reconciling "
       "items, so the blocker names what is holding the close."
+    ),
+  )
+  unposted_source_event_count: int = Field(
+    0,
+    description=(
+      "Source events dated in this period that were never committed: bank-feed "
+      "lines still captured or classified, and QuickBooks transactions whose "
+      "automatic posting failed. Commit or void each, or close over them "
+      "knowingly with allow_unposted_source_events."
+    ),
+  )
+  unposted_source_event_sample: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Source identifiers (or event ids) of up to 5 unposted source events, "
+      "so the blocker names what is holding the close."
     ),
   )
   last_close_at: datetime | None = None

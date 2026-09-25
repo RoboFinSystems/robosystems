@@ -1828,6 +1828,7 @@ class TestClosePeriodOp:
       allow_stale_sync=True,
       allow_stranded_obligations=True,
       allow_reconciling_items=True,
+      allow_unposted_source_events=True,
     )
     with (
       patch(
@@ -1861,6 +1862,7 @@ class TestClosePeriodOp:
       "allow_stale_sync",
       "allow_stranded_obligations",
       "allow_reconciling_items",
+      "allow_unposted_source_events",
     }
     dropped = overrides - set(kwargs)
     assert not dropped, (

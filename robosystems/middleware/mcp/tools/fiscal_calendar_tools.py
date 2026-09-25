@@ -204,6 +204,10 @@ class ClosePeriodTool:
   close even though posted events in the period are still flagged as
   changed in the source system, leaving those differences undecided.
   Prefer resolve-reconciling-item on each first.
+- allow_unposted_source_events (optional): override the unposted-source-event
+  gate — close even though bank-feed lines or QuickBooks transactions dated
+  in the period were never committed, leaving them out of the period for
+  good. Prefer committing or voiding each first.
 
 **RETURNS:**
 Two shapes. Usually the receipt below, returned once the close lands. If the
@@ -243,6 +247,9 @@ The receipt:
 - Cannot close over unresolved reconciling items (posted events whose
   source payload changed afterwards) unless allow_reconciling_items=true —
   preview-reconciling-item then resolve-reconciling-item on each first
+- Cannot close over source events dated in the period that were never
+  committed (inbox lines, QuickBooks transactions whose automatic posting
+  failed) unless allow_unposted_source_events=true — commit or void each
 - Cannot close if BS equation doesn't balance for the period
 
 **WORKFLOW:**
@@ -300,6 +307,15 @@ The receipt:
               "is recorded in the close audit note."
             ),
           },
+          "allow_unposted_source_events": {
+            "type": "boolean",
+            "description": (
+              "Override the unposted-source-event gate (default false). "
+              "Closes over source events dated in the period that were never "
+              "committed, leaving them out of the period; the override is "
+              "recorded in the close audit note."
+            ),
+          },
           "note": {
             "type": "string",
             "description": "Optional note captured in the audit event",
@@ -350,6 +366,9 @@ The receipt:
           ),
           "allow_reconciling_items": bool(
             arguments.get("allow_reconciling_items", False)
+          ),
+          "allow_unposted_source_events": bool(
+            arguments.get("allow_unposted_source_events", False)
           ),
           "note": arguments.get("note"),
         },
@@ -458,6 +477,9 @@ The receipt:
             arguments.get("allow_stranded_obligations", False)
           ),
           allow_reconciling_items=bool(arguments.get("allow_reconciling_items", False)),
+          allow_unposted_source_events=bool(
+            arguments.get("allow_unposted_source_events", False)
+          ),
         )
         if gate.is_closeable:
           return None
@@ -675,6 +697,9 @@ class BackfillPlanHistoryTool:
   on each reclose — only when an event inside the backfill window is
   still flagged as changed upstream and you have decided not to resolve
   it first.
+- allow_unposted_source_events (optional): override the unposted-source-event
+  gate on each reclose — only when a source event inside the backfill window
+  was never committed and you have decided not to commit or void it first.
 - restamp (optional, default false): also re-derive months that already
   have canonical sets — the healing pass after an engine improvement.
   Advance start_period between chunks (a restamp run is not
@@ -728,6 +753,14 @@ class BackfillPlanHistoryTool:
               "backfill window is still flagged as changed upstream."
             ),
           },
+          "allow_unposted_source_events": {
+            "type": "boolean",
+            "description": (
+              "Override the unposted-source-event gate on each reclose "
+              "(default false). Only needed when a source event inside the "
+              "backfill window was never committed."
+            ),
+          },
           "allow_stranded_obligations": {
             "type": "boolean",
             "description": (
@@ -776,6 +809,9 @@ class BackfillPlanHistoryTool:
         arguments.get("allow_stranded_obligations", False)
       ),
       allow_reconciling_items=bool(arguments.get("allow_reconciling_items", False)),
+      allow_unposted_source_events=bool(
+        arguments.get("allow_unposted_source_events", False)
+      ),
       restamp=bool(arguments.get("restamp", False)),
       note=arguments.get("note"),
     )
