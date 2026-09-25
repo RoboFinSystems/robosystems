@@ -1354,7 +1354,9 @@ class ExtensionsMaterializer:
         try:
           db_exists = await client.database_exists(graph_id)
 
-          if db_exists and rebuild:
+          # The ledger is a full projection: copied in place into a populated
+          # graph it collides on primary keys, whatever ``rebuild`` says.
+          if db_exists:
             await self._materialize_blue_green(
               client, graph_id, entity_id, result, lock
             )
@@ -1455,7 +1457,7 @@ class ExtensionsMaterializer:
     result: MaterializeResult,
     lock: "MaterializationLock | None" = None,
   ) -> None:
-    """Build in place — for first-time creation, or when ``rebuild`` is False.
+    """Build in place, for first-time creation.
 
     Unlike the blue-green path there is no fallback copy: a failure part-way
     leaves the graph in whatever state it reached.
