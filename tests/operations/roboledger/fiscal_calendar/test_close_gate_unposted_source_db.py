@@ -57,9 +57,10 @@ def session():
 
 
 def _event(session, *, source, status, occurred, event_type="expense", metadata=None):
+  event_id = f"evt_{uuid.uuid4().hex[:10]}"
   session.add(
     Event(
-      id=f"evt_{uuid.uuid4().hex[:10]}",
+      id=event_id,
       event_type=event_type,
       event_category="purchase",
       source=source,
@@ -70,6 +71,7 @@ def _event(session, *, source, status, occurred, event_type="expense", metadata=
     )
   )
   session.commit()
+  return event_id
 
 
 def _gate(session, **overrides):
@@ -110,6 +112,32 @@ def test_lines_outside_the_month_and_obligations_do_not_block(session):
     occurred=datetime(2026, 7, 31),
     event_type="schedule_entry_due",
   )
+  gate = _gate(session)
+  assert BLOCKER not in gate.blockers
+  assert gate.unposted_source_event_count == 0
+
+
+def test_a_drafted_manual_journal_entry_does_not_block(session):
+  """A manual journal entry sits 'classified' with draft rows that close
+  posts; it is the normal close workflow, not an unposted event."""
+  from robosystems.models.extensions.roboledger.entry import Entry
+
+  event_id = _event(
+    session,
+    source="manual",
+    status="classified",
+    occurred=datetime(2026, 7, 15),
+    event_type="journal_entry_recorded",
+  )
+  session.add(
+    Entry(
+      posting_date=date(2026, 7, 15),
+      triggered_by_event_id=event_id,
+      created_by="u",
+    )
+  )
+  session.commit()
+
   gate = _gate(session)
   assert BLOCKER not in gate.blockers
   assert gate.unposted_source_event_count == 0

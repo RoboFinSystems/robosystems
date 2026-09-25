@@ -646,16 +646,23 @@ class FiscalCalendarService:
         str(external_id or event_id) for event_id, external_id in reconciling_rows[:5]
       ]
 
-    # Source events (a bank line, a QuickBooks bill whose auto-commit failed)
-    # dated in the period and never committed: once the period closes, commit
-    # is fenced out of it, so they could never post. Obligations are counted
-    # above.
+    # Events dated in the period that produced no ledger rows (a bank line
+    # never committed, a QuickBooks bill whose auto-commit failed): once the
+    # period closes, commit is fenced out of it, so they could never post. A
+    # drafted entry (a manual journal entry) has rows, which close posts.
+    # Obligations are counted above.
+    from robosystems.models.extensions.roboledger.entry import Entry
+
     posting_date = func.date(func.coalesce(Event.effective_at, Event.occurred_at))
+    has_rows = (
+      session.query(Entry.id).filter(Entry.triggered_by_event_id == Event.id).exists()
+    )
     unposted_query = session.query(Event).filter(
       Event.status.in_(("captured", "classified")),
       Event.event_type != "schedule_entry_due",
       posting_date >= period_start,
       posting_date <= period_end,
+      ~has_rows,
     )
     unposted_count = unposted_query.count()
     unposted_sample: list[str] = []
@@ -664,7 +671,7 @@ class FiscalCalendarService:
         blockers.append(CloseableGateResult.UNPOSTED_SOURCE_EVENTS)
       unposted_sample = [
         str(event.external_id or event.id)
-        for event in unposted_query.order_by(Event.occurred_at.asc()).limit(5)
+        for event in unposted_query.order_by(posting_date.asc()).limit(5)
       ]
 
     return CloseableGateResult(
