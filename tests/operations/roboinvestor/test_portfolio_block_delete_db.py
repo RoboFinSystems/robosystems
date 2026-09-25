@@ -20,7 +20,7 @@ from robosystems.operations.roboinvestor.commands.portfolio_block import (
 
 pytestmark = pytest.mark.integration
 
-GRAPH = "kgdddddddddddddddd09"
+GRAPH = "kgdddddddddddddddd23"
 
 
 @pytest.fixture(scope="module")
