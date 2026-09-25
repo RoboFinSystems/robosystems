@@ -114,7 +114,7 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   "contentType": "application/json",
   "format": "tavi",
   "generationCount": 1,
-  "omittedContent": ["ib_envelopes", "definition_links", "reporting_style", "framework_pins", "fact_sets", "filing_lifecycle"]
+  "omittedContent": ["ib_envelopes", "definition_links", "framework_pins", "filing_lifecycle"]
 }
 ```
 
@@ -149,13 +149,25 @@ Every aspect of a fact, the concept included, is a dimension of it. A fact:
     "xbrl:entity": "entity:entity_kg1a…",
     "xbrl:unit": "iso4217:USD"
   },
-  "factValues": [{ "value": "0" }]
+  "factValues": [{ "value": "0", "decimals": 2 }],
+  "properties": [{ "property": "rs:structureId", "value": "struct_…" }]
 }
 ```
 
-Periods are written as `xs:dateTime`, where the end is exclusive: the instant above is the close of 31 August 2026, and a fiscal year reads `2025-09-01T00:00:00/2026-09-01T00:00:00`. A text fact carries `xbrl:language` in place of a unit, and its value is the text.
+Periods are written as `xs:dateTime`, where the end is exclusive: the instant above is the close of 31 August 2026, and a fiscal year reads `2025-09-01T00:00:00/2026-09-01T00:00:00`. A text fact carries `xbrl:language` in place of a unit, and its value is the text. Ledger amounts are stated to the cent, so a numeric fact carries `decimals: 2`.
 
-The compiled model carries the statements and notes but has no place for some of the report's content: the Information Block envelopes, the definition arcs, the Reporting Style, the framework pins, the FactSet partition, and the filing lifecycle. `omittedContent` lists them (`ib_envelopes`, `definition_links`, `reporting_style`, `framework_pins`, `fact_sets`, `filing_lifecycle`), and the holon carries all of them.
+Platform content that Tavi has no built-in slot for rides as **model-defined properties** in the `rs:` namespace (`https://robosystems.ai/vocab/`), each declared in `propertyTypes`:
+
+| Property | On | Holds |
+| --- | --- | --- |
+| `rs:reportingStyle` | the model | The Reporting Style id |
+| `rs:legalName` | the entity | The legal name, when it differs from the name |
+| `rs:blockType` | a network | The statement or note kind, such as `balance_sheet` |
+| `rs:structureId` | a network, a fact | The structure the network presents, and the one a fact is pinned to |
+| `rs:factSetId` | a network | The FactSet the structure's facts belong to |
+| `rs:structureOrder` | a network | The structure's display order |
+
+Four items still have no place in the file: the Information Block envelopes, the definition arcs, the framework pins, and the filing lifecycle. `omittedContent` lists them (`ib_envelopes`, `definition_links`, `framework_pins`, `filing_lifecycle`), and the holon carries all of them.
 
 The format follows XBRL International's working draft, PWD-2026-09-01, and will track it as the draft moves.
 
@@ -188,8 +200,8 @@ XBRL 2.1 has no standard place for the platform-specific content, so the package
 | Disclosure notes | Yes | Yes | No |
 | Information Block envelopes | No | Yes | No |
 | Definition arcs | No | Yes | Yes, when present |
-| Reporting Style, framework pins | No | Yes | No |
-| FactSets, filing lifecycle | No | Yes | No |
+| Reporting Style, FactSets | Yes | Yes | No |
+| Framework pins, filing lifecycle | No | Yes | No |
 
 ## Reading an Export Without the Platform
 
