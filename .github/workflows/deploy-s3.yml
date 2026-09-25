@@ -44,6 +44,11 @@ on:
         required: false
         type: string
         default: ""
+      user_upload_cors_origin:
+        description: "App origin allowed to PUT browser uploads to the user bucket"
+        required: false
+        type: string
+        default: ""
 
     outputs:
       # Policy ARNs
@@ -194,6 +199,11 @@ jobs:
           if [ -n "$HOSTED_ZONE_ID" ]; then
             S3_STACK_PARAMS="$S3_STACK_PARAMS \
                   ParameterKey=HostedZoneId,ParameterValue=$HOSTED_ZONE_ID"
+          fi
+
+          if [ -n "${{ inputs.user_upload_cors_origin }}" ]; then
+            S3_STACK_PARAMS="$S3_STACK_PARAMS \
+                  ParameterKey=UserUploadCorsOrigin,ParameterValue=${{ inputs.user_upload_cors_origin }}"
           fi
 
           # Deploy or update the stack

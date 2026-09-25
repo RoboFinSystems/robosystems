@@ -243,6 +243,7 @@ jobs:
       # Leave PUBLIC_DOMAIN_NAME_STAGING empty for default CloudFront domain (isolated deployment)
       public_domain_name: ${{ vars.PUBLIC_DOMAIN_NAME_STAGING || '' }}
       domain_name_root: ${{ vars.API_DOMAIN_NAME_ROOT || '' }}
+      user_upload_cors_origin: ${{ vars.ROBOSYSTEMS_APP_URL_STAGING || 'https://staging.robosystems.ai' }}
     secrets: inherit
 
   package-scripts:

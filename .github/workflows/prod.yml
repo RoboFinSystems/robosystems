@@ -234,6 +234,7 @@ jobs:
       # Leave PUBLIC_DOMAIN_NAME_PROD empty for default CloudFront domain (isolated deployment)
       public_domain_name: ${{ vars.PUBLIC_DOMAIN_NAME_PROD || '' }}
       domain_name_root: ${{ vars.API_DOMAIN_NAME_ROOT || '' }}
+      user_upload_cors_origin: ${{ vars.ROBOSYSTEMS_APP_URL_PROD || 'https://robosystems.ai' }}
     secrets: inherit
 
   package-scripts:
