@@ -7,6 +7,7 @@ behaves like the REST handler built from that spec, without FastAPI.
 
 from __future__ import annotations
 
+import importlib
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -466,11 +467,26 @@ def _dump_response(result: Any) -> Any:
 # ── Public factory ─────────────────────────────────────────────────────────
 
 
+_OPERATION_MODULES = {
+  "roboledger": "robosystems.routers.extensions.roboledger.operations",
+  "roboinvestor": "robosystems.routers.extensions.roboinvestor.operations",
+}
+
+
+def _ensure_specs_registered(extension: str) -> None:
+  # Specs register when their router module is imported. The API imports them
+  # at startup; the worker and Dagster never do, so import them here.
+  module = _OPERATION_MODULES.get(extension)
+  if module:
+    importlib.import_module(module)
+
+
 def build_tools_for_extension(
   extension: str,
   client: GraphMCPClient,
   meta_getter: Any | None = None,
 ) -> dict[str, _RegistrarMCPTool]:
+  _ensure_specs_registered(extension)
   tools: dict[str, _RegistrarMCPTool] = {}
   for registrar, spec in OperationRegistrar.specs_for_extension(extension):
     tool = _RegistrarMCPTool(

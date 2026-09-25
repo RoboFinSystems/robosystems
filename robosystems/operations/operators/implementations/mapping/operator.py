@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 
 CONFIDENCE_AUTO_APPROVE = 0.90
 CONFIDENCE_MIN_MAP = 0.70
+# The registrar tool reports `protected_facts`; the hand-written tool, which
+# only DirectToolAccess reaches, reports `protected_history`.
+_CLOSED_HISTORY_CODES = frozenset({"protected_facts", "protected_history"})
 
 BATCH_SIZE = 10
 
@@ -314,6 +317,7 @@ class MappingOperator(Operator):
                   "to_element_id": target,
                   "confidence": confidence,
                   "association_type": "mapping",
+                  "suggested_by": "mapping-agent",
                 }
               )
             except Exception as e:
@@ -327,7 +331,7 @@ class MappingOperator(Operator):
                 f"rs-gaap mapping create rejected for {m['element_id']}: "
                 f"{written.get('error')}"
               )
-              if written.get("error") == "protected_history":
+              if written.get("error") in _CLOSED_HISTORY_CODES:
                 refused_closed_history += 1
               else:
                 skipped += 1

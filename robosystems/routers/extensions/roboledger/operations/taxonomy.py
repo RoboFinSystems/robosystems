@@ -315,7 +315,13 @@ async def auto_map_elements_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
+  from robosystems.routers.graphs.operator.execute import (
+    _check_operator_post_enabled,
+  )
   from robosystems.worker.client import enqueue_task
+
+  # The operator surface's kill switch covers this AI-spending dispatch too.
+  _check_operator_post_enabled()
 
   op_name = "auto-map-elements"
   user_id = str(user.id)

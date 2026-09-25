@@ -414,6 +414,27 @@ class TestAutoMapElementsOp:
   """
 
   @pytest.mark.asyncio
+  async def test_operator_kill_switch_refuses_before_enqueue(self) -> None:
+    from fastapi import HTTPException
+
+    with (
+      patch("robosystems.routers.graphs.operator.execute.env") as mock_env,
+      patch("robosystems.worker.client.enqueue_task") as mock_enqueue,
+    ):
+      mock_env.OPERATOR_POST_ENABLED = False
+      with pytest.raises(HTTPException) as exc:
+        await auto_map_elements_op(
+          body=AutoMapElementsOperation(mapping_id="map_abc"),
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert exc.value.status_code == 403
+    mock_enqueue.assert_not_called()
+
+  @pytest.mark.asyncio
   async def test_fresh_enqueue_returns_pending_envelope(self) -> None:
     body = AutoMapElementsOperation(mapping_id="map_abc")
     cache = _FakeCache()

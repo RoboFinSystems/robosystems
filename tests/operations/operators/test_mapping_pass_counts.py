@@ -119,22 +119,43 @@ async def test_a_closed_history_refusal_is_counted_apart_from_skipped():
     {"element_id": "el_1", "target_id": "rs_cash", "confidence": 0.95},
   ]
 
+  # The refusal exactly as the registrar tool, the one production uses,
+  # renders ProtectedFactsError for this operation.
+  from robosystems.middleware.extensions import OperationRegistrar
+  from robosystems.middleware.mcp.tools.registrar import (
+    _ensure_specs_registered,
+    translate_error,
+  )
+  from robosystems.operations.taxonomy_block.immutability import ProtectedFactsError
+
+  _ensure_specs_registered("roboledger")
+  spec = next(
+    spec
+    for _reg, spec in OperationRegistrar.specs_for_extension("roboledger")
+    if spec.name == "create-mapping-association"
+  )
+  refusal = translate_error(
+    ProtectedFactsError(
+      filed_report_count=0,
+      closed_period_count=1,
+      closed_period_names=["2026-06"],
+    ),
+    spec.error_map,
+  )
+
   def _create(args):
     if args["from_element_id"] == "el_1":
-      return {
-        "error": "protected_history",
-        "message": "refusing to disturb facts that the ledger treats as immutable",
-        "closed_periods": ["2026-06"],
-      }
+      return refusal
     return {"association_id": "assoc_1"}
 
-  result, _ = await _run(_create, mappings)
+  result, create_tool = await _run(_create, mappings)
 
   assert result.metadata["mapped"] == 1
   assert result.metadata["skipped"] == 0
   assert result.metadata["refused_closed_history"] == 1
   assert "1 refused" in result.content
   assert "reopen" in result.content
+  assert all(c["suggested_by"] == "mapping-agent" for c in create_tool.calls)
 
 
 @pytest.mark.asyncio
