@@ -364,13 +364,30 @@ class TestResolveClient:
     fetch.assert_not_called()
 
 
-class _DripStream(httpx.SyncByteStream):
-  def __iter__(self):
-    import time
+class _DripStream(httpx.AsyncByteStream):
+  async def __aiter__(self):
+    import asyncio
 
     for _ in range(100):
-      time.sleep(0.2)
+      await asyncio.sleep(0.2)
       yield b" "
+
+
+class _PlainHttpTo(httpx.AsyncBaseTransport):
+  """Send an https client_id's request to a local plain-HTTP port instead."""
+
+  def __init__(self, port: int) -> None:
+    self._port = port
+    self._inner = httpx.AsyncHTTPTransport()
+
+  async def handle_async_request(self, request):
+    request.url = request.url.copy_with(
+      scheme="http", host="127.0.0.1", port=self._port
+    )
+    return await self._inner.handle_async_request(request)
+
+  async def aclose(self) -> None:
+    await self._inner.aclose()
 
 
 class TestFetchIsBounded:
@@ -383,6 +400,53 @@ class TestFetchIsBounded:
       with pytest.raises(ClientError):
         fetch_client_metadata(UNKNOWN_ID, transport=transport)
     assert time.monotonic() - started < 2.0
+
+  def test_a_server_dripping_its_headers_is_cut_off_at_the_deadline(self, public_dns):
+    """A real socket: the status line and headers arrive a byte at a time,
+    each byte inside the per-read timeout."""
+    import socket
+    import threading
+    import time
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    stop = threading.Event()
+
+    def drip():
+      conn, _ = server.accept()
+      with conn:
+        for byte in b"HTTP/1.1 200 OK\r\nX-Slow: " + b"a" * 200:
+          if stop.is_set():
+            return
+          conn.sendall(bytes([byte]))
+          time.sleep(0.3)
+
+    threading.Thread(target=drip, daemon=True).start()
+    started = time.monotonic()
+    try:
+      with patch.object(cimd, "CIMD_TIMEOUT_SECONDS", 1.0):
+        with pytest.raises(ClientError):
+          fetch_client_metadata(
+            UNKNOWN_ID, transport=_PlainHttpTo(server.getsockname()[1])
+          )
+      assert time.monotonic() - started < 2.0
+    finally:
+      stop.set()
+      server.close()
+
+  def test_trusted_hosts_keep_their_own_slots(self, public_dns):
+    held = 0
+    while cimd._fetch_slots.acquire(blocking=False):
+      held += 1
+    try:
+      doc, _ = fetch_client_metadata(
+        VSCODE_ID, transport=_transport(lambda r: _doc_response(VSCODE_DOC))
+      )
+    finally:
+      for _ in range(held):
+        cimd._fetch_slots.release()
+    assert doc["client_id"] == VSCODE_ID
 
   def test_fetches_beyond_the_cap_are_refused_without_a_request(self, public_dns):
     calls = []
