@@ -285,16 +285,36 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
         f"Process batch completed for {partition_key}, "
         f"{pending_in_partition} files still pending, triggering next batch"
       )
-    elif total_pending > 0:
-      context.log.info(
-        f"Partition {partition_key} fully processed, but {total_pending} files "
-        f"pending in other partitions — waiting for batch to complete"
-      )
-      return
     else:
-      context.log.info(
-        "All pending files processed across all partitions, waking shared master"
-      )
+      # Pending rows in other partitions hold the wake only while a process
+      # run is draining them. Left by a failed or abandoned run, nothing would
+      # ever drain them, and waiting on them stalls the nightly chain for good.
+      other_process_runs = [
+        run
+        for run in context.instance.get_runs(
+          filters=RunsFilter(
+            job_name="sec_process",
+            statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+          ),
+        )
+        if run.run_id != dagster_run.run_id
+      ]
+      if total_pending > 0 and other_process_runs:
+        context.log.info(
+          f"Partition {partition_key} fully processed, but {total_pending} files "
+          f"pending in other partitions — waiting for batch to complete"
+        )
+        return
+      if total_pending > 0:
+        context.log.warning(
+          f"{total_pending} files pending in other partitions with no process "
+          "run in flight; waking the shared master without them (reprocess those "
+          "partitions to pick them up)"
+        )
+      else:
+        context.log.info(
+          "All pending files processed across all partitions, waking shared master"
+        )
 
       active_wake_runs = context.instance.get_runs(
         filters=RunsFilter(
