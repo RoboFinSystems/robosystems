@@ -250,3 +250,38 @@ class TestRoutedConnectionMustBeOnTheGraph:
           graph_id=GRAPH_ID,
         )
     assert event.metadata_ == {"connection_id": "conn_mine"}
+
+
+@pytest.mark.parametrize(
+  "key",
+  [
+    "qb_external_id",
+    "qb_entry_ids",
+    "qb_sync_token",
+    "routed_via",
+    "last_outbound_error",
+    "drift_detected_at",
+    "drift_payload",
+    "reconciliation_history",
+    "dispatch_attempts",
+  ],
+)
+def test_create_refuses_system_metadata_like_update(key) -> None:
+  """The same reserved keys update-event-block refuses: a caller-set
+  qb_external_id would stop write-back and misstate what reached QuickBooks."""
+  from robosystems.operations.event_block.commands import (
+    InvalidEventTransitionError,
+  )
+
+  body = CreateEventBlockRequest(
+    event_type="expense",
+    event_category="purchase",
+    source="manual",
+    occurred_at=datetime(2026, 7, 1, tzinfo=UTC),
+    metadata={key: "x"},
+  )
+  session = MagicMock()
+  with pytest.raises(InvalidEventTransitionError, match=key):
+    create_event_block(session, body, "usr_test", graph_id=GRAPH_ID)
+  session.add.assert_not_called()
+  session.commit.assert_not_called()

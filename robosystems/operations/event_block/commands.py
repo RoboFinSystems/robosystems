@@ -387,6 +387,9 @@ def create_event_block(
   Use :func:`create_event_block_in_session` when the event is one step of a
   larger unit of work.
   """
+  # The keys write-back and the sync maintain; the in-session path is for
+  # internal callers that set their own.
+  _refuse_system_metadata(body.metadata)
   _event, envelope = create_event_block_in_session(
     session, body, created_by, graph_id=graph_id
   )
@@ -524,7 +527,8 @@ def _validate_classification(event: Event) -> None:
 
 def _refuse_system_metadata(patch: dict | None) -> None:
   """Written by write-back and the sync; a caller-supplied value would misstate
-  what reached QuickBooks (a fake `qb_external_id` stops write-back)."""
+  what reached QuickBooks (a fake `qb_external_id` stops write-back). Applies
+  to a create's metadata and an update's metadata_patch alike."""
   from .qb_writeback import QB_ENTRY_IDS_KEY
 
   system_keys = {
@@ -542,7 +546,7 @@ def _refuse_system_metadata(patch: dict | None) -> None:
   )
   if reserved:
     raise InvalidEventTransitionError(
-      f"metadata_patch cannot set system-maintained keys: {', '.join(reserved)}."
+      f"metadata cannot set system-maintained keys: {', '.join(reserved)}."
     )
 
 
