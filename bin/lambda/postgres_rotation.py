@@ -147,7 +147,7 @@ def create_secret(arn: str, token: str) -> None:
     secrets_client.get_secret_value(
       SecretId=arn, VersionId=token, VersionStage="AWSPENDING"
     )
-    logger.info(f"createSecret: pending version {token} already exists for {arn}")
+    logger.info("createSecret: the pending version already exists; keeping it")
     return
   except secrets_client.exceptions.ResourceNotFoundException:
     pass
@@ -226,7 +226,7 @@ def set_secret(arn: str, token: str, environment: str) -> None:
 
   try:
     _connect(db_info, pending_dict).close()
-    logger.info(f"setSecret: pending password already applied for user {username}")
+    logger.info("setSecret: the pending password is already applied")
     return
   except psycopg2.OperationalError:
     pass
@@ -260,12 +260,10 @@ def set_secret(arn: str, token: str, environment: str) -> None:
         ),
         (pending_dict["POSTGRES_PASSWORD"],),
       )
-    logger.info(
-      f"setSecret: Successfully set password for user {username} in PostgreSQL"
-    )
+    logger.info("setSecret: applied the pending password")
   except Exception as e:
     error_type = type(e).__name__
-    logger.error(f"setSecret: Unable to set password: {error_type}: {e}")
+    logger.error(f"setSecret: Unable to set password: {error_type}")
     raise
   finally:
     conn.close()
