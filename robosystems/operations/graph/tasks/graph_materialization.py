@@ -51,7 +51,8 @@ class GraphMaterializationTask(BaseTask):
         materialize_embeddings=materialize_embeddings,
         operation_id=self.task_id,
       )
-
+      if isinstance(result, dict) and result.get("copy_may_still_run"):
+        release = False
       return result
 
     except (asyncio.CancelledError, GraphTransientError):
