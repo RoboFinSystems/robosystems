@@ -50,6 +50,29 @@ ERROR_RETRY_BACKOFF_SECONDS = 3600
 ERROR_RETRY_MAX_ATTEMPTS = 3
 
 
+def requeue_failed_files(session, quarter: str | None = None) -> int:
+  """Move failed SEC files whose backoff has passed back to pending, a bounded
+  number of times: an EDGAR read that was incomplete is retried, never kept.
+
+  ``quarter`` (``YYYY-QN``) limits it to one partition. Commits.
+  """
+  from robosystems.models.core import SourceFile
+
+  retry_before = datetime.now(UTC) - timedelta(seconds=ERROR_RETRY_BACKOFF_SECONDS)
+  query = session.query(SourceFile).filter(
+    SourceFile.graph_id == "sec",
+    SourceFile.status == "error",
+    SourceFile.attempts < ERROR_RETRY_MAX_ATTEMPTS,
+    (SourceFile.last_attempt_at.is_(None))
+    | (SourceFile.last_attempt_at < retry_before),
+  )
+  if quarter is not None:
+    query = query.filter(SourceFile.partition_key.like(f"{quarter}_%"))
+  requeued = query.update({SourceFile.status: "pending"}, synchronize_session=False)
+  session.commit()
+  return requeued
+
+
 @sensor(
   job=sec_process_job,
   minimum_interval_seconds=300,
@@ -81,21 +104,7 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   try:
     session = SessionLocal()
 
-    # A failed filing goes back to pending after a backoff, a bounded number
-    # of times: an EDGAR read that was incomplete is retried, never kept.
-    retry_before = datetime.now(UTC) - timedelta(seconds=ERROR_RETRY_BACKOFF_SECONDS)
-    requeued = (
-      session.query(SourceFile)
-      .filter(
-        SourceFile.graph_id == "sec",
-        SourceFile.status == "error",
-        SourceFile.attempts < ERROR_RETRY_MAX_ATTEMPTS,
-        (SourceFile.last_attempt_at.is_(None))
-        | (SourceFile.last_attempt_at < retry_before),
-      )
-      .update({SourceFile.status: "pending"}, synchronize_session=False)
-    )
-    session.commit()
+    requeued = requeue_failed_files(session)
     if requeued:
       context.log.info(f"Requeued {requeued} failed SEC files for retry")
 
@@ -367,6 +376,19 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
       return
   else:
     context.log.info(f"Download completed for {partition_key}, triggering processing")
+    # The nightly chain's retry: the backfill sensor that also requeues is
+    # stopped in steady state, and nothing else moves a failed file back.
+    session = None
+    try:
+      session = SessionLocal()
+      requeued = requeue_failed_files(session, quarter=partition_key)
+      if requeued:
+        context.log.info(f"Requeued {requeued} failed SEC files in {partition_key}")
+    except Exception as e:
+      context.log.error(f"Requeue of failed SEC files failed: {e}")
+    finally:
+      if session:
+        session.close()
 
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
