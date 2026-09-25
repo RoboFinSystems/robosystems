@@ -106,6 +106,7 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
     CancellationType,
   )
   from robosystems.models.core.graph import Graph, GraphStatus
+  from robosystems.operations.graph.deprovision_service import RESIDUAL_PENDING_KEY
 
   config = get_deprovisioning_config()
   db = db_session_factory()
@@ -150,6 +151,19 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
       .all()
     )
     stranded_ids = [row[0] for row in stranded if row[0]]
+
+    # Deprovisioned, but a data-disposal step (tenant schema, search entries,
+    # report bundles) failed; deprovision_graph re-runs only those steps.
+    residual = (
+      db.query(Graph.graph_id)
+      .filter(
+        Graph.status == GraphStatus.DEPROVISIONED.value,
+        Graph.deleted_at < stranded_cutoff,
+        Graph.graph_metadata[RESIDUAL_PENDING_KEY].as_boolean().is_(True),
+      )
+      .all()
+    )
+    stranded_ids += [row[0] for row in residual if row[0]]
     if stranded_ids:
       context.log.info(
         f"Found {len(stranded_ids)} graphs stranded mid-teardown to retry"

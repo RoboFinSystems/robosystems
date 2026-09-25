@@ -14,6 +14,10 @@ from ...logger import get_logger
 logger = get_logger(__name__)
 
 
+# graph_metadata key: a deprovisioned graph whose data disposal must be retried.
+RESIDUAL_PENDING_KEY = "residual_pending"
+
+
 @dataclass
 class DeprovisionResult:
   """Result of a graph deprovisioning operation."""
@@ -147,6 +151,7 @@ class GraphDeprovisionService:
       result.status = "already_deprovisioned"
       result.previous_status = graph.status
       self._dispose_residual_data(graph_id, result)
+      self._mark_residual_pending(graph, session, bool(result.errors))
       return result
 
     # Shared repositories are platform-managed and never deprovisioned here.
@@ -172,7 +177,9 @@ class GraphDeprovisionService:
 
     await self._delete_subgraphs(graph_id, session, result)
     await self._delete_database(graph_id, result)
+    errors_before_disposal = len(result.errors)
     self._dispose_residual_data(graph_id, result)
+    residual_failed = len(result.errors) > errors_before_disposal
 
     # The .lbug is still on the instance: freeing the registry slot would hand
     # the next tenant a volume carrying this one's file. Stop here; the
@@ -200,6 +207,9 @@ class GraphDeprovisionService:
     self._clean_pg_records(graph_id, session, result)
     self._update_subscription_metadata(graph_id, session, result)
     graph.transition_status(GraphStatus.DEPROVISIONED, session)
+    # The status is final either way; a failed disposal step is retried by the
+    # teardown sensor, which selects graphs carrying this mark.
+    self._mark_residual_pending(graph, session, residual_failed)
 
     if result.errors:
       result.status = "partial"
@@ -348,12 +358,7 @@ class GraphDeprovisionService:
         result.errors.append(error_msg)
         logger.warning(error_msg)
 
-      # Same ordering as the parent path; a connection may be scoped directly
-      # to a subgraph.
-      self._purge_staged_uploads(subgraph.graph_id, session, result)
-      await self._revoke_provider_grants(subgraph.graph_id, session, result)
-      self._clean_pg_records(subgraph.graph_id, session, result)
-      self._purge_search_index(subgraph.graph_id, result)
+      await self._release_subgraph(subgraph.graph_id, session, result)
 
       # Regardless of the database deletion outcome.
       try:
@@ -363,6 +368,35 @@ class GraphDeprovisionService:
         error_msg = f"Subgraph {subgraph.graph_id} status transition failed: {e}"
         result.errors.append(error_msg)
         logger.warning(error_msg)
+
+  async def release_subgraph_records(
+    self, subgraph_id: str, session: Session
+  ) -> DeprovisionResult:
+    """Remove what a subgraph holds outside its database, before its row goes.
+
+    ``delete-subgraph`` deletes the Graph row, and a connection (even a
+    soft-deleted one) still references it by FK, so the same release the
+    parent's teardown runs has to come first. Flushes; the caller commits.
+    """
+    result = DeprovisionResult(status="success", graph_id=subgraph_id)
+    await self._release_subgraph(subgraph_id, session, result)
+    if result.errors:
+      result.status = "partial"
+      logger.warning(
+        f"Subgraph {subgraph_id} release incomplete",
+        extra={"graph_id": subgraph_id, "errors": result.errors},
+      )
+    return result
+
+  async def _release_subgraph(
+    self, subgraph_id: str, session: Session, result: DeprovisionResult
+  ) -> None:
+    # Same ordering as the parent path; a connection may be scoped directly
+    # to a subgraph.
+    self._purge_staged_uploads(subgraph_id, session, result)
+    await self._revoke_provider_grants(subgraph_id, session, result)
+    self._clean_pg_records(subgraph_id, session, result)
+    self._purge_search_index(subgraph_id, result)
 
   async def _delete_database(self, graph_id: str, result: DeprovisionResult) -> None:
     """Delete the parent graph database.
@@ -408,6 +442,18 @@ class GraphDeprovisionService:
       error_msg = f"Database deletion failed: {e}"
       result.errors.append(error_msg)
       logger.warning(error_msg, extra={"graph_id": graph_id})
+
+  @staticmethod
+  def _mark_residual_pending(graph, session: Session, pending: bool) -> None:
+    metadata = dict(graph.graph_metadata or {})
+    if bool(metadata.get(RESIDUAL_PENDING_KEY)) == pending:
+      return
+    if pending:
+      metadata[RESIDUAL_PENDING_KEY] = True
+    else:
+      metadata.pop(RESIDUAL_PENDING_KEY, None)
+    graph.graph_metadata = metadata
+    session.commit()
 
   def _dispose_residual_data(self, graph_id: str, result: DeprovisionResult) -> None:
     """The three data-disposal steps that are safe to repeat."""

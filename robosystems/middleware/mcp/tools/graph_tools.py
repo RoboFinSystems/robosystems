@@ -387,6 +387,14 @@ class DeleteSubgraphTool:
           "hint": hint,
         }
 
+      from robosystems.config import env
+      from robosystems.operations.graph.deprovision_service import (
+        GraphDeprovisionService,
+      )
+
+      await GraphDeprovisionService(env.ENVIRONMENT).release_subgraph_records(
+        subgraph_id, session
+      )
       session.delete(subgraph)
       session.commit()
       return {
