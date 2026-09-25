@@ -103,3 +103,47 @@ def test_the_requested_window_binds(tenant, requested_start, expected):
       period_start=requested_start,
     )
   assert bound is not None and bound.value == expected
+
+
+MONTHLY_ONLY = "ent_monthly_only"
+
+
+def test_a_window_with_no_fact_of_its_own_binds_nothing(tenant):
+  """Only December's set exists: the year and the quarter ending with it are
+  different numbers, so neither binds December."""
+  with extensions_session(GRAPH) as session:
+    fact_set = create_fact_set(
+      session,
+      period_end=YEAR_END,
+      period_start=date(2025, 12, 1),
+      factset_type="report",
+      entity_id=MONTHLY_ONLY,
+      provenance={"origin": "pivot", "mapping_id": "m", "period": "2025-12"},
+      created_by="test",
+    )
+    session.flush()
+    session.add(
+      Fact(
+        element_id=REVENUE,
+        entity_id=MONTHLY_ONLY,
+        fact_set_id=fact_set.id,
+        period_start=date(2025, 12, 1),
+        period_end=YEAR_END,
+        period_type="duration",
+        value=100_000.0,
+        fact_scope="in_scope",
+      )
+    )
+    session.flush()
+    for requested_start in (date(2025, 1, 1), date(2025, 10, 1)):
+      assert (
+        _bind_operand(
+          session,
+          element_id=REVENUE,
+          entity_id=MONTHLY_ONLY,
+          period_end=YEAR_END,
+          period_start=requested_start,
+        )
+        is None
+      )
+    session.rollback()

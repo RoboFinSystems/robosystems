@@ -89,8 +89,9 @@ def _bind_operand(
   """Most recent persisted fact for one operand ending exactly at ``period_end``.
 
   Binds report and metric sets, so a metric computed on another structure
-  resolves. The longest window wins (FY over Q4 over December), then the
-  newest set: a newer monthly report must not answer for the year.
+  resolves. A requested ``period_start`` must match the fact's exactly; with
+  none, the longest window wins (FY over Q4 over December), then the newest
+  set: a newer monthly report must not answer for the year.
   ``scenario_id=None`` binds actuals only; otherwise scenario facts are
   preferred with actuals as fallback, so an ``avg()`` begin at the seam
   still reaches the actual base month.
@@ -117,8 +118,10 @@ def _bind_operand(
     .limit(1)
   )
   if period_start is not None:
+    # The window must match exactly: a shorter one ending on the same day
+    # (December for the year) is a different number. Instants carry no start.
     stmt = stmt.where(
-      or_(Fact.period_start.is_(None), Fact.period_start >= period_start)
+      or_(Fact.period_start.is_(None), Fact.period_start == period_start)
     )
   row = session.execute(stmt).first()
   if row is None:
