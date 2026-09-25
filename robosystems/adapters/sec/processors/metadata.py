@@ -14,12 +14,13 @@ class SECMetadataLoader:
 
   def __init__(self):
     self._cache: dict[str, dict] = {}
-    # CIKs whose snapshot missed an accession and were re-read from the API.
-    self._refetched: set[str] = set()
+    # The live SEC header per CIK, read once when its snapshot missed an
+    # accession and searched for every later miss from that filer.
+    self._live: dict[str, dict] = {}
 
   def clear_cache(self) -> None:
     self._cache.clear()
-    self._refetched.clear()
+    self._live.clear()
 
   def _load_submissions_from_s3(self, s3_client, bucket: str, cik: str) -> dict | None:
     """Load a CIK's submissions snapshot from S3, or None if absent."""
@@ -61,7 +62,7 @@ class SECMetadataLoader:
       logger.warning("No S3 snapshot for CIK %s, falling back to SEC API", cik)
       submissions = cast(dict[str, Any], edgar_client().submissions(cik))
       self._cache[cik] = submissions
-      self._refetched.add(cik)
+      self._live[cik] = submissions
 
     sec_filer = {
       "cik": cik,
@@ -87,17 +88,17 @@ class SECMetadataLoader:
     }
 
     sec_report = _find_report(submissions, accession)
-    if sec_report is None and cik not in self._refetched:
-      # A snapshot can predate the filing (a failed refresh, a short master);
-      # the live header's recent page carries every new filing.
-      self._refetched.add(cik)
-      logger.warning(
-        "Accession %s not in the submissions snapshot for CIK %s; re-reading the SEC API",
-        accession,
-        cik,
-      )
-      live = cast(dict[str, Any], edgar_client().submissions(cik))
-      sec_report = _find_report(live, accession)
+    if sec_report is None:
+      if cik not in self._live:
+        # A snapshot can predate the filing (a failed refresh, a short master);
+        # the live header's recent page carries every new filing.
+        logger.warning(
+          "Accession %s not in the submissions snapshot for CIK %s; re-reading the SEC API",
+          accession,
+          cik,
+        )
+        self._live[cik] = cast(dict[str, Any], edgar_client().submissions(cik))
+      sec_report = _find_report(self._live[cik], accession)
     if sec_report is None:
       sec_report = {"accessionNumber": accession}
 

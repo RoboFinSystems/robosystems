@@ -258,10 +258,19 @@ def sec_raw_filings(
                   )
                 else:
                   new_recent = await asyncio.to_thread(edgar_client().submissions, cik)
-
-                  submissions_data = incremental_update_submissions(
-                    existing_data, cik, new_recent
-                  )
+                  if _stored_master_is_short(existing_data, new_recent):
+                    # Stored before every page arrived; prepending the recent
+                    # page would never bring the missing history back.
+                    context.log.warning(
+                      f"Rebuilding short submissions master for CIK {cik}"
+                    )
+                    submissions_data = await asyncio.to_thread(
+                      build_complete_submissions_sync, cik
+                    )
+                  else:
+                    submissions_data = incremental_update_submissions(
+                      existing_data, cik, new_recent
+                    )
 
                 s3.client.put_object(
                   Bucket=bucket,
@@ -500,3 +509,15 @@ def sec_raw_filings(
       "source_files_existed": source_files_existed,
     }
   )
+
+
+def _stored_master_is_short(master: dict, header: dict) -> bool:
+  """Whether a stored submissions master merged fewer pagination pages than
+  the live header declares."""
+  filings = header.get("filings") if isinstance(header, dict) else None
+  pages = filings.get("files") if isinstance(filings, dict) else None
+  declared = len([p for p in (pages or []) if isinstance(p, dict) and p.get("name")])
+  merged = int(
+    ((master or {}).get("_metadata") or {}).get("paginationFilesMerged") or 0
+  )
+  return merged < declared

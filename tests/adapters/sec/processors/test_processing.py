@@ -691,3 +691,31 @@ class TestProcessorOrchestration:
     assert result.success is False
     assert result.skipped_reason is None
     mock_processor_cls.assert_not_called()
+
+
+@pytest.mark.unit
+@patch("robosystems.adapters.sec.processors.processing.XBRLGraphProcessor")
+def test_an_unknown_form_type_fails_without_a_form_filter_too(mock_processor_cls):
+  """Primary quarters run with no filter; a Report with no form drops out of
+  the catalog and search, so it must not be written."""
+  buf = BytesIO()
+  with zipfile.ZipFile(buf, "w") as zf:
+    zf.writestr("filing.htm", "<content>")
+  zip_data = buf.getvalue()
+  mock_s3 = MagicMock()
+  mock_s3.download_fileobj.side_effect = lambda bucket, key, out: out.write(zip_data)
+  mock_loader = MagicMock()
+  mock_loader.get_metadata.return_value = ({"cik": "1045810"}, {"accessionNumber": "a"})
+
+  result = process_single_filing_to_memory(
+    storage_key="sec/raw/file.zip",
+    partition_key="2024_1045810_0001045810-24-000001",
+    source_file_id="sf1",
+    s3_client=mock_s3,
+    raw_bucket="bucket",
+    metadata_loader=mock_loader,
+    allowed_form_types=None,
+  )
+
+  assert result.success is False
+  mock_processor_cls.assert_not_called()

@@ -8,7 +8,7 @@ staging. ``sec_processing_sensor`` is the separate backfill driver.
 """
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from dagster import (
   DagsterRunStatus,
@@ -45,6 +45,10 @@ from .jobs import (
   sec_stage_job,
 )
 
+# A failed SEC file is retried after this long, up to this many attempts.
+ERROR_RETRY_BACKOFF_SECONDS = 3600
+ERROR_RETRY_MAX_ATTEMPTS = 3
+
 
 @sensor(
   job=sec_process_job,
@@ -76,6 +80,24 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   session = None
   try:
     session = SessionLocal()
+
+    # A failed filing goes back to pending after a backoff, a bounded number
+    # of times: an EDGAR read that was incomplete is retried, never kept.
+    retry_before = datetime.now(UTC) - timedelta(seconds=ERROR_RETRY_BACKOFF_SECONDS)
+    requeued = (
+      session.query(SourceFile)
+      .filter(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "error",
+        SourceFile.attempts < ERROR_RETRY_MAX_ATTEMPTS,
+        (SourceFile.last_attempt_at.is_(None))
+        | (SourceFile.last_attempt_at < retry_before),
+      )
+      .update({SourceFile.status: "pending"}, synchronize_session=False)
+    )
+    session.commit()
+    if requeued:
+      context.log.info(f"Requeued {requeued} failed SEC files for retry")
 
     pending_files = (
       session.query(SourceFile.partition_key)

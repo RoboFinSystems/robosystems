@@ -420,3 +420,26 @@ def test_an_accession_missing_from_the_snapshot_is_read_from_the_api():
   assert report["form"] == "10-K"
   # Re-read once per CIK, not once per missing accession.
   assert live.submissions.call_count == 1
+
+
+@pytest.mark.unit
+def test_every_accession_missing_from_a_stale_snapshot_is_found_live():
+  from robosystems.adapters.sec.processors.metadata import SECMetadataLoader
+
+  loader = SECMetadataLoader()
+  loader._cache["1045810"] = {
+    "name": "Example Corp",
+    "filings": {"accessionNumber": []},
+  }
+  live = MagicMock()
+  live.submissions.return_value = {
+    "filings": {
+      "recent": {"accessionNumber": ["acc-a", "acc-b"], "form": ["10-Q", "8-K"]}
+    }
+  }
+  with patch("robosystems.adapters.sec.client.edgar.edgar_client", return_value=live):
+    _f, first = loader.get_metadata("1045810", "acc-a")
+    _f, second = loader.get_metadata("1045810", "acc-b")
+
+  assert (first["form"], second["form"]) == ("10-Q", "8-K")
+  assert live.submissions.call_count == 1

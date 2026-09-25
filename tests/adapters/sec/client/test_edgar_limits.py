@@ -65,3 +65,15 @@ def test_a_submissions_page_that_fails_fails_the_filer():
   with patch.object(EdgarClient, "_get_submissions", fetch):
     with pytest.raises(IncompleteSubmissions):
       complete_submissions_strict("1045810")
+
+
+def test_a_master_stored_short_is_detected_against_the_live_header():
+  from robosystems.adapters.sec.pipeline.download import _stored_master_is_short
+
+  header = {"filings": {"files": [{"name": "p1.json"}, {"name": "p2.json"}]}}
+  assert _stored_master_is_short({"_metadata": {"paginationFilesMerged": 1}}, header)
+  assert _stored_master_is_short({}, header)
+  assert not _stored_master_is_short(
+    {"_metadata": {"paginationFilesMerged": 2}}, header
+  )
+  assert not _stored_master_is_short({}, {"filings": {"recent": {}}})
