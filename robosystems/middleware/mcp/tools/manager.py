@@ -90,6 +90,9 @@ ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
     # (`rebuild=true`), and answers with a stream URL a chat client can't follow.
     "create-backup",
     "materialize",
+    # Answers with a credentialed link, which a chat client has nowhere to hand
+    # but the transcript; it is for a local reader that fetches by URL.
+    "get-report-bundle",
     # QuickBooks write-back is an owner decision in the app, not a chat action.
     "set-write-policy",
     # Maintenance and onboarding repair, not the close.
