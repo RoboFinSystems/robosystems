@@ -181,6 +181,7 @@ class PeriodCloseService:
     allow_stale_sync: bool = False,
     allow_stranded_obligations: bool = False,
     allow_reconciling_items: bool = False,
+    allow_unposted_source_events: bool = False,
     note: str | None = None,
   ) -> PeriodCloseResult:
     gate = self._fcs.closeable_gate(
@@ -192,6 +193,7 @@ class PeriodCloseService:
       allow_stale_sync=allow_stale_sync,
       allow_stranded_obligations=allow_stranded_obligations,
       allow_reconciling_items=allow_reconciling_items,
+      allow_unposted_source_events=allow_unposted_source_events,
     )
     if not gate.is_closeable:
       raise CloseGateFailed(gate)
@@ -272,6 +274,9 @@ class PeriodCloseService:
       ),
       reconciling_overridden_count=(
         gate.reconciling_item_count if allow_reconciling_items else 0
+      ),
+      unposted_overridden_count=(
+        gate.unposted_source_event_count if allow_unposted_source_events else 0
       ),
     )
 
@@ -599,6 +604,7 @@ class PeriodCloseService:
     allow_stale_sync: bool,
     stranded_overridden_count: int = 0,
     reconciling_overridden_count: int = 0,
+    unposted_overridden_count: int = 0,
   ) -> str | None:
     """Append a marker to the audit note for each overridden close gate."""
     suffixes: list[str] = []
@@ -613,6 +619,11 @@ class PeriodCloseService:
       suffixes.append(
         "[reconciling-item gate overridden — "
         f"{reconciling_overridden_count} unresolved item(s) left undecided]"
+      )
+    if unposted_overridden_count > 0:
+      suffixes.append(
+        "[unposted-source-event gate overridden — "
+        f"{unposted_overridden_count} uncommitted event(s) left out of the period]"
       )
     if not suffixes:
       return note

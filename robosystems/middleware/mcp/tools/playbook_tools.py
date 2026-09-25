@@ -220,8 +220,12 @@ _KEY_RULES: list[str] = [
   "one), and stranded_obligations (matured obligations already "
   "'classified' but with no drafted closing entry — adjusting entries the "
   "close would otherwise silently omit; promote-obligations with "
-  "dispatch_handlers=true drafts them, or void the obligation). Resolve "
-  "before close-period; get-fiscal-calendar reports them.",
+  "dispatch_handlers=true drafts them, or void the obligation), and "
+  "unposted_source_events (source events dated in the month never committed "
+  "— inbox lines still captured or classified, or a QuickBooks transaction "
+  "whose automatic posting failed; once the month closes they can never post "
+  "into it, so commit or void each; unposted_source_event_sample names them). "
+  "Resolve before close-period; get-fiscal-calendar reports them.",
   "JE PUBLISH SEMANTICS: journal_entry_recorded events with source='manual' "
   "publish to QuickBooks at close through the outbox; source='system' posts "
   "locally only. Set metadata.publish_to_source to decide explicitly rather "
