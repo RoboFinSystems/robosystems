@@ -246,8 +246,9 @@ def create_app() -> FastAPI:
   # Authentication is enforced in prod/staging only.
   try:
     from .middleware import LadybugAuthMiddleware
+    from .middleware.auth import read_graph_api_keys
 
-    app.add_middleware(LadybugAuthMiddleware)
+    app.add_middleware(LadybugAuthMiddleware, key_source=read_graph_api_keys)
     logger.info("LadybugDB authentication middleware enabled")
   except Exception as e:
     logger.warning(f"LadybugDB authentication middleware not loaded: {e}")

@@ -141,6 +141,17 @@ def create_secret(arn: str, token: str) -> None:
   username/password) with the same value, so EnableRDSProxy can be turned on at
   any time after one rotation.
   """
+  # A retried or re-driven rotation keeps the password it already generated:
+  # setSecret may have applied it to the database.
+  try:
+    secrets_client.get_secret_value(
+      SecretId=arn, VersionId=token, VersionStage="AWSPENDING"
+    )
+    logger.info("createSecret: the pending version already exists; keeping it")
+    return
+  except secrets_client.exceptions.ResourceNotFoundException:
+    pass
+
   # Get the current secret
   current_secret = secrets_client.get_secret_value(
     SecretId=arn, VersionStage="AWSCURRENT"
@@ -177,65 +188,85 @@ def create_secret(arn: str, token: str) -> None:
   )
 
 
+def _connect(db_info: dict, secret: dict, *, user: str | None = None):
+  return psycopg2.connect(
+    host=db_info["host"],
+    port=db_info["port"],
+    database=db_info["database"],
+    user=user or secret.get("POSTGRES_USER", "postgres"),
+    password=secret["POSTGRES_PASSWORD"],
+    sslmode=db_info.get("sslmode", "require"),
+    connect_timeout=30,
+  )
+
+
+def _secret_at(arn: str, stage: str, version_id: str | None = None) -> dict | None:
+  kwargs = {"SecretId": arn, "VersionStage": stage}
+  if version_id:
+    kwargs["VersionId"] = version_id
+  try:
+    return json.loads(secrets_client.get_secret_value(**kwargs)["SecretString"])
+  except secrets_client.exceptions.ResourceNotFoundException:
+    return None
+
+
 def set_secret(arn: str, token: str, environment: str) -> None:
   """Step 2: apply the pending password in PostgreSQL via ALTER USER.
 
-  Connects with the still-current credentials, since the pending ones are not
-  live in the database yet.
+  Idempotent, in the order AWS's rotation template uses: if the pending
+  password already logs in, it was applied by an earlier attempt and nothing
+  is done. Otherwise it logs in with the current password, then the previous
+  one, and applies the pending password.
   """
-  # Get the pending secret
-  pending_secret = secrets_client.get_secret_value(
-    SecretId=arn, VersionStage="AWSPENDING", VersionId=token
-  )
-  pending_dict = json.loads(pending_secret["SecretString"])
-
-  # Get the current secret for connection
-  current_secret = secrets_client.get_secret_value(
-    SecretId=arn, VersionStage="AWSCURRENT"
-  )
-  current_dict = json.loads(current_secret["SecretString"])
-
-  # Get database connection info
+  pending_dict = _secret_at(arn, "AWSPENDING", token)
+  if pending_dict is None:
+    raise ValueError(f"setSecret: no pending version {token} for {arn}")
+  username = pending_dict.get("POSTGRES_USER", "postgres")
   db_info = get_database_connection_info(arn, environment)
 
-  # Connect and change password
-  conn = None
   try:
-    conn = psycopg2.connect(
-      host=db_info["host"],
-      port=db_info["port"],
-      database=db_info["database"],
-      user=current_dict.get("POSTGRES_USER", "postgres"),
-      password=current_dict["POSTGRES_PASSWORD"],
-      sslmode="require",
-      connect_timeout=30,
+    _connect(db_info, pending_dict).close()
+    logger.info("setSecret: the pending password is already applied")
+    return
+  except psycopg2.OperationalError:
+    pass
+
+  conn = None
+  last_error: Exception | None = None
+  for stage in ("AWSCURRENT", "AWSPREVIOUS"):
+    login = _secret_at(arn, stage)
+    if login is None:
+      continue
+    try:
+      conn = _connect(db_info, login, user=username)
+      break
+    except psycopg2.OperationalError as e:
+      last_error = e
+  if conn is None:
+    error_type = type(last_error).__name__ if last_error else "NoCredential"
+    logger.error(f"setSecret: Unable to log into database: {error_type}")
+    raise ValueError(
+      "setSecret: neither the pending, current nor previous password logs in"
     )
+
+  try:
     conn.autocommit = True
-
     with conn.cursor() as cursor:
-      username = pending_dict.get("POSTGRES_USER", "postgres")
-      new_password = pending_dict["POSTGRES_PASSWORD"]
-
       # Quote the identifier (user name) safely via psycopg2.sql.Identifier
       # so a hostile username in the secret can't inject SQL.
       cursor.execute(
         sql.SQL("ALTER USER {username} WITH PASSWORD %s").format(
           username=sql.Identifier(username)
         ),
-        (new_password,),
+        (pending_dict["POSTGRES_PASSWORD"],),
       )
-
-    logger.info(
-      f"setSecret: Successfully set password for user {username} in PostgreSQL"
-    )
-
+    logger.info("setSecret: applied the pending password")
   except Exception as e:
     error_type = type(e).__name__
-    logger.error(f"setSecret: Unable to set password: {error_type}: {e}")
+    logger.error(f"setSecret: Unable to set password: {error_type}")
     raise
   finally:
-    if conn:
-      conn.close()
+    conn.close()
 
 
 def test_secret(arn: str, token: str, environment: str) -> None:
@@ -252,15 +283,7 @@ def test_secret(arn: str, token: str, environment: str) -> None:
   # Test connection with new password
   conn = None
   try:
-    conn = psycopg2.connect(
-      host=db_info["host"],
-      port=db_info["port"],
-      database=db_info["database"],
-      user=pending_dict.get("POSTGRES_USER", "postgres"),
-      password=pending_dict["POSTGRES_PASSWORD"],
-      sslmode="require",
-      connect_timeout=30,
-    )
+    conn = _connect(db_info, pending_dict)
 
     # Run a simple query to verify the connection
     with conn.cursor() as cursor:
