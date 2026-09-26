@@ -9,7 +9,7 @@ can wait for it. The pause lapses on its own and fails open.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -133,14 +133,117 @@ def test_the_stale_graph_sensor_waits_out_the_pause(paused):
 
 
 async def test_the_materialize_api_answers_503_with_retry_after(paused):
-  from robosystems.operations.graph.commands.materialize import (
-    _refuse_while_writes_paused,
-  )
-
   with pytest.raises(HTTPException) as refused:
-    await _refuse_while_writes_paused()
+    await write_pause.refuse_while_writes_paused()
   assert refused.value.status_code == 503
   assert int(refused.value.headers["Retry-After"]) > 60
+
+
+async def test_an_ingest_into_the_graph_is_refused_before_anything_starts(paused):
+  from robosystems.operations.graph.commands.ingest_file import ingest_file_cmd
+
+  with (
+    patch(
+      "robosystems.operations.graph.commands.ingest_file.GraphFile.get_by_id"
+    ) as file_lookup,
+    pytest.raises(HTTPException) as refused,
+  ):
+    await ingest_file_cmd("kg1", "f1", True, AsyncMock(), AsyncMock(), AsyncMock())
+  assert refused.value.status_code == 503
+  file_lookup.assert_not_called()
+
+
+async def test_a_forked_subgraph_is_refused_before_it_is_queued(paused):
+  from robosystems.models.api.graphs.subgraphs import CreateSubgraphRequest
+  from robosystems.routers.graphs.subgraphs import main
+
+  parent = MagicMock()
+  with (
+    patch.object(main, "handle_circuit_breaker_check"),
+    patch.object(main, "verify_parent_graph_access", return_value=parent),
+    patch.object(main, "verify_subgraph_tier_support"),
+    patch.object(main, "verify_parent_graph_active"),
+    patch.object(main, "check_subgraph_quota", return_value=(0, 3, [])),
+    patch.object(main, "validate_subgraph_name_unique"),
+    patch("robosystems.worker.client.enqueue_task", new=AsyncMock()) as enqueue,
+    pytest.raises(HTTPException) as refused,
+  ):
+    await main.create_subgraph(
+      request=CreateSubgraphRequest(name="dev", display_name="Dev", fork_parent=True),
+      graph_id="kg0123456789abcdef01",
+      current_user=AsyncMock(),
+      db=AsyncMock(),
+    )
+  assert refused.value.status_code == 503
+  enqueue.assert_not_awaited()
+
+
+async def test_a_queued_file_write_is_refused_at_its_start(paused, counter):
+  from robosystems.dagster.jobs.graph import _counted_materialize_table
+
+  client = AsyncMock()
+  client._instance_id = "i-abc"
+  with pytest.raises(write_pause.GraphWritesPausedError):
+    await _counted_materialize_table(client, "kg1", "Entity", ["f1"])
+  client.materialize_table.assert_not_awaited()
+  counter[0].assert_not_called()
+
+
+async def test_a_file_write_is_counted_for_the_drain(ssm, counter):
+  from robosystems.dagster.jobs.graph import _counted_materialize_table
+
+  async_update, _ = counter
+  client = AsyncMock()
+  client._instance_id = "i-abc"
+  client.materialize_table.return_value = {"rows_ingested": 3}
+  assert await _counted_materialize_table(client, "kg1", "Entity", ["f1"]) == {
+    "rows_ingested": 3
+  }
+  assert [c.kwargs["delta"] for c in async_update.await_args_list] == [1, -1]
+
+
+def test_a_deferred_ledger_run_does_not_fail_the_dagster_run(paused):
+  """A refusal is planned maintenance: no RunFailure alert, graph stays stale."""
+  from dagster import build_op_context
+
+  from robosystems.dagster.jobs.extensions import (
+    ExtensionsMaterializeConfig,
+    materialize_extensions_to_graph,
+  )
+  from robosystems.operations.extensions.materialize import MaterializeResult
+
+  deferred = MaterializeResult(graph_id="kg0123456789abcdef01", status="error")
+  deferred.paused_until = datetime.now(UTC) + timedelta(minutes=30)
+  with (
+    patch(
+      "robosystems.operations.extensions.materialize.ExtensionsMaterializer.materialize",
+      new=AsyncMock(return_value=deferred),
+    ),
+    patch(
+      "robosystems.middleware.graph.ingestion_limits.IngestionLimitChecker.check_instance_storage",
+      new=AsyncMock(return_value={"allowed": True, "errors": []}),
+    ),
+    patch("robosystems.database.get_db_session") as sessions,
+  ):
+    sessions.side_effect = lambda: iter([MagicMock()])
+    out = materialize_extensions_to_graph(
+      build_op_context(),
+      MagicMock(),
+      MagicMock(),
+      ExtensionsMaterializeConfig(graph_id="kg0123456789abcdef01"),
+    )
+  assert out["status"] == "deferred"
+
+
+def test_a_broken_ssm_client_fails_open(monkeypatch):
+  monkeypatch.setenv("ENVIRONMENT", "prod")
+  monkeypatch.setattr(parameter_store, "_parameter_manager", None)
+
+  def broken():
+    raise KeyError("credential_provider")
+
+  monkeypatch.setattr(parameter_store, "_get_fast_ssm_client", broken)
+  assert write_pause.graph_writes_paused_until(now=NOW) is None
 
 
 async def test_writes_proceed_without_a_pause(ssm, counter):

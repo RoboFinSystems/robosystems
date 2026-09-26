@@ -290,6 +290,11 @@ async def ingest_file_cmd(
   background_tasks: BackgroundTasks,
 ) -> dict:
   """Mark the file uploaded and trigger DuckDB staging (direct or Dagster)."""
+  if ingest_to_graph:
+    from robosystems.middleware.graph.write_pause import refuse_while_writes_paused
+
+    await refuse_while_writes_paused()
+
   graph_file = GraphFile.get_by_id(file_id, db)
   if not graph_file or graph_file.graph_id != graph_id:
     raise HTTPException(

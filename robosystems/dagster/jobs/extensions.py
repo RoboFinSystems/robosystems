@@ -109,6 +109,15 @@ def materialize_extensions_to_graph(
   finally:
     loop.close()
 
+  if result.paused_until is not None:
+    # A planned writer roll, not a failure: no RunFailure alert. graph_stale
+    # stays set, so the sensor picks the graph up again after the pause.
+    context.log.warning(
+      f"Extensions materialization for {graph_id} deferred: graph writes are "
+      f"paused until {result.paused_until.isoformat()}"
+    )
+    return {"graph_id": graph_id, "status": "deferred"}
+
   if result.status != "success":
     # 'partial' fails too: a missing relationship table renders empty
     # statements. graph_stale stays set; the sensor retries only once a later

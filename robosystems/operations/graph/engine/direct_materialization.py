@@ -351,7 +351,13 @@ async def materialize_graph_directly(
 
   except Exception as e:
     duration_ms = (time.time() - start_time) * 1000
-    logger.error(f"Direct materialization failed for {graph_id}: {e}")
+    from robosystems.middleware.graph.write_pause import GraphWritesPausedError
+
+    if isinstance(e, GraphWritesPausedError):
+      # Planned maintenance, kept out of the write-failure alarm's pattern.
+      logger.warning(f"Direct materialization for {graph_id} deferred: {e}")
+    else:
+      logger.error(f"Direct materialization failed for {graph_id}: {e}")
 
     from robosystems.graph_api.client.exceptions import GraphTransientError
 

@@ -164,7 +164,7 @@ jobs:
     # standard tier. Must stay above the monitor step's own timeout below, or
     # the job is killed before the monitor can report why the stack is stuck.
     # 55 min of stack monitoring + up to 30 min draining writes before a roll.
-    timeout-minutes: 100
+    timeout-minutes: 110
     permissions:
       id-token: write
       contents: read

@@ -52,3 +52,24 @@ def assert_graph_writes_allowed() -> None:
   until = graph_writes_paused_until()
   if until is not None:
     raise GraphWritesPausedError(until)
+
+
+async def refuse_while_writes_paused() -> None:
+  """For an API that starts a graph write: 503 + Retry-After during a pause,
+  instead of queuing work the worker would refuse."""
+  import asyncio
+
+  from fastapi import HTTPException, status
+
+  until = await asyncio.to_thread(graph_writes_paused_until)
+  if until is None:
+    return
+  retry_after = max(60, int((until - datetime.now(UTC)).total_seconds()))
+  raise HTTPException(
+    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    detail={
+      "error": "Graph writes are paused for maintenance",
+      "retry_after_seconds": retry_after,
+    },
+    headers={"Retry-After": str(retry_after)},
+  )

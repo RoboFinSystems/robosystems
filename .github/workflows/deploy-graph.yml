@@ -473,7 +473,8 @@ jobs:
   # the others are still rolling.
   pause-graph-writes:
     needs: [prepare-writer-matrix]
-    if: inputs.cycle_writers == 'true' && fromJson(needs.prepare-writer-matrix.outputs.lbug_matrix).include[0] != null
+    # An AZ move replaces writers too.
+    if: (inputs.cycle_writers == 'true' || inputs.writer_az_change_allowed == 'true') && fromJson(needs.prepare-writer-matrix.outputs.lbug_matrix).include[0] != null
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -489,10 +490,11 @@ jobs:
       - name: Pause graph writes
         run: |
           # A timestamp, so a run that dies mid-roll cannot pause writes for good:
-          # the drain cap (at most 40) + the 55-minute stack monitor + margin.
+          # the drain cap (at most 40) + the 55-minute stack monitor + margin,
+          # outlasting the 110-minute writer deploy job.
           DRAIN=${{ inputs.drain_max_minutes }}
           [ "$DRAIN" -gt 40 ] && DRAIN=40
-          UNTIL=$(date -u -d "+$((DRAIN + 70)) minutes" +%Y-%m-%dT%H:%M:%SZ)
+          UNTIL=$(date -u -d "+$((DRAIN + 80)) minutes" +%Y-%m-%dT%H:%M:%SZ)
           aws ssm put-parameter --type String --overwrite \
             --name "/robosystems/${{ inputs.environment }}/features/GRAPH_WRITES_PAUSED_UNTIL" \
             --value "$UNTIL" > /dev/null
@@ -562,7 +564,8 @@ jobs:
   # S3 database must exist (published by Dagster job), but that's not a deploy-time dependency
   resume-graph-writes:
     needs: [prepare-writer-matrix, pause-graph-writes, deploy-graph-ladybug]
-    if: always() && needs.pause-graph-writes.result == 'success'
+    # Not only on success: a cancel after the put must still clear it.
+    if: always() && needs.pause-graph-writes.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -580,18 +583,26 @@ jobs:
           MATRIX: ${{ needs.prepare-writer-matrix.outputs.lbug_matrix }}
         run: |
           # A failed update rolls back through the writers too; keep writes
-          # paused until no writer stack is still moving (bounded; the pause
-          # timestamp lapses on its own regardless).
+          # paused until no writer stack is still moving. If one still is at
+          # the deadline, leave the pause to lapse on its own timestamp.
           SUFFIX=${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
           STACKS=$(echo "$MATRIX" | jq -r --arg s "$SUFFIX" '.include[] | "RoboSystemsGraph\(.stack_suffix)\($s)"')
-          for _ in $(seq 1 80); do
+          DEADLINE=$(( $(date +%s) + 40 * 60 ))
+          while :; do
             MOVING=""
             for STACK in $STACKS; do
-              STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK" \
-                --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "")
+              if ! STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+                  --query 'Stacks[0].StackStatus' --output text); then
+                STATUS="UNREADABLE_IN_PROGRESS"
+              fi
               case "$STATUS" in *_IN_PROGRESS) MOVING="$MOVING $STACK($STATUS)" ;; esac
             done
             [ -z "$MOVING" ] && break
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "::warning::Writer stacks still moving:$MOVING. Leaving the pause to lapse on its timestamp."
+              echo "### ⚠️ Graph writes left paused until the timestamp lapses:$MOVING" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             echo "Still moving:$MOVING"
             sleep 30
           done

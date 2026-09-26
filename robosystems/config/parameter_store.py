@@ -7,6 +7,7 @@ override both; SSM is only consulted in prod/staging.
 
 import logging
 import os
+import threading
 import time
 
 # Not robosystems.logger: that would be a circular import.
@@ -35,26 +36,29 @@ def _get_ssm_client():
 
 
 _fast_ssm_client = None
+_fast_ssm_client_lock = threading.Lock()
 
 
 def _get_fast_ssm_client():
   """An SSM client with short timeouts, for uncached reads on a request path:
-  a slow SSM must not hold the caller for botocore's 60s default."""
+  a slow SSM must not hold the caller for botocore's 60s default. Called from
+  worker threads, so it is built once, under a lock, from its own session."""
   global _fast_ssm_client
   if _fast_ssm_client is None:
     if os.getenv("ENVIRONMENT", "dev") not in ("prod", "staging"):
       return None
-    try:
-      import boto3
-      from botocore.config import Config
-
-      _fast_ssm_client = boto3.client(
-        "ssm",
-        region_name=os.getenv("AWS_REGION", "us-east-1"),
-        config=Config(connect_timeout=2, read_timeout=2, retries={"max_attempts": 2}),
-      )
-    except ImportError:
-      return None
+    with _fast_ssm_client_lock:
+      if _fast_ssm_client is None:
+        try:
+          import boto3
+          from botocore.config import Config
+        except ImportError:
+          return None
+        _fast_ssm_client = boto3.session.Session().client(
+          "ssm",
+          region_name=os.getenv("AWS_REGION", "us-east-1"),
+          config=Config(connect_timeout=2, read_timeout=2, retries={"max_attempts": 2}),
+        )
   return _fast_ssm_client
 
 
@@ -119,16 +123,15 @@ class ParameterStoreManager:
     take effect at once (a maintenance pause) rather than after the cache TTL."""
     if self.environment not in ["prod", "staging"]:
       return default
-    client = _get_fast_ssm_client()
-    if client is None:
-      return default
     parameter_path = f"/robosystems/{self.environment}/features/{name}"
     try:
+      client = _get_fast_ssm_client()
+      if client is None:
+        return default
       return client.get_parameter(Name=parameter_path)["Parameter"]["Value"]
-    except client.exceptions.ParameterNotFound:
-      return default
     except Exception as e:
-      logger.warning(f"Failed to retrieve parameter '{parameter_path}': {e}")
+      if getattr(e, "response", {}).get("Error", {}).get("Code") != "ParameterNotFound":
+        logger.warning(f"Failed to retrieve parameter '{parameter_path}': {e}")
       return default
 
   def get_all_feature_flags(self) -> dict[str, str]:
