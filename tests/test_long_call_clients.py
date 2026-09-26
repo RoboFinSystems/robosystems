@@ -101,7 +101,7 @@ def test_userdata_lambda_invokes_wait_out_the_callee_once():
   lambda_timeout = _volume_manager_timeout()
   invokes = [
     (path.name, command)
-    for path in sorted(USERDATA.glob("*.sh"))
+    for path in sorted(USERDATA.rglob("*.sh"))
     for command in _lambda_invokes(path)
   ]
   assert invokes, "expected the writer's volume-manager invoke"
