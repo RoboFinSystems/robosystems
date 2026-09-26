@@ -104,6 +104,16 @@ on:
         type: string
         description: Permit this run to replace writer instances ("true" only from a dispatch input)
         default: "false"
+      drain_max_minutes:
+        required: false
+        type: string
+        description: Minutes to wait for in-flight writes before an opted-in writer roll
+        default: "30"
+      drain_force:
+        required: false
+        type: string
+        description: Skip the in-flight write wait before an opted-in roll
+        default: "false"
       # Graph Scaling Configuration (passed from parent workflow)
       lbug_standard_min_instances:
         required: false
@@ -489,6 +499,8 @@ jobs:
       writer_az: ${{ inputs.writer_az }}
       writer_az_change_allowed: ${{ inputs.writer_az_change_allowed }}
       cycle_writers: ${{ inputs.cycle_writers }}
+      drain_max_minutes: ${{ inputs.drain_max_minutes }}
+      drain_force: ${{ inputs.drain_force }}
       # Instance Configuration
       instance_type: ${{ matrix.instance_type }}
       databases_per_instance: "${{ matrix.databases_per_instance }}"

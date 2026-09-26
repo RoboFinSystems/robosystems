@@ -867,11 +867,13 @@ def materialize_graph_tables(
         get_graph_client(graph_id=graph_id, operation_type="write")
       )
 
-      # Busy counter lets the deploy-time instance refresh wait for us.
-      busy_instance_id = client._instance_id or ""
+      # Busy counter lets the deploy-time instance refresh wait for us. Set
+      # only once counted: a start refused by a maintenance pause never was.
+      instance_id = client._instance_id or ""
       loop.run_until_complete(
-        begin_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+        begin_destructive_op(instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
       )
+      busy_instance_id = instance_id
 
       if config.rebuild:
         context.log.info("[10%] Rebuild requested - regenerating graph database")

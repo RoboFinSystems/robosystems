@@ -90,6 +90,23 @@ class ParameterStoreManager:
       logger.warning(f"Failed to retrieve parameter '{parameter_path}': {e}")
       return default
 
+  def get_parameter_uncached(self, name: str, default: str = "") -> str:
+    """One feature flag read straight from SSM, for a flag whose change must
+    take effect at once (a maintenance pause) rather than after the cache TTL."""
+    if self.environment not in ["prod", "staging"]:
+      return default
+    client = self._get_client()
+    if client is None:
+      return default
+    parameter_path = f"/robosystems/{self.environment}/features/{name}"
+    try:
+      return client.get_parameter(Name=parameter_path)["Parameter"]["Value"]
+    except client.exceptions.ParameterNotFound:
+      return default
+    except Exception as e:
+      logger.warning(f"Failed to retrieve parameter '{parameter_path}': {e}")
+      return default
+
   def get_all_feature_flags(self) -> dict[str, str]:
     """Batch fetch every flag under /robosystems/{env}/features/."""
     if self.environment not in ["prod", "staging"]:

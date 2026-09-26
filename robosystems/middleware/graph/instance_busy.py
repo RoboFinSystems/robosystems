@@ -17,6 +17,7 @@ from robosystems.config import env
 from robosystems.logger import logger
 
 from .allocation_manager import get_dynamodb_resource
+from .write_pause import assert_graph_writes_allowed
 
 # Conventional op_kind labels; GHA reads the kind only for logging.
 OP_KIND_MATERIALIZATION = "materialization"
@@ -105,7 +106,11 @@ async def resolve_instance_id_for_graph(graph_id: str) -> str:
 
 async def begin_destructive_op(instance_id: str, op_kind: str) -> None:
   """+1 to the busy counter. Prefer :func:`instance_busy`; otherwise callers
-  must call :func:`end_destructive_op` in a ``finally``."""
+  must call :func:`end_destructive_op` in a ``finally``.
+
+  Raises GraphWritesPausedError, before counting, during a maintenance pause.
+  """
+  await asyncio.to_thread(assert_graph_writes_allowed)
   await _update_counter_async(instance_id, delta=1, op_kind=op_kind)
 
 
@@ -119,7 +124,9 @@ async def instance_busy(
   instance_id: str,
   op_kind: str,
 ) -> AsyncIterator[None]:
-  """Mark an instance busy for the duration of the block, exceptions included."""
+  """Mark an instance busy for the duration of the block, exceptions included.
+  Raises GraphWritesPausedError, before counting, during a maintenance pause."""
+  await asyncio.to_thread(assert_graph_writes_allowed)
   await _update_counter_async(instance_id, delta=1, op_kind=op_kind)
   try:
     yield
@@ -133,6 +140,7 @@ def instance_busy_sync(
   op_kind: str,
 ) -> Iterator[None]:
   """Synchronous :func:`instance_busy`."""
+  assert_graph_writes_allowed()
   _update_counter(instance_id, delta=1, op_kind=op_kind)
   try:
     yield
