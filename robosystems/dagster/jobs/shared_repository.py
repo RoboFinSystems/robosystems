@@ -12,7 +12,9 @@ import boto3
 from dagster import (
   AssetSelection,
   Config,
+  DefaultScheduleStatus,
   OpExecutionContext,
+  ScheduleDefinition,
   define_asset_job,
   job,
   op,
@@ -21,6 +23,7 @@ from dagster import (
 from robosystems.config import env
 from robosystems.dagster.assets.shared_repositories.master_parking import (
   BOOSTED_VOLUME_PERFORMANCE,
+  park_volume_if_master_asleep,
   set_volume_performance,
 )
 
@@ -216,3 +219,36 @@ def boost_shared_master_volume(context: OpExecutionContext) -> list[dict[str, An
 def shared_master_volume_boost_job():
   """Raise the shared data volume to run performance; sleep parks it again."""
   boost_shared_master_volume()
+
+
+@op
+def park_idle_shared_master_volume(context: OpExecutionContext) -> dict[str, Any]:
+  """Park a shared data volume left boosted while the master sleeps."""
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping volume park check in dev environment")
+    return {"status": "skipped", "reason": "dev_environment"}
+  if not env.SHARED_MASTER_PARKING_ENABLED:
+    context.log.info("Master parking disabled; the volume stays boosted")
+    return {"status": "skipped", "reason": "parking_disabled"}
+
+  result = park_volume_if_master_asleep()
+  context.log.info(f"Shared volume park check: {result}")
+  return result
+
+
+@job(name="shared_master_volume_park_check", tags=_MASTER_PARKING_TAGS)
+def shared_master_volume_park_check_job():
+  """Backstop for the sleep's park, for runs that end without a sleep."""
+  park_idle_shared_master_volume()
+
+
+# Midday UTC is hours clear of the nightly run (roughly 01:00-05:30 UTC).
+shared_master_volume_park_check_schedule = ScheduleDefinition(
+  job=shared_master_volume_park_check_job,
+  cron_schedule="0 12 * * *",
+  default_status=(
+    DefaultScheduleStatus.RUNNING
+    if env.ENVIRONMENT != "dev"
+    else DefaultScheduleStatus.STOPPED
+  ),
+)

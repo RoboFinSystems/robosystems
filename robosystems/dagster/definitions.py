@@ -77,6 +77,8 @@ from robosystems.dagster.jobs.notifications import (
 from robosystems.dagster.jobs.shared_repository import (
   shared_master_sleep_job,
   shared_master_volume_boost_job,
+  shared_master_volume_park_check_job,
+  shared_master_volume_park_check_schedule,
   shared_master_wake_job,
   shared_replicas_refresh_job,
   shared_repository_refresh_replicas_job,
@@ -228,6 +230,7 @@ all_jobs = [
   shared_master_wake_job,
   shared_master_sleep_job,
   shared_master_volume_boost_job,
+  shared_master_volume_park_check_job,
   shared_replicas_refresh_job,
   shared_repository_refresh_replicas_job,
   # Platform: Version migration (manually triggered)
@@ -263,6 +266,8 @@ all_schedules = [
   instance_registry_cleanup_schedule,
   volume_registry_cleanup_schedule,
   full_instance_maintenance_schedule,
+  # Platform: Shared repository
+  shared_master_volume_park_check_schedule,
   # Adapter: SEC pipeline
   *sec["schedules"],
   # Adapter: QuickBooks, Mercury and Plaid pipelines

@@ -548,3 +548,110 @@ class TestVolumeBoostOp:
 
     assert boost_shared_master_volume(build_op_context()) == []
     m_perf.assert_not_called()
+
+
+def _asg_state(desired: int, instances: list | None = None) -> MagicMock:
+  client = MagicMock()
+  client.describe_auto_scaling_groups.return_value = {
+    "AutoScalingGroups": [{"DesiredCapacity": desired, "Instances": instances or []}]
+  }
+  return client
+
+
+@pytest.mark.unit
+class TestParkVolumeIfMasterAsleep:
+  @patch.object(master_parking, "set_volume_performance")
+  @patch.object(master_parking, "_autoscaling_client")
+  def test_parks_when_the_master_is_asleep(self, m_asg, m_perf):
+    m_asg.return_value = _asg_state(0)
+    m_perf.return_value = [{"volume_id": "vol-sec", "result": "modified"}]
+
+    result = master_parking.park_volume_if_master_asleep()
+
+    m_perf.assert_called_once_with(
+      master_parking.PARKED_VOLUME_PERFORMANCE, database="sec"
+    )
+    assert result["status"] == "checked"
+
+  @pytest.mark.parametrize(
+    ("desired", "instances"),
+    [(1, [{"InstanceId": "i-1"}]), (1, []), (0, [{"InstanceId": "i-going"}])],
+  )
+  @patch.object(master_parking, "set_volume_performance")
+  @patch.object(master_parking, "_autoscaling_client")
+  def test_never_touches_a_volume_a_master_may_be_using(
+    self, m_asg, m_perf, desired, instances
+  ):
+    # Awake, waking, or still terminating: the volume may be in use.
+    m_asg.return_value = _asg_state(desired, instances)
+
+    result = master_parking.park_volume_if_master_asleep()
+
+    m_perf.assert_not_called()
+    assert result == {"status": "skipped", "reason": "master_awake"}
+
+  @patch.object(master_parking, "set_volume_performance")
+  @patch.object(master_parking, "_autoscaling_client")
+  def test_missing_asg_is_skipped(self, m_asg, m_perf):
+    client = MagicMock()
+    client.describe_auto_scaling_groups.return_value = {"AutoScalingGroups": []}
+    m_asg.return_value = client
+
+    result = master_parking.park_volume_if_master_asleep()
+
+    m_perf.assert_not_called()
+    assert result["reason"] == "asg_not_found"
+
+
+@pytest.mark.unit
+class TestVolumeParkCheckOp:
+  @patch("robosystems.dagster.jobs.shared_repository.park_volume_if_master_asleep")
+  @patch("robosystems.dagster.jobs.shared_repository.env")
+  def test_runs_the_check(self, mock_env, m_park):
+    from dagster import build_op_context
+
+    from robosystems.dagster.jobs.shared_repository import (
+      park_idle_shared_master_volume,
+    )
+
+    mock_env.ENVIRONMENT = "prod"
+    mock_env.SHARED_MASTER_PARKING_ENABLED = True
+    m_park.return_value = {"status": "checked", "volumes": []}
+
+    assert park_idle_shared_master_volume(build_op_context())["status"] == "checked"
+    m_park.assert_called_once()
+
+  @pytest.mark.parametrize(
+    ("environment", "parking_enabled", "reason"),
+    [("dev", True, "dev_environment"), ("prod", False, "parking_disabled")],
+  )
+  @patch("robosystems.dagster.jobs.shared_repository.park_volume_if_master_asleep")
+  @patch("robosystems.dagster.jobs.shared_repository.env")
+  def test_skips_in_dev_and_when_parking_disabled(
+    self, mock_env, m_park, environment, parking_enabled, reason
+  ):
+    from dagster import build_op_context
+
+    from robosystems.dagster.jobs.shared_repository import (
+      park_idle_shared_master_volume,
+    )
+
+    mock_env.ENVIRONMENT = environment
+    mock_env.SHARED_MASTER_PARKING_ENABLED = parking_enabled
+
+    result = park_idle_shared_master_volume(build_op_context())
+
+    m_park.assert_not_called()
+    assert result["reason"] == reason
+
+
+@pytest.mark.unit
+def test_park_check_runs_clear_of_the_nightly_run():
+  from robosystems.dagster.definitions import defs
+  from robosystems.dagster.jobs.shared_repository import (
+    shared_master_volume_park_check_schedule,
+  )
+
+  # The nightly chain runs roughly 01:00-05:30 UTC.
+  assert shared_master_volume_park_check_schedule.cron_schedule == "0 12 * * *"
+  assert defs.get_schedule_def("shared_master_volume_park_check_schedule")

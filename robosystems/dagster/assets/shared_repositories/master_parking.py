@@ -302,6 +302,30 @@ async def wait_for_volume_modifications(
     await asyncio.sleep(poll_interval_s)
 
 
+def park_volume_if_master_asleep(
+  *, database: str = DEFAULT_SHARED_DATABASE
+) -> dict[str, Any]:
+  """Park the shared data volume if the master is asleep and it was left boosted.
+
+  The sleep parks it on every path that ends a run. This catches the ones that
+  do not reach a sleep — a cancelled run, a chain that stalled before the wake —
+  and only when the ASG is at 0 with no instance left, so it never touches a
+  volume a master is using.
+  """
+  asg_name = get_shared_master_asg_name()
+  groups = _autoscaling_client().describe_auto_scaling_groups(
+    AutoScalingGroupNames=[asg_name]
+  )["AutoScalingGroups"]
+  if not groups:
+    return {"status": "skipped", "reason": "asg_not_found"}
+  if groups[0].get("DesiredCapacity", 0) or groups[0].get("Instances"):
+    return {"status": "skipped", "reason": "master_awake"}
+  return {
+    "status": "checked",
+    "volumes": set_volume_performance(PARKED_VOLUME_PERFORMANCE, database=database),
+  }
+
+
 def sleep_master() -> dict[str, Any]:
   """Clear scale-in protection, scale the shared master to 0, park its volume.
 

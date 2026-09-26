@@ -185,7 +185,10 @@ the boost starts with the download and the wake waits out whatever is left
 while the master is still asleep. The wake also boosts on its own, so a
 backfill or manual wake gets run performance without the sensor. The park
 after sleep is not waited on. A failed download or process run parks the
-volume through `sec_master_sleep_on_failure_sensor`.
+volume through `sec_master_sleep_on_failure_sensor`, and the platform's daily
+`shared_master_volume_park_check_schedule` (12:00 UTC, on by default) parks a
+volume left boosted by anything that never reached a sleep, such as a cancelled
+run, but only while the master ASG is at 0 with no instance left.
 
 The download's quarter travels down the chain as the `quarter` run tag, so
 stage, index and catalog all work on the quarter that was downloaded, even when
