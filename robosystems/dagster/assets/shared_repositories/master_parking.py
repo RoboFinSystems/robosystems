@@ -20,12 +20,14 @@ from robosystems.logger import logger
 DEFAULT_SHARED_DATABASE = "sec"
 
 # gp3 performance of the shared data volume. Provisioned IOPS and throughput
-# bill whether or not the volume is attached, so it is boosted ahead of a run
-# and parked at the free gp3 baseline while the master sleeps. BOOSTED matches
-# the ladybug-shared floor in bin/lambda/graph_volume_manager.py, which raises
-# the volume again on attach should the boost not have run.
+# bill whether or not the volume is attached, so it is boosted for a run and
+# parked at the free gp3 baseline while the master sleeps. BOOSTED matches the
+# ladybug-shared floor in bin/lambda/graph_volume_manager.py, which raises the
+# volume again on attach should a boost not have been applied.
 BOOSTED_VOLUME_PERFORMANCE = {"Iops": 12000, "Throughput": 500}
 PARKED_VOLUME_PERFORMANCE = {"Iops": 3000, "Throughput": 125}
+# A 3000 -> 12000 IOPS change on the SEC volume took 51 minutes to complete.
+VOLUME_MODIFICATION_WAIT_S = 3600
 
 
 class MasterWakeTimeout(Exception):
@@ -185,15 +187,36 @@ async def wait_for_master_healthy(
 async def wake_master(
   *, database: str = DEFAULT_SHARED_DATABASE, timeout_s: int | None = None
 ) -> dict[str, Any]:
-  """Scale the shared master to 1 and wait until it is healthy."""
+  """Boost the data volume, let the change land, then scale the master to 1.
+
+  The wait happens while the master is still asleep, so it costs time but no
+  instance hours; the boost started with the download has usually landed by
+  now, leaving little or nothing to wait for.
+  """
   asg_name = get_shared_master_asg_name()
+  set_volume_performance(BOOSTED_VOLUME_PERFORMANCE, database=database)
+  volume = await wait_for_volume_modifications(database=database)
   set_desired_capacity(asg_name, 1)
   result = await wait_for_master_healthy(
     asg_name,
     database=database,
     timeout_s=timeout_s or env.SHARED_MASTER_WAKE_TIMEOUT_S,
   )
-  return {"status": "awake", **result}
+  return {"status": "awake", "volume": volume, **result}
+
+
+def _find_shared_volumes(database: str) -> list[dict[str, Any]]:
+  return (
+    _ec2_client()
+    .describe_volumes(
+      Filters=[
+        {"Name": "tag:Tier", "Values": ["ladybug-shared"]},
+        {"Name": "tag:DatabaseId", "Values": [database]},
+        {"Name": "tag:Environment", "Values": [env.ENVIRONMENT]},
+      ]
+    )
+    .get("Volumes", [])
+  )
 
 
 def set_volume_performance(
@@ -206,17 +229,7 @@ def set_volume_performance(
   one outcome per volume found.
   """
   try:
-    volumes = (
-      _ec2_client()
-      .describe_volumes(
-        Filters=[
-          {"Name": "tag:Tier", "Values": ["ladybug-shared"]},
-          {"Name": "tag:DatabaseId", "Values": [database]},
-          {"Name": "tag:Environment", "Values": [env.ENVIRONMENT]},
-        ]
-      )
-      .get("Volumes", [])
-    )
+    volumes = _find_shared_volumes(database)
   except (BotoCoreError, ClientError) as exc:
     logger.warning(f"Could not look up the {database} data volume: {exc}")
     return []
@@ -243,6 +256,50 @@ def set_volume_performance(
     logger.info(f"Set {volume_id} to {changes}")
     outcomes.append({"volume_id": volume_id, "result": "modified", **changes})
   return outcomes
+
+
+async def wait_for_volume_modifications(
+  *,
+  database: str = DEFAULT_SHARED_DATABASE,
+  timeout_s: int = VOLUME_MODIFICATION_WAIT_S,
+  poll_interval_s: int = 30,
+) -> str:
+  """Wait until no change to ``database``'s shared data volume is in flight.
+
+  Until a change completes the volume performs somewhere between the old and
+  new spec. Never raises: a lookup failure or a timeout returns, and the wake
+  proceeds on a volume that works, only slower.
+  """
+  deadline = time.monotonic() + timeout_s
+  while True:
+    try:
+      volume_ids = [v["VolumeId"] for v in _find_shared_volumes(database)]
+      if not volume_ids:
+        return "no_volume"
+      in_flight = (
+        _ec2_client()
+        .describe_volumes_modifications(
+          Filters=[
+            {"Name": "volume-id", "Values": volume_ids},
+            {"Name": "modification-state", "Values": ["modifying", "optimizing"]},
+          ]
+        )
+        .get("VolumesModifications", [])
+      )
+    except (BotoCoreError, ClientError) as exc:
+      logger.warning(f"Could not check {database} volume modifications: {exc}")
+      return "lookup_failed"
+    if not in_flight:
+      return "settled"
+    progress = ", ".join(
+      f"{m.get('VolumeId')} {m.get('ModificationState')} {m.get('Progress', 0)}%"
+      for m in in_flight
+    )
+    if time.monotonic() >= deadline:
+      logger.warning(f"Volume change still in flight after {timeout_s}s: {progress}")
+      return "timed_out"
+    logger.info(f"Waiting on volume change: {progress}")
+    await asyncio.sleep(poll_interval_s)
 
 
 def sleep_master() -> dict[str, Any]:

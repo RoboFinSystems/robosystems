@@ -196,8 +196,9 @@ def shared_repository_refresh_replicas_job():
 def boost_shared_master_volume(context: OpExecutionContext) -> list[dict[str, Any]]:
   """Raise the parked shared data volume to run performance ahead of a wake.
 
-  An IOPS change takes the better part of an hour to complete, so this runs
-  before the pipeline rather than at wake.
+  An IOPS change takes the better part of an hour to complete, so adapter
+  pipelines start it early; the wake boosts again (a no-op by then) and waits
+  for the change to land.
   """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping volume boost in dev environment")

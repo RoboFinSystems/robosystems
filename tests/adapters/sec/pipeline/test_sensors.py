@@ -23,7 +23,7 @@ from robosystems.adapters.sec.pipeline.sensors import (
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
   sec_master_sleep_on_failure_sensor,
-  sec_master_volume_boost_schedule,
+  sec_master_volume_boost_sensor,
   sec_post_materialize_publish_sensor,
   sec_post_stage_index_sensor,
   sec_stage_to_materialize_sensor,
@@ -981,6 +981,21 @@ class TestSecMasterSleepOnFailureSensor:
     assert len(result) == 1
     assert result[0].tags["phase"] == "master_sleep"
 
+  @pytest.mark.parametrize("job_name", ["sec_download", "sec_process"])
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_parks_the_boosted_volume_when_the_chain_fails_before_wake(
+    self, mock_env, job_name
+  ):
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_master_sleep_on_failure_sensor",
+      job_name=job_name,
+      tags={"mode": "incremental"},
+    )
+    result = list(sec_master_sleep_on_failure_sensor(context))
+    assert len(result) == 1
+    assert result[0].tags["phase"] == "master_sleep"
+
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_non_incremental(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
@@ -1072,21 +1087,41 @@ def test_every_job_that_materializes_a_sec_graph_is_serialized():
 
 
 @pytest.mark.unit
-class TestSecMasterVolumeBoostSchedule:
-  def test_one_boost_per_evening(self):
-    sched = datetime(2026, 9, 28, 20, 0, tzinfo=ZoneInfo("America/New_York"))
-    context = build_schedule_context(scheduled_execution_time=sched)
+class TestSecMasterVolumeBoostSensor:
+  """The volume boost starts with the download so it lands before the wake."""
 
-    result = sec_master_volume_boost_schedule(context)
-
-    assert isinstance(result, RunRequest)
-    assert result.run_key == "sec-volume-boost-20260928"
-    assert result.tags["phase"] == "volume_boost"
-
-  def test_runs_an_hour_ahead_of_the_download(self):
-    assert sec_master_volume_boost_schedule.cron_schedule == "0 20 * * 1-5"
-    assert sec_incremental_download_schedule.cron_schedule == "0 21 * * 1-5"
-    assert (
-      sec_master_volume_boost_schedule.execution_timezone
-      == sec_incremental_download_schedule.execution_timezone
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_boosts_when_incremental_download_starts(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_master_volume_boost_sensor",
+      job_name="sec_download",
+      tags={"mode": "incremental"},
     )
+    result = list(sec_master_volume_boost_sensor(context))
+    assert len(result) == 1
+    assert result[0].tags["phase"] == "volume_boost"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_non_incremental_download(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_master_volume_boost_sensor",
+      job_name="sec_download",
+      tags={"mode": "backfill"},
+    )
+    assert list(sec_master_volume_boost_sensor(context)) == []
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_in_dev(self, mock_env):
+    mock_env.ENVIRONMENT = "dev"
+    context = _build_run_status_context(
+      sensor_name="sec_master_volume_boost_sensor",
+      job_name="sec_download",
+      tags={"mode": "incremental"},
+    )
+    assert list(sec_master_volume_boost_sensor(context)) == []
+
+  def test_declares_the_boost_job(self):
+    names = {j.name for j in sec_master_volume_boost_sensor.jobs}
+    assert names == {"shared_master_volume_boost"}

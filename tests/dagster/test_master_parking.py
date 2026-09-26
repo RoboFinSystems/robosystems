@@ -78,11 +78,18 @@ def _health_client() -> MagicMock:
 
 @pytest.mark.unit
 class TestWakeMaster:
+  @patch.object(
+    master_parking,
+    "wait_for_volume_modifications",
+    new_callable=AsyncMock,
+    return_value="settled",
+  )
+  @patch.object(master_parking, "set_volume_performance", return_value=[])
   @patch.object(master_parking, "_autoscaling_client")
   @patch.object(master_parking, "_ec2_client")
   @patch.object(master_parking, "_dynamodb_resource")
   @patch.object(master_parking, "get_graph_client_for_instance", new_callable=AsyncMock)
-  def test_happy_path(self, m_health, m_ddb, m_ec2, m_asg):
+  def test_happy_path(self, m_health, m_ddb, m_ec2, m_asg, _m_perf, _m_wait):
     asg = _asg_client("i-123")
     m_asg.return_value = asg
     m_ec2.return_value = _ec2_client(running=True)
@@ -92,10 +99,31 @@ class TestWakeMaster:
     result = asyncio.run(wake_master())
 
     assert result["status"] == "awake"
+    assert result["volume"] == "settled"
     assert result["instance_id"] == "i-123"
     assert result["private_ip"] == "10.0.0.5"
     asg.set_desired_capacity.assert_called_once()
     assert asg.set_desired_capacity.call_args.kwargs["DesiredCapacity"] == 1
+
+  @patch.object(master_parking, "wait_for_master_healthy", new_callable=AsyncMock)
+  @patch.object(master_parking, "wait_for_volume_modifications", new_callable=AsyncMock)
+  @patch.object(master_parking, "set_volume_performance")
+  @patch.object(master_parking, "set_desired_capacity")
+  def test_boost_lands_before_the_master_scales_up(
+    self, m_scale, m_perf, m_wait, m_healthy
+  ):
+    # Mid-change the volume performs between the old and new spec, so the
+    # rebuild must not start on it; waiting while asleep costs no instance time.
+    order: list[str] = []
+    m_perf.side_effect = lambda target, database: order.append("boost") or []
+    m_wait.side_effect = lambda database: order.append("wait") or "settled"
+    m_scale.side_effect = lambda asg, desired: order.append(f"scale:{desired}")
+    m_healthy.return_value = {"instance_id": "i-1", "private_ip": "10.0.0.9"}
+
+    asyncio.run(wake_master())
+
+    assert order == ["boost", "wait", "scale:1"]
+    assert m_perf.call_args.args[0] == master_parking.BOOSTED_VOLUME_PERFORMANCE
 
   @patch.object(master_parking, "_autoscaling_client")
   @patch.object(master_parking, "_ec2_client")
@@ -292,6 +320,75 @@ class TestSetVolumePerformance:
     m_ec2.return_value = ec2
 
     assert master_parking.set_volume_performance({"Iops": 3000}) == []
+
+
+def _modifications_ec2(*polls: list[dict]) -> MagicMock:
+  ec2 = MagicMock()
+  ec2.describe_volumes.return_value = {"Volumes": [_volume(12000, 500)]}
+  ec2.describe_volumes_modifications.side_effect = [
+    {"VolumesModifications": p} for p in polls
+  ]
+  return ec2
+
+
+@pytest.mark.unit
+class TestWaitForVolumeModifications:
+  @patch.object(master_parking, "_ec2_client")
+  def test_waits_until_the_change_completes(self, m_ec2):
+    in_flight = {"VolumeId": "vol-sec", "ModificationState": "optimizing"}
+    ec2 = _modifications_ec2([in_flight], [in_flight], [])
+    m_ec2.return_value = ec2
+
+    result = asyncio.run(
+      master_parking.wait_for_volume_modifications(poll_interval_s=0)
+    )
+
+    assert result == "settled"
+    assert ec2.describe_volumes_modifications.call_count == 3
+    filters = {
+      f["Name"]: f["Values"]
+      for f in ec2.describe_volumes_modifications.call_args.kwargs["Filters"]
+    }
+    assert filters == {
+      "volume-id": ["vol-sec"],
+      "modification-state": ["modifying", "optimizing"],
+    }
+
+  @patch.object(master_parking, "_ec2_client")
+  def test_times_out_without_raising(self, m_ec2):
+    in_flight = {"VolumeId": "vol-sec", "ModificationState": "modifying"}
+    m_ec2.return_value = _modifications_ec2([in_flight])
+
+    result = asyncio.run(
+      master_parking.wait_for_volume_modifications(timeout_s=0, poll_interval_s=0)
+    )
+
+    assert result == "timed_out"
+
+  @patch.object(master_parking, "_ec2_client")
+  def test_no_volume_returns_at_once(self, m_ec2):
+    ec2 = MagicMock()
+    ec2.describe_volumes.return_value = {"Volumes": []}
+    m_ec2.return_value = ec2
+
+    assert asyncio.run(master_parking.wait_for_volume_modifications()) == "no_volume"
+    ec2.describe_volumes_modifications.assert_not_called()
+
+  @patch.object(master_parking, "_ec2_client")
+  def test_lookup_failure_returns_without_raising(self, m_ec2):
+    from botocore.exceptions import ClientError
+
+    ec2 = MagicMock()
+    ec2.describe_volumes.return_value = {"Volumes": [_volume(12000, 500)]}
+    ec2.describe_volumes_modifications.side_effect = ClientError(
+      {"Error": {"Code": "UnauthorizedOperation", "Message": "no"}},
+      "DescribeVolumesModifications",
+    )
+    m_ec2.return_value = ec2
+
+    result = asyncio.run(master_parking.wait_for_volume_modifications())
+
+    assert result == "lookup_failed"
 
 
 @pytest.mark.unit

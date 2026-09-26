@@ -5,14 +5,14 @@ repositories (SEC today). Adapter pipelines wake it before the first
 master-dependent step and sleep it once every artifact is published to S3, so
 the writer only runs while there is work for it.
 
-- ``shared_master_awake`` scales the master ASG to 1 and blocks until it is
-  genuinely healthy (EC2 running + data volume reattached + registered healthy +
+- ``shared_master_awake`` boosts the data volume and waits for the change to
+  land, then scales the master ASG to 1 and blocks until it is genuinely
+  healthy (EC2 running + data volume reattached + registered healthy +
   live /health). A wake that cannot reach healthy raises ``Failure`` — that
   failure IS the wake alarm, and it prevents any downstream master-dependent
   step from starting against a missing/half-ready master.
 - ``shared_master_asleep`` clears scale-in protection, scales the ASG to 0 and
-  parks the data volume at the gp3 baseline (``shared_master_volume_boost``
-  raises it again ahead of the next run). It also runs on the failure path so a broken run never strands the master
+  parks the data volume at the gp3 baseline without waiting on it. It also runs on the failure path so a broken run never strands the master
   awake. Idempotent — a clean no-op when no instance is running. Gated by
   ``SHARED_MASTER_PARKING_ENABLED``: when parking is disabled (e.g. a
   reserved-instance-backed master that should stay pinned awake and utilized),

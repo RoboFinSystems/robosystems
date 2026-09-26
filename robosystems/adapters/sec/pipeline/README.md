@@ -150,15 +150,16 @@ uv run dagster asset materialize -m robosystems.dagster \
 ## Nightly chain
 
 ```
-8pm ET — sec_master_volume_boost_schedule
-  → raise the parked shared data volume to 12000 IOPS / 500 MB/s
-
 9pm ET — sec_incremental_download_schedule
   → download (the current Eastern-time quarter only)
 
+sec_master_volume_boost_sensor (as the download starts)
+  → raise the parked shared data volume to 12000 IOPS / 500 MB/s
+
 sec_incremental_pipeline_sensor
   → process (250-filing batches, looping; spot-safe via the S3 cache)
-  → shared master wake, once the partition has drained
+  → shared master wake, once the partition has drained (waits for the
+    volume boost to land before scaling the master up)
 
 sec_wake_to_stage_sensor
   → stage (DuckDB INSERT with NOT EXISTS dedup)
@@ -178,10 +179,13 @@ sec_post_materialize_publish_sensor
 ```
 
 Provisioned IOPS and throughput bill around the clock, attached or not, so the
-volume is only boosted for the run. The boost goes an hour ahead because an
-IOPS change takes up to an hour to finish. If the boost schedule is off, the
-volume manager Lambda still raises the volume when the master attaches it, and
-the start of the rebuild runs while that change is finishing.
+volume is only boosted for the run. An IOPS change takes up to an hour to
+finish, and mid-change the volume performs between the old and new spec, so
+the boost starts with the download and the wake waits out whatever is left
+while the master is still asleep. The wake also boosts on its own, so a
+backfill or manual wake gets run performance without the sensor. The park
+after sleep is not waited on. A failed download or process run parks the
+volume through `sec_master_sleep_on_failure_sensor`.
 
 The download's quarter travels down the chain as the `quarter` run tag, so
 stage, index and catalog all work on the quarter that was downloaded, even when
@@ -192,14 +196,14 @@ automated chain; nothing runs on its own after a fresh deploy.
 
 | Sensor / schedule | Triggers | Role |
 |-------------------|----------|------|
-| `sec_master_volume_boost_schedule` | `shared_master_volume_boost` | 8pm ET weekdays — enable with the download schedule |
 | `sec_incremental_download_schedule` | `sec_download_job` | 9pm EST weekdays |
+| `sec_master_volume_boost_sensor` | `shared_master_volume_boost` | download started → boost the shared data volume so it lands before the wake |
 | `sec_incremental_pipeline_sensor` | `sec_process_job`, `shared_master_wake_job` | download → process (batched loop) → wake the shared master once drained |
 | `sec_wake_to_stage_sensor` | `sec_incremental_stage_job` | master awake → stage the tagged quarter |
 | `sec_stage_to_materialize_sensor` | `sec_materialize_job` | stage → full graph rebuild |
 | `sec_post_stage_index_sensor` | `sec_narratives_index_job`, `sec_ixbrl_index_job` | stage → OpenSearch indexing |
 | `sec_post_materialize_publish_sensor` | `sec_lbug_s3_publish_job`, `sec_duckdb_s3_publish_job`, `shared_replicas_refresh_job` | materialize → publish → replica refresh |
-| `sec_master_sleep_on_failure_sensor` | — | halts the chain on failure instead of looping |
+| `sec_master_sleep_on_failure_sensor` | `shared_master_sleep` | halts the chain on failure instead of looping; sleeps the master and parks its volume |
 | `sec_processing_sensor` | `sec_process_job` | backfill: discovers pending SourceFiles across all quarters, polls every 5 min |
 
 `sec_processing_sensor` is for bulk and manual processing, not the nightly path.

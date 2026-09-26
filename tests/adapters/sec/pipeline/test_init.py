@@ -58,14 +58,14 @@ class TestGetDagsterComponents:
   def test_expected_number_of_sensors(self):
     """Test that the expected number of sensors are registered."""
     components = get_dagster_components()
-    assert len(components["sensors"]) == 7
+    assert len(components["sensors"]) == 8
 
   def test_expected_number_of_schedules(self):
     """Test that the expected number of schedules are registered."""
     components = get_dagster_components()
-    # The incremental download and the volume boost an hour ahead of it — the
-    # nightly full rebuild rides the sensor chain (stage → materialize).
-    assert len(components["schedules"]) == 2
+    # Only the incremental download schedule — the nightly full rebuild rides
+    # the sensor chain (stage → materialize), not a separate schedule.
+    assert len(components["schedules"]) == 1
 
   def test_asset_names_include_core_pipeline(self):
     """Test that core pipeline assets are included."""

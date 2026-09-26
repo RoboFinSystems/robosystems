@@ -69,7 +69,7 @@ from robosystems.adapters.sec.pipeline.sensors import (
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
   sec_master_sleep_on_failure_sensor,
-  sec_master_volume_boost_schedule,
+  sec_master_volume_boost_sensor,
   sec_post_materialize_publish_sensor,
   sec_post_stage_index_sensor,
   sec_processing_sensor,
@@ -143,10 +143,10 @@ def get_dagster_components():
       sec_post_stage_index_sensor,
       sec_wake_to_stage_sensor,
       sec_master_sleep_on_failure_sensor,
+      sec_master_volume_boost_sensor,
     ],
     "schedules": [
       sec_incremental_download_schedule,
-      sec_master_volume_boost_schedule,
     ],
   }
 
@@ -199,7 +199,7 @@ __all__ = [
   "sec_lbug_s3_publish_job",
   "sec_lbug_s3_published",
   "sec_master_sleep_on_failure_sensor",
-  "sec_master_volume_boost_schedule",
+  "sec_master_volume_boost_sensor",
   "sec_materialize_job",
   "sec_narratives_index_job",
   "sec_narratives_indexed",

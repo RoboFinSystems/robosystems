@@ -247,22 +247,30 @@ def sec_incremental_download_schedule(context):
     )
 
 
-@schedule(
-  job=shared_master_volume_boost_job,
-  cron_schedule="0 20 * * 1-5",
-  default_status=DefaultScheduleStatus.STOPPED,
-  execution_timezone="America/New_York",
+@run_status_sensor(
+  run_status=DagsterRunStatus.STARTED,
+  monitored_jobs=[sec_download_job],
+  request_job=shared_master_volume_boost_job,
+  default_status=DefaultSensorStatus.STOPPED,
+  minimum_interval_seconds=60,
+  description="Boost the shared data volume as the nightly download starts",
 )
-def sec_master_volume_boost_schedule(context):
-  """Boost the parked shared data volume an hour ahead of the nightly download.
+def sec_master_volume_boost_sensor(context: RunStatusSensorContext):
+  """Start the volume boost alongside the download.
 
-  The IOPS change takes up to an hour to complete, and the rebuild's
-  random-read phase begins within minutes of the wake. Enable it together
-  with sec_incremental_download_schedule.
+  The IOPS change takes up to an hour to land; started here it overlaps the
+  download and processing, and the wake waits only for what is left.
   """
-  run_date = context.scheduled_execution_time.strftime("%Y%m%d")
-  return RunRequest(
-    run_key=f"sec-volume-boost-{run_date}",
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping volume boost sensor in dev environment")
+    return
+
+  dagster_run = context.dagster_run
+  if (dagster_run.tags or {}).get("mode") != "incremental":
+    return
+
+  yield RunRequest(
+    run_key=f"sec-volume-boost-{dagster_run.run_id[:8]}",
     tags={"pipeline": "sec", "phase": "volume_boost"},
   )
 
@@ -673,6 +681,8 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
 @run_status_sensor(
   run_status=DagsterRunStatus.FAILURE,
   monitored_jobs=[
+    sec_download_job,
+    sec_process_job,
     shared_master_wake_job,
     sec_incremental_stage_job,
     sec_materialize_job,
@@ -682,10 +692,14 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
   request_job=shared_master_sleep_job,
   default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
-  description="Sleep the shared master if any incremental master-dependent job fails",
+  description="Sleep the shared master and park its volume if an incremental job fails",
 )
 def sec_master_sleep_on_failure_sensor(context: RunStatusSensorContext):
-  """A failed chain step never reaches the terminal sleep, so sleep here."""
+  """A failed chain step never reaches the terminal sleep, so sleep here.
+
+  Download and process failures are included for the volume: the master is
+  still asleep then, but the boost started with the download needs parking.
+  """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping failure sleep sensor in dev environment")
     return
