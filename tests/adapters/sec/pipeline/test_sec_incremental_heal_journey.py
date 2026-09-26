@@ -149,7 +149,11 @@ class FakeXBRLProcessor:
     )
     (self._out / "nodes").mkdir(parents=True, exist_ok=True)
     table = pa.table({"identifier": [self._report["accessionNumber"]]})
-    pq.write_table(table, self._out / "nodes" / "Fact.parquet")
+    # A file handle, not a path: path resolution goes through pyarrow's
+    # filesystem registry, which another test module's imports can leave
+    # double-registered.
+    with (self._out / "nodes" / "Fact.parquet").open("wb") as out:
+      pq.write_table(table, out)
 
 
 @pytest.fixture()
