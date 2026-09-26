@@ -144,12 +144,15 @@ def _reap(monkeypatch: pytest.MonkeyPatch, skew: float) -> None:
 
 @pytest.fixture
 def scratch(monkeypatch: pytest.MonkeyPatch):
-  from robosystems.middleware.sse import operation_manager
+  from robosystems.middleware.sse import event_storage, operation_manager
 
   monkeypatch.setattr(
     ValkeyURLBuilder, "build_authenticated_url", staticmethod(_scratch_url)
   )
+  # Both singletons cache a client bound to this test's loop and scratch
+  # database; setting them here restores the previous ones at teardown.
   monkeypatch.setattr(operation_manager, "_operation_manager", None)
+  monkeypatch.setattr(event_storage, "_event_storage", None)
   queue = create_redis_client(ValkeyDatabase.WORKER_QUEUE)
   sse = create_redis_client(ValkeyDatabase.SSE)
   locks = create_redis_client(ValkeyDatabase.LOCKS)
