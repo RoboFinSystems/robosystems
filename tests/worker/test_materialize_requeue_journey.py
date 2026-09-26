@@ -304,10 +304,8 @@ async def test_a_killed_materialize_is_requeued_and_finishes_exactly_once(
 @pytest.mark.xfail(
   strict=True,
   reason=(
-    "FINDING: a requeued extensions_materialize runs under the lock the API "
-    "took at submit, which nothing extends; the reaper requeues only after "
-    "budget + grace from the enqueue, so the retry's own budget overruns the "
-    "lock's TTL and a second materialize is admitted under a live writer."
+    "A requeued attempt can outlive the lock it runs under; flips when the "
+    "reaper clock or the lock lifetime is derived from the task budget."
   ),
 )
 def test_a_requeued_attempt_finishes_inside_the_lock_it_runs_under() -> None:
