@@ -1168,28 +1168,66 @@ class TestVolumeResolvedFromTheInstancesOwnRow:
     with pytest.raises(VolumeNotResolvedError):
       manager._resolve_instance_volume("i-mine")
 
-  @pytest.mark.asyncio
-  async def test_an_unresolved_volume_releases_the_allocation(self, tables):
+  @staticmethod
+  def _writers(*ids):
     from datetime import UTC, datetime
 
     from robosystems.middleware.graph.allocation_manager import (
       InstanceInfo,
       InstanceStatus,
-      VolumeNotResolvedError,
     )
 
+    writers = [
+      InstanceInfo(
+        instance_id=iid,
+        private_ip=f"10.0.0.{n}",
+        availability_zone="us-east-1a",
+        status=InstanceStatus.HEALTHY,
+        database_count=0,
+        max_databases=1,
+        created_at=datetime.now(UTC),
+      )
+      for n, iid in enumerate(ids, start=1)
+    ]
+
+    async def find_best(_tier=None, exclude_instance=None, exclude=None):
+      skip = set(exclude or ()) | {exclude_instance}
+      return next((w for w in writers if w.instance_id not in skip), None)
+
+    return find_best
+
+  @pytest.mark.asyncio
+  async def test_a_writer_with_a_stuck_volume_row_is_skipped(self, tables):
     manager, volumes, instances, graphs = tables
-    mine = InstanceInfo(
-      instance_id="i-mine",
-      private_ip="10.0.0.9",
-      availability_zone="us-east-1a",
-      status=InstanceStatus.HEALTHY,
-      database_count=0,
-      max_databases=1,
-      created_at=datetime.now(UTC),
+    volumes.put_item(
+      Item={"volume_id": "vol-mine", "instance_id": "i-mine", "status": "attaching"}
     )
-    with patch.object(manager, "_find_best_instance", return_value=mine):
-      with pytest.raises(VolumeNotResolvedError):
+    volumes.put_item(
+      Item={"volume_id": "vol-peer", "instance_id": "i-peer", "status": "attached"}
+    )
+    instances.put_item(
+      Item={"instance_id": "i-peer", "database_count": 0, "max_databases": 1}
+    )
+    with patch.object(
+      manager, "_find_best_instance", side_effect=self._writers("i-mine", "i-peer")
+    ):
+      location = await manager.allocate_database(
+        "entity_1", graph_id="kg0123456789abcdef01"
+      )
+
+    assert location.instance_id == "i-peer"
+    assert volumes.get_item(Key={"volume_id": "vol-peer"})["Item"]["databases"] == [
+      "kg0123456789abcdef01"
+    ]
+    assert "databases" not in volumes.get_item(Key={"volume_id": "vol-mine"})["Item"]
+
+  @pytest.mark.asyncio
+  async def test_no_writer_with_a_volume_writes_nothing(self, tables):
+    manager, volumes, instances, graphs = tables
+    with patch.object(
+      manager, "_find_best_instance", side_effect=self._writers("i-mine")
+    ):
+      with pytest.raises(Exception, match="capacity"):
         await manager.allocate_database("entity_1", graph_id="kg0123456789abcdef01")
 
     assert "Item" not in graphs.get_item(Key={"graph_id": "kg0123456789abcdef01"})

@@ -17,7 +17,12 @@ pytestmark = pytest.mark.unit
 
 PACKAGE = Path(__file__).resolve().parents[1] / "robosystems"
 HELPER = PACKAGE / "operations" / "aws" / "long_call.py"
-LONG_CALL_SERVICES = {"lambda", "bedrock-runtime"}
+LONG_CALL_SERVICES = {
+  "lambda",
+  "bedrock-runtime",
+  "bedrock-agent-runtime",
+  "sagemaker-runtime",
+}
 
 
 def _direct_clients(path: Path) -> list[int]:

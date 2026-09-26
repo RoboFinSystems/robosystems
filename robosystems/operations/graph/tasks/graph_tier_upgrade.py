@@ -60,9 +60,10 @@ def _get_dynamodb_resource():
   return boto3.resource("dynamodb", region_name=region)
 
 
-# The volume manager's own timeout (graph-volumes.yaml): snapshot_for_upgrade
-# holds the call for up to 10 minutes.
-VOLUME_MANAGER_TIMEOUT_SECONDS = 900
+# Past the volume manager's own 900s timeout (graph-volumes.yaml), so its own
+# timeout error arrives first; snapshot_for_upgrade holds the call for up to
+# 10 minutes.
+VOLUME_MANAGER_TIMEOUT_SECONDS = 930
 
 
 def _get_lambda_client():

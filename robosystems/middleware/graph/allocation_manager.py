@@ -327,10 +327,13 @@ class LadybugAllocationManager:
       tier_config = self.get_tier_config(instance_tier or GraphTier.LADYBUG_STANDARD)
       backend_type = tier_config.get("backend_type", "ladybug")
 
-      # Fail fast before writing anything if no instance has capacity.
-      instance = await self._find_best_instance(instance_tier)
+      # Fail fast before writing anything: a writer with capacity whose
+      # volume resolves, since instance replacement reattaches from the
+      # volume registry.
+      excluded: set[str] = set()
+      picked = await self._pick_writer(instance_tier, excluded)
 
-      if not instance:
+      if not picked:
         tier_name = (
           instance_tier.value.replace("-", " ").title()
           if instance_tier
@@ -341,6 +344,7 @@ class LadybugAllocationManager:
           f"No {tier_name} capacity currently available. "
           "Please contact support or try again later."
         )
+      instance, volume_id = picked
 
       now = datetime.now(UTC)
       max_retries = 3
@@ -404,11 +408,11 @@ class LadybugAllocationManager:
                   f"Failed to rollback database entry during capacity conflict: {rollback_error}"
                 )
 
-              instance = await self._find_best_instance(
-                instance_tier, exclude_instance=instance.instance_id
-              )
-              if not instance:
+              excluded.add(instance.instance_id)
+              picked = await self._pick_writer(instance_tier, excluded)
+              if not picked:
                 raise Exception("No available instances after capacity conflict")
+              instance, volume_id = picked
 
               retry_count += 1
               if retry_count >= max_retries:
@@ -491,15 +495,6 @@ class LadybugAllocationManager:
         f"entity: {entity_id}"
       )
 
-      # Instance replacement reattaches volumes from this registry, so a
-      # database recorded on no volume, or the wrong one, is lost on refresh.
-      try:
-        volume_id = self._resolve_instance_volume(instance.instance_id)
-      except VolumeNotResolvedError:
-        self._release_allocation(
-          graph_id, instance.instance_id, f"allocated_by_{now.timestamp()}"
-        )
-        raise
       await self._update_volume_registry_add_database(volume_id, graph_id)
 
       # Protect the instance from scale-in now that it holds a database.
@@ -976,6 +971,7 @@ class LadybugAllocationManager:
     self,
     instance_tier: GraphTier | None = None,
     exclude_instance: str | None = None,
+    exclude: set[str] | None = None,
   ) -> InstanceInfo | None:
     """Find the instance with most available capacity for the specified tier."""
     try:
@@ -1025,7 +1021,9 @@ class LadybugAllocationManager:
       for item in instances:
         instance_id = item["instance_id"]
 
-        if exclude_instance and instance_id == exclude_instance:
+        if (exclude_instance and instance_id == exclude_instance) or (
+          exclude and instance_id in exclude
+        ):
           continue
 
         # See `_count_allocated_graphs`; `database_count` remains only the
@@ -1223,21 +1221,23 @@ class LadybugAllocationManager:
       )
     return str(items[0]["volume_id"])
 
-  def _release_allocation(self, graph_id: str, instance_id: str, lock_id: str) -> None:
-    """Undo an allocation's graph row and instance slot."""
-    try:
-      self.graph_table.delete_item(
-        Key={"graph_id": graph_id},
-        ConditionExpression="allocation_lock = :lock_id",
-        ExpressionAttributeValues={":lock_id": lock_id},
-      )
-      self.instance_table.update_item(
-        Key={"instance_id": instance_id},
-        UpdateExpression="ADD database_count :dec",
-        ExpressionAttributeValues={":dec": -1},
-      )
-    except ClientError as e:
-      logger.critical(f"Failed to release allocation of {graph_id}: {e}")
+  async def _pick_writer(
+    self, instance_tier: GraphTier | None, excluded: set[str]
+  ) -> tuple[InstanceInfo, str | None] | None:
+    """The best writer whose volume resolves, and that volume.
+
+    A writer whose volume row is stuck is skipped, not fatal: on dedicated
+    tiers every empty writer ties, and the same one would win every time.
+    Skipped writers are added to `excluded`.
+    """
+    while True:
+      instance = await self._find_best_instance(instance_tier, exclude=excluded)
+      if not instance:
+        return None
+      try:
+        return instance, self._resolve_instance_volume(instance.instance_id)
+      except VolumeNotResolvedError:
+        excluded.add(instance.instance_id)
 
   async def _update_volume_registry_add_database(
     self, volume_id: str | None, graph_id: str
