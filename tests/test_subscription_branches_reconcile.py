@@ -23,6 +23,11 @@ BILLING = PACKAGE / "dagster" / "jobs" / "billing.py"
 CHECKOUT = PACKAGE / "routers" / "billing" / "checkout.py"
 RECONCILERS = {"_reconcile_repository_grant", "reconcile_repository_grant"}
 
+# Every `<name>.status =` and `<name>.cancel(` counts as a subscription change
+# unless its name is listed here, so renaming a subscription variable cannot
+# hide a branch from the scan.
+NOT_SUBSCRIPTIONS = {"invoice"}
+
 # Status changes that happen before any grant exists, so there is nothing to
 # reconcile. Each entry says why.
 BEFORE_ANY_GRANT = {
@@ -71,16 +76,19 @@ def _changes_status(func: ast.AST) -> bool:
         if (
           isinstance(target, ast.Attribute)
           and target.attr == "status"
-          and isinstance(target.value, ast.Name)
-          and "sub" in target.value.id
+          and not (
+            isinstance(target.value, ast.Name) and target.value.id in NOT_SUBSCRIPTIONS
+          )
         ):
           return True
     if (
       isinstance(node, ast.Call)
       and isinstance(node.func, ast.Attribute)
       and node.func.attr == "cancel"
-      and isinstance(node.func.value, ast.Name)
-      and "sub" in node.func.value.id
+      and not (
+        isinstance(node.func.value, ast.Name)
+        and node.func.value.id in NOT_SUBSCRIPTIONS
+      )
     ):
       return True
   return False

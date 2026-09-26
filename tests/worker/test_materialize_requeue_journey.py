@@ -116,6 +116,10 @@ def _spawn_worker(mode: str, events_key: str, log: Path) -> subprocess.Popen[byt
     )
 
 
+def _task_ids(queue: Any, key: str) -> set[str]:
+  return {json.loads(entry)["task_id"] for entry in queue.lrange(key, 0, -1)}
+
+
 def _wait_for(predicate: Any, what: str, log: Path, timeout: float = 90) -> None:
   deadline = time.monotonic() + timeout
   while time.monotonic() < deadline:
@@ -172,7 +176,7 @@ def scratch(monkeypatch: pytest.MonkeyPatch):
     *queue.scan_iter(match="worker:inflight:worker-*"),
     *queue.scan_iter(match=f"worker:dedup:*:{graph_id}:*"),
   ]:
-    if key.startswith("worker:dedup:") or graph_id in str(queue.lrange(key, 0, -1)):
+    if key.startswith("worker:dedup:") or set(task_ids) & _task_ids(queue, key):
       queue.delete(key)
   for task_id in task_ids:
     sse.delete(
@@ -229,7 +233,7 @@ async def test_a_killed_materialize_is_requeued_and_finishes_exactly_once(
   [inflight_key] = [
     key
     for key in queue.scan_iter(match="worker:inflight:*")
-    if task_id in str(queue.lrange(key, 0, -1))
+    if task_id in _task_ids(queue, key)
   ]
   worker_id = inflight_key.removeprefix("worker:inflight:")
   assert status() == "running"
@@ -295,7 +299,7 @@ async def test_a_killed_materialize_is_requeued_and_finishes_exactly_once(
   assert queue.llen("worker:tasks") == 0
   assert queue.llen("worker:dlq") == 0
   assert not any(
-    task_id in str(queue.lrange(key, 0, -1))
+    task_id in _task_ids(queue, key)
     for key in queue.scan_iter(match="worker:inflight:*")
   )
 
