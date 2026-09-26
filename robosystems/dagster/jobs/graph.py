@@ -473,6 +473,27 @@ def restore_graph_job():
 # ============================================================================
 
 
+async def _counted_materialize_table(
+  client: Any, graph_id: str, table_name: str, file_ids: list[str]
+) -> dict[str, Any]:
+  """A file's graph write, admitted past any maintenance pause and counted
+  busy so a writer roll's drain waits for it."""
+  from robosystems.middleware.graph.instance_busy import (
+    OP_KIND_DAGSTER_MATERIALIZATION,
+    begin_destructive_op,
+    end_destructive_op,
+  )
+
+  instance_id = client._instance_id or ""
+  await begin_destructive_op(instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+  try:
+    return await client.materialize_table(
+      graph_id=graph_id, table_name=table_name, file_ids=file_ids
+    )
+  finally:
+    await end_destructive_op(instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+
+
 @op(out={"staging_result": Out(dict)})
 def stage_file_in_duckdb(
   context: OpExecutionContext,
@@ -590,11 +611,7 @@ def materialize_file_to_graph(
     )
 
     result = loop.run_until_complete(
-      client.materialize_table(
-        graph_id=graph_id,
-        table_name=table_name,
-        file_ids=[file_id],
-      )
+      _counted_materialize_table(client, graph_id, table_name, [file_id])
     )
   finally:
     loop.close()
@@ -669,10 +686,8 @@ def materialize_staged_file(
     )
 
     result = loop.run_until_complete(
-      client.materialize_table(
-        graph_id=config.graph_id,
-        table_name=config.table_name,
-        file_ids=[config.file_id],
+      _counted_materialize_table(
+        client, config.graph_id, config.table_name, [config.file_id]
       )
     )
   finally:
@@ -867,11 +882,13 @@ def materialize_graph_tables(
         get_graph_client(graph_id=graph_id, operation_type="write")
       )
 
-      # Busy counter lets the deploy-time instance refresh wait for us.
-      busy_instance_id = client._instance_id or ""
+      # Busy counter lets the deploy-time instance refresh wait for us. Set
+      # only once counted: a start refused by a maintenance pause never was.
+      instance_id = client._instance_id or ""
       loop.run_until_complete(
-        begin_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+        begin_destructive_op(instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
       )
+      busy_instance_id = instance_id
 
       if config.rebuild:
         context.log.info("[10%] Rebuild requested - regenerating graph database")

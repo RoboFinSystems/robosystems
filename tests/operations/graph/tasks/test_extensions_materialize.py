@@ -31,9 +31,10 @@ def _make_task() -> ExtensionsMaterializeTask:
   return task
 
 
-def _result(status: str) -> SimpleNamespace:
+def _result(status: str, paused_until=None) -> SimpleNamespace:
   return SimpleNamespace(
     status=status,
+    paused_until=paused_until,
     errors=["FactSet: staging count mismatch"] if status != "success" else [],
     duration_ms=42.0,
     tables_staged=3,
@@ -91,6 +92,37 @@ class TestPartialBuildNotMarkedFresh:
         return_value=_db_session_gen(db),
       ),
       pytest.raises(ValueError, match="error"),
+    ):
+      await task.execute()
+
+    db.query.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_a_maintenance_pause_fails_as_deferred_not_as_an_error(self):
+    """The consumer turns this into a retry-later message, outside the
+    write-failure alarm; the graph stays stale."""
+    from datetime import UTC, datetime, timedelta
+
+    from robosystems.middleware.graph.write_pause import GraphWritesPausedError
+
+    task = _make_task()
+    db = MagicMock()
+    until = datetime.now(UTC) + timedelta(minutes=30)
+    materializer = MagicMock()
+    materializer.materialize = AsyncMock(
+      return_value=_result("error", paused_until=until)
+    )
+
+    with (
+      patch(
+        "robosystems.operations.extensions.materialize.ExtensionsMaterializer",
+        return_value=materializer,
+      ),
+      patch(
+        "robosystems.database.get_db_session",
+        return_value=_db_session_gen(db),
+      ),
+      pytest.raises(GraphWritesPausedError),
     ):
       await task.execute()
 

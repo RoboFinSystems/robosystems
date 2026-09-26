@@ -8,6 +8,7 @@ Arrow. Order is a correctness constraint: ``NODE_TABLES`` before
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -69,6 +70,8 @@ class MaterializeResult:
   total_rows: int = 0
   duration_ms: float = 0
   errors: list[str] = field(default_factory=list)
+  # Set when a maintenance pause refused the start: planned, not a failure.
+  paused_until: datetime | None = None
 
 
 NODE_TABLES = [
@@ -1342,12 +1345,17 @@ class ExtensionsMaterializer:
       begin_destructive_op,
       end_destructive_op,
     )
+    from robosystems.middleware.graph.write_pause import GraphWritesPausedError
 
-    busy_instance_id = client._instance_id or ""
-    await begin_destructive_op(busy_instance_id, OP_KIND_EXTENSIONS_MATERIALIZE)
-
+    busy_instance_id = ""
     try:
       async with client:
+        # Set only once counted: a start refused by a maintenance pause never
+        # was, and lands on the result like any other error.
+        await begin_destructive_op(
+          client._instance_id or "", OP_KIND_EXTENSIONS_MATERIALIZE
+        )
+        busy_instance_id = client._instance_id or ""
         # One lock for both paths: a first build is as exposed to a
         # double-writer as a rebuild.
         lock = await self._acquire_lock(graph_id)
@@ -1368,6 +1376,11 @@ class ExtensionsMaterializer:
           # A no-op if the lock lapsed under us (extend already cleared it).
           await lock.release()
 
+    except GraphWritesPausedError as e:
+      logger.warning(f"Ledger materialization for {graph_id} deferred: {e}")
+      result.status = "error"
+      result.errors.append(str(e))
+      result.paused_until = e.until
     except Exception as e:
       logger.error(f"Ledger materialization failed for {graph_id}: {e}", exc_info=True)
       result.status = "error"

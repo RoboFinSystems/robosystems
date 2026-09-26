@@ -80,6 +80,9 @@ async def materialize_cmd(
       "limit_check": limit_check,
     }
 
+  from robosystems.middleware.graph.write_pause import refuse_while_writes_paused
+
+  await refuse_while_writes_paused()
   lock = acquire_materialize_lock(graph_id)
 
   # The worker releases the lock by lock_id (compare-and-delete), so a task

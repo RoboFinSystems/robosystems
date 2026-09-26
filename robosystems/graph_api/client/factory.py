@@ -191,6 +191,23 @@ class GraphClientFactory:
     return f"graph:{env_prefix}:{key_type}"
 
   @classmethod
+  async def forget_location(cls, cache_key: str) -> None:
+    """Delete a cached graph location. Best effort: the entry expires anyway."""
+    redis_client = await cls._get_redis()
+    if not redis_client:
+      return
+    try:
+      await redis_client.delete(cache_key)
+      logger.info(f"Dropped cached graph location {cache_key} after a connection error")
+    except Exception as e:
+      logger.warning(f"Could not drop cached graph location {cache_key}: {e}")
+    finally:
+      try:
+        await redis_client.aclose()
+      except Exception:
+        pass
+
+  @classmethod
   async def _get_redis(cls) -> redis.Redis | None:
     """Get a Redis client for route caching, or None when caching is unavailable.
 
@@ -588,6 +605,7 @@ class GraphClientFactory:
     # Differs from _graph_id for subgraphs — the client targets this database.
     client._database_name = database_name
     client._instance_id = instance_id
+    client._location_cache_key = cache_key
 
     return client
 

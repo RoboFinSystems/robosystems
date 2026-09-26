@@ -47,7 +47,7 @@ class GraphClient(BaseGraphClient):
 
     self.client = httpx.AsyncClient(
       base_url=self.config.base_url,
-      timeout=httpx.Timeout(self.config.timeout),
+      timeout=httpx.Timeout(self.config.timeout, connect=self.config.connect_timeout),
       limits=limits,
       headers=self.config.headers,
       verify=self.config.verify_ssl,
@@ -59,6 +59,9 @@ class GraphClient(BaseGraphClient):
     self._database_name: str | None = None
     self._instance_id: str | None = None
     self._purpose: str | None = None
+    # Set by the factory for a routed graph: the cached location to drop when
+    # the writer stops answering, so the next client resolves it afresh.
+    self._location_cache_key: str | None = None
 
   async def __aenter__(self):
     return self
@@ -116,6 +119,24 @@ class GraphClient(BaseGraphClient):
     if last_error is None:
       raise RuntimeError("Retry logic failed without capturing an exception")
     raise last_error
+
+  async def _post(self, path: str, **kwargs: Any) -> httpx.Response:
+    """A direct POST that, like ``_request``, drops the cached location when
+    the writer does not answer."""
+    try:
+      return await self.client.post(path, **kwargs)
+    except (httpx.ConnectError, httpx.ConnectTimeout):
+      await self._forget_location()
+      raise
+
+  async def _forget_location(self) -> None:
+    """Drop this graph's cached location once; a replaced writer comes back
+    at a new address that only the registry knows."""
+    key, self._location_cache_key = self._location_cache_key, None
+    if key:
+      from robosystems.graph_api.client.factory import GraphClientFactory
+
+      await GraphClientFactory.forget_location(key)
 
   @staticmethod
   def _classify_operation(path: str) -> str:
@@ -210,7 +231,10 @@ class GraphClient(BaseGraphClient):
     if params is not None:
       request_kwargs["params"] = params
     if timeout is not None:
-      request_kwargs["timeout"] = timeout
+      # A float would replace the whole timeout, connect included.
+      request_kwargs["timeout"] = httpx.Timeout(
+        timeout, connect=self.config.connect_timeout
+      )
     if headers is not None:
       request_kwargs["headers"] = headers
 
@@ -224,7 +248,13 @@ class GraphClient(BaseGraphClient):
           )
         logger.debug(f"Client headers: {debug_headers}")
 
-      response = await self.client.request(**request_kwargs)
+      try:
+        response = await self.client.request(**request_kwargs)
+      except (httpx.ConnectError, httpx.ConnectTimeout):
+        # A dead or replaced writer: refused (container down) or silent (the
+        # instance is gone). Either way the cached address is suspect.
+        await self._forget_location()
+        raise
 
       if response.status_code >= 400:
         try:
@@ -492,7 +522,7 @@ class GraphClient(BaseGraphClient):
 
     try:
       async with httpx.AsyncClient(
-        timeout=httpx.Timeout(timeout),
+        timeout=httpx.Timeout(timeout, connect=self.config.connect_timeout),
         headers=self.config.headers,
       ) as sse_client:
         async with aconnect_sse(sse_client, "GET", sse_url) as event_source:
@@ -1201,7 +1231,7 @@ class GraphClient(BaseGraphClient):
     if s3_destination:
       payload["s3_destination"] = s3_destination
 
-    response = await self.client.post(
+    response = await self._post(
       f"/databases/{graph_id}/backup",
       json=payload,
       headers=self.config.headers,
@@ -1264,7 +1294,7 @@ class GraphClient(BaseGraphClient):
     The whole dump is held in memory; prefer :meth:`create_backup` with an
     ``s3_destination`` for anything large.
     """
-    response = await self.client.post(
+    response = await self._post(
       f"/databases/{graph_id}/backup-download",
       headers=self.config.headers,
       # A multi-GB dump takes minutes to produce and send; the client's 30s
@@ -1315,7 +1345,7 @@ class GraphClient(BaseGraphClient):
       "compressed": str(compressed).lower(),
     }
 
-    response = await self.client.post(
+    response = await self._post(
       f"/databases/{graph_id}/restore",
       data=data,
     )

@@ -263,7 +263,10 @@ async def create_subgraph(
 
   # Fork path: enqueue to the worker.
   if request.fork_parent:
+    from robosystems.middleware.graph.write_pause import refuse_while_writes_paused
     from robosystems.worker.client import enqueue_task
+
+    await refuse_while_writes_paused()
 
     response = await enqueue_task(
       task_type="subgraph_creation",

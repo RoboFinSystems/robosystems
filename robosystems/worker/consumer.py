@@ -23,6 +23,7 @@ from typing import Any
 import redis.exceptions
 
 from robosystems.config.valkey_registry import ValkeyDatabase, create_async_redis_client
+from robosystems.middleware.graph.write_pause import GraphWritesPausedError
 from robosystems.middleware.otel.setup import get_tracer
 from robosystems.middleware.sse.event_storage import OperationStatus
 from robosystems.middleware.sse.operation_manager import (
@@ -307,6 +308,19 @@ async def _process_task(
           "timeout_seconds": timeout,
           "still_running": still_running,
         },
+      )
+
+    except GraphWritesPausedError as e:
+      # A planned writer roll, not a failure: logged outside the alarm pattern.
+      logger.warning(
+        f"Task deferred: {task_type} ({task_id}): {e}",
+        extra={"task_id": task_id, "task_type": task_type, "graph_id": graph_id},
+      )
+      await _fail_quietly(
+        manager,
+        task_id,
+        error=str(e),
+        error_details={"error_type": "GraphWritesPausedError"},
       )
 
     except Exception as e:

@@ -104,6 +104,16 @@ on:
         type: string
         description: Permit this run to replace writer instances ("true" only from a dispatch input)
         default: "false"
+      drain_max_minutes:
+        required: false
+        type: string
+        description: Minutes to wait for in-flight writes before an opted-in writer roll
+        default: "30"
+      drain_force:
+        required: false
+        type: string
+        description: Skip the in-flight write wait before an opted-in roll
+        default: "false"
       # Graph Scaling Configuration (passed from parent workflow)
       lbug_standard_min_instances:
         required: false
@@ -458,9 +468,50 @@ jobs:
           echo "  - Shared replica instance type: ${REPLICA_INSTANCE_TYPE}"
 
   # Step 2: Deploy Graph Writers (LadybugDB Backend)
+  # An opted-in writer roll pauses new graph writes around the WHOLE writer
+  # deploy. Per tier would let the first tier to finish lift the pause while
+  # the others are still rolling.
+  pause-graph-writes:
+    needs: [prepare-writer-matrix]
+    # An AZ move replaces writers too.
+    if: (inputs.cycle_writers == 'true' || inputs.writer_az_change_allowed == 'true') && fromJson(needs.prepare-writer-matrix.outputs.lbug_matrix).include[0] != null
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Pause graph writes
+        run: |
+          # A timestamp, so a run that dies mid-roll cannot pause writes for good:
+          # the drain cap (at most 40) + the 55-minute stack monitor + margin,
+          # outlasting the 110-minute writer deploy job.
+          DRAIN=${{ inputs.drain_max_minutes }}
+          [ "$DRAIN" -gt 40 ] && DRAIN=40
+          UNTIL=$(date -u -d "+$((DRAIN + 80)) minutes" +%Y-%m-%dT%H:%M:%SZ)
+          aws ssm put-parameter --type String --overwrite \
+            --name "/robosystems/${{ inputs.environment }}/features/GRAPH_WRITES_PAUSED_UNTIL" \
+            --value "$UNTIL" > /dev/null
+          echo "Graph writes paused until $UNTIL"
+          echo "### ⏸️ Graph writes paused until $UNTIL for an opted-in writer roll" >> "$GITHUB_STEP_SUMMARY"
+          # A write that checked the pause just before it was set must be
+          # counted busy before the first drain poll.
+          sleep 60
+
   deploy-graph-ladybug:
-    needs: [prepare-writer-matrix, resolve-ami]
-    if: fromJson(needs.prepare-writer-matrix.outputs.lbug_matrix).include[0] != null
+    needs: [prepare-writer-matrix, resolve-ami, pause-graph-writes]
+    if: >-
+      !cancelled()
+      && needs.prepare-writer-matrix.result == 'success'
+      && needs.resolve-ami.result == 'success'
+      && (needs.pause-graph-writes.result == 'success' || needs.pause-graph-writes.result == 'skipped')
+      && fromJson(needs.prepare-writer-matrix.outputs.lbug_matrix).include[0] != null
     permissions:
       id-token: write
       contents: read
@@ -489,6 +540,8 @@ jobs:
       writer_az: ${{ inputs.writer_az }}
       writer_az_change_allowed: ${{ inputs.writer_az_change_allowed }}
       cycle_writers: ${{ inputs.cycle_writers }}
+      drain_max_minutes: ${{ inputs.drain_max_minutes }}
+      drain_force: ${{ inputs.drain_force }}
       # Instance Configuration
       instance_type: ${{ matrix.instance_type }}
       databases_per_instance: "${{ matrix.databases_per_instance }}"
@@ -509,6 +562,56 @@ jobs:
   # Step 3: Deploy Shared Replicas (Read-Only Fleet)
   # Replicas read from S3 via httpfs - independent of writer deployment
   # S3 database must exist (published by Dagster job), but that's not a deploy-time dependency
+  resume-graph-writes:
+    needs: [prepare-writer-matrix, pause-graph-writes, deploy-graph-ladybug]
+    # Not only on success: a cancel after the put must still clear it.
+    if: always() && needs.pause-graph-writes.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Resume graph writes
+        env:
+          MATRIX: ${{ needs.prepare-writer-matrix.outputs.lbug_matrix }}
+        run: |
+          # A failed update rolls back through the writers too; keep writes
+          # paused until no writer stack is still moving. If one still is at
+          # the deadline, leave the pause to lapse on its own timestamp.
+          SUFFIX=${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
+          STACKS=$(echo "$MATRIX" | jq -r --arg s "$SUFFIX" '.include[] | "RoboSystemsGraph\(.stack_suffix)\($s)"')
+          DEADLINE=$(( $(date +%s) + 40 * 60 ))
+          while :; do
+            MOVING=""
+            for STACK in $STACKS; do
+              if ! STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+                  --query 'Stacks[0].StackStatus' --output text); then
+                STATUS="UNREADABLE_IN_PROGRESS"
+              fi
+              case "$STATUS" in *_IN_PROGRESS) MOVING="$MOVING $STACK($STATUS)" ;; esac
+            done
+            [ -z "$MOVING" ] && break
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "::warning::Writer stacks still moving:$MOVING. Leaving the pause to lapse on its timestamp."
+              echo "### ⚠️ Graph writes left paused until the timestamp lapses:$MOVING" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Still moving:$MOVING"
+            sleep 30
+          done
+          aws ssm delete-parameter \
+            --name "/robosystems/${{ inputs.environment }}/features/GRAPH_WRITES_PAUSED_UNTIL" \
+            2>/dev/null || true
+          echo "Graph writes resumed"
+          echo "### ▶️ Graph writes resumed" >> "$GITHUB_STEP_SUMMARY"
+
   deploy-shared-replicas:
     needs: [resolve-ami, prepare-writer-matrix]
     if: inputs.shared_replicas_enabled == 'true'

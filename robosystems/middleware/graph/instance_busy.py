@@ -17,6 +17,7 @@ from robosystems.config import env
 from robosystems.logger import logger
 
 from .allocation_manager import get_dynamodb_resource
+from .write_pause import assert_graph_writes_allowed
 
 # Conventional op_kind labels; GHA reads the kind only for logging.
 OP_KIND_MATERIALIZATION = "materialization"
@@ -105,7 +106,14 @@ async def resolve_instance_id_for_graph(graph_id: str) -> str:
 
 async def begin_destructive_op(instance_id: str, op_kind: str) -> None:
   """+1 to the busy counter. Prefer :func:`instance_busy`; otherwise callers
-  must call :func:`end_destructive_op` in a ``finally``."""
+  must call :func:`end_destructive_op` in a ``finally``.
+
+  This is where a write is admitted, so it is where a maintenance pause
+  refuses one (GraphWritesPausedError, before counting). The per-call
+  :func:`instance_busy` in the Graph API does not check: work admitted before
+  a pause must finish, so the drain can wait for it.
+  """
+  await asyncio.to_thread(assert_graph_writes_allowed)
   await _update_counter_async(instance_id, delta=1, op_kind=op_kind)
 
 

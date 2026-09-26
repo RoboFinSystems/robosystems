@@ -521,6 +521,8 @@ jobs:
       writer_az_change_allowed: ${{ (inputs.graph_writer_az != '' && 'true') || 'false' }}
       # Writer replacement is opt-in per run; create-release never opts in.
       cycle_writers: ${{ (inputs.cycle_writers && 'true') || 'false' }}
+      drain_max_minutes: ${{ inputs.graph_refresh_max_wait_minutes || '30' }}
+      drain_force: ${{ (inputs.graph_refresh_force_ignore_busy && 'true') || 'false' }}
       # Graph Tier Configuration
       lbug_large_enabled: ${{ vars.LBUG_LARGE_ENABLED_STAGING || 'false' }}
       lbug_xlarge_enabled: ${{ vars.LBUG_XLARGE_ENABLED_STAGING || 'false' }}
