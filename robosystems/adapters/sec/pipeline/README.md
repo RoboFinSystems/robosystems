@@ -150,6 +150,9 @@ uv run dagster asset materialize -m robosystems.dagster \
 ## Nightly chain
 
 ```
+8pm ET — sec_master_volume_boost_schedule
+  → raise the parked shared data volume to 12000 IOPS / 500 MB/s
+
 9pm ET — sec_incremental_download_schedule
   → download (the current Eastern-time quarter only)
 
@@ -171,7 +174,14 @@ sec_post_materialize_publish_sensor
   → lbug S3 publish
   → duckdb S3 publish (sequential, to avoid overloading the instance)
   → replica refresh (rolling, min_healthy=100%, ~15 min warmup)
+  → shared master sleep, beside the refresh (parks the data volume at 3000 IOPS / 125 MB/s)
 ```
+
+Provisioned IOPS and throughput bill around the clock, attached or not, so the
+volume is only boosted for the run. The boost goes an hour ahead because an
+IOPS change takes up to an hour to finish. If the boost schedule is off, the
+volume manager Lambda still raises the volume when the master attaches it, and
+the start of the rebuild runs while that change is finishing.
 
 The download's quarter travels down the chain as the `quarter` run tag, so
 stage, index and catalog all work on the quarter that was downloaded, even when
@@ -182,6 +192,7 @@ automated chain; nothing runs on its own after a fresh deploy.
 
 | Sensor / schedule | Triggers | Role |
 |-------------------|----------|------|
+| `sec_master_volume_boost_schedule` | `shared_master_volume_boost` | 8pm ET weekdays — enable with the download schedule |
 | `sec_incremental_download_schedule` | `sec_download_job` | 9pm EST weekdays |
 | `sec_incremental_pipeline_sensor` | `sec_process_job`, `shared_master_wake_job` | download → process (batched loop) → wake the shared master once drained |
 | `sec_wake_to_stage_sensor` | `sec_incremental_stage_job` | master awake → stage the tagged quarter |

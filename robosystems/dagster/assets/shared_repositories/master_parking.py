@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 from robosystems.config import env
 from robosystems.graph_api.client.factory import get_graph_client_for_instance
@@ -17,6 +18,14 @@ from robosystems.logger import logger
 # Default shared repository whose data volume gates the wake health check.
 # The shared master is SEC-only today; a second shared repo passes its own name.
 DEFAULT_SHARED_DATABASE = "sec"
+
+# gp3 performance of the shared data volume. Provisioned IOPS and throughput
+# bill whether or not the volume is attached, so it is boosted ahead of a run
+# and parked at the free gp3 baseline while the master sleeps. BOOSTED matches
+# the ladybug-shared floor in bin/lambda/graph_volume_manager.py, which raises
+# the volume again on attach should the boost not have run.
+BOOSTED_VOLUME_PERFORMANCE = {"Iops": 12000, "Throughput": 500}
+PARKED_VOLUME_PERFORMANCE = {"Iops": 3000, "Throughput": 125}
 
 
 class MasterWakeTimeout(Exception):
@@ -187,8 +196,57 @@ async def wake_master(
   return {"status": "awake", **result}
 
 
+def set_volume_performance(
+  target: dict[str, int], *, database: str = DEFAULT_SHARED_DATABASE
+) -> list[dict[str, Any]]:
+  """Move ``database``'s shared data volume(s) to ``target`` IOPS/throughput.
+
+  Never raises: a modification still in flight, or the EBS limit of four per
+  volume per rolling 24 hours, is logged and left for the next call. Returns
+  one outcome per volume found.
+  """
+  try:
+    volumes = (
+      _ec2_client()
+      .describe_volumes(
+        Filters=[
+          {"Name": "tag:Tier", "Values": ["ladybug-shared"]},
+          {"Name": "tag:DatabaseId", "Values": [database]},
+          {"Name": "tag:Environment", "Values": [env.ENVIRONMENT]},
+        ]
+      )
+      .get("Volumes", [])
+    )
+  except (BotoCoreError, ClientError) as exc:
+    logger.warning(f"Could not look up the {database} data volume: {exc}")
+    return []
+  if not volumes:
+    logger.warning(f"No {database} shared data volume found to set {target}")
+
+  outcomes = []
+  for volume in volumes:
+    volume_id = volume["VolumeId"]
+    if volume.get("VolumeType") != "gp3":
+      outcomes.append({"volume_id": volume_id, "result": "not_gp3"})
+      continue
+    changes = {k: v for k, v in target.items() if int(volume.get(k) or 0) != v}
+    if not changes:
+      outcomes.append({"volume_id": volume_id, "result": "unchanged"})
+      continue
+    try:
+      _ec2_client().modify_volume(VolumeId=volume_id, **changes)
+    except (BotoCoreError, ClientError) as exc:
+      code = getattr(exc, "response", {}).get("Error", {}).get("Code", str(exc))
+      logger.warning(f"Could not set {volume_id} to {changes}: {code}")
+      outcomes.append({"volume_id": volume_id, "result": f"deferred: {code}"})
+      continue
+    logger.info(f"Set {volume_id} to {changes}")
+    outcomes.append({"volume_id": volume_id, "result": "modified", **changes})
+  return outcomes
+
+
 def sleep_master() -> dict[str, Any]:
-  """Clear scale-in protection then scale the shared master to 0.
+  """Clear scale-in protection, scale the shared master to 0, park its volume.
 
   Order is load-bearing: the ASG cancels scale-in while the instance is
   protected, so protection MUST be cleared before desired capacity drops.
@@ -206,4 +264,5 @@ def sleep_master() -> dict[str, Any]:
   else:
     logger.info(f"No instance in ASG {asg_name}; scaling to 0 anyway")
   set_desired_capacity(asg_name, 0)
-  return {"status": "asleep", "instance_id": instance_id}
+  volumes = set_volume_performance(PARKED_VOLUME_PERFORMANCE)
+  return {"status": "asleep", "instance_id": instance_id, "volumes": volumes}

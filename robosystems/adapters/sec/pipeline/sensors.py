@@ -27,6 +27,7 @@ from dagster import (
 from robosystems.config import env
 from robosystems.dagster.jobs.shared_repository import (
   shared_master_sleep_job,
+  shared_master_volume_boost_job,
   shared_master_wake_job,
   shared_replicas_refresh_job,
 )
@@ -244,6 +245,26 @@ def sec_incremental_download_schedule(context):
         "batch_id": batch_id or "",
       },
     )
+
+
+@schedule(
+  job=shared_master_volume_boost_job,
+  cron_schedule="0 20 * * 1-5",
+  default_status=DefaultScheduleStatus.STOPPED,
+  execution_timezone="America/New_York",
+)
+def sec_master_volume_boost_schedule(context):
+  """Boost the parked shared data volume an hour ahead of the nightly download.
+
+  The IOPS change takes up to an hour to complete, and the rebuild's
+  random-read phase begins within minutes of the wake. Enable it together
+  with sec_incremental_download_schedule.
+  """
+  run_date = context.scheduled_execution_time.strftime("%Y%m%d")
+  return RunRequest(
+    run_key=f"sec-volume-boost-{run_date}",
+    tags={"pipeline": "sec", "phase": "volume_boost"},
+  )
 
 
 @run_status_sensor(

@@ -19,6 +19,10 @@ from dagster import (
 )
 
 from robosystems.config import env
+from robosystems.dagster.assets.shared_repositories.master_parking import (
+  BOOSTED_VOLUME_PERFORMANCE,
+  set_volume_performance,
+)
 
 # Light on-demand profile: a few AWS API calls plus a health poll. The
 # triggering sensor adds its own pipeline/mode/phase tags per run.
@@ -186,3 +190,28 @@ def shared_repository_refresh_replicas_job():
   For forcing a refresh, recovering from a failed one, or rolling out AMI/code changes.
   """
   refresh_replica_instances()
+
+
+@op
+def boost_shared_master_volume(context: OpExecutionContext) -> list[dict[str, Any]]:
+  """Raise the parked shared data volume to run performance ahead of a wake.
+
+  An IOPS change takes the better part of an hour to complete, so this runs
+  before the pipeline rather than at wake.
+  """
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping volume boost in dev environment")
+    return []
+  if not env.SHARED_MASTER_PARKING_ENABLED:
+    context.log.info("Master parking disabled; the volume is never parked")
+    return []
+
+  outcomes = set_volume_performance(BOOSTED_VOLUME_PERFORMANCE)
+  context.log.info(f"Shared volume boost: {outcomes}")
+  return outcomes
+
+
+@job(name="shared_master_volume_boost", tags=_MASTER_PARKING_TAGS)
+def shared_master_volume_boost_job():
+  """Raise the shared data volume to run performance; sleep parks it again."""
+  boost_shared_master_volume()

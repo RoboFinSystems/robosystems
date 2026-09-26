@@ -70,7 +70,8 @@ DEFAULT_THROUGHPUT = 125  # MB/s
 # `iops` / `throughput` are the gp3 performance FLOOR, re-asserted on every
 # attach by reconcile_volume_performance (volumes outlive instances); it only
 # ever raises a volume. The shared tier's nightly SEC rebuild is bound by small
-# random reads, hence 12000 IOPS / 500 MB/s there.
+# random reads, hence 12000 IOPS / 500 MB/s there; Dagster parks that volume at
+# the baseline between runs, so this floor is the backstop for an unboosted wake.
 TIER_VOLUME_SPEC: dict[str, dict[str, int]] = {
   "ladybug-standard": {"size": 20, "iops": 3000, "throughput": 125},
   "ladybug-large": {"size": 50, "iops": 3000, "throughput": 125},
@@ -679,8 +680,8 @@ def reconcile_volume_performance(volume_id: str, tier: str) -> dict[str, Any]:
   except ClientError as e:
     code = e.response.get("Error", {}).get("Code", "")
     # IncorrectModificationState: another modification is still in flight
-    # (a size expansion from the volume monitor, or an earlier change inside
-    # EBS's six-hour cooldown). Nothing to do but try again next launch.
+    # (a size expansion from the volume monitor, or the shared-master boost),
+    # or EBS's limit of four changes a day. Nothing to do but retry next launch.
     logger.warning(
       f"Performance reconcile for {volume_id} ({tier}) deferred: {code or e}"
     )

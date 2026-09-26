@@ -478,6 +478,15 @@ Resources:
                   - ec2:DescribeInstances
                   - ec2:DescribeNetworkInterfaces
                 Resource: "*"
+              # Shared-master parking: boost / park the shared data volume's IOPS
+              - Effect: Allow
+                Action:
+                  - ec2:ModifyVolume
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Tier: ladybug-shared
+                    aws:ResourceTag/Environment: !Ref Environment
               # EC2 Launch Template management (for replica updates)
               - Effect: Allow
                 Action:

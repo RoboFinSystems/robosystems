@@ -23,6 +23,7 @@ from robosystems.adapters.sec.pipeline.sensors import (
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
   sec_master_sleep_on_failure_sensor,
+  sec_master_volume_boost_schedule,
   sec_post_materialize_publish_sensor,
   sec_post_stage_index_sensor,
   sec_stage_to_materialize_sensor,
@@ -1068,3 +1069,24 @@ def test_every_job_that_materializes_a_sec_graph_is_serialized():
   assert set(defined) == set(materializers)
   for name, db in materializers.items():
     assert defined[name].tags.get("materialize_db") == db, name
+
+
+@pytest.mark.unit
+class TestSecMasterVolumeBoostSchedule:
+  def test_one_boost_per_evening(self):
+    sched = datetime(2026, 9, 28, 20, 0, tzinfo=ZoneInfo("America/New_York"))
+    context = build_schedule_context(scheduled_execution_time=sched)
+
+    result = sec_master_volume_boost_schedule(context)
+
+    assert isinstance(result, RunRequest)
+    assert result.run_key == "sec-volume-boost-20260928"
+    assert result.tags["phase"] == "volume_boost"
+
+  def test_runs_an_hour_ahead_of_the_download(self):
+    assert sec_master_volume_boost_schedule.cron_schedule == "0 20 * * 1-5"
+    assert sec_incremental_download_schedule.cron_schedule == "0 21 * * 1-5"
+    assert (
+      sec_master_volume_boost_schedule.execution_timezone
+      == sec_incremental_download_schedule.execution_timezone
+    )

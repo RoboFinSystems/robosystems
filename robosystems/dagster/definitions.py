@@ -76,6 +76,7 @@ from robosystems.dagster.jobs.notifications import (
 )
 from robosystems.dagster.jobs.shared_repository import (
   shared_master_sleep_job,
+  shared_master_volume_boost_job,
   shared_master_wake_job,
   shared_replicas_refresh_job,
   shared_repository_refresh_replicas_job,
@@ -226,6 +227,7 @@ all_jobs = [
   # Platform: Shared repository
   shared_master_wake_job,
   shared_master_sleep_job,
+  shared_master_volume_boost_job,
   shared_replicas_refresh_job,
   shared_repository_refresh_replicas_job,
   # Platform: Version migration (manually triggered)

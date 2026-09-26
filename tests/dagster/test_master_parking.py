@@ -128,14 +128,15 @@ class TestWakeMaster:
 
 @pytest.mark.unit
 class TestSleepMaster:
+  @patch.object(master_parking, "set_volume_performance", return_value=[])
   @patch.object(master_parking, "_autoscaling_client")
-  def test_clears_protection_before_scaling_down(self, m_asg):
+  def test_clears_protection_before_scaling_down(self, m_asg, _m_perf):
     asg = _asg_client("i-xyz")
     m_asg.return_value = asg
 
     result = sleep_master()
 
-    assert result == {"status": "asleep", "instance_id": "i-xyz"}
+    assert result == {"status": "asleep", "instance_id": "i-xyz", "volumes": []}
     # Load-bearing: protection must be cleared BEFORE desired capacity drops,
     # or the ASG cancels the scale-in and the master strands awake.
     call_names = [c[0] for c in asg.method_calls]
@@ -147,8 +148,9 @@ class TestSleepMaster:
     assert asg.set_instance_protection.call_args.kwargs["ProtectedFromScaleIn"] is False
     assert asg.set_desired_capacity.call_args.kwargs["DesiredCapacity"] == 0
 
+  @patch.object(master_parking, "set_volume_performance", return_value=[])
   @patch.object(master_parking, "_autoscaling_client")
-  def test_no_instance_still_scales_to_zero(self, m_asg):
+  def test_no_instance_still_scales_to_zero(self, m_asg, _m_perf):
     asg = _asg_client(instance_id=None)
     m_asg.return_value = asg
 
@@ -158,6 +160,138 @@ class TestSleepMaster:
     asg.set_instance_protection.assert_not_called()
     asg.set_desired_capacity.assert_called_once()
     assert asg.set_desired_capacity.call_args.kwargs["DesiredCapacity"] == 0
+
+  @patch.object(master_parking, "set_volume_performance")
+  @patch.object(master_parking, "_autoscaling_client")
+  def test_parks_volume_after_scaling_down(self, m_asg, m_perf):
+    order: list[str] = []
+    asg = _asg_client("i-xyz")
+    asg.set_desired_capacity.side_effect = lambda **_: order.append("scale")
+    m_asg.return_value = asg
+    m_perf.side_effect = lambda target: (
+      order.append("park") or [{"volume_id": "vol-1", "result": "modified"}]
+    )
+
+    result = sleep_master()
+
+    assert order == ["scale", "park"]
+    m_perf.assert_called_once_with(master_parking.PARKED_VOLUME_PERFORMANCE)
+    assert result["volumes"] == [{"volume_id": "vol-1", "result": "modified"}]
+
+
+def _volume(iops: int, throughput: int, volume_type: str = "gp3") -> dict:
+  return {
+    "VolumeId": "vol-sec",
+    "VolumeType": volume_type,
+    "Iops": iops,
+    "Throughput": throughput,
+  }
+
+
+@pytest.mark.unit
+class TestSetVolumePerformance:
+  @patch.object(master_parking, "_ec2_client")
+  def test_finds_the_volume_by_tier_database_and_environment(self, m_ec2):
+    from robosystems.config import env
+
+    ec2 = MagicMock()
+    ec2.describe_volumes.return_value = {"Volumes": []}
+    m_ec2.return_value = ec2
+
+    assert master_parking.set_volume_performance({"Iops": 3000}) == []
+
+    filters = {
+      f["Name"]: f["Values"] for f in ec2.describe_volumes.call_args.kwargs["Filters"]
+    }
+    assert filters == {
+      "tag:Tier": ["ladybug-shared"],
+      "tag:DatabaseId": ["sec"],
+      "tag:Environment": [env.ENVIRONMENT],
+    }
+
+  @patch.object(master_parking, "_ec2_client")
+  def test_parks_a_boosted_volume(self, m_ec2):
+    ec2 = MagicMock()
+    ec2.describe_volumes.return_value = {"Volumes": [_volume(12000, 500)]}
+    m_ec2.return_value = ec2
+
+    outcomes = master_parking.set_volume_performance(
+      master_parking.PARKED_VOLUME_PERFORMANCE
+    )
+
+    ec2.modify_volume.assert_called_once_with(
+      VolumeId="vol-sec", Iops=3000, Throughput=125
+    )
+    assert outcomes[0]["result"] == "modified"
+
+  @patch.object(master_parking, "_ec2_client")
+  def test_changes_only_what_differs(self, m_ec2):
+    ec2 = MagicMock()
+    ec2.describe_volumes.return_value = {"Volumes": [_volume(3000, 500)]}
+    m_ec2.return_value = ec2
+
+    master_parking.set_volume_performance(master_parking.BOOSTED_VOLUME_PERFORMANCE)
+
+    ec2.modify_volume.assert_called_once_with(VolumeId="vol-sec", Iops=12000)
+
+  @patch.object(master_parking, "_ec2_client")
+  def test_volume_already_at_target_is_left_alone(self, m_ec2):
+    ec2 = MagicMock()
+    ec2.describe_volumes.return_value = {"Volumes": [_volume(12000, 500)]}
+    m_ec2.return_value = ec2
+
+    outcomes = master_parking.set_volume_performance(
+      master_parking.BOOSTED_VOLUME_PERFORMANCE
+    )
+
+    ec2.modify_volume.assert_not_called()
+    assert outcomes == [{"volume_id": "vol-sec", "result": "unchanged"}]
+
+  @patch.object(master_parking, "_ec2_client")
+  def test_non_gp3_volume_is_skipped(self, m_ec2):
+    ec2 = MagicMock()
+    ec2.describe_volumes.return_value = {"Volumes": [_volume(3000, 125, "io2")]}
+    m_ec2.return_value = ec2
+
+    outcomes = master_parking.set_volume_performance(
+      master_parking.BOOSTED_VOLUME_PERFORMANCE
+    )
+
+    ec2.modify_volume.assert_not_called()
+    assert outcomes[0]["result"] == "not_gp3"
+
+  @patch.object(master_parking, "_ec2_client")
+  def test_modification_in_flight_is_deferred_not_raised(self, m_ec2):
+    from botocore.exceptions import ClientError
+
+    ec2 = MagicMock()
+    ec2.describe_volumes.return_value = {"Volumes": [_volume(12000, 500)]}
+    ec2.modify_volume.side_effect = ClientError(
+      {"Error": {"Code": "IncorrectModificationState", "Message": "in flight"}},
+      "ModifyVolume",
+    )
+    m_ec2.return_value = ec2
+
+    outcomes = master_parking.set_volume_performance(
+      master_parking.PARKED_VOLUME_PERFORMANCE
+    )
+
+    assert outcomes == [
+      {"volume_id": "vol-sec", "result": "deferred: IncorrectModificationState"}
+    ]
+
+  @patch.object(master_parking, "_ec2_client")
+  def test_lookup_failure_returns_empty(self, m_ec2):
+    from botocore.exceptions import ClientError
+
+    ec2 = MagicMock()
+    ec2.describe_volumes.side_effect = ClientError(
+      {"Error": {"Code": "UnauthorizedOperation", "Message": "no"}},
+      "DescribeVolumes",
+    )
+    m_ec2.return_value = ec2
+
+    assert master_parking.set_volume_performance({"Iops": 3000}) == []
 
 
 @pytest.mark.unit
@@ -275,3 +409,45 @@ class TestSleepAssetParkingGate:
 
     m_sleep.assert_called_once()
     assert result.metadata["instance_id"] == "i-xyz"
+
+
+@pytest.mark.unit
+class TestVolumeBoostOp:
+  @patch("robosystems.dagster.jobs.shared_repository.set_volume_performance")
+  @patch("robosystems.dagster.jobs.shared_repository.env")
+  def test_boosts_to_run_performance(self, mock_env, m_perf):
+    from dagster import build_op_context
+
+    from robosystems.dagster.jobs.shared_repository import (
+      BOOSTED_VOLUME_PERFORMANCE,
+      boost_shared_master_volume,
+    )
+
+    mock_env.ENVIRONMENT = "prod"
+    mock_env.SHARED_MASTER_PARKING_ENABLED = True
+    m_perf.return_value = [{"volume_id": "vol-sec", "result": "modified"}]
+
+    result = boost_shared_master_volume(build_op_context())
+
+    m_perf.assert_called_once_with(BOOSTED_VOLUME_PERFORMANCE)
+    assert result == [{"volume_id": "vol-sec", "result": "modified"}]
+
+  @pytest.mark.parametrize(
+    ("environment", "parking_enabled"), [("dev", True), ("prod", False)]
+  )
+  @patch("robosystems.dagster.jobs.shared_repository.set_volume_performance")
+  @patch("robosystems.dagster.jobs.shared_repository.env")
+  def test_skips_in_dev_and_when_parking_disabled(
+    self, mock_env, m_perf, environment, parking_enabled
+  ):
+    from dagster import build_op_context
+
+    from robosystems.dagster.jobs.shared_repository import (
+      boost_shared_master_volume,
+    )
+
+    mock_env.ENVIRONMENT = environment
+    mock_env.SHARED_MASTER_PARKING_ENABLED = parking_enabled
+
+    assert boost_shared_master_volume(build_op_context()) == []
+    m_perf.assert_not_called()
