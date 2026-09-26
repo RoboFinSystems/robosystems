@@ -88,3 +88,19 @@ async def test_a_long_request_timeout_keeps_the_short_connect():
   await client._request("POST", "/databases/kg1/materialize", timeout=600.0, retries=0)
   assert seen["connect"] == 5.0
   assert seen["read"] == 600.0
+
+
+async def test_a_backup_against_a_silent_writer_drops_the_cached_location():
+  import httpx
+
+  def handler(request):
+    raise httpx.ConnectTimeout("timed out", request=request)
+
+  client = GraphClient(base_url="http://10.0.0.9:8001")
+  await client.close()
+  client.client = _transport(handler)
+  client._location_cache_key = KEY
+  with _forget() as forget:
+    with pytest.raises(httpx.ConnectTimeout):
+      await client.create_backup("kg1")
+  forget.assert_awaited_once_with(KEY)

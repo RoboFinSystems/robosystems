@@ -120,6 +120,15 @@ class GraphClient(BaseGraphClient):
       raise RuntimeError("Retry logic failed without capturing an exception")
     raise last_error
 
+  async def _post(self, path: str, **kwargs: Any) -> httpx.Response:
+    """A direct POST that, like ``_request``, drops the cached location when
+    the writer does not answer."""
+    try:
+      return await self.client.post(path, **kwargs)
+    except (httpx.ConnectError, httpx.ConnectTimeout):
+      await self._forget_location()
+      raise
+
   async def _forget_location(self) -> None:
     """Drop this graph's cached location once; a replaced writer comes back
     at a new address that only the registry knows."""
@@ -1222,7 +1231,7 @@ class GraphClient(BaseGraphClient):
     if s3_destination:
       payload["s3_destination"] = s3_destination
 
-    response = await self.client.post(
+    response = await self._post(
       f"/databases/{graph_id}/backup",
       json=payload,
       headers=self.config.headers,
@@ -1285,7 +1294,7 @@ class GraphClient(BaseGraphClient):
     The whole dump is held in memory; prefer :meth:`create_backup` with an
     ``s3_destination`` for anything large.
     """
-    response = await self.client.post(
+    response = await self._post(
       f"/databases/{graph_id}/backup-download",
       headers=self.config.headers,
       # A multi-GB dump takes minutes to produce and send; the client's 30s
@@ -1336,7 +1345,7 @@ class GraphClient(BaseGraphClient):
       "compressed": str(compressed).lower(),
     }
 
-    response = await self.client.post(
+    response = await self._post(
       f"/databases/{graph_id}/restore",
       data=data,
     )

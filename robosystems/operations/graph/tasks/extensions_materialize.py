@@ -45,6 +45,13 @@ class ExtensionsMaterializeTask(BaseTask):
         rebuild=rebuild,
       )
 
+      if result.paused_until is not None:
+        from robosystems.middleware.graph.write_pause import GraphWritesPausedError
+
+        # The consumer fails the operation with a retry-later message, kept
+        # out of the write-failure alarm.
+        raise GraphWritesPausedError(result.paused_until)
+
       if result.status != "success":
         # 'partial' counts as failure: blue/green did not swap, so the old
         # generation still serves and the graph must stay stale for a retry.

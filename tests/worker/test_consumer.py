@@ -385,3 +385,34 @@ async def test_task_cancelled_while_queued_is_skipped(
   mock_manager.fail_operation.assert_not_called()
   mock_queue.lrem.assert_called_once()
   mock_cleanup.assert_not_called()
+
+
+class DeferredTask(BaseTask):
+  async def execute(self) -> dict[str, Any]:
+    from datetime import UTC, datetime
+
+    from robosystems.middleware.graph.write_pause import GraphWritesPausedError
+
+    raise GraphWritesPausedError(datetime(2026, 9, 26, 3, 0, tzinfo=UTC))
+
+
+@pytest.mark.asyncio
+@patch("robosystems.worker.consumer.cleanup_connections")
+@patch("robosystems.worker.consumer.get_tracer")
+async def test_a_maintenance_pause_fails_the_task_outside_the_alarm_pattern(
+  mock_tracer, mock_cleanup, mock_manager, mock_queue, caplog
+):
+  """The write-failure alarm matches `Task failed: <type>`; a planned pause
+  must fail the operation with a retry-later message without matching it."""
+  register_task("test_deferred")(DeferredTask)
+  mock_tracer.return_value = MagicMock()
+
+  with caplog.at_level("WARNING"):
+    await _call_process_task(
+      _make_task_data(task_type="test_deferred"), mock_queue, mock_manager
+    )
+
+  error = mock_manager.fail_operation.call_args[1]["error"]
+  assert "paused for maintenance until 2026-09-26T03:00:00+00:00" in error
+  assert "Task failed:" not in caplog.text
+  mock_manager.complete_operation.assert_not_called()
