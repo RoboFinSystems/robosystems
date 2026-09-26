@@ -9,11 +9,10 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-import boto3
 import pytest
-from botocore.config import Config
 from botocore.exceptions import ClientError, ReadTimeoutError
 
+from robosystems.operations.aws.long_call import long_call_client
 from robosystems.operations.operators import ai_client
 from robosystems.operations.operators.ai_client import AIClient
 
@@ -57,14 +56,13 @@ def slow_bedrock():
 @pytest.mark.unit
 def test_a_timed_out_generation_is_sent_once(slow_bedrock):
   url, hits = slow_bedrock
-  config = ai_client._BEDROCK_CONFIG.merge(Config(read_timeout=0.5))
-  client = boto3.client(
+  client = long_call_client(
     "bedrock-runtime",
+    0.5,
     region_name="us-east-1",
     endpoint_url=url,
     aws_access_key_id="x",
     aws_secret_access_key="y",
-    config=config,
   )
 
   with pytest.raises(ReadTimeoutError):

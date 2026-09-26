@@ -999,8 +999,11 @@ class TestVolumeRegistrySkipDev:
   @pytest.mark.asyncio
   async def test_add_database_skips_in_dev(self):
     manager = _create_manager(environment="test")
-    await manager._update_volume_registry_add_database("i-12345678", "kg_test")
+    volume_id = manager._resolve_instance_volume("i-12345678")
+    await manager._update_volume_registry_add_database(volume_id, "kg_test")
+    assert volume_id is None
     manager.volume_table.scan.assert_not_called()
+    manager.volume_table.update_item.assert_not_called()
 
   @pytest.mark.asyncio
   async def test_remove_database_skips_in_dev(self):
@@ -1083,3 +1086,170 @@ class TestVolumeRegistryRemoveRace:
 
     databases = volume_table.get_item(Key={"volume_id": "vol-1"})["Item"]["databases"]
     assert databases == ["kg_a", "kg_a_old"]
+
+
+@pytest.mark.unit
+class TestVolumeResolvedFromTheInstancesOwnRow:
+  """A database is recorded only on the volume its instance's registry row
+  names. Guessing by AZ and tier recorded it on another writer's volume."""
+
+  @pytest.fixture
+  def tables(self, monkeypatch):
+    import boto3
+    from moto import mock_aws
+
+    monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+    with mock_aws():
+      dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+
+      def table(name, key):
+        return dynamodb.create_table(
+          TableName=name,
+          KeySchema=[{"AttributeName": key, "KeyType": "HASH"}],
+          AttributeDefinitions=[{"AttributeName": key, "AttributeType": "S"}],
+          BillingMode="PAY_PER_REQUEST",
+        )
+
+      volumes = table("volume-registry", "volume_id")
+      instances = table("instance-registry", "instance_id")
+      graphs = table("graph-registry", "graph_id")
+      # A neighbour writer in the same AZ and tier.
+      volumes.put_item(
+        Item={
+          "volume_id": "vol-other",
+          "instance_id": "i-other",
+          "status": "attached",
+          "availability_zone": "us-east-1a",
+          "tier": "ladybug-standard",
+          "databases": ["kg_theirs"],
+        }
+      )
+      instances.put_item(
+        Item={
+          "instance_id": "i-mine",
+          "availability_zone": "us-east-1a",
+          "tier": "ladybug-standard",
+          "database_count": 0,
+          "max_databases": 1,
+        }
+      )
+      manager = _create_manager(environment="prod")
+      manager.volume_table = volumes
+      manager.instance_table = instances
+      manager.graph_table = graphs
+      yield manager, volumes, instances, graphs
+
+  def test_no_row_of_its_own_is_refused(self, tables):
+    from robosystems.middleware.graph.allocation_manager import (
+      VolumeNotResolvedError,
+    )
+
+    manager, volumes, _, _ = tables
+    with pytest.raises(VolumeNotResolvedError):
+      manager._resolve_instance_volume("i-mine")
+
+  def test_an_expanding_row_of_its_own_is_used(self, tables):
+    manager, volumes, _, _ = tables
+    volumes.put_item(
+      Item={"volume_id": "vol-mine", "instance_id": "i-mine", "status": "expanding"}
+    )
+    assert manager._resolve_instance_volume("i-mine") == "vol-mine"
+
+  def test_two_live_rows_are_refused(self, tables):
+    from robosystems.middleware.graph.allocation_manager import (
+      VolumeNotResolvedError,
+    )
+
+    manager, volumes, _, _ = tables
+    for vid in ("vol-a", "vol-b"):
+      volumes.put_item(
+        Item={"volume_id": vid, "instance_id": "i-mine", "status": "attached"}
+      )
+    with pytest.raises(VolumeNotResolvedError):
+      manager._resolve_instance_volume("i-mine")
+
+  @staticmethod
+  def _writers(*ids):
+    from datetime import UTC, datetime
+
+    from robosystems.middleware.graph.allocation_manager import (
+      InstanceInfo,
+      InstanceStatus,
+    )
+
+    writers = [
+      InstanceInfo(
+        instance_id=iid,
+        private_ip=f"10.0.0.{n}",
+        availability_zone="us-east-1a",
+        status=InstanceStatus.HEALTHY,
+        database_count=0,
+        max_databases=1,
+        created_at=datetime.now(UTC),
+      )
+      for n, iid in enumerate(ids, start=1)
+    ]
+
+    async def find_best(_tier=None, exclude_instance=None, exclude=None):
+      skip = set(exclude or ()) | {exclude_instance}
+      return next((w for w in writers if w.instance_id not in skip), None)
+
+    return find_best
+
+  @pytest.mark.asyncio
+  async def test_a_writer_with_a_stuck_volume_row_is_skipped(self, tables):
+    manager, volumes, instances, graphs = tables
+    volumes.put_item(
+      Item={"volume_id": "vol-mine", "instance_id": "i-mine", "status": "attaching"}
+    )
+    volumes.put_item(
+      Item={"volume_id": "vol-peer", "instance_id": "i-peer", "status": "attached"}
+    )
+    instances.put_item(
+      Item={"instance_id": "i-peer", "database_count": 0, "max_databases": 1}
+    )
+    with patch.object(
+      manager, "_find_best_instance", side_effect=self._writers("i-mine", "i-peer")
+    ):
+      location = await manager.allocate_database(
+        "entity_1", graph_id="kg0123456789abcdef01"
+      )
+
+    assert location.instance_id == "i-peer"
+    assert volumes.get_item(Key={"volume_id": "vol-peer"})["Item"]["databases"] == [
+      "kg0123456789abcdef01"
+    ]
+    assert "databases" not in volumes.get_item(Key={"volume_id": "vol-mine"})["Item"]
+
+  @pytest.mark.asyncio
+  async def test_no_writer_with_a_volume_writes_nothing(self, tables):
+    manager, volumes, instances, graphs = tables
+    with patch.object(
+      manager, "_find_best_instance", side_effect=self._writers("i-mine")
+    ):
+      with pytest.raises(Exception, match="capacity"):
+        await manager.allocate_database("entity_1", graph_id="kg0123456789abcdef01")
+
+    assert "Item" not in graphs.get_item(Key={"graph_id": "kg0123456789abcdef01"})
+    assert (
+      instances.get_item(Key={"instance_id": "i-mine"})["Item"]["database_count"] == 0
+    )
+    assert volumes.get_item(Key={"volume_id": "vol-other"})["Item"]["databases"] == [
+      "kg_theirs"
+    ]
+
+  @pytest.mark.asyncio
+  async def test_the_sale_gate_does_not_count_a_writer_allocation_skips(self, tables):
+    from robosystems.config.graph_tier import GraphTier
+
+    manager, volumes, _, _ = tables
+    volumes.put_item(
+      Item={"volume_id": "vol-mine", "instance_id": "i-mine", "status": "attaching"}
+    )
+    with (
+      patch.object(manager, "_find_best_instance", side_effect=self._writers("i-mine")),
+      patch.object(manager, "_asg_has_headroom", return_value=False),
+    ):
+      status = await manager.check_tier_capacity(GraphTier.LADYBUG_STANDARD)
+
+    assert status != "ready"

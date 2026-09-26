@@ -37,6 +37,10 @@ class GraphIDCollisionError(Exception):
   """Raised when a generated graph ID collides with an existing one owned by a different entity."""
 
 
+class VolumeNotResolvedError(Exception):
+  """An instance's data volume could not be identified from the registry."""
+
+
 class AllocationRaceConditionError(Exception):
   """Raised when DynamoDB conditional write fails and the existing item cannot be resolved."""
 
@@ -302,9 +306,8 @@ class LadybugAllocationManager:
       )
 
       # Subgraphs are real databases on disk, so they need volume tracking.
-      await self._update_volume_registry_add_database(
-        parent_location.instance_id, graph_id
-      )
+      volume_id = self._resolve_instance_volume(parent_location.instance_id)
+      await self._update_volume_registry_add_database(volume_id, graph_id)
 
       return DatabaseLocation(
         graph_id=graph_id,
@@ -324,10 +327,13 @@ class LadybugAllocationManager:
       tier_config = self.get_tier_config(instance_tier or GraphTier.LADYBUG_STANDARD)
       backend_type = tier_config.get("backend_type", "ladybug")
 
-      # Fail fast before writing anything if no instance has capacity.
-      instance = await self._find_best_instance(instance_tier)
+      # Fail fast before writing anything: a writer with capacity whose
+      # volume resolves, since instance replacement reattaches from the
+      # volume registry.
+      excluded: set[str] = set()
+      picked = await self._pick_writer(instance_tier, excluded)
 
-      if not instance:
+      if not picked:
         tier_name = (
           instance_tier.value.replace("-", " ").title()
           if instance_tier
@@ -338,6 +344,7 @@ class LadybugAllocationManager:
           f"No {tier_name} capacity currently available. "
           "Please contact support or try again later."
         )
+      instance, volume_id = picked
 
       now = datetime.now(UTC)
       max_retries = 3
@@ -401,11 +408,11 @@ class LadybugAllocationManager:
                   f"Failed to rollback database entry during capacity conflict: {rollback_error}"
                 )
 
-              instance = await self._find_best_instance(
-                instance_tier, exclude_instance=instance.instance_id
-              )
-              if not instance:
+              excluded.add(instance.instance_id)
+              picked = await self._pick_writer(instance_tier, excluded)
+              if not picked:
                 raise Exception("No available instances after capacity conflict")
+              instance, volume_id = picked
 
               retry_count += 1
               if retry_count >= max_retries:
@@ -488,8 +495,7 @@ class LadybugAllocationManager:
         f"entity: {entity_id}"
       )
 
-      # Instance replacement reattaches volumes from this registry.
-      await self._update_volume_registry_add_database(instance.instance_id, graph_id)
+      await self._update_volume_registry_add_database(volume_id, graph_id)
 
       # Protect the instance from scale-in now that it holds a database.
       if self.environment not in ["dev", "test"]:
@@ -900,8 +906,8 @@ class LadybugAllocationManager:
     - `scalable`: no slots, but the ASG can add instances
     - `at_capacity`: no slots and the ASG is at max
     """
-    instance = await self._find_best_instance(tier)
-    if instance:
+    # Placeable means what allocation means: capacity and a resolvable volume.
+    if await self._pick_writer(tier, set()):
       return "ready"
 
     has_headroom = await self._asg_has_headroom(tier)
@@ -965,6 +971,7 @@ class LadybugAllocationManager:
     self,
     instance_tier: GraphTier | None = None,
     exclude_instance: str | None = None,
+    exclude: set[str] | None = None,
   ) -> InstanceInfo | None:
     """Find the instance with most available capacity for the specified tier."""
     try:
@@ -1014,7 +1021,9 @@ class LadybugAllocationManager:
       for item in instances:
         instance_id = item["instance_id"]
 
-        if exclude_instance and instance_id == exclude_instance:
+        if (exclude_instance and instance_id == exclude_instance) or (
+          exclude and instance_id in exclude
+        ):
           continue
 
         # See `_count_allocated_graphs`; `database_count` remains only the
@@ -1168,134 +1177,97 @@ class LadybugAllocationManager:
     except Exception as e:
       logger.error(f"Failed to publish failure metric: {e}")
 
-  async def _update_volume_registry_add_database(
-    self, instance_id: str, graph_id: str
-  ) -> None:
-    """Record a database against an instance's volume.
+  def _resolve_instance_volume(self, instance_id: str) -> str | None:
+    """The volume this instance's registry row names, or VolumeNotResolvedError.
 
-    Instance replacement reattaches volumes by consulting this registry, so
-    a database missing from it is lost track of on the next ASG refresh.
+    Only the instance's own row counts, in any of its live states. Guessing a
+    volume by AZ and tier records the graph on another writer's volume. None
+    outside prod/staging, where the volume registry does not exist.
     """
-    # The volume registry doesn't exist outside prod/staging.
     if self.environment in ["dev", "test"]:
-      logger.debug(f"Skipping volume registry update in {self.environment} environment")
+      return None
+
+    # Page cap so a pathological table can't spin here forever.
+    MAX_PAGES = 100
+    items: list[dict[str, Any]] = []
+    last_evaluated_key = None
+    for _ in range(MAX_PAGES):
+      scan_params: dict[str, Any] = {
+        "FilterExpression": "instance_id = :iid AND #status IN (:a, :e, :o)",
+        "ExpressionAttributeNames": {"#status": "status"},
+        "ExpressionAttributeValues": {
+          ":iid": instance_id,
+          ":a": "attached",
+          ":e": "expanding",
+          ":o": "optimizing",
+        },
+      }
+      if last_evaluated_key:
+        scan_params["ExclusiveStartKey"] = last_evaluated_key
+      response = self.volume_table.scan(**scan_params)
+      items.extend(response.get("Items", []))
+      last_evaluated_key = response.get("LastEvaluatedKey")
+      if not last_evaluated_key:
+        break
+
+    if len(items) != 1:
+      logger.critical(
+        f"Volume for instance {instance_id} not resolved: "
+        f"{len(items)} live registry rows"
+      )
+      raise VolumeNotResolvedError(
+        f"Instance {instance_id} has {len(items)} live volume registry rows; "
+        "refusing to record a database without exactly one."
+      )
+    return str(items[0]["volume_id"])
+
+  async def _pick_writer(
+    self, instance_tier: GraphTier | None, excluded: set[str]
+  ) -> tuple[InstanceInfo, str | None] | None:
+    """The best writer whose volume resolves, and that volume.
+
+    A writer whose volume row is stuck is skipped, not fatal: on dedicated
+    tiers every empty writer ties, and the same one would win every time.
+    Skipped writers are added to `excluded`.
+    """
+    while True:
+      instance = await self._find_best_instance(instance_tier, exclude=excluded)
+      if not instance:
+        return None
+      try:
+        return instance, self._resolve_instance_volume(instance.instance_id)
+      except VolumeNotResolvedError:
+        excluded.add(instance.instance_id)
+
+  async def _update_volume_registry_add_database(
+    self, volume_id: str | None, graph_id: str
+  ) -> None:
+    """Record a database against a volume. None (dev/test) is a no-op."""
+    if volume_id is None:
       return
 
-    logger.info(
-      f"Updating volume registry: adding database {graph_id} for instance {instance_id}"
-    )
-
+    # list_append is atomic, so concurrent writers don't lose each other's
+    # entries; the ConditionExpression makes a duplicate add a no-op.
     try:
-      # Page cap so a pathological table can't spin here forever.
-      MAX_PAGES = 100
-      all_items = []
-      last_evaluated_key = None
-      pages_scanned = 0
-
-      while pages_scanned < MAX_PAGES:
-        scan_params = {
-          "FilterExpression": "instance_id = :iid AND #status = :status",
-          "ExpressionAttributeNames": {"#status": "status"},
-          "ExpressionAttributeValues": {
-            ":iid": instance_id,
-            ":status": "attached",
-          },
-        }
-
-        if last_evaluated_key:
-          scan_params["ExclusiveStartKey"] = last_evaluated_key
-
-        response = self.volume_table.scan(**scan_params)
-        all_items.extend(response.get("Items", []))
-        pages_scanned += 1
-
-        last_evaluated_key = response.get("LastEvaluatedKey")
-        if not last_evaluated_key:
-          break
-
-      if pages_scanned >= MAX_PAGES:
-        logger.warning(
-          f"Volume registry scan hit safety limit ({MAX_PAGES} pages) for instance {instance_id}"
-        )
-
-      if not all_items:
-        logger.warning(
-          f"No attached volume found via scan for instance {instance_id}, "
-          f"trying instance registry lookup"
-        )
-
-        try:
-          instance_response = self.instance_table.get_item(
-            Key={"instance_id": instance_id}
-          )
-          if "Item" in instance_response:
-            instance_item = instance_response["Item"]
-            logger.info(
-              f"Instance {instance_id} found in instance registry, "
-              f"AZ: {instance_item.get('availability_zone')}, tier: {instance_item.get('tier')}"
-            )
-
-            az = instance_item.get("availability_zone")
-            tier = instance_item.get("tier")
-            if az and tier:
-              vol_response = self.volume_table.scan(
-                FilterExpression="availability_zone = :az AND tier = :tier AND #status = :status",
-                ExpressionAttributeNames={"#status": "status"},
-                ExpressionAttributeValues={
-                  ":az": az,
-                  ":tier": tier,
-                  ":status": "attached",
-                },
-              )
-              vol_items = vol_response.get("Items", [])
-              if vol_items:
-                all_items = vol_items
-                logger.info(
-                  f"Found volume {vol_items[0]['volume_id']} via AZ/tier lookup for instance {instance_id}"
-                )
-        except Exception as lookup_error:
-          logger.warning(f"Instance registry lookup failed: {lookup_error}")
-
-      if not all_items:
-        logger.critical(
-          f"No attached volume found for instance {instance_id} - "
-          f"cannot update volume registry for database {graph_id}. "
-          f"This will cause database loss on ASG refresh!"
-        )
-        return
-
-      volume_id = all_items[0]["volume_id"]
-      logger.info(f"Found volume {volume_id} for instance {instance_id}")
-
-      # list_append is atomic, so concurrent writers don't lose each other's
-      # entries; the ConditionExpression makes a duplicate add a no-op.
-      try:
-        self.volume_table.update_item(
-          Key={"volume_id": volume_id},
-          UpdateExpression="SET databases = list_append(if_not_exists(databases, :empty), :new_db), last_updated = :timestamp",
-          ConditionExpression="attribute_not_exists(databases) OR NOT contains(databases, :gid)",
-          ExpressionAttributeValues={
-            ":empty": [],
-            ":new_db": [graph_id],
-            ":gid": graph_id,
-            ":timestamp": datetime.now(UTC).isoformat(),
-          },
-        )
-        logger.info(
-          f"Successfully added database {graph_id} to volume {volume_id} registry"
-        )
-      except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-          logger.info(
-            f"Database {graph_id} already in volume {volume_id} registry (no update needed)"
-          )
-        else:
-          raise
-
+      self.volume_table.update_item(
+        Key={"volume_id": volume_id},
+        UpdateExpression="SET databases = list_append(if_not_exists(databases, :empty), :new_db), last_updated = :timestamp",
+        ConditionExpression="attribute_not_exists(databases) OR NOT contains(databases, :gid)",
+        ExpressionAttributeValues={
+          ":empty": [],
+          ":new_db": [graph_id],
+          ":gid": graph_id,
+          ":timestamp": datetime.now(UTC).isoformat(),
+        },
+      )
+      logger.info(f"Added database {graph_id} to volume {volume_id} registry")
     except ClientError as e:
+      if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+        logger.info(f"Database {graph_id} already in volume {volume_id} registry")
+        return
       logger.critical(
-        f"Failed to update volume registry for database {graph_id} "
-        f"on instance {instance_id}: {e}. This will cause database loss on ASG refresh!"
+        f"Failed to add database {graph_id} to volume {volume_id} registry: {e}. "
+        "This will cause database loss on ASG refresh!"
       )
 
   async def _update_volume_registry_remove_database(

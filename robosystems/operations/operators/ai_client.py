@@ -11,7 +11,6 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
 
 from robosystems.config import (
@@ -38,11 +37,7 @@ class AIProviderError(Exception):
 # its default 60s read timeout plus retries re-bought every long answer. The
 # read timeout covers the longest generation; only refusals that happen before
 # a generation starts are retried, by `create_message`.
-_BEDROCK_CONFIG = Config(
-  connect_timeout=10,
-  read_timeout=900,
-  retries={"total_max_attempts": 1},
-)
+_BEDROCK_READ_TIMEOUT = 900
 _UNSTARTED_ERROR_CODES = frozenset(
   {"ThrottlingException", "ServiceUnavailableException", "ModelNotReadyException"}
 )
@@ -134,14 +129,14 @@ class AIClient:
   def _initialize_bedrock_client(self):
     import boto3
 
+    from robosystems.operations.aws.long_call import long_call_client
+
     # Explicit endpoint so LocalStack's AWS_ENDPOINT_URL is bypassed.
     bedrock_endpoint = f"https://bedrock-runtime.{env.AWS_BEDROCK_REGION}.amazonaws.com"
 
     kwargs = {
-      "service_name": "bedrock-runtime",
       "region_name": env.AWS_BEDROCK_REGION,
       "endpoint_url": bedrock_endpoint,
-      "config": _BEDROCK_CONFIG,
     }
 
     if env.ENVIRONMENT == "dev" and env.AWS_BEDROCK_ACCESS_KEY_ID:
@@ -154,7 +149,7 @@ class AIClient:
       )
 
     try:
-      client = boto3.client(**kwargs)
+      client = long_call_client("bedrock-runtime", _BEDROCK_READ_TIMEOUT, **kwargs)
       # Fail at construction rather than on the first (billable) call. Skipped
       # in dev, where LocalStack has no STS to call.
       if env.ENVIRONMENT != "dev":
@@ -236,7 +231,7 @@ class AIClient:
     except ReadTimeoutError as e:
       raise AIProviderError(
         f"Bedrock call to {spec.model_id} produced no response within "
-        f"{_BEDROCK_CONFIG.read_timeout}s. The model may have run (and been "
+        f"{_BEDROCK_READ_TIMEOUT}s. The model may have run (and been "
         "billed); it was not re-sent."
       ) from e
     except ClientError as e:

@@ -60,12 +60,20 @@ def _get_dynamodb_resource():
   return boto3.resource("dynamodb", region_name=region)
 
 
+# Past the volume manager's own 900s timeout (graph-volumes.yaml), so its own
+# timeout error arrives first; snapshot_for_upgrade holds the call for up to
+# 10 minutes.
+VOLUME_MANAGER_TIMEOUT_SECONDS = 930
+
+
 def _get_lambda_client():
-  """Lambda client, pointed at LocalStack in development."""
-  region = env.AWS_REGION
+  """Lambda client for the volume manager, pointed at LocalStack in development."""
+  from robosystems.operations.aws.long_call import long_call_client
+
+  kwargs: dict = {"region_name": env.AWS_REGION}
   if env.is_development() and env.AWS_ENDPOINT_URL:
-    return boto3.client("lambda", endpoint_url=env.AWS_ENDPOINT_URL, region_name=region)
-  return boto3.client("lambda", region_name=region)
+    kwargs["endpoint_url"] = env.AWS_ENDPOINT_URL
+  return long_call_client("lambda", VOLUME_MANAGER_TIMEOUT_SECONDS, **kwargs)
 
 
 def _get_autoscaling_client():
