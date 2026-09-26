@@ -123,8 +123,12 @@ PAYLOAD="{
 # Lambda CLI v2 requires base64-encoded payload
 ENCODED_PAYLOAD=$(echo -n "$PAYLOAD" | base64)
 
-# Invoke Volume Manager Lambda to attach volume
-if ! aws lambda invoke \
+# Invoke Volume Manager Lambda to attach volume. One attempt, waited out to the
+# Lambda's own 900s timeout: the CLI default re-sends the claim after 60s while
+# the first is still waiting on the old instance's detach.
+if ! AWS_MAX_ATTEMPTS=1 aws lambda invoke \
+  --cli-read-timeout 900 \
+  --cli-connect-timeout 10 \
   --function-name "RoboSystemsGraphVolumes${ENVIRONMENT^}-volume-manager" \
   --payload "$ENCODED_PAYLOAD" \
   --region ${REGION} \

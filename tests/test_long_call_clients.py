@@ -9,14 +9,18 @@ directly.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.unit
 
-PACKAGE = Path(__file__).resolve().parents[1] / "robosystems"
+REPO = Path(__file__).resolve().parents[1]
+PACKAGE = REPO / "robosystems"
 HELPER = PACKAGE / "operations" / "aws" / "long_call.py"
+USERDATA = REPO / "bin" / "userdata"
+VOLUMES_TEMPLATE = REPO / "cloudformation" / "graph-volumes.yaml"
 LONG_CALL_SERVICES = {
   "lambda",
   "bedrock-runtime",
@@ -76,3 +80,33 @@ def test_the_tier_upgrade_waits_out_the_volume_manager_once():
   config = client.meta.config
   assert config.read_timeout >= graph_tier_upgrade.VOLUME_MANAGER_TIMEOUT_SECONDS
   assert config.retries["total_max_attempts"] == 1
+
+
+def _lambda_invokes(script: Path) -> list[str]:
+  """Each `aws lambda invoke` command in a shell script, continuations joined."""
+  joined = re.sub(r"\\\n\s*", " ", script.read_text())
+  return [line for line in joined.splitlines() if "aws lambda invoke" in line]
+
+
+def _volume_manager_timeout() -> int:
+  block = VOLUMES_TEMPLATE.read_text().split("VolumeManagerFunction:", 1)[1]
+  match = re.search(r"^\s+Timeout:\s*(\d+)", block, re.MULTILINE)
+  assert match, "VolumeManagerFunction has no Timeout"
+  return int(match.group(1))
+
+
+def test_userdata_lambda_invokes_wait_out_the_callee_once():
+  """The CLI's own defaults re-send a volume claim after 60s, while the first
+  attach is still waiting on the old instance's detach."""
+  lambda_timeout = _volume_manager_timeout()
+  invokes = [
+    (path.name, command)
+    for path in sorted(USERDATA.glob("*.sh"))
+    for command in _lambda_invokes(path)
+  ]
+  assert invokes, "expected the writer's volume-manager invoke"
+  for name, command in invokes:
+    read_timeout = re.search(r"--cli-read-timeout\s+(\d+)", command)
+    assert read_timeout and int(read_timeout.group(1)) >= lambda_timeout, name
+    assert "--cli-connect-timeout" in command, name
+    assert re.search(r"\bAWS_MAX_ATTEMPTS=1\s+aws lambda invoke", command), name
