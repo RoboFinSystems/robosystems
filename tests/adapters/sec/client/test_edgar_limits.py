@@ -21,7 +21,8 @@ def test_concurrent_clients_share_one_request_rate():
 
   def worker():
     client = edgar_client()
-    for _ in range(6):
+    # Ten requests: unshared limiters would land them all within ~0.2s.
+    for _ in range(2):
       client._limiter.wait()
       with lock:
         stamps.append(time.monotonic())

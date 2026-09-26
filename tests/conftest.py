@@ -7,7 +7,8 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from main import app
@@ -618,14 +619,41 @@ def db_session(test_db):
   return test_db
 
 
+_READ_ONLY_PREFIXES = (
+  "SELECT",
+  "SHOW",
+  "SET",
+  "BEGIN",
+  "COMMIT",
+  "ROLLBACK",
+  "SAVEPOINT",
+  "RELEASE",
+  "EXPLAIN",
+)
+_wrote_since_cleanup = True  # the first test cleans whatever a prior run left
+
+
+@event.listens_for(Engine, "before_cursor_execute")
+def _note_database_writes(conn, cursor, statement, parameters, context, executemany):
+  """Flag any statement that is not a known read, on every engine in the process."""
+  global _wrote_since_cleanup
+  if not statement.lstrip().upper().startswith(_READ_ONLY_PREFIXES):
+    _wrote_since_cleanup = True
+
+
 @pytest.fixture(autouse=True)
 def setup_database(test_db):
   """Setup and teardown for each test."""
+  global _wrote_since_cleanup
   # Start a transaction
   test_db.begin()
   yield test_db
   # Clean up all data after each test
   test_db.rollback()
+  # Most tests never write to the database; the deletes below cost ~7ms each
+  # time, which on the full suite is minutes of CI.
+  if not _wrote_since_cleanup:
+    return
   # Also clean any committed data by truncating tables
   from robosystems.models.core import (
     BillingAuditLog,
@@ -697,6 +725,7 @@ def setup_database(test_db):
     test_db.query(User).delete()
     test_db.query(Org).delete()
     test_db.commit()
+    _wrote_since_cleanup = False
   except Exception as exc:
     test_db.rollback()
     # Never silent: a failed cleanup leaks this test's rows into every test

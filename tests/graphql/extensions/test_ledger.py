@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.exc import ProgrammingError
 
 from robosystems.graphql.schema import schema
@@ -1041,3 +1042,463 @@ class TestReportDownloadUrl:
     assert (result.errors[0].extensions or {}).get("code") == "INVALID_EXPIRES_IN"
     # Guard fires before the ops read is ever called.
     m.assert_not_called()
+
+
+_OPS = "robosystems.operations.roboledger.reads"
+_SCHEMA_MISSING = ProgrammingError("stmt", {}, Exception("schema missing"))
+
+
+def _run(query: str):
+  with _patch_session():
+    return schema.execute_sync(query, context_value=_ctx())
+
+
+class TestSingleRecordResolvers:
+  """Field-by-field round-trips for the single-record ledger reads."""
+
+  def test_reporting_taxonomy(self) -> None:
+    from robosystems.models.api.extensions.taxonomies import TaxonomyResponse
+
+    taxonomy = TaxonomyResponse(
+      id="tax_usgaap",
+      name="US GAAP",
+      taxonomy_type="reporting_standard",
+      standard="us-gaap",
+      is_shared=True,
+      is_active=True,
+      is_locked=True,
+    )
+    with patch(f"{_OPS}.taxonomies.get_reporting_taxonomy", return_value=taxonomy):
+      result = _run("query { reportingTaxonomy { id standard isLocked } }")
+    assert result.errors is None
+    assert result.data == {
+      "reportingTaxonomy": {"id": "tax_usgaap", "standard": "us-gaap", "isLocked": True}
+    }
+
+  def test_mapping_with_associations(self) -> None:
+    from robosystems.models.api.extensions.taxonomies import (
+      AssociationResponse,
+      MappingDetailResponse,
+    )
+
+    detail = MappingDetailResponse(
+      id="map_1",
+      name="CoA mapping",
+      block_type="coa_mapping",
+      taxonomy_id="tax_map",
+      associations=[
+        AssociationResponse(
+          id="assoc_1",
+          structure_id="map_1",
+          from_element_id="el_checking",
+          from_element_name="Checking",
+          to_element_id="el_cash",
+          to_element_qname="rs-gaap:Cash",
+          association_type="mapping",
+          confidence=0.95,
+        )
+      ],
+      total_associations=1,
+    )
+    with patch(f"{_OPS}.taxonomies.get_mapping_detail", return_value=detail) as read:
+      result = _run(
+        'query { mapping(mappingId: "map_1") { id totalAssociations '
+        "associations { fromElementName toElementQname confidence } } }"
+      )
+    assert result.errors is None
+    assert result.data["mapping"] == {
+      "id": "map_1",
+      "totalAssociations": 1,
+      "associations": [
+        {
+          "fromElementName": "Checking",
+          "toElementQname": "rs-gaap:Cash",
+          "confidence": 0.95,
+        }
+      ],
+    }
+    assert read.call_args.args[1] == "map_1"
+
+  def test_transaction_with_entries_and_lines(self) -> None:
+    from datetime import date
+
+    from robosystems.models.api.extensions.transactions import (
+      LedgerEntryResponse,
+      LedgerLineItemResponse,
+      LedgerTransactionDetailResponse,
+    )
+
+    txn = LedgerTransactionDetailResponse(
+      id="txn_1",
+      type="invoice",
+      amount=125.5,
+      currency="USD",
+      date=date(2026, 3, 10),
+      source="quickbooks",
+      status="posted",
+      entries=[
+        LedgerEntryResponse(
+          id="ent_1",
+          type="standard",
+          posting_date=date(2026, 3, 10),
+          status="posted",
+          line_items=[
+            LedgerLineItemResponse(
+              id="li_1",
+              account_id="el_ar",
+              debit_amount=125.5,
+              credit_amount=0,
+              line_order=0,
+            )
+          ],
+        )
+      ],
+    )
+    with patch(f"{_OPS}.transactions.get_transaction", return_value=txn):
+      result = _run(
+        'query { transaction(transactionId: "txn_1") { id amount date '
+        "entries { postingDate lineItems { accountId debitAmount } } } }"
+      )
+    assert result.errors is None
+    assert result.data["transaction"] == {
+      "id": "txn_1",
+      "amount": 125.5,
+      "date": "2026-03-10",
+      "entries": [
+        {
+          "postingDate": "2026-03-10",
+          "lineItems": [{"accountId": "el_ar", "debitAmount": 125.5}],
+        }
+      ],
+    }
+
+  def test_report(self) -> None:
+    from robosystems.models.api.extensions.reports import ReportResponse
+
+    report = ReportResponse(
+      id="rpt_1",
+      name="March close",
+      taxonomy_id="tax_usgaap",
+      generation_status="complete",
+      period_type="monthly",
+      comparative=True,
+      created_at=datetime(2026, 4, 1, tzinfo=UTC),
+    )
+    with patch(f"{_OPS}.reports.get_report", return_value=report):
+      result = _run('query { report(reportId: "rpt_1") { id name comparative } }')
+    assert result.errors is None
+    assert result.data["report"] == {
+      "id": "rpt_1",
+      "name": "March close",
+      "comparative": True,
+    }
+
+  @pytest.mark.parametrize(
+    ("target", "query", "field"),
+    [
+      (
+        "taxonomies.get_reporting_taxonomy",
+        "query { reportingTaxonomy { id } }",
+        "reportingTaxonomy",
+      ),
+      (
+        "taxonomies.get_mapping_detail",
+        'query { mapping(mappingId: "m") { id } }',
+        "mapping",
+      ),
+      (
+        "transactions.get_transaction",
+        'query { transaction(transactionId: "t") { id } }',
+        "transaction",
+      ),
+      ("reports.get_report", 'query { report(reportId: "r") { id } }', "report"),
+      (
+        "reports.get_statement",
+        'query { statement(reportId: "r", blockType: "balance_sheet") { reportId } }',
+        "statement",
+      ),
+    ],
+  )
+  def test_missing_row_is_null_not_an_error(self, target, query, field) -> None:
+    with patch(f"{_OPS}.{target}", return_value=None):
+      result = _run(query)
+    assert result.errors is None
+    assert result.data == {field: None}
+
+
+class TestStatementResolver:
+  def test_renders_the_statement_for_this_graph(self) -> None:
+    from robosystems.models.api.extensions.reports import StatementResponse
+
+    statement = StatementResponse(
+      report_id="rpt_1",
+      structure_id="bs_1",
+      structure_name="Balance Sheet",
+      block_type="balance_sheet",
+    )
+    with patch(f"{_OPS}.reports.get_statement", return_value=statement) as read:
+      result = _run(
+        'query { statement(reportId: "rpt_1", blockType: "balance_sheet") '
+        "{ reportId structureName blockType } }"
+      )
+    assert result.errors is None
+    assert result.data["statement"] == {
+      "reportId": "rpt_1",
+      "structureName": "Balance Sheet",
+      "blockType": "balance_sheet",
+    }
+    # The graph id comes from the URL-scoped context, never the query.
+    assert read.call_args.args[1:] == (GRAPH_ID, "rpt_1", "balance_sheet")
+
+  def test_a_block_type_the_report_lacks_is_null(self) -> None:
+    from robosystems.operations.roboledger.reads.reports import (
+      StatementStructureNotFoundError,
+    )
+
+    with patch(
+      f"{_OPS}.reports.get_statement",
+      side_effect=StatementStructureNotFoundError("cash_flow_statement"),
+    ):
+      result = _run(
+        'query { statement(reportId: "rpt_1", blockType: "cash_flow_statement") '
+        "{ reportId } }"
+      )
+    assert result.errors is None
+    assert result.data == {"statement": None}
+
+
+class TestAccountRollupsResolver:
+  def test_groups_accounts_under_reporting_elements(self) -> None:
+    from datetime import date
+
+    from robosystems.models.api.extensions.account_rollups import (
+      AccountRollupGroup,
+      AccountRollupRow,
+      AccountRollupsResponse,
+    )
+
+    rollups = AccountRollupsResponse(
+      mapping_id="map_1",
+      mapping_name="CoA mapping",
+      groups=[
+        AccountRollupGroup(
+          reporting_element_id="el_cash",
+          reporting_name="Cash",
+          reporting_qname="rs-gaap:Cash",
+          trait="asset",
+          balance_type="debit",
+          total=1500.0,
+          accounts=[
+            AccountRollupRow(
+              element_id="el_checking",
+              account_name="Checking",
+              total_debits=2000.0,
+              total_credits=500.0,
+              net_balance=1500.0,
+            )
+          ],
+        )
+      ],
+      total_mapped=1,
+      total_unmapped=0,
+    )
+    with patch(
+      f"{_OPS}.account_rollups.get_account_rollups", return_value=rollups
+    ) as read:
+      result = _run(
+        'query { accountRollups(mappingId: "map_1", startDate: "2026-03-01", '
+        'endDate: "2026-03-31") { mappingName totalMapped '
+        "groups { reportingQname total accounts { accountName netBalance } } } }"
+      )
+    assert result.errors is None
+    assert result.data["accountRollups"] == {
+      "mappingName": "CoA mapping",
+      "totalMapped": 1,
+      "groups": [
+        {
+          "reportingQname": "rs-gaap:Cash",
+          "total": 1500.0,
+          "accounts": [{"accountName": "Checking", "netBalance": 1500.0}],
+        }
+      ],
+    }
+    assert read.call_args.kwargs == {
+      "mapping_id": "map_1",
+      "start_date": date(2026, 3, 1),
+      "end_date": date(2026, 3, 31),
+    }
+
+  def test_unknown_mapping_is_null(self) -> None:
+    from robosystems.operations.roboledger.reads.account_rollups import (
+      MappingNotFoundError,
+    )
+
+    with patch(
+      f"{_OPS}.account_rollups.get_account_rollups",
+      side_effect=MappingNotFoundError("nope"),
+    ):
+      result = _run('query { accountRollups(mappingId: "nope") { mappingId } }')
+    assert result.errors is None
+    assert result.data == {"accountRollups": None}
+
+
+class TestMappingCandidatesResolver:
+  def _candidate(self):
+    from robosystems.models.api.extensions.taxonomies import ElementResponse
+
+    return ElementResponse(
+      id="el_cash",
+      name="Cash",
+      qname="rs-gaap:Cash",
+      trait="asset",
+      balance_type="debit",
+      period_type="instant",
+      is_abstract=False,
+      element_type="concept",
+      source="rs-gaap",
+      depth=2,
+      is_active=True,
+    )
+
+  def test_narrows_to_the_primary_reporting_style(self) -> None:
+    with (
+      patch(
+        "robosystems.graphql.resolvers.ledger.load_primary_reporting_style",
+        return_value="style_1",
+      ),
+      patch(
+        f"{_OPS}.taxonomies.suggest_mapping_candidates",
+        return_value=[self._candidate()],
+      ) as suggest,
+    ):
+      result = _run('query { mappingCandidates(classification: "asset") { qname } }')
+    assert result.errors is None
+    assert result.data == {"mappingCandidates": [{"qname": "rs-gaap:Cash"}]}
+    assert suggest.call_args.kwargs == {
+      "trait": "asset",
+      "reporting_style_id": "style_1",
+    }
+
+  def test_without_an_entity_falls_back_to_no_style(self) -> None:
+    with (
+      patch(
+        "robosystems.graphql.resolvers.ledger.load_primary_reporting_style",
+        side_effect=LookupError("no entity"),
+      ),
+      patch(
+        f"{_OPS}.taxonomies.suggest_mapping_candidates", return_value=[]
+      ) as suggest,
+    ):
+      result = _run('query { mappingCandidates(classification: "asset") { qname } }')
+    assert result.errors is None
+    assert result.data == {"mappingCandidates": []}
+    assert suggest.call_args.kwargs["reporting_style_id"] is None
+
+
+class TestPeriodDraftsResolver:
+  def test_lists_drafts_with_the_writeback_connection(self) -> None:
+    from datetime import date
+
+    from robosystems.models.api.extensions.fiscal_calendar import (
+      DraftEntryResponse,
+      DraftLineItem,
+      PeriodDraftsResponse,
+    )
+
+    drafts = PeriodDraftsResponse(
+      period="2026-03",
+      period_start=date(2026, 3, 1),
+      period_end=date(2026, 3, 31),
+      draft_count=1,
+      total_debit=50000,
+      total_credit=50000,
+      all_balanced=True,
+      drafts=[
+        DraftEntryResponse(
+          entry_id="ent_1",
+          posting_date=date(2026, 3, 31),
+          type="adjusting",
+          line_items=[
+            DraftLineItem(
+              line_item_id="li_1",
+              element_id="el_dep",
+              element_name="Depreciation",
+              debit_amount=50000,
+              credit_amount=0,
+            )
+          ],
+          total_debit=50000,
+          total_credit=50000,
+          balanced=True,
+        )
+      ],
+    )
+    writeback = MagicMock(name="writeback")
+    platform_ctx = MagicMock()
+    platform_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    platform_ctx.__exit__ = MagicMock(return_value=False)
+    with (
+      patch("robosystems.db.platform.platform_session", return_value=platform_ctx),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.qb_writeback."
+        "resolve_writeback_connection",
+        return_value=writeback,
+      ) as resolve,
+      patch(f"{_OPS}.period_drafts.list_period_drafts", return_value=drafts) as read,
+    ):
+      result = _run(
+        'query { periodDrafts(period: "2026-03") { period draftCount allBalanced '
+        "drafts { entryId lineItems { elementName debitAmount } } } }"
+      )
+    assert result.errors is None
+    assert result.data["periodDrafts"] == {
+      "period": "2026-03",
+      "draftCount": 1,
+      "allBalanced": True,
+      "drafts": [
+        {
+          "entryId": "ent_1",
+          "lineItems": [{"elementName": "Depreciation", "debitAmount": 50000}],
+        }
+      ],
+    }
+    assert resolve.call_args.args[1] == GRAPH_ID
+    assert read.call_args.kwargs == {"writeback": writeback}
+
+
+class TestNotInitializedAcrossReads:
+  @pytest.mark.parametrize(
+    ("target", "query"),
+    [
+      ("taxonomies.get_reporting_taxonomy", "query { reportingTaxonomy { id } }"),
+      ("taxonomies.get_mapping_detail", 'query { mapping(mappingId: "m") { id } }'),
+      (
+        "transactions.get_transaction",
+        'query { transaction(transactionId: "t") { id } }',
+      ),
+      ("reports.get_report", 'query { report(reportId: "r") { id } }'),
+      (
+        "reports.get_statement",
+        'query { statement(reportId: "r", blockType: "balance_sheet") { reportId } }',
+      ),
+      (
+        "account_rollups.get_account_rollups",
+        "query { accountRollups { mappingId } }",
+      ),
+      (
+        "taxonomies.suggest_mapping_candidates",
+        'query { mappingCandidates(classification: "asset") { id } }',
+      ),
+    ],
+  )
+  def test_schema_missing_is_a_typed_error(self, target, query) -> None:
+    with (
+      patch(
+        "robosystems.graphql.resolvers.ledger.load_primary_reporting_style",
+        return_value=None,
+      ),
+      patch(f"{_OPS}.{target}", side_effect=_SCHEMA_MISSING),
+    ):
+      result = _run(query)
+    assert result.errors is not None
+    assert result.errors[0].extensions == {"code": "LEDGER_NOT_INITIALIZED"}
