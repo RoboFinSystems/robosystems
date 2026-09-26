@@ -61,17 +61,17 @@ _DISPLAY_NAMES = {
 }
 
 _ROBOLEDGER_DESCRIPTION = (
-  "Complete accounting system with XBRL reporting and GL transactions. "
-  "Context-aware: SEC repositories get reporting-only tables, "
-  "entity graphs get full accounting capabilities."
+  "A general ledger synced from QuickBooks, with every account mapped to a "
+  "reporting concept. Build statements and forecasts, run schedules for "
+  "depreciation and prepaids, and close the month with a receipt — in the app "
+  "or from Claude, ChatGPT or any MCP client."
 )
 
 _ROBOINVESTOR_DESCRIPTION = (
-  "Private-market portfolio tracking — positions with cost basis, holdings grouped "
-  "by company, and a securities registry covering preferred and common stock, LLC "
-  "units, LP interests, SAFEs, notes, warrants and options with their terms. Link a "
-  "holding to its issuer's graph and that company's reports publish straight into "
-  "yours, alongside public SEC filings."
+  "Private-market portfolio tracking — positions with cost basis, and a "
+  "securities registry for stock, LLC and LP units, SAFEs, notes, warrants and "
+  "options. Link a holding to its issuer's graph and that company's reports "
+  "publish straight into yours."
 )
 
 
