@@ -5,7 +5,7 @@ response parsing, model resolution, and error handling.
 """
 
 from dataclasses import replace
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -707,8 +707,13 @@ class TestAIClientErrors:
       {"Error": {"Code": "ThrottlingException", "Message": "slow down"}},
       "Converse",
     )
-    with pytest.raises(ClientError, match="ThrottlingException"):
+    with (
+      patch(f"{AI_CLIENT_MODULE}.asyncio.sleep", new=AsyncMock()) as backoff,
+      pytest.raises(ClientError, match="ThrottlingException"),
+    ):
       await client.create_message(messages=[AIMessage(role="user", content="hi")])
+    assert mock_bedrock.converse.call_count == 3
+    assert [c.args[0] for c in backoff.await_args_list] == [2, 4]
 
   @pytest.mark.unit
   async def test_unexpected_exceptions_propagate(self):
