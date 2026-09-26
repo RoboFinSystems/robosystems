@@ -47,7 +47,7 @@ class GraphClient(BaseGraphClient):
 
     self.client = httpx.AsyncClient(
       base_url=self.config.base_url,
-      timeout=httpx.Timeout(self.config.timeout),
+      timeout=httpx.Timeout(self.config.timeout, connect=self.config.connect_timeout),
       limits=limits,
       headers=self.config.headers,
       verify=self.config.verify_ssl,
@@ -59,6 +59,9 @@ class GraphClient(BaseGraphClient):
     self._database_name: str | None = None
     self._instance_id: str | None = None
     self._purpose: str | None = None
+    # Set by the factory for a routed graph: the cached location to drop when
+    # the writer stops answering, so the next client resolves it afresh.
+    self._location_cache_key: str | None = None
 
   async def __aenter__(self):
     return self
@@ -97,6 +100,7 @@ class GraphClient(BaseGraphClient):
           last_error = GraphTimeoutError(f"Request timeout: {e}")
         elif isinstance(e, httpx.ConnectError):
           last_error = GraphTransientError(f"Connection error: {e}")
+          await self._forget_location()
         elif isinstance(e, httpx.RequestError):
           last_error = GraphTransientError(f"Request error: {e}")
 
@@ -116,6 +120,15 @@ class GraphClient(BaseGraphClient):
     if last_error is None:
       raise RuntimeError("Retry logic failed without capturing an exception")
     raise last_error
+
+  async def _forget_location(self) -> None:
+    """Drop this graph's cached location once; a replaced writer comes back
+    at a new address that only the registry knows."""
+    key, self._location_cache_key = self._location_cache_key, None
+    if key:
+      from robosystems.graph_api.client.factory import GraphClientFactory
+
+      await GraphClientFactory.forget_location(key)
 
   @staticmethod
   def _classify_operation(path: str) -> str:

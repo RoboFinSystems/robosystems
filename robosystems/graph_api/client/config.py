@@ -17,6 +17,9 @@ class GraphClientConfig:
   # Connection settings
   base_url: str = ""
   timeout: int = 30
+  # A replaced or stopped writer never answers a connect, so this bounds how
+  # long each attempt spends on a dead address.
+  connect_timeout: float = 5.0
   max_retries: int = 3
   retry_delay: float = 1.0
   retry_backoff: float = 2.0
@@ -46,6 +49,7 @@ class GraphClientConfig:
     env_mappings = {
       "base_url": "BASE_URL",
       "timeout": "TIMEOUT",
+      "connect_timeout": "CONNECT_TIMEOUT",
       "max_retries": "MAX_RETRIES",
       "retry_delay": "RETRY_DELAY",
       "retry_backoff": "RETRY_BACKOFF",
