@@ -1343,11 +1343,15 @@ class ExtensionsMaterializer:
       end_destructive_op,
     )
 
-    busy_instance_id = client._instance_id or ""
-    await begin_destructive_op(busy_instance_id, OP_KIND_EXTENSIONS_MATERIALIZE)
-
+    busy_instance_id = ""
     try:
       async with client:
+        # Set only once counted: a start refused by a maintenance pause never
+        # was, and lands on the result like any other error.
+        await begin_destructive_op(
+          client._instance_id or "", OP_KIND_EXTENSIONS_MATERIALIZE
+        )
+        busy_instance_id = client._instance_id or ""
         # One lock for both paths: a first build is as exposed to a
         # double-writer as a rebuild.
         lock = await self._acquire_lock(graph_id)

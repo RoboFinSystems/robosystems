@@ -34,6 +34,30 @@ def _get_ssm_client():
   return _ssm_client
 
 
+_fast_ssm_client = None
+
+
+def _get_fast_ssm_client():
+  """An SSM client with short timeouts, for uncached reads on a request path:
+  a slow SSM must not hold the caller for botocore's 60s default."""
+  global _fast_ssm_client
+  if _fast_ssm_client is None:
+    if os.getenv("ENVIRONMENT", "dev") not in ("prod", "staging"):
+      return None
+    try:
+      import boto3
+      from botocore.config import Config
+
+      _fast_ssm_client = boto3.client(
+        "ssm",
+        region_name=os.getenv("AWS_REGION", "us-east-1"),
+        config=Config(connect_timeout=2, read_timeout=2, retries={"max_attempts": 2}),
+      )
+    except ImportError:
+      return None
+  return _fast_ssm_client
+
+
 class ParameterStoreManager:
   """SSM Parameter Store client with TTL-based caching."""
 
@@ -95,7 +119,7 @@ class ParameterStoreManager:
     take effect at once (a maintenance pause) rather than after the cache TTL."""
     if self.environment not in ["prod", "staging"]:
       return default
-    client = self._get_client()
+    client = _get_fast_ssm_client()
     if client is None:
       return default
     parameter_path = f"/robosystems/{self.environment}/features/{name}"

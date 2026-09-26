@@ -7,6 +7,7 @@ from dagster import (
   DefaultSensorStatus,
   RunRequest,
   SensorEvaluationContext,
+  SkipReason,
   sensor,
 )
 
@@ -38,8 +39,17 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
   """Submit materialization for active entity graphs stale past the batch window.
 
   Only entity graphs have extensions OLTP. Graphs already in the cursor are skipped.
+  During a writer-roll maintenance pause the tick submits nothing and leaves the
+  cursor alone, so stale graphs are picked up as soon as the pause ends.
   """
+  from robosystems.middleware.graph.write_pause import graph_writes_paused_until
   from robosystems.models.core.graph import Graph
+
+  paused_until = graph_writes_paused_until()
+  if paused_until is not None:
+    return SkipReason(
+      f"Graph writes paused for maintenance until {paused_until.isoformat()}"
+    )
 
   db = db_session_factory()
   try:

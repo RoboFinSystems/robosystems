@@ -3,7 +3,7 @@
 # (materialization, SEC stage, extensions materialization).
 #
 # Usage: wait-graph-writers-idle.sh <environment> <region> <asg-name> <max-wait-minutes> [force]
-# Exit 0 when idle (or force=true), 1 on timeout.
+# Exit 0 when idle (or force=true), 1 on timeout, 2 when the ASG can't be read.
 #
 # Reads `active_destructive_ops` per instance from the graph instance registry.
 # The instance-side twin is wait_until_idle in
@@ -26,13 +26,23 @@ if [ "$FORCE_IGNORE_BUSY" = "true" ]; then
   exit 0
 fi
 
+# Fail closed: an unknown ASG or an AWS error is not "nothing to wait for".
+if [ -z "$ASG_NAME" ] || [ "$ASG_NAME" = "None" ]; then
+  echo "::error::No ASG name to drain"
+  exit 2
+fi
 echo "  Checking $ASG_NAME for in-flight destructive operations..."
-INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
-  --auto-scaling-group-names "$ASG_NAME" \
-  --query 'AutoScalingGroups[0].Instances[].InstanceId' \
-  --output text \
-  --region "$REGION" 2>/dev/null || echo "")
-if [ -z "$INSTANCE_IDS" ] || [ "$INSTANCE_IDS" = "None" ]; then
+if ! ASG_JSON=$(aws autoscaling describe-auto-scaling-groups \
+    --auto-scaling-group-names "$ASG_NAME" --output json --region "$REGION"); then
+  echo "::error::Could not describe ASG $ASG_NAME"
+  exit 2
+fi
+if [ "$(echo "$ASG_JSON" | jq '.AutoScalingGroups | length')" -eq 0 ]; then
+  echo "::error::ASG $ASG_NAME not found"
+  exit 2
+fi
+INSTANCE_IDS=$(echo "$ASG_JSON" | jq -r '.AutoScalingGroups[0].Instances[].InstanceId')
+if [ -z "$INSTANCE_IDS" ]; then
   echo "  No instances in $ASG_NAME — nothing to wait for"
   exit 0
 fi

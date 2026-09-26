@@ -108,7 +108,10 @@ async def begin_destructive_op(instance_id: str, op_kind: str) -> None:
   """+1 to the busy counter. Prefer :func:`instance_busy`; otherwise callers
   must call :func:`end_destructive_op` in a ``finally``.
 
-  Raises GraphWritesPausedError, before counting, during a maintenance pause.
+  This is where a write is admitted, so it is where a maintenance pause
+  refuses one (GraphWritesPausedError, before counting). The per-call
+  :func:`instance_busy` in the Graph API does not check: work admitted before
+  a pause must finish, so the drain can wait for it.
   """
   await asyncio.to_thread(assert_graph_writes_allowed)
   await _update_counter_async(instance_id, delta=1, op_kind=op_kind)
@@ -124,9 +127,7 @@ async def instance_busy(
   instance_id: str,
   op_kind: str,
 ) -> AsyncIterator[None]:
-  """Mark an instance busy for the duration of the block, exceptions included.
-  Raises GraphWritesPausedError, before counting, during a maintenance pause."""
-  await asyncio.to_thread(assert_graph_writes_allowed)
+  """Mark an instance busy for the duration of the block, exceptions included."""
   await _update_counter_async(instance_id, delta=1, op_kind=op_kind)
   try:
     yield
@@ -140,7 +141,6 @@ def instance_busy_sync(
   op_kind: str,
 ) -> Iterator[None]:
   """Synchronous :func:`instance_busy`."""
-  assert_graph_writes_allowed()
   _update_counter(instance_id, delta=1, op_kind=op_kind)
   try:
     yield

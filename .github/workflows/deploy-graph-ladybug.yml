@@ -441,22 +441,18 @@ jobs:
 
             if [ "$CYCLES" = "true" ]; then
               echo "::notice::${{ inputs.stack_name }}: replacing the ${{ inputs.writer_tier }} writers (opted in): $(echo "$GUARD" | jq -r '.reasons | join("; ")')"
-              # Pause new graph writes for the roll, then drain the ones in
-              # flight. The pause is a timestamp, so it lapses on its own if this
-              # run dies; the "Resume graph writes" step clears it normally.
-              PAUSE_PARAM="/robosystems/${{ inputs.environment }}/features/GRAPH_WRITES_PAUSED_UNTIL"
-              PAUSE_MINUTES=$(( ${{ inputs.drain_max_minutes }} + 70 ))
-              PAUSE_UNTIL=$(date -u -d "+${PAUSE_MINUTES} minutes" +%Y-%m-%dT%H:%M:%SZ)
-              aws ssm put-parameter --name "$PAUSE_PARAM" --type String --overwrite \
-                --value "$PAUSE_UNTIL" > /dev/null
-              echo "writes_paused=true" >> $GITHUB_OUTPUT
-              echo "Graph writes paused until $PAUSE_UNTIL"
-
+              # deploy-graph.yml has already paused new graph writes for the
+              # whole writer deploy; drain the ones still in flight on this tier.
+              DRAIN_MINUTES=${{ inputs.drain_max_minutes }}
+              if [ "$DRAIN_MINUTES" -gt 40 ]; then
+                echo "::warning::Drain capped at 40 minutes (asked for $DRAIN_MINUTES) to fit the job timeout."
+                DRAIN_MINUTES=40
+              fi
               ASG_NAME=$(aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} \
                 --query "Stacks[0].Outputs[?OutputKey=='WriterAutoScalingGroupName'].OutputValue" \
                 --output text)
               if ! bin/tools/wait-graph-writers-idle.sh "${{ inputs.environment }}" "${{ inputs.aws_region }}" \
-                  "$ASG_NAME" "${{ inputs.drain_max_minutes }}" "${{ inputs.drain_force }}"; then
+                  "$ASG_NAME" "$DRAIN_MINUTES" "${{ inputs.drain_force }}"; then
                 aws cloudformation delete-change-set \
                   --stack-name ${{ inputs.stack_name }} --change-set-name "$CHANGE_SET"
                 echo "::error::${{ inputs.stack_name }}: writes did not drain; the roll was not started."
@@ -485,14 +481,6 @@ jobs:
           # rollout surfaces here as a reported failure rather than a killed job.
           timeout: "3300"
           interval: "10"
-
-      - name: Resume graph writes
-        if: always() && steps.deploy-stack.outputs.writes_paused == 'true'
-        run: |
-          aws ssm delete-parameter \
-            --name "/robosystems/${{ inputs.environment }}/features/GRAPH_WRITES_PAUSED_UNTIL" \
-            2>/dev/null || true
-          echo "Graph writes resumed"
 
       - name: Get Stack Outputs
         id: get-outputs

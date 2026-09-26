@@ -100,7 +100,6 @@ class GraphClient(BaseGraphClient):
           last_error = GraphTimeoutError(f"Request timeout: {e}")
         elif isinstance(e, httpx.ConnectError):
           last_error = GraphTransientError(f"Connection error: {e}")
-          await self._forget_location()
         elif isinstance(e, httpx.RequestError):
           last_error = GraphTransientError(f"Request error: {e}")
 
@@ -223,7 +222,10 @@ class GraphClient(BaseGraphClient):
     if params is not None:
       request_kwargs["params"] = params
     if timeout is not None:
-      request_kwargs["timeout"] = timeout
+      # A float would replace the whole timeout, connect included.
+      request_kwargs["timeout"] = httpx.Timeout(
+        timeout, connect=self.config.connect_timeout
+      )
     if headers is not None:
       request_kwargs["headers"] = headers
 
@@ -237,7 +239,13 @@ class GraphClient(BaseGraphClient):
           )
         logger.debug(f"Client headers: {debug_headers}")
 
-      response = await self.client.request(**request_kwargs)
+      try:
+        response = await self.client.request(**request_kwargs)
+      except (httpx.ConnectError, httpx.ConnectTimeout):
+        # A dead or replaced writer: refused (container down) or silent (the
+        # instance is gone). Either way the cached address is suspect.
+        await self._forget_location()
+        raise
 
       if response.status_code >= 400:
         try:
@@ -505,7 +513,7 @@ class GraphClient(BaseGraphClient):
 
     try:
       async with httpx.AsyncClient(
-        timeout=httpx.Timeout(timeout),
+        timeout=httpx.Timeout(timeout, connect=self.config.connect_timeout),
         headers=self.config.headers,
       ) as sse_client:
         async with aconnect_sse(sse_client, "GET", sse_url) as event_source:

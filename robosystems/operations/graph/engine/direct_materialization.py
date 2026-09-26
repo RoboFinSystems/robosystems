@@ -125,11 +125,13 @@ async def materialize_graph_directly(
       graph_id=graph_id, operation_type="write"
     )
 
-    # Instance-busy signal so refresh workflows wait before cycling the container.
-    busy_instance_id = client._instance_id or ""
-    await begin_destructive_op(busy_instance_id, OP_KIND_MATERIALIZATION)
-
+    # Instance-busy signal so refresh workflows wait before cycling the
+    # container. Set only once counted: a start refused by a maintenance pause
+    # never was, and the finally still closes the client.
+    busy_instance_id = ""
     try:
+      await begin_destructive_op(client._instance_id or "", OP_KIND_MATERIALIZATION)
+      busy_instance_id = client._instance_id or ""
       if rebuild:
         if operation_id:
           await manager.emit_progress(

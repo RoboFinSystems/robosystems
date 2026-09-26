@@ -80,7 +80,7 @@ async def materialize_cmd(
       "limit_check": limit_check,
     }
 
-  _refuse_while_writes_paused()
+  await _refuse_while_writes_paused()
   lock = acquire_materialize_lock(graph_id)
 
   # The worker releases the lock by lock_id (compare-and-delete), so a task
@@ -220,14 +220,15 @@ async def materialize_cmd(
     raise
 
 
-def _refuse_while_writes_paused() -> None:
+async def _refuse_while_writes_paused() -> None:
   """503 + Retry-After during a maintenance pause, instead of queuing a run
   that the worker would refuse."""
+  import asyncio
   from datetime import UTC, datetime
 
   from robosystems.middleware.graph.write_pause import graph_writes_paused_until
 
-  until = graph_writes_paused_until()
+  until = await asyncio.to_thread(graph_writes_paused_until)
   if until is None:
     return
   retry_after = max(60, int((until - datetime.now(UTC)).total_seconds()))
