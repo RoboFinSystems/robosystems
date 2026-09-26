@@ -143,8 +143,11 @@ def _big_cut_report() -> dict:
   """Near the cell cap, cut mid-transaction, with no notice at all."""
   rows: list[dict] = []
   day = date(2020, 1, 1)
-  while sum(len(r.get("ColData", [])) for r in rows) < 310_000:
-    rows.extend(_transaction(day))
+  cells = 0
+  while cells < 310_000:
+    group = _transaction(day)
+    rows.extend(group)
+    cells += sum(len(r.get("ColData", [])) for r in group)
     day += timedelta(days=1)
   rows.append(_line(day.isoformat(), "cut", "10", dr="1"))
   return {"Rows": {"Row": rows}}
