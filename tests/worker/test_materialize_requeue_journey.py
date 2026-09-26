@@ -107,9 +107,12 @@ def _spawn_worker(mode: str, events_key: str, log: Path) -> subprocess.Popen[byt
     "from tests.worker.test_materialize_requeue_journey import _run_worker; "
     f"_run_worker({mode!r}, {events_key!r})"
   )
+  # The inherited database URLs are already this xdist worker's own; importing
+  # `tests` with the worker id still set would suffix them a second time.
+  env = {k: v for k, v in os.environ.items() if k != "PYTEST_XDIST_WORKER"}
   with log.open("wb") as out:
     return subprocess.Popen(
-      [sys.executable, "-c", code], cwd=_REPO_ROOT, stdout=out, stderr=out
+      [sys.executable, "-c", code], cwd=_REPO_ROOT, env=env, stdout=out, stderr=out
     )
 
 
@@ -181,7 +184,10 @@ def scratch(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.timeout(240)
 async def test_a_killed_materialize_is_requeued_and_finishes_exactly_once(
-  scratch: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+  scratch: SimpleNamespace,
+  monkeypatch: pytest.MonkeyPatch,
+  tmp_path: Path,
+  test_db: Any,  # the worker processes read platform tables from this database
 ) -> None:
   from robosystems.dagster.sensors.worker_reaper import (
     SSE_META_PREFIX,
