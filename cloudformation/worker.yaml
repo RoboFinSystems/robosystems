@@ -670,6 +670,40 @@ Resources:
       AlarmActions:
         - !Ref WorkerNotificationTopic
 
+  # A failed graph write (materialization) emails the alerts inbox: the signal
+  # to watch during a planned writer roll, and a failure worth knowing about
+  # at any other time.
+  WorkerGraphWriteFailureMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref WorkerLogGroup
+      FilterPattern: '?"Task failed: extensions_materialize" ?"Task timed out: extensions_materialize" ?"Task failed: graph_materialization" ?"Task timed out: graph_materialization" ?"Direct materialization failed for"'
+      MetricTransformations:
+        - MetricNamespace: !Sub RoboSystems/Worker/${Environment}
+          MetricName: GraphWriteFailures
+          MetricValue: "1"
+          DefaultValue: 0
+
+  WorkerGraphWriteFailureAlarm:
+    Condition: HasAlertEmail
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-worker-graph-write-failures-${Environment}
+      AlarmDescription: >-
+        A graph materialization failed or timed out on the worker. During a
+        planned writer roll, a write refused by the maintenance pause also
+        lands here; it retries once the pause ends.
+      Namespace: !Sub RoboSystems/Worker/${Environment}
+      MetricName: GraphWriteFailures
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref WorkerNotificationTopic
+
 Outputs:
   WorkerServiceArn:
     Description: ARN of the worker ECS service
