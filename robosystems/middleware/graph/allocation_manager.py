@@ -906,8 +906,8 @@ class LadybugAllocationManager:
     - `scalable`: no slots, but the ASG can add instances
     - `at_capacity`: no slots and the ASG is at max
     """
-    instance = await self._find_best_instance(tier)
-    if instance:
+    # Placeable means what allocation means: capacity and a resolvable volume.
+    if await self._pick_writer(tier, set()):
       return "ready"
 
     has_headroom = await self._asg_has_headroom(tier)

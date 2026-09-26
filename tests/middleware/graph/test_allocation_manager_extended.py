@@ -1237,3 +1237,19 @@ class TestVolumeResolvedFromTheInstancesOwnRow:
     assert volumes.get_item(Key={"volume_id": "vol-other"})["Item"]["databases"] == [
       "kg_theirs"
     ]
+
+  @pytest.mark.asyncio
+  async def test_the_sale_gate_does_not_count_a_writer_allocation_skips(self, tables):
+    from robosystems.config.graph_tier import GraphTier
+
+    manager, volumes, _, _ = tables
+    volumes.put_item(
+      Item={"volume_id": "vol-mine", "instance_id": "i-mine", "status": "attaching"}
+    )
+    with (
+      patch.object(manager, "_find_best_instance", side_effect=self._writers("i-mine")),
+      patch.object(manager, "_asg_has_headroom", return_value=False),
+    ):
+      status = await manager.check_tier_capacity(GraphTier.LADYBUG_STANDARD)
+
+    assert status != "ready"
