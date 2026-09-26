@@ -99,6 +99,11 @@ on:
         type: string
         description: Permit this run to move existing writer stacks to writer_az ("true" only from a dispatch input)
         default: "false"
+      cycle_writers:
+        required: false
+        type: string
+        description: Permit this run to replace writer instances ("true" only from a dispatch input)
+        default: "false"
       # Graph Scaling Configuration (passed from parent workflow)
       lbug_standard_min_instances:
         required: false
@@ -483,6 +488,7 @@ jobs:
       # Writer placement — one AZ for every tier; see deploy-graph-ladybug.yml
       writer_az: ${{ inputs.writer_az }}
       writer_az_change_allowed: ${{ inputs.writer_az_change_allowed }}
+      cycle_writers: ${{ inputs.cycle_writers }}
       # Instance Configuration
       instance_type: ${{ matrix.instance_type }}
       databases_per_instance: "${{ matrix.databases_per_instance }}"

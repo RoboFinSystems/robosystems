@@ -90,6 +90,11 @@ on:
         required: false
         type: string
         default: "false"
+      cycle_writers:
+        description: "Permit this run to replace EXISTING writer instances (a launch-template or placement change). 'true' only from a per-run dispatch input, never from a variable."
+        required: false
+        type: string
+        default: "false"
 
       # Tier Specifications (from graph.yml)
       instance_type:
@@ -365,9 +370,14 @@ jobs:
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions
           else
-            # Update existing stack, handling "No updates" error
-            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+            # Preview the update as a change set. Replacing a writer moves its
+            # data volume, so a change that would cycle the writers runs only
+            # when this run opts in (cycle_writers, or a deliberate AZ move).
+            CHANGE_SET="gha-${{ github.run_id }}-${{ github.run_attempt }}"
+            aws cloudformation create-change-set \
               --stack-name ${{ inputs.stack_name }} \
+              --change-set-name "$CHANGE_SET" \
+              --change-set-type UPDATE \
               --template-body file://cloudformation/graph-ladybug.yaml \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
               --parameters $LBUG_STACK_PARAMS \
@@ -376,19 +386,62 @@ jobs:
                 Key=Service,Value=RoboSystems \
                 Key=Component,Value=LadybugWriter \
                 Key=Repository,Value=${{ github.repository }} \
-                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+                Key=CreatedBy,Value=GitHubActions > /dev/null
 
-            # Check if the error was "No updates are to be performed"
-            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
-              echo "Stack is already up to date - no changes needed"
-              echo "is_new_stack=false" >> $GITHUB_OUTPUT
-            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
-              echo "Error updating stack: $UPDATE_OUTPUT"
+            if ! aws cloudformation wait change-set-create-complete \
+                --stack-name ${{ inputs.stack_name }} --change-set-name "$CHANGE_SET"; then
+              REASON=$(aws cloudformation describe-change-set \
+                --stack-name ${{ inputs.stack_name }} --change-set-name "$CHANGE_SET" \
+                --query StatusReason --output text)
+              aws cloudformation delete-change-set \
+                --stack-name ${{ inputs.stack_name }} --change-set-name "$CHANGE_SET"
+              if echo "$REASON" | grep -qiE "didn't contain changes|no updates are to be performed"; then
+                echo "Stack is already up to date - no changes needed"
+                exit 0
+              fi
+              echo "::error::Change set for ${{ inputs.stack_name }} failed: $REASON"
               exit 1
-            else
-              echo "Stack update initiated successfully"
-              echo "is_new_stack=false" >> $GITHUB_OUTPUT
             fi
+
+            aws cloudformation describe-change-set \
+              --stack-name ${{ inputs.stack_name }} --change-set-name "$CHANGE_SET" \
+              --output json > change-set.json
+            GUARD=$(python3 bin/tools/writer_cycle_guard.py < change-set.json)
+            CYCLES=$(echo "$GUARD" | jq -r '.cycles_writers')
+
+            if [ "$CYCLES" = "true" ] \
+                && [ "${{ inputs.cycle_writers }}" != "true" ] \
+                && [ "${{ inputs.writer_az_change_allowed }}" != "true" ]; then
+              aws cloudformation delete-change-set \
+                --stack-name ${{ inputs.stack_name }} --change-set-name "$CHANGE_SET"
+              echo "writer_cycle_pending=true" >> $GITHUB_OUTPUT
+              echo "::warning::${{ inputs.stack_name }}: update skipped because it would replace the ${{ inputs.writer_tier }} writers. Re-run this environment's deploy at the same ref with cycle_writers=true to roll them."
+              {
+                echo "### ⏸️ Writer roll pending: ${{ inputs.writer_tier }}"
+                echo ""
+                echo "This deploy would replace the writer instances of \`${{ inputs.stack_name }}\`, so its update was skipped. The rest of the release deployed."
+                echo ""
+                echo "$GUARD" | jq -r '.reasons[] | "- " + .'
+                echo ""
+                echo "To roll them at a time you choose: re-run \`${{ inputs.environment }}.yml\` at this ref with \`cycle_writers\` on."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+
+            if [ "$CYCLES" = "true" ]; then
+              echo "::notice::${{ inputs.stack_name }}: replacing the ${{ inputs.writer_tier }} writers (opted in): $(echo "$GUARD" | jq -r '.reasons | join("; ")')"
+            fi
+            aws cloudformation execute-change-set \
+              --stack-name ${{ inputs.stack_name }} --change-set-name "$CHANGE_SET"
+            # Execution is asynchronous: until the stack leaves its previous
+            # *_COMPLETE state, the monitor would read the old status as done.
+            for _ in $(seq 1 60); do
+              STATUS=$(aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} \
+                --query 'Stacks[0].StackStatus' --output text)
+              case "$STATUS" in *_IN_PROGRESS) break ;; esac
+              sleep 2
+            done
+            echo "Stack update initiated successfully ($STATUS)"
           fi
 
       - name: Monitor Stack Deployment

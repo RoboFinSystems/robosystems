@@ -33,6 +33,11 @@ on:
         required: false
         type: string
         default: ""
+      cycle_writers:
+        description: "Replace the LadybugDB writer instances if this deploy changes their launch template (a new AMI, userdata, instance type). Off by default: the deploy skips the writer stacks and says why. Re-run at the same tag with this on to roll them at a time you choose."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   runner:
@@ -505,6 +510,8 @@ jobs:
       # GRAPH_WRITER_AZ_PROD only SUSTAINS their current AZ. Both unset → <region>c.
       writer_az: ${{ inputs.graph_writer_az || vars.GRAPH_WRITER_AZ_PROD || '' }}
       writer_az_change_allowed: ${{ (inputs.graph_writer_az != '' && 'true') || 'false' }}
+      # Writer replacement is opt-in per run; create-release never opts in.
+      cycle_writers: ${{ (inputs.cycle_writers && 'true') || 'false' }}
       # Graph Tier Configuration
       lbug_large_enabled: ${{ vars.LBUG_LARGE_ENABLED_PROD }}
       lbug_xlarge_enabled: ${{ vars.LBUG_XLARGE_ENABLED_PROD }}
