@@ -20,6 +20,8 @@ The arithmetic along the way is calculated, not generated. Entries, statements, 
 
 ## Information blocks
 
+![What is an information block? RoboLedger explained](https://youtu.be/8rI66pkhWMQ)
+
 Every statement, note, schedule, set of metrics and forecast in RoboLedger is an **information block**. A block is more than a table. It carries:
 
 - **the numbers for a period,** each one a fact with its concept and dates

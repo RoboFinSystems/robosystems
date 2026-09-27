@@ -24,6 +24,8 @@ Statements show each closed month. Metrics show the months that have been comput
 - **Validation** — each check and its result: passed, failed, errored or skipped.
 - **Rules** — the checks its numbers are held to, and how serious a failure of each would be.
 
+![What is an information block? RoboLedger explained](https://youtu.be/8rI66pkhWMQ)
+
 Export the block's table as CSV or JSON. The export is the table whichever view you are on.
 
 ## Metrics
