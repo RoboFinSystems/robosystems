@@ -31,7 +31,7 @@ Close is the last thing to set up, on purpose. Connect your books, ask questions
 
 A busy month can take longer to close than your assistant's call waits for. The close keeps running, and your assistant checks back until the receipt is ready. It never needs to be started twice.
 
-The close tool tells your assistant to show you the drafts and wait for your explicit approval before it closes. Your MCP client may also ask you to allow the call.
+The close playbook tells your assistant to show you the drafts and wait for your explicit approval before it closes. Your MCP client may also ask you to allow the call. RoboLedger marks every tool that changes your books as a write, so a client set to ask before making changes, such as ChatGPT's **Allow read-only tools**, asks every time. ChatGPT's default setting approves some writes it judges low-risk without asking.
 
 ## In the app
 
