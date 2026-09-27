@@ -83,15 +83,11 @@ class DownloadRateLimiter:
 
       if used > monthly_limit:
         await redis_client.decr(key)
-        logger.debug(
-          f"Download refused on {resource_id}: limit={monthly_limit} reached"
-        )
+        logger.debug(f"Download refused on {resource_id}: monthly limit reached")
         return False, 0, reset_at
 
       remaining = monthly_limit - used
-      logger.info(
-        f"Download reserved on {resource_id}: used={used}, limit={monthly_limit}"
-      )
+      logger.info(f"Download reserved on {resource_id}: used={used}")
       return True, remaining, reset_at
     finally:
       if redis_client is not None:
