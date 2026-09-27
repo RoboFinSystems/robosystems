@@ -371,18 +371,12 @@ Access via the RoboSystems Python client:
 from robosystems_client import RoboSystemsClient
 from robosystems_client.api.query.execute_cypher import sync_detailed as execute_query
 from robosystems_client.models.cypher_statement_request import CypherStatementRequest
-import json
-from pathlib import Path
+import os
 
-# Load API key from credentials file (created by just demo-sec)
-credentials_path = Path(".local/config.json")
-with open(credentials_path) as f:
-    credentials = json.load(f)
-
-# Initialize client with API key
+# An API key from robosystems.ai (Settings → API keys) on an account with an SEC subscription
 client = RoboSystemsClient(
-    base_url="http://localhost:8000",
-    token=credentials["api_key"],
+    base_url="https://api.robosystems.ai",
+    token=os.environ["ROBOSYSTEMS_API_KEY"],
     auth_header_name="X-API-Key",
     prefix="",
 )
@@ -410,6 +404,8 @@ if response.parsed:
 ```
 
 `CypherStatementRequest` also takes an optional `timeout` (seconds, 1–300, default 60).
+
+Against the pipeline you loaded locally, set `base_url="http://localhost:8000"` and use the `api_key` that `just demo-sec` saved in `.local/config.json`.
 
 ### Option 5: G.V() Graph IDE For Interactive Exploration
 
