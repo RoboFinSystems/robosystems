@@ -54,6 +54,7 @@ _METRICS_ENDPOINT = "/v1/graphs/{graph_id}/metrics"
 _USAGE_ENDPOINT = "/v1/graphs/{graph_id}/usage"
 
 graph_metrics_service = GraphMetricsService()
+circuit_breaker = CircuitBreakerManager()
 
 
 @router.get(
@@ -90,7 +91,6 @@ async def get_graph_metrics(
       ),
     )
 
-  circuit_breaker = CircuitBreakerManager()
   timeout_coordinator = TimeoutCoordinator()
   operation_logger = get_operation_logger()
 
@@ -209,8 +209,8 @@ async def get_graph_metrics(
       f"Analytics operation timeout after {operation_timeout}s for user {current_user.id}"
     )
     raise HTTPException(status_code=504, detail="Analytics operation timed out")
-  except HTTPException:
-    circuit_breaker.record_failure(graph_id, "analytics_metrics")
+  except HTTPException as e:
+    circuit_breaker.record_failure(graph_id, "analytics_metrics", error=e)
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     record_operation_metric(
@@ -228,7 +228,7 @@ async def get_graph_metrics(
     )
     raise
   except Exception as e:
-    circuit_breaker.record_failure(graph_id, "analytics_metrics")
+    circuit_breaker.record_failure(graph_id, "analytics_metrics", error=e)
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     record_operation_metric(
@@ -288,7 +288,6 @@ async def get_graph_usage(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphUsageResponse:
-  circuit_breaker = CircuitBreakerManager()
   timeout_coordinator = TimeoutCoordinator()
   operation_logger = get_operation_logger()
 
@@ -496,8 +495,8 @@ async def get_graph_usage(
       f"Usage analytics operation timeout after {operation_timeout}s for user {current_user.id}"
     )
     raise HTTPException(status_code=504, detail="Usage analytics operation timed out")
-  except HTTPException:
-    circuit_breaker.record_failure(graph_id, "analytics_usage")
+  except HTTPException as e:
+    circuit_breaker.record_failure(graph_id, "analytics_usage", error=e)
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     record_operation_metric(
@@ -516,7 +515,7 @@ async def get_graph_usage(
     )
     raise
   except Exception as e:
-    circuit_breaker.record_failure(graph_id, "analytics_usage")
+    circuit_breaker.record_failure(graph_id, "analytics_usage", error=e)
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     record_operation_metric(

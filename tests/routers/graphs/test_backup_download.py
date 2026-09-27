@@ -75,11 +75,11 @@ class TestBackupDownloadEndpoint:
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.release_download",
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_download_limit",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.reserve_download",
     new_callable=AsyncMock,
   )
   @patch(
@@ -94,8 +94,8 @@ class TestBackupDownloadEndpoint:
     mock_get_by_user_id,
     mock_is_shared,
     mock_get_user_repo,
-    mock_check_limit,
-    mock_increment,
+    mock_reserve,
+    mock_release,
     mock_get_backup_manager,
     client,
     mock_auth_user,
@@ -139,11 +139,11 @@ class TestBackupDownloadEndpoint:
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.release_download",
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_download_limit",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.reserve_download",
     new_callable=AsyncMock,
   )
   @patch(
@@ -162,8 +162,8 @@ class TestBackupDownloadEndpoint:
     mock_is_shared,
     mock_get_user_repo,
     mock_get_monthly_limit,
-    mock_check_limit,
-    mock_increment,
+    mock_reserve,
+    mock_release,
     mock_get_backup_manager,
     client,
     mock_auth_user,
@@ -205,8 +205,8 @@ class TestBackupDownloadEndpoint:
       assert "not available" in response.json()["detail"].lower()
 
       # Should NOT have checked rate limit or incremented
-      mock_check_limit.assert_not_called()
-      mock_increment.assert_not_called()
+      mock_reserve.assert_not_called()
+      mock_release.assert_not_called()
     finally:
       if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
         del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
@@ -215,11 +215,11 @@ class TestBackupDownloadEndpoint:
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.release_download",
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_download_limit",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.reserve_download",
     new_callable=AsyncMock,
   )
   @patch(
@@ -238,8 +238,8 @@ class TestBackupDownloadEndpoint:
     mock_is_shared,
     mock_get_user_repo,
     mock_get_monthly_limit,
-    mock_check_limit,
-    mock_increment,
+    mock_reserve,
+    mock_release,
     mock_get_backup_manager,
     client,
     mock_auth_user,
@@ -273,7 +273,7 @@ class TestBackupDownloadEndpoint:
 
       # Rate limit exceeded
       reset_time = datetime.now(UTC) + timedelta(hours=5)
-      mock_check_limit.return_value = (False, 0, reset_time)
+      mock_reserve.return_value = (False, 0, reset_time)
 
       mock_auth_user.id = "test-user-123"
 
@@ -293,11 +293,11 @@ class TestBackupDownloadEndpoint:
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.release_download",
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_download_limit",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.reserve_download",
     new_callable=AsyncMock,
   )
   @patch(
@@ -316,8 +316,8 @@ class TestBackupDownloadEndpoint:
     mock_is_shared,
     mock_get_user_repo,
     mock_get_monthly_limit,
-    mock_check_limit,
-    mock_increment,
+    mock_reserve,
+    mock_release,
     mock_get_backup_manager,
     client,
     mock_auth_user,
@@ -351,7 +351,7 @@ class TestBackupDownloadEndpoint:
 
       # Rate limit NOT exceeded
       reset_time = datetime.now(UTC) + timedelta(hours=5)
-      mock_check_limit.return_value = (True, 4, reset_time)
+      mock_reserve.return_value = (True, 4, reset_time)
 
       # Mock backup manager to return a download URL
       mock_backup_mgr = MagicMock()
@@ -370,11 +370,9 @@ class TestBackupDownloadEndpoint:
       assert data["backup_id"] == "backup123"
       assert data["graph_id"] == "sec"
 
-      # Verify increment was called
-      mock_increment.assert_called_once_with(
-        user_id="test-user-123",
-        resource_id="sec",
-      )
+      # The reservation stands: a URL was issued.
+      assert mock_reserve.call_args.kwargs["user_id"] == "test-user-123"
+      mock_release.assert_not_called()
     finally:
       if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
         del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
@@ -383,11 +381,11 @@ class TestBackupDownloadEndpoint:
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.release_download",
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_graph_download_limit",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.reserve_graph_download",
     new_callable=AsyncMock,
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
@@ -401,8 +399,8 @@ class TestBackupDownloadEndpoint:
     mock_admin_access,
     mock_is_shared,
     mock_get_graph,
-    mock_check_graph_limit,
-    mock_increment,
+    mock_reserve_graph,
+    mock_release,
     mock_get_backup_manager,
     client,
     mock_auth_user,
@@ -429,7 +427,7 @@ class TestBackupDownloadEndpoint:
 
       # Under limit
       reset_time = datetime.now(UTC) + timedelta(hours=5)
-      mock_check_graph_limit.return_value = (True, 1, reset_time)
+      mock_reserve_graph.return_value = (True, 1, reset_time)
 
       mock_backup_mgr = MagicMock()
       mock_backup_mgr.get_backup_download_url = AsyncMock(
@@ -445,8 +443,8 @@ class TestBackupDownloadEndpoint:
       data = response.json()
       assert "download_url" in data
 
-      # Verify download count was incremented (standard tier has limit > 0)
-      mock_increment.assert_called_once()
+      mock_reserve_graph.assert_called_once()
+      mock_release.assert_not_called()
     finally:
       if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
         del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
@@ -455,7 +453,7 @@ class TestBackupDownloadEndpoint:
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_graph_download_limit",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.reserve_graph_download",
     new_callable=AsyncMock,
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
@@ -469,7 +467,7 @@ class TestBackupDownloadEndpoint:
     mock_admin_access,
     mock_is_shared,
     mock_get_graph,
-    mock_check_graph_limit,
+    mock_reserve_graph,
     mock_get_backup_manager,
     client,
     mock_auth_user,
@@ -496,7 +494,7 @@ class TestBackupDownloadEndpoint:
 
       # Limit exceeded
       reset_time = datetime.now(UTC) + timedelta(hours=5)
-      mock_check_graph_limit.return_value = (False, 0, reset_time)
+      mock_reserve_graph.return_value = (False, 0, reset_time)
 
       mock_auth_user.id = "test-user-123"
 
@@ -513,11 +511,11 @@ class TestBackupDownloadEndpoint:
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.release_download",
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_graph_download_limit",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.reserve_graph_download",
     new_callable=AsyncMock,
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
@@ -531,8 +529,8 @@ class TestBackupDownloadEndpoint:
     mock_admin_access,
     mock_is_shared,
     mock_get_graph,
-    mock_check_graph_limit,
-    mock_increment,
+    mock_reserve_graph,
+    mock_release,
     mock_get_backup_manager,
     client,
     mock_auth_user,
@@ -559,7 +557,7 @@ class TestBackupDownloadEndpoint:
 
       # Under limit
       reset_time = datetime.now(UTC) + timedelta(hours=5)
-      mock_check_graph_limit.return_value = (True, 9, reset_time)
+      mock_reserve_graph.return_value = (True, 9, reset_time)
 
       mock_backup_mgr = MagicMock()
       mock_backup_mgr.get_backup_download_url = AsyncMock(
@@ -574,7 +572,7 @@ class TestBackupDownloadEndpoint:
       assert response.status_code == 200
 
       # All tiers now track download count
-      mock_increment.assert_called_once()
+      mock_release.assert_not_called()
     finally:
       if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
         del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
@@ -583,7 +581,11 @@ class TestBackupDownloadEndpoint:
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_graph_download_limit",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.release_download",
+    new_callable=AsyncMock,
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.reserve_graph_download",
     new_callable=AsyncMock,
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
@@ -597,7 +599,8 @@ class TestBackupDownloadEndpoint:
     mock_admin_access,
     mock_is_shared,
     mock_get_graph,
-    mock_check_graph_limit,
+    mock_reserve_graph,
+    mock_release,
     mock_get_backup_manager,
     client,
     mock_auth_user,
@@ -623,7 +626,7 @@ class TestBackupDownloadEndpoint:
       mock_get_graph.return_value = mock_graph_record
 
       reset_time = datetime.now(UTC) + timedelta(hours=5)
-      mock_check_graph_limit.return_value = (True, 9, reset_time)
+      mock_reserve_graph.return_value = (True, 9, reset_time)
 
       # Backup not found
       mock_backup_mgr = MagicMock()
@@ -638,6 +641,10 @@ class TestBackupDownloadEndpoint:
 
       assert response.status_code == 404
       assert "not found" in response.json()["detail"].lower()
+      # No URL was issued, so the reservation goes back.
+      mock_release.assert_called_once_with(
+        user_id="test-user-123", resource_id="kg0123456789abcdef"
+      )
     finally:
       if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
         del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
@@ -646,11 +653,11 @@ class TestBackupDownloadEndpoint:
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.release_download",
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_download_limit",
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.reserve_download",
     new_callable=AsyncMock,
   )
   @patch(
@@ -669,20 +676,16 @@ class TestBackupDownloadEndpoint:
     mock_is_shared,
     mock_get_user_repo,
     mock_get_monthly_limit,
-    mock_check_limit,
-    mock_increment,
+    mock_reserve,
+    mock_release,
     mock_get_backup_manager,
     client,
     mock_auth_user,
   ):
-    """The quota is checked on one key and incremented on another.
-
-    Shared-repository downloads resolve a subgraph to its parent for the
-    *check* (`sec_historical` → `sec`), because the subscription and its
-    monthly allowance belong to the parent. The increment used the requested
-    id instead, and the Redis key is built from whichever id it is given —
-    so the counter the check reads never moved and the monthly limit was
-    unenforced for every subgraph download. Both calls must name the same
+    """A subgraph download reserves against its parent (`sec_historical` →
+    `sec`), where the subscription and its monthly allowance live, and a
+    reservation that issues no URL is released on that same key. The Redis key
+    is built from whichever id it is given, so both calls must name the same
     resource.
     """
     from robosystems.database import get_db_session
@@ -710,24 +713,20 @@ class TestBackupDownloadEndpoint:
       mock_get_monthly_limit.return_value = 1
 
       reset_time = datetime.now(UTC) + timedelta(hours=5)
-      mock_check_limit.return_value = (True, 4, reset_time)
+      mock_reserve.return_value = (True, 4, reset_time)
 
       mock_backup_mgr = MagicMock()
-      mock_backup_mgr.get_backup_download_url = AsyncMock(
-        return_value="https://s3.amazonaws.com/bucket/backup.lbug?signature=xyz"
-      )
+      mock_backup_mgr.get_backup_download_url = AsyncMock(return_value=None)
       mock_get_backup_manager.return_value = mock_backup_mgr
 
       mock_auth_user.id = "test-user-123"
 
       response = client.get("/v1/graphs/sec_historical/backups/backup123/download")
 
-      assert response.status_code == 200
+      assert response.status_code == 404
 
-      # The check resolves to the parent...
-      assert mock_check_limit.call_args.kwargs["repository"] == "sec"
-      # ...so the increment has to move that same counter, not the subgraph's.
-      mock_increment.assert_called_once_with(
+      assert mock_reserve.call_args.kwargs["repository"] == "sec"
+      mock_release.assert_called_once_with(
         user_id="test-user-123",
         resource_id="sec",
       )

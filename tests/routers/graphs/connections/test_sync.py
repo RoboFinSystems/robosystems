@@ -598,8 +598,9 @@ class TestSyncConnection:
         cache=_make_mock_cache(),
       )
 
+    # Same key record_operation_failure records under, or the breaker never trips.
     components["circuit_breaker"].check_circuit.assert_called_once_with(
-      GRAPH_ID, "connection_sync"
+      GRAPH_ID, "sync_connection"
     )
 
   @pytest.mark.unit

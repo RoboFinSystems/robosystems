@@ -17,7 +17,9 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
 
   Enforced in production and staging only; development runs unauthenticated.
   ``/health`` is the only exempt path so ALB and container probes do not
-  need a key. Repeated failures from one IP are locked out.
+  need a key. Repeated failures from one IP are locked out, but the key is
+  checked first: behind a load balancer every caller shares one peer address,
+  so a lockout must never refuse a caller holding a valid key.
   """
 
   EXEMPT_PATHS = frozenset({"/health"})
@@ -80,12 +82,6 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
       return await call_next(request)
 
     client_ip = request.client.host if request.client else "unknown"
-    if self._is_rate_limited(client_ip):
-      logger.warning(f"Rate limited IP: {client_ip}")
-      return JSONResponse(
-        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        content={"detail": "Too many failed authentication attempts"},
-      )
 
     now = time.time()
     if (
@@ -113,6 +109,12 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
         del self.failed_attempts[client_ip]
       return await call_next(request)
     except HTTPException as e:
+      if self._is_rate_limited(client_ip):
+        logger.warning(f"Rate limited IP: {client_ip}")
+        return JSONResponse(
+          status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+          content={"detail": "Too many failed authentication attempts"},
+        )
       self._record_failed_attempt(client_ip)
       logger.warning(f"Authentication failed from {client_ip} - {e.detail}")
       return JSONResponse(status_code=e.status_code, content={"detail": e.detail})

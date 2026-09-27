@@ -354,7 +354,7 @@ class TestBackupDownloadRequiresAdmin:
       ),
       patch(
         "robosystems.routers.graphs.backups.download.DownloadRateLimiter"
-        ".check_graph_download_limit",
+        ".reserve_graph_download",
         new=AsyncMock(return_value=(True, 1, datetime.now(UTC))),
       ),
     ):
@@ -386,7 +386,7 @@ class TestBackupDownloadRequiresAdmin:
       ),
       patch(
         "robosystems.routers.graphs.backups.download.DownloadRateLimiter"
-        ".check_graph_download_limit",
+        ".reserve_graph_download",
         new=AsyncMock(return_value=(True, 1, datetime.now(UTC))),
       ),
     ):

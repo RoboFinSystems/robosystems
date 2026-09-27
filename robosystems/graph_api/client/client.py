@@ -99,9 +99,9 @@ class GraphClient(BaseGraphClient):
         if isinstance(e, httpx.TimeoutException):
           last_error = GraphTimeoutError(f"Request timeout: {e}")
         elif isinstance(e, httpx.ConnectError):
-          last_error = GraphTransientError(f"Connection error: {e}")
+          last_error = GraphTransientError(f"Connection error: {e}", cause=e)
         elif isinstance(e, httpx.RequestError):
-          last_error = GraphTransientError(f"Request error: {e}")
+          last_error = GraphTransientError(f"Request error: {e}", cause=e)
 
         if not self._should_retry(last_error, attempt):
           self._record_failure()

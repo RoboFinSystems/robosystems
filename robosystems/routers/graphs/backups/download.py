@@ -98,12 +98,13 @@ async def get_backup_download_url(
   Returns the download URL and its expiration. `expires_in` ranges from 5
   minutes to 24 hours.
   """
+  # The id the monthly counter keys on; a reservation and its release must
+  # resolve a subgraph to its parent (`sec_historical` → `sec`).
+  quota_resource_id = graph_id
+  reserved = False
   try:
     is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     has_tier_limit = False
-    # The one id the monthly counter keys on; check and increment must both
-    # resolve a subgraph to its parent (`sec_historical` → `sec`).
-    quota_resource_id = graph_id
 
     if is_shared:
       # Subscriptions live on the parent repository.
@@ -133,7 +134,7 @@ async def get_backup_download_url(
           detail="Backup downloads are not available on your current plan. Please upgrade to Pro.",
         )
 
-      allowed, remaining, resets_at = await DownloadRateLimiter.check_download_limit(
+      allowed, remaining, resets_at = await DownloadRateLimiter.reserve_download(
         user_id=str(current_user.id),
         repository=parent_repo_id,
         plan=plan,
@@ -177,7 +178,7 @@ async def get_backup_download_url(
           allowed,
           remaining,
           resets_at,
-        ) = await DownloadRateLimiter.check_graph_download_limit(
+        ) = await DownloadRateLimiter.reserve_graph_download(
           user_id=str(current_user.id),
           graph_id=graph_id,
           graph_tier=str(graph_record.graph_tier),
@@ -194,6 +195,7 @@ async def get_backup_download_url(
             },
           )
 
+    reserved = is_shared or has_tier_limit
     backup_manager = get_backup_manager()
 
     download_url = await backup_manager.get_backup_download_url(
@@ -205,12 +207,7 @@ async def get_backup_download_url(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Backup not found or cannot be downloaded",
       )
-
-    if is_shared or has_tier_limit:
-      await DownloadRateLimiter.increment_download_count(
-        user_id=str(current_user.id),
-        resource_id=quota_resource_id,
-      )
+    reserved = False
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -248,3 +245,9 @@ async def get_backup_download_url(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to generate download URL",
     )
+  finally:
+    # A reservation that issued no URL goes back to the allowance.
+    if reserved:
+      await DownloadRateLimiter.release_download(
+        user_id=str(current_user.id), resource_id=quota_resource_id
+      )

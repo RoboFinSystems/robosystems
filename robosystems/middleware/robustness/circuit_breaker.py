@@ -16,12 +16,25 @@ from robosystems.graph_api.client.exceptions import GraphClientError
 from robosystems.logger import logger
 
 
+class CircuitOpenError(HTTPException):
+  """The breaker's own 503. Never counted as a failure, or steady polling
+  against an open circuit would hold it open."""
+
+
 @dataclass
 class CircuitState:
   failure_count: int = 0
   last_failure_time: float | None = None
   is_open: bool = False
   last_success_time: float | None = None
+  half_open_calls: int = 0
+  last_probe_time: float | None = None
+
+  @property
+  def state(self) -> str:
+    if not self.is_open:
+      return "closed"
+    return "half_open" if self.half_open_calls else "open"
 
 
 class CircuitBreakerManager:
@@ -31,6 +44,7 @@ class CircuitBreakerManager:
     self,
     failure_threshold: int | None = None,
     recovery_timeout: int | None = None,
+    half_open_max_calls: int = 1,
   ):
     self.failure_threshold = (
       failure_threshold
@@ -42,6 +56,7 @@ class CircuitBreakerManager:
       if recovery_timeout is not None
       else TuningConfig.get_circuit_breaker_timeout()
     )
+    self.half_open_max_calls = half_open_max_calls
 
     # Only circuits with a recorded failure are stored, so caller-supplied
     # operation names can't grow this map.
@@ -56,21 +71,27 @@ class CircuitBreakerManager:
     return f"{graph_id}:{operation}"
 
   def _should_allow_request(self, circuit_key: str) -> bool:
+    """Closed admits everything. Open admits nothing until the recovery window
+    passes, then half-open admits ``half_open_max_calls`` probes; their outcome
+    closes or reopens the circuit. Probes that never report are re-armed after
+    another window."""
     circuit = self.circuits.get(circuit_key)
-    current_time = time.time()
-
     if circuit is None or not circuit.is_open:
       return True
 
-    if circuit.last_failure_time and (
-      current_time - circuit.last_failure_time >= self.recovery_timeout
-    ):
-      circuit.is_open = False
-      circuit.failure_count = 0
+    current_time = time.time()
+    if circuit.half_open_calls == 0:
+      if current_time - (circuit.last_failure_time or 0) < self.recovery_timeout:
+        return False
       logger.info(f"Circuit {circuit_key} moving to half-open state")
-      return True
+    elif circuit.half_open_calls >= self.half_open_max_calls:
+      if current_time - (circuit.last_probe_time or 0) < self.recovery_timeout:
+        return False
+      circuit.half_open_calls = 0
 
-    return False
+    circuit.half_open_calls += 1
+    circuit.last_probe_time = current_time
+    return True
 
   def check_circuit(self, graph_id: str, operation: str) -> bool:
     """Raise 503 with Retry-After while the circuit is open."""
@@ -80,7 +101,7 @@ class CircuitBreakerManager:
       circuit = self.circuits.get(circuit_key, CircuitState())
       time_since_failure = time.time() - (circuit.last_failure_time or 0)
 
-      raise HTTPException(
+      raise CircuitOpenError(
         status_code=503,
         detail=f"Circuit breaker open for {operation} on {graph_id}",
         headers={
@@ -109,10 +130,12 @@ class CircuitBreakerManager:
     self, graph_id: str, operation: str, error: Exception | None = None
   ) -> None:
     """Record a failure, opening the circuit at the threshold. Client errors
-    (bad Cypher) don't count: only infrastructure failures trip the breaker."""
-    if error is not None and isinstance(error, GraphClientError):
+    (bad Cypher, a 4xx) and the breaker's own refusal don't count: only
+    infrastructure failures trip the breaker. A failure while half-open
+    reopens the circuit for a full recovery window."""
+    if _is_ignored_failure(error):
       logger.debug(
-        f"Circuit {graph_id}:{operation} ignoring client error: {type(error).__name__}"
+        f"Circuit {graph_id}:{operation} ignoring error: {type(error).__name__}"
       )
       return
 
@@ -121,6 +144,7 @@ class CircuitBreakerManager:
 
     circuit.failure_count += 1
     circuit.last_failure_time = time.time()
+    circuit.half_open_calls = 0
 
     if circuit.failure_count >= self.failure_threshold and not circuit.is_open:
       circuit.is_open = True
@@ -154,7 +178,7 @@ class CircuitBreakerManager:
         "failure_count": circuit.failure_count,
         "last_failure_time": circuit.last_failure_time,
         "last_success_time": circuit.last_success_time,
-        "state": "open" if circuit.is_open else "closed",
+        "state": circuit.state,
       }
 
     return status
@@ -169,7 +193,7 @@ class CircuitBreakerManager:
       collector.update_circuit_breaker_status(
         graph_id=graph_id,
         operation=operation,
-        state="open" if circuit.is_open else "closed",
+        state=circuit.state,
         failure_count=circuit.failure_count,
         last_failure_time=circuit.last_failure_time,
         recovery_time=None
@@ -182,3 +206,9 @@ class CircuitBreakerManager:
       )
     except Exception as e:
       logger.warning(f"Failed to update circuit breaker metrics: {e}")
+
+
+def _is_ignored_failure(error: Exception | None) -> bool:
+  if isinstance(error, (GraphClientError, CircuitOpenError)):
+    return True
+  return isinstance(error, HTTPException) and error.status_code < 500

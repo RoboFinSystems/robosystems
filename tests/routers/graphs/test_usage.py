@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import HTTPException
 
+from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.routers.graphs.usage import (
   _get_days_from_time_range,
   _parse_time_range,
@@ -36,8 +37,8 @@ def _patch_robustness():
 
   return (
     patch(
-      "robosystems.routers.graphs.usage.CircuitBreakerManager",
-      return_value=mock_cb,
+      "robosystems.routers.graphs.usage.circuit_breaker",
+      mock_cb,
     ),
     patch(
       "robosystems.routers.graphs.usage.TimeoutCoordinator",
@@ -295,6 +296,72 @@ class TestGetGraphMetrics:
 
 
 @pytest.mark.unit
+class TestMetricsCircuitBreaker:
+  """The breaker is shared across requests, so repeated failures trip it, and
+  its own 503 does not hold it open."""
+
+  async def _call(self):
+    return await get_graph_metrics(
+      graph_id="kg01234567890abcdef",
+      current_user=_make_mock_user(),
+      db=Mock(),
+      _rate_limit=None,
+    )
+
+  @pytest.mark.asyncio
+  async def test_repeated_failures_trip_the_breaker(self):
+    breaker = CircuitBreakerManager(failure_threshold=2, recovery_timeout=60)
+    mock_service = AsyncMock()
+    mock_service.collect_metrics_for_graph_async = AsyncMock(
+      side_effect=RuntimeError("backend down")
+    )
+    _, tc_patch, ol_patch, rm_patch = _patch_robustness()
+
+    with (
+      patch("robosystems.routers.graphs.usage.circuit_breaker", breaker),
+      patch("robosystems.routers.graphs.usage.graph_metrics_service", mock_service),
+      tc_patch,
+      ol_patch,
+      rm_patch,
+    ):
+      for _ in range(2):
+        with pytest.raises(HTTPException) as exc_info:
+          await self._call()
+        assert exc_info.value.status_code == 500
+
+      opened_at = breaker.get_circuit_status(
+        "kg01234567890abcdef", "analytics_metrics"
+      )["last_failure_time"]
+      for _ in range(3):
+        with pytest.raises(HTTPException) as exc_info:
+          await self._call()
+        assert exc_info.value.status_code == 503
+
+    assert mock_service.collect_metrics_for_graph_async.await_count == 2
+    status = breaker.get_circuit_status("kg01234567890abcdef", "analytics_metrics")
+    assert status["last_failure_time"] == opened_at
+
+  @pytest.mark.asyncio
+  async def test_not_found_does_not_count(self):
+    breaker = CircuitBreakerManager(failure_threshold=2, recovery_timeout=60)
+    mock_service = AsyncMock()
+    mock_service.collect_metrics_for_graph_async = AsyncMock(return_value=None)
+    _, tc_patch, ol_patch, rm_patch = _patch_robustness()
+
+    with (
+      patch("robosystems.routers.graphs.usage.circuit_breaker", breaker),
+      patch("robosystems.routers.graphs.usage.graph_metrics_service", mock_service),
+      tc_patch,
+      ol_patch,
+      rm_patch,
+    ):
+      for _ in range(3):
+        with pytest.raises(HTTPException) as exc_info:
+          await self._call()
+        assert exc_info.value.status_code == 404
+
+
+@pytest.mark.unit
 class TestGetGraphUsageAnalytics:
   """Test the get_graph_usage endpoint."""
 
@@ -459,8 +526,8 @@ class TestGetGraphUsageAnalytics:
 
     with (
       patch(
-        "robosystems.routers.graphs.usage.CircuitBreakerManager",
-        return_value=mock_cb,
+        "robosystems.routers.graphs.usage.circuit_breaker",
+        mock_cb,
       ),
       tc_patch,
       ol_patch,

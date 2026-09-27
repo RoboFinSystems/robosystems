@@ -103,7 +103,7 @@ async def sync_connection(
     )
 
     try:
-      components["circuit_breaker"].check_circuit(graph_id, "connection_sync")
+      components["circuit_breaker"].check_circuit(graph_id, "sync_connection")
 
       # Sync operations can be long-running.
       operation_timeout = components["timeout_coordinator"].calculate_timeout(
@@ -227,7 +227,7 @@ async def sync_connection(
         detail="Connection sync timed out",
         code=ErrorCode.OPERATION_FAILED,
       )
-    except HTTPException:
+    except HTTPException as e:
       record_operation_failure(
         components=components,
         operation_name="sync_connection",
@@ -235,6 +235,7 @@ async def sync_connection(
         graph_id=graph_id,
         user_id=current_user.id,
         error_type="http_exception",
+        error=e,
       )
       raise
     except (ProviderUnavailableError, ValueError) as e:
@@ -246,6 +247,7 @@ async def sync_connection(
         user_id=current_user.id,
         error_type="provider_disabled",
         error_message=str(e),
+        counts_toward_breaker=False,
       )
 
       logger.warning(f"Provider not available for sync: {e}")
@@ -263,6 +265,7 @@ async def sync_connection(
         user_id=current_user.id,
         error_type=type(e).__name__,
         error_message=str(e),
+        error=e,
       )
 
       logger.error("Failed to sync connection %s", connection_id, exc_info=True)

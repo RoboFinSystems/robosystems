@@ -186,6 +186,40 @@ class TestDatabaseQueryRouter:
         assert chunk["count"] == 1
         assert chunk["rows"][0]["n"]["id"] == i + 1
 
+  def test_streaming_query_holds_its_connection_while_it_streams(
+    self, client, mock_query_request
+  ):
+    """The connection is counted until the last chunk, not released when the
+    handler returns the response object."""
+    from robosystems.graph_api.core.admission_control import (
+      LadybugAdmissionController,
+    )
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
+
+    admission = LadybugAdmissionController()
+    admission.check_admission = MagicMock(return_value=(AdmissionDecision.ACCEPT, None))
+    seen_during_stream = []
+
+    def chunks(*_args, **_kwargs):
+      for i in range(2):
+        seen_during_stream.append(admission._connections_per_db.get("kg1a2b3c4d5", 0))
+        yield {"columns": ["n"], "rows": [{"n": {"id": i}}], "count": 1}
+
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
+    mock_service.execute_query_streaming.side_effect = chunks
+
+    with patch(
+      "robosystems.graph_api.routers.databases.query.get_admission_controller",
+      return_value=admission,
+    ):
+      response = client.post(
+        "/databases/kg1a2b3c4d5/query?streaming=true", json=mock_query_request
+      )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert seen_during_stream == [1, 1]
+    assert admission._connections_per_db.get("kg1a2b3c4d5", 0) == 0
+
   def test_execute_query_empty_result(self, client):
     """Test query with empty result set."""
     empty_query = {

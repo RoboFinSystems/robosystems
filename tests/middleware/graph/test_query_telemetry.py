@@ -8,8 +8,12 @@ must never emit), and the start/end cost-line pairing.
 import json
 from unittest.mock import Mock, patch
 
+import httpx
+
+from robosystems.graph_api.client.exceptions import GraphTransientError
 from robosystems.middleware.graph.query_telemetry import (
   api_key_prefix_from_request,
+  engine_disruption_cause,
   is_disrupted_aggregation,
   is_engine_disruption,
   log_shared_query_end,
@@ -108,6 +112,19 @@ class TestRecordSharedQueryOutcome:
     kwargs = mock_audit.call_args.kwargs
     assert kwargs["signal"] == "engine_disruption"
     assert kwargs["disruption"] is True
+
+  def test_transient_error_from_a_lost_connection_is_a_disruption(self):
+    """/query/cypher sees a replica dying mid-query only as a
+    GraphTransientError; the transport cause it carries is what classifies it."""
+    lost = httpx.RemoteProtocolError("peer closed connection")
+    refused = httpx.ConnectError("All connection attempts failed")
+
+    assert engine_disruption_cause(GraphTransientError("x", cause=lost)) is lost
+    assert engine_disruption_cause(GraphTransientError("x", cause=refused)) is refused
+
+  def test_admission_rejection_is_not_a_disruption(self):
+    rejected = GraphTransientError("Server temporarily unavailable", status_code=503)
+    assert engine_disruption_cause(rejected) is None
 
   @patch(_AUDIT)
   @patch(_SHARED_CHECK, return_value=True)

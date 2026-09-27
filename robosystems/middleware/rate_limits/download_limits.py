@@ -60,76 +60,72 @@ class DownloadRateLimiter:
     return next_month
 
   @classmethod
-  async def _check_limit(
+  async def _reserve(
     cls,
     user_id: str,
     resource_id: str,
     monthly_limit: int,
   ) -> tuple[bool, int, datetime]:
-    """(allowed, remaining, reset_at)."""
+    """Take one download from the month's allowance: (allowed, remaining,
+    reset_at). Increment first and compare, handing the slot back on refusal,
+    so parallel requests cannot all pass a read of the same count."""
     reset_at = cls._get_reset_time()
 
     redis_client = None
     try:
       redis_client = cls._get_redis_client()
       key = cls._get_key(user_id, resource_id)
-      current = await redis_client.get(key)
-      used = int(current) if current else 0
-      remaining = max(0, monthly_limit - used)
-      allowed = used < monthly_limit
 
-      logger.debug(
-        f"Download limit check on {resource_id}: "
-        f"used={used}, limit={monthly_limit}, remaining={remaining}"
+      used = await redis_client.incr(key)
+      if used == 1:
+        ttl_seconds = int((reset_at - datetime.now(UTC)).total_seconds())
+        await redis_client.expire(key, ttl_seconds)
+
+      if used > monthly_limit:
+        await redis_client.decr(key)
+        logger.debug(
+          f"Download refused on {resource_id}: limit={monthly_limit} reached"
+        )
+        return False, 0, reset_at
+
+      remaining = monthly_limit - used
+      logger.info(
+        f"Download reserved on {resource_id}: used={used}, limit={monthly_limit}"
       )
-
-      return allowed, remaining, reset_at
+      return True, remaining, reset_at
     finally:
       if redis_client is not None:
         await redis_client.aclose()
 
   @classmethod
-  async def check_download_limit(
+  async def reserve_download(
     cls,
     user_id: str,
     repository: str,
     plan: str,
   ) -> tuple[bool, int, datetime]:
     monthly_limit = cls.get_shared_repo_monthly_limit(repository, plan)
-    return await cls._check_limit(user_id, repository, monthly_limit)
+    return await cls._reserve(user_id, repository, monthly_limit)
 
   @classmethod
-  async def check_graph_download_limit(
+  async def reserve_graph_download(
     cls,
     user_id: str,
     graph_id: str,
     graph_tier: str,
   ) -> tuple[bool, int, datetime]:
     monthly_limit = cls.get_graph_tier_monthly_limit(graph_tier)
-    return await cls._check_limit(user_id, graph_id, monthly_limit)
+    return await cls._reserve(user_id, graph_id, monthly_limit)
 
   @classmethod
-  async def increment_download_count(
-    cls,
-    user_id: str,
-    resource_id: str,
-  ) -> int:
+  async def release_download(cls, user_id: str, resource_id: str) -> None:
+    """Return a reserved download that produced no URL."""
     redis_client = None
     try:
       redis_client = cls._get_redis_client()
       key = cls._get_key(user_id, resource_id)
-
-      count = await redis_client.incr(key)
-
-      # First increment: expire at the monthly reset.
-      if count == 1:
-        reset_at = cls._get_reset_time()
-        ttl_seconds = int((reset_at - datetime.now(UTC)).total_seconds())
-        await redis_client.expire(key, ttl_seconds)
-
-      logger.info(f"Download count incremented on {resource_id}: count={count}")
-
-      return count
+      if await redis_client.decr(key) < 0:
+        await redis_client.set(key, 0, keepttl=True)
     finally:
       if redis_client is not None:
         await redis_client.aclose()

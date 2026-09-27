@@ -87,7 +87,7 @@ async def create_connection(
   operation_timeout = 30.0
 
   try:
-    components["circuit_breaker"].check_circuit(graph_id, "connection_create")
+    components["circuit_breaker"].check_circuit(graph_id, "create_connection")
 
     operation_timeout = components["timeout_coordinator"].calculate_timeout(
       operation_type="external_service",
@@ -247,7 +247,7 @@ async def create_connection(
       detail="Connection creation timed out",
       code=ErrorCode.OPERATION_FAILED,
     )
-  except HTTPException:
+  except HTTPException as e:
     record_operation_failure(
       components=components,
       operation_name="create_connection",
@@ -255,6 +255,7 @@ async def create_connection(
       graph_id=graph_id,
       user_id=current_user.id,
       error_type="http_exception",
+      error=e,
     )
     raise
   except ValueError as e:
@@ -266,6 +267,7 @@ async def create_connection(
       user_id=current_user.id,
       error_type="provider_disabled",
       error_message=str(e),
+      counts_toward_breaker=False,
     )
 
     logger.warning(f"Provider not available for connection: {e}")
@@ -283,6 +285,7 @@ async def create_connection(
       user_id=current_user.id,
       error_type=type(e).__name__,
       error_message=str(e),
+      error=e,
     )
 
     logger.error("Failed to create connection", exc_info=True)
