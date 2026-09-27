@@ -161,8 +161,8 @@ async def get_graph_schema_info(
       status_code=status.HTTP_504_GATEWAY_TIMEOUT,
       detail="Schema operation timed out",
     )
-  except HTTPException:
-    circuit_breaker.record_failure(graph_id, "schema")
+  except HTTPException as e:
+    circuit_breaker.record_failure(graph_id, "schema", error=e)
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     record_operation_metric(
@@ -179,7 +179,7 @@ async def get_graph_schema_info(
     )
     raise
   except Exception as e:
-    circuit_breaker.record_failure(graph_id, "schema")
+    circuit_breaker.record_failure(graph_id, "schema", error=e)
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     record_operation_metric(

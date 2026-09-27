@@ -1,11 +1,46 @@
 """Tests for download rate limiting module."""
 
+import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from robosystems.middleware.rate_limits.download_limits import DownloadRateLimiter
+
+
+class FakeRedis:
+  """Atomic INCR/DECR over a dict, yielding to the loop between calls the way
+  a real round trip does."""
+
+  def __init__(self, values: dict[str, int] | None = None):
+    self.values = dict(values or {})
+    self.expired: list[str] = []
+    self.closed = 0
+
+  async def get(self, key):
+    await asyncio.sleep(0)
+    value = self.values.get(key)
+    return None if value is None else str(value).encode()
+
+  async def incr(self, key):
+    await asyncio.sleep(0)
+    self.values[key] = self.values.get(key, 0) + 1
+    return self.values[key]
+
+  async def decr(self, key):
+    await asyncio.sleep(0)
+    self.values[key] = self.values.get(key, 0) - 1
+    return self.values[key]
+
+  async def set(self, key, value, keepttl=False):
+    self.values[key] = int(value)
+
+  async def expire(self, key, ttl):
+    self.expired.append(key)
+
+  async def aclose(self):
+    self.closed += 1
 
 
 class TestDownloadRateLimiter:
@@ -65,113 +100,78 @@ class TestDownloadRateLimiter:
     assert reset_time.tzinfo == UTC
 
   @pytest.mark.asyncio
-  async def test_check_download_limit_allows_when_under_limit(self):
-    """Test download is allowed when under monthly limit."""
-    mock_redis = AsyncMock()
-    mock_redis.get.return_value = None  # No downloads used
-
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
+  async def test_reserve_allows_under_limit(self):
+    redis = FakeRedis()
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      allowed, remaining, reset_at = await DownloadRateLimiter.reserve_download(
         user_id="user123",
         repository="sec",
         plan="advanced",  # Limit is 4
       )
 
     assert allowed is True
-    assert remaining == 4
+    assert remaining == 3
     assert reset_at > datetime.now(UTC)
 
   @pytest.mark.asyncio
-  async def test_check_download_limit_blocks_when_at_limit(self):
-    """Test download is blocked when at monthly limit."""
-    mock_redis = AsyncMock()
-    mock_redis.get.return_value = b"4"  # 4 downloads used (at limit for ADVANCED)
-
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
-        user_id="user123",
-        repository="sec",
-        plan="advanced",  # Limit is 4
+  async def test_reserve_refuses_at_limit_and_hands_the_slot_back(self):
+    key = DownloadRateLimiter._get_key("user123", "sec")
+    redis = FakeRedis({key: 4})
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      allowed, remaining, _ = await DownloadRateLimiter.reserve_download(
+        user_id="user123", repository="sec", plan="advanced"
       )
 
     assert allowed is False
     assert remaining == 0
+    assert redis.values[key] == 4
 
   @pytest.mark.asyncio
-  async def test_check_download_limit_blocks_when_over_limit(self):
-    """Test download is blocked when over monthly limit."""
-    mock_redis = AsyncMock()
-    mock_redis.get.return_value = b"10"  # 10 downloads used (over limit for ADVANCED)
+  async def test_first_reservation_sets_ttl(self):
+    redis = FakeRedis()
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      await DownloadRateLimiter.reserve_download("user123", "sec", "advanced")
+      await DownloadRateLimiter.reserve_download("user123", "sec", "advanced")
 
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
-        user_id="user123",
-        repository="sec",
-        plan="advanced",  # Limit is 4
-      )
-
-    assert allowed is False
-    assert remaining == 0  # Never negative
+    assert len(redis.expired) == 1
 
   @pytest.mark.asyncio
-  async def test_check_download_limit_starter_allows_when_under_limit(self):
-    """Test starter plan allows downloads (limit is 1)."""
-    mock_redis = AsyncMock()
-    mock_redis.get.return_value = None  # No downloads yet
+  async def test_parallel_requests_cannot_exceed_the_limit(self):
+    """Reading the count and incrementing later let N concurrent requests all
+    pass a read of 0 against a 1/month limit."""
+    redis = FakeRedis()
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      with patch.object(
+        DownloadRateLimiter, "get_graph_tier_monthly_limit", return_value=1
+      ):
+        results = await asyncio.gather(
+          *(
+            DownloadRateLimiter.reserve_graph_download(
+              "user123", "kg1", "ladybug-standard"
+            )
+            for _ in range(5)
+          )
+        )
 
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
-        user_id="user123",
-        repository="sec",
-        plan="starter",  # Limit is 1
-      )
-
-    assert allowed is True
-    assert remaining == 1
-
-  @pytest.mark.asyncio
-  async def test_increment_download_count_first_increment(self):
-    """Test first increment sets TTL."""
-    mock_redis = AsyncMock()
-    mock_redis.incr.return_value = 1  # First increment
-
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      count = await DownloadRateLimiter.increment_download_count(
-        user_id="user123",
-        resource_id="sec",
-      )
-
-    assert count == 1
-    mock_redis.incr.assert_called_once()
-    mock_redis.expire.assert_called_once()  # TTL should be set on first increment
+    assert sum(1 for allowed, _, _ in results if allowed) == 1
+    assert redis.values[DownloadRateLimiter._get_key("user123", "kg1")] == 1
 
   @pytest.mark.asyncio
-  async def test_increment_download_count_subsequent_increment(self):
-    """Test subsequent increments don't reset TTL."""
-    mock_redis = AsyncMock()
-    mock_redis.incr.return_value = 2  # Second increment
+  async def test_release_returns_a_reservation(self):
+    redis = FakeRedis()
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      await DownloadRateLimiter.reserve_download("user123", "sec", "advanced")
+      await DownloadRateLimiter.release_download("user123", "sec")
 
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      count = await DownloadRateLimiter.increment_download_count(
-        user_id="user123",
-        resource_id="sec",
-      )
+    assert redis.values[DownloadRateLimiter._get_key("user123", "sec")] == 0
 
-    assert count == 2
-    mock_redis.incr.assert_called_once()
-    mock_redis.expire.assert_not_called()  # TTL not set for subsequent increments
+  @pytest.mark.asyncio
+  async def test_release_never_goes_negative(self):
+    redis = FakeRedis()
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      await DownloadRateLimiter.release_download("user123", "sec")
+
+    assert redis.values[DownloadRateLimiter._get_key("user123", "sec")] == 0
 
   @pytest.mark.asyncio
   async def test_get_download_quota_returns_complete_info(self):
@@ -213,37 +213,20 @@ class TestDownloadRateLimiter:
     assert quota["remaining"] == 0
 
   @pytest.mark.asyncio
-  async def test_redis_client_closed_after_check(self):
-    """Test Redis client is properly closed after check_download_limit."""
-    mock_redis = AsyncMock()
-    mock_redis.get.return_value = None
+  async def test_redis_client_closed_after_reserve(self):
+    redis = FakeRedis()
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      await DownloadRateLimiter.reserve_download("user123", "sec", "advanced")
 
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      await DownloadRateLimiter.check_download_limit(
-        user_id="user123",
-        repository="sec",
-        plan="advanced",
-      )
-
-    mock_redis.aclose.assert_called_once()
+    assert redis.closed == 1
 
   @pytest.mark.asyncio
-  async def test_redis_client_closed_after_increment(self):
-    """Test Redis client is properly closed after increment_download_count."""
-    mock_redis = AsyncMock()
-    mock_redis.incr.return_value = 1
+  async def test_redis_client_closed_after_release(self):
+    redis = FakeRedis()
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      await DownloadRateLimiter.release_download("user123", "sec")
 
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      await DownloadRateLimiter.increment_download_count(
-        user_id="user123",
-        resource_id="sec",
-      )
-
-    mock_redis.aclose.assert_called_once()
+    assert redis.closed == 1
 
   @pytest.mark.asyncio
   async def test_redis_client_closed_after_get_quota(self):
@@ -268,38 +251,17 @@ class TestDownloadRateLimiterIntegration:
 
   @pytest.mark.asyncio
   async def test_full_download_cycle(self):
-    """Test a complete download cycle from 0 to limit (4/month for advanced)."""
-    mock_redis = AsyncMock()
-    download_count = {"value": 0}
+    """0 to the limit (4/month for advanced), then refused."""
+    redis = FakeRedis()
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      for expected_remaining in (3, 2, 1, 0):
+        allowed, remaining, _ = await DownloadRateLimiter.reserve_download(
+          "user1", "sec", "advanced"
+        )
+        assert allowed is True
+        assert remaining == expected_remaining
 
-    def mock_get(key):
-      if download_count["value"] == 0:
-        return None
-      return str(download_count["value"]).encode()
-
-    def mock_incr(key):
-      download_count["value"] += 1
-      return download_count["value"]
-
-    mock_redis.get.side_effect = mock_get
-    mock_redis.incr.side_effect = mock_incr
-
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      # First download - should be allowed (advanced plan, limit 4)
-      allowed, remaining, _ = await DownloadRateLimiter.check_download_limit(
-        "user1", "sec", "advanced"
-      )
-      assert allowed is True
-      assert remaining == 4
-
-      # Use all 4 downloads
-      for _ in range(4):
-        await DownloadRateLimiter.increment_download_count("user1", "sec")
-
-      # Fifth download - should be blocked (4 used, limit 4)
-      allowed, remaining, _ = await DownloadRateLimiter.check_download_limit(
+      allowed, remaining, _ = await DownloadRateLimiter.reserve_download(
         "user1", "sec", "advanced"
       )
       assert allowed is False
@@ -307,66 +269,31 @@ class TestDownloadRateLimiterIntegration:
 
   @pytest.mark.asyncio
   async def test_different_users_have_separate_limits(self):
-    """Test that different users have independent download limits."""
-    mock_redis = AsyncMock()
-    user_counts = {"user1": 4, "user2": 0}
-
-    def mock_get(key):
-      for user, count in user_counts.items():
-        if user in key:
-          if count == 0:
-            return None
-          return str(count).encode()
-      return None
-
-    mock_redis.get.side_effect = mock_get
-
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      # User1 has used all 4 downloads (advanced plan, limit 4)
-      allowed1, remaining1, _ = await DownloadRateLimiter.check_download_limit(
+    redis = FakeRedis({DownloadRateLimiter._get_key("user1", "sec"): 4})
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      allowed1, _, _ = await DownloadRateLimiter.reserve_download(
         "user1", "sec", "advanced"
       )
-      assert allowed1 is False
-      assert remaining1 == 0
-
-      # User2 has fresh limit
-      allowed2, remaining2, _ = await DownloadRateLimiter.check_download_limit(
+      allowed2, remaining2, _ = await DownloadRateLimiter.reserve_download(
         "user2", "sec", "advanced"
       )
-      assert allowed2 is True
-      assert remaining2 == 4
+
+    assert allowed1 is False
+    assert allowed2 is True
+    assert remaining2 == 3
 
   @pytest.mark.asyncio
   async def test_different_repositories_have_separate_limits(self):
-    """Test that different repositories have independent download limits."""
-    mock_redis = AsyncMock()
-    repo_counts = {"sec": 4, "economic": 0}
-
-    def mock_get(key):
-      for repo, count in repo_counts.items():
-        if repo in key:
-          if count == 0:
-            return None
-          return str(count).encode()
-      return None
-
-    mock_redis.get.side_effect = mock_get
-
-    with patch.object(
-      DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
-    ):
-      # SEC has 4 downloads used (advanced plan, limit 4)
-      allowed1, remaining1, _ = await DownloadRateLimiter.check_download_limit(
+    redis = FakeRedis({DownloadRateLimiter._get_key("user1", "sec"): 4})
+    with patch.object(DownloadRateLimiter, "_get_redis_client", return_value=redis):
+      allowed1, _, _ = await DownloadRateLimiter.reserve_download(
         "user1", "sec", "advanced"
       )
-      assert allowed1 is False
-      assert remaining1 == 0
-
-      # Economic has fresh limit (falls back to default of 1)
-      allowed2, remaining2, _ = await DownloadRateLimiter.check_download_limit(
+      # Economic falls back to the default of 1.
+      allowed2, remaining2, _ = await DownloadRateLimiter.reserve_download(
         "user1", "economic", "advanced"
       )
-      assert allowed2 is True
-      assert remaining2 == 1
+
+    assert allowed1 is False
+    assert allowed2 is True
+    assert remaining2 == 0

@@ -195,6 +195,26 @@ class TestLadybugAuthMiddleware:
       assert response.status_code == status.HTTP_401_UNAUTHORIZED  # Not 429
 
   @pytest.mark.asyncio
+  async def test_valid_key_is_never_locked_out(self, mock_app, mock_request):
+    """Behind a load balancer every caller shares one peer address, so bad keys
+    from one caller must not lock out callers holding the right key."""
+    with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
+      mock_env.ENVIRONMENT = "prod"
+      mock_env.GRAPH_API_KEY = None
+
+      middleware = LadybugAuthMiddleware(mock_app, api_key="correct-key")
+      middleware.max_failed_attempts = 3
+      call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
+
+      mock_request.headers = Headers({"X-Graph-API-Key": "wrong-key"})
+      for _ in range(4):
+        await middleware.dispatch(mock_request, call_next)
+
+      mock_request.headers = Headers({"X-Graph-API-Key": "correct-key"})
+      response = await middleware.dispatch(mock_request, call_next)
+      assert response.status_code == 200
+
+  @pytest.mark.asyncio
   async def test_middleware_resets_failed_attempts_on_success(
     self, mock_app, mock_request
   ):

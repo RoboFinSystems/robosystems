@@ -1,11 +1,14 @@
 """Full circuit breaker manager tests."""
 
+import time
+
 import pytest
 from fastapi import HTTPException
 
 from robosystems.graph_api.client.exceptions import GraphClientError
 from robosystems.middleware.robustness.circuit_breaker import (
   CircuitBreakerManager,
+  CircuitOpenError,
   CircuitState,
 )
 
@@ -153,3 +156,84 @@ class TestGetAllCircuitStatus:
     assert "query" in status["kg1"]
     assert "schema" in status["kg2"]
     assert "state" in status["kg1"]["query"]
+
+
+def _trip(breaker, graph_id="kg123", operation="query"):
+  for _ in range(breaker.failure_threshold):
+    breaker.record_failure(graph_id, operation)
+
+
+class TestHalfOpen:
+  def test_recovery_admits_only_the_probe(self, breaker):
+    _trip(breaker)
+    breaker.circuits["kg123:query"].last_failure_time = time.time() - 11
+
+    assert breaker.check_circuit("kg123", "query") is True
+    with pytest.raises(HTTPException) as exc:
+      breaker.check_circuit("kg123", "query")
+    assert exc.value.status_code == 503
+    assert breaker.get_all_circuit_status()["kg123"]["query"]["state"] == "half_open"
+
+  def test_half_open_max_calls_sets_probe_budget(self):
+    breaker = CircuitBreakerManager(
+      failure_threshold=3, recovery_timeout=10, half_open_max_calls=2
+    )
+    _trip(breaker)
+    breaker.circuits["kg123:query"].last_failure_time = time.time() - 11
+
+    assert breaker.check_circuit("kg123", "query") is True
+    assert breaker.check_circuit("kg123", "query") is True
+    with pytest.raises(HTTPException):
+      breaker.check_circuit("kg123", "query")
+
+  def test_failed_probe_reopens_for_a_full_window(self, breaker):
+    _trip(breaker)
+    breaker.circuits["kg123:query"].last_failure_time = time.time() - 11
+
+    assert breaker.check_circuit("kg123", "query") is True
+    breaker.record_failure("kg123", "query")
+
+    with pytest.raises(HTTPException):
+      breaker.check_circuit("kg123", "query")
+    assert breaker.get_circuit_status("kg123", "query")["is_open"] is True
+
+  def test_successful_probe_closes(self, breaker):
+    breaker.recovery_timeout = 0
+    _trip(breaker)
+
+    breaker.check_circuit("kg123", "query")
+    breaker.record_success("kg123", "query")
+
+    assert breaker.check_circuit("kg123", "query") is True
+    assert breaker.check_circuit("kg123", "query") is True
+
+  def test_unreported_probe_is_rearmed_after_a_window(self, breaker):
+    _trip(breaker)
+    breaker.circuits["kg123:query"].last_failure_time = time.time() - 11
+    breaker.check_circuit("kg123", "query")
+
+    breaker.circuits["kg123:query"].last_probe_time = time.time() - 11
+    assert breaker.check_circuit("kg123", "query") is True
+
+
+class TestFailuresThatDoNotCount:
+  def test_own_refusal_does_not_hold_the_circuit_open(self, breaker):
+    _trip(breaker)
+    with pytest.raises(CircuitOpenError) as exc:
+      breaker.check_circuit("kg123", "query")
+    before = breaker.get_circuit_status("kg123", "query")
+
+    breaker.record_failure("kg123", "query", error=exc.value)
+
+    after = breaker.get_circuit_status("kg123", "query")
+    assert after["last_failure_time"] == before["last_failure_time"]
+    assert after["failure_count"] == before["failure_count"]
+
+  def test_client_http_errors_do_not_count(self, breaker):
+    for code in (400, 403, 404, 409, 422, 429):
+      breaker.record_failure("kg123", "query", error=HTTPException(status_code=code))
+    assert breaker.get_circuit_status("kg123", "query")["failure_count"] == 0
+
+  def test_server_http_errors_count(self, breaker):
+    breaker.record_failure("kg123", "query", error=HTTPException(status_code=502))
+    assert breaker.get_circuit_status("kg123", "query")["failure_count"] == 1

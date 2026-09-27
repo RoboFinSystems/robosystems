@@ -34,6 +34,7 @@ from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.graph.query_queue import get_query_queue
 from robosystems.middleware.graph.query_telemetry import (
   api_key_prefix_from_request,
+  engine_disruption_cause,
   log_shared_query_end,
   log_shared_query_start,
   record_shared_query_outcome,
@@ -757,13 +758,19 @@ async def execute_cypher_query(
     # breaker failure since the graph is healthy, just at capacity.
     retry_after = 30
     logger.warning(f"Graph API unavailable for {graph_id}: {e}")
+    # A replica that died mid-query surfaces here too; its carried cause tells
+    # it apart from an admission rejection.
+    lost_connection = engine_disruption_cause(e)
     record_shared_query_outcome(
       graph_id,
       current_user.id,
+      signal="engine_disruption" if lost_connection else None,
       status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+      error=lost_connection,
       api_key_prefix=key_prefix,
       endpoint="/v1/graphs/{graph_id}/query/cypher",
       source="query_cypher",
+      disruption=lost_connection is not None,
     )
     log_shared_query_end(
       exec_id,

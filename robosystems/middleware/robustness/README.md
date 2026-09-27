@@ -33,6 +33,7 @@ to recover.
 CircuitBreakerManager(
     failure_threshold: int | None = None,   # default: TuningConfig.get_circuit_breaker_threshold() → 5
     recovery_timeout: int | None = None,    # default: TuningConfig.get_circuit_breaker_timeout() → 60s
+    half_open_max_calls: int = 1,           # probes admitted once the recovery window passes
 )
 ```
 
@@ -40,23 +41,33 @@ Omitted arguments resolve through `TuningConfig`, which is SSM-tunable at
 runtime (`circuits/THRESHOLD`, `circuits/TIMEOUT`) — you can widen a breaker in
 production without a redeploy.
 
-`CircuitState` carries `failure_count`, `last_failure_time`, `is_open`, and
-`last_success_time`. There is **no half-open state object**: once
-`recovery_timeout` elapses, the next `check_circuit` call resets the circuit and
-lets one request through as a one-shot recovery probe. If that probe fails, the
-count starts again from zero rather than reopening immediately at the threshold.
+**Construct it once, at module scope.** State lives in the instance, in
+process memory; a breaker built per request starts at zero every time and can
+never trip.
+
+States (`CircuitState.state`):
+
+- **closed** — everything is admitted.
+- **open** — nothing is admitted until `recovery_timeout` has passed since the
+  last failure.
+- **half_open** — `half_open_max_calls` probes are admitted; everyone else still
+  gets the 503. A probe's success closes and forgets the circuit; its failure
+  reopens it for a full recovery window. Probes that never report back are
+  re-armed after another window, so a lost probe cannot wedge the circuit.
 
 Methods:
 
 - `check_circuit(graph_id, operation) -> bool` — call before the operation;
-  raises `HTTPException(503)` with a `Retry-After` header if the circuit is open.
+  raises `CircuitOpenError` (an `HTTPException(503)` with `Retry-After`) if the
+  circuit is not admitting.
 - `record_success(graph_id, operation)` — closes the circuit and forgets it.
   Only circuits with a recorded failure are stored, so a caller-supplied
   operation name cannot grow the map, and a healthy operation has no entry.
 - `record_failure(graph_id, operation, error=None)` — increments the failure
-  count and opens the circuit at the threshold. **Client errors are ignored:**
-  if `error` is a `GraphClientError` (e.g. bad Cypher syntax) it does not count
-  toward tripping the breaker.
+  count and opens the circuit at the threshold. **Pass `error`**: only
+  infrastructure failures count. A `GraphClientError` (bad Cypher), an
+  `HTTPException` below 500, and the breaker's own `CircuitOpenError` are
+  ignored — the last so that polling an open circuit cannot hold it open.
 - `get_circuit_status(...)` / `get_all_circuit_status()` — status snapshots for
   monitoring.
 

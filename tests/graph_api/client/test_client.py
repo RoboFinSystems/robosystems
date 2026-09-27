@@ -654,8 +654,9 @@ class TestGraphClientConnectionTimeout:
       raise httpx.ConnectError("Connection refused")
 
     with patch.object(client.client, "request", side_effect=raise_connect_error):
-      with pytest.raises(GraphTransientError, match="Connection error"):
+      with pytest.raises(GraphTransientError, match="Connection error") as exc:
         await client._request("GET", "/health")
+    assert isinstance(exc.value.cause, httpx.ConnectError)
 
   @pytest.mark.asyncio
   async def test_request_error_converts_to_transient(self, client):
@@ -665,8 +666,9 @@ class TestGraphClientConnectionTimeout:
       raise httpx.RequestError("Request failed")
 
     with patch.object(client.client, "request", side_effect=raise_request_error):
-      with pytest.raises(GraphTransientError, match="Request error"):
+      with pytest.raises(GraphTransientError, match="Request error") as exc:
         await client._request("GET", "/health")
+    assert isinstance(exc.value.cause, httpx.RequestError)
 
 
 @pytest.mark.unit

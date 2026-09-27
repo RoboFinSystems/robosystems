@@ -5,6 +5,7 @@ exhausted, so an overloaded instance sheds load instead of being OOM-killed
 and taking every database on the box with it.
 """
 
+import threading
 import time
 from enum import Enum
 from pathlib import Path
@@ -74,6 +75,10 @@ class LadybugAdmissionController:
     self._cached_cgroup_available_mb: float | None = None
     self._cached_cpu = 0.0
 
+    # The query route runs on the threadpool: every read-modify-write of the
+    # counters holds this lock, or lost updates drift the count upward until
+    # admission rejects every request.
+    self._connections_lock = threading.Lock()
     self._connections_per_db: dict[str, int] = {}
 
     try:
@@ -163,7 +168,8 @@ class LadybugAdmissionController:
       logger.warning(f"Rejecting request for {database_name}: {reason}")
       return AdmissionDecision.REJECT_CPU, reason
 
-    current_connections = self._connections_per_db.get(database_name, 0)
+    with self._connections_lock:
+      current_connections = self._connections_per_db.get(database_name, 0)
     if current_connections >= self.max_connections_per_db:
       reason = (
         f"Too many connections to {database_name}: {current_connections} "
@@ -176,28 +182,25 @@ class LadybugAdmissionController:
 
   def register_connection(self, database_name: str) -> None:
     """Register a new active connection to a database."""
-    self._connections_per_db[database_name] = (
-      self._connections_per_db.get(database_name, 0) + 1
-    )
-    logger.debug(
-      f"Connection registered for {database_name}. "
-      f"Total: {self._connections_per_db[database_name]}"
-    )
+    with self._connections_lock:
+      total = self._connections_per_db.get(database_name, 0) + 1
+      self._connections_per_db[database_name] = total
+    logger.debug(f"Connection registered for {database_name}. Total: {total}")
 
   def release_connection(self, database_name: str) -> None:
     """Release a connection from a database."""
-    if database_name in self._connections_per_db:
-      self._connections_per_db[database_name] = max(
-        0, self._connections_per_db[database_name] - 1
-      )
-      logger.debug(
-        f"Connection released for {database_name}. "
-        f"Remaining: {self._connections_per_db[database_name]}"
-      )
+    with self._connections_lock:
+      if database_name not in self._connections_per_db:
+        return
+      remaining = max(0, self._connections_per_db[database_name] - 1)
+      self._connections_per_db[database_name] = remaining
+    logger.debug(f"Connection released for {database_name}. Remaining: {remaining}")
 
   def get_metrics(self) -> dict:
     """Get current admission control metrics."""
     self._update_resource_cache()
+    with self._connections_lock:
+      connections = dict(self._connections_per_db)
     return {
       "memory_percent": self._cached_memory,
       "memory_available_mb": self._cached_available_mb,
@@ -207,8 +210,8 @@ class LadybugAdmissionController:
       "memory_threshold": self.memory_threshold,
       "min_available_mb": self.min_available_mb,
       "cpu_threshold": self.cpu_threshold,
-      "connections_per_db": dict(self._connections_per_db),
-      "total_connections": sum(self._connections_per_db.values()),
+      "connections_per_db": connections,
+      "total_connections": sum(connections.values()),
     }
 
 

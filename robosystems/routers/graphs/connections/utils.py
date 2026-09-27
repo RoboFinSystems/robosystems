@@ -13,12 +13,13 @@ from robosystems.middleware.robustness import (
 from robosystems.operations.providers.registry import ProviderRegistry
 
 provider_registry = ProviderRegistry()
+circuit_breaker = CircuitBreakerManager()
 
 
 def create_robustness_components():
   """Create robustness components for connection operations."""
   return {
-    "circuit_breaker": CircuitBreakerManager(),
+    "circuit_breaker": circuit_breaker,
     "timeout_coordinator": TimeoutCoordinator(),
     "operation_logger": get_operation_logger(),
     "operation_start_time": time.time(),
@@ -78,10 +79,14 @@ def record_operation_failure(
   error_type: str | None = None,
   error_message: str | None = None,
   timeout_seconds: float | None = None,
+  error: Exception | None = None,
+  counts_toward_breaker: bool = True,
 ):
-  """Record operation failure."""
+  """Record operation failure. A disabled or unknown provider is a caller
+  error, not a failing dependency: pass ``counts_toward_breaker=False``."""
   operation_duration_ms = (time.time() - components["operation_start_time"]) * 1000
-  components["circuit_breaker"].record_failure(graph_id, operation_name)
+  if counts_toward_breaker:
+    components["circuit_breaker"].record_failure(graph_id, operation_name, error=error)
 
   metadata = {"error_type": error_type} if error_type else {}
   if error_message:

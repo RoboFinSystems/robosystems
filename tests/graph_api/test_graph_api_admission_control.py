@@ -339,3 +339,30 @@ def test_get_admission_controller_uses_env_configuration(monkeypatch):
   assert controller_one.min_available_mb == 2048.0
   assert controller_one.cpu_threshold == 88.0
   assert controller_one.max_connections_per_db == 5
+
+
+def test_connection_counters_survive_concurrent_threads():
+  """register/release run on the threadpool; unguarded read-modify-write
+  loses updates and the count drifts until admission rejects for good."""
+  import sys
+  import threading
+
+  previous = sys.getswitchinterval()
+  sys.setswitchinterval(1e-6)
+  try:
+    controller = LadybugAdmissionController()
+
+    def churn():
+      for _ in range(20_000):
+        controller.register_connection("kg1")
+        controller.release_connection("kg1")
+
+    threads = [threading.Thread(target=churn) for _ in range(8)]
+    for t in threads:
+      t.start()
+    for t in threads:
+      t.join()
+  finally:
+    sys.setswitchinterval(previous)
+
+  assert controller._connections_per_db.get("kg1", 0) == 0

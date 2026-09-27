@@ -134,26 +134,29 @@ def execute_query(
       },
     )
 
-  with track_connection(admission_controller, graph_id):
-    # The path's graph_id is authoritative — ignore any database in the body.
-    query_request = QueryRequest(
-      database=graph_id, cypher=request.cypher, parameters=request.parameters
-    )
+  # The path's graph_id is authoritative — ignore any database in the body.
+  query_request = QueryRequest(
+    database=graph_id, cypher=request.cypher, parameters=request.parameters
+  )
 
-    if not streaming:
+  if not streaming:
+    with track_connection(admission_controller, graph_id):
       return service.execute_query(query_request)
 
-    def _json_default(obj: object) -> str:
-      if isinstance(obj, (date, datetime)):
-        return obj.isoformat()
-      raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+  def _json_default(obj: object) -> str:
+    if isinstance(obj, (date, datetime)):
+      return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
-    def generate_stream():
+  # The handler returns before the body is produced, so a stream is counted
+  # from inside its generator for as long as it runs.
+  def generate_stream():
+    with track_connection(admission_controller, graph_id):
       for chunk in service.execute_query_streaming(query_request, chunk_size=1000):
         yield json.dumps(chunk, default=_json_default) + "\n"
 
-    return StreamingResponse(
-      generate_stream(),
-      media_type="application/x-ndjson",
-      headers={"X-Streaming": "true", "Cache-Control": "no-cache"},
-    )
+  return StreamingResponse(
+    generate_stream(),
+    media_type="application/x-ndjson",
+    headers={"X-Streaming": "true", "Cache-Control": "no-cache"},
+  )

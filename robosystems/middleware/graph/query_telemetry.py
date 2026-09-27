@@ -89,6 +89,15 @@ def is_engine_disruption(error: BaseException) -> bool:
   return any(marker in message for marker in _DISRUPTION_MESSAGE_MARKERS)
 
 
+def engine_disruption_cause(error: BaseException) -> BaseException | None:
+  """The lost-connection cause a transient Graph API error carries, or None
+  when it was a rejection (admission control, a 503 the engine sent)."""
+  cause = getattr(error, "cause", None)
+  if cause is not None and is_engine_disruption(cause):
+    return cause
+  return None
+
+
 def is_disrupted_aggregation(result: Any) -> bool:
   """True when an aggregated MCP stream ended without any terminal event —
   the client-visible shape of an engine connection lost mid-stream.
