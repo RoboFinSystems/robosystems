@@ -24,6 +24,12 @@ RoboSystems gives AI clients a financial knowledge graph to work on: your compan
 - [Documents and memory](documents-and-memory.md): policies and notes on a graph, search, and memories your assistant can recall.
 - [Data lake, subgraphs and backups](data-lake-and-subgraphs.md): stage files, try a model in a subgraph, download a copy of the graph.
 
+## Your account and data
+
+- [Security and your data](security-and-your-data.md): how each graph is kept apart, encryption, and what an AI client sees.
+- [Take your data with you](take-your-data-with-you.md): reports, backups and your records, and what happens when you cancel.
+- [Invite your team](teams-and-roles.md): organization and graph roles, invitations, and removing someone.
+
 ## By product
 
 - **Your books:** the [RoboLedger docs](https://roboledger.ai/docs) cover connecting QuickBooks, reporting, planning and the month-end close.
