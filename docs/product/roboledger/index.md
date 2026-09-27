@@ -14,6 +14,7 @@ RoboLedger connects your QuickBooks books to Claude, ChatGPT and any other MCP c
 4. [How RoboLedger works](how-roboledger-works.md): from an event to a report, and the information blocks your statements are made of.
 5. [Find your way around the app](the-roboledger-app.md): a tour, page by page, with screenshots.
 6. [Work across several companies](working-across-companies.md): for fractional CFOs and bookkeepers, one graph and one connection per client.
+7. [Your books and your data](your-books-and-your-data.md): what's copied from QuickBooks, who can see it, and how to take it with you.
 
 ## Work with your books
 
