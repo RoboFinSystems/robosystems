@@ -169,9 +169,8 @@ class ClosePeriodTool:
       "description": """Close a fiscal period — the FINAL commit action.
 
 **WHEN TO USE:**
-- After all closing entries are drafted AND reviewed via list-period-drafts
-- After the user explicitly approves the drafts
-- NEVER without calling list-period-drafts first and summarizing to the user
+- The period's closing entries are drafted, and list-period-drafts shows
+  exactly what this call will post
 
 **WHAT IT DOES (atomic):**
 1. Validates closeable gates (sequence, period complete, sync current)
