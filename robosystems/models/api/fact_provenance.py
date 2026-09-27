@@ -100,12 +100,10 @@ class ScheduleProvenance(BaseModel):
 
 
 class DerivedProvenance(BaseModel):
-  """Facts computed from other facts via a formula/computation.
-
-  Subtotals and the retained-earnings close; metrics will use it too. At
-  least one of `formula` / `computation` / `source_fact_ids` must be
-  present — computation-only covers auto-derived facts with no single source
-  row (retained earnings, persisted subtotals).
+  """Facts computed from other facts via a formula/computation — today only
+  `compute-metrics`. Statement subtotals and the retained-earnings close ride
+  under `pivot`. At least one of `formula` / `computation` / `source_fact_ids`
+  must be present; computation-only covers a result with no single source row.
   """
 
   origin: Literal["derived"] = "derived"

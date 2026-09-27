@@ -50,8 +50,8 @@ class TestDerivedValidator:
     assert DerivedProvenance(formula="a + b").origin == "derived"
 
   def test_derived_accepts_computation_only(self) -> None:
-    # auto-derived facts with no single source row (retained earnings, subtotals)
-    assert DerivedProvenance(computation="retained_earnings_close").computation
+    # a computed result with no single source row
+    assert DerivedProvenance(computation="compute-metrics").computation
 
   def test_derived_accepts_source_fact_ids(self) -> None:
     assert DerivedProvenance(source_fact_ids=["fact_1"]).source_fact_ids == ["fact_1"]
