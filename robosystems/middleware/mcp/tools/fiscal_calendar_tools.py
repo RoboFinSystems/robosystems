@@ -185,8 +185,8 @@ class ClosePeriodTool:
 7. Auto-runs the rule engine for every schedule Structure with facts in
    the closed period, and the statement rule corpus against the stamped
    sets. Rule outcomes ride on the response as `rule_summary` /
-   `evaluated_structure_ids` / `statement_rule_summary` so you can
-   report which schedules and statements passed / failed to the user.
+   `evaluated_structure_ids` / `statement_rule_summary`, per schedule and
+   statement.
 8. Emits a period_closed audit event
 
 **PARAMETERS:**
@@ -206,9 +206,9 @@ class ClosePeriodTool:
 **RETURNS:**
 Two shapes. Usually the receipt below, returned once the close lands. If the
 close is still running when this call's budget runs out, you instead get
-`status: "in_progress"` with an `operation_id` and `worker_started` — see
-WORKFLOW. That is not a failure and not a timeout: the close is running
-on the worker and is atomic.
+`status: "in_progress"` with an `operation_id` and `worker_started` (see
+NOTES). That is not a failure and not a timeout: the close is running on
+the worker and is atomic.
 
 The receipt:
 - period: the period that was closed
@@ -227,7 +227,7 @@ The receipt:
   the period's canonical statement FactSets (note carries the soft-skip
   reason, e.g. no_coa_mapping).
 - stamped_statement_sets: structure_id -> fact_set_id for the minted
-  canonical sets — use get-information-block to render them.
+  canonical sets; get-information-block renders them.
 - statement_rule_summary: verification tally across the stamped
   statements (pass / fail / error / skipped); null when no rules exist.
 
@@ -244,23 +244,19 @@ The receipt:
   allow_unposted_source_events)
 - the balance sheet equation does not balance for the period
 
-**WORKFLOW:**
-The close is dispatched to the worker and this call waits ~18s for it. An
-`in_progress` response means it is running; get-period-close-status shows
-period_status closed and a filled close_receipt once it lands, and
-get-fiscal-calendar shows has_close_receipt on the period row.
-`worker_started: false` means it is queued behind a busy worker. A repeat
-call within 30s returns the same operation (`deduplicated: true`).
-
 **NOTES:**
+- The close is dispatched to the worker and this call waits ~18s for it. An
+  `in_progress` response means it is running; get-period-close-status shows
+  period_status closed and a filled close_receipt once it lands, and
+  get-fiscal-calendar shows has_close_receipt on the period row.
+  `worker_started: false` means it is queued behind a busy worker. A repeat
+  call within 30s returns the same operation (`deduplicated: true`).
 - Posted entries cannot be re-drafted; reopen-period undoes a close
 - Manual entries (drafted via create-event-block event_type='journal_entry_recorded') are posted alongside schedule drafts
-- Which drafts write back to QuickBooks follows the event's source (schedule/manual publish; system posts locally), unless metadata.publish_to_source overrides it per entry. list-period-drafts previews the split before you close
+- Which drafts write back to QuickBooks follows the event's source (schedule/manual publish; system posts locally), unless metadata.publish_to_source overrides it per entry. list-period-drafts previews the split
 - After close, close_target auto-advances to the next period
 - The close runs on the worker, so a slow QuickBooks publish can outlast
-  this call. The work is unaffected by that — only who is waiting for it
-- An identical close re-dispatched within 30s returns the same operation
-  rather than starting a second one (`deduplicated: true`)""",
+  this call. The work is unaffected by that — only who is waiting for it""",
       "inputSchema": {
         "type": "object",
         "properties": {
