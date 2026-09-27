@@ -166,12 +166,10 @@ class ClosePeriodTool:
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "close-period",
-      "description": """Close a fiscal period — the FINAL commit action.
+      "description": """Close a fiscal period: post its drafts, lock it, and save its statements.
 
 **WHEN TO USE:**
-- After all closing entries are drafted AND reviewed via list-period-drafts
-- After the user explicitly approves the drafts
-- NEVER without calling list-period-drafts first and summarizing to the user
+- Month-end: the step that posts a period's drafts and locks the period
 
 **WHAT IT DOES (atomic):**
 1. Validates closeable gates (sequence, period complete, sync current)
@@ -193,28 +191,24 @@ class ClosePeriodTool:
 
 **PARAMETERS:**
 - period (required): YYYY-MM format (e.g., "2026-03")
-- allow_stale_sync (optional): override the sync-current gate. Only use
-  when the user has explicitly verified that QB data is complete despite
-  a stale sync timestamp.
-- allow_stranded_obligations (optional): override the stranded-obligation
-  gate — close even though matured classified obligations have no drafted
-  closing entry, knowingly omitting those adjusting entries. Prefer
-  promote-obligations (dispatch_handlers=true) or voiding them instead.
-- allow_reconciling_items (optional): override the reconciling-item gate —
-  close even though posted events in the period are still flagged as
-  changed in the source system, leaving those differences undecided.
-  Prefer resolve-reconciling-item on each first.
-- allow_unposted_source_events (optional): override the unposted-source-event
-  gate — close even though bank-feed lines or QuickBooks transactions dated
-  in the period were never committed, leaving them out of the period for
-  good. Prefer committing or voiding each first.
+- allow_stale_sync (optional): lifts the sync-current gate, closing on
+  QuickBooks data older than the freshness window.
+- allow_stranded_obligations (optional): lifts the stranded-obligation gate,
+  closing without adjusting entries for matured classified obligations that
+  have none drafted. promote-obligations (dispatch_handlers=true) drafts them.
+- allow_reconciling_items (optional): lifts the reconciling-item gate,
+  closing with posted events still flagged as changed in the source system.
+  resolve-reconciling-item settles each one.
+- allow_unposted_source_events (optional): lifts the unposted-source-event
+  gate, closing without bank-feed lines or QuickBooks transactions dated in
+  the period that were never committed; they stay out of the period.
 
 **RETURNS:**
 Two shapes. Usually the receipt below, returned once the close lands. If the
 close is still running when this call's budget runs out, you instead get
-`status: "in_progress"` with an `operation_id`, `worker_started`, and
-instructions — see WORKFLOW. That is not a failure and not a timeout: the
-close is running on the worker and is atomic.
+`status: "in_progress"` with an `operation_id` and `worker_started` — see
+WORKFLOW. That is not a failure and not a timeout: the close is running
+on the worker and is atomic.
 
 The receipt:
 - period: the period that was closed
@@ -237,36 +231,29 @@ The receipt:
 - statement_rule_summary: verification tally across the stamped
   statements (pass / fail / error / skipped); null when no rules exist.
 
-**GUARDS (422 errors):**
-- Cannot close out of sequence
-- Cannot close the current (still-open) month
-- Cannot close with a stale QB sync unless allow_stale_sync=true
-- Cannot close over stranded obligations (matured, classified, but no
-  drafted entry) unless allow_stranded_obligations=true — run
-  promote-obligations (dispatch_handlers=true) to draft them first
-- Cannot close over unresolved reconciling items (posted events whose
-  source payload changed afterwards) unless allow_reconciling_items=true —
-  preview-reconciling-item then resolve-reconciling-item on each first
-- Cannot close over source events dated in the period that were never
-  committed (inbox lines, QuickBooks transactions whose automatic posting
-  failed) unless allow_unposted_source_events=true — commit or void each
-- Cannot close if BS equation doesn't balance for the period
+**GATES (a 422 error names the gate):**
+- the period is out of sequence
+- the period is the current, still-open month
+- the QuickBooks sync is stale (lifted by allow_stale_sync)
+- stranded obligations: matured and classified, with no drafted entry
+  (lifted by allow_stranded_obligations)
+- unresolved reconciling items: posted events whose source payload changed
+  afterwards (lifted by allow_reconciling_items)
+- source events dated in the period that were never committed: inbox lines,
+  QuickBooks transactions whose automatic posting failed (lifted by
+  allow_unposted_source_events)
+- the balance sheet equation does not balance for the period
 
 **WORKFLOW:**
-1. Call close-period once. It dispatches the close to the worker and waits
-   ~18s for it.
-2. If you get the receipt, you are done — read entries_published_to_qb and
-   statements_stamped to summarize for the user.
-3. If you get `status: "in_progress"`, do NOT call close-period again. The
-   close is already running and re-dispatching risks nothing useful. Poll
-   get-period-close-status (period_status flips to closed, close_receipt
-   fills in) or get-fiscal-calendar (has_close_receipt on the period row)
-   every ~10s until it lands, then summarize from the receipt.
-4. `worker_started: false` means the close is queued behind a busy worker
-   rather than running yet. Same instruction — it will run.
+The close is dispatched to the worker and this call waits ~18s for it. An
+`in_progress` response means it is running; get-period-close-status shows
+period_status closed and a filled close_receipt once it lands, and
+get-fiscal-calendar shows has_close_receipt on the period row.
+`worker_started: false` means it is queued behind a busy worker. A repeat
+call within 30s returns the same operation (`deduplicated: true`).
 
 **NOTES:**
-- Posted entries cannot be re-drafted — use reopen-period to undo
+- Posted entries cannot be re-drafted; reopen-period undoes a close
 - Manual entries (drafted via create-event-block event_type='journal_entry_recorded') are posted alongside schedule drafts
 - Which drafts write back to QuickBooks follows the event's source (schedule/manual publish; system posts locally), unless metadata.publish_to_source overrides it per entry. list-period-drafts previews the split before you close
 - After close, close_target auto-advances to the next period
@@ -285,8 +272,8 @@ The receipt:
           "allow_stale_sync": {
             "type": "boolean",
             "description": (
-              "Override the sync-current gate (default false). Only set "
-              "true when the user has verified QB data is complete."
+              "Lift the sync-current gate (default false), closing on "
+              "QuickBooks data older than the freshness window."
             ),
           },
           "allow_stranded_obligations": {

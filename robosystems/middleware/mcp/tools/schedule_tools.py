@@ -140,7 +140,7 @@ class ListPeriodDraftsTool:
    - **Manual adjustments**: `create-event-block(event_type='journal_entry_recorded')`.
 2. Use this tool to review every draft with DR/CR detail
 3. Summarize to the user — total debits/credits, balance check, per-schedule amounts
-4. On user approval, call `close-period` to commit + close atomically
+4. `close-period` posts these drafts and closes the period atomically
 
 **PARAMETERS:**
 - period: YYYY-MM format (e.g., "2026-03")
