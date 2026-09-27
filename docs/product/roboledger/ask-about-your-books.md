@@ -9,6 +9,20 @@ Once your books are connected, you can ask about them the way you'd ask a contro
 
 Asking questions uses no credits and never writes to QuickBooks.
 
+![Ask about your books with RoboLedger, in Claude, ChatGPT or any MCP client](https://youtu.be/twydr672bGo)
+
+## What the conversation looks like
+
+Recorded in Claude, on a demo company's books.
+
+> **You:** Why did gross margin drop in July? Show me the accounts that moved.
+
+Gross margin fell from 60.1% in June to 55.4% in July. Revenue grew $9,200, but cost of goods sold rose $10,000, or 20%. The assistant lists each revenue account and the cost account with June, July and the change. Without being asked, it also flags that cost of goods sold is booked as one manual entry a month in round amounts, which usually means an estimate rather than a calculation.
+
+> **You:** Which transactions make up July's cost of goods sold?
+
+One manual journal entry on July 28 for $60,000, with no reference number or vendor, moving cost out of green coffee inventory. The next thing to check is how that figure was set.
+
 ## What your assistant can read
 
 - **Statements.** The balance sheet, income statement and cash flow for any period, built from the ledger when you ask. No close is needed.
