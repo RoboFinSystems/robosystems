@@ -10,13 +10,16 @@ projection that never had a posted event behind it.
 The union is discriminated on `origin` (the same typed-boundary
 discipline as `ArtifactMechanics`, which discriminates on `kind`):
 
-* `pivot`    — facts pivoted from the posted ledger (statements/reports);
-                 re-derivable from posted actuals.
+* `pivot`    — a set built by pivoting the posted ledger through a
+                 mapping (statements/reports); re-derivable from posted
+                 actuals. The mapped leaves are the pivot; the set also
+                 carries the calc-DAG rollups and derivations built on
+                 them (subtotals, net income, PP&E-net, cash flow).
 * `schedule` — forward facts generated from a schedule template
                  (straight-line depreciation, amortization); projected,
                  no posted event yet.
-* `derived`  — computed from other facts via a formula/computation
-                 (subtotals, retained-earnings close, metrics).
+* `derived`  — a set computed from other facts via a formula or
+                 computation (metrics).
 * `asserted` — provided/manual/external/cross-graph-share; the value is
                  the assertion, with no ledger lineage in this graph.
 * `document` — text-block fact bound from a platform Document; the
@@ -46,7 +49,12 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class PivotProvenance(BaseModel):
-  """Facts pivoted from the posted ledger (statements / reports)."""
+  """A set built by pivoting the posted ledger (statements / reports).
+
+  Describes the set's construction, not each fact: only the mapped leaves
+  and flow facts aggregate posted line items; the set's subtotals and
+  derivations are computed from those leaves.
+  """
 
   origin: Literal["pivot"] = "pivot"
   mapping_id: str = Field(
@@ -92,12 +100,10 @@ class ScheduleProvenance(BaseModel):
 
 
 class DerivedProvenance(BaseModel):
-  """Facts computed from other facts via a formula/computation.
-
-  Subtotals and the retained-earnings close; metrics will use it too. At
-  least one of `formula` / `computation` / `source_fact_ids` must be
-  present — computation-only covers auto-derived facts with no single source
-  row (retained earnings, persisted subtotals).
+  """Facts computed from other facts via a formula/computation — today only
+  `compute-metrics`. Statement subtotals and the retained-earnings close ride
+  under `pivot`. At least one of `formula` / `computation` / `source_fact_ids`
+  must be present; computation-only covers a result with no single source row.
   """
 
   origin: Literal["derived"] = "derived"
