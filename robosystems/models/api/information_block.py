@@ -238,9 +238,11 @@ class FactSetLite(BaseModel):
     description=(
       "Typed `FactProvenance` descriptor (discriminated on `origin`: "
       "pivot | schedule | derived | asserted | document | forecast | filed) "
-      "recording how this FactSet's facts were constructed. Surfaced as "
-      "JSON, mirroring how mechanics is exposed. Null when the FactSet "
-      "carries no descriptor."
+      "recording how this FactSet was constructed. It describes the set, "
+      "not each fact: a `pivot` set's mapped leaves aggregate posted line "
+      "items, while its subtotals and derivations are computed from those "
+      "leaves. Surfaced as JSON, mirroring how mechanics is exposed. Null "
+      "when the FactSet carries no descriptor."
     ),
   )
 
