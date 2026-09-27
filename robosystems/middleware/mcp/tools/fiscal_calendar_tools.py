@@ -168,6 +168,9 @@ class ClosePeriodTool:
       "name": "close-period",
       "description": """Close a fiscal period: post its drafts, lock it, and save its statements.
 
+**WHEN TO USE:**
+- Month-end: the step that posts a period's drafts and locks the period
+
 **WHAT IT DOES (atomic):**
 1. Validates closeable gates (sequence, period complete, sync current)
 2. Bulk-transitions all draft entries in the period to status='posted'
@@ -204,7 +207,7 @@ class ClosePeriodTool:
 Two shapes. Usually the receipt below, returned once the close lands. If the
 close is still running when this call's budget runs out, you instead get
 `status: "in_progress"` with an `operation_id` and `worker_started` — see
-IN PROGRESS. That is not a failure and not a timeout: the close is running
+WORKFLOW. That is not a failure and not a timeout: the close is running
 on the worker and is atomic.
 
 The receipt:
@@ -241,7 +244,7 @@ The receipt:
   allow_unposted_source_events)
 - the balance sheet equation does not balance for the period
 
-**IN PROGRESS:**
+**WORKFLOW:**
 The close is dispatched to the worker and this call waits ~18s for it. An
 `in_progress` response means it is running; get-period-close-status shows
 period_status closed and a filled close_receipt once it lands, and
