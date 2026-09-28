@@ -59,6 +59,31 @@ class ToolLoopResult:
   hit_credit_ceiling: bool = False  # stopped by the caller's max_credits
   cancelled: bool = False  # the operation was cancelled; no answer was composed
   error_retries: int = 0  # uncharged turns granted for all-error tool results
+  writes: list[dict[str, Any]] = field(default_factory=list)  # successful writes
+
+
+_WRITE_ID_KEYS = ("id", "structure_id", "block_id", "agent_id", "memory_id")
+
+
+def write_record(tool: str, arguments: dict[str, Any], result: Any) -> dict[str, Any]:
+  """What a receipt needs from one write: the operation, the object it made
+  or changed, and a name to show. Ids come from the result, else the
+  arguments (an update names its target)."""
+  # One level down too: some tools wrap the object (`{"memory": {...}}`).
+  nested = (
+    [v for v in result.values() if isinstance(v, dict)]
+    if isinstance(result, dict)
+    else []
+  )
+  sources = [r for r in (result, *nested, arguments) if isinstance(r, dict)]
+  object_id = next(
+    (str(src[k]) for src in sources for k in _WRITE_ID_KEYS if src.get(k)), None
+  )
+  name = next((str(src["name"]) for src in sources if src.get("name")), None)
+  record: dict[str, Any] = {"operation": tool, "id": object_id, "name": name}
+  if isinstance(result, dict) and result.get("block_type"):
+    record["block_type"] = result["block_type"]
+  return record
 
 
 def _serialize_tool_result(result: Any, tool_name: str | None = None) -> str:
@@ -96,6 +121,7 @@ async def run_tool_loop(
   max_credits: float | None = None,
   user_message: str | None = None,
   effort: str | None = None,
+  write_tools: frozenset[str] = frozenset(),
 ) -> ToolLoopResult:
   """Run a bounded tool-use loop and return the model's final answer.
 
@@ -107,7 +133,9 @@ async def run_tool_loop(
   ``max_credits`` is a soft ceiling checked between calls; the wrap-up turn
   can carry spend somewhat past it. ``user_message`` replaces ``ctx.query``
   as the opening turn, for per-request context that must stay out of the
-  cached system prefix.
+  cached system prefix. Each successful call to one of ``write_tools`` is
+  recorded in ``writes``, whatever stops the loop, so a partial run shows
+  what landed.
   """
   tools = await ctx.tools.get_tool_schemas(tool_names)
   if not tools:
@@ -121,6 +149,7 @@ async def run_tool_loop(
   messages.append(AIMessage(role="user", content=user_message or ctx.query))
 
   tools_called: list[str] = []
+  writes: list[dict[str, Any]] = []
   last_rows: list[dict[str, Any]] | None = None
   last_cypher: str | None = None
 
@@ -135,6 +164,7 @@ async def run_tool_loop(
     # queued spends nothing. No wrap-up call on cancel.
     if await ctx.progress.is_cancelled():
       return ToolLoopResult(
+        writes=writes,
         text="Cancelled before an answer was reached.",
         rows=last_rows,
         cypher=last_cypher,
@@ -173,6 +203,7 @@ async def run_tool_loop(
 
     if response.stop_reason != "tool_use":
       return ToolLoopResult(
+        writes=writes,
         text=response.content,
         rows=last_rows,
         cypher=last_cypher,
@@ -222,6 +253,8 @@ async def run_tool_loop(
 
       if not is_error:
         turn_succeeded = True
+        if name in write_tools:
+          writes.append(write_record(name, args, result))
       tool_results.append(
         tool_result_block(call.id, _serialize_tool_result(result, name), is_error)
       )
@@ -235,6 +268,7 @@ async def run_tool_loop(
 
   if await ctx.progress.is_cancelled():
     return ToolLoopResult(
+      writes=writes,
       text="Cancelled before an answer was reached.",
       rows=last_rows,
       cypher=last_cypher,
@@ -280,6 +314,7 @@ async def run_tool_loop(
       len(final.tool_calls),
     )
   return ToolLoopResult(
+    writes=writes,
     text=final.content or _NO_ANSWER,
     rows=last_rows,
     cypher=last_cypher,

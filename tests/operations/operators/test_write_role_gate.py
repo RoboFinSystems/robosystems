@@ -136,6 +136,13 @@ class TestRegisteredOperatorDeclarations:
       "MappingOperator persists mapping associations, so it must stay gated"
     )
 
+  def test_author_operator_is_write_capable(self) -> None:
+    from robosystems.operations.operators.implementations.author import AuthorOperator
+
+    assert AuthorOperator.spec.read_only is False, (
+      "AuthorOperator carries write tools, so it must stay gated on the write role"
+    )
+
 
 class TestToolSurfaceMatchesSpec:
   """The tool surface handed to an operator must not exceed what the role

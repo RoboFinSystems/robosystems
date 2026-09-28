@@ -350,8 +350,8 @@ class OperatorConfig:
   # Per-operator-class profile or pinned model, between an explicit per-call
   # choice and the platform default.
   OPERATOR_MODEL_OVERRIDES: dict[str, ModelProfile | OperatorModel] = {
-    # Example: "analyst": ModelProfile.ECONOMY,
-    # Example: "mapping": OperatorModel.SONNET_5,
+    # Writes are rarer than questions and costlier to get wrong.
+    "author": ModelProfile.QUALITY,
   }
 
   ORCHESTRATOR_CONFIG = {
@@ -363,6 +363,11 @@ class OperatorConfig:
   }
 
   OPERATOR_CAPABILITIES = {
+    "author": {
+      "supported_modes": ["quick", "standard", "extended"],
+      "requires_credits": True,
+      "max_concurrent_requests": 5,
+    },
     "analyst": {
       "supported_modes": ["quick", "standard", "extended", "streaming"],
       "requires_credits": True,

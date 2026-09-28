@@ -1,0 +1,252 @@
+"""AuthorOperator — the analyst's reads plus a narrow write allowlist.
+
+The allowlist is the safety boundary: a write tool the graph exposes but the
+list omits is never advertised to the model, and the tool loop refuses any
+name it did not advertise. Every successful write is reported, so the console
+can show a receipt and refresh the page it changed.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from robosystems.config.operators import ModelProfile, OperatorConfig
+from robosystems.operations.operators.ai_client import AIResponse
+from robosystems.operations.operators.base import OperatorMode
+from robosystems.operations.operators.implementations.analyst import AnalystOperator
+from robosystems.operations.operators.implementations.author import AuthorOperator
+from robosystems.operations.operators.operator_context import OperatorContext
+from robosystems.operations.operators.operator_registry import get_operator
+from robosystems.operations.operators.progress import NoOpProgress
+from robosystems.operations.operators.tool_loop import (
+  ToolLoopResult,
+  run_tool_loop,
+  write_record,
+)
+
+pytestmark = pytest.mark.asyncio
+
+# Writes a graph exposes that must never reach the author's model.
+GATED_WRITES = [
+  "delete-information-block",
+  "delete-journal-entry",
+  "update-journal-entry",
+  "close-period",
+  "reopen-period",
+  "write-graph-cypher",
+  "set-write-policy",
+  "sync-connection",
+  "delete-taxonomy-block",
+  "create-event-handler",
+  "update-taxonomy-block",
+]
+
+
+def _tools(available: list[str], call_results: dict | None = None) -> MagicMock:
+  tools = MagicMock()
+  tools.get_tool_schemas = AsyncMock(
+    side_effect=lambda names: [
+      {"name": n, "description": "d", "inputSchema": {"type": "object"}}
+      for n in names
+      if n in available
+    ]
+  )
+  results = call_results or {}
+
+  async def call_tool(name, arguments, return_raw=False):
+    return results.get(name, {"error": "unavailable"})
+
+  tools.call_tool = AsyncMock(side_effect=call_tool)
+  return tools
+
+
+def _ctx(tools: MagicMock, ai: MagicMock | None = None) -> OperatorContext:
+  return OperatorContext(
+    graph_id="kg_test",
+    user_id="u",
+    query="Create a metric block for revenue per customer",
+    mode=OperatorMode.STANDARD,
+    history=[],
+    ai=ai or MagicMock(),
+    tools=tools,
+    progress=NoOpProgress(),
+  )
+
+
+async def _loop_kwargs(operator, tools: MagicMock) -> dict:
+  with patch(
+    "robosystems.operations.operators.implementations.analyst.run_tool_loop",
+    AsyncMock(return_value=ToolLoopResult(text="done", iterations=2)),
+  ) as loop:
+    await operator.run(_ctx(tools))
+  return loop.await_args.kwargs
+
+
+class TestDeclaration:
+  def test_registered_by_name_and_never_auto_routed(self):
+    operator = get_operator("author")
+    assert isinstance(operator, AuthorOperator)
+    assert operator.can_handle("create a metric block") == 0.0
+
+  def test_allowlist_holds_no_destructive_or_gated_tool(self):
+    assert set(AuthorOperator.WRITE_TOOLS).isdisjoint(GATED_WRITES)
+    assert not any(t.startswith("delete-") for t in AuthorOperator.WRITE_TOOLS)
+
+  def test_runs_on_the_quality_tier(self):
+    assert OperatorConfig.OPERATOR_MODEL_OVERRIDES["author"] is ModelProfile.QUALITY
+    assert (
+      OperatorConfig.resolve_model(operator_type="author").model_id
+      == OperatorConfig.resolve_model(ModelProfile.QUALITY).model_id
+    )
+
+  def test_analyst_writes_nothing(self):
+    assert AnalystOperator.WRITE_TOOLS == ()
+
+
+class TestRun:
+  async def test_advertises_allowed_writes_and_never_gated_ones(self):
+    tools = _tools(
+      ["read-graph-cypher", "create-information-block", "assert-metrics", *GATED_WRITES]
+    )
+    kwargs = await _loop_kwargs(AuthorOperator(), tools)
+
+    assert "create-information-block" in kwargs["tool_names"]
+    assert "assert-metrics" in kwargs["tool_names"]
+    assert not set(kwargs["tool_names"]) & set(GATED_WRITES)
+    assert kwargs["write_tools"] == frozenset(
+      {"create-information-block", "assert-metrics"}
+    )
+
+  async def test_step_cap_is_a_backstop_not_the_mode_budget(self):
+    kwargs = await _loop_kwargs(AuthorOperator(), _tools(["read-graph-cypher"]))
+    assert kwargs["max_iterations"] == 25
+    assert kwargs["operator_type"] == "author"
+
+  async def test_prompt_names_the_writes_and_the_rules(self):
+    tools = _tools(["read-graph-cypher", "create-information-block"])
+    kwargs = await _loop_kwargs(AuthorOperator(), tools)
+    assert "AUTHORING" in kwargs["system"]
+    assert "`create-information-block`" in kwargs["system"]
+    assert "never invent" in kwargs["system"]
+
+  async def test_prompt_says_so_when_the_graph_has_no_write_tools(self):
+    kwargs = await _loop_kwargs(AuthorOperator(), _tools(["read-graph-cypher"]))
+    assert "no write tools are available" in kwargs["system"]
+    assert kwargs["write_tools"] == frozenset()
+
+  async def test_analyst_is_unchanged_on_a_graph_with_write_tools(self):
+    tools = _tools(["read-graph-cypher", "create-information-block"])
+    kwargs = await _loop_kwargs(AnalystOperator(), tools)
+    assert "create-information-block" not in kwargs["tool_names"]
+    assert kwargs["write_tools"] == frozenset()
+    assert "AUTHORING" not in kwargs["system"]
+    assert kwargs["operator_type"] == "analyst"
+
+  async def test_writes_reach_the_result_metadata(self):
+    written = [{"operation": "create-information-block", "id": "blk_1", "name": "ARPC"}]
+    with patch(
+      "robosystems.operations.operators.implementations.analyst.run_tool_loop",
+      AsyncMock(return_value=ToolLoopResult(text="done", writes=written)),
+    ):
+      result = await AuthorOperator().run(_ctx(_tools(["read-graph-cypher"])))
+    assert result.metadata["writes"] == written
+
+
+def _turn(*calls, text: str = "") -> AIResponse:
+  blocks = [
+    {"toolUse": {"toolUseId": f"t{i}", "name": name, "input": args}}
+    for i, (name, args) in enumerate(calls)
+  ]
+  return AIResponse(
+    content=text,
+    model="m",
+    input_tokens=1,
+    output_tokens=1,
+    stop_reason="tool_use" if calls else "end_turn",
+    content_blocks=blocks or [{"text": text}],
+  )
+
+
+class TestLoopRecordsWrites:
+  async def test_only_successful_writes_are_recorded(self):
+    tools = _tools(
+      ["create-information-block", "assert-metrics", "read-graph-cypher"],
+      {
+        "create-information-block": {
+          "id": "blk_9",
+          "name": "Revenue per customer",
+          "block_type": "metric",
+        },
+        "assert-metrics": {"error": "invalid_arguments", "message": "bad"},
+        "read-graph-cypher": [{"n": 1}],
+      },
+    )
+    ai = MagicMock()
+    ai.create_message = AsyncMock(
+      side_effect=[
+        _turn(
+          ("create-information-block", {"block_type": "metric"}),
+          ("assert-metrics", {"structure_id": "s1"}),
+          ("read-graph-cypher", {"query": "MATCH (n) RETURN n LIMIT 1"}),
+        ),
+        _turn(text="Created it."),
+      ]
+    )
+    result = await run_tool_loop(
+      _ctx(tools, ai),
+      system="s",
+      tool_names=["create-information-block", "assert-metrics", "read-graph-cypher"],
+      max_iterations=3,
+      max_tokens=100,
+      write_tools=frozenset({"create-information-block", "assert-metrics"}),
+    )
+    assert result.writes == [
+      {
+        "operation": "create-information-block",
+        "id": "blk_9",
+        "name": "Revenue per customer",
+        "block_type": "metric",
+      }
+    ]
+
+  async def test_writes_survive_a_run_stopped_by_the_step_cap(self):
+    tools = _tools(
+      ["create-information-block"], {"create-information-block": {"id": "b1"}}
+    )
+    ai = MagicMock()
+    ai.create_message = AsyncMock(
+      side_effect=[
+        _turn(("create-information-block", {})),
+        _turn(text="Partial."),
+      ]
+    )
+    result = await run_tool_loop(
+      _ctx(tools, ai),
+      system="s",
+      tool_names=["create-information-block"],
+      max_iterations=1,
+      max_tokens=100,
+      write_tools=frozenset({"create-information-block"}),
+    )
+    assert result.hit_cap is True
+    assert [w["id"] for w in result.writes] == ["b1"]
+
+
+class TestWriteRecord:
+  def test_id_and_name_come_from_the_result(self):
+    assert write_record(
+      "create-agent", {"name": "Acme"}, {"id": "agt_1", "name": "Acme Corp"}
+    ) == {"operation": "create-agent", "id": "agt_1", "name": "Acme Corp"}
+
+  def test_an_update_falls_back_to_the_target_in_its_arguments(self):
+    record = write_record("assert-metrics", {"structure_id": "s_7"}, {"facts": 3})
+    assert record["id"] == "s_7"
+
+  def test_a_wrapped_object_is_read_one_level_down(self):
+    result = {"success": True, "memory": {"id": "mem_1", "text": "x"}}
+    assert write_record("remember", {"text": "x"}, result)["id"] == "mem_1"
+
+  def test_a_result_with_no_id_records_none(self):
+    assert write_record("remember", {"text": "x"}, "ok")["id"] is None
