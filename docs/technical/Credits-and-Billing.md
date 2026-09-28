@@ -26,7 +26,7 @@ The model has one rule worth memorizing: **credits meter AI, and nothing else.**
 
 ### What Consumes Credits
 
-Only operations that call an external AI model consume credits. In production, that means AI Operators calling a model through AWS Bedrock (Claude Sonnet 5 by default) — the analyst operator (which answers questions from a graph's read-only tools), the chart-of-accounts mapping operator, and any other operator-driven workflow. Each call is metered on the tokens it actually uses once it completes, then debited from the graph's credit pool.
+Only operations that call an external AI model consume credits. In production, that means AI Operators calling a model through AWS Bedrock (Claude Sonnet 5 by default) — the analyst operator (which answers questions from a graph's read-only tools), the author operator (which makes changes a request asks for, on Claude Opus 5.5), the chart-of-accounts mapping operator, and any other operator-driven workflow. Each call is metered on the tokens it actually uses once it completes, then debited from the graph's credit pool.
 
 ### What Is Free
 
@@ -47,6 +47,12 @@ Everything that does not call an AI model is free and unmetered by credits:
 AI operations are priced on the tokens consumed by the model call, not as a flat per-call fee. Nothing is reserved up front: the charge is computed *after* the model responds, from the input and output token counts it actually reported, at a per-1,000-token rate for each direction. A **minimum charge of 1 credit** then applies, so a very small call still costs something — but a call that consumed nothing costs nothing rather than being rounded up. An unregistered model raises at billing time rather than guessing a rate, so a model has to be priced before it can be used.
 
 The current rates are served as `operation_costs.token_pricing` from `GET /v1/offering`, which is where to read them rather than from a copy on this page. What a call costs depends on how many tokens it uses, so the way to plan is to run representative calls and read their actual charges from the transaction history (see [Reviewing Usage and Transaction History](#reviewing-usage-and-transaction-history)); the charge is always the real measured token cost, never a fixed estimate.
+
+### Capping a Run
+
+An operator request can carry `max_credits`, a soft ceiling on what that one run spends. It is checked before each model call, so the first call always runs and the run can end slightly above the ceiling; once reached, the operator stops calling tools and answers from what it has. The author operator applies a default of 750 credits when a request sets none, so every write run is bounded; a request's own `max_credits`, higher or lower, takes precedence. See [AI Operators & MCP](AI-Operators-and-MCP#the-operator-endpoint).
+
+A run's first model call after a few idle minutes costs more than the ones that follow, because the operator's instructions and the graph's schema are written to the model's prompt cache on that call and read from it afterwards.
 
 ## Monthly Allocations by Tier
 

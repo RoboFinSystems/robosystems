@@ -231,20 +231,22 @@ The Operator endpoint runs a model-driven executor against a graph. It is mounte
 
 **Auto-select vs specific.** `POST /operator` ranks the available operators internally and dispatches to the best match for the message — there is no endpoint to preview that ranking. `POST /operator/{operator_type}` targets one operator directly. Note that `{operator_type}` is a path parameter, so a misspelled or invented operator name returns **404 "Operator type '…' not found"** rather than a routing error.
 
-**Modes** (`mode` field on the request): `quick`, `standard`, `extended`, `streaming`. Each maps to an execution profile with a tool-call budget and timeout:
+**Modes** (`mode` field on the request): `quick`, `standard`, `extended`, `streaming`. Each maps to an execution profile with a tool-call budget, a timeout, and a reasoning effort:
 
-| Mode | Tool-call budget | Timeout |
-| --- | --- | --- |
-| `quick` | ≤ 2 | 30 s |
-| `standard` | ≤ 5 | 60 s |
-| `extended` | ≤ 12 | 300 s |
-| `streaming` | ≤ 8 | 120 s |
+| Mode | Tool-call budget | Timeout | Effort |
+| --- | --- | --- | --- |
+| `quick` | ≤ 2 | 30 s | `low` |
+| `standard` | ≤ 5 | 60 s | `medium` |
+| `extended` | ≤ 12 | 300 s | `high` |
+| `streaming` | ≤ 8 | 120 s | `medium` |
+
+Effort controls how hard the model thinks and how many tool calls it chooses to make. It is sent only to models that support it, which today is Claude Opus 5.5 (the `quality` tier); on other models the request is unchanged. The author operator (below) replaces the tool-call budget with a fixed 25-step backstop, since a write plan cut off partway would leave some changes made and some not.
 
 **Strategies.** A `?mode=sync|async|stream|auto` query parameter overrides the transport strategy on an operator `POST`. With `auto`, the endpoint chooses sync, Server-Sent Events, or async based on the tool type, client capabilities, and current load.
 
 The Operator `POST` path can be disabled by deployment via `OPERATOR_POST_ENABLED=false` (returns 403). The GraphQL MCP tools have a separate kill switch, `MCP_GRAPHQL_ENABLED`.
 
-An `OperatorRequest` carries `message` (required), `mode`, optional `history` (a list of `{role, content}` turns), `context`, `enable_rag`, `force_extended_analysis`, `operator_type`, and `selection_criteria`. The `OperatorResponse` returns `content`, `operator_used`, `mode_used`, `metadata`, `tokens_used`, `confidence_score`, `execution_time`, and `error_details`. See [robosystems.ai/docs/api](https://robosystems.ai/docs/api) for the full field reference.
+An `OperatorRequest` carries `message` (required), `mode`, optional `history` (a list of `{role, content}` turns), `context`, `max_credits`, `enable_rag`, `force_extended_analysis`, `operator_type`, and `selection_criteria`. `max_credits` is a soft ceiling on the run's spend: it is checked before each model call (the first call always runs), and once reached the operator stops calling tools and answers from what it has, so a run can end slightly above it. The `OperatorResponse` returns `content`, `operator_used`, `mode_used`, `metadata`, `tokens_used`, `confidence_score`, `execution_time`, and `error_details`. See [robosystems.ai/docs/api](https://robosystems.ai/docs/api) for the full field reference.
 
 ---
 
@@ -260,9 +262,10 @@ await context.tools.call_tool(tool_name, arguments, return_raw)
 
 Because operators call the same `middleware/mcp/tools/` classes as the external entry points, the tool an MCP client such as Claude or ChatGPT invokes is the identical implementation an in-process operator invokes. There is one tool surface, used three ways.
 
-Two operators ship today:
+Three operators ship today:
 
 - **AnalystOperator** (`analyst`; `cypher` is accepted as its former name) — answers natural-language questions over the graph from its read-only tool surface: curated financial reads (`live-financial-statement`, `build-fact-grid`, close and mapping status), `search-documents`, `recall`, GraphQL, and read-only Cypher as the general fallback. It answers questions like "What are my five largest expense accounts this year?".
+- **AuthorOperator** (`author`) — makes the change a request asks for, on top of the analyst's read tools. It writes only through an allowlist of additive, reversible tools: `create-taxonomy-block` (metric structures), `create-information-block`, `update-information-block`, `assert-metrics`, `compute-metrics`, `compute-forecast`, `create-agent`, `update-agent`, and `remember`. Deletes, journal-entry edits, period close and reopen, connection sync, taxonomy updates, and Cypher writes are never offered to it, so a request that needs one gets an explanation instead of a change. It asks when a request is ambiguous, reads before it writes, and reports each change it made. It is selected by name only (the auto-select path never picks it), requires the graph's write role, runs on the `quality` tier, and has a default `max_credits` of 750 when the request sets none. Its response lists each successful write in `metadata.writes` (`operation`, `id`, `name`), including when the run stops early. In the RoboLedger console, `/do <change>` runs it and shows the writes as a receipt.
 - **MappingOperator** — assists with chart-of-accounts mapping; scoped to graphs carrying the `roboledger` schema extension (it will not run on a graph without it).
 
 An operator declares its capabilities through an `OperatorSpec` (`name`, `description`, `capabilities`, `supported_modes`, `requires_credits`, `execution_profile`, and a `graph_scope`). The `graph_scope` restricts which graphs the operator runs on — by `shared_repo` or by `schema_extension` — which is how MappingOperator is confined to ledger graphs.
