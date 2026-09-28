@@ -62,25 +62,28 @@ def _tools(available: list[str], call_results: dict | None = None) -> MagicMock:
   return tools
 
 
-def _ctx(tools: MagicMock, ai: MagicMock | None = None) -> OperatorContext:
+def _ctx(
+  tools: MagicMock, ai: MagicMock | None = None, extra: dict | None = None
+) -> OperatorContext:
   return OperatorContext(
     graph_id="kg_test",
     user_id="u",
     query="Create a metric block for revenue per customer",
     mode=OperatorMode.STANDARD,
     history=[],
+    extra=extra or {},
     ai=ai or MagicMock(),
     tools=tools,
     progress=NoOpProgress(),
   )
 
 
-async def _loop_kwargs(operator, tools: MagicMock) -> dict:
+async def _loop_kwargs(operator, tools: MagicMock, extra: dict | None = None) -> dict:
   with patch(
     "robosystems.operations.operators.implementations.analyst.run_tool_loop",
     AsyncMock(return_value=ToolLoopResult(text="done", iterations=2)),
   ) as loop:
-    await operator.run(_ctx(tools))
+    await operator.run(_ctx(tools, extra=extra))
   return loop.await_args.kwargs
 
 
@@ -143,6 +146,27 @@ class TestRun:
     assert kwargs["write_tools"] == frozenset()
     assert "AUTHORING" not in kwargs["system"]
     assert kwargs["operator_type"] == "analyst"
+
+  async def test_a_write_run_is_bounded_by_default(self):
+    kwargs = await _loop_kwargs(AuthorOperator(), _tools(["read-graph-cypher"]))
+    assert kwargs["max_credits"] == 750
+
+  @pytest.mark.parametrize("requested", [50, 1200])
+  async def test_the_request_ceiling_wins_either_way(self, requested):
+    kwargs = await _loop_kwargs(
+      AuthorOperator(), _tools(["read-graph-cypher"]), {"max_credits": requested}
+    )
+    assert kwargs["max_credits"] == requested
+
+  async def test_a_non_positive_request_falls_back_to_the_default(self):
+    kwargs = await _loop_kwargs(
+      AuthorOperator(), _tools(["read-graph-cypher"]), {"max_credits": 0}
+    )
+    assert kwargs["max_credits"] == 750
+
+  async def test_the_analyst_keeps_no_default_ceiling(self):
+    kwargs = await _loop_kwargs(AnalystOperator(), _tools(["read-graph-cypher"]))
+    assert kwargs["max_credits"] is None
 
   async def test_writes_reach_the_result_metadata(self):
     written = [{"operation": "create-information-block", "id": "blk_1", "name": "ARPC"}]

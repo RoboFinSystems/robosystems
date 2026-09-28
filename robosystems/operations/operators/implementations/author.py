@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from robosystems.config.operators import OperatorConfig
 from robosystems.operations.operators.base import (
   ExecutionProfile,
   OperatorCapability,
@@ -14,6 +15,7 @@ from robosystems.operations.operators.base import (
   OperatorSpec,
 )
 from robosystems.operations.operators.implementations.analyst import AnalystOperator
+from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.operator_registry import register_operator
 
 # A backstop against a runaway loop, not the budget: max_credits governs. A
@@ -77,6 +79,15 @@ class AuthorOperator(AnalystOperator):
 
   def _max_iterations(self, limits: dict[str, Any]) -> int:
     return _STEP_CAP
+
+  @staticmethod
+  def _get_max_credits(ctx: OperatorContext) -> float | None:
+    """The request's ceiling, else the author's configured default: a write
+    run is bounded even when the caller sets nothing."""
+    requested = AnalystOperator._get_max_credits(ctx)
+    if requested is not None:
+      return requested
+    return OperatorConfig.get_operator_capabilities("author").get("default_max_credits")
 
   def _prompt_suffix(self, write_tools: list[str]) -> str:
     if not write_tools:
