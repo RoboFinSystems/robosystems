@@ -165,7 +165,7 @@ class TestProfileOverrides:
       {**self.NONE, ModelProfile.BALANCED: "openai-compat"}, registry
     )
     assert mapping[ModelProfile.BALANCED] is OperatorModel.OPENAI_COMPAT
-    assert mapping[ModelProfile.QUALITY] is OperatorModel.OPUS_5
+    assert mapping[ModelProfile.QUALITY] is OperatorModel.OPUS_5_5
 
   def test_a_tier_can_point_at_another_platform_model(self):
     mapping = build_profile_models(
@@ -201,7 +201,7 @@ class TestProfiles:
     assert OperatorConfig.get_bedrock_model_id() == "us.anthropic.claude-sonnet-5"
 
   def test_quality_and_economy_targets(self):
-    assert OperatorConfig.PROFILE_MODELS[ModelProfile.QUALITY] == OperatorModel.OPUS_5
+    assert OperatorConfig.PROFILE_MODELS[ModelProfile.QUALITY] == OperatorModel.OPUS_5_5
     assert (
       OperatorConfig.PROFILE_MODELS[ModelProfile.ECONOMY] == OperatorModel.GPT_5_6_LUNA
     )
@@ -233,7 +233,7 @@ class TestResolveModel:
       "us.openai.gpt-5.6-luna"
     )
     assert OperatorConfig.resolve_model("quality").model_id == (
-      "us.anthropic.claude-opus-5"
+      "us.anthropic.claude-opus-5-5"
     )
 
   def test_unknown_choice_raises(self):

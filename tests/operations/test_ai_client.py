@@ -654,7 +654,7 @@ class TestAIClientCreateMessage:
       messages=[AIMessage(role="user", content="hi")], model="quality"
     )
     assert mock_bedrock.converse.call_args.kwargs["modelId"] == (
-      "us.anthropic.claude-opus-5"
+      "us.anthropic.claude-opus-5-5"
     )
     await client.create_message(
       messages=[AIMessage(role="user", content="hi")],
