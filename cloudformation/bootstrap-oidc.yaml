@@ -772,7 +772,7 @@ Resources:
                   - sns:ListTagsForResource
                 Resource: "*"
 
-              # IAM role management — mutations pinned to the App Runner roles the
+              # IAM role management — mutations pinned to the compute roles the
               # frontend stacks create, so a compromised frontend workflow cannot
               # touch backend/deploy/SSO roles. Reads stay broad. A NEW privileged
               # role inside the prefix is what FrontendRoleBoundary prevents.
@@ -790,14 +790,17 @@ Resources:
                   - iam:DetachRolePolicy
                   - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
-                # Names verified against each app repo's template.yaml: the App
-                # Runner access/instance roles are `<app>-<env>-apprunner-*`.
-                # roboledger/roboinvestor drop the `-app` segment the S3/ECR
-                # statements use, so match on the shared `-apprunner-` shape.
+                  - iam:PassRole
+                # No iam:PassedToService condition: App Runner leaves it unset.
+                # Names per the app templates: `<app>-<env>-apprunner-*` and
+                # `-ecs-*`; roboledger/roboinvestor drop the `-app` segment.
                 Resource:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-ecs-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-ecs-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-ecs-*
               - Sid: IAMReadOnly
                 Effect: Allow
                 Action:
@@ -807,17 +810,6 @@ Resources:
                   - iam:ListRolePolicies
                   - iam:ListAttachedRolePolicies
                 Resource: "*"
-              - Sid: IAMPassRole
-                Effect: Allow
-                Action:
-                  - iam:PassRole
-                Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
-                # No iam:PassedToService condition: App Runner does not populate
-                # that key, so any value denies the pass. The role-name patterns
-                # and the roles' trust policies are the bound.
               # Setting the boundary is allowed only to this one policy, so the
               # frontend role can install the ceiling but never swap it for a
               # looser one. Removing it (DeleteRolePermissionsBoundary) is not
@@ -837,10 +829,12 @@ Resources:
                 Effect: Allow
                 Action:
                   - iam:CreateServiceLinkedRole
-                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/apprunner.amazonaws.com/*
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/*
                 Condition:
                   StringEquals:
-                    "iam:AWSServiceName": apprunner.amazonaws.com
+                    "iam:AWSServiceName":
+                      - apprunner.amazonaws.com
+                      - ecs.amazonaws.com
 
               # STS - for identity
               - Sid: STS
@@ -866,6 +860,20 @@ Resources:
                   - apprunner:TagResource
                   - apprunner:UntagResource
                   - apprunner:ListTagsForResource
+                Resource: "*"
+
+              # ECS Express (for accounts App Runner is closed to)
+              - Sid: ECSExpress
+                Effect: Allow
+                Action:
+                  - ecs:*ExpressGatewayService
+                  - ecs:CreateCluster
+                  - ecs:RegisterTaskDefinition
+                  - ecs:DeregisterTaskDefinition
+                  - ecs:TagResource
+                  - ecs:UntagResource
+                  - ecs:Describe*
+                  - ecs:List*
                 Resource: "*"
       Tags:
         - Key: Name
