@@ -12,7 +12,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy.exc import DBAPIError, ProgrammingError
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 
 from robosystems.db.extensions import is_statement_timeout
 from robosystems.logger import logger
@@ -415,6 +415,8 @@ class _RegistrarMCPTool(BaseTool):
         "error": "command_failed",
         "message": f"{self.spec.name} failed on a database error; see server logs",
       }
+    except IntegrityError as exc:
+      return integrity_error_answer(self.spec.name, exc)
     except DBAPIError as exc:
       if is_statement_timeout(exc):
         return statement_timeout_answer(self.spec.name)
@@ -454,6 +456,33 @@ class _RegistrarMCPTool(BaseTool):
     if user_id:
       return str(user_id)
     return f"mcp:{graph_id}"
+
+
+_UNIQUE_VIOLATION = "23505"
+
+
+def integrity_error_answer(tool_name: str, exc: IntegrityError) -> dict[str, str]:
+  """A constraint refusal as a domain error the caller can act on.
+
+  A duplicate gets Postgres's own detail line ("Key (qname)=(x) already
+  exists.") — the tenant's identifier, which tells a model to reuse the
+  existing object. Anything else names only the constraint: the raw text
+  carries SQL and bound parameters.
+  """
+  diag = getattr(exc.orig, "diag", None)
+  if getattr(exc.orig, "pgcode", None) == _UNIQUE_VIOLATION:
+    detail = getattr(diag, "message_detail", None) or "the object already exists."
+    return {
+      "error": "conflict",
+      "message": f"{tool_name}: {detail} Reuse the existing object instead "
+      "of creating it again.",
+    }
+  constraint = getattr(diag, "constraint_name", None)
+  suffix = f" ({constraint})" if constraint else ""
+  return {
+    "error": "invalid_request",
+    "message": f"{tool_name} was refused by a database constraint{suffix}.",
+  }
 
 
 def _dump_response(result: Any) -> Any:

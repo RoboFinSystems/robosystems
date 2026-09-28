@@ -85,6 +85,11 @@ class AnalystOperator(Operator):
     "recall",
   ]
 
+  # Subclass hooks. The analyst writes nothing.
+  OPERATOR_TYPE = "analyst"
+  LOOP_DESCRIPTION = "Analyst tool loop"
+  WRITE_TOOLS: tuple[str, ...] = ()
+
   # Advertised in the system prompt as preferred over raw Cypher.
   CURATED_TOOL_HINTS: dict[str, str] = {
     "live-financial-statement": (
@@ -155,8 +160,7 @@ class AnalystOperator(Operator):
   async def run(self, ctx: OperatorContext) -> OperatorResult:
     limits = OperatorConfig.get_mode_limits(ctx.mode.value)
     max_results = self._get_max_results(ctx.mode)
-    # Mode budgets were tuned against `max_tools + 1` tool-calling turns.
-    max_iterations = int(limits.get("max_tools", 5)) + 1
+    max_iterations = self._max_iterations(limits)
     max_tokens = int(limits.get("max_output_tokens", 4000))
     output_mode = "answer" if ctx.extra.get("output_mode") == "answer" else "narrative"
     is_shared = is_shared_repository_or_subgraph(ctx.graph_id)
@@ -164,14 +168,18 @@ class AnalystOperator(Operator):
     # Advertise optional tools only when this graph exposes them. Cached, so
     # the loop's later call is free.
     available_tools = {
-      t["name"] for t in await ctx.tools.get_tool_schemas(self.READ_ONLY_TOOLS)
+      t["name"]
+      for t in await ctx.tools.get_tool_schemas(
+        [*self.READ_ONLY_TOOLS, *self.WRITE_TOOLS]
+      )
     }
     has_document_search = "search-documents" in available_tools
     has_memory = "recall" in available_tools
 
     orientation = await self._fetch_orientation(ctx, available_tools)
     memories = await self._fetch_memories(ctx) if has_memory else None
-    tool_names = self.READ_ONLY_TOOLS
+    write_tools = [t for t in self.WRITE_TOOLS if t in available_tools]
+    tool_names = [*self.READ_ONLY_TOOLS, *write_tools]
     if orientation is not None:
       tool_names = [t for t in tool_names if t not in _ORIENTATION_TOOLS]
 
@@ -186,7 +194,7 @@ class AnalystOperator(Operator):
       orientation,
       curated_tools,
       has_memory,
-    )
+    ) + self._prompt_suffix(write_tools)
 
     result = await run_tool_loop(
       ctx,
@@ -196,26 +204,30 @@ class AnalystOperator(Operator):
       max_iterations=max_iterations,
       max_tokens=max_tokens,
       temperature=0.3,
-      operator_type="analyst",
-      operation_description="Analyst tool loop",
+      operator_type=self.OPERATOR_TYPE,
+      operation_description=self.LOOP_DESCRIPTION,
       max_credits=self._get_max_credits(ctx),
       effort=limits.get("effort"),
+      write_tools=frozenset(write_tools),
     )
 
     await ctx.progress.report("Done", percent=100)
 
     rows = result.rows or []
+    metadata: dict[str, Any] = {
+      "cypher": result.cypher,
+      "rows": rows,
+      "result_count": len(rows),
+      "hit_step_limit": result.hit_cap,
+      "hit_credit_ceiling": result.hit_credit_ceiling,
+      "cancelled": result.cancelled,
+      "loop_iterations": result.iterations,
+    }
+    if self.WRITE_TOOLS:
+      metadata["writes"] = result.writes
     return OperatorResult(
       content=result.text,
-      metadata={
-        "cypher": result.cypher,
-        "rows": rows,
-        "result_count": len(rows),
-        "hit_step_limit": result.hit_cap,
-        "hit_credit_ceiling": result.hit_credit_ceiling,
-        "cancelled": result.cancelled,
-        "loop_iterations": result.iterations,
-      },
+      metadata=metadata,
       tools_called=list(dict.fromkeys(result.tools_called)),
       confidence_score=self._calculate_confidence(result),
     )
@@ -430,6 +442,13 @@ EXAMPLE QUERIES (working patterns for this graph — copy and adapt rather than 
         "row — summarize and interpret."
       )
     return prompt
+
+  def _max_iterations(self, limits: dict[str, Any]) -> int:
+    # Mode budgets were tuned against `max_tools + 1` tool-calling turns.
+    return int(limits.get("max_tools", 5)) + 1
+
+  def _prompt_suffix(self, write_tools: list[str]) -> str:
+    return ""
 
   def _get_max_results(self, mode: OperatorMode) -> int:
     return {

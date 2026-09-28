@@ -1395,9 +1395,11 @@ class GraphMCPTools:
       error_context = self._build_error_context(name, arguments, e)
       error_msg = self._sanitize_error_message(str(e))
 
+      # The caller gets the sanitized message; the server log keeps the cause.
       logger.error(
         f"Tool execution failed for '{name}': {error_msg}",
         extra={"error_context": error_context, "exception_type": type(e).__name__},
+        exc_info=True,
       )
 
       if return_raw:
