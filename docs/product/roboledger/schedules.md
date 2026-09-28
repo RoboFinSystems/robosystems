@@ -7,6 +7,20 @@ section: Keep the books right
 
 Some entries are the same every month: depreciation on equipment, amortization of software or a loan fee, a prepaid insurance policy rolling off. In RoboLedger each one is a schedule. You set it up once, every close drafts its entry for you to review, and every forecast keeps it running until it ends.
 
+![Schedules with ChatGPT: set up depreciation and amortization once](https://youtu.be/jGjPJRsAMsE)
+
+## What the conversation looks like
+
+Recorded in ChatGPT, on a demo company's books.
+
+> **You:** We bought a delivery van on September 1: 38,000, five years, 2,000 salvage. Set up straight-line depreciation.
+
+The assistant checks the depreciation accounts, then sets up the schedule: a $36,000 depreciable basis over 60 months, $600 a month from September 2026 through August 2031, debiting depreciation expense and crediting accumulated depreciation.
+
+> **You:** What will our schedules post when September closes?
+
+Six schedules, $7,988.88 in all, the new van included: amortization of prepaid software and insurance, and depreciation on computer equipment, the office build-out and the van. Nothing posts until September is closed. The van also appears in **Ledger → Closing Book** as its own schedule.
+
 ## What a schedule is
 
 A schedule books one amount, from one account to another, every month from a first month to a last month.
