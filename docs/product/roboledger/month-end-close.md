@@ -9,6 +9,24 @@ Closing a month in RoboLedger locks the period, posts its adjusting entries, and
 
 Close is the last thing to set up, on purpose. Connect your books, ask questions, build reports and plans first. Once you trust the numbers, closing is the same conversation with one more step.
 
+![Close the month with ChatGPT: RoboLedger month-end close](https://youtu.be/bKgMr-bxnk0)
+
+## What the conversation looks like
+
+Recorded in ChatGPT, on a demo company's books.
+
+> **You:** What's blocking the August close? Don't close anything yet.
+
+Nothing is blocking August. Five entries are drafted and ready for review, they balance, and nothing has posted.
+
+> **You:** Show me the entries that will post when August closes.
+
+Five entries dated August 31: tooling prepay and insurance amortization, and depreciation on computer equipment and the office build-out. $7,388.88 of debits and credits, all local, none written to QuickBooks.
+
+> **You:** Looks right. Close August.
+
+ChatGPT asks you to allow the close before it runs. Then the receipt: five entries posted, no rule failed, the month's statements saved, and the close target moved to September.
+
 ## Before your first close
 
 - **Your books are connected and synced.** See [Connect your books to your AI assistant](connect-your-books.md).
