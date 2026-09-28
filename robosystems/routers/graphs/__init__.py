@@ -2,6 +2,7 @@
 
 from robosystems.config import env
 
+from .audit import router as audit_router
 from .backups import router as backups_router
 from .connections import router as connections_router
 from .credits import router as credits_router
@@ -19,6 +20,7 @@ from .tables import router as tables_router
 from .usage import router as usage_router
 
 __all__ = [
+  "audit_router",
   "backups_router",
   "connections_router",
   "credits_router",

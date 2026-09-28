@@ -14,6 +14,7 @@ from .billing import (
   subscriptions_router as billing_subscriptions_router,
 )
 from .graphs import (
+  audit_router,
   backups_router,
   credits_router,
   files_router,
@@ -67,6 +68,7 @@ router.include_router(health_router)
 router.include_router(info_router)
 router.include_router(limits_router)
 router.include_router(members_router)
+router.include_router(audit_router)
 router.include_router(subgraphs_router, prefix="/subgraphs")
 router.include_router(graph_subscriptions_router, prefix="/subscriptions")
 router.include_router(tables_router)
