@@ -91,3 +91,84 @@ async def test_only_refusals_before_generation_are_retried():
   with pytest.raises(ClientError):
     await client._converse_with_retry({})
   assert client.client.converse.call_count == 1
+
+
+@pytest.fixture
+def dropping_bedrock():
+  """A stand-in for bedrock-runtime whose first connection dies before any
+  reply, the way a pooled connection the NAT dropped while idle does."""
+  import socket
+
+  hits: list[str] = []
+  body = json.dumps(
+    {
+      "output": {"message": {"role": "assistant", "content": [{"text": "x"}]}},
+      "stopReason": "end_turn",
+      "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+      "metrics": {"latencyMs": 1},
+    }
+  ).encode()
+  listener = socket.socket()
+  listener.bind(("127.0.0.1", 0))
+  listener.listen()
+
+  def serve():
+    while True:
+      try:
+        conn, _ = listener.accept()
+      except OSError:
+        return
+      with conn:
+        conn.recv(65536)
+        if not hits:
+          hits.append("dropped")
+          continue
+        hits.append("answered")
+        conn.sendall(
+          b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+          + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+          + body
+        )
+
+  threading.Thread(target=serve, daemon=True).start()
+  yield f"http://127.0.0.1:{listener.getsockname()[1]}", hits
+  listener.close()
+
+
+def _client_for(url: str) -> AIClient:
+  client = AIClient.__new__(AIClient)
+  client.client = long_call_client(
+    "bedrock-runtime",
+    5,
+    region_name="us-east-1",
+    endpoint_url=url,
+    aws_access_key_id="x",
+    aws_secret_access_key="y",
+  )
+  return client
+
+
+_REQUEST = {"modelId": "m", "messages": [{"role": "user", "content": [{"text": "q"}]}]}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_connection_dropped_before_the_call_is_re_sent(dropping_bedrock):
+  url, hits = dropping_bedrock
+
+  response = await _client_for(url)._converse_with_retry(_REQUEST)
+
+  assert response["stopReason"] == "end_turn"
+  assert hits == ["dropped", "answered"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_drop_after_the_window_is_not_re_sent(dropping_bedrock):
+  url, hits = dropping_bedrock
+
+  with patch.object(ai_client, "_STALE_CONNECTION_WINDOW", -1):
+    with pytest.raises(ai_client._STALE_CONNECTION_ERRORS):
+      await _client_for(url)._converse_with_retry(_REQUEST)
+
+  assert hits == ["dropped"]

@@ -8,10 +8,19 @@ must be replayed verbatim or the transcript is rejected.
 
 import asyncio
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
+from botocore.exceptions import (
+  BotoCoreError,
+  ClientError,
+  ConnectionClosedError,
+  ConnectTimeoutError,
+  EndpointConnectionError,
+  ReadTimeoutError,
+  SSLError,
+)
 
 from robosystems.config import (
   ModelProfile,
@@ -42,6 +51,18 @@ _UNSTARTED_ERROR_CODES = frozenset(
   {"ThrottlingException", "ServiceUnavailableException", "ModelNotReadyException"}
 )
 _UNSTARTED_MAX_ATTEMPTS = 3
+
+# A pooled connection the network dropped while idle (NAT gateways cut them
+# after 350s) fails the next call almost at once, before Bedrock has it. Such
+# a failure is re-sent once; one arriving after the window may have been a
+# generation in flight, and is not.
+_STALE_CONNECTION_ERRORS = (
+  ConnectionClosedError,
+  ConnectTimeoutError,
+  EndpointConnectionError,
+  SSLError,
+)
+_STALE_CONNECTION_WINDOW = 5.0
 
 _PROVIDER_ERROR_CODES = frozenset(
   {
@@ -261,16 +282,28 @@ class AIClient:
     return self._parse_response(response, spec)
 
   async def _converse_with_retry(self, request: dict[str, Any]) -> dict[str, Any]:
-    """Retry only refusals that precede generation (nothing was billed)."""
+    """Retry only failures that precede generation (nothing was billed)."""
     for attempt in range(1, _UNSTARTED_MAX_ATTEMPTS + 1):
       try:
-        return await asyncio.to_thread(self._converse_sync, request)
+        return await self._converse_on_live_connection(request)
       except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "")
         if code not in _UNSTARTED_ERROR_CODES or attempt == _UNSTARTED_MAX_ATTEMPTS:
           raise
         await asyncio.sleep(2**attempt)
     raise AssertionError("unreachable")
+
+  async def _converse_on_live_connection(
+    self, request: dict[str, Any]
+  ) -> dict[str, Any]:
+    started = time.monotonic()
+    try:
+      return await asyncio.to_thread(self._converse_sync, request)
+    except _STALE_CONNECTION_ERRORS as e:
+      if time.monotonic() - started > _STALE_CONNECTION_WINDOW:
+        raise
+      logger.warning(f"Bedrock connection dropped before the call; re-sending: {e}")
+      return await asyncio.to_thread(self._converse_sync, request)
 
   def _converse_sync(self, request: dict[str, Any]) -> dict[str, Any]:
     return self.client.converse(**request)
