@@ -453,10 +453,22 @@ deploy_github_oidc() {
     print_info "Role ARN: ${GITHUB_ACTIONS_ROLE_ARN}"
 }
 
+# The template's comments put it over CloudFormation's 51,200-byte
+# --template-body limit, so full-line comments are dropped from what is sent.
+# Safe while the template has no block scalars (no content line starts with #).
+oidc_template_file() {
+    local out
+    out=$(mktemp)
+    grep -v '^[[:space:]]*#' cloudformation/bootstrap-oidc.yaml > "$out"
+    echo "$out"
+}
+
 deploy_oidc_create() {
+    local template
+    template=$(oidc_template_file)
     aws cloudformation create-stack \
         --stack-name "${OIDC_STACK_NAME}" \
-        --template-body file://cloudformation/bootstrap-oidc.yaml \
+        --template-body "file://${template}" \
         --parameters \
             ParameterKey=GitHubOrg,ParameterValue="${GITHUB_ORG}" \
             ParameterKey=GitHubRepoName,ParameterValue="${GITHUB_REPO}" \
@@ -464,6 +476,7 @@ deploy_oidc_create() {
         --profile "${SSO_PROFILE}" \
         --region "${AWS_REGION}" \
         --tags Key=Service,Value=RoboSystems Key=Component,Value=GitHubOIDC
+    rm -f "$template"
 
     print_step "Waiting for stack creation..."
     aws cloudformation wait stack-create-complete \
@@ -513,14 +526,15 @@ deploy_oidc_update() {
             ;;
     esac
 
-    local change_set
+    local change_set template
     change_set="bootstrap-$(date +%Y%m%d%H%M%S)"
+    template=$(oidc_template_file)
     print_step "Computing what would change (change set ${change_set})..."
     aws cloudformation create-change-set \
         --stack-name "${OIDC_STACK_NAME}" \
         --change-set-name "${change_set}" \
         --change-set-type UPDATE \
-        --template-body file://cloudformation/bootstrap-oidc.yaml \
+        --template-body "file://${template}" \
         --parameters \
             ParameterKey=GitHubOrg,ParameterValue="${GITHUB_ORG}" \
             ParameterKey=GitHubRepoName,ParameterValue="${GITHUB_REPO}" \
@@ -528,6 +542,7 @@ deploy_oidc_update() {
         --profile "${SSO_PROFILE}" \
         --region "${AWS_REGION}" \
         --tags Key=Service,Value=RoboSystems Key=Component,Value=GitHubOIDC >/dev/null
+    rm -f "$template"
 
     if ! aws cloudformation wait change-set-create-complete \
         --stack-name "${OIDC_STACK_NAME}" \
