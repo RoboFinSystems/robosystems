@@ -6,11 +6,14 @@ dispatched before the hand-written ladder, so they win on a name clash.
 """
 
 import json
+import time
 from typing import TYPE_CHECKING, Any
 
 from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.middleware.mcp.query_validator import GraphQueryValidator
+from robosystems.middleware.operations import run_off_loop
+from robosystems.security.mcp_audit import build_record, write_record
 
 from ..exceptions import (
   GraphAPIError,
@@ -18,6 +21,7 @@ from ..exceptions import (
   GraphQueryTimeoutError,
   GraphValidationError,
 )
+from .classification import is_mutating_tool
 from .cypher_tool import CypherTool
 from .example_queries_tool import ExampleQueriesTool
 from .graph_tools import (
@@ -783,7 +787,66 @@ class GraphMCPTools:
   async def call_tool(
     self, name: str, arguments: dict[str, Any], return_raw: bool = False
   ) -> Any:
-    """Dispatch by name; `return_raw` returns the native result, not JSON."""
+    """Dispatch by name; `return_raw` returns the native result, not JSON.
+
+    A mutating call, from an external client or an in-app operator, is
+    recorded in `mcp_mutation_audit` whatever its outcome.
+    """
+    if not is_mutating_tool(name):
+      return await self._dispatch_tool(name, arguments, return_raw)
+
+    started = time.monotonic()
+    result: Any = None
+    error: BaseException | None = None
+    try:
+      result = await self._dispatch_tool(name, arguments, return_raw)
+      return result
+    except BaseException as exc:
+      error = exc
+      raise
+    finally:
+      await self._record_mutation(
+        name, arguments, result, error, (time.monotonic() - started) * 1000
+      )
+
+  async def _record_mutation(
+    self,
+    name: str,
+    arguments: dict[str, Any],
+    result: Any,
+    error: BaseException | None,
+    duration_ms: float,
+  ) -> None:
+    # Auditing never breaks the call it describes.
+    try:
+      if isinstance(result, str):
+        # A JSON-rendered result: read it back for status and object ids.
+        try:
+          result = json.loads(result)
+        except ValueError:
+          pass
+      record = build_record(
+        graph_id=self.client.graph_id,
+        tool_name=name,
+        arguments=arguments,
+        result=result,
+        error=error,
+        duration_ms=duration_ms,
+        user_id=getattr(self.client, "user_id", None),
+        caller=getattr(self.client, "audit_caller", None),
+      )
+    except Exception:
+      logger.error(
+        "mcp_mutation_audit.unrecorded",
+        extra={"audit": {"tool_name": name, "reason": "record_build_failed"}},
+        exc_info=True,
+      )
+      return
+    await run_off_loop(write_record, record)
+
+  async def _dispatch_tool(
+    self, name: str, arguments: dict[str, Any], return_raw: bool = False
+  ) -> Any:
     # A client with a stale tool list can still call a tool this graph no
     # longer advertises; answer it instead of failing in the OLTP validator.
     if self._is_tenant_subgraph() and name not in SUBGRAPH_TOOL_PROFILE:

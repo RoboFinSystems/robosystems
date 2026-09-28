@@ -37,6 +37,7 @@ from .graph import (
   GraphTable,
   GraphUsage,
   GraphUser,
+  McpMutationAudit,
   SourceFile,
   UsageEventType,
 )
@@ -97,6 +98,7 @@ __all__ = [
   "GraphUser",
   "InvitationStatus",
   "InvoiceStatus",
+  "McpMutationAudit",
   "OAuthClient",
   "OAuthGrant",
   "OAuthToken",

@@ -15,6 +15,7 @@ from robosystems.operations.operators.base import (
   OperatorResult,
   OperatorSpec,
 )
+from robosystems.security.mcp_audit import McpCaller
 
 GRAPH_ID = "kg01234567890abcdef"
 USER_ID = "usr_test123"
@@ -174,6 +175,13 @@ async def test_worker_uses_the_full_tool_surface_gated_by_read_only():
       manager=AsyncMock(),
     )
 
-  http_access.assert_called_once_with(GRAPH_ID, read_only=True, user_id=USER_ID)
+  # The run is named on the tool access so the mutation audit attributes
+  # each write to it.
+  http_access.assert_called_once_with(
+    GRAPH_ID,
+    read_only=True,
+    user_id=USER_ID,
+    caller=McpCaller(operator_type="analyst", operation_id="op_01TEST"),
+  )
   ctx = operator.run.call_args[0][0]
   assert ctx.tools is tools

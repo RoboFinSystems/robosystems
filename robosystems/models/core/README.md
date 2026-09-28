@@ -22,7 +22,7 @@ For the extensions side, see [`../extensions/README.md`](../extensions/README.md
 | `billing/` | `BillingCustomer`, `BillingSubscription`, `BillingInvoice` + line items, `BillingAuditLog` |
 | `connection/` | `Connection` (provider, graph, sync state, write policy) and `ConnectionCredentials` (Fernet-encrypted OAuth tokens) |
 | `document/` | `Document` — metadata for uploaded markdown/text indexed in OpenSearch |
-| `graph/` | `Graph`, `GraphBackup`, `GraphCredits` + `GraphCreditTransaction`, `GraphFile`, `GraphSchema`, `GraphTable`, `GraphUsage`, `GraphUser`, `SourceFile` |
+| `graph/` | `Graph`, `GraphBackup`, `GraphCredits` + `GraphCreditTransaction`, `GraphFile`, `GraphSchema`, `GraphTable`, `GraphUsage`, `GraphUser`, `SourceFile`, `McpMutationAudit` (one row per mutating MCP call; no FK to `graphs`, so rows outlive the graph) |
 | `org/` | `Org`, `OrgUser` (membership + role), `OrgInvitation`, `OrgLimits` |
 | `user/` | `User`, `UserAPIKey`, `UserToken`, `UserIdentity`, `ScimToken`, `UserRepository`, and shared-repository credits |
 
