@@ -46,6 +46,13 @@ Parameters:
     AllowedPattern: ^[a-zA-Z0-9._-]+$
     ConstraintDescription: Must be a valid GitHub repository name
 
+  GitHubMarketplaceRepoName:
+    Type: String
+    Default: robosystems-marketplace
+    Description: AWS Marketplace signup portal and metering repository name
+    AllowedPattern: ^[a-zA-Z0-9._-]+$
+    ConstraintDescription: Must be a valid GitHub repository name
+
   # Tagging Configuration
   ServiceTag:
     Type: String
@@ -871,6 +878,121 @@ Resources:
           Value: CloudFormation
 
   # =============================================================================
+  # MARKETPLACE ROLES - AWS Marketplace signup portal and metering
+  # =============================================================================
+  # Seller calls (ResolveCustomer, GetEntitlements, BatchMeterUsage) work only
+  # from the listing's own account, so the portal deploys here with its own
+  # role: it creates Lambda execution roles, each capped by this boundary.
+  MarketplaceRoleBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ManagedPolicyName: !Sub ${ServiceTag}MarketplaceRoleBoundary
+      Description: Permissions ceiling for the execution roles created by the marketplace stack
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [aws-marketplace:ResolveCustomer, aws-marketplace:GetEntitlements, aws-marketplace:BatchMeterUsage, ce:GetCostAndUsage]
+            Resource: "*"
+          - Effect: Allow
+            Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:Query, dynamodb:Scan]
+            Resource: !Sub arn:aws:dynamodb:*:${AWS::AccountId}:table/robosystems-marketplace-*
+          - Effect: Allow
+            Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes, sns:Publish]
+            Resource:
+              - !Sub arn:aws:sqs:*:${AWS::AccountId}:robosystems-marketplace-*
+              - !Sub arn:aws:sns:*:${AWS::AccountId}:robosystems-marketplace-*
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:robosystems-marketplace-*
+          - Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !Sub arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/lambda/robosystems-marketplace-*
+
+  GitHubActionsMarketplaceRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: !Sub ${ServiceTag}GitHubActionsMarketplaceRole
+      Description: !Sub Deploy role for the ${ServiceTag} AWS Marketplace portal
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOIDCProvider
+            Action: [sts:AssumeRoleWithWebIdentity, sts:TagSession]
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubOrg}/${GitHubMarketplaceRepoName}:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}/${GitHubMarketplaceRepoName}:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}/${GitHubMarketplaceRepoName}:ref:refs/tags/v*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubMarketplaceRepoName}@*:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}@*/${GitHubMarketplaceRepoName}@*:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubMarketplaceRepoName}@*:ref:refs/tags/v*
+      Policies:
+        - PolicyName: !Sub ${ServiceTag}MarketplaceDeploymentPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [cloudformation:CreateStack, cloudformation:UpdateStack, cloudformation:DeleteStack, cloudformation:ContinueUpdateRollback]
+                Resource: !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/RoboSystemsMarketplace*/*
+              - Effect: Allow
+                Action: [cloudformation:Describe*, cloudformation:GetTemplate, cloudformation:ListStacks, cloudformation:ValidateTemplate,
+                         lambda:CreateEventSourceMapping, lambda:GetEventSourceMapping, lambda:ListEventSourceMappings,
+                         logs:DescribeLogGroups, secretsmanager:GetRandomPassword, sts:GetCallerIdentity,
+                         iam:GetRole, iam:GetRolePolicy, iam:ListRolePolicies, iam:ListAttachedRolePolicies, iam:ListRoleTags,
+                         route53:ChangeResourceRecordSets, route53:GetChange, route53:GetHostedZone, route53:ListHostedZones, route53:ListResourceRecordSets,
+                         acm:RequestCertificate, acm:DescribeCertificate, acm:ListCertificates, acm:GetCertificate, acm:DeleteCertificate,
+                         acm:AddTagsToCertificate, acm:ListTagsForCertificate, cloudfront:*]
+                Resource: "*"
+              - Effect: Allow
+                Action: [s3:*, lambda:*, dynamodb:*, sqs:*, sns:*, events:*, logs:*, secretsmanager:*]
+                Resource:
+                  - arn:aws:s3:::robosystems-marketplace-*
+                  - arn:aws:s3:::robosystems-marketplace-*/*
+                  - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:robosystems-marketplace-*
+                  - !Sub arn:aws:lambda:*:${AWS::AccountId}:event-source-mapping:*
+                  - !Sub arn:aws:dynamodb:*:${AWS::AccountId}:table/robosystems-marketplace-*
+                  - !Sub arn:aws:sqs:*:${AWS::AccountId}:robosystems-marketplace-*
+                  - !Sub arn:aws:sns:*:${AWS::AccountId}:robosystems-marketplace-*
+                  - !Sub arn:aws:events:*:${AWS::AccountId}:rule/robosystems-marketplace-*
+                  - !Sub arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/lambda/robosystems-marketplace-*
+                  - !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:robosystems-marketplace-*
+              # Execution roles may be created or given policies only inside
+              # MarketplaceRoleBoundary, and passed only to Lambda.
+              - Effect: Allow
+                Action: [iam:CreateRole, iam:PutRolePolicy, iam:AttachRolePolicy, iam:PutRolePermissionsBoundary]
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-marketplace-*
+                Condition:
+                  StringEquals:
+                    iam:PermissionsBoundary: !Ref MarketplaceRoleBoundary
+              - Effect: Allow
+                Action: [iam:DeleteRole, iam:UpdateRole, iam:DeleteRolePolicy, iam:DetachRolePolicy, iam:TagRole, iam:UntagRole]
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-marketplace-*
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-marketplace-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: lambda.amazonaws.com
+      Tags:
+        - Key: Name
+          Value: !Sub ${ServiceTag}-github-actions-marketplace-role
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # =============================================================================
   # APPLICATION SUPER ADMIN ROLE - For human admins managing the application
   # =============================================================================
   # This role is for SSO users who need to administer the RoboSystems application
@@ -1049,6 +1171,19 @@ Outputs:
     Value: !Ref FrontendRoleBoundary
     Export:
       Name: !Sub ${AWS::StackName}-FrontendRoleBoundaryArn
+
+  # Marketplace Role Outputs
+  GitHubActionsMarketplaceRoleArn:
+    Description: ARN of the IAM Role for the AWS Marketplace portal deployment
+    Value: !GetAtt GitHubActionsMarketplaceRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-GitHubActionsMarketplaceRoleArn
+
+  MarketplaceRoleBoundaryArn:
+    Description: Permissions boundary the marketplace stack sets on the execution roles it creates
+    Value: !Ref MarketplaceRoleBoundary
+    Export:
+      Name: !Sub ${AWS::StackName}-MarketplaceRoleBoundaryArn
 
   WorkflowExample:
     Description: Example workflow configuration for GitHub Actions

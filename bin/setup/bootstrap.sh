@@ -729,6 +729,41 @@ EOF
     print_info "Each app's remaining setup is GitHub-only: bin/gha-setup.sh"
 }
 
+# The marketplace portal deploys with its own role, not the frontend one.
+configure_marketplace_repo() {
+    print_header "Configuring Marketplace Repository"
+
+    local role_arn repo_name
+    role_arn=$(aws cloudformation describe-stacks \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" \
+        --query 'Stacks[0].Outputs[?OutputKey==`GitHubActionsMarketplaceRoleArn`].OutputValue' \
+        --output text 2>/dev/null) || role_arn=""
+    repo_name=$(aws cloudformation describe-stacks \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" \
+        --query 'Stacks[0].Parameters[?ParameterKey==`GitHubMarketplaceRepoName`].ParameterValue' \
+        --output text 2>/dev/null) || repo_name=""
+
+    if [ -z "$role_arn" ] || [ "$role_arn" = "None" ] || [ -z "$repo_name" ] || [ "$repo_name" = "None" ]; then
+        print_warning "Stack exposes no marketplace role — skipping"
+        return 0
+    fi
+
+    local target="${GITHUB_ORG}/${repo_name}"
+    if ! gh repo view "$target" &>/dev/null; then
+        print_warning "${target} not accessible to this gh account — skipping"
+        return 0
+    fi
+
+    print_step "${target}"
+    set_variable_if_changed AWS_ROLE_ARN "$role_arn" "$target"
+    set_variable_if_changed AWS_ACCOUNT_ID "$AWS_ACCOUNT_ID" "$target"
+    set_variable_if_changed AWS_REGION "$AWS_REGION" "$target"
+}
+
 # =============================================================================
 # SSO USER EMAIL DETECTION
 # =============================================================================
@@ -1455,6 +1490,7 @@ main() {
 
     # Push the identity variables to the frontend app repos
     configure_frontend_repos
+    configure_marketplace_repo
 
     if [ "$BOOTSTRAP_MODE" = "oidc" ]; then
         show_summary
