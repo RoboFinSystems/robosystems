@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from robosystems.logger import logger
-from robosystems.security.mcp_audit import McpCaller
+from robosystems.security.operation_audit import AuditCaller
 
 
 class _RemoteToolHandle:
@@ -37,7 +37,7 @@ class HttpToolAccess:
     graph_id: str,
     read_only: bool = True,
     user_id: str | None = None,
-    caller: McpCaller | None = None,
+    caller: AuditCaller | None = None,
   ) -> None:
     self._graph_id = graph_id
     self._read_only = read_only

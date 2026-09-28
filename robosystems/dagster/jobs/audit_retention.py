@@ -1,4 +1,4 @@
-"""Daily retention for mcp_mutation_audit.
+"""Daily retention for operation_mutation_audit.
 
 Its own job, not a step of the billing jobs: those schedules are gated on
 billing, and dedicated deployments run with billing off but still keep an
@@ -27,30 +27,30 @@ _SCHEDULE_STATUS = (
 
 
 @op
-def prune_mcp_mutation_audit(
+def prune_operation_mutation_audit(
   context: OpExecutionContext, db: DatabaseResource
 ) -> dict[str, Any]:
-  """Delete audit rows older than MCP_AUDIT_RETENTION_DAYS."""
-  from robosystems.models.core import McpMutationAudit
+  """Delete audit rows older than OPERATION_AUDIT_RETENTION_DAYS."""
+  from robosystems.models.core import OperationMutationAudit
 
-  cutoff = datetime.now(UTC) - timedelta(days=env.MCP_AUDIT_RETENTION_DAYS)
+  cutoff = datetime.now(UTC) - timedelta(days=env.OPERATION_AUDIT_RETENTION_DAYS)
   with db.get_session() as session:
     deleted = (
-      session.query(McpMutationAudit)
-      .filter(McpMutationAudit.occurred_at < cutoff)
+      session.query(OperationMutationAudit)
+      .filter(OperationMutationAudit.occurred_at < cutoff)
       .delete(synchronize_session=False)
     )
 
   context.log.info(
-    f"MCP mutation audit retention: deleted {deleted} rows older than "
-    f"{env.MCP_AUDIT_RETENTION_DAYS} days"
+    f"Operation mutation audit retention: deleted {deleted} rows older than "
+    f"{env.OPERATION_AUDIT_RETENTION_DAYS} days"
   )
   return {"deleted": deleted, "cutoff": cutoff.isoformat()}
 
 
 @job(tags={"dagster/priority": "3"})
 def daily_audit_retention_job():
-  prune_mcp_mutation_audit()
+  prune_operation_mutation_audit()
 
 
 daily_audit_retention_schedule = ScheduleDefinition(

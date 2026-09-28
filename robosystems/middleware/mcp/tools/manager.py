@@ -13,7 +13,7 @@ from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.middleware.mcp.query_validator import GraphQueryValidator
 from robosystems.middleware.operations import run_off_loop
-from robosystems.security.mcp_audit import build_record, write_record
+from robosystems.security.operation_audit import build_tool_record, write_record
 
 from ..exceptions import (
   GraphAPIError,
@@ -790,7 +790,7 @@ class GraphMCPTools:
     """Dispatch by name; `return_raw` returns the native result, not JSON.
 
     A mutating call, from an external client or an in-app operator, is
-    recorded in `mcp_mutation_audit` whatever its outcome.
+    recorded in `operation_mutation_audit` whatever its outcome.
     """
     if not is_mutating_tool(name):
       return await self._dispatch_tool(name, arguments, return_raw)
@@ -825,7 +825,7 @@ class GraphMCPTools:
           result = json.loads(result)
         except ValueError:
           pass
-      record = build_record(
+      record = build_tool_record(
         graph_id=self.client.graph_id,
         tool_name=name,
         arguments=arguments,
@@ -837,7 +837,7 @@ class GraphMCPTools:
       )
     except Exception:
       logger.error(
-        "mcp_mutation_audit.unrecorded",
+        "operation_mutation_audit.unrecorded",
         extra={"audit": {"tool_name": name, "reason": "record_build_failed"}},
         exc_info=True,
       )

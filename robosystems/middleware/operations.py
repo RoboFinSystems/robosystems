@@ -506,8 +506,13 @@ def log_operation_audit(
   error: str | None = None,
   event: str = "extensions.operation",
   surface: str = "rest",
+  arguments_fingerprint: str | None = None,
+  result: Any = None,
 ) -> None:
-  """Emit one structured audit-log line per operation call.
+  """Emit one structured audit-log line per operation call, and for a
+  mutating REST call also queue its `operation_mutation_audit` row. An MCP
+  call is recorded by the MCP tool manager instead, and a replay changed
+  nothing.
 
   `event` is `"extensions.operation"` or `"graph.operation"`; `surface` is
   `"rest"` or `"mcp"`. Inside a request the payload also carries the request
@@ -537,6 +542,27 @@ def log_operation_audit(
     logger.error(event, extra={"audit": payload})
   else:
     logger.info(event, extra={"audit": payload})
+
+  if surface == "rest" and not idempotent_replay:
+    from robosystems.middleware.mcp.tools.classification import is_mutating_tool
+    from robosystems.security.operation_audit import record_api_operation
+
+    # Analytical views run through the same envelope but read; the one
+    # read/write classification decides, as it does for MCP.
+    if not is_mutating_tool(operation_name):
+      return
+
+    record_api_operation(
+      operation_name=operation_name,
+      operation_id=operation_id,
+      user_id=user_id,
+      graph_id=graph_id,
+      duration_ms=duration_ms,
+      status=status,
+      error=error,
+      arguments_fingerprint=arguments_fingerprint,
+      result=result,
+    )
 
 
 # ── Operation dispatcher ─────────────────────────────────────────────────
@@ -897,6 +923,7 @@ async def execute_operation(
           status="failed",
           idempotency_key=ctx.idempotency_key,
           error=f"{type(exc).__name__}: {exc}",
+          arguments_fingerprint=ctx.body_fingerprint,
         )
         raise
 
@@ -936,6 +963,8 @@ async def execute_operation(
         duration_ms=duration_ms,
         status="completed",
         idempotency_key=ctx.idempotency_key,
+        arguments_fingerprint=ctx.body_fingerprint,
+        result=envelope.result,
       )
       return envelope
     finally:

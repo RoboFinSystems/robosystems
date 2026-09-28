@@ -1,6 +1,6 @@
-"""The MCP mutation audit: every mutating MCP call, from an external client
-or an in-app operator, leaves one row — never its arguments, only their
-fingerprint — and a failure to record never breaks the call."""
+"""The mutation audit: every mutating call on a graph — REST, an external MCP
+client, or an in-app operator — leaves one row, never its arguments, only
+their fingerprint; and a failure to record never breaks the call."""
 
 from __future__ import annotations
 
@@ -12,12 +12,13 @@ from sqlalchemy.orm import sessionmaker
 
 from robosystems.middleware.mcp.tools.classification import is_mutating_tool
 from robosystems.middleware.mcp.tools.manager import GraphMCPTools
-from robosystems.models.core import McpMutationAudit
-from robosystems.security.mcp_audit import (
-  McpCaller,
-  build_record,
-  fingerprint,
+from robosystems.middleware.operations import fingerprint_body, log_operation_audit
+from robosystems.models.core import OperationMutationAudit
+from robosystems.security.operation_audit import (
+  AuditCaller,
+  build_tool_record,
   object_ids,
+  record_api_operation,
   write_record,
 )
 from robosystems.security.request_context import (
@@ -43,7 +44,7 @@ def _record(**overrides):
     "caller": None,
   }
   kwargs.update(overrides)
-  return build_record(**kwargs)
+  return build_tool_record(**kwargs)
 
 
 class TestClassification:
@@ -70,11 +71,11 @@ class TestRecord:
     assert record.error_code is None
     assert record.object_ids == ["agt_1"]
     assert record.duration_ms == 12.35
-    assert record.caller_kind == "client"
+    assert record.surface == "mcp"
 
   def test_arguments_are_fingerprinted_never_kept(self):
     record = _record()
-    assert record.arguments_sha256 == fingerprint(
+    assert record.arguments_fingerprint == fingerprint_body(
       {"agent_type": "vendor", "name": "Linear"}
     )
     assert "Linear" not in json.dumps(record.__dict__ | {"object_ids": []})
@@ -89,8 +90,8 @@ class TestRecord:
     assert (record.status, record.error_code) == ("failed", "ValueError")
 
   def test_an_operator_run_is_attributed_to_its_run(self):
-    record = _record(caller=McpCaller(operator_type="author", operation_id="op_1"))
-    assert record.caller_kind == "operator"
+    record = _record(caller=AuditCaller(operator_type="author", operation_id="op_1"))
+    assert record.surface == "operator"
     assert (record.operator_type, record.operation_id) == ("author", "op_1")
 
   def test_an_external_client_carries_its_credential(self):
@@ -148,18 +149,18 @@ class TestWriteRecord:
     factory = sessionmaker(bind=test_db.get_bind())
     with patch("robosystems.db.platform.SessionFactory", factory):
       write_record(
-        _record(caller=McpCaller(operator_type="author", operation_id="op_9"))
+        _record(caller=AuditCaller(operator_type="author", operation_id="op_9"))
       )
 
     session = factory()
     try:
       row = (
-        session.query(McpMutationAudit)
-        .filter(McpMutationAudit.operation_id == "op_9")
+        session.query(OperationMutationAudit)
+        .filter(OperationMutationAudit.operation_id == "op_9")
         .one()
       )
-      assert row.id.startswith("mcpa_")
-      assert (row.tool_name, row.status, row.caller_kind) == (
+      assert row.id.startswith("oma_")
+      assert (row.operation_name, row.status, row.surface) == (
         "create-agent",
         "completed",
         "operator",
@@ -173,15 +174,17 @@ class TestWriteRecord:
     broken = MagicMock(side_effect=RuntimeError("db down"))
     with (
       patch("robosystems.db.platform.SessionFactory", broken),
-      patch("robosystems.security.mcp_audit.logger") as log,
+      patch("robosystems.security.operation_audit.logger") as log,
     ):
       write_record(_record())
     log.error.assert_called_once()
-    assert log.error.call_args.args[0] == "mcp_mutation_audit.unrecorded"
-    assert log.error.call_args.kwargs["extra"]["audit"]["tool_name"] == "create-agent"
+    assert log.error.call_args.args[0] == "operation_mutation_audit.unrecorded"
+    assert (
+      log.error.call_args.kwargs["extra"]["audit"]["operation_name"] == "create-agent"
+    )
 
 
-def _tools(caller: McpCaller | None = None) -> GraphMCPTools:
+def _tools(caller: AuditCaller | None = None) -> GraphMCPTools:
   client = MagicMock()
   client.graph_id = GRAPH
   client.user_id = "user_1"
@@ -192,7 +195,7 @@ def _tools(caller: McpCaller | None = None) -> GraphMCPTools:
 @pytest.mark.asyncio
 class TestHook:
   async def test_a_mutating_call_is_recorded(self):
-    tools = _tools(McpCaller(operator_type="author", operation_id="op_2"))
+    tools = _tools(AuditCaller(operator_type="author", operation_id="op_2"))
     with (
       patch.object(tools, "_dispatch_tool", AsyncMock(return_value={"id": "agt_3"})),
       patch("robosystems.middleware.mcp.tools.manager.write_record") as write,
@@ -201,7 +204,7 @@ class TestHook:
 
     assert result == {"id": "agt_3"}
     record = write.call_args.args[0]
-    assert (record.tool_name, record.status, record.operation_id) == (
+    assert (record.operation_name, record.status, record.operation_id) == (
       "create-agent",
       "completed",
       "op_2",
@@ -247,4 +250,80 @@ class TestHook:
     ):
       result = await tools.call_tool("create-agent", {}, return_raw=True)
     assert result == {"id": "a"}
-    assert log.error.call_args.args[0] == "mcp_mutation_audit.unrecorded"
+    assert log.error.call_args.args[0] == "operation_mutation_audit.unrecorded"
+
+
+class TestRestSurface:
+  def _log(self, **overrides):
+    kwargs = {
+      "operation_name": "create-agent",
+      "operation_id": "op_rest_1",
+      "user_id": "user_1",
+      "graph_id": GRAPH,
+      "duration_ms": 5.0,
+      "status": "completed",
+      "arguments_fingerprint": "f" * 64,
+      "result": {"id": "agt_9", "name": "Linear"},
+    }
+    kwargs.update(overrides)
+    with patch("robosystems.security.operation_audit.record_api_operation") as record:
+      log_operation_audit(**kwargs)
+    return record
+
+  def test_a_mutating_rest_call_is_queued(self):
+    record = self._log()
+    kwargs = record.call_args.kwargs
+    assert kwargs["operation_name"] == "create-agent"
+    assert kwargs["arguments_fingerprint"] == "f" * 64
+    assert kwargs["result"] == {"id": "agt_9", "name": "Linear"}
+
+  def test_a_view_operation_is_a_read(self):
+    self._log(operation_name="build-fact-grid").assert_not_called()
+
+  def test_the_mcp_surface_is_left_to_the_tool_manager(self):
+    self._log(surface="mcp").assert_not_called()
+
+  def test_a_replay_changed_nothing(self):
+    self._log(idempotent_replay=True).assert_not_called()
+
+  def test_the_api_row(self):
+    with patch("robosystems.security.operation_audit._executor") as executor:
+      record_api_operation(
+        operation_name="create-agent",
+        operation_id="op_rest_2",
+        user_id="user_1",
+        graph_id=GRAPH,
+        duration_ms=5.0,
+        status="completed",
+        error=None,
+        arguments_fingerprint="a" * 64,
+        result={"id": "agt_7"},
+      )
+    fn, row = executor.submit.call_args.args
+    assert fn is write_record
+    assert (row.surface, row.operation_id, row.object_ids) == (
+      "api",
+      "op_rest_2",
+      ["agt_7"],
+    )
+    assert row.arguments_fingerprint == "a" * 64
+
+  def test_a_failed_api_call_names_no_objects(self):
+    with patch("robosystems.security.operation_audit._executor") as executor:
+      record_api_operation(
+        operation_name="create-agent",
+        operation_id="op_rest_3",
+        user_id="user_1",
+        graph_id=GRAPH,
+        duration_ms=5.0,
+        status="failed",
+        error="ValueError: bad",
+        arguments_fingerprint=None,
+        result=None,
+      )
+    row = executor.submit.call_args.args[1]
+    assert (row.status, row.error_code, row.object_ids) == (
+      "failed",
+      "ValueError: bad",
+      [],
+    )

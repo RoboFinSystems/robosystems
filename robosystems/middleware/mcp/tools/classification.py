@@ -1,5 +1,6 @@
-"""Which MCP tools read and which mutate — one definition, shared by
-authorization (viewers may call only reads) and the mutation audit."""
+"""Which MCP tools and REST operations read and which mutate — one
+definition, shared by authorization (viewers may call only reads) and the
+mutation audit on every surface. Tools and operations share names."""
 
 # Write classification is fail-closed: any tool not in this allowlist is a
 # write and needs the member/admin role, so every new tool (including
