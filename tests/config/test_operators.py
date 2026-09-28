@@ -49,6 +49,36 @@ class TestModelRegistry:
       assert spec.additional_request_fields == {"thinking": {"type": "disabled"}}
       assert spec.cache_points is True
 
+  def test_opus_5_5_runs_adaptive_thinking_and_takes_effort(self):
+    """It 400s on disabled thinking at every effort level (2026-09-27)."""
+    spec = OperatorConfig.MODEL_REGISTRY[OperatorModel.OPUS_5_5]
+    assert spec.model_id == "us.anthropic.claude-opus-5-5"
+    assert spec.pricing_key == "anthropic_claude_5_5_opus"
+    assert spec.accepts_sampling_params is False
+    assert spec.cache_points is True
+    assert spec.additional_request_fields == {"thinking": {"type": "adaptive"}}
+    assert spec.supports_effort is True
+
+  def test_only_adopted_rows_take_effort(self):
+    takes_effort = {
+      model
+      for model, spec in OperatorConfig.MODEL_REGISTRY.items()
+      if spec.supports_effort
+    }
+    assert takes_effort == {OperatorModel.OPUS_5_5}
+
+  def test_execution_modes_map_to_effort(self):
+    efforts = {
+      mode: OperatorConfig.get_mode_limits(mode)["effort"]
+      for mode in ("quick", "standard", "extended", "streaming")
+    }
+    assert efforts == {
+      "quick": "low",
+      "standard": "medium",
+      "extended": "high",
+      "streaming": "medium",
+    }
+
   def test_claude_4_family_accepts_sampling_params(self):
     for model in (
       OperatorModel.SONNET_4_6,

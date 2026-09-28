@@ -533,6 +533,71 @@ class TestAIClientCreateMessage:
     assert request["additionalModelRequestFields"] == {"thinking": {"type": "disabled"}}
 
   @pytest.mark.unit
+  async def test_claude_5_family_ignores_effort_until_adopted(self):
+    """Effort reaches a model only when its row supports_effort; Sonnet 5 has
+    not been A/B'd with it, so its request is unchanged."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    mock_bedrock.converse.return_value = _text_response("hi")
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model="claude-sonnet-5",
+      effort="high",
+    )
+    request = mock_bedrock.converse.call_args.kwargs
+    assert request["additionalModelRequestFields"] == {"thinking": {"type": "disabled"}}
+
+  @pytest.mark.unit
+  async def test_opus_5_5_runs_adaptive_thinking_with_effort(self):
+    """Opus 5.5 rejects disabled thinking; effort rides beside `thinking` as
+    `output_config` (both verified over Converse 2026-09-27)."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    mock_bedrock.converse.return_value = _text_response("hi")
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model="claude-opus-5-5",
+      temperature=0.3,
+      effort="low",
+    )
+    request = mock_bedrock.converse.call_args.kwargs
+    assert request["modelId"] == "us.anthropic.claude-opus-5-5"
+    assert request["inferenceConfig"] == {"maxTokens": 4000}
+    assert request["additionalModelRequestFields"] == {
+      "thinking": {"type": "adaptive"},
+      "output_config": {"effort": "low"},
+    }
+
+  @pytest.mark.unit
+  async def test_opus_5_5_without_effort_keeps_the_model_default(self):
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    mock_bedrock.converse.return_value = _text_response("hi")
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model="claude-opus-5-5",
+    )
+    request = mock_bedrock.converse.call_args.kwargs
+    assert request["additionalModelRequestFields"] == {"thinking": {"type": "adaptive"}}
+
+  @pytest.mark.unit
+  async def test_effort_does_not_mutate_the_registry_row(self):
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    mock_bedrock.converse.return_value = _text_response("hi")
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model="claude-opus-5-5",
+      effort="high",
+    )
+    spec = OperatorConfig.MODEL_REGISTRY[OperatorModel.OPUS_5_5]
+    assert spec.additional_request_fields == {"thinking": {"type": "adaptive"}}
+
+  @pytest.mark.unit
   async def test_luna_sends_no_cache_points_no_temperature_no_extra_fields(self):
     """GPT-5.6 over Converse rejects explicit cache points and `temperature`
     (verified live 2026-09-15); it caches implicitly and reports the reads."""

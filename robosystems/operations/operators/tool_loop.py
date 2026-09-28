@@ -95,6 +95,7 @@ async def run_tool_loop(
   max_error_retries: int = DEFAULT_MAX_ERROR_RETRIES,
   max_credits: float | None = None,
   user_message: str | None = None,
+  effort: str | None = None,
 ) -> ToolLoopResult:
   """Run a bounded tool-use loop and return the model's final answer.
 
@@ -166,6 +167,7 @@ async def run_tool_loop(
       operation_description=operation_description,
       tools=tools,
       cache_conversation=True,
+      effort=effort,
     )
     model_calls += 1
 
@@ -269,6 +271,7 @@ async def run_tool_loop(
     operation_description=operation_description,
     tools=tools,
     cache_conversation=True,
+    effort=effort,
   )
   if final.tool_calls and not final.content:
     logger.info(

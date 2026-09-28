@@ -21,6 +21,16 @@ class ModelProfile(Enum):
   QUALITY = "quality"
 
 
+class ReasoningEffort(Enum):
+  """How hard a model thinks, and how many tool calls it chooses to make."""
+
+  LOW = "low"
+  MEDIUM = "medium"
+  HIGH = "high"
+  XHIGH = "xhigh"
+  MAX = "max"
+
+
 class ModelProvider(Enum):
   """Where a model is served."""
 
@@ -37,6 +47,7 @@ class OperatorModel(Enum):
   SONNET_4_5 = "claude-sonnet-4-5-20250929"
   SONNET_4 = "claude-sonnet-4-20250514"  # Last resort fallback
   OPUS_5 = "claude-opus-5"
+  OPUS_5_5 = "claude-opus-5-5"
   GPT_5_6_LUNA = "gpt-5.6-luna"
   # The deployment's self-hosted model, registered only when enabled.
   OPENAI_COMPAT = "openai-compat"
@@ -70,6 +81,9 @@ class ModelSpec:
   # Model-specific request fields passed through Converse's
   # additionalModelRequestFields verbatim.
   additional_request_fields: dict[str, Any] = field(default_factory=dict)
+  # Send the execution mode's effort as `output_config.effort`. Rows that
+  # have not been A/B'd with effort omit it and run the model's default.
+  supports_effort: bool = False
   provider: ModelProvider = ModelProvider.BEDROCK
 
 
@@ -78,6 +92,10 @@ class ModelSpec:
 # off until adopted deliberately. (Bedrock also requires thinking disabled
 # whenever tool choice forces a tool.)
 _CLAUDE_5_REQUEST_FIELDS: dict[str, Any] = {"thinking": {"type": "disabled"}}
+
+# Opus 5.5 rejects disabled thinking at every effort level (verified over
+# Converse 2026-09-27); effort is its only depth control.
+_ADAPTIVE_THINKING_REQUEST_FIELDS: dict[str, Any] = {"thinking": {"type": "adaptive"}}
 
 
 # Wire ids: Bedrock publishes the Claude 5 family and GPT-5.6 unversioned (no
@@ -115,6 +133,14 @@ _BEDROCK_MODELS: dict[OperatorModel, ModelSpec] = {
     cache_points=True,
     accepts_sampling_params=False,
     additional_request_fields=_CLAUDE_5_REQUEST_FIELDS,
+  ),
+  OperatorModel.OPUS_5_5: ModelSpec(
+    model_id="us.anthropic.claude-opus-5-5",
+    pricing_key="anthropic_claude_5_5_opus",
+    cache_points=True,
+    accepts_sampling_params=False,
+    additional_request_fields=_ADAPTIVE_THINKING_REQUEST_FIELDS,
+    supports_effort=True,
   ),
   # The `us.` profile is its only regional address (not available In-Region).
   OperatorModel.GPT_5_6_LUNA: ModelSpec(
@@ -232,6 +258,8 @@ class ExecutionProfile:
   max_input_tokens: int
   max_output_tokens: int
   timeout_seconds: int
+  # Sent only to models whose registry row supports_effort.
+  effort: ReasoningEffort = ReasoningEffort.MEDIUM
 
 
 @dataclass
@@ -285,6 +313,7 @@ class OperatorConfig:
       max_input_tokens=50000,
       max_output_tokens=2000,
       timeout_seconds=30,
+      effort=ReasoningEffort.LOW,
     ),
     OperatorExecutionMode.STANDARD: ExecutionProfile(
       min_time_seconds=5,
@@ -294,6 +323,7 @@ class OperatorConfig:
       max_input_tokens=100000,
       max_output_tokens=4000,
       timeout_seconds=60,
+      effort=ReasoningEffort.MEDIUM,
     ),
     OperatorExecutionMode.EXTENDED: ExecutionProfile(
       min_time_seconds=30,
@@ -303,6 +333,7 @@ class OperatorConfig:
       max_input_tokens=150000,
       max_output_tokens=8000,
       timeout_seconds=300,
+      effort=ReasoningEffort.HIGH,
     ),
     OperatorExecutionMode.STREAMING: ExecutionProfile(
       min_time_seconds=5,
@@ -312,6 +343,7 @@ class OperatorConfig:
       max_input_tokens=100000,
       max_output_tokens=8000,
       timeout_seconds=120,
+      effort=ReasoningEffort.MEDIUM,
     ),
   }
 
@@ -432,6 +464,7 @@ class OperatorConfig:
       "timeout": profile.timeout_seconds,
       "max_input_tokens": profile.max_input_tokens,
       "max_output_tokens": profile.max_output_tokens,
+      "effort": profile.effort.value,
     }
 
   @classmethod
@@ -527,6 +560,7 @@ class OperatorConfig:
           "max_input_tokens": profile.max_input_tokens,
           "max_output_tokens": profile.max_output_tokens,
           "timeout": profile.timeout_seconds,
+          "effort": profile.effort.value,
         }
         for mode, profile in cls.EXECUTION_PROFILES.items()
       },
