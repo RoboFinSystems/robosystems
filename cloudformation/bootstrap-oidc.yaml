@@ -772,8 +772,8 @@ Resources:
                   - sns:ListTagsForResource
                 Resource: "*"
 
-              # IAM role management — mutations pinned to the App Runner and ECS
-              # Express roles the frontend stacks create, so a compromised frontend workflow cannot
+              # IAM role management — mutations pinned to the compute roles the
+              # frontend stacks create, so a compromised frontend workflow cannot
               # touch backend/deploy/SSO roles. Reads stay broad. A NEW privileged
               # role inside the prefix is what FrontendRoleBoundary prevents.
               # TODO: once every app template sets PermissionsBoundary, add the
@@ -790,10 +790,10 @@ Resources:
                   - iam:DetachRolePolicy
                   - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
-                # Names verified against each app repo's templates: App Runner
-                # roles are `<app>-<env>-apprunner-*`, ECS Express roles
-                # `<app>-<env>-ecs-*`. roboledger/roboinvestor drop the `-app`
-                # segment the S3/ECR statements use, so match on those shapes.
+                  - iam:PassRole
+                # No iam:PassedToService condition: App Runner leaves it unset.
+                # Names per the app templates: `<app>-<env>-apprunner-*` and
+                # `-ecs-*`; roboledger/roboinvestor drop the `-app` segment.
                 Resource:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
@@ -810,20 +810,6 @@ Resources:
                   - iam:ListRolePolicies
                   - iam:ListAttachedRolePolicies
                 Resource: "*"
-              - Sid: IAMPassRole
-                Effect: Allow
-                Action:
-                  - iam:PassRole
-                Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-ecs-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-ecs-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-ecs-*
-                # No iam:PassedToService condition: App Runner does not populate
-                # that key, so any value denies the pass. The role-name patterns
-                # and the roles' trust policies are the bound.
               # Setting the boundary is allowed only to this one policy, so the
               # frontend role can install the ceiling but never swap it for a
               # looser one. Removing it (DeleteRolePermissionsBoundary) is not
@@ -843,9 +829,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - iam:CreateServiceLinkedRole
-                Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/apprunner.amazonaws.com/*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.amazonaws.com/*
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/*
                 Condition:
                   StringEquals:
                     "iam:AWSServiceName":
@@ -878,32 +862,18 @@ Resources:
                   - apprunner:ListTagsForResource
                 Resource: "*"
 
-              # ECS Express Mode - the compute route for accounts App Runner is
-              # closed to; the stack's infrastructure role provisions the ALB.
+              # ECS Express (for accounts App Runner is closed to)
               - Sid: ECSExpress
                 Effect: Allow
                 Action:
-                  - ecs:CreateExpressGatewayService
-                  - ecs:UpdateExpressGatewayService
-                  - ecs:DeleteExpressGatewayService
-                  - ecs:DescribeExpressGatewayService
+                  - ecs:*ExpressGatewayService
                   - ecs:CreateCluster
-                  - ecs:DescribeClusters
-                  - ecs:DescribeServices
-                  - ecs:ListServices
                   - ecs:RegisterTaskDefinition
                   - ecs:DeregisterTaskDefinition
-                  - ecs:DescribeTaskDefinition
                   - ecs:TagResource
                   - ecs:UntagResource
-                  - ecs:ListTagsForResource
-                Resource: "*"
-              - Sid: ECSExpressNetworkRead
-                Effect: Allow
-                Action:
-                  - ec2:DescribeVpcs
-                  - ec2:DescribeSubnets
-                  - ec2:DescribeSecurityGroups
+                  - ecs:Describe*
+                  - ecs:List*
                 Resource: "*"
       Tags:
         - Key: Name
