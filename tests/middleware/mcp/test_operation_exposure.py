@@ -202,10 +202,11 @@ def _assigned_tool_attributes() -> dict[str, str]:
 
 
 def _dispatchable_tool_names() -> set[str]:
-  """String literals ``call_tool`` compares the incoming tool name against."""
+  """String literals the dispatch ladder (``_dispatch_tool``, behind the
+  audited ``call_tool``) compares the incoming tool name against."""
   names: set[str] = set()
   for node in ast.walk(_parse(MANAGER)):
-    if not isinstance(node, ast.AsyncFunctionDef) or node.name != "call_tool":
+    if not isinstance(node, ast.AsyncFunctionDef) or node.name != "_dispatch_tool":
       continue
     for inner in ast.walk(node):
       if not isinstance(inner, ast.Compare):

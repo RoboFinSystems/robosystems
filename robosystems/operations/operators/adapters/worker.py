@@ -20,6 +20,7 @@ from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.progress import OperationManagerProgress
 from robosystems.operations.operators.tool_access import HttpToolAccess
 from robosystems.operations.operators.tracked_ai import TrackedAIClient
+from robosystems.security.operation_audit import AuditCaller
 
 if TYPE_CHECKING:
   from robosystems.middleware.sse.operation_manager import OperationManager
@@ -68,7 +69,15 @@ async def run_operator_worker(
     preflight_session.close()
 
   # Not DirectToolAccess: a model-driven loop on it would see no tools.
-  tools = HttpToolAccess(graph_id, read_only=operator.spec.read_only, user_id=user_id)
+  tools = HttpToolAccess(
+    graph_id,
+    read_only=operator.spec.read_only,
+    user_id=user_id,
+    caller=AuditCaller(
+      operator_type=params.get("operator_type") or operator.spec.name,
+      operation_id=task_id,
+    ),
+  )
   ai_client = get_ai_client()
   credit_consumer = FactoryCreditConsumer()
 

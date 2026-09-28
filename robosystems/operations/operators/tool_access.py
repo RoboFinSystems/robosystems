@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from robosystems.logger import logger
+from robosystems.security.operation_audit import AuditCaller
 
 
 class _RemoteToolHandle:
@@ -32,11 +33,16 @@ class HttpToolAccess:
   """
 
   def __init__(
-    self, graph_id: str, read_only: bool = True, user_id: str | None = None
+    self,
+    graph_id: str,
+    read_only: bool = True,
+    user_id: str | None = None,
+    caller: AuditCaller | None = None,
   ) -> None:
     self._graph_id = graph_id
     self._read_only = read_only
     self._user_id = user_id
+    self._caller = caller
     self._client = None
     self._tools = None
 
@@ -56,6 +62,9 @@ class HttpToolAccess:
     # attributed to `mcp:{graph_id}`.
     if self._user_id:
       self._client.user_id = self._user_id
+    # The mutation audit attributes writes to this operator run.
+    if self._caller is not None:
+      self._client.audit_caller = self._caller
     schema_extensions = resolve_schema_extensions(self._graph_id)
     self._tools = GraphMCPTools(
       self._client,

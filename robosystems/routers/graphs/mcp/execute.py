@@ -21,6 +21,7 @@ from robosystems.middleware.graph.statement_kernel import (
   statement_kernel,
 )
 from robosystems.middleware.graph.utils import MultiTenantUtils
+from robosystems.middleware.mcp.tools.classification import READ_ONLY_MCP_TOOLS
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
 )
@@ -44,60 +45,6 @@ _MCP_SCHEMA_CACHE_TTL = 3600  # 1 hour
 
 # Created lazily to avoid import-time URL resolution.
 _mcp_redis_client: Any = None
-
-# Write classification is fail-closed: any tool not in this allowlist is a
-# write and needs the member/admin role, so every new tool (including
-# registrar-generated command ops) defaults to write. The `read-*-cypher` tools
-# are absent on purpose: the StatementKernel classifies them per statement.
-# A new read tool must be added here, or viewers can't call it.
-READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
-  {
-    # Graph introspection / exploration
-    "get-graph-info",
-    "get-graph-schema",
-    "get-graphql-schema",
-    "get-graph-sync-status",
-    "get-example-queries",
-    "query-graphql",
-    "list-subgraphs",
-    # Financial analysis / reporting reads
-    "financial-statement-analysis",
-    "live-financial-statement",
-    "build-fact-grid",
-    "resolve-element",
-    "disclosures",
-    "information-block",
-    "get-report-bundle",
-    # Fiscal calendar / close reads
-    "get-fiscal-calendar",
-    "get-period-close-status",
-    "get-close-playbook",
-    "list-period-drafts",
-    # Mapping reads
-    "get-unmapped-elements",
-    "suggest-mapping",
-    "list-mapping-structures",
-    "get-mapping-summary",
-    # Agent reads
-    "get-agent",
-    "list-agents",
-    "agent-activity",
-    # Event block / handler reads
-    "get-event-block",
-    "list-event-blocks",
-    "get-event-handler",
-    "list-event-handlers",
-    # Information block reads
-    "get-information-block",
-    "list-information-blocks",
-    # Document / memory reads
-    "get-document",
-    "list-documents",
-    "get-document-section",
-    "search-documents",
-    "recall",
-  }
-)
 
 
 def _get_mcp_redis_client() -> Any:

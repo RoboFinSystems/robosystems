@@ -42,6 +42,7 @@ from robosystems.middleware.graph.query_telemetry import (
   record_shared_query_outcome,
 )
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.mcp.tools.classification import CYPHER_READ_TOOLS
 from robosystems.middleware.mcp.tools.manager import ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import (
@@ -337,9 +338,7 @@ _SSE_PING_SECONDS = 15
 
 # Cypher read tools route through the shared query queue under load; other
 # tools execute directly (mirrors the REST endpoint's queue path).
-_CYPHER_READ_TOOLS = frozenset(
-  {"read-graph-cypher", "read-neo4j-cypher", "read-ladybug-cypher"}
-)
+_CYPHER_READ_TOOLS = CYPHER_READ_TOOLS
 
 _QUEUE_STRATEGIES = frozenset(
   {

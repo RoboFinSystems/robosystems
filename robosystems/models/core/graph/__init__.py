@@ -12,6 +12,7 @@ from .graph_schema import GraphSchema
 from .graph_table import GraphTable
 from .graph_usage import GraphUsage, UsageEventType
 from .graph_user import GraphRole, GraphUser
+from .operation_mutation_audit import MutationSurface, OperationMutationAudit
 from .source_file import SourceFile
 
 __all__ = [
@@ -30,6 +31,8 @@ __all__ = [
   "GraphTable",
   "GraphUsage",
   "GraphUser",
+  "MutationSurface",
+  "OperationMutationAudit",
   "SourceFile",
   "UsageEventType",
 ]

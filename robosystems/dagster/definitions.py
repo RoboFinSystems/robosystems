@@ -21,6 +21,10 @@ from robosystems.dagster.assets.shared_repositories import (
   shared_master_asleep,
   shared_master_awake,
 )
+from robosystems.dagster.jobs.audit_retention import (
+  daily_audit_retention_job,
+  daily_audit_retention_schedule,
+)
 from robosystems.dagster.jobs.backup_cleanup import (
   daily_backup_cleanup_job,
   daily_backup_cleanup_schedule,
@@ -204,6 +208,7 @@ all_jobs = [
   monthly_usage_report_job,
   invoice_subscription_renewal_job,
   # Platform: Infrastructure
+  daily_audit_retention_job,
   daily_backup_cleanup_job,
   daily_storage_reclaim_job,
   hourly_auth_cleanup_job,
@@ -251,6 +256,7 @@ all_schedules = [
   monthly_credit_allocation_schedule,
   monthly_usage_report_schedule,
   # Platform: Infrastructure
+  daily_audit_retention_schedule,
   daily_backup_cleanup_schedule,
   nightly_graph_backup_schedule,
   daily_storage_reclaim_schedule,

@@ -27,10 +27,6 @@ MAIN_API_TAGS = [
     "description": "🌳 Subgraphs - List and inspect subgraph databases",
   },
   {
-    "name": "Graph Members",
-    "description": "🧑‍🤝‍🧑 Graph members - Manage per-graph member access and roles",
-  },
-  {
     "name": "Backup",
     "description": "💾 Backup - List, download, and inspect graph backups",
   },
@@ -57,20 +53,20 @@ MAIN_API_TAGS = [
     "description": "✍️ Content operations - Write content across memory, documents, and files",
   },
   {
-    "name": "Connections",
-    "description": "🔗 Connection management — Manage external data source integrations",
-  },
-  {
     "name": "Documents",
     "description": "📑 Documents - List documents for search and analysis",
+  },
+  {
+    "name": "Tables",
+    "description": "🗃️ Staging tables - Table metadata for the staging layer",
   },
   {
     "name": "Files",
     "description": "📄 File management - List stored data files for generic graphs",
   },
   {
-    "name": "Tables",
-    "description": "🗃️ Staging tables - Table metadata for the staging layer",
+    "name": "Connections",
+    "description": "🔗 Connection management — Manage external data source integrations",
   },
   # ── Domain applications — extensions ──────────────────────────────────────
   #
@@ -132,6 +128,14 @@ MAIN_API_TAGS = [
   {
     "name": "Graph Limits",
     "description": "📏 Graph limits - Storage usage, operation limits, and tier configuration",
+  },
+  {
+    "name": "Graph Members",
+    "description": "🧑‍🤝‍🧑 Graph members - Manage per-graph member access and roles",
+  },
+  {
+    "name": "Graph Audit",
+    "description": "📜 Graph audit - Every change made to a graph, from the REST API, MCP clients, and AI operators",
   },
   {
     "name": "Graph Health",

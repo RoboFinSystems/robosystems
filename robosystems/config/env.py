@@ -537,6 +537,10 @@ class EnvConfig:
     "MCP_WORKSPACE_ENABLED",
     get_parameter_value("MCP_WORKSPACE_ENABLED", "true").lower() == "true",
   )
+  # Rows in operation_mutation_audit older than this are pruned. 396 days = 13
+  # months: a SOC 2 observation year plus slack. Dedicated deployments set
+  # their own.
+  OPERATION_AUDIT_RETENTION_DAYS = get_int_env("OPERATION_AUDIT_RETENTION_DAYS", 396)
   # Gates the subgraph write/DDL MCP tools; the main graph stays read-only to
   # raw statements regardless.
   MCP_SUBGRAPH_OPS_ENABLED = get_bool_env(
