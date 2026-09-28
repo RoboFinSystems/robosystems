@@ -947,7 +947,7 @@ Resources:
                 Resource: !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/RoboSystemsMarketplace*/*
               - Effect: Allow
                 Action: [cloudformation:Describe*, cloudformation:GetTemplate, cloudformation:ListStacks, cloudformation:ValidateTemplate,
-                         lambda:CreateEventSourceMapping, lambda:GetEventSourceMapping, lambda:ListEventSourceMappings,
+                         lambda:GetEventSourceMapping, lambda:ListEventSourceMappings,
                          logs:DescribeLogGroups, secretsmanager:GetRandomPassword, sts:GetCallerIdentity,
                          iam:GetRole, iam:GetRolePolicy, iam:ListRolePolicies, iam:ListAttachedRolePolicies, iam:ListRoleTags,
                          route53:ChangeResourceRecordSets, route53:GetChange, route53:GetHostedZone, route53:ListHostedZones, route53:ListResourceRecordSets,
@@ -960,13 +960,23 @@ Resources:
                   - arn:aws:s3:::robosystems-marketplace-*
                   - arn:aws:s3:::robosystems-marketplace-*/*
                   - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:robosystems-marketplace-*
-                  - !Sub arn:aws:lambda:*:${AWS::AccountId}:event-source-mapping:*
                   - !Sub arn:aws:dynamodb:*:${AWS::AccountId}:table/robosystems-marketplace-*
                   - !Sub arn:aws:sqs:*:${AWS::AccountId}:robosystems-marketplace-*
                   - !Sub arn:aws:sns:*:${AWS::AccountId}:robosystems-marketplace-*
                   - !Sub arn:aws:events:*:${AWS::AccountId}:rule/robosystems-marketplace-*
                   - !Sub arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/lambda/robosystems-marketplace-*
                   - !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:robosystems-marketplace-*
+              # Mapping writes take no resource ARN (create) or any mapping's
+              # (update/delete); pin them to the portal's functions instead.
+              - Effect: Allow
+                Action: [lambda:CreateEventSourceMapping, lambda:UpdateEventSourceMapping, lambda:DeleteEventSourceMapping]
+                Resource: "*"
+                Condition:
+                  ArnLike:
+                    lambda:FunctionArn: !Sub arn:aws:lambda:*:${AWS::AccountId}:function:robosystems-marketplace-*
+              - Effect: Allow
+                Action: [lambda:TagResource, lambda:UntagResource, lambda:ListTags]
+                Resource: !Sub arn:aws:lambda:*:${AWS::AccountId}:event-source-mapping:*
               # Execution roles may be created or given policies only inside
               # MarketplaceRoleBoundary, and passed only to Lambda.
               - Effect: Allow
