@@ -15,7 +15,10 @@ from typing import Any
 from ..logger import logger
 from .request_context import audit_context
 
-_ID_KEYS = ("id", "structure_id", "block_id", "agent_id", "memory_id", "subgraph_id")
+# The row carries these in its own columns.
+_CONTEXT_ID_KEYS = frozenset({"graph_id", "user_id", "org_id"})
+# Enough to name what a call touched; a bulk write can't bloat a row.
+_MAX_OBJECT_IDS = 20
 
 
 @dataclass
@@ -51,9 +54,14 @@ def fingerprint(arguments: dict[str, Any] | None) -> str:
   return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _is_id_key(key: str) -> bool:
+  return (key == "id" or key.endswith("_id")) and key not in _CONTEXT_ID_KEYS
+
+
 def object_ids(arguments: dict[str, Any] | None, result: Any) -> list[str]:
   """Ids of the objects a call touched: the result's (one level down too,
-  for wrapped objects), then the arguments' (an update names its target)."""
+  for wrapped objects), then the arguments' (an update names its target).
+  Any `id` or `*_id` key counts, so a new tool's naming is covered."""
   sources: list[dict[str, Any]] = []
   if isinstance(result, dict):
     sources.append(result)
@@ -62,10 +70,13 @@ def object_ids(arguments: dict[str, Any] | None, result: Any) -> list[str]:
     sources.append(arguments)
   found: list[str] = []
   for src in sources:
-    for key in _ID_KEYS:
-      value = src.get(key)
+    for key, value in src.items():
+      if not (isinstance(key, str) and _is_id_key(key)):
+        continue
       if isinstance(value, str) and value and value not in found:
         found.append(value)
+        if len(found) == _MAX_OBJECT_IDS:
+          return found
   return found
 
 

@@ -120,6 +120,28 @@ class TestObjectIds:
   def test_duplicates_collapse(self):
     assert object_ids({"id": "a"}, {"id": "a"}) == ["a"]
 
+  @pytest.mark.parametrize(
+    "result",
+    [
+      {"document_id": "doc_1"},
+      {"deleted": True, "report_id": "rpt_1"},
+      {"backup_id": "bak_1"},
+      {"mapping_id": "map_1", "association_id": "assoc_1"},
+      {"connection_id": "conn_1"},
+    ],
+  )
+  def test_any_id_key_is_captured(self, result):
+    ids = object_ids({}, result)
+    assert ids == [v for k, v in result.items() if k.endswith("_id")]
+
+  def test_context_ids_are_left_to_their_columns(self):
+    ids = object_ids({"graph_id": "kg_1", "user_id": "u"}, {"org_id": "o", "id": "x"})
+    assert ids == ["x"]
+
+  def test_a_bulk_write_is_capped(self):
+    result = {f"item{i}_id": f"id_{i}" for i in range(50)}
+    assert len(object_ids({}, result)) == 20
+
 
 class TestWriteRecord:
   def test_a_row_lands_in_the_platform_db(self, test_db):
