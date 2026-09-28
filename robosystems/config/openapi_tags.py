@@ -31,6 +31,10 @@ MAIN_API_TAGS = [
     "description": "🧑‍🤝‍🧑 Graph members - Manage per-graph member access and roles",
   },
   {
+    "name": "Graph Audit",
+    "description": "📜 Graph audit - Every change made to a graph, from the REST API, MCP clients, and AI operators",
+  },
+  {
     "name": "Backup",
     "description": "💾 Backup - List, download, and inspect graph backups",
   },
