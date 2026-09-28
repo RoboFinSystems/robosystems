@@ -199,6 +199,7 @@ class AnalystOperator(Operator):
       operator_type="analyst",
       operation_description="Analyst tool loop",
       max_credits=self._get_max_credits(ctx),
+      effort=limits.get("effort"),
     )
 
     await ctx.progress.report("Done", percent=100)

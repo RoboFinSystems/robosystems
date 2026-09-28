@@ -22,6 +22,14 @@ def test_token_pricing_matches_bedrock_us_profile_cost():
   assert pricing["openai_gpt_5_6_luna"]["output"] == Decimal("1.32")
 
 
+def test_opus_5_5_rate_is_list_plus_the_regional_premium():
+  """Predicted, not read: Bedrock's page does not publish Opus 5.5. List is
+  $4 / $20 per MTok; every Claude row holds list x 1.1. The CUR confirms."""
+  pricing = AIBillingConfig.TOKEN_PRICING["anthropic_claude_5_5_opus"]
+  assert pricing["input"] == Decimal("4") * Decimal("1.1")
+  assert pricing["output"] == Decimal("20") * Decimal("1.1")
+
+
 def test_cache_rates_mirror_bedrock_multipliers():
   """The cache discount is passed through: reads at 0.1x the input rate,
   writes at 1.25x — Bedrock's own multipliers, for every registered family."""
@@ -37,6 +45,7 @@ def test_token_pricing_only_has_registered_families():
     "anthropic_claude_4_sonnet",
     "anthropic_claude_5_sonnet",
     "anthropic_claude_5_opus",
+    "anthropic_claude_5_5_opus",
     "openai_gpt_5_6_luna",
   }
 

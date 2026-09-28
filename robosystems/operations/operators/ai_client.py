@@ -199,6 +199,7 @@ class AIClient:
     operator_type: str | None = None,
     tools: list[dict[str, Any]] | None = None,
     cache_conversation: bool = False,
+    effort: str | None = None,
   ) -> AIResponse:
     """Send one Converse request.
 
@@ -206,7 +207,8 @@ class AIClient:
     name raises. `tools` takes MCP-shaped definitions. Converse cannot forbid
     tool use, so a loop wanting a final answer asks in the prompt and treats a
     stray tool call as terminal. `cache_conversation` caches the trailing turn;
-    only worth the cache-write premium for multi-call loops.
+    only worth the cache-write premium for multi-call loops. `effort` reaches
+    the model only when its registry row `supports_effort`.
     """
     spec = OperatorConfig.resolve_model(model, operator_type)
     if spec.provider is ModelProvider.OPENAI_COMPAT:
@@ -221,7 +223,14 @@ class AIClient:
 
     logger.debug(f"Using Bedrock model: {spec.model_id}")
     request = self._build_request(
-      spec, messages, system, max_tokens, temperature, tools, cache_conversation
+      spec,
+      messages,
+      system,
+      max_tokens,
+      temperature,
+      tools,
+      cache_conversation,
+      effort,
     )
 
     # Minutes-long sync call: off the event loop, on the default executor
@@ -275,6 +284,7 @@ class AIClient:
     temperature: float,
     tools: list[dict[str, Any]] | None,
     cache_conversation: bool,
+    effort: str | None = None,
   ) -> dict[str, Any]:
     message_dicts: list[dict[str, Any]] = [
       {
@@ -303,8 +313,11 @@ class AIClient:
       "messages": message_dicts,
       "inferenceConfig": inference,
     }
-    if spec.additional_request_fields:
-      request["additionalModelRequestFields"] = dict(spec.additional_request_fields)
+    extra_fields = dict(spec.additional_request_fields)
+    if effort and spec.supports_effort:
+      extra_fields["output_config"] = {"effort": effort}
+    if extra_fields:
+      request["additionalModelRequestFields"] = extra_fields
 
     if system:
       # Caches tools and system together (Converse orders tools -> system ->

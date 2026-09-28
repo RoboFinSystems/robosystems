@@ -58,6 +58,7 @@ class TrackedAIClient:
     operation_description: str = "Operator AI call",
     tools: list[dict[str, Any]] | None = None,
     cache_conversation: bool = False,
+    effort: str | None = None,
   ) -> AIResponse:
     """Call the model and bill it; `operation_description` lands in the credit
     audit trail. Raises `UnbilledAICallError` if an earlier call went unbilled.
@@ -75,6 +76,7 @@ class TrackedAIClient:
       operator_type=operator_type,
       tools=tools,
       cache_conversation=cache_conversation,
+      effort=effort,
     )
 
     self.total_tokens["input"] += response.input_tokens

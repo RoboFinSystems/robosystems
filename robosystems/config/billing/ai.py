@@ -67,6 +67,14 @@ class AIBillingConfig:
       "cache_read": Decimal("0.55"),
       "cache_write": Decimal("6.875"),
     },
+    # Predicted from list ($4 / $20) + 10%, the ratio every Claude row above
+    # holds; Bedrock's page does not publish it. Confirm against the CUR.
+    "anthropic_claude_5_5_opus": {
+      "input": Decimal("4.4"),
+      "output": Decimal("22"),
+      "cache_read": Decimal("0.44"),
+      "cache_write": Decimal("5.5"),
+    },
     "openai_gpt_5_6_luna": {
       "input": Decimal("0.22"),
       "output": Decimal("1.32"),

@@ -722,3 +722,29 @@ async def test_wrap_up_tool_call_is_terminal_and_never_dispatched():
   assert result.tools_called == ["read-graph-cypher"]
   assert result.rows == [{"n": 1}]
   assert "couldn't compose a final answer" in result.text
+
+
+async def test_effort_reaches_every_call_including_the_wrap_up():
+  ai = MagicMock()
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "read-graph-cypher", query="MATCH (n) RETURN n LIMIT 1"),
+      _final("answer"),
+    ]
+  )
+  tools = _tools_mock(call_results=[[{"n": 1}]])
+
+  await run_tool_loop(
+    _ctx(ai, tools),
+    system="s",
+    tool_names=["read-graph-cypher"],
+    max_iterations=1,
+    max_tokens=100,
+    effort="high",
+  )
+
+  assert ai.create_message.await_count == 2
+  assert [c.kwargs["effort"] for c in ai.create_message.call_args_list] == [
+    "high",
+    "high",
+  ]
