@@ -367,6 +367,10 @@ class OperatorConfig:
       "supported_modes": ["quick", "standard", "extended"],
       "requires_credits": True,
       "max_concurrent_requests": 5,
+      # A request's max_credits overrides it. Sized from live runs: a cold
+      # quality-tier first call alone can pass 300, and a warm step costs
+      # ~40-60, so this allows a cold start plus about six steps.
+      "default_max_credits": 750,
     },
     "analyst": {
       "supported_modes": ["quick", "standard", "extended", "streaming"],
