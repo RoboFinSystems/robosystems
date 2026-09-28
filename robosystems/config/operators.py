@@ -155,7 +155,7 @@ _BEDROCK_MODELS: dict[OperatorModel, ModelSpec] = {
 _PLATFORM_PROFILE_MODELS: dict[ModelProfile, OperatorModel] = {
   ModelProfile.ECONOMY: OperatorModel.GPT_5_6_LUNA,
   ModelProfile.BALANCED: OperatorModel.SONNET_5,
-  ModelProfile.QUALITY: OperatorModel.OPUS_5,
+  ModelProfile.QUALITY: OperatorModel.OPUS_5_5,
 }
 
 
