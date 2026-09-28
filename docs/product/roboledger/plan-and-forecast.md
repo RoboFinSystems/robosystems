@@ -9,6 +9,24 @@ A forecast in RoboLedger is a scenario: a named set of assumptions that your AI 
 
 Forecasts are calculated, not generated. The same assumptions always give the same numbers, and running a forecast uses no credits. Nothing about planning writes to QuickBooks.
 
+![Plan with ChatGPT: build a budget from your books](https://youtu.be/MiZz_wPmO0U)
+
+## What the conversation looks like
+
+Recorded in ChatGPT, on a demo company's books.
+
+> **You:** Build a twelve month budget from our last closed month. Revenue grows 2% a month and customers pay in 40 days.
+
+A scenario from September through the following August, projected from August's closed books: revenue rises from about $141,000 to $175,000 a month, and every month passes its checks.
+
+> **You:** Add a scenario where we hire two engineers in October at 12,000 a month each.
+
+A second scenario with the same assumptions and $24,000 a month more in R&D from October. The first scenario is unchanged.
+
+> **You:** How many months of cash do we have in each scenario?
+
+Neither runs out inside the twelve months. The hires leave $264,000 less cash by the end of the forecast. Both scenarios then show on the **Plan** page, the actual months followed by the forecast months.
+
 ## What you need first
 
 A scenario starts from closed months, because that's where its opening balances come from.
