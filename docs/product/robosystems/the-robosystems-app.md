@@ -21,7 +21,7 @@ Pick a graph in the selector at the top. The rest of the menu follows that graph
 
 ## Console, Search, documents and memory
 
-**Console** asks questions about the selected graph inside the app. Questions run on RoboSystems' own AI, so they use credits. See [Ask questions in the Console](console.md).
+**Console** asks questions about the selected graph inside the app, from a drawer at the bottom of every page. Start a request with `/do` and it makes the change instead: a metric block, a counterparty, a memory. Questions and changes run on RoboSystems' own AI, so they use credits. See [Ask questions in the Console](console.md).
 
 **Search** finds text across the documents in the graph, or across the filings on the SEC repository.
 
@@ -38,6 +38,8 @@ On a shared repository such as SEC filings, Knowledge Base, Memory, Data Lake, S
 **Repositories** is where you subscribe to shared graphs such as SEC filings. See [Analyze SEC filings](sec-filings.md).
 
 **Usage** shows the graph's credit balance and recent credit transactions, its storage, and its limits, including rate limits.
+
+**Activity** lists every change made to the graph, whether it came from the Console, a connected AI assistant or the API, with who made it and when. Graph admins see it.
 
 ## Your account
 

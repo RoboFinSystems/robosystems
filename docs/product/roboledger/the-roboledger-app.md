@@ -68,7 +68,7 @@ The reporting concepts your accounts map to, with their definitions and how they
 
 ## Console
 
-Ask questions about your books inside the app. The Console runs on RoboLedger's own AI, so questions you ask it use credits from your plan's monthly allowance. Claude, ChatGPT and other clients you connect yourself don't use credits.
+Ask questions about your books inside the app, from the Console bar at the bottom of every page. Start a request with `/do` to have it make a change, such as adding a metric block or a counterparty; it lists what it changed, and Plan and Explorer refresh to show it. Closing a period, posting entries and deleting stay out of the Console. The Console runs on RoboLedger's own AI, so questions and changes use credits from your plan's monthly allowance. Claude, ChatGPT and other clients you connect yourself don't use credits.
 
 ## Search
 
