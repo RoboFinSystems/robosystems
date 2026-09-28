@@ -742,6 +742,52 @@ class TestRegistrarToolExecute:
     assert "secret" not in result["message"]
     assert "SELECT" not in result["message"]
 
+  @staticmethod
+  async def _run_integrity_error(orig: MagicMock) -> dict:
+    from sqlalchemy.exc import IntegrityError
+
+    def raising_cmd(session, body, created_by: str):
+      raise IntegrityError("INSERT INTO elements VALUES (%(v)s)", {"v": "secret"}, orig)
+
+    tool = _RegistrarMCPTool(
+      client=_client(user_id="usr_1"),
+      spec=_spec(command=raising_cmd),
+      registrar=_registrar_stub(),
+    )
+    with patch(
+      "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+      return_value=MagicMock(),
+    ):
+      return await tool.execute({"id": "x", "value": 0})
+
+  @pytest.mark.asyncio
+  async def test_duplicate_is_a_conflict_naming_the_existing_key(self) -> None:
+    """Found live 2026-09-27: a duplicate element escaped as a raw exception
+    and reached the caller as "Database connection failed", so the model
+    gave up instead of reusing the element."""
+    orig = MagicMock(pgcode="23505")
+    orig.diag.message_detail = (
+      "Key (qname)=(cadence:SubscriptionRevenue) already exists."
+    )
+    result = await self._run_integrity_error(orig)
+
+    assert result["error"] == "conflict"
+    assert "cadence:SubscriptionRevenue" in result["message"]
+    assert "Reuse the existing object" in result["message"]
+    assert "secret" not in result["message"]
+    assert "INSERT" not in result["message"]
+
+  @pytest.mark.asyncio
+  async def test_other_constraint_names_only_the_constraint(self) -> None:
+    orig = MagicMock(pgcode="23503")
+    orig.diag.constraint_name = "fk_associations_element"
+    orig.diag.message_detail = "Key (element_id)=(secret) is not present."
+    result = await self._run_integrity_error(orig)
+
+    assert result["error"] == "invalid_request"
+    assert "fk_associations_element" in result["message"]
+    assert "secret" not in result["message"]
+
   @pytest.mark.asyncio
   async def test_schema_missing_is_not_initialized(self) -> None:
     from sqlalchemy.exc import ProgrammingError
