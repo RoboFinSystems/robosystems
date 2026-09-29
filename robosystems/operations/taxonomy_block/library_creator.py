@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from sqlalchemy import delete, exists, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -22,6 +23,7 @@ from sqlalchemy.orm import Session
 from robosystems.logger import logger
 from robosystems.models.extensions import (
   Association,
+  AssociationClassification,
   Element,
   ElementLabel,
   ElementReference,
@@ -32,6 +34,7 @@ from robosystems.models.extensions import (
   Trait,
 )
 from robosystems.taxonomy.model import (
+  AssociationSpec,
   RuleVariableSpec,
   TaxonomyPackage,
   TraitAssignmentSpec,
@@ -447,16 +450,140 @@ def _resolve_trait_id(session: Session, category: str, identifier: str) -> str |
   return row
 
 
+@dataclass(frozen=True)
+class _PlannedArc:
+  id: str
+  structure_id: str
+  from_element_id: str
+  to_element_id: str
+  spec: AssociationSpec
+
+
+@dataclass
+class _ArcPlan:
+  arcs: list[_PlannedArc]
+  unresolved: list[tuple[str, str, str]]
+  owned_structure_ids: set[str]
+
+
+def _plan_library_arcs(session: Session, package: TaxonomyPackage) -> _ArcPlan:
+  """Resolve every arc of ``package`` to its deterministic row id.
+
+  ``owned_structure_ids`` are the structures this package writes arcs into;
+  no two packages share one (pinned by a test), which is what makes a
+  package's arcs retirable by structure.
+  """
+  default_struct_id = _structure_id(_default_role_uri(package))
+  owned = {_structure_id(spec.role_uri) for spec in package.structures}
+  owned.add(default_struct_id)
+
+  block_type_to_id: dict[str, str] = {}
+  for spec in package.structures:
+    sid = _structure_id(spec.role_uri)
+    block_type_to_id.setdefault(spec.block_type, sid)
+  arc_router = _build_arc_router(block_type_to_id)
+
+  qnames = {q for a in package.associations for q in (a.from_qname, a.to_qname)}
+  element_id_map = _bulk_resolve_element_ids(session, qnames)
+
+  parent_period_types: dict[str, str] = {}
+  if arc_router is not None:
+    parent_qnames = {a.from_qname for a in package.associations if not a.role}
+    parent_period_types = _bulk_resolve_element_period_types(session, parent_qnames)
+
+  arcs: list[_PlannedArc] = []
+  unresolved: list[tuple[str, str, str]] = []
+  for assoc in package.associations:
+    from_id = element_id_map.get(assoc.from_qname)
+    to_id = element_id_map.get(assoc.to_qname)
+    if from_id is None or to_id is None:
+      unresolved.append((assoc.from_qname, assoc.to_qname, assoc.association_type))
+      continue
+    if assoc.role:
+      struct_id = _structure_id(assoc.role)
+      owned.add(struct_id)
+    elif arc_router is not None:
+      routed = arc_router(assoc.from_qname, parent_period_types.get(assoc.from_qname))
+      struct_id = routed if routed is not None else default_struct_id
+    else:
+      struct_id = default_struct_id
+    arc_id = _association_id(struct_id, from_id, to_id, assoc.association_type)
+    arcs.append(_PlannedArc(arc_id, struct_id, from_id, to_id, assoc))
+  return _ArcPlan(arcs, unresolved, owned)
+
+
+def _unseeded_library_arc_ids(session: Session, plan: _ArcPlan) -> list[str]:
+  planned = [arc.id for arc in plan.arcs]
+  return list(
+    session.execute(
+      select(Association.id).where(
+        Association.structure_id.in_(plan.owned_structure_ids),
+        Association.created_by == "library-seeder",
+        Association.id.not_in(planned),
+      )
+    ).scalars()
+  )
+
+
+def find_unseeded_library_arcs(session: Session, package: TaxonomyPackage) -> list[str]:
+  """Library arcs in ``package``'s structures that its seed no longer emits.
+
+  An association id is ``uuid5(structure:from:to:type)``, so re-pointing an
+  arc mints a new row and leaves the old one summing under the same parent.
+  Empty when every arc resolves and the library matches the seed. ``None``
+  would be ambiguous, so an unresolvable package raises instead.
+  """
+  plan = _plan_library_arcs(session, package)
+  if plan.unresolved:
+    raise ValueError(
+      f"{package.name}: {len(plan.unresolved)} arc(s) do not resolve; "
+      "the expected set is incomplete"
+    )
+  return _unseeded_library_arc_ids(session, plan)
+
+
+def delete_library_arcs(session: Session, arc_ids: list[str]) -> int:
+  """Delete library arcs by id, with their classification rows (no FK cascade).
+
+  Runs against ``public``, which carries no immutability triggers. A tenant
+  schema does, so a tenant-side delete goes through
+  ``writer.retire_unsourced_library_arcs`` under the ``library_resync`` GUC.
+  """
+  if not arc_ids:
+    return 0
+  session.execute(
+    delete(AssociationClassification.__table__).where(
+      AssociationClassification.__table__.c.association_id.in_(arc_ids)
+    )
+  )
+  result = session.execute(
+    delete(Association.__table__).where(
+      Association.__table__.c.id.in_(arc_ids),
+      Association.__table__.c.created_by == "library-seeder",
+    )
+  )
+  return result.rowcount or 0
+
+
 def create_library_arcs(
   session: Session,
   package: TaxonomyPackage,
   created_by: str = "library-seeder",
+  *,
+  retire_stale: bool = True,
 ) -> dict[str, int]:
   """Insert Associations + Trait/Label/Reference assignments for one package,
-  resolving qnames by DB lookup so targets may live in any package."""
+  resolving qnames by DB lookup so targets may live in any package.
+
+  ``retire_stale`` then deletes the package's library arcs the seed no longer
+  emits (a re-pointed or removed arc), so a parent never sums a stale child.
+  Skipped, with a warning, when any arc fails to resolve: the expected set
+  would be incomplete and the delete could take a live arc.
+  """
   counts: dict[str, int] = {
     "associations": 0,
     "associations_skipped": 0,
+    "associations_retired": 0,
     "trait_assignments": 0,
     "trait_assignments_skipped": 0,
     "label_assignments": 0,
@@ -468,47 +595,23 @@ def create_library_arcs(
     "classification_assignments_skipped": 0,
   }
 
-  default_struct_id = _structure_id(_default_role_uri(package))
+  plan = _plan_library_arcs(session, package)
 
-  block_type_to_id: dict[str, str] = {}
-  for spec in package.structures:
-    sid = _structure_id(spec.role_uri)
-    block_type_to_id.setdefault(spec.block_type, sid)
-  arc_router = _build_arc_router(block_type_to_id)
-
-  all_qnames = {q for a in package.associations for q in (a.from_qname, a.to_qname)}
-  all_qnames |= {asn.element_qname for asn in package.trait_assignments}
+  all_qnames = {asn.element_qname for asn in package.trait_assignments}
   all_qnames |= {la.element_qname for la in package.label_assignments}
   all_qnames |= {ra.element_qname for ra in package.reference_assignments}
   element_id_map = _bulk_resolve_element_ids(session, all_qnames)
 
-  parent_period_types: dict[str, str] = {}
-  if arc_router is not None:
-    parent_qnames = {a.from_qname for a in package.associations if not a.role}
-    parent_period_types = _bulk_resolve_element_period_types(session, parent_qnames)
-
-  unresolved: list[tuple[str, str, str]] = []
-  for assoc in package.associations:
-    from_id = element_id_map.get(assoc.from_qname)
-    to_id = element_id_map.get(assoc.to_qname)
-    if from_id is None or to_id is None:
-      unresolved.append((assoc.from_qname, assoc.to_qname, assoc.association_type))
-      continue
-    if assoc.role:
-      struct_id = _structure_id(assoc.role)
-    elif arc_router is not None:
-      routed = arc_router(assoc.from_qname, parent_period_types.get(assoc.from_qname))
-      struct_id = routed if routed is not None else default_struct_id
-    else:
-      struct_id = default_struct_id
-    assoc_id = _association_id(struct_id, from_id, to_id, assoc.association_type)
+  unresolved = plan.unresolved
+  for arc in plan.arcs:
+    assoc = arc.spec
     session.execute(
       pg_insert(Association.__table__)
       .values(
-        id=assoc_id,
-        structure_id=struct_id,
-        from_element_id=from_id,
-        to_element_id=to_id,
+        id=arc.id,
+        structure_id=arc.structure_id,
+        from_element_id=arc.from_element_id,
+        to_element_id=arc.to_element_id,
         association_type=assoc.association_type,
         arcrole=assoc.arcrole,
         order_value=assoc.order,
@@ -535,6 +638,22 @@ def create_library_arcs(
     counts["associations"] += 1
 
   counts["associations_skipped"] = len(unresolved)
+  if retire_stale and not unresolved:
+    counts["associations_retired"] = delete_library_arcs(
+      session, _unseeded_library_arc_ids(session, plan)
+    )
+    if counts["associations_retired"]:
+      logger.info(
+        "[%s] retired %d library arc(s) the seed no longer emits",
+        package.name,
+        counts["associations_retired"],
+      )
+  elif retire_stale:
+    logger.warning(
+      "[%s] stale-arc retirement skipped: %d arc(s) unresolved",
+      package.name,
+      len(unresolved),
+    )
   if unresolved:
     sample = unresolved[:5]
     logger.warning(

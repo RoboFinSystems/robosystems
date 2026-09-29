@@ -115,6 +115,9 @@ class CopyStats:
   association_classifications: int
   rules: int
   reporting_style_networks: int
+  # Deleted, not inserted: library arcs the source no longer carries. Not in
+  # ``total``.
+  associations_retired: int = 0
 
   @property
   def total(self) -> int:
@@ -346,6 +349,11 @@ _RESYNC_TAXONOMY_CONFLICT = (
   "ON CONFLICT (id) DO UPDATE SET "
   "taxonomy_type = EXCLUDED.taxonomy_type, description = EXCLUDED.description"
 )
+# These columns are not metadata. A changed ``balance_type`` inverts every
+# historical period's sign, and ``is_abstract`` drops a concept from every
+# tenant's totals; a resync that carries one is a restatement for every tenant
+# and is reviewed as one. Propagated deliberately: a wrong value in the library
+# is exactly what a resync exists to fix.
 _RESYNC_ELEMENT_CONFLICT = (
   "ON CONFLICT (id) DO UPDATE SET "
   "balance_type = EXCLUDED.balance_type, period_type = EXCLUDED.period_type, "
@@ -370,7 +378,8 @@ _RESYNC_RULE_CONFLICT = (
   "rule_variables = EXCLUDED.rule_variables"
 )
 # The id is uuid5(structure:from:to:type), so value fixes update in place;
-# changing from/to/type mints a new arc and the stale one lingers.
+# changing from/to/type mints a new arc, and the resync's retire step removes
+# the old one.
 _RESYNC_ASSOCIATION_CONFLICT = (
   "ON CONFLICT (id) DO UPDATE SET "
   "weight = EXCLUDED.weight, order_value = EXCLUDED.order_value, "
@@ -383,13 +392,17 @@ def resync_library_into_tenant(
   connection: Connection,
   schema: str,
   pin: dict[str, str] | None = None,
+  *,
+  source_schema: str = "public",
 ) -> CopyStats:
-  """Re-sync pinned library taxonomies from ``public.*`` into ``{schema}.*``.
+  """Re-sync pinned library taxonomies from ``source_schema`` (``public``) into ``schema``.
 
   The ``DO UPDATE`` sibling of :func:`copy_library_into_tenant`: library
   fixes reach provisioned tenants. Mutable columns update in place; labels,
   references, structures, classifications and style networks are additive
-  only; **nothing is ever deleted**.
+  only. The one delete: library arcs in a pinned structure that the source no
+  longer carries (a re-pointed or retired arc), so a parent never sums a stale
+  child. Tenant-authored arcs are never touched.
 
   Does not commit. **Must run in a transaction that has executed**
   :data:`SET_LIBRARY_RESYNC`, or the immutability triggers reject the update
@@ -417,7 +430,7 @@ def resync_library_into_tenant(
   tax_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.taxonomies ({_TAXONOMY_COLS})
-      SELECT {_TAXONOMY_COLS} FROM public.taxonomies
+      SELECT {_TAXONOMY_COLS} FROM {source_schema}.taxonomies
       WHERE (standard, version) IN (VALUES {pin_values_sql})
       {_RESYNC_TAXONOMY_CONFLICT}
     """),
@@ -435,9 +448,9 @@ def resync_library_into_tenant(
   elem_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.elements ({_ELEMENT_COLS})
-      SELECT {_ELEMENT_COLS} FROM public.elements e
+      SELECT {_ELEMENT_COLS} FROM {source_schema}.elements e
       WHERE e.taxonomy_id IN (
-        SELECT id FROM public.taxonomies
+        SELECT id FROM {source_schema}.taxonomies
         WHERE (standard, version) IN (VALUES {pin_values_sql})
       )
       {exclude_clause}
@@ -449,7 +462,7 @@ def resync_library_into_tenant(
   label_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.element_labels ({_ELEMENT_LABEL_COLS})
-      SELECT {_ELEMENT_LABEL_COLS} FROM public.element_labels
+      SELECT {_ELEMENT_LABEL_COLS} FROM {source_schema}.element_labels
       WHERE element_id IN (SELECT id FROM {schema}.elements)
       ON CONFLICT (id) DO NOTHING
     """),
@@ -458,7 +471,7 @@ def resync_library_into_tenant(
   ref_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.element_references ({_ELEMENT_REFERENCE_COLS})
-      SELECT {_ELEMENT_REFERENCE_COLS} FROM public.element_references
+      SELECT {_ELEMENT_REFERENCE_COLS} FROM {source_schema}.element_references
       WHERE element_id IN (SELECT id FROM {schema}.elements)
       ON CONFLICT (id) DO NOTHING
     """),
@@ -467,9 +480,9 @@ def resync_library_into_tenant(
   struct_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.structures ({_STRUCTURE_COLS})
-      SELECT {_STRUCTURE_COLS} FROM public.structures
+      SELECT {_STRUCTURE_COLS} FROM {source_schema}.structures
       WHERE taxonomy_id IN (
-        SELECT id FROM public.taxonomies
+        SELECT id FROM {source_schema}.taxonomies
         WHERE (standard, version) IN (VALUES {pin_values_sql})
       )
       ON CONFLICT (id) DO NOTHING
@@ -480,11 +493,11 @@ def resync_library_into_tenant(
   assoc_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.associations ({_ASSOCIATION_COLS})
-      SELECT {_ASSOCIATION_COLS} FROM public.associations a
+      SELECT {_ASSOCIATION_COLS} FROM {source_schema}.associations a
       WHERE a.structure_id IN (
-        SELECT id FROM public.structures
+        SELECT id FROM {source_schema}.structures
         WHERE taxonomy_id IN (
-          SELECT id FROM public.taxonomies
+          SELECT id FROM {source_schema}.taxonomies
           WHERE (standard, version) IN (VALUES {pin_values_sql})
         )
       )
@@ -497,7 +510,7 @@ def resync_library_into_tenant(
   trait_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.traits ({_TRAIT_COLS})
-      SELECT {_TRAIT_COLS} FROM public.traits
+      SELECT {_TRAIT_COLS} FROM {source_schema}.traits
       WHERE created_by = 'library-seeder'
       {_RESYNC_TRAIT_CONFLICT}
     """),
@@ -506,7 +519,7 @@ def resync_library_into_tenant(
   et_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.element_traits ({_ELEMENT_TRAIT_COLS})
-      SELECT {_ELEMENT_TRAIT_COLS} FROM public.element_traits
+      SELECT {_ELEMENT_TRAIT_COLS} FROM {source_schema}.element_traits
       WHERE element_id IN (SELECT id FROM {schema}.elements)
       {_RESYNC_ELEMENT_TRAIT_CONFLICT}
     """),
@@ -515,7 +528,7 @@ def resync_library_into_tenant(
   cls_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.classifications ({_CLASSIFICATION_COLS})
-      SELECT {_CLASSIFICATION_COLS} FROM public.classifications
+      SELECT {_CLASSIFICATION_COLS} FROM {source_schema}.classifications
       WHERE created_by = 'library-seeder'
       ON CONFLICT (id) DO NOTHING
     """),
@@ -524,7 +537,7 @@ def resync_library_into_tenant(
   ac_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.association_classifications ({_ASSOC_CLASSIFICATION_COLS})
-      SELECT {_ASSOC_CLASSIFICATION_COLS} FROM public.association_classifications
+      SELECT {_ASSOC_CLASSIFICATION_COLS} FROM {source_schema}.association_classifications
       WHERE association_id IN (SELECT id FROM {schema}.associations)
       ON CONFLICT (association_id, classification_id) DO NOTHING
     """),
@@ -533,9 +546,9 @@ def resync_library_into_tenant(
   rule_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.rules ({_RULE_COLS})
-      SELECT {_RULE_COLS} FROM public.rules
+      SELECT {_RULE_COLS} FROM {source_schema}.rules
       WHERE taxonomy_id IN (
-        SELECT id FROM public.taxonomies
+        SELECT id FROM {source_schema}.taxonomies
         WHERE (standard, version) IN (VALUES {pin_values_sql})
       )
       {_RESYNC_RULE_CONFLICT}
@@ -546,11 +559,15 @@ def resync_library_into_tenant(
   rsn_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.reporting_style_networks ({_REPORTING_STYLE_NETWORK_COLS})
-      SELECT {_REPORTING_STYLE_NETWORK_COLS} FROM public.reporting_style_networks rsn
+      SELECT {_REPORTING_STYLE_NETWORK_COLS} FROM {source_schema}.reporting_style_networks rsn
       WHERE EXISTS (SELECT 1 FROM {schema}.structures s WHERE s.id = rsn.reporting_style_id)
         AND EXISTS (SELECT 1 FROM {schema}.structures s WHERE s.id = rsn.network_id)
       ON CONFLICT (reporting_style_id, statement_type) DO NOTHING
     """),
+  )
+
+  retired = retire_unsourced_library_arcs(
+    connection, schema, resolved_pin, source_schema=source_schema
   )
 
   return CopyStats(
@@ -566,4 +583,72 @@ def resync_library_into_tenant(
     association_classifications=ac_result.rowcount or 0,
     rules=rule_result.rowcount or 0,
     reporting_style_networks=rsn_result.rowcount or 0,
+    associations_retired=retired,
   )
+
+
+def find_unsourced_library_arcs(
+  connection: Connection,
+  schema: str,
+  pin: dict[str, str] | None = None,
+  *,
+  source_schema: str = "public",
+) -> list[str]:
+  """Library arcs in ``schema``'s pinned structures that ``source_schema`` no
+  longer carries — the double-count shape a re-pointed arc leaves behind."""
+  resolved_pin = pin if pin is not None else DEFAULT_TAXONOMY_PIN
+  if not resolved_pin:
+    return []
+  pin_values_sql, pin_params = _build_pin_clause(resolved_pin)
+  return list(
+    connection.execute(
+      text(f"""
+        SELECT a.id FROM {schema}.associations a
+        WHERE a.created_by = 'library-seeder'
+          AND a.structure_id IN (
+            SELECT id FROM {source_schema}.structures
+            WHERE taxonomy_id IN (
+              SELECT id FROM {source_schema}.taxonomies
+              WHERE (standard, version) IN (VALUES {pin_values_sql})
+            )
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM {source_schema}.associations p WHERE p.id = a.id
+          )
+      """),
+      pin_params,
+    ).scalars()
+  )
+
+
+def retire_unsourced_library_arcs(
+  connection: Connection,
+  schema: str,
+  pin: dict[str, str] | None = None,
+  *,
+  source_schema: str = "public",
+) -> int:
+  """Delete :func:`find_unsourced_library_arcs` and their classification rows.
+
+  Runs under the resync GUC like the rest of the resync.
+  """
+  arc_ids = find_unsourced_library_arcs(
+    connection, schema, pin, source_schema=source_schema
+  )
+  if not arc_ids:
+    return 0
+  connection.execute(
+    text(
+      f"DELETE FROM {schema}.association_classifications "
+      "WHERE association_id = ANY(:ids)"
+    ),
+    {"ids": arc_ids},
+  )
+  result = connection.execute(
+    text(
+      f"DELETE FROM {schema}.associations "
+      "WHERE id = ANY(:ids) AND created_by = 'library-seeder'"
+    ),
+    {"ids": arc_ids},
+  )
+  return result.rowcount or 0
