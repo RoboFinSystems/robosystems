@@ -207,3 +207,17 @@ def test_an_account_mapped_to_net_and_gross_counts_once(tenant):
 def test_an_all_in_net_chart_is_unchanged(tenant):
   _post(tenant, [("leasehold_net", 2_500_000, 0), ("bank", 0, 2_500_000)])
   assert _net(tenant) == pytest.approx(25_000.0)
+
+
+def test_assets_at_cost_on_net_with_depreciation_on_ad_net_down(tenant):
+  _post(
+    tenant,
+    [
+      ("leasehold_net", 5_000_000, 0),
+      ("bank", 0, 5_000_000),
+      ("accum", 0, 600_000),
+      ("capital", 600_000, 0),
+    ],
+  )
+  # 50,000 at cost on Net, less 6,000 accumulated depreciation
+  assert _net(tenant) == pytest.approx(44_000.0)

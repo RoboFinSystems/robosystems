@@ -902,7 +902,11 @@ def _ppe_details_outside_net(
   gross_id: str | None,
   ad_id: str | None,
 ) -> float:
-  """Gross - AD from accounts not already counted in the direct Net fact."""
+  """Gross - AD from accounts not already counted in the direct Net fact.
+
+  AD with no Gross beside it still nets: a chart mapping assets at cost to
+  Net and their depreciation to AD reports cost - AD, not cost alone.
+  """
   net_sources = set(net_fact.source_values or {})
   total = 0.0
   for f in facts:
