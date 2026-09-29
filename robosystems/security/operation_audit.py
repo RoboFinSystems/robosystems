@@ -59,6 +59,7 @@ def _is_id_key(key: str) -> bool:
     (key == "id" or key.endswith("_id"))
     and key not in _CONTEXT_ID_KEYS
     and key not in _NEVER_CAPTURED_KEYS
+    and not key.endswith("_tax_id")
   )
 
 

@@ -147,6 +147,9 @@ class TestObjectIds:
     )
     assert ids == ["agt_1"]
 
+  def test_a_prefixed_tax_id_key_is_never_captured(self):
+    assert object_ids({}, {"id": "agt_1", "vendor_tax_id": "GB123456789"}) == ["agt_1"]
+
   def test_a_bare_number_is_not_an_object_id(self):
     assert object_ids({}, {"id": "agt_1", "account_number_id": "4417"}) == ["agt_1"]
 
