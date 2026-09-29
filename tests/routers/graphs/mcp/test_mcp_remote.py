@@ -323,13 +323,31 @@ class TestToolsList:
       "idempotentHint": True,
     }
 
-  def test_write_tools_are_hinted_destructive(self):
-    assert remote._tool_annotations("close-period", "Close period") == {
-      "title": "Close period",
-      "openWorldHint": False,
-      "readOnlyHint": False,
-      "destructiveHint": True,
-    }
+  async def test_every_tool_sets_all_four_hints(self):
+    schema = {"type": "object", "properties": {}}
+    handler = _make_handler(
+      tools=[
+        {"name": "get-graph-schema", "description": "d", "inputSchema": schema},
+        {"name": "close-period", "description": "d", "inputSchema": schema},
+        {"name": "not-yet-listed", "description": "d", "inputSchema": schema},
+      ]
+    )
+    with (
+      patch.object(remote, "_validate_read_access", AsyncMock()),
+      patch.object(remote, "get_graph_repository", AsyncMock(return_value=Mock())),
+      patch.object(remote, "MCPHandler", Mock(return_value=handler)),
+    ):
+      request = _make_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+      body = _body(await dispatch_jsonrpc(request, "kg123", _make_user()))
+
+    for tool in body["result"]["tools"]:
+      for hint in (
+        "readOnlyHint",
+        "destructiveHint",
+        "idempotentHint",
+        "openWorldHint",
+      ):
+        assert isinstance(tool["annotations"][hint], bool), (tool["name"], hint)
 
   def test_title_prefers_the_definition_then_humanizes(self):
     assert remote._tool_title({"name": "x", "title": " Fact grid "}) == "Fact grid"

@@ -18,6 +18,7 @@ from robosystems.middleware.mcp import (
 from robosystems.middleware.mcp import (
   GraphMCPTools as AdapterGraphMCPTools,
 )
+from robosystems.middleware.mcp.tools.sensitive import mask_tax_ids_for_graph
 from robosystems.middleware.robustness.timeout_coordinator import TimeoutCoordinator
 
 timeout_coordinator = TimeoutCoordinator()
@@ -305,6 +306,7 @@ class MCPHandler:
           timeout=tool_timeout,
           tool_timeout=instance_timeout,  # Pass instance timeout to the tool
         )
+        results = mask_tax_ids_for_graph(self.graph_id, results)
         text = json.dumps(results, indent=2)
         # Tools report a refusal (closed period, not found, bad arguments)
         # as a dict with an `error` code. It is a failed call for the client,

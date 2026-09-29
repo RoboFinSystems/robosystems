@@ -8,6 +8,7 @@ from typing import Any
 
 from robosystems.logger import logger
 from robosystems.middleware.mcp import GraphQueryComplexityError
+from robosystems.middleware.mcp.tools.sensitive import mask_tax_ids_for_graph
 
 from .handlers import is_tool_error_result, tool_error_kind
 
@@ -170,7 +171,9 @@ async def stream_cypher_query(
           "rows_in_chunk": rows_in_chunk,
           "total_rows_so_far": total_rows,
           "columns": all_columns,
-          "data": chunk.get("data", []),
+          "data": mask_tax_ids_for_graph(
+            getattr(handler, "graph_id", None), chunk.get("data", [])
+          ),
         },
       }
 

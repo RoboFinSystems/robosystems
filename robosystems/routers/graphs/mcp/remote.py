@@ -42,8 +42,10 @@ from robosystems.middleware.graph.query_telemetry import (
   record_shared_query_outcome,
 )
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.mcp.tools.annotations import tool_annotations
 from robosystems.middleware.mcp.tools.classification import CYPHER_READ_TOOLS
 from robosystems.middleware.mcp.tools.manager import ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
+from robosystems.middleware.mcp.tools.sensitive import mask_tax_ids_for_graph
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
@@ -52,7 +54,6 @@ from robosystems.models.api.graphs.mcp import MCPToolCall
 from robosystems.models.core import User
 
 from .execute import (
-  READ_ONLY_MCP_TOOLS,
   _get_mcp_operation_type,
   _get_user_priority,
   authorize_mcp_tool_call,
@@ -286,7 +287,7 @@ async def _handle_tools_list(
       "title": title,
       "description": tool.get("description", ""),
       "inputSchema": tool.get("inputSchema", {"type": "object", "properties": {}}),
-      "annotations": _tool_annotations(tool["name"], title),
+      "annotations": tool_annotations(tool["name"], title),
     }
     mcp_tools.append(entry)
 
@@ -301,25 +302,6 @@ def _tool_title(tool: dict[str, Any]) -> str:
     return explicit.strip()
   words = str(tool["name"]).replace("-", " ").replace("_", " ").strip()
   return words[:1].upper() + words[1:]
-
-
-def _tool_annotations(name: str, title: str) -> dict[str, Any]:
-  """MCP tool annotations, explicit on every tool (directory scans reject a
-  tool with none).
-
-  ``READ_ONLY_MCP_TOOLS`` and the Cypher read tools (guarded by
-  ``assert_read_only_cypher`` on every path) are read-only and idempotent;
-  everything else is hinted destructive, matching the authorization
-  gauntlet's treatment of non-read tools as mutations.
-  """
-  annotations: dict[str, Any] = {"title": title, "openWorldHint": False}
-  if name in READ_ONLY_MCP_TOOLS or name in _CYPHER_READ_TOOLS:
-    annotations.update(
-      {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-    )
-  else:
-    annotations.update({"readOnlyHint": False, "destructiveHint": True})
-  return annotations
 
 
 # Strategies that answer as SSE; everything else is a single JSON body.
@@ -615,7 +597,9 @@ async def _stream_queued_call(
 
           if state == "completed":
             query_settled = True
-            result = await queue_manager.get_query_result(queue_id)
+            result = mask_tax_ids_for_graph(
+              graph_id, await queue_manager.get_query_result(queue_id)
+            )
             failed, failure_kind = _tool_failure(result)
             outcome = "tool_error" if failed else "completed"
             payload = {
