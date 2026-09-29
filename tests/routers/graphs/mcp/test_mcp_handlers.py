@@ -665,7 +665,10 @@ class TestCallerTimeoutClamp:
       return None
 
     fake = SimpleNamespace(
-      _ensure_not_closed=lambda: None, _ensure_initialized=_noop, mcp_tools=None
+      _ensure_not_closed=lambda: None,
+      _ensure_initialized=_noop,
+      mcp_tools=None,
+      graph_id="kg1",
     )
     call_tool = handlers.MCPHandler.call_tool.__get__(fake)
     default = handlers.timeout_coordinator.get_tool_timeout("read-graph-cypher")
@@ -678,3 +681,36 @@ class TestCallerTimeoutClamp:
       )
 
     assert execute.call_args.kwargs["timeout"] == (expected or default)
+
+
+class TestTaxIdMasking:
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("graph_id", "expected"), [("kg1", "***6789"), ("sec", "12-3456789")]
+  )
+  async def test_tenant_answers_carry_last_four_only(self, graph_id, expected):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from robosystems.routers.graphs.mcp import handlers
+
+    async def _noop():
+      return None
+
+    fake = SimpleNamespace(
+      _ensure_not_closed=lambda: None,
+      _ensure_initialized=_noop,
+      mcp_tools=None,
+      graph_id=graph_id,
+    )
+    call_tool = handlers.MCPHandler.call_tool.__get__(fake)
+
+    with patch.object(
+      handlers,
+      "execute_mcp_query_with_timeout",
+      return_value={"agent": {"tax_id": "12-3456789"}},
+    ):
+      result = await call_tool("get-agent", {"id": "agt_1"})
+
+    assert json.loads(result["text"])["agent"]["tax_id"] == expected

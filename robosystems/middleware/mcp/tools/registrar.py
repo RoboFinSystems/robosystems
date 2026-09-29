@@ -34,6 +34,7 @@ from robosystems.operations.extensions.staleness import mark_graph_stale
 
 from ._gate import MCPExtensionGateError, require_graph_extension_mcp
 from .base_tool import BaseTool
+from .sensitive import drop_withheld_arguments, withhold_input_fields
 
 if TYPE_CHECKING:
   from ..client import GraphMCPClient
@@ -296,7 +297,9 @@ class _RegistrarMCPTool(BaseTool):
     return {
       "name": self.spec.name,
       "description": description,
-      "inputSchema": derive_input_schema(self.spec.request_model),
+      "inputSchema": withhold_input_fields(
+        derive_input_schema(self.spec.request_model)
+      ),
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
@@ -317,7 +320,7 @@ class _RegistrarMCPTool(BaseTool):
 
     # ── 2. Parse request ────────────────────────────────────────────────
     try:
-      body = self.spec.request_model.model_validate(arguments)
+      body = self.spec.request_model.model_validate(drop_withheld_arguments(arguments))
     except ValidationError as exc:
       return {
         "error": "invalid_arguments",
