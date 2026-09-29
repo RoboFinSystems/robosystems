@@ -20,9 +20,13 @@ class MutationAuditEntry(BaseModel):
     ),
   )
   operation_name: str = Field(..., description="The operation or MCP tool that ran")
-  status: Literal["completed", "failed"] = Field(
+  status: Literal["completed", "failed", "pending"] = Field(
     ...,
-    description="Whether the call succeeded; a failed call changed nothing it reports",
+    description=(
+      "Whether the call succeeded; a failed call changed nothing it reports. "
+      "'pending' means the call started background work; follow its "
+      "operation_id for the outcome"
+    ),
   )
   error_code: str | None = Field(None, description="Why a failed call failed")
   duration_ms: float = Field(..., description="How long the call took")

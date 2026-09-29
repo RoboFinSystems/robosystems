@@ -36,6 +36,7 @@ from .graph_tools import (
 )
 from .graphql_tool import GraphqlQueryTool, GraphqlSchemaTool
 from .schema_tool import SchemaTool
+from .sensitive import drop_withheld_arguments
 from .subgraph_write_tools import (
   AddNodeTableTool,
   AddRelationshipTableTool,
@@ -828,7 +829,7 @@ class GraphMCPTools:
       record = build_tool_record(
         graph_id=self.client.graph_id,
         tool_name=name,
-        arguments=arguments,
+        arguments=drop_withheld_arguments(arguments or {}),
         result=result,
         error=error,
         duration_ms=duration_ms,

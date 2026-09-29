@@ -20,6 +20,8 @@ from .request_context import audit_context
 _CONTEXT_ID_KEYS = frozenset({"graph_id", "user_id", "org_id"})
 # Enough to name what a call touched; a bulk write can't bloat a row.
 _MAX_OBJECT_IDS = 20
+# Customer identifiers that end in `_id` but name a person, not an object.
+_NEVER_CAPTURED_KEYS = frozenset({"tax_id", "taxId"})
 
 # REST rows are recorded from synchronous code on the event loop; the insert
 # runs here instead of blocking it.
@@ -53,7 +55,18 @@ class MutationRecord:
 
 
 def _is_id_key(key: str) -> bool:
-  return (key == "id" or key.endswith("_id")) and key not in _CONTEXT_ID_KEYS
+  return (
+    (key == "id" or key.endswith("_id"))
+    and key not in _CONTEXT_ID_KEYS
+    and key not in _NEVER_CAPTURED_KEYS
+    and not key.endswith("_tax_id")
+  )
+
+
+def _looks_like_object_id(value: str) -> bool:
+  # Every platform id carries a letter (a prefix, a ULID, a uuid); a bare
+  # number such as a tax or account number is never recorded.
+  return any(c.isalpha() for c in value)
 
 
 def object_ids(arguments: Any, result: Any) -> list[str]:
@@ -71,7 +84,7 @@ def object_ids(arguments: Any, result: Any) -> list[str]:
     for key, value in src.items():
       if not (isinstance(key, str) and _is_id_key(key)):
         continue
-      if isinstance(value, str) and value and value not in found:
+      if isinstance(value, str) and _looks_like_object_id(value) and value not in found:
         found.append(value)
         if len(found) == _MAX_OBJECT_IDS:
           return found
