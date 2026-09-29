@@ -3813,7 +3813,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.48.0,<1.0" },
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0,<1.0" },
     { name = "webauthn", specifier = ">=2.7.0,<3.0" },
-    { name = "xbrlkit", specifier = ">=0.18.1,<0.19.0" },
+    { name = "xbrlkit", specifier = ">=0.19.0,<0.20.0" },
     { name = "zstandard", specifier = ">=0.23,<1" },
 ]
 provides-extras = ["dev"]
@@ -3829,7 +3829,7 @@ lambda = [
 
 [[package]]
 name = "robosystems-client"
-version = "2.2.0"
+version = "2.2.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -3837,9 +3837,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7f/cc/9de8537f07860e02deabb0ffc8c09a70df1355329fb5c07790c2801f2549/robosystems_client-2.2.0.tar.gz", hash = "sha256:0920aa33cfbf254e309e84b5c9dd5ac742a577d34076b3a0404ed866183a7284", size = 590638, upload-time = "2026-09-24T22:24:06.172Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5e/28/c71c52fba3c917cc9bd3e27c4d17c962b4166555cdf420d5d6dc370d349c/robosystems_client-2.2.4.tar.gz", hash = "sha256:0033f7692df8516685d46455f6d3fcf0d205264d521cb4659e18573af052d81a", size = 595185, upload-time = "2026-09-29T17:04:20.919Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fd/20/4c736521bcc2bec9e79e1d30fc6983ff9f402db7f6dc24fe67d8ef3a4092/robosystems_client-2.2.0-py3-none-any.whl", hash = "sha256:9c7477de5c247f357bcc484c0ca8dbaa6509713f2c80ca363941344c62f4ef4f", size = 1343537, upload-time = "2026-09-24T22:24:03.88Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/1c/915cf9edad84ac38fe0f0fb295a0b684acfad64f574379ff2b0c9a06b55c/robosystems_client-2.2.4-py3-none-any.whl", hash = "sha256:eafe2e1a4c4e25eb4b045e1880f4a409c9177d59de5c6ad4fe495f21ff46ed06", size = 1351760, upload-time = "2026-09-29T17:04:19.002Z" },
 ]
 
 [[package]]
@@ -4640,7 +4640,7 @@ wheels = [
 
 [[package]]
 name = "xbrlkit"
-version = "0.18.1"
+version = "0.19.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arelle-release" },
@@ -4652,9 +4652,9 @@ dependencies = [
     { name = "regex" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/16/c8/f5972b91e0c5a501ded25eef32d90fb7f0b43f40ce920d16643671763a4f/xbrlkit-0.18.1.tar.gz", hash = "sha256:b99b46dc7d372cceca5c86f43c2d3fb76e042da5da3fd31ed1c062dabc912765", size = 2108968, upload-time = "2026-09-24T23:42:02.372Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/1d/a5b10a9d44635abd42bb4e7360eec45da39ccbfff2412cffaf3729f5a09f/xbrlkit-0.19.0.tar.gz", hash = "sha256:e004f657d3bd192dc0c62407fb3ae8fa885478629b5effa456abe8f0450b68d2", size = 2120104, upload-time = "2026-09-29T16:32:53.521Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/d5/367752ae27befd860f3782c09b4575b835b84f02a702ddfc5fdc280812c9/xbrlkit-0.18.1-py3-none-any.whl", hash = "sha256:a129433bcb6cb6df17b6091f99b788126c7daa4468b7c47366dc558d6d8ca288", size = 2064968, upload-time = "2026-09-24T23:42:00.346Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/1d/2136c1e6118f780583e568a16e10e25563b00082006d0ceb125cc0cb5d28/xbrlkit-0.19.0-py3-none-any.whl", hash = "sha256:ee373775930d4bebd57b6dd6761d7d37e9cf9a135db0b61eca8ad64dccde362c", size = 2071019, upload-time = "2026-09-29T16:32:51.781Z" },
 ]
 
 [[package]]
