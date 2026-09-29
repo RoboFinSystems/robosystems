@@ -333,12 +333,7 @@ class GetMappingSummaryTool:
             "high": coverage.high_confidence,
             "medium": coverage.medium_confidence,
             "low": coverage.low_confidence,
-            "manual": (
-              coverage.mapped_count
-              - coverage.high_confidence
-              - coverage.medium_confidence
-              - coverage.low_confidence
-            ),
+            "manual": coverage.manual_confidence,
           },
           "unreachable_count": coverage.unreachable_count,
           "unreachable": [

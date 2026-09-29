@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from robosystems.operations.roboledger.reports.calc_dag import SYNTHESIZED_PARENTS
+
 # Statement-level rollups: rendered from their children, so a CoA arc to one
 # would double-count. Adding a non-rollup here strands it as un-mappable.
 RS_GAAP_SUBTOTAL_DENYLIST: frozenset[str] = frozenset(
@@ -41,12 +43,7 @@ RS_GAAP_SUBTOTAL_DENYLIST: frozenset[str] = frozenset(
 # absent from the BS presentation network, yet they are the right mapping
 # grain: CF Investing reads capex from the change in Gross. The candidate
 # suggester admits them regardless of presentation membership.
-RS_GAAP_SYNTHESIZED_DETAIL_ALLOW: frozenset[str] = frozenset(
-  {
-    "rs-gaap:PropertyPlantAndEquipmentGross",
-    "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
-  }
-)
+RS_GAAP_SYNTHESIZED_DETAIL_ALLOW: frozenset[str] = frozenset(SYNTHESIZED_PARENTS)
 
 
 # Per-FAC catch-all "Other" leaf (non-rollup) for each FAC category.

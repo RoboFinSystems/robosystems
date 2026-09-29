@@ -21,6 +21,9 @@ from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
 from robosystems.operations.roboledger.reports.calc_dag import (
+  PPE_ACCUMULATED_DEPRECIATION_QNAME,
+  PPE_GROSS_QNAME,
+  PPE_NET_QNAME,
   load_rs_gaap_calculations,
   resolve_calc_dag,
   topo_sort_calculations,
@@ -891,27 +894,20 @@ def _synthesize_ppe_net_facts(
   purchases. Skipped where a direct PPE Net fact exists.
   """
   row = session.execute(
-    text(
-      "SELECT id, balance_type FROM elements "
-      "WHERE qname = 'rs-gaap:PropertyPlantAndEquipmentNet'"
-    )
+    text("SELECT id, balance_type FROM elements WHERE qname = :qname"),
+    {"qname": PPE_NET_QNAME},
   ).fetchone()
   if row is None:
     return
   net_id, net_balance_type = row[0], row[1] or "debit"
 
   src_rows = session.execute(
-    text(
-      "SELECT qname, id FROM elements WHERE qname IN ("
-      "'rs-gaap:PropertyPlantAndEquipmentGross', "
-      "'rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment')"
-    )
+    text("SELECT qname, id FROM elements WHERE qname = ANY(:qnames)"),
+    {"qnames": [PPE_GROSS_QNAME, PPE_ACCUMULATED_DEPRECIATION_QNAME]},
   ).fetchall()
   src_ids = dict(src_rows)
-  gross_id = src_ids.get("rs-gaap:PropertyPlantAndEquipmentGross")
-  ad_id = src_ids.get(
-    "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment"
-  )
+  gross_id = src_ids.get(PPE_GROSS_QNAME)
+  ad_id = src_ids.get(PPE_ACCUMULATED_DEPRECIATION_QNAME)
   if gross_id is None and ad_id is None:
     return  # Neither source mapped — nothing to synthesize.
 
@@ -967,7 +963,7 @@ def _synthesize_ppe_net_facts(
     facts.append(
       ReportFact(
         element_id=net_id,
-        element_qname="rs-gaap:PropertyPlantAndEquipmentNet",
+        element_qname=PPE_NET_QNAME,
         element_name="Property, Plant and Equipment, Net",
         classification="asset",
         balance_type=net_balance_type,

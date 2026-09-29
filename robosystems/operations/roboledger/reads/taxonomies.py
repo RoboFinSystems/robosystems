@@ -641,20 +641,23 @@ def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageRe
     .all()
   )
 
-  mapped_count = len({a.from_element_id for a in mapping_assocs})
+  # Bands count CoA elements, not arcs: an element mapped more than once
+  # takes the highest confidence among its arcs, so the four bands sum to
+  # mapped_count.
+  element_confidence: dict[str, float | None] = {}
+  for a in mapping_assocs:
+    current = element_confidence.get(a.from_element_id)
+    if current is None or (a.confidence is not None and a.confidence > current):
+      element_confidence[a.from_element_id] = a.confidence
+
+  mapped_count = len(element_confidence)
   unmapped_count = total_coa - mapped_count
 
-  high = sum(
-    1 for a in mapping_assocs if a.confidence is not None and a.confidence > 0.90
-  )
-  medium = sum(
-    1
-    for a in mapping_assocs
-    if a.confidence is not None and 0.70 <= a.confidence <= 0.90
-  )
-  low = sum(
-    1 for a in mapping_assocs if a.confidence is not None and a.confidence < 0.70
-  )
+  scores = element_confidence.values()
+  high = sum(1 for c in scores if c is not None and c > 0.90)
+  medium = sum(1 for c in scores if c is not None and 0.70 <= c <= 0.90)
+  low = sum(1 for c in scores if c is not None and c < 0.70)
+  manual = sum(1 for c in scores if c is None)
 
   unreachable = check_mapping_reachability(session, mapping_assocs)
 
@@ -667,6 +670,7 @@ def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageRe
     high_confidence=high,
     medium_confidence=medium,
     low_confidence=low,
+    manual_confidence=manual,
     unreachable_count=len(unreachable),
     unreachable=unreachable,
   )
@@ -766,7 +770,8 @@ def check_mapping_reachability(
 
 def _load_calc_parents(session: Session) -> dict[str, set[str]]:
   """``child_element_id → {parent_element_id, …}`` over all calc arcs (the
-  inverse of their declared direction). Cached on the session."""
+  inverse of their declared direction), plus the parents the renderer
+  synthesizes (``SYNTHESIZED_PARENTS``). Cached on the session."""
   cached = getattr(session, "_calc_parents_cache", None)
   if isinstance(cached, dict):
     return cached
@@ -780,6 +785,19 @@ def _load_calc_parents(session: Session) -> dict[str, set[str]]:
   parents: dict[str, set[str]] = {}
   for parent_id, child_id in rows:
     parents.setdefault(child_id, set()).add(parent_id)
+
+  from robosystems.operations.roboledger.reports.calc_dag import SYNTHESIZED_PARENTS
+
+  qname_ids = dict(
+    session.execute(
+      text("SELECT qname, id FROM elements WHERE qname = ANY(:qnames)"),
+      {"qnames": list(set(SYNTHESIZED_PARENTS) | set(SYNTHESIZED_PARENTS.values()))},
+    ).fetchall()
+  )
+  for child_qname, parent_qname in SYNTHESIZED_PARENTS.items():
+    child_id, parent_id = qname_ids.get(child_qname), qname_ids.get(parent_qname)
+    if child_id is not None and parent_id is not None:
+      parents.setdefault(child_id, set()).add(parent_id)
   try:
     session._calc_parents_cache = parents
   except (AttributeError, TypeError):

@@ -273,6 +273,33 @@ class TestMappingCoverage:
     assert coverage.unreachable[0].coa_code == "6100"
     assert coverage.unreachable[0].target_qname == "rs-gaap:Orphan"
 
+  def test_bands_count_elements_not_arcs(self, ledger):
+    # One element mapped twice (the Driftline inventory shape), one unscored.
+    ledger.add(
+      Association(
+        structure_id="map_1",
+        from_element_id="el_cash_acct",
+        to_element_id="el_current",
+        association_type="mapping",
+        order_value=4,
+        confidence=0.8,
+      )
+    )
+    ar_arc = ledger.query(Association).filter_by(from_element_id="el_ar_acct").one()
+    ar_arc.confidence = None
+    ledger.flush()
+
+    coverage = get_mapping_coverage(ledger, "map_1")
+    assert coverage.mapped_count == 3
+    bands = (
+      coverage.high_confidence,
+      coverage.medium_confidence,
+      coverage.low_confidence,
+      coverage.manual_confidence,
+    )
+    assert bands == (1, 0, 1, 1)
+    assert sum(bands) == coverage.mapped_count
+
   def test_unknown_mapping_raises_rather_than_reporting_zero(self, ledger):
     with pytest.raises(MappingStructureNotFoundError):
       get_mapping_coverage(ledger, "map_missing")
@@ -317,6 +344,42 @@ class TestReachability:
       ("el_rent_acct", "el_orphan")
     ]
     assert unreachable[0].coa_name == "Rent"
+
+  def test_gross_and_contra_reach_through_the_synthesized_net(self, ledger):
+    # No calc arc joins Gross or AD to Net; the renderer synthesizes Net from
+    # them, so the check must walk the same edge (the Driftline shape).
+    ledger.add_all(
+      [
+        Element(
+          id=f"el_{name}",
+          name=name,
+          qname=f"rs-gaap:{qname}",
+          source="rs-gaap",
+          taxonomy_id="tax_rs",
+          depth=2,
+        )
+        for name, qname in (
+          ("ppe_net", "PropertyPlantAndEquipmentNet"),
+          ("ppe_gross", "PropertyPlantAndEquipmentGross"),
+          (
+            "ppe_ad",
+            "AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+          ),
+        )
+      ]
+    )
+    ledger.flush()
+    ledger.add(
+      Association(
+        structure_id="calc_bs",
+        from_element_id="el_assets",
+        to_element_id="el_ppe_net",
+        association_type="calculation",
+      )
+    )
+    ledger.flush()
+    assert is_target_reachable(ledger, "el_ppe_gross") is True
+    assert is_target_reachable(ledger, "el_ppe_ad") is True
 
   def test_no_mappings_is_nothing_to_check(self, ledger):
     assert check_mapping_reachability(ledger, []) == []

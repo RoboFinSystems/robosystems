@@ -258,6 +258,7 @@ class MappingCoverageResponse(BaseModel):
   high_confidence: int = 0  # >0.90
   medium_confidence: int = 0  # 0.70-0.90
   low_confidence: int = 0  # <0.70
+  manual_confidence: int = 0  # no confidence score on any arc
   unreachable_count: int = 0
   unreachable: list[UnreachableMapping] = []
 
