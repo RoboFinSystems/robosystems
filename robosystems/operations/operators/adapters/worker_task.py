@@ -22,6 +22,8 @@ class OperatorWorkerTask(BaseTask):
       raise ValueError("Missing operator_type in task params")
 
     operator = get_operator(operator_type)
+    landed: list[dict[str, Any]] = []
+    self.partial_result["writes"] = landed
 
     return await run_operator_worker(
       operator=operator,
@@ -30,4 +32,5 @@ class OperatorWorkerTask(BaseTask):
       user_id=self.user_id,
       params=self.params,
       manager=self.manager,
+      landed_writes=landed,
     )

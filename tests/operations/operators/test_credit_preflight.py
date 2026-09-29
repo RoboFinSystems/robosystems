@@ -298,3 +298,16 @@ class TestUnbilledCallsStopTheLoop:
     kwargs = consumer.consume.await_args.kwargs
     assert kwargs["cache_read_input_tokens"] == 3905
     assert kwargs["cache_creation_input_tokens"] == 12
+
+
+def test_the_author_preflight_covers_its_cold_first_call():
+  """A cold /do writes the ~61K-token cached prefix: 343 credits measured on
+  Opus 5.5. The pre-flight must not admit a graph that cannot fund it."""
+  from robosystems.operations.operators.base import OperatorMode
+  from robosystems.operations.operators.credit_preflight import (
+    estimate_operator_credits,
+  )
+  from robosystems.operations.operators.implementations.author import AuthorOperator
+
+  for mode in (OperatorMode.QUICK, OperatorMode.STANDARD, OperatorMode.EXTENDED):
+    assert estimate_operator_credits(AuthorOperator(), mode, "author") >= 343

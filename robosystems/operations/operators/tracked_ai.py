@@ -115,6 +115,11 @@ class TrackedAIClient:
     logger.error(f"AI call completed but could not be billed — {detail}")
 
   @property
+  def last_call_unbilled(self) -> bool:
+    """Whether a call has gone unbilled; its tool calls must not write."""
+    return self._unbilled_call is not None
+
+  @property
   def credit_summary(self) -> dict[str, Any]:
     return {
       "total_credits_consumed": self.total_credits,

@@ -228,6 +228,10 @@ async def get_operation_status(
       response["result"] = metadata.result_data
     elif metadata.status == OperationStatus.FAILED and metadata.error_message:
       response["error"] = metadata.error_message
+      if metadata.error_details and metadata.error_details.get("writes"):
+        response["writes"] = metadata.error_details["writes"]
+    elif metadata.status == OperationStatus.CANCELLED and metadata.result_data:
+      response["result"] = metadata.result_data
 
     links = {
       "stream": f"/v1/operations/{operation_id}/stream",

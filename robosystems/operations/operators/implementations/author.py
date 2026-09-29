@@ -60,6 +60,8 @@ class AuthorOperator(AnalystOperator):
     read_only=False,
     version="1.0.0",
     requires_credits=True,
+    # The cached tools + system prefix measured on a cold /do (~61K tokens).
+    cold_start_tokens=62_000,
     execution_profile={
       OperatorMode.QUICK: ExecutionProfile(
         min_time=5, max_time=30, avg_time=12, tool_calls=6

@@ -64,3 +64,6 @@ class OperatorContext:
   ai: TrackedAIClient | None = None
   tools: ToolAccess | None = None
   progress: ProgressReporter | None = None
+  # Every write that landed, appended as it lands, so a run that stops on an
+  # error, a timeout or a cancel can still report them.
+  writes: list[dict[str, Any]] = field(default_factory=list)

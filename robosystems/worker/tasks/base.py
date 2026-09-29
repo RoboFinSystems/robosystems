@@ -48,6 +48,8 @@ class BaseTask(ABC):
     self.params = params
     self.manager = manager
     self._abandoned: list[asyncio.Future[Any]] = []
+    # What landed before the task stopped; the consumer adds it to a failure.
+    self.partial_result: dict[str, Any] = {}
 
   @abstractmethod
   async def execute(self) -> dict[str, Any]:
