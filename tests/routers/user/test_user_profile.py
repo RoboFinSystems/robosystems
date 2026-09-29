@@ -308,6 +308,37 @@ class TestUserProfile:
     db_session.refresh(test_user)
     assert test_user.email == original_email
 
+  @patch("robosystems.routers.user.main.passkey_ops.verify_reauth")
+  def test_email_change_reauth_runs_off_the_event_loop(
+    self, mock_verify_reauth, client_with_real_user: TestClient, db_session, test_user
+  ):
+    """The re-auth proof is a cost-14 bcrypt verify; on the loop it stalls
+    every other request in the process."""
+    import asyncio
+
+    from robosystems.operations.passkeys import ReauthInvalidError
+
+    on_loop: list[bool] = []
+
+    def _verify(*args, **kwargs):
+      try:
+        asyncio.get_running_loop()
+        on_loop.append(True)
+      except RuntimeError:
+        on_loop.append(False)
+      raise ReauthInvalidError("nope")
+
+    mock_verify_reauth.side_effect = _verify
+    db_session.merge(test_user)
+    db_session.commit()
+
+    response = client_with_real_user.put(
+      "/v1/user/", json={"email": "someone-else@example.com"}
+    )
+
+    assert response.status_code == 401
+    assert on_loop == [False]
+
   @patch("robosystems.routers.user.main.run_and_monitor_dagster_job")
   @patch("robosystems.routers.user.main.passkey_ops.verify_reauth")
   def test_own_email_in_different_case_is_a_noop(

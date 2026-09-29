@@ -7,6 +7,7 @@ This test suite covers:
 - Document not found (404)
 """
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -179,6 +180,28 @@ class TestSearchDocuments:
         )
       assert exc_info.value.status_code == 503
 
+  @pytest.mark.unit
+  async def test_search_runs_off_the_event_loop(self):
+    # ONNX embedding + a blocking OpenSearch call: on the loop it stalls
+    # every other request in the process.
+    loop_thread = threading.get_ident()
+    ran_on = {}
+
+    def _search(graph_id, request):
+      ran_on["thread"] = threading.get_ident()
+      return _make_search_response()
+
+    mock_service = MagicMock()
+    mock_service.search_documents.side_effect = _search
+    with patch(f"{MODULE}.get_search_service", return_value=mock_service):
+      await search_documents(
+        graph_id="sec",
+        request=SearchRequest(query="ai"),
+        current_user=MagicMock(),
+      )
+
+    assert ran_on["thread"] != loop_thread
+
 
 @pytest.mark.asyncio
 class TestGetDocumentSection:
@@ -255,3 +278,21 @@ class TestGetDocumentSection:
           current_user=MagicMock(),
         )
       assert exc_info.value.status_code == 503
+
+  @pytest.mark.unit
+  async def test_section_read_runs_off_the_event_loop(self):
+    loop_thread = threading.get_ident()
+    ran_on = {}
+
+    def _section(graph_id, document_id):
+      ran_on["thread"] = threading.get_ident()
+      return _make_document_section()
+
+    mock_service = MagicMock()
+    mock_service.get_document_section.side_effect = _section
+    with patch(f"{MODULE}.get_search_service", return_value=mock_service):
+      await get_document_section(
+        graph_id="sec", document_id="abc123", current_user=MagicMock()
+      )
+
+    assert ran_on["thread"] != loop_thread

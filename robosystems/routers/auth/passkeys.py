@@ -7,6 +7,7 @@ keeps the lanes disjoint: an enroll token never satisfies ``/mfa/verify`` and
 a login token never authorizes enrollment.
 """
 
+import asyncio
 import json
 
 from fastapi import (
@@ -125,8 +126,12 @@ async def get_registration_options(
     # demand a fresh proof. The forced lane's token was minted seconds after a
     # password verify.
     try:
-      passkey_ops.verify_reauth(
-        session, user, password=request.password, assertion=request.assertion
+      await asyncio.to_thread(
+        passkey_ops.verify_reauth,
+        session,
+        user,
+        password=request.password,
+        assertion=request.assertion,
       )
     except passkey_ops.ReauthInvalidError:
       client_ip = fastapi_request.client.host if fastapi_request.client else None
@@ -326,7 +331,8 @@ async def delete_passkey(
 ) -> SuccessResponse:
   client_ip = fastapi_request.client.host if fastapi_request.client else None
   try:
-    passkey_ops.remove_passkey(
+    await asyncio.to_thread(
+      passkey_ops.remove_passkey,
       session,
       user,
       passkey_id,

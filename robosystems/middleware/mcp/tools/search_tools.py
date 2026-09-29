@@ -4,6 +4,7 @@ A result is context the model pays for on every later turn, so a hit carries
 only what is needed to choose it; the REST surface keeps the full models.
 """
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from robosystems.logger import logger
@@ -252,7 +253,7 @@ class SearchDocumentsTool(_SearchToolMixin):
     logger.info(f"MCP search-documents: query='{request.query}' graph_id={graph_id}")
 
     try:
-      response = service.search_documents(graph_id, request)
+      response = await asyncio.to_thread(service.search_documents, graph_id, request)
       return compact_search_response(response)
     except Exception as e:
       # opensearch-py error text embeds the endpoint hostname.
@@ -335,7 +336,9 @@ class GetDocumentSectionTool(_SearchToolMixin):
     logger.info(f"MCP get-document-section: doc_id={document_id} graph_id={graph_id}")
 
     try:
-      result = service.get_document_section(graph_id, document_id)
+      result = await asyncio.to_thread(
+        service.get_document_section, graph_id, document_id
+      )
       if result is None:
         return {"error": f"Document {document_id} not found"}
       return window_section(result, offset, length)
