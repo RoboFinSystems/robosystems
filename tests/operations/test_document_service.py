@@ -278,7 +278,13 @@ class TestFrontmatterTags:
       levels.append(f"{name}: &{name} [" + ", ".join([f"*{prev}"] * 10) + "]")
     levels.append("tags: [*i, keep]")
 
-    assert self._tags("\n".join(levels)) == ["keep"]
+    assert self._tags("\n".join(levels)) is None
+
+  def test_non_string_title_is_ignored(self):
+    from robosystems.operations.document_service import _apply_frontmatter
+
+    content = "---\ntitle: [a, b]\n---\n# Body\n"
+    assert _apply_frontmatter(content, None, None, None)[1] is None
 
   def test_repeated_long_alias_is_bounded(self):
     long_tag = "  " + "x" * 5000 + "  "

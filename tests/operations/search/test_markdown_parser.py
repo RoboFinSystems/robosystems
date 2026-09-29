@@ -149,3 +149,41 @@ class TestContentHash:
 
   def test_length(self):
     assert len(content_hash("test")) == 12
+
+
+def _alias_block(levels: int) -> str:
+  names = "abcdefghij"
+  lines = ["a: &a [" + ", ".join(["xxxxxxxxxx"] * 10) + "]"]
+  for i in range(1, levels):
+    lines.append(
+      f"{names[i]}: &{names[i]} [" + ", ".join([f"*{names[i - 1]}"] * 10) + "]"
+    )
+  lines.append(f"tags: [*{names[levels - 1]}, keep]")
+  return "\n".join(lines)
+
+
+class TestFrontmatterBounds:
+  def test_aliases_are_refused(self):
+    content = f"---\n{_alias_block(3)}\n---\n# Body\n"
+    metadata, remaining = parse_frontmatter(content)
+    assert metadata == {}
+    assert remaining == content
+
+  def test_second_block_is_bounded_when_the_stored_body_is_reparsed(self):
+    """The first block is stripped on write; indexing re-parses the stored
+    body, whose own leading block must be held to the same bounds."""
+    stored_body = f"---\n{_alias_block(4)}\n---\n# Memo\n\n" + "word " * 40
+    metadata, _ = parse_document(stored_body, "Quarterly memo")
+    assert "tags" not in metadata or all(isinstance(t, str) for t in metadata["tags"])
+
+  def test_tags_are_scalar_and_capped(self):
+    tags = ", ".join(f"t{i}" for i in range(200))
+    content = f"---\ntags: [{tags}, [nested], {{k: v}}]\n---\nBody."
+    metadata, _ = parse_document(content, "Doc")
+    assert metadata["tags"] == [f"t{i}" for i in range(50)]
+
+  def test_non_string_title_and_folder_are_ignored(self):
+    content = "---\ntitle: [a, b]\nfolder: {x: 1}\n---\nBody."
+    metadata, _ = parse_document(content, "Fallback")
+    assert metadata["title"] == "Fallback"
+    assert "folder" not in metadata
