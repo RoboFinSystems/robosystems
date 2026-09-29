@@ -11,6 +11,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CFN_DIR = REPO_ROOT / "cloudformation"
 WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+SCRIPT_DIR = REPO_ROOT / "bin"
 
 # AWS CloudFormation template size limits (bytes)
 # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-limits.html
@@ -31,6 +32,30 @@ _INLINE_RE = re.compile(r"--template-body\s+file://cloudformation/([\w.-]+)\.yam
 # only counts as an S3 deploy if that same workflow also passes --template-url.
 _UPLOAD_RE = re.compile(r"s3\s+cp\s+cloudformation/([\w.-]+)\.yaml")
 _URL_FLAG = "--template-url"
+# A script that sends a template with its full-line comments dropped
+# (bin/setup/bootstrap.sh for bootstrap-oidc.yaml): the inline limit applies to
+# what is sent, not to the file.
+_STRIPPED_RE = re.compile(
+  r"grep -v '\^\[\[:space:\]\]\*#' cloudformation/([\w.-]+)\.yaml"
+)
+
+
+def _templates_sent_without_comments() -> set[str]:
+  stems: set[str] = set()
+  for script in SCRIPT_DIR.rglob("*.sh"):
+    stems.update(_STRIPPED_RE.findall(script.read_text()))
+  return stems
+
+
+def _sent_size(template: Path) -> int:
+  if template.stem not in _templates_sent_without_comments():
+    return template.stat().st_size
+  kept = [
+    line
+    for line in template.read_text().splitlines(keepends=True)
+    if not line.lstrip().startswith("#")
+  ]
+  return len("".join(kept).encode())
 
 
 def _templates_by_deploy_mechanism() -> tuple[set[str], set[str]]:
@@ -56,6 +81,11 @@ class TestCloudFormationTemplateSizes:
   def test_templates_exist(self, templates):
     """Sanity check that we found templates to validate."""
     assert len(templates) > 0, f"No .yaml templates found in {CFN_DIR}"
+
+  def test_comment_stripping_deploy_is_discoverable(self):
+    """bootstrap.sh strips bootstrap-oidc.yaml's comments before sending it; if
+    this stops matching, that template is measured raw again and fails loudly."""
+    assert "bootstrap-oidc" in _templates_sent_without_comments()
 
   def test_deploy_mechanisms_are_discoverable(self):
     """The regexes must actually match the workflows, or every check below passes vacuously."""
@@ -100,7 +130,7 @@ class TestCloudFormationTemplateSizes:
         "--template-url (see the api.yaml upload step in deploy-api.yml).",
       )
 
-    size = template.stat().st_size
+    size = _sent_size(template)
     assert size <= limit, (
       f"{template.name} is {size:,} bytes, exceeding the {limit:,} byte "
       f"{mechanism} limit by {size - limit:,} bytes. {remedy}"
