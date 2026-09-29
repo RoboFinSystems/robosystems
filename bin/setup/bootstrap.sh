@@ -453,10 +453,19 @@ deploy_github_oidc() {
     print_info "Role ARN: ${GITHUB_ACTIONS_ROLE_ARN}"
 }
 
+# CloudFormation caps an inline template body at 51,200 bytes. Full-line
+# comments are dropped before sending; the template has no block scalars.
+oidc_template_file() {
+    local out
+    out=$(mktemp -t bootstrap-oidc.XXXXXX)
+    grep -v '^[[:space:]]*#' cloudformation/bootstrap-oidc.yaml > "$out"
+    echo "$out"
+}
+
 deploy_oidc_create() {
     aws cloudformation create-stack \
         --stack-name "${OIDC_STACK_NAME}" \
-        --template-body file://cloudformation/bootstrap-oidc.yaml \
+        --template-body "file://$(oidc_template_file)" \
         --parameters \
             ParameterKey=GitHubOrg,ParameterValue="${GITHUB_ORG}" \
             ParameterKey=GitHubRepoName,ParameterValue="${GITHUB_REPO}" \
@@ -520,7 +529,7 @@ deploy_oidc_update() {
         --stack-name "${OIDC_STACK_NAME}" \
         --change-set-name "${change_set}" \
         --change-set-type UPDATE \
-        --template-body file://cloudformation/bootstrap-oidc.yaml \
+        --template-body "file://$(oidc_template_file)" \
         --parameters \
             ParameterKey=GitHubOrg,ParameterValue="${GITHUB_ORG}" \
             ParameterKey=GitHubRepoName,ParameterValue="${GITHUB_REPO}" \
