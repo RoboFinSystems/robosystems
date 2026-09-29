@@ -7,7 +7,7 @@ private), so never encode secrets in type or field names.
 from __future__ import annotations
 
 import asyncio
-from typing import TypedDict
+from typing import Any, NotRequired, TypedDict
 
 import strawberry
 from fastapi import Depends, HTTPException, Path, Request, Security
@@ -42,6 +42,8 @@ class GraphQLContext(TypedDict):
   graph_id: str
   schema_extensions: tuple[str, ...]
   graph_type: str
+  # Per-request shared loads, keyed by `load_once`.
+  loads: NotRequired[dict[str, asyncio.Future[Any]]]
 
 
 async def get_context(

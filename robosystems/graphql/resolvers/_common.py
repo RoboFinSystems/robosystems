@@ -4,7 +4,12 @@ session prelude every data resolver runs.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
+from typing import Any
+
 import strawberry
+from sqlalchemy.orm import Session
 from strawberry.types import Info
 
 from robosystems.graphql.context import (
@@ -117,3 +122,26 @@ def open_library_session(info: Info[GraphQLContext, None]):
   from robosystems.db.extensions import extensions_session
 
   return extensions_session(graph_id)
+
+
+async def load_once(
+  info: Info[GraphQLContext, None],
+  extension: str,
+  key: str,
+  loader: Callable[[Session], Any],
+) -> Any:
+  """Run `loader` once per request for `key`; every field that asks shares it.
+
+  For per-item fields on list types: without this each list item opens its own
+  session and query, so one aliased list query fans out to thousands.
+  """
+  loads = info.context.setdefault("loads", {})
+  if key not in loads:
+    from robosystems.middleware.operations import run_off_loop
+
+    def run() -> Any:
+      with open_extensions_session(info, extension) as session:
+        return loader(session)
+
+    loads[key] = asyncio.ensure_future(run_off_loop(run))
+  return await loads[key]

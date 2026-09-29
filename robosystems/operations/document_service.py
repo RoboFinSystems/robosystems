@@ -15,6 +15,27 @@ from robosystems.models.core.document import Document
 
 logger = logging.getLogger(__name__)
 
+MAX_FRONTMATTER_TAGS = 50
+MAX_FRONTMATTER_TAG_LENGTH = 100
+
+
+def _frontmatter_tags(raw_tags: list[object]) -> list[str]:
+  """Scalar tags only, bounded in count and length.
+
+  YAML aliases make a nested or repeated value cheap to parse and costly to
+  stringify, so nothing is stringified until it is known to be small.
+  """
+  tags: list[str] = []
+  for raw in raw_tags[:MAX_FRONTMATTER_TAGS]:
+    if not isinstance(raw, str | int | float):
+      continue
+    if isinstance(raw, str) and len(raw) > MAX_FRONTMATTER_TAG_LENGTH:
+      continue
+    tag = str(raw).strip()
+    if tag:
+      tags.append(tag)
+  return tags
+
 
 def _apply_frontmatter(
   content: str,
@@ -42,11 +63,9 @@ def _apply_frontmatter(
   if resolved_tags is ... or resolved_tags is None:
     raw_tags = metadata.get("tags")
     if isinstance(raw_tags, str):
-      parsed = [t.strip() for t in raw_tags.split(",") if t.strip()]
-      if parsed:
-        resolved_tags = parsed
-    elif isinstance(raw_tags, list):
-      parsed = [str(t).strip() for t in raw_tags if str(t).strip()]
+      raw_tags = raw_tags.split(",")
+    if isinstance(raw_tags, list):
+      parsed = _frontmatter_tags(raw_tags)
       if parsed:
         resolved_tags = parsed
 

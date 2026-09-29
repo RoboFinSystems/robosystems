@@ -1490,7 +1490,8 @@ class ScheduleService:
       )
 
     # Fence before the deletes take row locks: fence, then rows, as every
-    # ledger writer does against close.
+    # ledger writer does against close. A kept period's auto-reversal is dated
+    # after the cutoff but belongs to that period, so it stays.
     stale_dates = (
       session.execute(
         text("""
@@ -1498,6 +1499,8 @@ class ScheduleService:
           WHERE source_structure_id = :sid
             AND status = 'draft'
             AND posting_date > :new_end
+            AND (reversal_of IS NULL
+                 OR reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
         """),
         {"sid": structure_id, "new_end": new_end_date},
       )
@@ -1514,6 +1517,8 @@ class ScheduleService:
           WHERE source_structure_id = :sid
             AND status = 'draft'
             AND posting_date > :new_end
+            AND (reversal_of IS NULL
+                 OR reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
         )
       """),
       {"sid": structure_id, "new_end": new_end_date},
@@ -1524,6 +1529,8 @@ class ScheduleService:
         WHERE source_structure_id = :sid
           AND status = 'draft'
           AND posting_date > :new_end
+          AND (reversal_of IS NULL
+               OR reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
       """),
       {"sid": structure_id, "new_end": new_end_date},
     )
