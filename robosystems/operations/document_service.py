@@ -31,6 +31,7 @@ def _apply_frontmatter(
     return content, title, tags, folder
 
   from robosystems.operations.search.markdown_parser import (
+    frontmatter_folder,
     frontmatter_tags,
     frontmatter_title,
     parse_frontmatter,
@@ -50,9 +51,9 @@ def _apply_frontmatter(
 
   resolved_folder = folder
   if resolved_folder is ... or resolved_folder is None:
-    fm_folder = metadata.get("folder")
-    if isinstance(fm_folder, str) and fm_folder.strip():
-      resolved_folder = fm_folder.strip()
+    fm_folder = frontmatter_folder(metadata.get("folder"))
+    if fm_folder:
+      resolved_folder = fm_folder
 
   return body, resolved_title, resolved_tags, resolved_folder
 

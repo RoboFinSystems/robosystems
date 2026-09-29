@@ -187,3 +187,8 @@ class TestFrontmatterBounds:
     metadata, _ = parse_document(content, "Fallback")
     assert metadata["title"] == "Fallback"
     assert "folder" not in metadata
+
+  def test_folder_is_capped(self):
+    content = "---\nfolder: " + "f" * 5000 + "\n---\nBody."
+    metadata, _ = parse_document(content, "Doc")
+    assert metadata["folder"] == "f" * 200
