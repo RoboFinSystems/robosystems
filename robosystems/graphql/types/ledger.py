@@ -5,10 +5,12 @@ pydantic decorator cannot resolve self-references.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 
 import strawberry
+from sqlalchemy.orm import Session
 from strawberry.scalars import JSON
 
 from robosystems.graphql.types._pydantic import pydantic_type
@@ -262,37 +264,42 @@ class Agent:
     )
 
   @strawberry.field
-  def open_receivable(self, info: strawberry.Info) -> OpenBalanceByAgent | None:
-    """This agent's open AR balance, or null when fully settled.
-
-    Single-agent lookup; resolves in one SQL round-trip. Querying this
-    on a paginated `agents` list triggers N+1 — wrap with a dataloader
-    when list views need it. The drill-in detail flow (one agent at a
-    time) is the supported v1 use case.
-    """
-    from robosystems.graphql.resolvers._common import open_extensions_session
+  async def open_receivable(self, info: strawberry.Info) -> OpenBalanceByAgent | None:
+    """This agent's open AR balance, or null when fully settled."""
     from robosystems.operations.roboledger.reads import ar_ap as reads_ar_ap
 
-    with open_extensions_session(info, "roboledger") as session:
-      response = reads_ar_ap.get_open_receivable_for_agent(session, self.id)
-    if response is None:
-      return None
-    return OpenBalanceByAgent.from_pydantic(response)
+    return await _open_balance(
+      info, "open_receivables", reads_ar_ap.list_open_receivables_by_agent, self.id
+    )
 
   @strawberry.field
-  def open_payable(self, info: strawberry.Info) -> OpenBalanceByAgent | None:
-    """This agent's open AP balance, or null when fully settled.
-
-    Same N+1 caveat as `open_receivable`.
-    """
-    from robosystems.graphql.resolvers._common import open_extensions_session
+  async def open_payable(self, info: strawberry.Info) -> OpenBalanceByAgent | None:
+    """This agent's open AP balance, or null when fully settled."""
     from robosystems.operations.roboledger.reads import ar_ap as reads_ar_ap
 
-    with open_extensions_session(info, "roboledger") as session:
-      response = reads_ar_ap.get_open_payable_for_agent(session, self.id)
-    if response is None:
-      return None
-    return OpenBalanceByAgent.from_pydantic(response)
+    return await _open_balance(
+      info, "open_payables", reads_ar_ap.list_open_payables_by_agent, self.id
+    )
+
+
+async def _open_balance(
+  info: strawberry.Info,
+  key: str,
+  list_by_agent: Callable[[Session], list[PydanticOpenBalanceByAgent]],
+  agent_id: str,
+) -> OpenBalanceByAgent | None:
+  """One agent's row from the graph's per-agent balances, loaded once per
+  request however many agents (or aliases) ask."""
+  from robosystems.graphql.resolvers._common import load_once
+
+  balances = await load_once(
+    info,
+    "roboledger",
+    key,
+    lambda session: {row.agent_id: row for row in list_by_agent(session)},
+  )
+  row = balances.get(agent_id)
+  return None if row is None else OpenBalanceByAgent.from_pydantic(row)
 
 
 # ── AR / AP open balances ─────────────────────────────────────────────────

@@ -408,6 +408,45 @@ class TestAgentResolvers:
     assert result.errors is not None
     assert result.errors[0].extensions == {"code": "LEDGER_NOT_INITIALIZED"}
 
+  @pytest.mark.asyncio
+  async def test_agent_balances_load_once_per_request(self) -> None:
+    """Balances on an agent list are one query per request, not one per agent
+    per alias — the per-item lookup let one query fan out to thousands."""
+    from robosystems.models.api.extensions.ar_ap import OpenBalanceByAgent
+
+    agents = [
+      self._agent().model_copy(update={"id": agent_id}) for agent_id in ("a1", "a2")
+    ]
+    balances = [
+      OpenBalanceByAgent(
+        agent_id="a1", open_balance_cents=500, open_event_count=1, currency="USD"
+      )
+    ]
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.agent.list_agents",
+        return_value=agents,
+      ),
+      patch(
+        "robosystems.operations.roboledger.reads.ar_ap.list_open_receivables_by_agent",
+        return_value=balances,
+      ) as list_receivables,
+    ):
+      result = await schema.execute(
+        "query { x: agents { id openReceivable { openBalanceCents } }"
+        " y: agents { id openReceivable { openBalanceCents } } }",
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert list_receivables.call_count == 1
+    expected = [
+      {"id": "a1", "openReceivable": {"openBalanceCents": 500}},
+      {"id": "a2", "openReceivable": None},
+    ]
+    assert result.data == {"x": expected, "y": expected}
+
 
 class TestEventBlockResolvers:
   """Inbox surface — event_block(id) + event_blocks(filters)."""
