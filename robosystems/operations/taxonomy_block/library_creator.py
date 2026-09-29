@@ -545,8 +545,9 @@ def find_unseeded_library_arcs(session: Session, package: TaxonomyPackage) -> li
 def delete_library_arcs(session: Session, arc_ids: list[str]) -> int:
   """Delete library arcs by id, with their classification rows (no FK cascade).
 
-  Callers run it under the ``library_resync`` GUC; the immutability
-  triggers reject the delete otherwise.
+  Runs against ``public``, which carries no immutability triggers. A tenant
+  schema does, so a tenant-side delete goes through
+  ``writer.retire_unsourced_library_arcs`` under the ``library_resync`` GUC.
   """
   if not arc_ids:
     return 0
