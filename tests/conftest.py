@@ -25,6 +25,21 @@ _UserAPIKey.BCRYPT_ROUNDS = 4  # Fast for tests
 
 
 @pytest.fixture(autouse=True)
+def guard_blocking_calls_on_loop():
+  """Platform coroutines must not reach bcrypt, OpenSearch or requests inline."""
+  from tests._blocking_guard import guard_blocking_calls
+
+  with guard_blocking_calls() as violations:
+    yield
+  if violations:
+    pytest.fail(
+      "Blocking call on the event loop (wrap it in asyncio.to_thread or make "
+      "the handler a plain def):\n  " + "\n  ".join(dict.fromkeys(violations)),
+      pytrace=False,
+    )
+
+
+@pytest.fixture(autouse=True)
 def no_retry_backoff(monkeypatch):
   """Elide `retrying`'s exponential backoff so retry tests don't pay real time.
 

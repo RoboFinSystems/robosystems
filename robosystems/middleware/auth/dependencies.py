@@ -6,6 +6,7 @@ credential from the query string (EventSource cannot send headers); log
 ``request.url.path``, never the full URL.
 """
 
+import asyncio
 from typing import Any
 
 from fastapi import Depends, Header, HTTPException, Query, Request, Security, status
@@ -249,7 +250,7 @@ async def get_optional_user(
         return user
 
   if api_key:
-    user = validate_api_key(api_key)
+    user = await asyncio.to_thread(validate_api_key, api_key)
     if user:
       _stash_api_key_identity(request, api_key, user)
     return user
@@ -334,7 +335,7 @@ async def get_current_user(
     )
 
   if api_key:
-    user = validate_api_key(api_key)
+    user = await asyncio.to_thread(validate_api_key, api_key)
     if user:
       _stash_api_key_identity(request, api_key, user)
       SecurityAuditLogger.log_auth_success(
@@ -475,8 +476,11 @@ async def _resolve_user_with_graph(
     )
 
   if api_key:
-    user = validate_api_key_with_graph(
-      api_key, graph_id, allow_deprovisioned=allow_deprovisioned
+    user = await asyncio.to_thread(
+      validate_api_key_with_graph,
+      api_key,
+      graph_id,
+      allow_deprovisioned=allow_deprovisioned,
     )
     if user:
       _stash_api_key_identity(request, api_key, user)
@@ -923,7 +927,7 @@ async def get_current_user_sse(
     )
 
   if api_key:
-    user = validate_api_key(api_key)
+    user = await asyncio.to_thread(validate_api_key, api_key)
     if user:
       _stash_api_key_identity(request, api_key, user)
       SecurityAuditLogger.log_auth_success(

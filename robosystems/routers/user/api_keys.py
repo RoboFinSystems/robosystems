@@ -1,5 +1,6 @@
 """User API key management endpoints."""
 
+import asyncio
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -171,7 +172,8 @@ async def create_api_key(
           detail="Access denied to graph",
         )
 
-    api_key, plain_key = UserAPIKey.create(
+    api_key, plain_key = await asyncio.to_thread(
+      UserAPIKey.create,
       user_id=current_user.id,
       name=sanitized_name,
       description=sanitized_description,
