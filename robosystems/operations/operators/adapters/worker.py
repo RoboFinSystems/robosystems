@@ -34,6 +34,7 @@ async def run_operator_worker(
   user_id: str,
   params: dict[str, Any],
   manager: OperationManager,
+  landed_writes: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
   """Run an operator in worker context.
 
@@ -99,6 +100,8 @@ async def run_operator_worker(
     tools=tools,
     progress=OperationManagerProgress(task_id, manager),
   )
+  if landed_writes is not None:
+    ctx.writes = landed_writes
 
   try:
     started = time.monotonic()

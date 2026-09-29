@@ -362,6 +362,7 @@ class TestSSEEventStorage:
             "created_at": "2023-01-01T12:00:00Z",
             "updated_at": "2023-01-01T12:00:00Z",
             "error_message": None,
+            "error_details": None,
             "result_data": None,
             "input_request": None,
           }

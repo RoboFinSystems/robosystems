@@ -72,7 +72,9 @@ def estimate_operator_credits(
 
   input_cost = (Decimal(tokens["input"]) / 1000) * pricing["input"]
   output_cost = (Decimal(tokens["output"]) / 1000) * pricing["output"]
-  return input_cost + output_cost
+  cache_write_rate = pricing.get("cache_write", pricing["input"])
+  cold_start_cost = (Decimal(operator.spec.cold_start_tokens) / 1000) * cache_write_rate
+  return input_cost + output_cost + cold_start_cost
 
 
 def check_operator_credits(

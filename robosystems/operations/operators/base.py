@@ -114,6 +114,9 @@ class OperatorSpec:
     default_factory=lambda: {"input": 150000, "output": 8000}
   )
   requires_credits: bool = True
+  cold_start_tokens: int = 0
+  """Tokens a first call writes to the prompt cache (tools + system prefix),
+  so the credit pre-flight never admits a run that cannot fund that call."""
   read_only: bool = False
   """Whether this operator only reads from the graph.
 

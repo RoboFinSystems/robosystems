@@ -149,7 +149,7 @@ async def run_tool_loop(
   messages.append(AIMessage(role="user", content=user_message or ctx.query))
 
   tools_called: list[str] = []
-  writes: list[dict[str, Any]] = []
+  writes = ctx.writes
   last_rows: list[dict[str, Any]] | None = None
   last_cypher: str | None = None
 
@@ -223,6 +223,16 @@ async def run_tool_loop(
       tools_called.append(name)
 
       is_error = False
+      if name in write_tools and getattr(ctx.ai, "last_call_unbilled", False) is True:
+        # The turn that asked for this write could not be paid for.
+        tool_results.append(
+          tool_result_block(
+            call.id,
+            _serialize_tool_result({"error": "Not run: this turn could not be billed"}),
+            is_error=True,
+          )
+        )
+        continue
       if name not in advertised:
         logger.warning(
           "run_tool_loop: model requested unadvertised tool %s on graph %s",

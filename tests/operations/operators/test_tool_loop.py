@@ -748,3 +748,33 @@ async def test_effort_reaches_every_call_including_the_wrap_up():
     "high",
     "high",
   ]
+
+
+async def test_a_write_from_an_unbilled_turn_is_not_dispatched():
+  """A turn the graph could not pay for must not write."""
+  ai = MagicMock()
+  ai.last_call_unbilled = True
+  ai.total_credits = 0.0
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "create-agent", agent_type="vendor"),
+      _final("stopped"),
+    ]
+  )
+  tools = MagicMock()
+  tools.get_tool_schemas = AsyncMock(
+    return_value=[{"name": "create-agent", "description": "", "inputSchema": {}}]
+  )
+  tools.call_tool = AsyncMock(return_value={"id": "agt_1"})
+
+  result = await run_tool_loop(
+    _ctx(ai, tools),
+    system="s",
+    tool_names=["create-agent"],
+    max_iterations=3,
+    max_tokens=100,
+    write_tools=frozenset({"create-agent"}),
+  )
+
+  tools.call_tool.assert_not_awaited()
+  assert result.writes == []

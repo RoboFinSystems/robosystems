@@ -168,6 +168,13 @@ async def _heartbeat(queue: Any, worker_id: str) -> None:
     await asyncio.sleep(WORKER_HEARTBEAT_INTERVAL)
 
 
+def _landed(handler: BaseTask | None) -> dict[str, Any]:
+  """The non-empty parts of what a stopped task had already done."""
+  if handler is None:
+    return {}
+  return {k: v for k, v in handler.partial_result.items() if v}
+
+
 async def _fail_quietly(manager: OperationManager, task_id: str, **kwargs: Any) -> None:
   """Record a task failure without letting the recording itself raise.
 
@@ -307,6 +314,7 @@ async def _process_task(
           "error_type": "TimeoutError",
           "timeout_seconds": timeout,
           "still_running": still_running,
+          **_landed(handler),
         },
       )
 
@@ -340,7 +348,7 @@ async def _process_task(
         manager,
         task_id,
         error=safe_error_message(e) or f"Operation failed — reference {task_id}",
-        error_details={"error_type": type(e).__name__},
+        error_details={"error_type": type(e).__name__, **_landed(handler)},
       )
 
     finally:

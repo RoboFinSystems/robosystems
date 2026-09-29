@@ -94,6 +94,8 @@ class OperationMetadata:
   created_at: str
   updated_at: str
   error_message: str | None = None
+  # Structured failure detail; for an operator run, the writes that landed.
+  error_details: dict[str, Any] | None = None
   result_data: dict[str, Any] | None = None
   # Set while AWAITING_INPUT: the prompt for the human, the task's own
   # checkpoint, and the queue payload needed to re-enqueue it on resume.
@@ -160,6 +162,13 @@ def _apply_input_request(
     metadata.input_request = data.get("input_request")
   elif event_type in (EventType.OPERATION_RESUMED, EventType.OPERATION_STARTED):
     metadata.input_request = None
+
+
+def _result_after_cancel(current: OperationStatus, event_type: EventType) -> bool:
+  """A run that was cancelled mid-flight still returns what it did."""
+  return (
+    current == OperationStatus.CANCELLED and event_type == EventType.OPERATION_COMPLETED
+  )
 
 
 def _transition_allowed(current: OperationStatus, new: OperationStatus) -> bool:
@@ -430,6 +439,7 @@ class SSEEventStorage:
               metadata.result_data = new_result
           elif event_type == EventType.OPERATION_ERROR:
             metadata.error_message = data.get("error", "Unknown error")
+            metadata.error_details = data.get("error_details")
           else:
             _apply_input_request(metadata, event_type, data)
 
@@ -437,6 +447,16 @@ class SSEEventStorage:
           pipe.setex(metadata_key, self.default_ttl, json.dumps(metadata.to_dict()))
           pipe.execute()
           terminal_failure = entering_failure
+        elif _result_after_cancel(metadata.status, event_type):
+          # Status stays CANCELLED; what the run did before stopping is kept.
+          metadata.result_data = {
+            **(metadata.result_data or {}),
+            **(data.get("result") or {}),
+          }
+          metadata.updated_at = datetime.now(UTC).isoformat()
+          pipe.multi()
+          pipe.setex(metadata_key, self.default_ttl, json.dumps(metadata.to_dict()))
+          pipe.execute()
         else:
           pipe.unwatch()
 
@@ -550,6 +570,7 @@ class SSEEventStorage:
               metadata.result_data = new_result
           elif event_type == EventType.OPERATION_ERROR:
             metadata.error_message = data.get("error", "Unknown error")
+            metadata.error_details = data.get("error_details")
           else:
             _apply_input_request(metadata, event_type, data)
 
@@ -559,6 +580,20 @@ class SSEEventStorage:
             pipe.setex(metadata_key, ttl, json.dumps(metadata.to_dict()))
             await pipe.execute()
             terminal_failure = entering_failure
+          else:
+            await pipe.unwatch()
+        elif _result_after_cancel(metadata.status, event_type):
+          # Status stays CANCELLED; what the run did before stopping is kept.
+          metadata.result_data = {
+            **(metadata.result_data or {}),
+            **(data.get("result") or {}),
+          }
+          metadata.updated_at = datetime.now(UTC).isoformat()
+          ttl = await pipe.ttl(metadata_key)
+          if ttl > 0:
+            pipe.multi()
+            pipe.setex(metadata_key, ttl, json.dumps(metadata.to_dict()))
+            await pipe.execute()
           else:
             await pipe.unwatch()
         else:
