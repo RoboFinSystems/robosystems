@@ -15,27 +15,6 @@ from robosystems.models.core.document import Document
 
 logger = logging.getLogger(__name__)
 
-MAX_FRONTMATTER_TAGS = 50
-MAX_FRONTMATTER_TAG_LENGTH = 100
-
-
-def _frontmatter_tags(raw_tags: list[object]) -> list[str]:
-  """Scalar tags only, bounded in count and length.
-
-  YAML aliases make a nested or repeated value cheap to parse and costly to
-  stringify, so nothing is stringified until it is known to be small.
-  """
-  tags: list[str] = []
-  for raw in raw_tags[:MAX_FRONTMATTER_TAGS]:
-    if not isinstance(raw, str | int | float):
-      continue
-    if isinstance(raw, str) and len(raw) > MAX_FRONTMATTER_TAG_LENGTH:
-      continue
-    tag = str(raw).strip()
-    if tag:
-      tags.append(tag)
-  return tags
-
 
 def _apply_frontmatter(
   content: str,
@@ -51,29 +30,30 @@ def _apply_frontmatter(
   if content is None:
     return content, title, tags, folder
 
-  from robosystems.operations.search.markdown_parser import parse_frontmatter
+  from robosystems.operations.search.markdown_parser import (
+    frontmatter_folder,
+    frontmatter_tags,
+    frontmatter_title,
+    parse_frontmatter,
+  )
 
   metadata, body = parse_frontmatter(content)
   if not metadata:
     return content, title, tags, folder
 
-  resolved_title = title if title else metadata.get("title") or title
+  resolved_title = title if title else frontmatter_title(metadata.get("title")) or title
 
   resolved_tags = tags
   if resolved_tags is ... or resolved_tags is None:
-    raw_tags = metadata.get("tags")
-    if isinstance(raw_tags, str):
-      raw_tags = raw_tags.split(",")
-    if isinstance(raw_tags, list):
-      parsed = _frontmatter_tags(raw_tags)
-      if parsed:
-        resolved_tags = parsed
+    parsed = frontmatter_tags(metadata.get("tags"))
+    if parsed:
+      resolved_tags = parsed
 
   resolved_folder = folder
   if resolved_folder is ... or resolved_folder is None:
-    fm_folder = metadata.get("folder")
-    if isinstance(fm_folder, str) and fm_folder.strip():
-      resolved_folder = fm_folder.strip()
+    fm_folder = frontmatter_folder(metadata.get("folder"))
+    if fm_folder:
+      resolved_folder = fm_folder
 
   return body, resolved_title, resolved_tags, resolved_folder
 

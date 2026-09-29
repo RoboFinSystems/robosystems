@@ -19,6 +19,60 @@ MIN_SECTION_WORDS = 20
 
 MAX_SECTION_CHARS = 50_000
 
+MAX_FRONTMATTER_TAGS = 50
+MAX_FRONTMATTER_TAG_LENGTH = 100
+MAX_FRONTMATTER_TITLE_LENGTH = 500
+MAX_FRONTMATTER_FOLDER_LENGTH = 200
+
+
+def _no_alias_loader():
+  import yaml
+
+  class NoAliasLoader(yaml.SafeLoader):
+    """Refuses YAML aliases: a repeated reference is cheap to parse and
+    expands on every later copy or serialization."""
+
+    def compose_node(self, parent, index):  # type: ignore[override]
+      if self.check_event(yaml.AliasEvent):
+        raise yaml.YAMLError("YAML aliases are not allowed in frontmatter")
+      return super().compose_node(parent, index)
+
+  return NoAliasLoader
+
+
+def frontmatter_tags(raw_tags: object) -> list[str]:
+  """Scalar tags only, bounded in count and length."""
+  if isinstance(raw_tags, str):
+    raw_tags = raw_tags.split(",")
+  if not isinstance(raw_tags, list):
+    return []
+  tags: list[str] = []
+  for raw in raw_tags[:MAX_FRONTMATTER_TAGS]:
+    if not isinstance(raw, str | int | float):
+      continue
+    if isinstance(raw, str) and len(raw) > MAX_FRONTMATTER_TAG_LENGTH:
+      continue
+    tag = str(raw).strip()
+    if tag:
+      tags.append(tag)
+  return tags
+
+
+def frontmatter_folder(raw_folder: object) -> str | None:
+  """A non-empty string folder, capped in length; anything else is ignored."""
+  if not isinstance(raw_folder, str):
+    return None
+  folder = raw_folder.strip()[:MAX_FRONTMATTER_FOLDER_LENGTH]
+  return folder or None
+
+
+def frontmatter_title(raw_title: object) -> str | None:
+  """A non-empty string title, capped in length; anything else is ignored."""
+  if not isinstance(raw_title, str):
+    return None
+  title = raw_title.strip()[:MAX_FRONTMATTER_TITLE_LENGTH]
+  return title or None
+
 
 def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
   """Split markdown into its ``(frontmatter, remaining_content)`` pair.
@@ -47,7 +101,7 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
   try:
     import yaml
 
-    metadata = yaml.safe_load(frontmatter_text)
+    metadata = yaml.load(frontmatter_text, Loader=_no_alias_loader())  # noqa: S506
     if not isinstance(metadata, dict):
       return {}, content
     return metadata, remaining
@@ -168,10 +222,21 @@ def parse_document(
   """
   metadata, body = parse_frontmatter(content)
 
-  doc_title = metadata.get("title", title)
+  doc_title = frontmatter_title(metadata.get("title")) or title
 
-  if "tags" in metadata and isinstance(metadata["tags"], str):
-    metadata["tags"] = [t.strip() for t in metadata["tags"].split(",") if t.strip()]
+  if "tags" in metadata:
+    tags = frontmatter_tags(metadata["tags"])
+    if tags:
+      metadata["tags"] = tags
+    else:
+      del metadata["tags"]
+
+  if "folder" in metadata:
+    folder = frontmatter_folder(metadata["folder"])
+    if folder:
+      metadata["folder"] = folder
+    else:
+      del metadata["folder"]
 
   sections = section_markdown(body, default_title=doc_title)
 
