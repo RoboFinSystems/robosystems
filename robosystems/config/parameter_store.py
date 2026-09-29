@@ -130,7 +130,8 @@ class ParameterStoreManager:
         return default
       return client.get_parameter(Name=parameter_path)["Parameter"]["Value"]
     except Exception as e:
-      if getattr(e, "response", {}).get("Error", {}).get("Code") != "ParameterNotFound":
+      response = getattr(e, "response", None) or {}
+      if response.get("Error", {}).get("Code") != "ParameterNotFound":
         logger.warning(f"Failed to retrieve parameter '{parameter_path}': {e}")
       return default
 
