@@ -139,6 +139,17 @@ class TestObjectIds:
     ids = object_ids({"graph_id": "kg_1", "user_id": "u"}, {"org_id": "o", "id": "x"})
     assert ids == ["x"]
 
+  @pytest.mark.parametrize("tax_id", ["123-45-6789", "123456789", "12-3456789"])
+  def test_a_tax_id_is_never_captured(self, tax_id):
+    ids = object_ids(
+      {"name": "Linear", "tax_id": tax_id},
+      {"agent": {"id": "agt_1", "tax_id": tax_id}, "vendor_tax_id": tax_id},
+    )
+    assert ids == ["agt_1"]
+
+  def test_a_bare_number_is_not_an_object_id(self):
+    assert object_ids({}, {"id": "agt_1", "account_number_id": "4417"}) == ["agt_1"]
+
   def test_a_bulk_write_is_capped(self):
     result = {f"item{i}_id": f"id_{i}" for i in range(50)}
     assert len(object_ids({}, result)) == 20
@@ -167,6 +178,34 @@ class TestWriteRecord:
       )
       assert row.object_ids == ["agt_1"]
       assert row.org_id is None  # no graph row in this test
+    finally:
+      session.close()
+
+  def test_a_rest_agent_result_lands_without_its_tax_id(self, test_db):
+    from robosystems.security.operation_audit import MutationRecord
+
+    factory = sessionmaker(bind=test_db.get_bind())
+    result = {"id": "agt_77", "name": "Linear", "tax_id": "123-45-6789"}
+    record = MutationRecord(
+      graph_id=GRAPH,
+      surface="api",
+      operation_name="create-agent",
+      status="completed",
+      duration_ms=3.0,
+      operation_id="op_tax_1",
+      object_ids=object_ids({"tax_id": "123-45-6789"}, result),
+    )
+    with patch("robosystems.db.platform.SessionFactory", factory):
+      write_record(record)
+
+    session = factory()
+    try:
+      row = (
+        session.query(OperationMutationAudit)
+        .filter(OperationMutationAudit.operation_id == "op_tax_1")
+        .one()
+      )
+      assert row.object_ids == ["agt_77"]
     finally:
       session.close()
 
@@ -210,6 +249,20 @@ class TestHook:
       "op_2",
     )
     assert record.object_ids == ["agt_3"]
+
+  async def test_withheld_arguments_never_reach_the_record(self):
+    tools = _tools()
+    with (
+      patch.object(tools, "_dispatch_tool", AsyncMock(return_value={"id": "agt_4"})),
+      patch("robosystems.middleware.mcp.tools.manager.write_record") as write,
+    ):
+      await tools.call_tool(
+        "create-agent", {"name": "X", "tax_id": "123-45-6789"}, return_raw=True
+      )
+
+    record = write.call_args.args[0]
+    assert record.object_ids == ["agt_4"]
+    assert record.arguments_fingerprint == fingerprint_body({"name": "X"})
 
   async def test_a_read_is_not_recorded(self):
     tools = _tools()

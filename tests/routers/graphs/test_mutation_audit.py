@@ -159,3 +159,34 @@ class TestListGraphMutations:
     )
 
     assert response.status_code == 400
+
+
+class TestPendingRows:
+  async def test_a_pending_async_row_does_not_break_the_read(
+    self, async_client, test_db, test_user
+  ):
+    """An async REST operation records `pending` at dispatch; the read must
+    return it, not fail the whole page."""
+    graph = _graph(test_db, test_user.id)
+    _seed(test_db, graph.graph_id)
+    test_db.add(
+      OperationMutationAudit(
+        id=f"oma_{uuid4().hex}",
+        occurred_at=datetime.now(UTC),
+        duration_ms=4.0,
+        graph_id=graph.graph_id,
+        surface="api",
+        operation_name="create-backup",
+        status="pending",
+        operation_id="op_backup_1",
+        object_ids=[],
+      )
+    )
+    test_db.commit()
+
+    response = await async_client.get(f"/v1/graphs/{graph.graph_id}/audit/mutations")
+
+    assert response.status_code == 200
+    entries = response.json()["entries"]
+    assert entries[0]["status"] == "pending"
+    assert len(entries) == 4
