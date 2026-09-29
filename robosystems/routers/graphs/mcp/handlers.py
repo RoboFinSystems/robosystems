@@ -8,7 +8,6 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.logger import logger
 from robosystems.middleware.mcp import (
   GraphAPIError,
@@ -19,7 +18,7 @@ from robosystems.middleware.mcp import (
 from robosystems.middleware.mcp import (
   GraphMCPTools as AdapterGraphMCPTools,
 )
-from robosystems.middleware.mcp.tools.sensitive import mask_tax_ids
+from robosystems.middleware.mcp.tools.sensitive import mask_tax_ids_for_graph
 from robosystems.middleware.robustness.timeout_coordinator import TimeoutCoordinator
 
 timeout_coordinator = TimeoutCoordinator()
@@ -307,8 +306,7 @@ class MCPHandler:
           timeout=tool_timeout,
           tool_timeout=instance_timeout,  # Pass instance timeout to the tool
         )
-        if not is_shared_repository_or_subgraph(self.graph_id):
-          results = mask_tax_ids(results)
+        results = mask_tax_ids_for_graph(self.graph_id, results)
         text = json.dumps(results, indent=2)
         # Tools report a refusal (closed period, not found, bad arguments)
         # as a dict with an `error` code. It is a failed call for the client,

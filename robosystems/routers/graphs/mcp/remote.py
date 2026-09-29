@@ -45,6 +45,7 @@ from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.mcp.tools.annotations import tool_annotations
 from robosystems.middleware.mcp.tools.classification import CYPHER_READ_TOOLS
 from robosystems.middleware.mcp.tools.manager import ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
+from robosystems.middleware.mcp.tools.sensitive import mask_tax_ids_for_graph
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
@@ -596,7 +597,9 @@ async def _stream_queued_call(
 
           if state == "completed":
             query_settled = True
-            result = await queue_manager.get_query_result(queue_id)
+            result = mask_tax_ids_for_graph(
+              graph_id, await queue_manager.get_query_result(queue_id)
+            )
             failed, failure_kind = _tool_failure(result)
             outcome = "tool_error" if failed else "completed"
             payload = {

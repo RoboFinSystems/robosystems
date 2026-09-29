@@ -651,3 +651,22 @@ class TestStreamingReadGuard:
       stream_cypher_query(self._handler(), {"query": "MATCH (n) RETURN n"})
     )
     assert all(e["event"] != "error" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_streamed_cypher_rows_mask_tax_ids_on_a_tenant_graph():
+  from unittest.mock import Mock
+
+  async def _rows(*_args, **_kwargs):
+    yield {"columns": ["e.tax_id"], "data": [{"e.tax_id": "123-45-6789"}]}
+
+  handler = Mock()
+  handler.graph_id = "kg1"
+  handler.execute_query_streaming = _rows
+
+  events = [
+    e
+    async for e in stream_cypher_query(handler, {"query": "MATCH (e) RETURN e.tax_id"})
+  ]
+  chunk = next(e for e in events if e["event"] == "query_chunk")
+  assert chunk["data"]["data"] == [{"e.tax_id": "***6789"}]

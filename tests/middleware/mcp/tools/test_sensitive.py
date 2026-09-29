@@ -64,3 +64,19 @@ def test_tax_ids_are_masked_to_last_four_at_any_depth():
 @pytest.mark.unit
 def test_masking_an_already_masked_value_is_a_no_op():
   assert mask_tax_ids({"tax_id": "***6789"}) == {"tax_id": "***6789"}
+
+
+@pytest.mark.unit
+def test_cypher_columns_are_matched_by_property_name():
+  assert mask_tax_ids([{"e.tax_id": "123-45-6789", "e.name": "Solo"}]) == [
+    {"e.tax_id": "***6789", "e.name": "Solo"}
+  ]
+
+
+@pytest.mark.unit
+def test_shared_repositories_are_left_verbatim():
+  from robosystems.middleware.mcp.tools.sensitive import mask_tax_ids_for_graph
+
+  row = {"e.tax_id": "12-3456789"}
+  assert mask_tax_ids_for_graph("sec", row) == row
+  assert mask_tax_ids_for_graph("kg1", row) == {"e.tax_id": "***6789"}
