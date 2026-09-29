@@ -7,6 +7,20 @@ section: Work with your books
 
 Public companies report their financials to the SEC in a structured format, tagged with the same kind of reporting concepts your chart of accounts is mapped to. RoboSystems keeps those filings in a graph of their own. Connect it beside your books, and your AI assistant can put your gross margin, revenue growth or expense ratios next to companies in your industry, in one conversation.
 
+![Compare with public companies in Claude: your margins beside their SEC filings](https://youtu.be/qK2xPNSYfaQ)
+
+## What the conversation looks like
+
+Recorded in Claude, with two connections: a demo company's books and the SEC filings graph.
+
+> **You:** Find five small public companies with a business like ours, and tell me why you picked them.
+
+The assistant reads your books first, so "like ours" is measured: revenue of about $1.2M a year, split between direct-to-consumer subscriptions, wholesale and one-off web orders. No public company in the business is that small, so it picks on business model first and size second, gives a reason for each of five filers, and says which ones it left out and why.
+
+> **You:** Compare our gross margin for the last four quarters with theirs.
+
+A table of gross margin by quarter: yours at 56 to 61%, the peers at roughly 30 to 40%, with notes where a filer's fiscal quarters don't line up with yours or a figure isn't reported yet. Then the reason for the gap: your cost of goods holds only the coffee, where public roasters also count freight and production costs. Counted their way, yours is closer to 50%. And the trend that matters more than the level: your margin has fallen as wholesale has grown.
+
 ## Set it up
 
 1. **Subscribe to the SEC filings graph.** It's a separate RoboSystems subscription from your RoboLedger graph. Plans and how to subscribe are in the [SEC filings guide](https://robosystems.ai/docs/guides/sec-filings).
