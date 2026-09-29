@@ -16,6 +16,19 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+PPE_NET_QNAME = "rs-gaap:PropertyPlantAndEquipmentNet"
+PPE_GROSS_QNAME = "rs-gaap:PropertyPlantAndEquipmentGross"
+PPE_ACCUMULATED_DEPRECIATION_QNAME = (
+  "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment"
+)
+
+# child qname → the parent fact_grid synthesizes from it. No calculation arc
+# joins them, so reachability walks these edges alongside the calc DAG.
+SYNTHESIZED_PARENTS: dict[str, str] = {
+  PPE_GROSS_QNAME: PPE_NET_QNAME,
+  PPE_ACCUMULATED_DEPRECIATION_QNAME: PPE_NET_QNAME,
+}
+
 
 def load_rs_gaap_calculations(
   session: Session,

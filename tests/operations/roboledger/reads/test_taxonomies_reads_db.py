@@ -345,5 +345,41 @@ class TestReachability:
     ]
     assert unreachable[0].coa_name == "Rent"
 
+  def test_gross_and_contra_reach_through_the_synthesized_net(self, ledger):
+    # No calc arc joins Gross or AD to Net; the renderer synthesizes Net from
+    # them, so the check must walk the same edge (the Driftline shape).
+    ledger.add_all(
+      [
+        Element(
+          id=f"el_{name}",
+          name=name,
+          qname=f"rs-gaap:{qname}",
+          source="rs-gaap",
+          taxonomy_id="tax_rs",
+          depth=2,
+        )
+        for name, qname in (
+          ("ppe_net", "PropertyPlantAndEquipmentNet"),
+          ("ppe_gross", "PropertyPlantAndEquipmentGross"),
+          (
+            "ppe_ad",
+            "AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+          ),
+        )
+      ]
+    )
+    ledger.flush()
+    ledger.add(
+      Association(
+        structure_id="calc_bs",
+        from_element_id="el_assets",
+        to_element_id="el_ppe_net",
+        association_type="calculation",
+      )
+    )
+    ledger.flush()
+    assert is_target_reachable(ledger, "el_ppe_gross") is True
+    assert is_target_reachable(ledger, "el_ppe_ad") is True
+
   def test_no_mappings_is_nothing_to_check(self, ledger):
     assert check_mapping_reachability(ledger, []) == []

@@ -770,7 +770,8 @@ def check_mapping_reachability(
 
 def _load_calc_parents(session: Session) -> dict[str, set[str]]:
   """``child_element_id → {parent_element_id, …}`` over all calc arcs (the
-  inverse of their declared direction). Cached on the session."""
+  inverse of their declared direction), plus the parents the renderer
+  synthesizes (``SYNTHESIZED_PARENTS``). Cached on the session."""
   cached = getattr(session, "_calc_parents_cache", None)
   if isinstance(cached, dict):
     return cached
@@ -784,6 +785,19 @@ def _load_calc_parents(session: Session) -> dict[str, set[str]]:
   parents: dict[str, set[str]] = {}
   for parent_id, child_id in rows:
     parents.setdefault(child_id, set()).add(parent_id)
+
+  from robosystems.operations.roboledger.reports.calc_dag import SYNTHESIZED_PARENTS
+
+  qname_ids = dict(
+    session.execute(
+      text("SELECT qname, id FROM elements WHERE qname = ANY(:qnames)"),
+      {"qnames": list(set(SYNTHESIZED_PARENTS) | set(SYNTHESIZED_PARENTS.values()))},
+    ).fetchall()
+  )
+  for child_qname, parent_qname in SYNTHESIZED_PARENTS.items():
+    child_id, parent_id = qname_ids.get(child_qname), qname_ids.get(parent_qname)
+    if child_id is not None and parent_id is not None:
+      parents.setdefault(child_id, set()).add(parent_id)
   try:
     session._calc_parents_cache = parents
   except (AttributeError, TypeError):
