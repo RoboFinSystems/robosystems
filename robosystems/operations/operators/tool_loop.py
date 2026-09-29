@@ -228,9 +228,7 @@ async def run_tool_loop(
         tool_results.append(
           tool_result_block(
             call.id,
-            _serialize_tool_result(
-              {"error": "Not run: the credit balance is exhausted"}
-            ),
+            _serialize_tool_result({"error": "Not run: this turn could not be billed"}),
             is_error=True,
           )
         )
