@@ -162,6 +162,8 @@ Resources:
                 Action:
                   - ecr:GetAuthorizationToken
                   - ecr:DescribeRegistry
+                  - ecr-public:GetAuthorizationToken
+                  - sts:GetServiceBearerToken
                 Resource: "*"
 
               # IAM Role/Policy Management
@@ -295,7 +297,7 @@ Resources:
                   - s3:GetBucketLocation
                 Resource: "*"
 
-              # DynamoDB - for graph infrastructure registries (instance, graph, volume)
+              # DynamoDB - graph registries (instance, graph, volume)
               - Sid: DynamoDB
                 Effect: Allow
                 Action:
@@ -689,6 +691,8 @@ Resources:
                 Effect: Allow
                 Action:
                   - ecr:GetAuthorizationToken
+                  - ecr-public:GetAuthorizationToken
+                  - sts:GetServiceBearerToken
                 Resource: "*"
 
               # S3 - scoped to frontend app buckets
@@ -1097,7 +1101,7 @@ Resources:
                   - ec2:DescribeTags
                 Resource: "*"
 
-              # Start bastion instance if stopped (scoped to bastion-tagged instances)
+              # Start the bastion if stopped (bastion-tagged only)
               - Sid: StartBastionInstance
                 Effect: Allow
                 Action:
