@@ -118,6 +118,39 @@ class TestGetContextAuthContract:
     # The graph-scoped retry is attempted for a pure API-key request, then fails.
     mock_scoped.assert_called_once()
 
+  async def test_graph_scoped_key_validation_runs_off_the_event_loop(self):
+    """The graph-scoped retry can reach a bcrypt verify on a cache miss; on
+    the loop it stalls every other request in the process."""
+    import asyncio
+
+    on_loop: list[bool] = []
+
+    def _validate(*args, **kwargs):
+      try:
+        asyncio.get_running_loop()
+        on_loop.append(True)
+      except RuntimeError:
+        on_loop.append(False)
+      return None
+
+    with (
+      patch(
+        f"{MODULE}.get_current_user",
+        new_callable=AsyncMock,
+        side_effect=HTTPException(status_code=401, detail="Invalid API key"),
+      ),
+      patch(f"{MODULE}.validate_api_key_with_graph", side_effect=_validate),
+    ):
+      with pytest.raises(HTTPException):
+        await get_context(
+          request=_make_request(headers={}),
+          api_key="rfsc_scoped_key",
+          graph_id=GRAPH_ID,
+          db=MagicMock(),
+        )
+
+    assert on_loop == [False]
+
   async def test_graph_scoped_key_accepted_via_graph_validation(self):
     """Case 2a': a graph-scoped (`rfsc…`) key is refused by the
     account-wide validator (it has no graph context there) but is valid for

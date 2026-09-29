@@ -6,6 +6,7 @@ private), so never encode secrets in type or field names.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TypedDict
 
 import strawberry
@@ -66,7 +67,7 @@ async def get_context(
       # A graph-scoped key is refused by `get_current_user` by design; the URL
       # scopes this endpoint to one graph, so validate it against that graph
       # as the REST operations and MCP surfaces do.
-      user = validate_api_key_with_graph(api_key, graph_id, db)
+      user = await asyncio.to_thread(validate_api_key_with_graph, api_key, graph_id, db)
       if user is None:
         raise
       # Publish the principal, which `get_current_user` would have done.

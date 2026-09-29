@@ -3,6 +3,7 @@
 Steps are best-effort: a failure is recorded and does not block later steps.
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -150,7 +151,7 @@ class GraphDeprovisionService:
       # idempotent disposal steps (and nothing else) to finish the job.
       result.status = "already_deprovisioned"
       result.previous_status = graph.status
-      self._dispose_residual_data(graph_id, result)
+      await asyncio.to_thread(self._dispose_residual_data, graph_id, result)
       self._mark_residual_pending(graph, session, bool(result.errors))
       return result
 
@@ -178,7 +179,7 @@ class GraphDeprovisionService:
     await self._delete_subgraphs(graph_id, session, result)
     await self._delete_database(graph_id, result)
     errors_before_disposal = len(result.errors)
-    self._dispose_residual_data(graph_id, result)
+    await asyncio.to_thread(self._dispose_residual_data, graph_id, result)
     residual_failed = len(result.errors) > errors_before_disposal
 
     # The .lbug is still on the instance: freeing the registry slot would hand
@@ -396,7 +397,7 @@ class GraphDeprovisionService:
     self._purge_staged_uploads(subgraph_id, session, result)
     await self._revoke_provider_grants(subgraph_id, session, result)
     self._clean_pg_records(subgraph_id, session, result)
-    self._purge_search_index(subgraph_id, result)
+    await asyncio.to_thread(self._purge_search_index, subgraph_id, result)
 
   async def _delete_database(self, graph_id: str, result: DeprovisionResult) -> None:
     """Delete the parent graph database.
