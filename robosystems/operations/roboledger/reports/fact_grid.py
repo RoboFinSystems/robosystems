@@ -54,6 +54,9 @@ class ReportFact:
   # contribution (others 0) so each posting counts once in net income.
   # ``None`` means "same as value".
   close_value: float | None = None
+  # Natural-sign value per mapped source account, for a mapped balance fact;
+  # None for derived facts.
+  source_values: dict[str, float] | None = None
 
 
 @dataclass
@@ -152,6 +155,10 @@ def generate_report_facts(
             if balance.close_net_balance is not None
             else None
           ),
+          source_values={
+            source_id: _natural_sign(net, balance.balance_type)
+            for source_id, net in balance.by_source.items()
+          },
         )
       )
 
@@ -429,6 +436,8 @@ class _Balance:
   close_net_balance: float | None = None
   # The reporting element's XBRL periodType; None falls back to inference.
   period_type: str | None = None
+  # debit - credit per source account.
+  by_source: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -645,6 +654,9 @@ def _read_mapped_balances(
     balance.total_debits += debits
     balance.total_credits += credits
     balance.net_balance += debits - credits
+    balance.by_source[row.source_id] = (
+      balance.by_source.get(row.source_id, 0.0) + debits - credits
+    )
     if (row.source_id, row.reporting_element_id) in primary_pairs:
       assert balance.close_net_balance is not None
       balance.close_net_balance += debits - credits
@@ -883,6 +895,26 @@ def _mark_ppe_details_audit_only(
       f.audit_only = True
 
 
+def _ppe_details_outside_net(
+  facts: list[ReportFact],
+  period: PeriodSpec,
+  net_fact: ReportFact,
+  gross_id: str | None,
+  ad_id: str | None,
+) -> float:
+  """Gross - AD from accounts not already counted in the direct Net fact."""
+  net_sources = set(net_fact.source_values or {})
+  total = 0.0
+  for f in facts:
+    if f.period_start != period.start or f.period_end != period.end:
+      continue
+    if f.element_id not in (gross_id, ad_id) or f.source_values is None:
+      continue
+    outside = sum(v for s, v in f.source_values.items() if s not in net_sources)
+    total += outside if f.element_id == gross_id else -outside
+  return total
+
+
 def _synthesize_ppe_net_facts(
   session: Session,
   facts: list[ReportFact],
@@ -891,7 +923,9 @@ def _synthesize_ppe_net_facts(
   """Append PPE Net = Gross - Accumulated Depreciation per period.
 
   For gross + contra mappings, which let CF Investing read ΔGross as
-  purchases. Skipped where a direct PPE Net fact exists.
+  purchases. Where a direct PPE Net fact exists, Gross - AD from accounts
+  not also mapped to Net is added to it, so a chart mixing the two keeps
+  every account on the balance sheet exactly once.
   """
   row = session.execute(
     text("SELECT id, balance_type FROM elements WHERE qname = :qname"),
@@ -912,13 +946,20 @@ def _synthesize_ppe_net_facts(
     return  # Neither source mapped — nothing to synthesize.
 
   for period in periods:
-    already_present = any(
-      f.element_id == net_id
-      and f.period_start == period.start
-      and f.period_end == period.end
-      for f in facts
+    net_fact = next(
+      (
+        f
+        for f in facts
+        if f.element_id == net_id
+        and f.period_start == period.start
+        and f.period_end == period.end
+      ),
+      None,
     )
-    if already_present:
+    if net_fact is not None:
+      net_fact.value += _ppe_details_outside_net(
+        facts, period, net_fact, gross_id, ad_id
+      )
       # All-in-Net mapping: the BS is right, but CF capex (from ΔGross) is 0.
       if gross_id is not None and not any(
         f.element_id == gross_id
