@@ -273,6 +273,33 @@ class TestMappingCoverage:
     assert coverage.unreachable[0].coa_code == "6100"
     assert coverage.unreachable[0].target_qname == "rs-gaap:Orphan"
 
+  def test_bands_count_elements_not_arcs(self, ledger):
+    # One element mapped twice (the Driftline inventory shape), one unscored.
+    ledger.add(
+      Association(
+        structure_id="map_1",
+        from_element_id="el_cash_acct",
+        to_element_id="el_current",
+        association_type="mapping",
+        order_value=4,
+        confidence=0.8,
+      )
+    )
+    ar_arc = ledger.query(Association).filter_by(from_element_id="el_ar_acct").one()
+    ar_arc.confidence = None
+    ledger.flush()
+
+    coverage = get_mapping_coverage(ledger, "map_1")
+    assert coverage.mapped_count == 3
+    bands = (
+      coverage.high_confidence,
+      coverage.medium_confidence,
+      coverage.low_confidence,
+      coverage.manual_confidence,
+    )
+    assert bands == (1, 0, 1, 1)
+    assert sum(bands) == coverage.mapped_count
+
   def test_unknown_mapping_raises_rather_than_reporting_zero(self, ledger):
     with pytest.raises(MappingStructureNotFoundError):
       get_mapping_coverage(ledger, "map_missing")

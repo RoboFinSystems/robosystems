@@ -641,20 +641,23 @@ def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageRe
     .all()
   )
 
-  mapped_count = len({a.from_element_id for a in mapping_assocs})
+  # Bands count CoA elements, not arcs: an element mapped more than once
+  # takes the highest confidence among its arcs, so the four bands sum to
+  # mapped_count.
+  element_confidence: dict[str, float | None] = {}
+  for a in mapping_assocs:
+    current = element_confidence.get(a.from_element_id)
+    if current is None or (a.confidence is not None and a.confidence > current):
+      element_confidence[a.from_element_id] = a.confidence
+
+  mapped_count = len(element_confidence)
   unmapped_count = total_coa - mapped_count
 
-  high = sum(
-    1 for a in mapping_assocs if a.confidence is not None and a.confidence > 0.90
-  )
-  medium = sum(
-    1
-    for a in mapping_assocs
-    if a.confidence is not None and 0.70 <= a.confidence <= 0.90
-  )
-  low = sum(
-    1 for a in mapping_assocs if a.confidence is not None and a.confidence < 0.70
-  )
+  scores = element_confidence.values()
+  high = sum(1 for c in scores if c is not None and c > 0.90)
+  medium = sum(1 for c in scores if c is not None and 0.70 <= c <= 0.90)
+  low = sum(1 for c in scores if c is not None and c < 0.70)
+  manual = sum(1 for c in scores if c is None)
 
   unreachable = check_mapping_reachability(session, mapping_assocs)
 
@@ -667,6 +670,7 @@ def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageRe
     high_confidence=high,
     medium_confidence=medium,
     low_confidence=low,
+    manual_confidence=manual,
     unreachable_count=len(unreachable),
     unreachable=unreachable,
   )

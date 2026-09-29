@@ -240,7 +240,7 @@ class TestGetMappingSummaryTool:
     assert result["confidence_distribution"]["high"] == 1
     assert result["confidence_distribution"]["medium"] == 1
     assert result["confidence_distribution"]["low"] == 1
-    # 3 mapped - (1 high + 1 med + 1 low) = 0 manual
+    # manual comes from the op, not derived from mapped minus the bands
     assert result["confidence_distribution"]["manual"] == 0
 
   @pytest.mark.asyncio
