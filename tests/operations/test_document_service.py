@@ -258,3 +258,38 @@ class TestResyncDocument:
     assert response.sections_indexed == 2
     search_service.upload_document.assert_called_once()
     doc.update.assert_called_once_with(session, sections_indexed=2)
+
+
+@pytest.mark.unit
+class TestFrontmatterTags:
+  def _tags(self, frontmatter: str):
+    from robosystems.operations.document_service import _apply_frontmatter
+
+    content = f"---\n{frontmatter}\n---\n# Body\n"
+    return _apply_frontmatter(content, None, None, None)[2]
+
+  def test_list_and_comma_string_tags(self):
+    assert self._tags("tags: [alpha, ' beta ', 3]") == ["alpha", "beta", "3"]
+    assert self._tags("tags: 'alpha, beta,,'") == ["alpha", "beta"]
+
+  def test_nested_alias_tags_are_not_expanded(self):
+    levels = ["a: &a [" + ", ".join(["xxxxxxxxxx"] * 10) + "]"]
+    for prev, name in zip("abcdefgh", "bcdefghi", strict=True):
+      levels.append(f"{name}: &{name} [" + ", ".join([f"*{prev}"] * 10) + "]")
+    levels.append("tags: [*i, keep]")
+
+    assert self._tags("\n".join(levels)) == ["keep"]
+
+  def test_repeated_long_alias_is_bounded(self):
+    long_tag = "  " + "x" * 5000 + "  "
+    frontmatter = f"s: &s '{long_tag}'\ntags: [" + ", ".join(["*s"] * 1000) + "]"
+
+    assert self._tags(frontmatter) is None
+
+  def test_tag_count_is_capped(self):
+    frontmatter = "tags: [" + ", ".join(f"t{i}" for i in range(200)) + "]"
+
+    tags = self._tags(frontmatter)
+
+    assert tags is not None
+    assert len(tags) == 50
