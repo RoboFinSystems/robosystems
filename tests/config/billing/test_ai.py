@@ -22,20 +22,26 @@ def test_token_pricing_matches_bedrock_us_profile_cost():
   assert pricing["openai_gpt_5_6_luna"]["output"] == Decimal("1.32")
 
 
-def test_opus_5_5_rate_is_list_plus_the_regional_premium():
-  """Predicted, not read: Bedrock's page does not publish Opus 5.5. List is
-  $4 / $20 per MTok; every Claude row holds list x 1.1. The CUR confirms."""
-  pricing = AIBillingConfig.TOKEN_PRICING["anthropic_claude_5_5_opus"]
-  assert pricing["input"] == Decimal("4") * Decimal("1.1")
-  assert pricing["output"] == Decimal("20") * Decimal("1.1")
+# AWS Pricing API (AmazonBedrockFoundationModels, us-east-1 regional
+# "Standard"), read 2026-09-29, in credits per 1K tokens ($ per MTok / 1000 x
+# 1000 credits per $). Each family is pinned on its own: Bedrock's cache
+# multipliers are per model, so a shared 0.1x rule overbilled Opus 5.5 reads.
+BEDROCK_US_EAST_1 = {
+  "anthropic_claude_4_sonnet": ("3.3", "16.5", "0.33", "4.125"),
+  "anthropic_claude_5_sonnet": ("2.2", "11", "0.22", "2.75"),
+  "anthropic_claude_5_opus": ("5.5", "27.5", "0.55", "6.875"),
+  "anthropic_claude_5_5_opus": ("4.4", "22", "0.22", "5.5"),
+}
 
 
-def test_cache_rates_mirror_bedrock_multipliers():
-  """The cache discount is passed through: reads at 0.1x the input rate,
-  writes at 1.25x — Bedrock's own multipliers, for every registered family."""
-  for model, prices in AIBillingConfig.TOKEN_PRICING.items():
-    assert prices["cache_read"] == prices["input"] * Decimal("0.1"), model
-    assert prices["cache_write"] == prices["input"] * Decimal("1.25"), model
+@pytest.mark.parametrize("family", sorted(BEDROCK_US_EAST_1))
+def test_claude_rates_match_the_bedrock_price_list(family):
+  input_, output, cache_read, cache_write = BEDROCK_US_EAST_1[family]
+  prices = AIBillingConfig.TOKEN_PRICING[family]
+  assert prices["input"] == Decimal(input_)
+  assert prices["output"] == Decimal(output)
+  assert prices["cache_read"] == Decimal(cache_read)
+  assert prices["cache_write"] == Decimal(cache_write)
 
 
 def test_token_pricing_only_has_registered_families():

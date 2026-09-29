@@ -192,6 +192,29 @@ class TestCreditServiceFlow:
     # 3.3 + 16.5 + 10 * 0.33 + 4.125
     assert float(result["credits_consumed"]) == pytest.approx(27.225)
 
+  def test_consume_ai_tokens_opus_5_5_cache_reads_bill_at_bedrock_rate(
+    self, test_db, test_graph_with_credits
+  ):
+    """Opus 5.5 cache reads are 0.05x input on Bedrock (0.22 per 1K), not the
+    0.1x the older Claude families carry. A warm author step reads ~62K."""
+    graph = test_graph_with_credits["graph"]
+    credits = test_graph_with_credits["credits"]
+
+    service = CreditService(test_db)
+    result = service.consume_ai_tokens(
+      graph_id=graph.graph_id,
+      input_tokens=2,
+      output_tokens=371,
+      model="us.anthropic.claude-opus-5-5",
+      operation_description="Opus 5.5 cache pricing test",
+      user_id=str(credits.user_id),
+      cache_read_input_tokens=61696,
+      cache_creation_input_tokens=644,
+    )
+    assert result["success"] is True
+    # 0.002 * 4.4 + 0.371 * 22 + 61.696 * 0.22 + 0.644 * 5.5
+    assert float(result["credits_consumed"]) == pytest.approx(25.28592)
+
   def test_consume_ai_tokens_sonnet_5_uses_its_own_rate(
     self, test_db, test_graph_with_credits
   ):

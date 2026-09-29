@@ -3,8 +3,8 @@ credits).
 
 Rates are credits per 1K tokens at exact cost passthrough (1 credit ~ $0.001),
 indexed on what Bedrock bills for the ``us.*`` regional profiles (10% over
-list). Cache rates pass Bedrock's multipliers through (read 0.1x, write
-1.25x input).
+list). Cache rates pass Bedrock's per-model rates through: write is 1.25x
+input for every family, read is 0.1x except Opus 5.5 (0.05x).
 
 A model bills under its registry ``pricing_key`` (config/operators.py); an
 unregistered model raises at billing time. Never add a silent default entry.
@@ -67,12 +67,12 @@ class AIBillingConfig:
       "cache_read": Decimal("0.55"),
       "cache_write": Decimal("6.875"),
     },
-    # Predicted from list ($4 / $20) + 10%, the ratio every Claude row above
-    # holds; Bedrock's page does not publish it. Confirm against the CUR.
+    # AWS Pricing API, us-east-1 regional, read 2026-09-29. Cache read is
+    # 0.05x input on this model, not the 0.1x the older rows carry.
     "anthropic_claude_5_5_opus": {
       "input": Decimal("4.4"),
       "output": Decimal("22"),
-      "cache_read": Decimal("0.44"),
+      "cache_read": Decimal("0.22"),
       "cache_write": Decimal("5.5"),
     },
     "openai_gpt_5_6_luna": {
