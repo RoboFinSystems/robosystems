@@ -7,6 +7,7 @@ and every failure feeds the same progressive-delay accounting as password
 failures.
 """
 
+import asyncio
 import json
 
 from fastapi import (
@@ -396,8 +397,12 @@ async def regenerate_recovery_codes(
   user: User = Depends(require_jwt_user),
 ) -> RecoveryCodesResponse:
   try:
-    passkey_ops.verify_reauth(
-      session, user, password=request.password, assertion=request.assertion
+    await asyncio.to_thread(
+      passkey_ops.verify_reauth,
+      session,
+      user,
+      password=request.password,
+      assertion=request.assertion,
     )
   except passkey_ops.ReauthInvalidError:
     raise HTTPException(

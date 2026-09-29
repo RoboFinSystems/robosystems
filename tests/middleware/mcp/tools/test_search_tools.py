@@ -1,5 +1,6 @@
 """Tests for search MCP tools."""
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -199,6 +200,49 @@ class TestGetDocumentSectionTool:
     ):
       result = await tool.execute({"document_id": "nonexistent"})
       assert "error" in result
+
+
+class TestSearchToolsRunOffTheEventLoop:
+  """The public `sec` MCP surface: a blocking search on the loop stalls every
+  other request in the process."""
+
+  @pytest.mark.asyncio
+  async def test_search_documents(self, mock_graph_client):
+    loop_thread = threading.get_ident()
+    ran_on = {}
+
+    def _search(graph_id, request):
+      ran_on["thread"] = threading.get_ident()
+      return _response(_hit("doc1"))
+
+    mock_service = MagicMock()
+    mock_service.search_documents.side_effect = _search
+    with patch(
+      "robosystems.operations.search.get_search_service",
+      return_value=mock_service,
+    ):
+      await SearchDocumentsTool(mock_graph_client).execute({"query": "tariffs"})
+
+    assert ran_on["thread"] != loop_thread
+
+  @pytest.mark.asyncio
+  async def test_get_document_section(self, mock_graph_client):
+    loop_thread = threading.get_ident()
+    ran_on = {}
+
+    def _get(graph_id, document_id):
+      ran_on["thread"] = threading.get_ident()
+      return _section("Full text...")
+
+    mock_service = MagicMock()
+    mock_service.get_document_section.side_effect = _get
+    with patch(
+      "robosystems.operations.search.get_search_service",
+      return_value=mock_service,
+    ):
+      await GetDocumentSectionTool(mock_graph_client).execute({"document_id": "doc1"})
+
+    assert ran_on["thread"] != loop_thread
 
 
 class TestResolveSearchGraphId:

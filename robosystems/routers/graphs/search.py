@@ -1,5 +1,6 @@
 """Full-text search router for graph-scoped document search."""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -138,7 +139,7 @@ async def search_documents(
     session.close()
   await _check_search_rate_limit(graph_id, current_user, "search")
   service = _require_search_service()
-  return service.search_documents(graph_id, request)
+  return await asyncio.to_thread(service.search_documents, graph_id, request)
 
 
 @router.get(
@@ -165,7 +166,7 @@ async def get_document_section(
     session.close()
   await _check_search_rate_limit(graph_id, current_user, "search")
   service = _require_search_service()
-  result = service.get_document_section(graph_id, document_id)
+  result = await asyncio.to_thread(service.get_document_section, graph_id, document_id)
   if result is None:
     raise HTTPException(status_code=404, detail="Document not found")
   return result

@@ -6,6 +6,7 @@ authenticator responses); the dual-principal enrollment resolution, recovery
 codes, re-auth proofs, and passwordless resolution all run real.
 """
 
+import asyncio
 import json
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -373,6 +374,66 @@ class TestLifecycle:
         headers=_bearer(user),
       )
     assert resp.status_code == 401
+
+
+@contextmanager
+def _record_verify_on_loop():
+  """Wrap the real cost-14 bcrypt verify, recording whether each call ran
+  with an event loop active on its thread (it must not: one ~0.7s verify on
+  the loop stalls every other request in the process)."""
+  on_loop: list[bool] = []
+  real = PasswordSecurity.verify_password
+
+  def _spy(password, hashed):
+    try:
+      asyncio.get_running_loop()
+      on_loop.append(True)
+    except RuntimeError:
+      on_loop.append(False)
+    return real(password, hashed)
+
+  with patch.object(passkey_ops.PasswordSecurity, "verify_password", _spy):
+    yield on_loop
+
+
+class TestReauthRunsOffTheEventLoop:
+  def test_enrollment_options(self, client, test_db):
+    user = _create_user(test_db)
+    with _passkeys_on(), _record_verify_on_loop() as on_loop:
+      resp = client.post(
+        "/v1/auth/passkeys/register/options",
+        json={"password": PASSWORD},
+        headers=_bearer(user),
+      )
+    assert resp.status_code == 200
+    assert on_loop == [False]
+
+  def test_passkey_removal(self, client, test_db):
+    user = _create_user(test_db)
+    with _passkeys_on():
+      body = _enroll_via_api(client, user)
+      with _record_verify_on_loop() as on_loop:
+        resp = client.request(
+          "DELETE",
+          f"/v1/auth/passkeys/{body['passkey']['id']}",
+          json={"password": PASSWORD},
+          headers=_bearer(user),
+        )
+    assert resp.status_code == 200
+    assert on_loop == [False]
+
+  def test_recovery_code_regeneration(self, client, test_db):
+    user = _create_user(test_db)
+    with _passkeys_on():
+      _enroll_via_api(client, user)
+      with _record_verify_on_loop() as on_loop:
+        resp = client.post(
+          "/v1/auth/mfa/recovery-codes/regenerate",
+          json={"password": PASSWORD},
+          headers=_bearer(user),
+        )
+    assert resp.status_code == 200
+    assert on_loop == [False]
 
 
 class TestPasswordlessLogin:

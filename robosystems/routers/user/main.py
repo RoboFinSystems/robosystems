@@ -1,5 +1,6 @@
 """User profile management endpoints."""
 
+import asyncio
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -169,7 +170,8 @@ async def update_user_profile(
       # A live proof (password or fresh passkey assertion) is required, as for
       # passkey enrollment/removal; a session alone is not enough.
       try:
-        passkey_ops.verify_reauth(
+        await asyncio.to_thread(
+          passkey_ops.verify_reauth,
           db,
           current_user,
           password=request.reauth_password,
