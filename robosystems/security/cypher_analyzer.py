@@ -67,6 +67,7 @@ class CypherSecurityAnalyzer:
   ADMIN_KEYWORDS = {
     "EXPORT",
     "INSTALL",
+    "UNINSTALL",
     "ATTACH",
     "USE",
   }

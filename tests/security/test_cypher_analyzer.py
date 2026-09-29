@@ -145,6 +145,11 @@ class TestIsAdminOperation:
   def test_use_operation(self, analyzer):
     assert analyzer.is_admin_operation("USE other_db")
 
+  def test_uninstall_operation(self, analyzer):
+    """`\bINSTALL\b` does not match inside UNINSTALL, which the engine runs
+    even on a read-only database."""
+    assert analyzer.is_admin_operation("UNINSTALL vector")
+
   def test_non_admin_query(self, analyzer):
     assert analyzer.is_admin_operation("MATCH (n) RETURN n") is False
 
