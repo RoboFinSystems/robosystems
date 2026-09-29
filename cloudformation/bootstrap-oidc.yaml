@@ -53,6 +53,13 @@ Parameters:
     AllowedPattern: ^[a-zA-Z0-9._-]+$
     ConstraintDescription: Must be a valid GitHub repository name
 
+  MarketplaceSubdomain:
+    Type: String
+    Default: marketplace
+    Description: First label of the portal's hostname; the marketplace role may write DNS records only under it
+    AllowedPattern: ^[a-z0-9-]+$
+    ConstraintDescription: Must be a single lowercase DNS label
+
   # Tagging Configuration
   ServiceTag:
     Type: String
@@ -962,10 +969,49 @@ Resources:
                          lambda:GetEventSourceMapping, lambda:ListEventSourceMappings,
                          logs:DescribeLogGroups, cloudwatch:DescribeAlarms, secretsmanager:GetRandomPassword, sts:GetCallerIdentity,
                          iam:GetRole, iam:GetRolePolicy, iam:ListRolePolicies, iam:ListAttachedRolePolicies, iam:ListRoleTags,
-                         route53:ChangeResourceRecordSets, route53:GetChange, route53:GetHostedZone, route53:ListHostedZones, route53:ListResourceRecordSets,
-                         acm:RequestCertificate, acm:DescribeCertificate, acm:ListCertificates, acm:GetCertificate, acm:DeleteCertificate,
-                         acm:AddTagsToCertificate, acm:ListTagsForCertificate, cloudfront:*]
+                         route53:GetChange, route53:GetHostedZone, route53:ListHostedZones, route53:ListResourceRecordSets,
+                         acm:RequestCertificate, acm:DescribeCertificate, acm:ListCertificates, acm:GetCertificate,
+                         acm:AddTagsToCertificate, acm:ListTagsForCertificate,
+                         cloudfront:Get*, cloudfront:List*, cloudfront:CreateDistribution,
+                         cloudfront:CreateOriginAccessControl, cloudfront:UpdateOriginAccessControl, cloudfront:DeleteOriginAccessControl]
                 Resource: "*"
+              # DNS writes only for the portal's own name and its certificate's
+              # validation record, in whichever zone holds it.
+              - Effect: Allow
+                Action: route53:ChangeResourceRecordSets
+                Resource: arn:aws:route53:::hostedzone/*
+                Condition:
+                  "Null":
+                    route53:ChangeResourceRecordSetsNormalizedRecordNames: "false"
+                  ForAllValues:StringLike:
+                    route53:ChangeResourceRecordSetsNormalizedRecordNames:
+                      - !Sub ${MarketplaceSubdomain}.*
+                      - !Sub _*.${MarketplaceSubdomain}.*
+              # Changes to an existing distribution only on the portal's own,
+              # which carries its stack's Component tag.
+              - Effect: Allow
+                Action: [cloudfront:UpdateDistribution, cloudfront:DeleteDistribution, cloudfront:CreateInvalidation,
+                         cloudfront:TagResource, cloudfront:UntagResource]
+                Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Component: Marketplace
+              # Creating the distribution tags it in the same call...
+              - Effect: Allow
+                Action: cloudfront:TagResource
+                Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/*
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/Component: Marketplace
+              # ...but never re-tags a distribution another stack owns.
+              - Effect: Deny
+                Action: [cloudfront:TagResource, cloudfront:UntagResource]
+                Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/*
+                Condition:
+                  StringNotEquals:
+                    aws:ResourceTag/Component: Marketplace
+                  "Null":
+                    aws:ResourceTag/Component: "false"
               - Effect: Allow
                 Action: [s3:*, lambda:*, dynamodb:*, sqs:*, sns:*, events:*, logs:*, secretsmanager:*, cloudwatch:*]
                 Resource:
