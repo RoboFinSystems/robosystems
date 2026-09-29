@@ -17,6 +17,7 @@ the blocking-call spec is made; the codebase uses them on the loop by design.
 from __future__ import annotations
 
 import inspect
+import os
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
@@ -28,8 +29,9 @@ import bcrypt
 import requests
 from opensearchpy.transport import Transport
 
+# Trailing separator, so a sibling like ``robosystems_extra/`` never matches.
 PLATFORM_ROOTS: list[str] = [
-  str(Path(__file__).resolve().parent.parent / "robosystems")
+  str(Path(__file__).resolve().parent.parent / "robosystems") + os.sep
 ]
 
 # "robosystems/path/to/module.py:function" of the platform coroutine that
@@ -48,7 +50,7 @@ def _platform_coroutine_on_stack() -> str | None:
       code.co_filename.startswith(root) for root in PLATFORM_ROOTS
     ):
       root = next(r for r in PLATFORM_ROOTS if code.co_filename.startswith(r))
-      relative = code.co_filename[len(str(Path(root).parent)) + 1 :]
+      relative = code.co_filename[len(str(Path(root.rstrip(os.sep)).parent)) + 1 :]
       return f"{relative}:{code.co_name}"
     frame = frame.f_back
   return None
