@@ -91,3 +91,43 @@ def test_with_clause_sort_feeds_a_limit(conn, ascending):
     "RETURN a, b"
   )
   assert _sorted(conn, query) == ascending[5:25]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+  "query",
+  [
+    "MATCH (o:Obs) RETURN o.name AS `Name`, o.value AS v ORDER BY v, `Name` LIMIT 5",
+    "MATCH (o:Obs) RETURN o.name, o.value "
+    "ORDER BY o.name ENDS WITH '1', o.value, o.`name` LIMIT 5",
+  ],
+)
+def test_rewrite_keeps_quoted_and_string_operator_keys_valid(conn, query):
+  assert _sorted(conn, query) == _rows(conn, query)
+
+
+@pytest.fixture(scope="module")
+def nullable(tmp_path_factory):
+  db = lbug.Database(str(tmp_path_factory.mktemp("nulls") / "nulls.lbug"))
+  c = lbug.Connection(db)
+  c.execute("CREATE NODE TABLE T(id INT64, v INT64, s STRING, PRIMARY KEY(id))")
+  c.execute(
+    "COPY T FROM (UNWIND range(0, 99999) AS o RETURN o, (o * 7919) % 100003, "
+    "CASE WHEN o % 17 = 0 THEN NULL ELSE 's' + CAST(o % 5 AS STRING) END)"
+  )
+  yield c
+  c.close()
+  db.close()
+
+
+@pytest.mark.unit
+@pytest.mark.xfail(
+  strict=True,
+  reason="LadybugDB #1067: the tiebreaker does not fix a sort whose keys hold "
+  "NULLs; only an engine fix does",
+)
+def test_tiebreaker_with_null_keys(nullable):
+  rows = _rows(nullable, "MATCH (t:T) RETURN t.s, t.v")
+  first = sorted((r for r in rows if r[0] is None), key=lambda r: r[1])[:10]
+  query = "MATCH (t:T) RETURN t.s, t.v ORDER BY t.s DESC, t.v LIMIT 10"
+  assert _sorted(nullable, query) == first

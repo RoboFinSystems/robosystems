@@ -204,7 +204,15 @@ class GraphMCPClient:
       logger.info(f"MCP: Full result object keys: {list(result.keys())}")
       logger.info(f"MCP: Result data preview: {data[:2] if data else 'No data'}")
 
-      if auto_limit_enabled and len(data) >= max_rows and cypher != original_query:
+      # Backstop for a LIMIT the text cap cannot read ($param, an expression).
+      over_cap = auto_limit_enabled and len(data) > max_rows
+      if over_cap:
+        del data[max_rows:]
+      if (
+        auto_limit_enabled
+        and len(data) == max_rows
+        and (over_cap or cypher != original_query)
+      ):
         logger.warning(
           f"MCP query results truncated at {max_rows} rows for context safety"
         )

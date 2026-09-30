@@ -123,6 +123,12 @@ class TestPrepareReadQuery:
       ),
       ("MATCH (n) RETURN n.limit", "MATCH (n) RETURN n.limit LIMIT 100"),
       (
+        "MATCH (a) RETURN a.name AS `Company Name`",
+        "MATCH (a) RETURN a.name AS `Company Name` LIMIT 100",
+      ),
+      ("MATCH (a) RETURN a.`name`", "MATCH (a) RETURN a.`name` LIMIT 100"),
+      ("MATCH (a) RETURN a.name, 'x'", "MATCH (a) RETURN a.name, 'x' LIMIT 100"),
+      (
         "MATCH (a:A) RETURN a.name UNION ALL MATCH (b:B) RETURN b.name LIMIT 9999",
         "MATCH (a:A) RETURN a.name LIMIT 100 UNION ALL MATCH (b:B) RETURN b.name "
         "LIMIT 100",
@@ -439,6 +445,25 @@ class TestResultTruncation:
       result = await client.execute_query("MATCH (n) RETURN n LIMIT 50000")
 
       assert mock_graph_client.query.call_args[1]["cypher"].endswith("LIMIT 1000")
+      assert result[-1]["_mcp_note"] == "RESULTS_TRUNCATED"
+
+  @pytest.mark.asyncio
+  async def test_rows_past_an_unreadable_limit_are_cut_at_the_cap(self):
+    mock_graph_client = AsyncMock()
+    mock_graph_client.query.return_value = {
+      "data": [{"id": i} for i in range(1500)],
+      "execution_time_ms": 50,
+    }
+
+    with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
+      client = _create_client()
+      client.graph_client = mock_graph_client
+      client.max_result_rows = 1000
+      client.auto_limit_enabled = True
+
+      result = await client.execute_query("MATCH (n) RETURN n LIMIT $n", {"n": 1500})
+
+      assert len(result) == 1001
       assert result[-1]["_mcp_note"] == "RESULTS_TRUNCATED"
 
   @pytest.mark.asyncio
