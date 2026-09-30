@@ -1056,7 +1056,7 @@ Resources:
                   - ssm:GetCommandInvocation
                   - ec2:DescribeInstances
                 Resource: "*"
-              # The busy counter, read before each dispatch.
+              # The busy leases, read before each dispatch.
               - Effect: Allow
                 Action: dynamodb:GetItem
                 Resource: !GetAtt InstanceRegistry.Arn

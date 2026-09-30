@@ -125,13 +125,13 @@ async def materialize_graph_directly(
       graph_id=graph_id, operation_type="write"
     )
 
-    # Instance-busy signal so refresh workflows wait before cycling the
-    # container. Set only once counted: a start refused by a maintenance pause
-    # never was, and the finally still closes the client.
-    busy_instance_id = ""
+    # Instance-busy lease so refresh workflows wait before cycling the
+    # container. A start refused by a maintenance pause holds none, and the
+    # finally still closes the client.
+    busy_instance_id = client._instance_id or ""
+    busy_lease = ""
     try:
-      await begin_destructive_op(client._instance_id or "", OP_KIND_MATERIALIZATION)
-      busy_instance_id = client._instance_id or ""
+      busy_lease = await begin_destructive_op(busy_instance_id, OP_KIND_MATERIALIZATION)
       if rebuild:
         if operation_id:
           await manager.emit_progress(
@@ -346,7 +346,7 @@ async def materialize_graph_directly(
           )
         except Exception as settle_err:
           logger.error(f"Could not clear rebuilding status on {graph_id}: {settle_err}")
-      await end_destructive_op(busy_instance_id, OP_KIND_MATERIALIZATION)
+      await end_destructive_op(busy_instance_id, busy_lease)
       await client.close()
 
   except Exception as e:

@@ -15,6 +15,7 @@ binaries. Nothing is added to the production script to make it testable.
 
 import os
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -101,7 +102,7 @@ if [ "$1" = "-u" ] && [ "$2" = "-d" ]; then
   python3 -c "
 import datetime,sys
 try:
-  print(int(datetime.datetime.strptime(sys.argv[1],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp()))
+  print(int(datetime.datetime.fromisoformat(sys.argv[1]).timestamp()))
 except Exception:
   sys.exit(1)
 " "$3"
@@ -208,57 +209,58 @@ class TestEnvironmentContract:
     assert refresh().exit_code == 0
 
 
-class TestBusyCounterFailsOpen:
+class TestBusyLeasesFailOpen:
   """Every one of these paths is deliberate.
 
-  The counter reports, it does not decide. A broken or absent counter must never
+  The leases report, they do not decide. A broken or absent signal must never
   block a refresh, and tightening any of these into a real guard is the mistake
   that doc records someone making.
   """
 
+  @staticmethod
+  def _lease(kind: str = "materialization") -> str:
+    started = datetime.now(UTC).isoformat(timespec="seconds")
+    return f"{started}|{kind}|abc123"
+
   def test_missing_registry_row_proceeds(self, refresh):
     result = refresh(STUB_DDB_ROW="None")
     assert result.exit_code == 0
-    assert "no registry entry" in result.output
-
-  def test_row_without_counter_is_idle(self, refresh):
-    result = refresh(STUB_DDB_ROW="None\\tNone\\tNone")
-    assert result.exit_code == 0
-    assert "is idle" in result.output
-
-  def test_negative_counter_is_idle_and_warns(self, refresh):
-    result = refresh(STUB_DDB_ROW="-1\\tNone\\tunknown")
-    assert result.exit_code == 0
-    assert "negative busy counter" in result.output
+    assert "no live busy leases" in result.output
 
   def test_unreadable_registry_proceeds(self, refresh):
     result = refresh(STUB_DDB_ROW="", STUB_DDB_EXIT=255)
     assert result.exit_code == 0
-    assert "no registry entry" in result.output
+    assert "no live busy leases" in result.output
 
-  def test_stale_heartbeat_is_treated_as_crashed(self, refresh):
-    result = refresh(STUB_DDB_ROW="2\\t2000-01-01T00:00:00Z\\tmaterialize")
+  def test_stale_lease_is_treated_as_crashed(self, refresh):
+    result = refresh(STUB_DDB_ROW="2000-01-01T00:00:00+00:00|materialization|abc")
     assert result.exit_code == 0
-    assert "stale busy counter" in result.output
+    assert "ignoring stale busy lease" in result.output
 
-  def test_busy_with_fresh_heartbeat_defers(self, refresh):
+  def test_unparseable_lease_is_ignored(self, refresh):
+    result = refresh(STUB_DDB_ROW="garbage")
+    assert result.exit_code == 0
+    assert "ignoring stale busy lease" in result.output
+
+  def test_live_lease_defers(self, refresh):
     """A deferral, not a failure: the fleet walk comes back to the instance."""
-    now = subprocess.run(
-      ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"], capture_output=True, text=True
-    ).stdout.strip()
-    result = refresh(STUB_DDB_ROW=f"2\\t{now}\\tmaterialize", MAX_WAIT_MINUTES=2)
+    result = refresh(STUB_DDB_ROW=self._lease(), MAX_WAIT_MINUTES=2)
     assert result.exit_code == EXIT_DEFERRED_BUSY
     assert "timed out after 2" in result.output
     assert "REFRESH_RESULT=deferred-busy" in result.output
     assert not result.restarted
 
+  def test_a_leak_beside_a_live_lease_counts_only_the_live_one(self, refresh):
+    leaked = "2000-01-01T00:00:00+00:00|leaked|abc"
+    live = self._lease(kind="extensions_materialize")
+    result = refresh(STUB_DDB_ROW=f"{leaked}\\t{live}", MAX_WAIT_MINUTES=1)
+    assert result.exit_code == EXIT_DEFERRED_BUSY
+    assert "1 lease(s), latest extensions_materialize" in result.output
+
   def test_force_ignore_busy_bypasses_the_wait(self, refresh):
-    now = subprocess.run(
-      ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"], capture_output=True, text=True
-    ).stdout.strip()
-    result = refresh(STUB_DDB_ROW=f"2\\t{now}\\tmaterialize", FORCE_IGNORE_BUSY="true")
+    result = refresh(STUB_DDB_ROW=self._lease(), FORCE_IGNORE_BUSY="true")
     assert result.exit_code == 0
-    assert "bypassing the busy-counter" in result.output
+    assert "bypassing the busy-lease" in result.output
 
 
 class TestDigestSkip:

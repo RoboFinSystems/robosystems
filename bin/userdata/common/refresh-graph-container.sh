@@ -12,7 +12,7 @@
 #
 # Optional environment overrides the caller may set on the command:
 #   MAX_WAIT_MINUTES   minutes to wait for in-flight destructive ops (default 30)
-#   FORCE_IGNORE_BUSY  "true" bypasses the busy-counter wait entirely. Emergency
+#   FORCE_IGNORE_BUSY  "true" bypasses the busy-lease wait entirely. Emergency
 #                      escape hatch — an interrupted materialization may require a
 #                      full graph rebuild.
 #   FORCE_RESTART      "true" restarts even when the image digest is unchanged
@@ -29,9 +29,9 @@ MAX_WAIT_MINUTES="${MAX_WAIT_MINUTES:-30}"
 FORCE_IGNORE_BUSY="${FORCE_IGNORE_BUSY:-false}"
 FORCE_RESTART="${FORCE_RESTART:-false}"
 
-# Busy counter > 0 but no heartbeat for 6h → treat as crashed. 6h comfortably
-# covers even full SEC historical backfills (30-120min); anything longer is
-# almost certainly hung.
+# A busy lease older than 6h → its holder crashed. 6h comfortably covers even
+# full SEC historical backfills (30-120min); anything longer is almost certainly
+# hung.
 STALE_WINDOW_SECONDS=21600
 
 # Bumped whenever /etc/environment gains a variable a refresh depends on.
@@ -107,78 +107,69 @@ log "target image=${ECR_IMAGE}"
 # WAIT FOR IN-FLIGHT DESTRUCTIVE OPS
 # ==================================================================================
 # instance_busy is a coordination signal, NOT a guard, so the fail-open rules are
-# deliberate: negative counter = idle, stale heartbeat = crashed writer, missing
-# row = proceed. The ASG-wide twin in bin/tools/wait-graph-writers-idle.sh and the
-# fleet walk's pre-dispatch check (_busy in bin/lambda/graph_container_refresh.py)
-# must apply the same rules.
+# deliberate: missing row, unreadable registry and no leases = idle; a lease
+# older than the stale window (or unparseable) = a crashed holder, ignored. Each
+# lease is `<started_at>|<op_kind>|<id>` and goes stale on its own clock. The
+# ASG-wide twin in bin/tools/wait-graph-writers-idle.sh and the fleet walk's
+# pre-dispatch check (_busy in bin/lambda/graph_container_refresh.py) must apply
+# the same rules.
 wait_until_idle() {
   if [ "${FORCE_IGNORE_BUSY}" = "true" ]; then
-    log "WARNING: FORCE_IGNORE_BUSY=true — bypassing the busy-counter check"
+    log "WARNING: FORCE_IGNORE_BUSY=true — bypassing the busy-lease check"
     return 0
   fi
 
   local table="robosystems-graph-${ENVIRONMENT}-instance-registry"
-  log "checking destructive-op counter (table: ${table})"
+  log "checking busy leases (table: ${table})"
 
-  local attempt=0 count=0 last_at kind row
+  local attempt=0 count=0 kind last_at leases lease started_at rest epoch now
   while [ "${attempt}" -lt "${MAX_WAIT_MINUTES}" ]; do
     attempt=$((attempt + 1))
 
-    # One call per poll, and no jq dependency: --query flattens the three fields
-    # we need into a single tab-separated row.
-    row=$(aws dynamodb get-item \
+    # No jq dependency: --query flattens the lease set into whitespace-separated
+    # tokens (a token holds no whitespace).
+    leases=$(aws dynamodb get-item \
       --table-name "${table}" \
       --key "{\"instance_id\":{\"S\":\"${INSTANCE_ID}\"}}" \
-      --query "Item.[active_destructive_ops.N, last_destructive_op_at.S, last_destructive_op_kind.S]" \
+      --query "Item.active_leases.SS" \
       --output text \
-      --region "${AWS_REGION}" 2>/dev/null) || row=""
+      --region "${AWS_REGION}" 2>/dev/null) || leases=""
 
-    # Fail open on a missing row or an unreadable registry: not yet registered,
-    # unmanaged, throttled, or a permissions gap — none of which should block a
-    # refresh.
-    if [ -z "${row}" ] || [ "${row}" = "None" ]; then
-      log "no registry entry for ${INSTANCE_ID} — proceeding"
-      return 0
-    fi
-
-    IFS=$'\t' read -r count last_at kind <<<"${row}"
-    [ "${count}" = "None" ] && count=0
-    [ "${last_at}" = "None" ] && last_at=""
-    [ "${kind}" = "None" ] && kind="unknown"
-
-    if [ "${count:-0}" -le 0 ] 2>/dev/null; then
-      if [ "${count:-0}" -lt 0 ] 2>/dev/null; then
-        log "WARNING: negative busy counter (count=${count}); treating as idle. May indicate a swallowed increment failure."
+    count=0 kind="" last_at=""
+    now=$(date -u +%s)
+    for lease in ${leases}; do
+      [ "${lease}" = "None" ] && continue
+      started_at=${lease%%|*}
+      rest=${lease#*|}
+      epoch=$(date -u -d "${started_at}" +%s 2>/dev/null || echo 0)
+      if [ "${epoch}" -le 0 ] || [ $((now - epoch)) -gt "${STALE_WINDOW_SECONDS}" ]; then
+        [ "${attempt}" -eq 1 ] && log "WARNING: ignoring stale busy lease ${lease}"
+        continue
       fi
+      count=$((count + 1))
+      if [[ "${started_at}" > "${last_at}" ]]; then
+        last_at=${started_at}
+        kind=${rest%%|*}
+      fi
+    done
+
+    # Fail open on a missing row or an unreadable registry too: not yet
+    # registered, unmanaged, throttled, or a permissions gap — none of which
+    # should block a refresh.
+    if [ "${count}" -eq 0 ]; then
       if [ "${attempt}" -eq 1 ]; then
-        log "instance is idle — proceeding"
+        log "no live busy leases on ${INSTANCE_ID} — proceeding"
       else
         log "instance became idle after ${attempt} attempt(s)"
       fi
       return 0
     fi
 
-    if [ -n "${last_at}" ]; then
-      local last_epoch now_epoch age
-      last_epoch=$(date -u -d "${last_at}" +%s 2>/dev/null || echo 0)
-      now_epoch=$(date -u +%s)
-      age=$((now_epoch - last_epoch))
-      if [ "${last_epoch}" -gt 0 ] && [ "${age}" -gt "${STALE_WINDOW_SECONDS}" ]; then
-        log "WARNING: stale busy counter (count=${count}, kind=${kind}, last=${last_at}, ${age}s ago > ${STALE_WINDOW_SECONDS}s). Treating as crashed and proceeding."
-        return 0
-      fi
-      # An unparseable heartbeat disables stale detection, so the wait can only
-      # end in idle or timeout; warn once. `date -d` needs GNU coreutils.
-      if [ "${last_epoch}" -eq 0 ] && [ "${attempt}" -eq 1 ]; then
-        log "WARNING: could not parse heartbeat '${last_at}' — stale-counter detection is inactive for this run"
-      fi
-    fi
-
-    log "attempt ${attempt}/${MAX_WAIT_MINUTES}: busy (count=${count}, kind=${kind}, last=${last_at}). Waiting 60s..."
+    log "attempt ${attempt}/${MAX_WAIT_MINUTES}: busy (${count} lease(s), latest ${kind} since ${last_at}). Waiting 60s..."
     sleep 60
   done
 
-  log "timed out after ${MAX_WAIT_MINUTES} minute(s) waiting for the instance to become idle (count=${count}, kind=${kind}). Set FORCE_IGNORE_BUSY=true to override."
+  log "timed out after ${MAX_WAIT_MINUTES} minute(s) waiting for the instance to become idle (${count} lease(s), latest ${kind}). Set FORCE_IGNORE_BUSY=true to override."
   echo "REFRESH_RESULT=deferred-busy"
   exit "${EXIT_DEFERRED_BUSY}"
 }

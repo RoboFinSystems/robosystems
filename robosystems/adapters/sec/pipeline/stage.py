@@ -78,7 +78,7 @@ def sec_duckdb_staged(
     )
     context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
 
-    # The busy counter on the master running the DuckDB writes makes a deploy's
+    # The busy lease on the master running the DuckDB writes makes a deploy's
     # pre-refresh wait before cycling it. Imported lazily to keep boto3 and
     # GraphClientFactory out of SEC module load.
     from robosystems.middleware.graph.instance_busy import (
@@ -89,7 +89,7 @@ def sec_duckdb_staged(
     )
 
     busy_instance_id = await resolve_instance_id_for_graph(config.graph_id)
-    await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
+    busy_lease = await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
     try:
       result = await processor.stage_to_duckdb(
         year=config.year,
@@ -101,7 +101,7 @@ def sec_duckdb_staged(
       )
       return result
     finally:
-      await end_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
+      await end_destructive_op(busy_instance_id, busy_lease)
 
   try:
     result = asyncio.run(run_staging())
@@ -199,7 +199,7 @@ def sec_historical_duckdb_staged(
     )
     context.log.info(f"Subgraph status: {subgraph_result.get('status')}")
 
-    # Busy counter: see sec_duckdb_staged.
+    # Busy lease: see sec_duckdb_staged.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_SEC_STAGING,
       begin_destructive_op,
@@ -208,7 +208,7 @@ def sec_historical_duckdb_staged(
     )
 
     busy_instance_id = await resolve_instance_id_for_graph(graph_id)
-    await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
+    busy_lease = await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
     try:
       result = await processor.stage_to_duckdb(
         start_year=start_year,
@@ -219,7 +219,7 @@ def sec_historical_duckdb_staged(
       )
       return result
     finally:
-      await end_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
+      await end_destructive_op(busy_instance_id, busy_lease)
 
   try:
     result = asyncio.run(run_staging())
@@ -296,7 +296,7 @@ def sec_duckdb_incremental_staged(
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
   async def run_incremental():
-    # Busy counter: see sec_duckdb_staged.
+    # Busy lease: see sec_duckdb_staged.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_SEC_STAGING,
       begin_destructive_op,
@@ -305,7 +305,7 @@ def sec_duckdb_incremental_staged(
     )
 
     busy_instance_id = await resolve_instance_id_for_graph(config.graph_id)
-    await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
+    busy_lease = await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
     try:
       return await processor.stage_incremental_to_duckdb(
         year=config.year,
@@ -313,7 +313,7 @@ def sec_duckdb_incremental_staged(
         progress_callback=context.log.info,
       )
     finally:
-      await end_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
+      await end_destructive_op(busy_instance_id, busy_lease)
 
   try:
     result = asyncio.run(run_incremental())

@@ -163,8 +163,9 @@ role.
 
 `execution_strategies.py` picks the execution path (direct query vs MCP,
 load-aware). `streaming_wrapper.py` adapts streaming results for Graph API
-clients. `instance_busy.py` maintains a DynamoDB busy counter so destructive
-operations don't run against an instance mid-work.
+clients. `instance_busy.py` holds a DynamoDB busy lease per destructive operation
+(each goes stale on its own after 6h, so one leaked by a killed process
+expires) so refreshes and rolls don't cycle an instance mid-work.
 
 ## Allocation
 

@@ -18,6 +18,10 @@ caller that stops stepping stops the walk after the in-flight instance.
   fail-fast on purpose — a bad image should halt at the first instance, not be
   pushed through the fleet.
 - Instances still busy at the deadline end the walk as `deferred`.
+
+`start` takes an optional `instance_ids` list that narrows the queue to those
+instances (still within the group's filters), so a deferred remainder can be
+re-walked on its own.
 """
 
 import logging
@@ -58,9 +62,11 @@ EXECUTION_TIMEOUT_SECONDS = INSTANCE_WAIT_MINUTES * 60 + REFRESH_HEADROOM_SECOND
 # undeliverable instance holds up everything behind it for this long.
 DELIVERY_TIMEOUT_SECONDS = 600
 
-# Busy counter > 0 with a heartbeat older than this is a crashed writer. Mirrors
-# STALE_WINDOW_SECONDS in refresh-graph-container.sh and
-# wait-graph-writers-idle.sh; the three read the counter the same way.
+# A busy lease older than this is a crashed holder. Mirrors STALE_WINDOW_SECONDS
+# in robosystems/middleware/graph/instance_busy.py (the writer),
+# refresh-graph-container.sh and wait-graph-writers-idle.sh; the three readers
+# read the leases the same way.
+LEASE_ATTRIBUTE = "active_leases"
 STALE_WINDOW_SECONDS = 21600
 
 # EC2 filters per node-type group. `writer` covers every writer tier (the tier is
@@ -100,27 +106,35 @@ TERMINAL_PHASES = {"complete", "failed", "deferred"}
 FAILURE_OUTPUT_TAIL_CHARS = 1500
 
 
-def _filters_for(group: str, environment: str) -> list[dict[str, Any]]:
+def _filters_for(
+  group: str, environment: str, instance_ids: list[str] | None = None
+) -> list[dict[str, Any]]:
   """EC2 filters selecting a node-type group's running instances."""
   if group not in NODE_TYPE_FILTERS:
     raise ValueError(
       f"Unknown node_type '{group}'; expected one of "
       f"{sorted([*NODE_TYPE_FILTERS, 'all'])}"
     )
-  return [
+  filters = [
     {"Name": "tag:Environment", "Values": [environment]},
     {"Name": "instance-state-name", "Values": ["running"]},
     *NODE_TYPE_FILTERS[group],
   ]
+  if instance_ids:
+    filters.append({"Name": "instance-id", "Values": instance_ids})
+  return filters
 
 
-def _resolve_queue(groups: list[str], environment: str) -> list[str]:
+def _resolve_queue(
+  groups: list[str], environment: str, instance_ids: list[str] | None = None
+) -> list[str]:
   """Instance ids in walk order: group by group, the shared writer tier last."""
   queue: list[str] = []
   for group in groups:
     found: list[tuple[bool, str]] = []
     paginator = ec2.get_paginator("describe_instances")
-    for page in paginator.paginate(Filters=_filters_for(group, environment)):
+    filters = _filters_for(group, environment, instance_ids)
+    for page in paginator.paginate(Filters=filters):
       for reservation in page.get("Reservations", []):
         for instance in reservation.get("Instances", []):
           tags = {t["Key"]: t["Value"] for t in instance.get("Tags", [])}
@@ -132,44 +146,42 @@ def _resolve_queue(groups: list[str], environment: str) -> list[str]:
 
 
 def _busy(instance_id: str) -> dict[str, str] | None:
-  """The instance's in-flight destructive op, or None when it is idle.
+  """The instance's live busy leases, or None when it is idle.
 
   A coordination signal, not a guard, so it fails open like its twins: a missing
-  row, an unreadable registry, a non-positive counter and a stale heartbeat all
-  read as idle. The instance script repeats the check before touching anything.
+  row, an unreadable registry, no leases, and leases that are stale or
+  unparseable all read as idle. Staleness is per lease, so a leaked one expires
+  however busy the instance stays. The instance script repeats the check before
+  touching anything.
   """
   try:
     item = dynamodb.get_item(
       TableName=INSTANCE_REGISTRY_TABLE,
       Key={"instance_id": {"S": instance_id}},
+      ProjectionExpression=LEASE_ATTRIBUTE,
     ).get("Item")
   except ClientError as e:
     logger.warning(f"Registry read failed for {instance_id}; treating as idle: {e}")
     return None
-  if not item:
-    return None
 
-  try:
-    count = int(item.get("active_destructive_ops", {}).get("N", "0"))
-  except ValueError:
-    count = 0
-  if count <= 0:
-    return None
-
-  last_at = item.get("last_destructive_op_at", {}).get("S", "")
-  kind = item.get("last_destructive_op_kind", {}).get("S", "unknown")
-  if last_at:
+  now = time.time()
+  live: list[tuple[str, str]] = []
+  for lease in (item or {}).get(LEASE_ATTRIBUTE, {}).get("SS", []):
+    started_at, _, rest = lease.partition("|")
+    kind = rest.split("|", 1)[0] or "unknown"
     try:
-      age = time.time() - datetime.fromisoformat(last_at).timestamp()
+      age = now - datetime.fromisoformat(started_at).timestamp()
     except ValueError:
-      age = 0
+      age = STALE_WINDOW_SECONDS + 1
     if age > STALE_WINDOW_SECONDS:
-      logger.warning(
-        f"Stale busy counter on {instance_id} (count={count}, kind={kind}, "
-        f"last={last_at}); treating as crashed"
-      )
-      return None
-  return {"count": str(count), "kind": kind, "last_at": last_at}
+      logger.warning(f"Stale busy lease on {instance_id} ({lease}); ignoring")
+      continue
+    live.append((started_at, kind))
+
+  if not live:
+    return None
+  started_at, kind = max(live)
+  return {"count": str(len(live)), "kind": kind, "last_at": started_at}
 
 
 def _build_parameters(
@@ -238,8 +250,8 @@ def _dispatch_next(state: dict[str, Any]) -> None:
     if busy:
       if instance_id not in state["busy"]:
         state["log"].append(
-          f"{instance_id}: busy ({busy['kind']}, last heartbeat "
-          f"{busy['last_at'] or 'unknown'}) — coming back to it"
+          f"{instance_id}: busy ({busy['count']} lease(s), latest {busy['kind']} "
+          f"since {busy['last_at'] or 'unknown'}) — coming back to it"
         )
       state["busy"][instance_id] = busy
       passed.append(instance_id)
@@ -322,12 +334,23 @@ def _refresh_result(output: str) -> str | None:
   return None
 
 
+def _parse_instance_ids(value: Any) -> list[str] | None:
+  """`instance_ids` as a list, or a comma/space separated string; None if empty."""
+  if not value:
+    return None
+  if isinstance(value, str):
+    value = value.replace(",", " ").split()
+  ids = [str(iid).strip() for iid in value if str(iid).strip()]
+  return ids or None
+
+
 def start(event: dict[str, Any]) -> dict[str, Any]:
   """Resolve the fleet into a queue and dispatch its first idle instance."""
   environment = event.get("environment", ENVIRONMENT)
   node_type = event.get("node_types", "writer")
   max_wait_minutes = int(event.get("max_wait_minutes", DEFAULT_MAX_WAIT_MINUTES))
   groups = ALL_GROUPS if node_type == "all" else [node_type]
+  instance_ids = _parse_instance_ids(event.get("instance_ids"))
 
   state: dict[str, Any] = {
     "environment": environment,
@@ -335,7 +358,7 @@ def start(event: dict[str, Any]) -> dict[str, Any]:
     "force_ignore_busy": bool(event.get("force_ignore_busy", False)),
     "force_restart": bool(event.get("force_restart", False)),
     "deadline": int(time.time()) + max_wait_minutes * 60,
-    "queue": _resolve_queue(groups, environment),
+    "queue": _resolve_queue(groups, environment, instance_ids),
     "current": None,
     "outcomes": [],
     "busy": {},
@@ -348,6 +371,12 @@ def start(event: dict[str, Any]) -> dict[str, Any]:
   state["log"].append(
     f"Refreshing {total} {node_type} instance(s) in {environment}, one at a time"
   )
+  if instance_ids:
+    gone = [iid for iid in instance_ids if iid not in state["queue"]]
+    if gone:
+      state["log"].append(
+        f"Not running or not a {node_type} in {environment}, skipped: {', '.join(gone)}"
+      )
   _dispatch_next(state)
   return {"statusCode": 200, **state}
 

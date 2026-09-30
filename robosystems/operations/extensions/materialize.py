@@ -1347,15 +1347,15 @@ class ExtensionsMaterializer:
     )
     from robosystems.middleware.graph.write_pause import GraphWritesPausedError
 
-    busy_instance_id = ""
+    busy_instance_id = client._instance_id or ""
+    busy_lease = ""
     try:
       async with client:
-        # Set only once counted: a start refused by a maintenance pause never
-        # was, and lands on the result like any other error.
-        await begin_destructive_op(
-          client._instance_id or "", OP_KIND_EXTENSIONS_MATERIALIZE
+        # A start refused by a maintenance pause holds no lease, and lands on
+        # the result like any other error.
+        busy_lease = await begin_destructive_op(
+          busy_instance_id, OP_KIND_EXTENSIONS_MATERIALIZE
         )
-        busy_instance_id = client._instance_id or ""
         # One lock for both paths: a first build is as exposed to a
         # double-writer as a rebuild.
         lock = await self._acquire_lock(graph_id)
@@ -1386,7 +1386,7 @@ class ExtensionsMaterializer:
       result.status = "error"
       result.errors.append(redact_connection_secrets(str(e)))
     finally:
-      await end_destructive_op(busy_instance_id, OP_KIND_EXTENSIONS_MATERIALIZE)
+      await end_destructive_op(busy_instance_id, busy_lease)
 
     result.duration_ms = (time.time() - start_time) * 1000
 

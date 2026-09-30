@@ -46,7 +46,7 @@ on:
         type: string
         default: "30"
       force_ignore_busy:
-        description: "Skip busy-counter check (emergency override)"
+        description: "Skip busy-lease check (emergency override)"
         required: false
         type: boolean
         default: false
@@ -55,6 +55,11 @@ on:
         required: false
         type: boolean
         default: false
+      instance_ids:
+        description: "Only these graph instances (comma-separated), within the node types; empty = all"
+        required: false
+        type: string
+        default: ""
   workflow_call:
     inputs:
       environment:
@@ -88,7 +93,7 @@ on:
         type: string
         default: "30"
       force_ignore_busy:
-        description: "Skip busy-counter check (emergency override)"
+        description: "Skip busy-lease check (emergency override)"
         required: false
         type: string
         default: "false"
@@ -101,6 +106,25 @@ on:
         required: false
         type: string
         default: "false"
+      instance_ids:
+        description: "Only these graph instances (comma-separated), within the node types; empty = all"
+        required: false
+        type: string
+        default: ""
+      defer_to_followup:
+        description: >-
+          When instances are still busy at the deadline, pass instead of failing
+          and dispatch a follow-up Service Refresh run for just those instances.
+          That run is the one that fails if they stay busy. Deploys set it; a
+          real refresh failure still fails the caller.
+        required: false
+        type: string
+        default: "false"
+      followup_max_wait_minutes:
+        description: "The follow-up run's busy wait, in minutes"
+        required: false
+        type: string
+        default: "180"
       # API refresh configuration
       api_refresh_enabled:
         description: "Refresh API ECS service"
@@ -167,6 +191,9 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    outputs:
+      phase: ${{ steps.refresh.outputs.phase }}
+      deferred_ids: ${{ steps.refresh.outputs.deferred_ids }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -204,6 +231,7 @@ jobs:
           echo "function=$FUNCTION" >> $GITHUB_OUTPUT
 
       - name: Refresh graph containers
+        id: refresh
         env:
           REGION: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
           ENV_NAME: ${{ inputs.environment }}
@@ -211,6 +239,8 @@ jobs:
           MAX_WAIT: ${{ inputs.max_wait_minutes || '30' }}
           FORCE_IGNORE_BUSY: ${{ inputs.force_ignore_busy || 'false' }}
           FORCE_RESTART: ${{ inputs.force_restart || 'false' }}
+          INSTANCE_IDS: ${{ inputs.instance_ids || '' }}
+          DEFER_TO_FOLLOWUP: ${{ inputs.defer_to_followup || 'false' }}
           FUNCTION: ${{ steps.fn.outputs.function }}
         run: |
           set -uo pipefail
@@ -230,8 +260,10 @@ jobs:
             --argjson wait "$MAX_WAIT" \
             --argjson ignore_busy "$([ "$FORCE_IGNORE_BUSY" = "true" ] && echo true || echo false)" \
             --argjson force_restart "$([ "$FORCE_RESTART" = "true" ] && echo true || echo false)" \
+            --arg ids "$INSTANCE_IDS" \
             '{action:"start", environment:$env, node_types:$nt, max_wait_minutes:$wait,
-              force_ignore_busy:$ignore_busy, force_restart:$force_restart}' > /tmp/request.json
+              force_ignore_busy:$ignore_busy, force_restart:$force_restart,
+              instance_ids:$ids}' > /tmp/request.json
 
           invoke /tmp/request.json /tmp/state.json || {
             echo "::error::Failed to invoke ${FUNCTION}"; exit 1; }
@@ -274,6 +306,7 @@ jobs:
           done
 
           PHASE=$(jq -r '.phase' /tmp/state.json)
+          echo "phase=${PHASE}" >> "$GITHUB_OUTPUT"
           {
             echo "### Graph container refresh (${ENV_NAME}, ${NODE_TYPES}): ${PHASE}"
             echo
@@ -303,13 +336,59 @@ jobs:
               exit 1
               ;;
             deferred)
+              echo "deferred_ids=$(jq -r '.queue | join(",")' /tmp/state.json)" >> "$GITHUB_OUTPUT"
+              if [ "$DEFER_TO_FOLLOWUP" = "true" ]; then
+                echo "::warning::Still busy after ${MAX_WAIT} minute(s), handed to a follow-up Service Refresh run:"
+                jq -r '.busy as $b | .queue[] | "  \(.): \($b[.].kind // "busy") (since \($b[.].last_at // "unknown"))"' /tmp/state.json
+                echo "_Still-busy instances are handed to a follow-up Service Refresh run._" >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
               echo "::error::Still busy after ${MAX_WAIT} minute(s), left on the old image:"
-              jq -r '.busy as $b | .queue[] | "  \(.): \($b[.].kind // "busy") (last heartbeat \($b[.].last_at // "unknown"))"' /tmp/state.json
-              echo "Re-run Service Refresh once they are idle; instances already current no-op."
+              jq -r '.busy as $b | .queue[] | "  \(.): \($b[.].kind // "busy") (since \($b[.].last_at // "unknown"))"' /tmp/state.json
+              echo "Re-run Service Refresh for these instances (instance_ids) once they are idle."
               exit 1
               ;;
           esac
           echo "Refresh complete."
+
+  # Busy instances must not hold a deploy hostage, and must not be dropped
+  # either: they get a run of their own, which fails loudly if they stay busy.
+  # Its own job so only this step holds actions: write.
+  handoff-deferred-graph-refresh:
+    needs: [refresh-graph]
+    if: ${{ needs.refresh-graph.result == 'success' && needs.refresh-graph.outputs.phase == 'deferred' }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch a follow-up refresh for the deferred instances
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref_name }}
+          ENV_NAME: ${{ inputs.environment }}
+          NODE_TYPES: ${{ inputs.graph_node_types || 'writer' }}
+          INSTANCE_IDS: ${{ needs.refresh-graph.outputs.deferred_ids }}
+          MAX_WAIT: ${{ inputs.followup_max_wait_minutes || '180' }}
+          FORCE_RESTART: ${{ inputs.force_restart || 'false' }}
+        run: |
+          set -euo pipefail
+          gh workflow run service-refresh.yml --repo "$GITHUB_REPOSITORY" --ref "$REF" \
+            -f environment="$ENV_NAME" \
+            -f graph_refresh_enabled=true \
+            -f api_refresh_enabled=false \
+            -f dagster_refresh_enabled=false \
+            -f worker_refresh_enabled=false \
+            -f graph_node_types="$NODE_TYPES" \
+            -f instance_ids="$INSTANCE_IDS" \
+            -f max_wait_minutes="$MAX_WAIT" \
+            -f force_restart="$FORCE_RESTART"
+          {
+            echo "### Follow-up graph refresh dispatched"
+            echo
+            echo "\`${INSTANCE_IDS}\` (${ENV_NAME}, ${NODE_TYPES}), waiting up to ${MAX_WAIT} minute(s) at \`${REF}\`."
+            echo "Track it under [Service Refresh](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/service-refresh.yml)."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
   # API ECS Service Refresh
