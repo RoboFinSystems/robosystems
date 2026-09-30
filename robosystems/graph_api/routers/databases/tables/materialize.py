@@ -129,6 +129,66 @@ def _lbug_type_to_duck(lbug_type: str) -> str:
   return "VARCHAR"
 
 
+# DuckDB 1.4.4 segfaults exporting a wide fixed-size ARRAY (e.g. FLOAT[384]) to
+# Arrow on Graviton; LIST exports are fine. Array columns therefore leave DuckDB
+# as LIST and are restored to their fixed size in Arrow before the COPY.
+_FIXED_ARRAY_TYPE = re.compile(r"^\s*([A-Za-z0-9]+)\[(\d+)\]\s*$")
+
+_ARRAY_ELEMENT_ARROW_TYPE = {
+  "FLOAT": pa.float32(),
+  "DOUBLE": pa.float64(),
+  "INT64": pa.int64(),
+  "BIGINT": pa.int64(),
+  "INT32": pa.int32(),
+  "INT": pa.int32(),
+  "INTEGER": pa.int32(),
+}
+
+
+def _fixed_array_arrow_type(type_name: str) -> pa.DataType | None:
+  """Arrow type for a fixed-size array column type (``FLOAT[384]``), else None."""
+  match = _FIXED_ARRAY_TYPE.match(type_name)
+  if not match:
+    return None
+  element = _ARRAY_ELEMENT_ARROW_TYPE.get(match.group(1).upper())
+  if element is None:
+    return None
+  return pa.list_(element, int(match.group(2)))
+
+
+def _as_list_for_export(expr: str, type_name: str) -> str:
+  """Re-type a fixed-size array expression as LIST for the Arrow export."""
+  match = _FIXED_ARRAY_TYPE.match(type_name)
+  if not match or _fixed_array_arrow_type(type_name) is None:
+    return expr
+  return f"({expr})::{match.group(1)}[]"
+
+
+def _fixed_array_casts(
+  columns: list[tuple[str, str]], exclude_cols: set[str] | None = None
+) -> dict[str, pa.DataType]:
+  """Columns exported as LIST that must be cast back to a fixed-size array."""
+  exclude = exclude_cols or set()
+  casts = {}
+  for name, type_name in columns:
+    arrow_type = _fixed_array_arrow_type(type_name)
+    if arrow_type is not None and name not in exclude:
+      casts[name] = arrow_type
+  return casts
+
+
+def _restore_fixed_arrays(
+  batch: pa.RecordBatch, casts: dict[str, pa.DataType]
+) -> pa.Table:
+  """Arrow table for ``batch`` with LIST-exported array columns cast back."""
+  table = pa.Table.from_batches([batch])
+  for name, arrow_type in casts.items():
+    index = table.schema.get_field_index(name)
+    if index >= 0:
+      table = table.set_column(index, name, table.column(index).cast(arrow_type))
+  return table
+
+
 def _get_target_columns(
   ladybug_service, graph_id: str, table_name: str
 ) -> list[tuple[str, str]] | None:
@@ -166,7 +226,8 @@ def _build_type_safe_select(
   DECIMAL type (its numeric target columns are DOUBLE), and postgres_scan
   stages Postgres NUMERIC as DuckDB DECIMAL, so casting at the source keeps the
   Arrow types unambiguous. Columns in null_cols become typed NULLs (preserving
-  column count for positional COPY).
+  column count for positional COPY). Fixed-size arrays are exported as LIST
+  (see _FIXED_ARRAY_TYPE).
   """
   exclude = exclude_cols or set()
   nullify = null_cols or set()
@@ -176,9 +237,12 @@ def _build_type_safe_select(
       continue
     quoted = quote_identifier(col_name)
     if col_name in nullify:
-      parts.append(f"NULL::{duck_type} AS {quoted}")
+      expr = _as_list_for_export(f"NULL::{duck_type}", duck_type)
+      parts.append(f"{expr} AS {quoted}")
     elif duck_type.upper().startswith("DECIMAL"):
       parts.append(f"CAST({quoted} AS DOUBLE) AS {quoted}")
+    elif _fixed_array_arrow_type(duck_type) is not None:
+      parts.append(f"{_as_list_for_export(quoted, duck_type)} AS {quoted}")
     else:
       parts.append(quoted)
   return ", ".join(parts)
@@ -196,6 +260,8 @@ def _build_reconciled_select(
   Adds missing columns as NULL with correct type. Casts existing columns
   to the target type (handles DuckDB inferring NULL columns as INT32).
   Columns in null_cols are included as NULL (preserving column count for COPY).
+  Fixed-size arrays are cast to their type, then exported as LIST (see
+  _FIXED_ARRAY_TYPE), so a wrong-length value still becomes NULL.
 
   For relationship tables, `from` and `to` are implicit in LadybugDB's
   TABLE_INFO but must be included in the DuckDB source. They are passed
@@ -218,12 +284,11 @@ def _build_reconciled_select(
       continue
     duck_type = _lbug_type_to_duck(lbug_type)
     quoted = quote_identifier(col_name)
-    if col_name in nullify:
-      parts.append(f"NULL::{duck_type} AS {quoted}")
-    elif col_name in source_set:
-      parts.append(f"TRY_CAST({quoted} AS {duck_type}) AS {quoted}")
+    if col_name in source_set and col_name not in nullify:
+      expr = f"TRY_CAST({quoted} AS {duck_type})"
     else:
-      parts.append(f"NULL::{duck_type} AS {quoted}")
+      expr = f"NULL::{duck_type}"
+    parts.append(f"{_as_list_for_export(expr, duck_type)} AS {quoted}")
   return ", ".join(parts)
 
 
@@ -444,12 +509,15 @@ async def _materialize_table_impl(
             exclude_cols=exclude_cols,
             null_cols=null_cols,
           )
+          array_casts = _fixed_array_casts(target_columns, exclude_cols)
         else:
+          typed_source = [(col[0], col[1]) for col in source_columns]
           select_expr = _build_type_safe_select(
-            [(col[0], col[1]) for col in source_columns],
+            typed_source,
             exclude_cols=exclude_cols,
             null_cols=null_cols,
           )
+          array_casts = _fixed_array_casts(typed_source, exclude_cols)
 
         # Aliased `t` so the incremental anti-join can qualify outer columns.
         select_sql = f"SELECT {select_expr} FROM {table_name} AS t{where}"
@@ -485,7 +553,7 @@ async def _materialize_table_impl(
             for arrow_batch in arrow_reader:
               # LadybugDB resolves `copy_batch` BY NAME from this frame (a
               # replacement scan), so the name must match the COPY statement.
-              copy_batch = pa.Table.from_batches([arrow_batch])  # noqa: F841
+              copy_batch = _restore_fixed_arrays(arrow_batch, array_casts)  # noqa: F841
               # Never ignore_errors: LadybugDB then silently drops VALID rows
               # in proportion to batch size. Staging dedupes, so a plain COPY
               # is safe.
@@ -683,10 +751,9 @@ async def _fork_from_parent_duckdb_impl(
           exclude_cols = (
             {"file_id"} if any(col[0] == "file_id" for col in source_columns) else set()
           )
-          select_expr = _build_type_safe_select(
-            [(col[0], col[1]) for col in source_columns],
-            exclude_cols=exclude_cols,
-          )
+          typed_source = [(col[0], col[1]) for col in source_columns]
+          select_expr = _build_type_safe_select(typed_source, exclude_cols=exclude_cols)
+          array_casts = _fixed_array_casts(typed_source, exclude_cols)
           arrow_reader = duck_conn.execute(
             f"SELECT {select_expr} FROM {table_name}"
           ).fetch_record_batch(ARROW_STREAM_BATCH_ROWS)
@@ -697,7 +764,7 @@ async def _fork_from_parent_duckdb_impl(
             conn.execute("CALL timeout=3600000")  # 60 minutes
             for arrow_batch in arrow_reader:
               # Resolved by name from this frame; see materialize_table.
-              copy_batch = pa.Table.from_batches([arrow_batch])  # noqa: F841
+              copy_batch = _restore_fixed_arrays(arrow_batch, array_casts)  # noqa: F841
               # Plain COPY — see the note in materialize_table: LadybugDB's
               # ignore_errors path silently drops valid rows.
               result = conn.execute(f"COPY {table_name} FROM copy_batch")
