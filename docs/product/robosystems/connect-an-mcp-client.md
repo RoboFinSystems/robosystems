@@ -19,6 +19,8 @@ You need a RoboSystems account and a graph to connect: your own, a RoboLedger gr
 
 **claude.ai and Claude Desktop:** Customize → Connectors → Add → Add custom connector, and paste the address. Claude detects the sign-in on its own, so leave the OAuth client fields blank.
 
+To read SEC filings without any setup, add [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) from Claude's connector directory instead.
+
 **Claude Code:** add the server, then run `/mcp`, pick `robosystems` and sign in.
 
 ```bash
