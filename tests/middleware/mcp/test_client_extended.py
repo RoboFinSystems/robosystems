@@ -80,161 +80,82 @@ class TestValidateQueryComplexity:
 
 
 @pytest.mark.unit
-class TestHasAggregationFunction:
-  """Tests for _has_aggregation_function method."""
+class TestPrepareReadQuery:
+  """The final RETURN of each branch is capped at max_result_rows."""
 
-  def test_count_detected(self):
+  @pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+      ("MATCH (n) RETURN n", "MATCH (n) RETURN n LIMIT 100"),
+      (
+        "MATCH (n) RETURN DISTINCT n.name",
+        "MATCH (n) RETURN DISTINCT n.name LIMIT 100",
+      ),
+      (
+        "MATCH (n) RETURN n.type, count(n) AS c",
+        "MATCH (n) RETURN n.type, count(n) AS c LIMIT 100",
+      ),
+      (
+        "MATCH (n) RETURN n ORDER BY n.name DESC",
+        "MATCH (n) RETURN n ORDER BY n.name DESC LIMIT 100",
+      ),
+      ("MATCH (n) RETURN n;", "MATCH (n) RETURN n LIMIT 100"),
+      ("MATCH (n) RETURN n   ", "MATCH (n) RETURN n LIMIT 100"),
+      ("MATCH (n) RETURN n // note", "MATCH (n) RETURN n LIMIT 100 // note"),
+      ("MATCH (n) RETURN n LIMIT 50", "MATCH (n) RETURN n LIMIT 50"),
+      ("MATCH (n) RETURN n LIMIT 50000", "MATCH (n) RETURN n LIMIT 100"),
+      (
+        "MATCH (n) RETURN n SKIP 10 LIMIT 500;",
+        "MATCH (n) RETURN n SKIP 10 LIMIT 100;",
+      ),
+      ("MATCH (n) RETURN n LIMIT $n", "MATCH (n) RETURN n LIMIT $n"),
+      (
+        "MATCH (n) WITH n LIMIT 10 MATCH (n)-->(m) RETURN m",
+        "MATCH (n) WITH n LIMIT 10 MATCH (n)-->(m) RETURN m LIMIT 100",
+      ),
+      (
+        "CALL { MATCH (n) RETURN n LIMIT 5 } RETURN n",
+        "CALL { MATCH (n) RETURN n LIMIT 5 } RETURN n LIMIT 100",
+      ),
+      (
+        "MATCH (n) RETURN n, 'LIMIT 5' AS x",
+        "MATCH (n) RETURN n, 'LIMIT 5' AS x LIMIT 100",
+      ),
+      ("MATCH (n) RETURN n.limit", "MATCH (n) RETURN n.limit LIMIT 100"),
+      (
+        "MATCH (a) RETURN a.name AS `Company Name`",
+        "MATCH (a) RETURN a.name AS `Company Name` LIMIT 100",
+      ),
+      ("MATCH (a) RETURN a.`name`", "MATCH (a) RETURN a.`name` LIMIT 100"),
+      ("MATCH (a) RETURN a.name, 'x'", "MATCH (a) RETURN a.name, 'x' LIMIT 100"),
+      (
+        "MATCH (a:A) RETURN a.name UNION ALL MATCH (b:B) RETURN b.name LIMIT 9999",
+        "MATCH (a:A) RETURN a.name LIMIT 100 UNION ALL MATCH (b:B) RETURN b.name "
+        "LIMIT 100",
+      ),
+      ("CALL show_tables()", "CALL show_tables()"),
+    ],
+  )
+  def test_caps_rows(self, query, expected):
     client = _create_client()
-    assert client._has_aggregation_function("RETURN COUNT(n)") is True
+    client.max_result_rows = 100
+    client.auto_limit_enabled = True
+    assert client.prepare_read_query(query) == expected
 
-  def test_sum_detected(self):
+  def test_disabled_leaves_the_query_alone(self):
     client = _create_client()
-    assert client._has_aggregation_function("RETURN SUM(n.value)") is True
+    client.auto_limit_enabled = False
+    assert client.prepare_read_query("MATCH (n) RETURN n") == "MATCH (n) RETURN n"
 
-  def test_avg_detected(self):
-    client = _create_client()
-    assert client._has_aggregation_function("RETURN AVG(n.score)") is True
-
-  def test_min_detected(self):
-    client = _create_client()
-    assert client._has_aggregation_function("RETURN MIN(n.date)") is True
-
-  def test_max_detected(self):
-    client = _create_client()
-    assert client._has_aggregation_function("RETURN MAX(n.date)") is True
-
-  def test_collect_detected(self):
-    client = _create_client()
-    assert client._has_aggregation_function("RETURN COLLECT(n.name)") is True
-
-  def test_group_by_detected(self):
-    client = _create_client()
-    assert client._has_aggregation_function("GROUP BY n.type") is True
-
-  def test_distinct_detected(self):
-    client = _create_client()
-    assert client._has_aggregation_function("RETURN DISTINCT n.name") is True
-
-  def test_count_subquery_detected(self):
-    client = _create_client()
-    assert client._has_aggregation_function("WHERE COUNT{(n)-->()} > 5") is True
-
-  def test_no_aggregation(self):
-    client = _create_client()
-    assert client._has_aggregation_function("RETURN N.NAME, N.VALUE") is False
-
-  def test_partial_match_not_detected(self):
-    """Test that partial names like 'COUNTER' do not trigger."""
-    client = _create_client()
-    # "COUNTER" does not contain "COUNT(" - only "COUNT" without paren
-    assert client._has_aggregation_function("RETURN N.COUNTER") is False
-
-
-@pytest.mark.unit
-class TestInjectLimitIntelligently:
-  """Tests for _inject_limit_intelligently method."""
-
-  def test_simple_query(self):
-    client = _create_client()
-    result = client._inject_limit_intelligently("MATCH (n) RETURN n", 100)
-    assert result == "MATCH (n) RETURN n LIMIT 100"
-
-  def test_query_with_order_by(self):
-    client = _create_client()
-    result = client._inject_limit_intelligently(
-      "MATCH (n) RETURN n ORDER BY n.name", 100
-    )
-    assert result == "MATCH (n) RETURN n ORDER BY n.name LIMIT 100"
-
-  def test_query_with_order_by_desc(self):
-    client = _create_client()
-    result = client._inject_limit_intelligently(
-      "MATCH (n) RETURN n ORDER BY n.name DESC", 50
-    )
-    assert result == "MATCH (n) RETURN n ORDER BY n.name DESC LIMIT 50"
-
-  def test_query_with_existing_limit_unchanged(self):
-    client = _create_client()
-    original = "MATCH (n) RETURN n LIMIT 50"
-    result = client._inject_limit_intelligently(original, 100)
-    assert result == original
-
-  def test_union_query_gets_limit_on_each_part(self):
-    client = _create_client()
-    result = client._inject_limit_intelligently(
-      "MATCH (a:TypeA) RETURN a.name UNION MATCH (b:TypeB) RETURN b.name", 100
-    )
-    parts = result.split("UNION")
-    assert len(parts) == 2
-    assert all("LIMIT 100" in part for part in parts)
-
-  def test_query_with_semicolon(self):
-    client = _create_client()
-    result = client._inject_limit_intelligently("MATCH (n) RETURN n;", 100)
-    assert result == "MATCH (n) RETURN n LIMIT 100"
-
-  def test_query_with_trailing_whitespace(self):
-    client = _create_client()
-    result = client._inject_limit_intelligently("MATCH (n) RETURN n   ", 100)
-    assert result == "MATCH (n) RETURN n LIMIT 100"
-
-  def test_with_clause_query(self):
-    client = _create_client()
-    result = client._inject_limit_intelligently(
-      "MATCH (n) WITH n, count(*) as cnt WHERE cnt > 5 RETURN n ORDER BY cnt", 100
-    )
-    assert "LIMIT 100" in result
-    assert result.endswith("LIMIT 100")
-
-
-@pytest.mark.unit
-class TestInjectLimitToSimpleQuery:
-  """Tests for _inject_limit_to_simple_query method."""
-
-  def test_simple_query(self):
-    client = _create_client()
-    result = client._inject_limit_to_simple_query("MATCH (n) RETURN n", 50)
-    assert result == "MATCH (n) RETURN n LIMIT 50"
-
-  def test_query_with_semicolon(self):
-    client = _create_client()
-    result = client._inject_limit_to_simple_query("MATCH (n) RETURN n;", 50)
-    assert result == "MATCH (n) RETURN n LIMIT 50"
-
-  def test_query_with_order_by(self):
-    client = _create_client()
-    result = client._inject_limit_to_simple_query(
-      "MATCH (n) RETURN n ORDER BY n.id", 50
-    )
-    assert result == "MATCH (n) RETURN n ORDER BY n.id LIMIT 50"
-
-  def test_order_by_desc_with_semicolon(self):
-    client = _create_client()
-    result = client._inject_limit_to_simple_query(
-      "MATCH (n) RETURN n ORDER BY n.x DESC;", 50
-    )
-    assert result == "MATCH (n) RETURN n ORDER BY n.x DESC LIMIT 50"
-
-  def test_limit_injected_after_last_order_by(self):
-    client = _create_client()
-    result = client._inject_limit_to_simple_query(
-      "MATCH (n) WITH n ORDER BY n.a RETURN n ORDER BY n.b", 50
-    )
-    assert result == "MATCH (n) WITH n ORDER BY n.a RETURN n ORDER BY n.b LIMIT 50"
-
-  def test_no_order_by_is_not_polynomial(self):
-    """Regression: the previous `(.*)(ORDER BY ...)$` regex backtracked
-    O(n^2) on queries without a trailing ORDER BY (ReDoS). The linear finder
-    must handle a large no-ORDER-BY query near-instantly."""
+  def test_long_query_is_not_polynomial(self):
     import time
 
-    client = _create_client()
+    client = _create_client(max_query_length=100000)
+    client.auto_limit_enabled = True
     query = "MATCH (n) RETURN " + "a" * 40000
     start = time.perf_counter()
-    result = client._inject_limit_to_simple_query(query, 50)
-    elapsed = time.perf_counter() - start
-    assert result.endswith(" LIMIT 50")
-    assert elapsed < 0.5, f"suspiciously slow ({elapsed:.2f}s) — possible ReDoS"
+    assert client.prepare_read_query(query).endswith(" LIMIT 1000")
+    assert time.perf_counter() - start < 0.5
 
 
 @pytest.mark.unit
@@ -508,6 +429,62 @@ class TestResultTruncation:
       assert result[-1]["_mcp_note"] == "RESULTS_TRUNCATED"
 
   @pytest.mark.asyncio
+  async def test_truncation_marker_added_when_explicit_limit_is_lowered(self):
+    mock_graph_client = AsyncMock()
+    mock_graph_client.query.return_value = {
+      "data": [{"id": i} for i in range(1000)],
+      "execution_time_ms": 50,
+    }
+
+    with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
+      client = _create_client()
+      client.graph_client = mock_graph_client
+      client.max_result_rows = 1000
+      client.auto_limit_enabled = True
+
+      result = await client.execute_query("MATCH (n) RETURN n LIMIT 50000")
+
+      assert mock_graph_client.query.call_args[1]["cypher"].endswith("LIMIT 1000")
+      assert result[-1]["_mcp_note"] == "RESULTS_TRUNCATED"
+
+  @pytest.mark.asyncio
+  async def test_rows_past_an_unreadable_limit_are_cut_at_the_cap(self):
+    mock_graph_client = AsyncMock()
+    mock_graph_client.query.return_value = {
+      "data": [{"id": i} for i in range(1500)],
+      "execution_time_ms": 50,
+    }
+
+    with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
+      client = _create_client()
+      client.graph_client = mock_graph_client
+      client.max_result_rows = 1000
+      client.auto_limit_enabled = True
+
+      result = await client.execute_query("MATCH (n) RETURN n LIMIT $n", {"n": 1500})
+
+      assert len(result) == 1001
+      assert result[-1]["_mcp_note"] == "RESULTS_TRUNCATED"
+
+  @pytest.mark.asyncio
+  async def test_no_marker_when_the_callers_limit_is_within_the_cap(self):
+    mock_graph_client = AsyncMock()
+    mock_graph_client.query.return_value = {
+      "data": [{"id": i} for i in range(1000)],
+      "execution_time_ms": 50,
+    }
+
+    with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
+      client = _create_client()
+      client.graph_client = mock_graph_client
+      client.max_result_rows = 1000
+      client.auto_limit_enabled = True
+
+      result = await client.execute_query("MATCH (n) RETURN n LIMIT 1000")
+
+      assert len(result) == 1000
+
+  @pytest.mark.asyncio
   async def test_size_based_truncation(self):
     """Test that results are truncated when exceeding size limit."""
     large_data = [{"id": i, "payload": "x" * 10000} for i in range(100)]
@@ -627,8 +604,8 @@ class TestCloseMethod:
         await client.execute_query("MATCH (n) RETURN n LIMIT 1")
 
   @pytest.mark.asyncio
-  async def test_aggregation_query_skips_auto_limit(self):
-    """Test that aggregation queries do not get auto-LIMIT injected."""
+  async def test_aggregation_query_is_capped(self):
+    """An aggregation's output groups are capped like any other rows."""
     mock_graph = AsyncMock()
     mock_graph.query.return_value = {
       "data": [{"count": 42}],
@@ -639,10 +616,9 @@ class TestCloseMethod:
       client = _create_client()
       client.graph_client = mock_graph
       client.auto_limit_enabled = True
+      client.max_result_rows = 1000
 
       result = await client.execute_query("MATCH (n:Entity) RETURN COUNT(n) as count")
 
-      # Should not inject LIMIT for aggregation
-      call_args = mock_graph.query.call_args
-      assert "LIMIT" not in call_args[1]["cypher"]
-      assert result[0]["count"] == 42
+      assert mock_graph.query.call_args[1]["cypher"].endswith("LIMIT 1000")
+      assert result == [{"count": 42}]

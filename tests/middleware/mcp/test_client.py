@@ -957,44 +957,24 @@ class TestGraphMCPAutoLimit:
       assert "_mcp_size_mb" in result[-1]
 
   @pytest.mark.unit
-  def test_intelligent_limit_injection(self):
-    """Test intelligent LIMIT injection for complex queries."""
+  def test_cap_rows(self):
+    """The row cap lands after the final RETURN, per UNION branch."""
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
       client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
 
-      # Test simple query
-      result = client._inject_limit_intelligently("MATCH (n) RETURN n", 100)
-      assert result == "MATCH (n) RETURN n LIMIT 100"
-
-      # Test query with ORDER BY
-      result = client._inject_limit_intelligently(
-        "MATCH (n) RETURN n ORDER BY n.name DESC", 100
+      assert client._cap_rows("MATCH (n) RETURN n", 100) == (
+        "MATCH (n) RETURN n LIMIT 100"
       )
-      assert result == "MATCH (n) RETURN n ORDER BY n.name DESC LIMIT 100"
-
-      # Test UNION query
-      result = client._inject_limit_intelligently(
-        "MATCH (a:TypeA) RETURN a.name UNION MATCH (b:TypeB) RETURN b.name", 100
-      )
-      assert "LIMIT 100" in result
-      # Both parts should have LIMIT
-      parts = result.split("UNION")
-      assert all("LIMIT 100" in part for part in parts)
-
-      # Test query with semicolon
-      result = client._inject_limit_intelligently("MATCH (n) RETURN n;", 100)
-      assert result == "MATCH (n) RETURN n LIMIT 100"
-
-      # Test query that already has LIMIT
-      original = "MATCH (n) RETURN n LIMIT 50"
-      result = client._inject_limit_intelligently(original, 100)
-      assert result == original  # Should not change
-
-      # Test complex query with WITH clause
-      result = client._inject_limit_intelligently(
+      assert client._cap_rows(
         "MATCH (n) WITH n, count(*) as cnt WHERE cnt > 5 RETURN n ORDER BY cnt", 100
+      ) == (
+        "MATCH (n) WITH n, count(*) as cnt WHERE cnt > 5 RETURN n ORDER BY cnt "
+        "LIMIT 100"
       )
-      assert (
-        result
-        == "MATCH (n) WITH n, count(*) as cnt WHERE cnt > 5 RETURN n ORDER BY cnt LIMIT 100"
+      parts = client._cap_rows(
+        "MATCH (a:TypeA) RETURN a.name UNION MATCH (b:TypeB) RETURN b.name", 100
+      ).split("UNION")
+      assert all("LIMIT 100" in part for part in parts)
+      assert client._cap_rows("MATCH (n) RETURN n LIMIT 50", 100) == (
+        "MATCH (n) RETURN n LIMIT 50"
       )
