@@ -61,7 +61,7 @@ def _anchor(conn: Connection, schema: str) -> None:
           JOIN "{schema}".taxonomies t ON t.id = e.taxonomy_id
           WHERE a.structure_id = s.id AND t.taxonomy_type = 'reporting_standard'
           GROUP BY e.taxonomy_id
-          ORDER BY count(*) DESC
+          ORDER BY count(*) DESC, e.taxonomy_id
           LIMIT 1
         ) AS arc_target_id
       FROM "{schema}".structures s
