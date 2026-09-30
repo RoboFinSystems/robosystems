@@ -88,6 +88,15 @@ jobs:
         with:
           mask-password: "true"
 
+      # Base images come from public.ecr.aws, so the Docker Hub token below only pushes.
+      # Non-fatal: without the IAM grant the build falls back to an anonymous pull.
+      - name: Login to Amazon ECR Public
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
+        continue-on-error: true
+        with:
+          registry-type: public
+          mask-password: "true"
+
       - name: Login to Docker Hub
         if: ${{ inputs.publish_to_dockerhub == true }}
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
