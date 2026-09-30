@@ -293,14 +293,9 @@ class RateLimitConfig:
     if len(path_parts) >= 2 and path_parts[0] == "graphs":
       endpoint_type = path_parts[2] if len(path_parts) >= 3 else None
 
-      # Files operations (first-class resources or nested under tables)
+      # File listing/info; file writes are content ops under /operations.
       if endpoint_type == "files" or "/files" in path:
-        if method in ["POST", "PUT"]:
-          return EndpointCategory.TABLE_UPLOAD
-        elif method in ["DELETE", "PATCH"]:
-          return EndpointCategory.TABLE_MANAGEMENT
-        else:
-          return EndpointCategory.GRAPH_READ  # File listing/info
+        return EndpointCategory.GRAPH_READ
 
       # Table operations (DuckDB staging tables)
       if endpoint_type == "tables" or "/tables/" in path:
@@ -341,7 +336,13 @@ class RateLimitConfig:
       # a graph_id can't route the bucket.
       elif endpoint_type == "operations":
         op_name = path_parts[3] if len(path_parts) > 3 else ""
-        if "backup" in op_name:  # create-backup
+        # A table load runs these once per file, so they take the staging
+        # buckets rather than the lifecycle one.
+        if op_name == "create-file-upload":
+          return EndpointCategory.TABLE_UPLOAD
+        elif op_name in ("ingest-file", "delete-file"):
+          return EndpointCategory.TABLE_MANAGEMENT
+        elif "backup" in op_name:  # create-backup
           return EndpointCategory.GRAPH_BACKUP
         elif "materialize" in op_name:  # heavy OLAP rebuild
           return EndpointCategory.GRAPH_IMPORT

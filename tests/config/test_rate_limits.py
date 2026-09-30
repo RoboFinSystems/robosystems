@@ -29,17 +29,26 @@ def test_unknown_tier_falls_back_to_base_limits():
     # SQL query layer — keeps the DuckDB/columnar bucket (former /tables/query)
     ("/v1/graphs/abc/query/sql", "POST", EndpointCategory.TABLE_QUERY),
     ("/v1/graphs/abc/tables/ingest", "POST", EndpointCategory.GRAPH_IMPORT),
-    # New first-class files endpoints
-    ("/v1/graphs/abc/files", "POST", EndpointCategory.TABLE_UPLOAD),
+    # File reads; the writes are content ops (below)
     ("/v1/graphs/abc/files", "GET", EndpointCategory.GRAPH_READ),
-    ("/v1/graphs/abc/files/f123", "DELETE", EndpointCategory.TABLE_MANAGEMENT),
-    ("/v1/graphs/abc/files/f123", "PATCH", EndpointCategory.TABLE_MANAGEMENT),
     ("/v1/graphs/abc/files/f123", "GET", EndpointCategory.GRAPH_READ),
-    # Legacy table-nested files endpoints
-    ("/v1/graphs/abc/tables/Entity/files", "POST", EndpointCategory.TABLE_UPLOAD),
-    ("/v1/graphs/abc/tables/Entity/files", "GET", EndpointCategory.GRAPH_READ),
-    ("/v1/graphs/abc/tables/files/f123", "DELETE", EndpointCategory.TABLE_MANAGEMENT),
-    ("/v1/graphs/abc/tables/files/f123", "PATCH", EndpointCategory.TABLE_MANAGEMENT),
+    # File content ops run once per table in a load, so they stay out of the
+    # lifecycle bucket
+    (
+      "/v1/graphs/abc/operations/create-file-upload",
+      "POST",
+      EndpointCategory.TABLE_UPLOAD,
+    ),
+    (
+      "/v1/graphs/abc/operations/ingest-file",
+      "POST",
+      EndpointCategory.TABLE_MANAGEMENT,
+    ),
+    (
+      "/v1/graphs/abc/operations/delete-file",
+      "POST",
+      EndpointCategory.TABLE_MANAGEMENT,
+    ),
     # Other graph endpoints
     ("/v1/graphs/abc/mcp/execute", "POST", EndpointCategory.GRAPH_MCP),
     ("/v1/graphs/abc/operator/run", "POST", EndpointCategory.GRAPH_OPERATOR),
@@ -110,3 +119,23 @@ def test_endpoint_category_detection(path, method, expected):
 
 def test_endpoint_category_returns_none_when_unmatched():
   assert RateLimitConfig.get_endpoint_category("/v1/unknown/path", "GET") is None
+
+
+def test_five_table_load_fits_standard_tier_in_one_minute():
+  # The SDK replaces a table with delete-file, create-file-upload, ingest-file.
+  # Five tables inside one window used to exhaust GRAPH_MANAGEMENT on the fourth.
+  per_table = ["delete-file", "create-file-upload", "ingest-file"]
+  counts: dict[EndpointCategory, int] = {}
+  for _ in range(5):
+    for op in per_table:
+      category = RateLimitConfig.get_endpoint_category(
+        f"/v1/graphs/kg1/operations/{op}", "POST"
+      )
+      assert category is not None
+      counts[category] = counts.get(category, 0) + 1
+
+  assert EndpointCategory.GRAPH_MANAGEMENT not in counts
+  for category, used in counts.items():
+    limit, window = RateLimitConfig.get_rate_limit("ladybug-standard", category)
+    assert window == RateLimitPeriod.MINUTE.to_seconds()
+    assert used <= limit, f"{category.value}: {used} calls > {limit}/min"
