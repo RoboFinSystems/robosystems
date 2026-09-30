@@ -195,7 +195,7 @@ async def _resolve_text_fallback(
         'AND l.type = "http://www.xbrl.org/2003/role/label" '
         "RETURN DISTINCT e.qname AS qname, l.value AS label, "
         "e.canonical_concept AS concept, e.canonical_confidence AS confidence "
-        "ORDER BY e.canonical_confidence DESC LIMIT 10"
+        "ORDER BY confidence DESC LIMIT 10"
       )
       params = {"search_term": search_term}
     rows = await graph_client.execute_query(query, parameters=params) or []
