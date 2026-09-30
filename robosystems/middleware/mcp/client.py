@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import time
 from typing import Any
 
@@ -12,6 +13,7 @@ from httpx import HTTPError, TimeoutException
 from robosystems.config import env
 from robosystems.config.tuning import TuningConfig
 from robosystems.graph_api.client import GraphClient
+from robosystems.graph_api.client.cypher_text import mask_literals
 from robosystems.logger import logger
 
 from .exceptions import (
@@ -144,23 +146,21 @@ class GraphMCPClient:
     )
 
   def prepare_read_query(self, cypher: str) -> str:
-    """Apply the complexity check and the MCP auto-LIMIT to a read statement."""
+    """Apply the complexity check and the MCP row cap to a read statement.
+
+    The final RETURN of each UNION branch is capped at ``max_result_rows``:
+    a LIMIT is added where there is none, and a larger literal one is
+    lowered. DISTINCT and aggregations are capped too, since a LIMIT after
+    the final RETURN only caps output rows.
+    """
     self._validate_query_complexity(cypher)
+    if not self.auto_limit_enabled:
+      return cypher
 
-    cypher_upper = cypher.strip().upper()
-    has_limit = "LIMIT" in cypher_upper
-    has_return = "RETURN" in cypher_upper
-    has_aggregation = self._has_aggregation_function(cypher_upper)
-
-    if self.auto_limit_enabled and has_return and not has_limit and not has_aggregation:
-      cypher = self._inject_limit_intelligently(cypher, self.max_result_rows)
-      logger.info(
-        f"MCP safety: Auto-injected LIMIT {self.max_result_rows} to prevent "
-        "context exhaustion"
-      )
-    elif has_aggregation:
-      logger.debug("MCP: Skipping auto-LIMIT for aggregation query")
-    return cypher
+    capped = self._cap_rows(cypher, self.max_result_rows)
+    if capped != cypher:
+      logger.info(f"MCP safety: capped result rows at {self.max_result_rows}")
+    return capped
 
   async def execute_query(
     self, cypher: str, parameters: dict[str, Any] | None = None
@@ -204,18 +204,14 @@ class GraphMCPClient:
       logger.info(f"MCP: Full result object keys: {list(result.keys())}")
       logger.info(f"MCP: Result data preview: {data[:2] if data else 'No data'}")
 
-      if (
-        auto_limit_enabled
-        and len(data) == max_rows
-        and "LIMIT" not in original_query.upper()
-      ):
+      if auto_limit_enabled and len(data) >= max_rows and cypher != original_query:
         logger.warning(
           f"MCP query results truncated at {max_rows} rows for context safety"
         )
         data.append(
           {
             "_mcp_note": "RESULTS_TRUNCATED",
-            "_mcp_message": f"Results limited to {max_rows} rows for LLM context safety. Add explicit LIMIT to your query to control result size.",
+            "_mcp_message": f"Results capped at {max_rows} rows for LLM context safety. Narrow the query with filters or aggregation to see the rest.",
             "_mcp_total_rows": f">={max_rows}",
           }
         )
@@ -683,70 +679,45 @@ class GraphMCPClient:
 
     return sanitized
 
-  def _has_aggregation_function(self, query_upper: str) -> bool:
-    """Aggregations return few rows, and an injected LIMIT can change their meaning."""
-    aggregation_functions = [
-      "COUNT(",
-      "SUM(",
-      "AVG(",
-      "MIN(",
-      "MAX(",
-      "COLLECT(",
-      "GROUP BY",
-      "DISTINCT",
-      "COUNT{",  # COUNT subquery syntax
-    ]
+  def _cap_rows(self, query: str, cap: int) -> str:
+    """Cap the final RETURN of each UNION branch at ``cap`` rows.
 
-    return any(func in query_upper for func in aggregation_functions)
-
-  def _inject_limit_intelligently(self, query: str, limit: int) -> str:
-    """Append a LIMIT without changing the query's semantics.
-
-    An existing LIMIT is left alone. Each UNION branch gets its own LIMIT so
-    every branch is sampled. Otherwise the LIMIT goes after any trailing
-    ORDER BY, so the sort still decides which rows survive.
+    Clauses are found in a copy with literals and comments blanked, so a
+    keyword inside either is never taken for one. A LIMIT given as a
+    parameter or expression is left alone.
     """
-    import re
+    masked = mask_literals(query)
+    parts: list[str] = []
+    start = 0
+    for union in _UNION_RE.finditer(masked):
+      parts.append(
+        _cap_branch(query[start : union.start()], masked[start : union.start()], cap)
+      )
+      parts.append(query[union.start() : union.end()])
+      start = union.end()
+    parts.append(_cap_branch(query[start:], masked[start:], cap))
+    capped = "".join(parts)
+    return query if capped == query else capped.rstrip()
 
-    query_normalized = query.strip()
-    query_upper = query_normalized.upper()
 
-    if "LIMIT" in query_upper:
-      return query
+_UNION_RE = re.compile(r"(?<![\w.$])UNION(?:\s+ALL)?\b", re.IGNORECASE)
+_RETURN_RE = re.compile(r"(?<![\w.$])RETURN\b", re.IGNORECASE)
+_LIMIT_RE = re.compile(r"(?<![\w.$])LIMIT\s+(\d+(?!\w)|\S+)", re.IGNORECASE)
 
-    if "UNION" in query_upper:
-      parts = re.split(r"\bUNION\b", query_normalized, flags=re.IGNORECASE)
-      limited_parts = []
 
-      for part in parts:
-        part_trimmed = part.strip()
-        if part_trimmed and "RETURN" in part_trimmed.upper():
-          limited_parts.append(self._inject_limit_to_simple_query(part_trimmed, limit))
-        else:
-          limited_parts.append(part)
+def _cap_branch(query: str, masked: str, cap: int) -> str:
+  returns = list(_RETURN_RE.finditer(masked))
+  if not returns:
+    return query
 
-      return " UNION ".join(limited_parts)
+  limits = list(_LIMIT_RE.finditer(masked, returns[-1].end()))
+  if limits:
+    value = limits[-1]
+    if value.group(1).isdigit() and int(value.group(1)) > cap:
+      return f"{query[: value.start(1)]}{cap}{query[value.end(1) :]}"
+    return query
 
-    return self._inject_limit_to_simple_query(query_normalized, limit)
-
-  def _inject_limit_to_simple_query(self, query: str, limit: int) -> str:
-    import re
-
-    query_trimmed = query.rstrip()
-
-    if query_trimmed.endswith(";"):
-      query_trimmed = query_trimmed[:-1].rstrip()
-
-    # A linear scan for the last ORDER BY; a single anchored regex here
-    # backtracks polynomially (ReDoS).
-    order_by_matches = list(
-      re.finditer(r"\bORDER\s+BY\s+", query_trimmed, re.IGNORECASE)
-    )
-    if order_by_matches:
-      last = order_by_matches[-1]
-      order_clause = query_trimmed[last.start() :]
-      if ";" not in order_clause:
-        before_order = query_trimmed[: last.start()].rstrip()
-        return f"{before_order} {order_clause} LIMIT {limit}"
-
-    return f"{query_trimmed} LIMIT {limit}"
+  end = len(masked.rstrip())
+  if masked[:end].endswith(";"):
+    return f"{query[: end - 1].rstrip()} LIMIT {cap}{query[end:]}"
+  return f"{query[:end]} LIMIT {cap}{query[end:]}"

@@ -18,6 +18,7 @@ from robosystems.logger import logger
 
 from .base import BaseGraphClient
 from .config import GraphClientConfig
+from .cypher_text import add_sort_tiebreaker
 from .exceptions import (
   GraphAPIError,
   GraphTimeoutError,
@@ -329,7 +330,10 @@ class GraphClient(BaseGraphClient):
     server's NDJSON chunks. A malformed or empty non-streaming body degrades
     to an empty result rather than raising.
     """
-    payload: dict[str, Any] = {"cypher": cypher, "database": graph_id}
+    payload: dict[str, Any] = {
+      "cypher": add_sort_tiebreaker(cypher),
+      "database": graph_id,
+    }
     if parameters:
       payload["parameters"] = parameters
 
