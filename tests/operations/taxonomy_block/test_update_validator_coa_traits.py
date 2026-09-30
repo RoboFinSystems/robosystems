@@ -144,10 +144,13 @@ class TestCoaUpdateProjectionTraits:
 def mapped_coa_taxonomy(ext_session, coa_taxonomy):
   """The chart above, mapped into a library concept the way a template
   initialization or the MappingOperator maps it: a ``coa_mapping`` structure
-  on the chart whose arc lands on an element of another taxonomy."""
+  on the chart's own mapping taxonomy, whose arc lands on an element of
+  another taxonomy."""
   from robosystems.models.extensions import Association, Structure
 
-  library = Taxonomy(name="rs-gaap v1", taxonomy_type="reporting_standard")
+  library = Taxonomy(
+    name="rs-gaap v1", taxonomy_type="reporting_standard", standard="rs-gaap"
+  )
   ext_session.add(library)
   ext_session.flush()
   concept = Element(
@@ -161,8 +164,16 @@ def mapped_coa_taxonomy(ext_session, coa_taxonomy):
   ext_session.add(concept)
   ext_session.flush()
 
+  mapping_taxonomy = Taxonomy(
+    name="rs-gaap mapping",
+    taxonomy_type="mapping",
+    source_taxonomy_id=coa_taxonomy.id,
+    target_taxonomy_id=library.id,
+  )
+  ext_session.add(mapping_taxonomy)
+  ext_session.flush()
   mapping = Structure(
-    name="rs-gaap mapping", block_type="coa_mapping", taxonomy_id=coa_taxonomy.id
+    name="rs-gaap mapping", block_type="coa_mapping", taxonomy_id=mapping_taxonomy.id
   )
   ext_session.add(mapping)
   ext_session.flush()
@@ -216,3 +227,14 @@ class TestCoaUpdateProjectionMappingArcs:
       elements_to_update=[ElementUpdatePatch(qname="rl:Cash", name="Operating cash")],
     )
     assert validate_update_envelope(ext_session, mapped_coa_taxonomy, payload) == []
+
+  def test_removing_a_mapped_account_is_not_a_cross_taxonomy_refusal(
+    self, ext_session, mapped_coa_taxonomy
+  ):
+    """The chart owns its mapping, so the arc goes with the account."""
+    payload = UpdateTaxonomyBlockRequest(
+      taxonomy_id=str(mapped_coa_taxonomy.id),
+      elements_to_remove=["rl:RentExpense"],
+    )
+    issues = validate_update_envelope(ext_session, mapped_coa_taxonomy, payload)
+    assert [i.code for i in issues] == []

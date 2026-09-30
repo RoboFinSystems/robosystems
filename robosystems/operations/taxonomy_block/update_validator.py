@@ -29,6 +29,7 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.line_item import LineItem
+from robosystems.operations.taxonomy_block.coa_mappings import in_block
 from robosystems.operations.taxonomy_block.immutability import (
   ProtectedFactSets,
   find_protected_fact_sets,
@@ -55,9 +56,7 @@ def validate_update_envelope(
     .all()
   )
   current_structures = (
-    session.execute(select(Structure).where(Structure.taxonomy_id == taxonomy.id))
-    .scalars()
-    .all()
+    session.execute(select(Structure).where(in_block(str(taxonomy.id)))).scalars().all()
   )
   current_structure_ids = [s.id for s in current_structures]
   taxonomy_structure_id_set = set(current_structure_ids)
@@ -624,7 +623,7 @@ def _validate_elements_to_remove(
         select(Association.id)
         .join(Structure, Association.structure_id == Structure.id)
         .where(
-          Structure.taxonomy_id != taxonomy.id,
+          ~in_block(str(taxonomy.id)),
           (
             (Association.from_element_id == element_id)
             | (Association.to_element_id == element_id)

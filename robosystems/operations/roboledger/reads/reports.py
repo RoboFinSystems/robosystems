@@ -51,6 +51,10 @@ from robosystems.operations.roboledger.reports.network_picker import (
   load_primary_reporting_style,
 )
 from robosystems.operations.serialization.flavors import RdfFlavor, XbrlFlavor
+from robosystems.operations.taxonomy_block.coa_mappings import (
+  BOOK_FRAMEWORK,
+  find_mapping_structure,
+)
 
 VALID_BLOCK_TYPES = {
   "income_statement",
@@ -131,9 +135,7 @@ def generate_adhoc_private_statement(
   Returns ``(grid, unmapped_count)``. Raises `CoaMappingNotFoundError` if the
   tenant has no CoA→GAAP mapping yet.
   """
-  mapping = (
-    session.query(Structure).filter(Structure.block_type == "coa_mapping").first()
-  )
+  mapping = find_mapping_structure(session, BOOK_FRAMEWORK)
   if mapping is None:
     raise CoaMappingNotFoundError(
       "No CoA→GAAP mapping found. Run the mapping workflow first."

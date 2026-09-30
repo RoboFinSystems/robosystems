@@ -30,6 +30,14 @@ from robosystems.operations.roboledger.commands.taxonomies import (
   assert_mapping_leaf,
 )
 from robosystems.operations.taxonomy_block._helpers import structure_from_request
+from robosystems.operations.taxonomy_block.coa_mappings import (
+  BOOK_FRAMEWORK,
+  COA_MAPPING_BLOCK_TYPE,
+  create_mapping_structure,
+  in_block,
+  is_chart_mapping,
+  prune_empty_mapping_taxonomies,
+)
 from robosystems.operations.taxonomy_block.immutability import (
   assert_history_undisturbed,
 )
@@ -128,10 +136,22 @@ def apply_structures_to_add(
   """Insert new structures; return name→Structure lookup of just the new ones."""
   new_structures_by_name: dict[str, Structure] = {}
   for req in payload.structures_to_add:
-    structure = structure_from_request(
-      req, taxonomy_id=taxonomy.id, created_by=updated_by
-    )
-    session.add(structure)
+    if is_chart_mapping(taxonomy, req.block_type):
+      structure = create_mapping_structure(
+        session,
+        chart_id=str(taxonomy.id),
+        framework=req.target_framework or BOOK_FRAMEWORK,
+        name=req.name,
+        description=req.description,
+        concept_arrangement=req.concept_arrangement,
+        metadata=req.metadata,
+        created_by=updated_by,
+      )
+    else:
+      structure = structure_from_request(
+        req, taxonomy_id=taxonomy.id, created_by=updated_by
+      )
+      session.add(structure)
     new_structures_by_name[req.name] = structure
   if new_structures_by_name:
     session.flush()
@@ -161,9 +181,7 @@ def apply_associations_to_add(
   }
   existing_structures_by_name: dict[str, str] = {
     str(s.name): str(s.id)
-    for s in session.execute(
-      select(Structure).where(Structure.taxonomy_id == taxonomy.id)
-    )
+    for s in session.execute(select(Structure).where(in_block(str(taxonomy.id))))
     .scalars()
     .all()
   }
@@ -412,6 +430,10 @@ def apply_structures_to_update(
       continue
     if patch.name is not None:
       structure.name = patch.name
+      if structure.block_type == COA_MAPPING_BLOCK_TYPE:
+        mapping_taxonomy = session.get(Taxonomy, structure.taxonomy_id)
+        if mapping_taxonomy is not None:
+          mapping_taxonomy.name = patch.name
     if patch.description is not None:
       structure.description = patch.description
     if patch.concept_arrangement is not None:
@@ -473,6 +495,8 @@ def apply_structures_to_remove(
     )
   session.execute(delete(Association).where(Association.structure_id.in_(ids)))
   session.execute(delete(Structure).where(Structure.id.in_(ids)))
+  if str(taxonomy.taxonomy_type) == "chart_of_accounts":
+    prune_empty_mapping_taxonomies(session, str(taxonomy.id))
   session.flush()
 
 
@@ -524,9 +548,7 @@ def apply_rules_to_add(
 
   structures_by_name: dict[str, Structure] = dict(new_structures_by_name)
   for s in (
-    session.execute(select(Structure).where(Structure.taxonomy_id == taxonomy.id))
-    .scalars()
-    .all()
+    session.execute(select(Structure).where(in_block(str(taxonomy.id)))).scalars().all()
   ):
     if s.name not in structures_by_name:
       structures_by_name[s.name] = s

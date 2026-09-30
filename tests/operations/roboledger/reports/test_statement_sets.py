@@ -53,10 +53,10 @@ def _exec_scalars(values):
 
 
 def _session(mapping, execute_side_effects):
-  """MagicMock session: mapping query via ``session.query``; ordered SQL
+  """MagicMock session: the book mapping ``_stamp`` resolves; ordered SQL
   results via ``session.execute.side_effect``."""
   session = MagicMock()
-  session.query.return_value.filter.return_value.order_by.return_value.first.return_value = mapping
+  session.book_mapping = mapping
   session.execute.side_effect = execute_side_effects
   return session
 
@@ -109,6 +109,9 @@ def _stamp(session, **patches):
   }
   defaults.update(patches)
   with (
+    patch(
+      f"{_MOD}.find_mapping_structure", MagicMock(return_value=session.book_mapping)
+    ),
     patch(
       f"{_MOD}.load_entity_reporting_style", defaults["load_entity_reporting_style"]
     ),

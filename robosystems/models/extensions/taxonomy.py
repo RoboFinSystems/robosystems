@@ -57,6 +57,16 @@ class Taxonomy(ExtensionsBase):
       "parent_taxonomy_id",
       postgresql_where="parent_taxonomy_id IS NOT NULL",
     ),
+    # A chart holds one active mapping per framework.
+    Index(
+      "uq_taxonomies_mapping_source_target",
+      "source_taxonomy_id",
+      "target_taxonomy_id",
+      unique=True,
+      postgresql_where=(
+        "taxonomy_type = 'mapping' AND source_taxonomy_id IS NOT NULL AND is_active"
+      ),
+    ),
     CheckConstraint(
       "taxonomy_type IN (" + ", ".join(f"'{v}'" for v in TAXONOMY_TYPE_VALUES) + ")",
       name="check_taxonomy_type",

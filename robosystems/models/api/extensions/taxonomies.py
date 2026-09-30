@@ -61,6 +61,13 @@ class StructureResponse(BaseModel):
   block_type: str
   taxonomy_id: str
   is_active: bool
+  framework: str | None = Field(
+    None,
+    description=(
+      "`coa_mapping` only: the reporting framework the mapping maps the chart "
+      "into (e.g. `rs-gaap`). A chart holds one mapping per framework."
+    ),
+  )
 
 
 class StructureListResponse(BaseModel):

@@ -349,23 +349,19 @@ def _trigger_auto_map_if_needed(
   import asyncio
 
   from robosystems.db.extensions import extensions_session
-  from robosystems.models.extensions import Association, Structure
+  from robosystems.models.extensions import Association
+  from robosystems.operations.taxonomy_block.coa_mappings import (
+    BOOK_FRAMEWORK,
+    find_mapping_structure,
+  )
 
   mapping_id: str | None = None
   try:
     with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
-      structure = (
-        session.query(Structure)
-        .filter(
-          Structure.block_type == "coa_mapping",
-          Structure.is_active.is_(True),
-        )
-        .order_by(Structure.created_at.asc())
-        .first()
-      )
+      structure = find_mapping_structure(session, BOOK_FRAMEWORK)
       if structure is None:
         context.log.info(
-          "No coa_mapping structure found on graph; skipping auto-map trigger"
+          "No book coa_mapping structure found on graph; skipping auto-map trigger"
         )
         return
       existing_assoc_count = (

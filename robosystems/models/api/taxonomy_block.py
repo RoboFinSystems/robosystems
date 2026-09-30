@@ -147,7 +147,21 @@ class TaxonomyBlockStructureRequest(BaseModel):
   )
   description: str | None = None
   role_uri: str | None = None
+  target_framework: str | None = Field(
+    None,
+    description=(
+      "`coa_mapping` only: the framework this mapping maps the chart into, "
+      "e.g. `rs-gaap`. Omitted means the graph's book framework. A chart "
+      "holds one mapping per framework."
+    ),
+  )
   metadata: dict[str, Any] = Field(default_factory=dict)
+
+  @model_validator(mode="after")
+  def _target_framework_only_on_mappings(self) -> TaxonomyBlockStructureRequest:
+    if self.target_framework is not None and self.block_type != "coa_mapping":
+      raise ValueError("target_framework applies only to coa_mapping structures.")
+    return self
 
 
 class TaxonomyBlockAssociationRequest(BaseModel):
@@ -595,6 +609,9 @@ class TaxonomyBlockStructure(BaseModel):
   block_type: str
   description: str | None = None
   role_uri: str | None = None
+  target_framework: str | None = Field(
+    None, description="`coa_mapping` only: the framework the mapping maps into."
+  )
 
 
 class TaxonomyBlockAssociation(BaseModel):

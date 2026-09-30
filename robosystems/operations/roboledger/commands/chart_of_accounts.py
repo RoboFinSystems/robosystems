@@ -10,7 +10,7 @@ envelope. The chart is minted as tenant-owned ``coa:*`` elements.
 
 from __future__ import annotations
 
-from sqlalchemy import exists, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -26,7 +26,7 @@ from robosystems.models.api.taxonomy_block import (
   TaxonomyBlockElementRequest,
   TaxonomyBlockStructureRequest,
 )
-from robosystems.models.extensions import Element, Structure, Taxonomy
+from robosystems.models.extensions import Element, Taxonomy
 from robosystems.operations.roboledger.commands.taxonomies import (
   MappingAssociationExistsError,
   create_mapping_association,
@@ -40,6 +40,10 @@ from robosystems.operations.taxonomy_block.chart_templates import (
   MappingSet,
   get_template,
   resolve_form,
+)
+from robosystems.operations.taxonomy_block.coa_mappings import (
+  find_mapping_structure,
+  framework_taxonomy_id,
 )
 
 COA_TAXONOMY_TYPE = "chart_of_accounts"
@@ -124,6 +128,7 @@ def initialize_chart_of_accounts(
       TaxonomyBlockStructureRequest(
         name=mapping_set.structure_name,
         block_type="coa_mapping",
+        target_framework=mapping_set.framework,
         description=(
           f"Maps the chart of accounts to {mapping_set.display_name} "
           "reporting concepts."
@@ -198,16 +203,12 @@ def _applicable_mapping_sets(
   session: Session, template: ChartTemplate
 ) -> tuple[list[MappingSet], list[MappingSet]]:
   """Split the template's mapping sets by whether the tenant carries the
-  framework — its concepts are in the library copy (``Element.source``) —
-  in the template's declared order."""
+  framework — its taxonomy is in the library copy — in the template's
+  declared order."""
   applicable: list[MappingSet] = []
   skipped: list[MappingSet] = []
   for mapping_set in template.mappings.values():
-    present = bool(
-      session.execute(
-        select(exists().where(Element.source == mapping_set.framework))
-      ).scalar()
-    )
+    present = framework_taxonomy_id(session, mapping_set.framework) is not None
     (applicable if present else skipped).append(mapping_set)
   return applicable, skipped
 
@@ -222,13 +223,12 @@ def _create_mapping_set(
   created_by: str,
 ) -> tuple[int, list[str]]:
   """Create one framework's mapping arcs; return (created, unresolved)."""
-  structure_id = session.execute(
-    select(Structure.id).where(
-      Structure.taxonomy_id == taxonomy_id,
-      Structure.block_type == "coa_mapping",
-      Structure.name == mapping_set.structure_name,
+  mapping = find_mapping_structure(session, mapping_set.framework, chart_id=taxonomy_id)
+  if mapping is None:
+    raise LookupError(
+      f"Chart {taxonomy_id!r} has no mapping into {mapping_set.framework!r}."
     )
-  ).scalar_one()
+  structure_id = str(mapping.id)
 
   arcs = mapping_set.arcs_for(entity_type)
   targets = sorted({qname for _code, qname in arcs})
