@@ -82,6 +82,12 @@ def test_additive_writes_are_not_destructive():
 
 
 @pytest.mark.unit
+def test_writes_that_can_post_entries_are_destructive():
+  hints = tool_hints("create-event-block")
+  assert hints.destructive and not hints.idempotent
+
+
+@pytest.mark.unit
 def test_previews_persist_nothing():
   assert tool_hints("preview-event-block").read_only
   assert tool_hints("preview-reconciling-item").read_only

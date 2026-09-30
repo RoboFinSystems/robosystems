@@ -63,8 +63,9 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   # Pulls from the user's QuickBooks / bank connection; full_rebuild resets
   # captured state.
   "sync-connection": _write(destructive=True, idempotent=False, open_world=True),
-  # Ledger events and entries.
-  "create-event-block": _ADDS,
+  # Ledger events and entries. apply_handlers can write posted entries
+  # (imports, reversals) that only a reversing entry undoes.
+  "create-event-block": _write(destructive=True, idempotent=False),
   "update-event-block": _REPLACES_ONCE_PER_STATE,
   # Creates the entry in QuickBooks; the event id is the request id, so a
   # repeat creates nothing.
