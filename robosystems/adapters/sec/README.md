@@ -49,7 +49,7 @@ There is no path from S3 straight into LadybugDB; staging is always in between.
 **The graph tables are xbrlkit's.** `XBRLGraphProcessor` loads the filing with
 `load_filing` (xbrlkit's loader), parses it with `xbrlkit.parse.to_xbrl_model`, and projects it with
 `xbrlkit.serialize.lpg.to_graph_tables` — the same ids, columns and DDL that
-`xbrlkit build --format lpg` writes into a single-filing `.lbug`, so a filing
+`xbrlkit build --format lpg` writes into a single-filing `.lbdb`, so a filing
 projected there and a filing ingested here are the same rows. What stays in the
 adapter is what needs the platform: text-block externalization to the CDN
 (`textblock.py`), semantic enrichment (`enrichment.py`), the schema-aware parquet
