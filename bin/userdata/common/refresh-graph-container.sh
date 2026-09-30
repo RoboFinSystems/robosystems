@@ -18,9 +18,10 @@
 #   FORCE_RESTART      "true" restarts even when the image digest is unchanged
 #                      (secrets rotation: credentials are cached in-process).
 #
-# Exits 0 when refreshed or already current, non-zero on failure, so the fleet's
-# SSM --max-errors budget halts a bad rollout. Exit 3 is a benign skip that the
-# fleet document (graph-infra.yaml GraphRefreshDocument) normalizes to 0.
+# Exits 0 when refreshed or already current, non-zero on failure, so the fleet
+# walk (bin/lambda/graph_container_refresh.py) stops at the first bad instance.
+# Exit 3 is a benign skip and exit 4 a deferral (still busy after the wait); the
+# fleet document (graph-infra.yaml GraphRefreshDocument) normalizes both to 0.
 
 set -o pipefail
 
@@ -40,6 +41,10 @@ REQUIRED_ENV_SCHEMA=2
 # "This instance predates the environment contract": a transitional skip, not a
 # failure. Any other non-zero exit is a real failure and must stay one.
 EXIT_STALE_ENV=3
+
+# "Still busy after the wait": the fleet walk re-queues the instance and comes
+# back to it, so it must not read as a failure.
+EXIT_DEFERRED_BUSY=4
 
 log() { echo "[refresh] $*"; }
 die() {
@@ -103,7 +108,8 @@ log "target image=${ECR_IMAGE}"
 # ==================================================================================
 # instance_busy is a coordination signal, NOT a guard, so the fail-open rules are
 # deliberate: negative counter = idle, stale heartbeat = crashed writer, missing
-# row = proceed. The ASG-wide twin in .github/actions/refresh-graph-asg/action.yml
+# row = proceed. The ASG-wide twin in bin/tools/wait-graph-writers-idle.sh and the
+# fleet walk's pre-dispatch check (_busy in bin/lambda/graph_container_refresh.py)
 # must apply the same rules.
 wait_until_idle() {
   if [ "${FORCE_IGNORE_BUSY}" = "true" ]; then
@@ -172,7 +178,9 @@ wait_until_idle() {
     sleep 60
   done
 
-  die "timed out after ${MAX_WAIT_MINUTES} minute(s) waiting for the instance to become idle (count=${count}, kind=${kind}). Set FORCE_IGNORE_BUSY=true to override."
+  log "timed out after ${MAX_WAIT_MINUTES} minute(s) waiting for the instance to become idle (count=${count}, kind=${kind}). Set FORCE_IGNORE_BUSY=true to override."
+  echo "REFRESH_RESULT=deferred-busy"
+  exit "${EXIT_DEFERRED_BUSY}"
 }
 
 wait_until_idle

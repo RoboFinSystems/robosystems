@@ -30,6 +30,10 @@ TEMPLATE = REPO_ROOT / "cloudformation" / "graph-infra.yaml"
 # contract across three files — see TestSkipContract at the bottom.
 EXIT_STALE_ENV = 3
 
+# "Still busy after the wait": the fleet walk re-queues the instance. Same
+# three-file contract as the skip.
+EXIT_DEFERRED_BUSY = 4
+
 REQUIRED_ENV = {
   "DATABASE_TYPE": "ladybug",
   "NODE_TYPE": "shared_replica",
@@ -237,13 +241,15 @@ class TestBusyCounterFailsOpen:
     assert result.exit_code == 0
     assert "stale busy counter" in result.output
 
-  def test_busy_with_fresh_heartbeat_times_out(self, refresh):
+  def test_busy_with_fresh_heartbeat_defers(self, refresh):
+    """A deferral, not a failure: the fleet walk comes back to the instance."""
     now = subprocess.run(
       ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"], capture_output=True, text=True
     ).stdout.strip()
     result = refresh(STUB_DDB_ROW=f"2\\t{now}\\tmaterialize", MAX_WAIT_MINUTES=2)
-    assert result.exit_code == 1
+    assert result.exit_code == EXIT_DEFERRED_BUSY
     assert "timed out after 2" in result.output
+    assert "REFRESH_RESULT=deferred-busy" in result.output
     assert not result.restarted
 
   def test_force_ignore_busy_bypasses_the_wait(self, refresh):
@@ -357,17 +363,16 @@ class TestImageTag:
 
 
 class TestSkipContract:
-  """The skip semantics are a contract across three files.
+  """The skip and deferral semantics are a contract across three files.
 
-  The script exits 3 for a stale /etc/environment, printing a REFRESH_RESULT
-  marker alongside. The fleet-refresh SSM document (graph-infra.yaml) guards for
-  a missing script and normalizes both skip shapes to exit 0 — SSM counts every
-  non-zero exit toward MaxErrors, so a skip that exits non-zero burns the error
-  budget and terminates the rest of the fleet's invocations. The Lambda then
-  classifies skips off the markers, never off an exit code. If any leg drifts, an
-  un-cycled fleet goes from a warning back to a failed deploy (or back to
-  cascade-terminating itself) — regressions nothing else would catch, and the
-  second of which shipped in the document's first fleet-wide prod run.
+  The script exits 3 for a stale /etc/environment and 4 when it is still busy,
+  printing a REFRESH_RESULT marker alongside. The fleet-refresh SSM document
+  (graph-infra.yaml) guards for a missing script and normalizes all three shapes
+  to exit 0, because every Failed invocation pages. The Lambda then classifies
+  them off the markers, never off an exit code: skips are outcomes, deferrals go
+  to the back of the queue. If any leg drifts, an un-cycled fleet or a busy
+  writer stops the walk as a failed deploy — regressions nothing else would
+  catch.
   """
 
   def test_document_guards_for_a_missing_script_and_exits_zero(self):
@@ -395,11 +400,18 @@ class TestSkipContract:
     assert "REFRESH_RESULT=skipped-stale-env" in script
     assert "REFRESH_RESULT=skipped-no-script" in template
 
-  def test_skips_are_excluded_from_the_failure_count(self):
-    """`failed` is what the workflow fails on, so skips must not reach it."""
+  def test_document_normalizes_the_scripts_deferral_exit(self):
+    """Every Failed invocation pages, and a busy instance is not a failure."""
+    script = SCRIPT.read_text()
+    template = TEMPLATE.read_text()
+    assert f"EXIT_DEFERRED_BUSY={EXIT_DEFERRED_BUSY}" in script
+    assert f'[ "$rc" -eq {EXIT_DEFERRED_BUSY} ] && exit 0' in template
+
+  def test_lambda_requeues_off_the_deferral_marker(self):
     handler = LAMBDA.read_text()
-    assert '"failed": len(failures)' in handler
-    assert '"skipped": skipped' in handler
+    script = SCRIPT.read_text()
+    assert 'DEFERRED_RESULT = "deferred-busy"' in handler
+    assert "REFRESH_RESULT=deferred-busy" in script
 
 
 class TestMarkerVisibility:
