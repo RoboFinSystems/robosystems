@@ -23,6 +23,7 @@ To read one filing at a time, [xbrlkit](https://xbrlkit.com), an open-source Rob
 
 ## Connect
 
+- **Claude, no setup:** add [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) from Claude's connector directory and sign in.
 - **ChatGPT, no setup:** install the [RoboSystems plugin](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) from ChatGPT's plugin directory and sign in.
 - **Any MCP client:** add `https://api.robosystems.ai/v1/mcp`, and on the consent screen choose **SEC EDGAR Filings** under shared repositories.
 - **Beside your own books:** add a second connection with the SEC graph's own address, so one conversation can use both.
