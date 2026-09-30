@@ -41,6 +41,7 @@ from robosystems.operations.roboledger.entry_status import (
 from robosystems.operations.roboledger.reads.accounts import coa_element_clause
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
+  in_block,
   mapping_frameworks,
 )
 
@@ -521,14 +522,20 @@ def list_structures(
   taxonomy_id: str | None = None,
   block_type: str | None = None,
 ) -> StructureListResponse:
-  """List active structures, optionally filtered by taxonomy + type."""
+  """List active structures, optionally filtered by taxonomy + type. A
+  chart's structures include the mappings it owns."""
   query = select(Structure).where(Structure.is_active.is_(True))
   if taxonomy_id:
-    query = query.where(Structure.taxonomy_id == taxonomy_id)
+    query = query.where(in_block(taxonomy_id))
   if block_type:
     query = query.where(Structure.block_type == block_type)
   rows = session.execute(query.order_by(Structure.name)).scalars().all()
-  return StructureListResponse(structures=[_structure_to_response(r) for r in rows])
+  frameworks = mapping_frameworks(
+    session, [str(r.id) for r in rows if r.block_type == "coa_mapping"]
+  )
+  return StructureListResponse(
+    structures=[_structure_to_response(r, frameworks.get(str(r.id))) for r in rows]
+  )
 
 
 # ── Mappings ──────────────────────────────────────────────────────────────

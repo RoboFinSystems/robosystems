@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
@@ -37,9 +38,13 @@ from robosystems.models.extensions import (
 )
 from robosystems.operations.roboledger.reads.taxonomies import list_mappings
 from robosystems.operations.taxonomy_block import chart_of_accounts as chart_block
+from robosystems.operations.taxonomy_block import (
+  custom_ontology as custom_ontology_block,
+)
 from robosystems.operations.taxonomy_block.coa_mappings import (
   FrameworkNotInLibraryError,
   MappingAlreadyExistsError,
+  MappingOutsideChartError,
   find_mapping_structure,
 )
 
@@ -202,9 +207,40 @@ class TestAnchor:
       )
 
   def test_a_framework_outside_the_library_is_refused(self, ext_session, library):
-    with pytest.raises(FrameworkNotInLibraryError):
+    # A ValueError, so the operation answers 422 rather than 500.
+    with pytest.raises(FrameworkNotInLibraryError) as exc:
       chart_block.create(
         ext_session, _chart_payload(_mapping("Call report", "rs-call-report")), "u"
+      )
+    assert isinstance(exc.value, ValueError)
+
+  def test_the_database_holds_one_active_mapping_per_framework(
+    self, ext_session, library
+  ):
+    chart_id = chart_block.create(
+      ext_session, _chart_payload(_mapping(GAAP_MAPPING)), "u"
+    )
+    ext_session.add(
+      Taxonomy(
+        name="Bypassing the app check",
+        taxonomy_type="mapping",
+        source_taxonomy_id=chart_id,
+        target_taxonomy_id=library["rs-gaap"][0].id,
+      )
+    )
+    with pytest.raises(IntegrityError):
+      ext_session.flush()
+
+  def test_a_mapping_belongs_only_to_a_chart(self, ext_session, library):
+    with pytest.raises(MappingOutsideChartError):
+      custom_ontology_block.create(
+        ext_session,
+        CreateTaxonomyBlockRequest(
+          name="Ontology",
+          taxonomy_type="custom_ontology",
+          structures=[_mapping(GAAP_MAPPING)],
+        ),
+        "u",
       )
 
 
@@ -334,6 +370,20 @@ class TestMigration0037:
     session.flush()
     return str(chart.id), str(structure.id)
 
+  def _second_legacy_mapping(
+    self, session, chart_id: str, name: str, *, is_active: bool = True
+  ) -> str:
+    structure = Structure(
+      name=name,
+      block_type="coa_mapping",
+      taxonomy_id=chart_id,
+      is_active=is_active,
+      created_by="u",
+    )
+    session.add(structure)
+    session.flush()
+    return str(structure.id)
+
   def _schema(self, session) -> str:
     return str(session.execute(text("SELECT current_schema()")).scalar_one())
 
@@ -372,3 +422,41 @@ class TestMigration0037:
     ext_session.expire_all()
     structure = ext_session.get(Structure, structure_id)
     assert structure is not None and str(structure.taxonomy_id) == chart_id
+
+  def test_an_inactive_mapping_does_not_take_the_slot(self, ext_session, library):
+    chart_id, retired_id = self._legacy_mapping(ext_session, "Retired mapping")
+    ext_session.get(Structure, retired_id).is_active = False
+    live_id = self._second_legacy_mapping(ext_session, chart_id, GAAP_MAPPING)
+    ext_session.flush()
+
+    _load_migration()._upgrade(ext_session.connection(), self._schema(ext_session))
+    ext_session.expire_all()
+
+    mapping = find_mapping_structure(ext_session, "rs-gaap", chart_id=chart_id)
+    assert mapping is not None and str(mapping.id) == live_id
+
+  def test_two_active_mappings_into_one_framework_keep_the_mapped_one(
+    self, ext_session, library
+  ):
+    chart_id, empty_id = self._legacy_mapping(ext_session, "Empty mapping")
+    ext_session.add(
+      Element(
+        name="Rent",
+        qname="coa:6000",
+        code="6000",
+        taxonomy_id=chart_id,
+        created_by="u",
+      )
+    )
+    mapped_id = self._second_legacy_mapping(ext_session, chart_id, GAAP_MAPPING)
+    _map_rent(ext_session, ext_session.get(Structure, mapped_id), library["rs-gaap"][1])
+
+    _load_migration()._upgrade(ext_session.connection(), self._schema(ext_session))
+    ext_session.expire_all()
+
+    mapping = find_mapping_structure(ext_session, "rs-gaap", chart_id=chart_id)
+    assert mapping is not None and str(mapping.id) == mapped_id
+    empty = ext_session.get(Structure, empty_id)
+    assert empty is not None
+    empty_anchor = ext_session.get(Taxonomy, empty.taxonomy_id)
+    assert empty_anchor is not None and empty_anchor.is_active is False

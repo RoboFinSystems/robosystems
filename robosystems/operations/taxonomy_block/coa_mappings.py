@@ -26,13 +26,21 @@ BOOK_FRAMEWORK = DEFAULT_FRAMEWORK.partition("@")[0]
 """The framework a chart's book mapping targets, until the pin names roles."""
 
 
-class FrameworkNotInLibraryError(LookupError):
+class FrameworkNotInLibraryError(ValueError):
   def __init__(self, framework: str) -> None:
     super().__init__(
       f"Framework {framework!r} is not in this graph's library; "
       "a chart cannot map into it."
     )
     self.framework = framework
+
+
+class MappingOutsideChartError(ValueError):
+  def __init__(self, taxonomy_type: str) -> None:
+    super().__init__(
+      f"A coa_mapping structure belongs to a chart of accounts, not a "
+      f"{taxonomy_type} taxonomy."
+    )
 
 
 class MappingAlreadyExistsError(ValueError):
@@ -63,15 +71,16 @@ def in_block(taxonomy_id: str) -> ColumnElement[bool]:
 
 
 def framework_taxonomy_id(session: Session, framework: str) -> str | None:
-  """The graph's ``reporting_standard`` taxonomy for ``framework``, newest
-  version first."""
+  """The graph's active ``reporting_standard`` taxonomy for ``framework``, the
+  most recently seeded first (``version`` is a label, not an ordering)."""
   return session.execute(
     select(Taxonomy.id)
     .where(
       Taxonomy.standard == framework,
       Taxonomy.taxonomy_type == "reporting_standard",
+      Taxonomy.is_active.is_(True),
     )
-    .order_by(Taxonomy.version.desc())
+    .order_by(Taxonomy.created_at.desc())
     .limit(1)
   ).scalar_one_or_none()
 
@@ -207,18 +216,24 @@ def prune_empty_mapping_taxonomies(session: Session, chart_id: str) -> None:
 
 
 def is_chart_mapping(taxonomy: Taxonomy, block_type: str) -> bool:
-  """Whether a structure request on ``taxonomy`` is one of its mappings."""
-  return (
-    str(taxonomy.taxonomy_type) == "chart_of_accounts"
-    and block_type == COA_MAPPING_BLOCK_TYPE
-  )
+  """Whether a structure request on ``taxonomy`` is one of its mappings.
+
+  Raises `MappingOutsideChartError` for a mapping on any other taxonomy:
+  only a chart owns mappings."""
+  if block_type != COA_MAPPING_BLOCK_TYPE:
+    return False
+  if str(taxonomy.taxonomy_type) != "chart_of_accounts":
+    raise MappingOutsideChartError(str(taxonomy.taxonomy_type))
+  return True
 
 
 __all__ = [
   "BOOK_FRAMEWORK",
   "COA_MAPPING_BLOCK_TYPE",
+  "MAPPING_TAXONOMY_TYPE",
   "FrameworkNotInLibraryError",
   "MappingAlreadyExistsError",
+  "MappingOutsideChartError",
   "create_mapping_structure",
   "ensure_mapping_structure",
   "find_mapping_structure",

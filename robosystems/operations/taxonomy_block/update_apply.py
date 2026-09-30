@@ -33,6 +33,7 @@ from robosystems.operations.taxonomy_block._helpers import structure_from_reques
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
   COA_MAPPING_BLOCK_TYPE,
+  MAPPING_TAXONOMY_TYPE,
   create_mapping_structure,
   in_block,
   is_chart_mapping,
@@ -137,6 +138,9 @@ def apply_structures_to_add(
   new_structures_by_name: dict[str, Structure] = {}
   for req in payload.structures_to_add:
     if is_chart_mapping(taxonomy, req.block_type):
+      metadata = dict(req.metadata)
+      if req.role_uri:
+        metadata["role_uri"] = req.role_uri
       structure = create_mapping_structure(
         session,
         chart_id=str(taxonomy.id),
@@ -144,7 +148,7 @@ def apply_structures_to_add(
         name=req.name,
         description=req.description,
         concept_arrangement=req.concept_arrangement,
-        metadata=req.metadata,
+        metadata=metadata,
         created_by=updated_by,
       )
     else:
@@ -432,7 +436,10 @@ def apply_structures_to_update(
       structure.name = patch.name
       if structure.block_type == COA_MAPPING_BLOCK_TYPE:
         mapping_taxonomy = session.get(Taxonomy, structure.taxonomy_id)
-        if mapping_taxonomy is not None:
+        if (
+          mapping_taxonomy is not None
+          and mapping_taxonomy.taxonomy_type == MAPPING_TAXONOMY_TYPE
+        ):
           mapping_taxonomy.name = patch.name
     if patch.description is not None:
       structure.description = patch.description

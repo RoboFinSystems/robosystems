@@ -41,6 +41,7 @@ from robosystems.operations.taxonomy_block.cascade import (
   cascade_delete_taxonomy,
   preflight_delete,
 )
+from robosystems.operations.taxonomy_block.coa_mappings import is_chart_mapping
 from robosystems.operations.taxonomy_block.rule_persistence import (
   persist_tenant_rules,
 )
@@ -195,6 +196,7 @@ def create(
 
   structures_by_name: dict[str, Structure] = {}
   for req in payload.structures:
+    is_chart_mapping(taxonomy, req.block_type)
     structure = structure_from_request(
       req, taxonomy_id=taxonomy.id, created_by=created_by
     )

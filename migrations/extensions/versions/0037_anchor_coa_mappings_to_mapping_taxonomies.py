@@ -10,13 +10,17 @@ Per tenant schema, for every mapping structure still anchored to a chart:
 
 - target = the reporting_standard taxonomy its arcs point into most often,
   or rs-gaap's when it has no arcs yet (the only framework mapped so far)
-- insert the mapping taxonomy, named after the structure
+- insert the mapping taxonomy, named after the structure and active only
+  when the structure is
 - re-point the structure at it (its id is unchanged, so ``reports.mapping_id``
   and the graph are untouched)
 
-Then the unique index: one active mapping per (chart, framework). Created
-after the data step so a tenant holding two mappings into one framework fails
-the migration loudly instead of being guessed at.
+Then the unique index: one active mapping per (chart, framework). A chart
+holding two active mappings into one framework keeps the one with the most
+arcs (the oldest on a tie) active and the others' mapping taxonomies
+inactive — before this, readers took whichever row came first, so no choice
+here removes one that was reliably in use. Resolving it in place keeps one
+tenant's data from failing the migration for every tenant.
 
 Revision ID: 0037
 Revises: 0036
@@ -46,7 +50,10 @@ def _anchor(conn: Connection, schema: str) -> None:
   mappings = conn.execute(
     text(
       f"""
-      SELECT s.id, s.name, s.description, s.created_by, s.taxonomy_id AS chart_id,
+      SELECT s.id, s.name, s.description, s.created_by, s.is_active, s.created_at,
+        s.taxonomy_id AS chart_id,
+        (SELECT count(*) FROM "{schema}".associations a WHERE a.structure_id = s.id)
+          AS arc_count,
         (
           SELECT e.taxonomy_id
           FROM "{schema}".associations a
@@ -60,6 +67,7 @@ def _anchor(conn: Connection, schema: str) -> None:
       FROM "{schema}".structures s
       JOIN "{schema}".taxonomies c ON c.id = s.taxonomy_id
       WHERE s.block_type = 'coa_mapping' AND c.taxonomy_type = 'chart_of_accounts'
+      ORDER BY arc_count DESC, s.created_at, s.id
       """
     )
   ).fetchall()
@@ -71,13 +79,17 @@ def _anchor(conn: Connection, schema: str) -> None:
       f"""
       SELECT id FROM "{schema}".taxonomies
       WHERE standard = :framework AND taxonomy_type = 'reporting_standard'
-      ORDER BY version DESC LIMIT 1
+        AND is_active
+      ORDER BY created_at DESC LIMIT 1
       """
     ),
     {"framework": DEFAULT_FRAMEWORK},
   ).scalar_one_or_none()
 
   now = datetime.now(UTC).replace(tzinfo=None)
+  # Rows arrive most-arcs-first, so the first active mapping into a
+  # (chart, target) keeps the slot.
+  active_slots: set[tuple[str, str]] = set()
   for row in mappings:
     target_id = row.arc_target_id or default_target_id
     if target_id is None:
@@ -85,6 +97,10 @@ def _anchor(conn: Connection, schema: str) -> None:
         f"{schema}: mapping {row.id} has no arcs and the schema has no "
         f"{DEFAULT_FRAMEWORK} reporting_standard taxonomy to target."
       )
+    slot = (row.chart_id, target_id)
+    is_active = bool(row.is_active) and slot not in active_slots
+    if is_active:
+      active_slots.add(slot)
     mapping_taxonomy_id = generate_prefixed_ulid("tax")
     conn.execute(
       text(
@@ -95,7 +111,7 @@ def _anchor(conn: Connection, schema: str) -> None:
           created_at, updated_at, created_by
         ) VALUES (
           :id, :name, :description, 'mapping', :chart_id, :target_id,
-          false, true, false, '{{}}'::jsonb, :now, :now, :created_by
+          false, :is_active, false, '{{}}'::jsonb, :now, :now, :created_by
         )
         """
       ),
@@ -105,6 +121,7 @@ def _anchor(conn: Connection, schema: str) -> None:
         "description": row.description,
         "chart_id": row.chart_id,
         "target_id": target_id,
+        "is_active": is_active,
         "now": now,
         "created_by": row.created_by,
       },

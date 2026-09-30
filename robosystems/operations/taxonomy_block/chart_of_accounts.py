@@ -282,6 +282,7 @@ def create(
         framework=req.target_framework or BOOK_FRAMEWORK,
         name=req.name,
         description=req.description,
+        concept_arrangement=req.concept_arrangement,
         metadata=req.metadata,
         created_by=created_by,
       )
