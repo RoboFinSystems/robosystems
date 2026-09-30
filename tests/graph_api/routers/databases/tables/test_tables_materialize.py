@@ -205,7 +205,7 @@ def test_type_safe_select_excludes_and_nulls():
     source, exclude_cols={"file_id"}, null_cols={"embedding"}
   )
   assert "file_id" not in expr
-  assert 'NULL::FLOAT[384] AS "embedding"' in expr
+  assert '(NULL::FLOAT[384])::FLOAT[] AS "embedding"' in expr
 
 
 # ---------------------------------------------------------------------------

@@ -165,7 +165,7 @@ class TestTypeSafeSelect:
       null_cols={"embedding"},
     )
 
-    assert select == '"identifier", NULL::FLOAT[384] AS "embedding"'
+    assert select == '"identifier", (NULL::FLOAT[384])::FLOAT[] AS "embedding"'
 
   def test_exclusion_wins_over_nullification(self):
     select = _build_type_safe_select(
@@ -251,7 +251,7 @@ class TestReconciledSelect:
       null_cols={"embedding"},
     )
 
-    assert 'NULL::FLOAT[384] AS "embedding"' in select
+    assert '(NULL::FLOAT[384])::FLOAT[] AS "embedding"' in select
     assert "TRY_CAST(embedding" not in select
 
 
