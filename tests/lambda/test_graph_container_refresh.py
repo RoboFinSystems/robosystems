@@ -1,258 +1,407 @@
-"""Tests for the fleet-wide graph container refresh Lambda.
+"""Tests for the graph container refresh walk.
 
-Two things here are load-bearing and would fail silently if they broke.
+The walk refreshes one instance at a time and is driven by its caller: `start`
+builds the queue, each `step` reads the in-flight instance and dispatches the
+next. Three behaviours are load-bearing and would fail quietly if they broke.
 
-**Targeting.** The command is dispatched at a tag expression, not an instance
-list, so a wrong expression does not error — it matches nothing and reports
-success. SSM ANDs across target keys and ORs within one, which is why "all"
-cannot be a single command and is instead one per node-type group.
+**Targeting.** The queue comes from tag filters, so a wrong filter does not
+error — it matches nothing and reports success. The `shared` group once filtered
+on `WriterTier=shared` while the fleet is tagged `ladybug-shared`, and selected
+nothing.
 
-**Skip classification.** A skip — "this instance has not cycled onto the new
-scripts, and its container was deliberately left running" — is a transitional
-state that must not fail a deploy. The refresh document normalizes skip exits to
-0 (a non-zero exit consumes SSM's MaxErrors budget and terminates the rest of
-the fleet's invocations), and the Lambda classifies skips off the
-REFRESH_RESULT stdout marker, never off an exit code. If skips leak into the
-failure count, an un-cycled fleet fails a deploy, which is the regression this
-classification exists to prevent — and which shipped once, precisely because
-the original classification read `ResponseCode` at the invocation level, a
-field the real API only sets on the plugin.
+**Busy instances come back around.** A writer mid-materialization is passed
+over and re-queued behind the rest, never failed and never forced. The walk that
+this replaced let one busy shared master time out, fail, and cancel every other
+writer in the fleet.
+
+**Failure stops the walk.** A real failure dispatches nothing further, so a bad
+image halts at the first instance. Skips and deferrals are classified off the
+REFRESH_RESULT marker, never an exit code.
 """
 
-from unittest.mock import patch
+import time
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
+import boto3
 import pytest
 from botocore.exceptions import ClientError
 
 pytestmark = pytest.mark.unit
 
+REGISTRY = "robosystems-graph-test-instance-registry"
 
-def _invocation(
-  status: str,
-  response_code: int | None = None,
-  output: str = "",
-  status_details: str = "",
+
+def _launch(env: str = "test", state: str = "running", **tags: str) -> str:
+  ec2 = boto3.client("ec2", region_name="us-east-1")
+  image = ec2.describe_images(Owners=["amazon"])["Images"][0]["ImageId"]
+  instance = ec2.run_instances(
+    ImageId=image,
+    MinCount=1,
+    MaxCount=1,
+    TagSpecifications=[
+      {
+        "ResourceType": "instance",
+        "Tags": [{"Key": "Environment", "Value": env}]
+        + [{"Key": k, "Value": v} for k, v in tags.items()],
+      }
+    ],
+  )["Instances"][0]["InstanceId"]
+  if state == "stopped":
+    ec2.stop_instances(InstanceIds=[instance])
+  return instance
+
+
+def _registry(
+  instance_id: str, count: int, age_seconds: int = 30, kind="materialization"
 ):
-  """Shape an invocation the way `list_command_invocations(Details=True)`
-  actually returns it: the exit code lives on the plugin, never on the
-  invocation. The first version of this fixture put ResponseCode at the
-  invocation level — a shape the real API never produces — which is exactly how
-  the classification bug these tests exist to catch survived them.
-  """
-  inv: dict = {"InstanceId": "i-abc", "Status": status}
-  if status_details:
-    inv["StatusDetails"] = status_details
-  plugin: dict = {}
-  if response_code is not None:
-    plugin["ResponseCode"] = response_code
-  if output:
-    plugin["Output"] = output
-  if plugin:
-    inv["CommandPlugins"] = [plugin]
-  return inv
+  last_at = (datetime.now(UTC) - timedelta(seconds=age_seconds)).isoformat()
+  boto3.client("dynamodb", region_name="us-east-1").put_item(
+    TableName=REGISTRY,
+    Item={
+      "instance_id": {"S": instance_id},
+      "active_destructive_ops": {"N": str(count)},
+      "last_destructive_op_at": {"S": last_at},
+      "last_destructive_op_kind": {"S": kind},
+    },
+  )
+
+
+def _invocation(status: str, output: str = "", code: int = 0, details: str = ""):
+  """`get_command_invocation`'s shape: stdout and exit code on the invocation."""
+  return {
+    "Status": status,
+    "StatusDetails": details or status,
+    "ResponseCode": code,
+    "StandardOutputContent": output,
+  }
+
+
+class Fleet:
+  """A mocked SSM plus a scripted busy map, for driving the walk step by step."""
+
+  def __init__(self, gcr, queue: list[str], busy: set[str] | None = None):
+    self.gcr = gcr
+    self.queue = queue
+    self.busy = set(busy or ())
+    self.ssm = MagicMock()
+    self.ssm.list_commands.return_value = {"Commands": []}
+    self.ssm.send_command.side_effect = lambda **kw: {
+      "Command": {"CommandId": f"cmd-{kw['InstanceIds'][0]}"}
+    }
+    self.ssm.get_command_invocation.return_value = _invocation("InProgress")
+
+  def _busy(self, instance_id):
+    if instance_id in self.busy:
+      return {"count": "1", "kind": "materialization", "last_at": "now"}
+    return None
+
+  def run(self, fn, *args):
+    with (
+      patch.object(self.gcr, "ssm", self.ssm),
+      patch.object(self.gcr, "_resolve_queue", return_value=list(self.queue)),
+      patch.object(self.gcr, "_busy", side_effect=self._busy),
+    ):
+      return fn(*args)
+
+  def start(self, **event):
+    return self.run(self.gcr.start, {"node_types": "writer", **event})
+
+  def step(self, state, invocation=None):
+    if invocation is not None:
+      self.ssm.get_command_invocation.return_value = invocation
+    return self.run(self.gcr.step, {"state": state})
+
+  def dispatched(self) -> list[str]:
+    return [c.kwargs["InstanceIds"][0] for c in self.ssm.send_command.call_args_list]
+
+
+UPDATED = _invocation("Success", "REFRESH_RESULT=updated")
 
 
 class TestTargeting:
-  def test_writer_group_targets_the_ladybug_role_tag(self, gcr):
-    targets = gcr._targets_for("writer", "prod")
-    assert {"Key": "tag:Environment", "Values": ["prod"]} in targets
-    assert {"Key": "tag:LadybugRole", "Values": ["writer"]} in targets
+  def test_writer_queue_covers_every_tier_with_shared_last(self, gcr):
+    shared = _launch(LadybugRole="writer", WriterTier="ladybug-shared")
+    standard = _launch(LadybugRole="writer", WriterTier="ladybug-standard")
+    large = _launch(LadybugRole="writer", WriterTier="ladybug-large")
 
-  def test_shared_group_narrows_by_writer_tier(self, gcr):
-    """Every writer tier carries LadybugRole=writer; the tier is on WriterTier."""
-    targets = gcr._targets_for("shared", "prod")
-    assert {"Key": "tag:WriterTier", "Values": ["shared"]} in targets
+    queue = gcr._resolve_queue(["writer"], "test")
+
+    assert set(queue) == {shared, standard, large}
+    assert queue[-1] == shared
+
+  def test_shared_group_matches_the_fleets_tier_tag(self, gcr):
+    """The tier tag is `ladybug-shared`; filtering on `shared` selected nothing."""
+    shared = _launch(LadybugRole="writer", WriterTier="ladybug-shared")
+    _launch(LadybugRole="writer", WriterTier="ladybug-standard")
+
+    assert gcr._resolve_queue(["shared"], "test") == [shared]
 
   def test_replicas_target_node_type_not_ladybug_role(self, gcr):
     """Replicas only got LadybugRole=replica later, and a tag reaches an instance
-    at boot. Matching the older NodeType tag means this works during that
-    rollout rather than silently selecting nothing.
-    """
-    targets = gcr._targets_for("shared-replicas", "prod")
-    assert {"Key": "tag:NodeType", "Values": ["shared_replica"]} in targets
-    assert not any(t["Key"] == "tag:LadybugRole" for t in targets)
+    at boot. Matching NodeType works during that rollout rather than silently
+    selecting nothing."""
+    replica = _launch(NodeType="shared_replica")
+
+    assert gcr._resolve_queue(["shared-replicas"], "test") == [replica]
+
+  def test_all_walks_writers_before_replicas(self, gcr):
+    replica = _launch(NodeType="shared_replica")
+    writer = _launch(LadybugRole="writer", WriterTier="ladybug-standard")
+
+    assert gcr._resolve_queue(gcr.ALL_GROUPS, "test") == [writer, replica]
+
+  def test_other_environments_and_stopped_instances_are_excluded(self, gcr):
+    _launch(env="prod", LadybugRole="writer", WriterTier="ladybug-standard")
+    _launch(state="stopped", LadybugRole="writer", WriterTier="ladybug-standard")
+
+    assert gcr._resolve_queue(["writer"], "test") == []
 
   def test_unknown_group_raises(self, gcr):
     with pytest.raises(ValueError, match="Unknown node_type"):
-      gcr._targets_for("nonsense", "prod")
+      gcr._filters_for("nonsense", "test")
 
 
-class TestParameterConstruction:
-  """The wrapper shell lives in the document (graph-infra.yaml); the Lambda only
-  supplies the per-dispatch values. tests/infrastructure covers the document's
-  side of that contract."""
+class TestBusyCounter:
+  """Fails open exactly like its twins in refresh-graph-container.sh and
+  wait-graph-writers-idle.sh — the instance repeats the check before acting."""
 
-  def test_overrides_become_document_parameters(self, gcr):
-    params = gcr._build_parameters(45, True, True, 3600)
-    assert params["MaxWaitMinutes"] == ["45"]
-    assert params["ForceIgnoreBusy"] == ["true"]
-    assert params["ForceRestart"] == ["true"]
-    assert params["ExecutionTimeout"] == ["3600"]
+  def test_missing_row_is_idle(self, gcr):
+    assert gcr._busy("i-unknown") is None
 
-  def test_force_flags_default_to_false(self, gcr):
-    params = gcr._build_parameters(30, False, False, 2700)
-    assert params["ForceIgnoreBusy"] == ["false"]
-    assert params["ForceRestart"] == ["false"]
+  @pytest.mark.parametrize("count", [0, -1])
+  def test_non_positive_counter_is_idle(self, gcr, count):
+    _registry("i-a", count)
+    assert gcr._busy("i-a") is None
+
+  def test_fresh_heartbeat_is_busy(self, gcr):
+    _registry("i-a", 1, kind="materialization")
+    assert gcr._busy("i-a")["kind"] == "materialization"
+
+  def test_stale_heartbeat_is_a_crashed_writer(self, gcr):
+    _registry("i-a", 1, age_seconds=gcr.STALE_WINDOW_SECONDS + 60)
+    assert gcr._busy("i-a") is None
+
+  def test_unreadable_registry_is_idle(self, gcr):
+    with patch.object(gcr, "dynamodb") as ddb:
+      ddb.get_item.side_effect = ClientError(
+        {"Error": {"Code": "AccessDeniedException"}}, "GetItem"
+      )
+      assert gcr._busy("i-a") is None
 
 
-class TestStart:
-  def test_all_dispatches_one_command_per_group(self, gcr):
-    with patch.object(gcr, "ssm") as ssm:
-      ssm.send_command.return_value = {"Command": {"CommandId": "cmd-1"}}
-      result = gcr.start({"environment": "prod", "node_types": "all"})
+class TestWalk:
+  def test_start_dispatches_only_the_first_instance(self, gcr):
+    fleet = Fleet(gcr, ["i-a", "i-b", "i-c"])
+    state = fleet.start()
 
-    assert ssm.send_command.call_count == len(gcr.ALL_GROUPS)
-    assert [c["node_type"] for c in result["commands"]] == gcr.ALL_GROUPS
+    assert fleet.dispatched() == ["i-a"]
+    assert state["phase"] == "running"
+    assert state["queue"] == ["i-b", "i-c"]
 
+  def test_each_step_waits_for_the_instance_in_flight(self, gcr):
+    fleet = Fleet(gcr, ["i-a", "i-b"])
+    state = fleet.step(fleet.start())
+
+    assert fleet.dispatched() == ["i-a"]
+    assert state["current"]["instance_id"] == "i-a"
+
+  def test_walks_the_fleet_in_order(self, gcr):
+    fleet = Fleet(gcr, ["i-a", "i-b"])
+    state = fleet.step(fleet.start(), UPDATED)
+    state = fleet.step(state, UPDATED)
+
+    assert fleet.dispatched() == ["i-a", "i-b"]
+    assert state["phase"] == "complete"
+    assert [o["result"] for o in state["outcomes"]] == ["updated", "updated"]
+
+  def test_a_busy_instance_is_passed_over_and_comes_back_around(self, gcr):
+    """The regression: a busy shared master used to fail and cancel the fleet."""
+    fleet = Fleet(gcr, ["i-a", "i-b", "i-c"], busy={"i-a"})
+    state = fleet.start()
+    assert fleet.dispatched() == ["i-b"]
+    assert state["queue"] == ["i-c", "i-a"]
+
+    state = fleet.step(state, UPDATED)
+    assert fleet.dispatched() == ["i-b", "i-c"]
+
+    fleet.busy.clear()
+    state = fleet.step(state, UPDATED)
+    assert fleet.dispatched() == ["i-b", "i-c", "i-a"]
+
+    state = fleet.step(state, UPDATED)
+    assert state["phase"] == "complete"
+    assert state["failure"] is None
+
+  def test_waits_while_only_busy_instances_remain(self, gcr):
+    fleet = Fleet(gcr, ["i-a"], busy={"i-a"})
+    state = fleet.start()
+
+    assert state["phase"] == "waiting"
+    assert fleet.dispatched() == []
+    assert "i-a" in state["busy"]
+
+  def test_busy_past_the_deadline_is_deferred(self, gcr):
+    fleet = Fleet(gcr, ["i-a", "i-b"], busy={"i-b"})
+    state = fleet.step(fleet.start(max_wait_minutes=0), UPDATED)
+
+    assert state["phase"] == "deferred"
+    assert state["queue"] == ["i-b"]
+    assert state["failure"] is None
+
+  def test_a_failure_stops_the_walk(self, gcr):
+    fleet = Fleet(gcr, ["i-a", "i-b", "i-c"])
+    state = fleet.step(
+      fleet.start(),
+      _invocation("Failed", "[refresh] ERROR: docker pull failed", code=1),
+    )
+    state = fleet.step(state)
+
+    assert state["phase"] == "failed"
+    assert fleet.dispatched() == ["i-a"]
+    assert state["queue"] == ["i-b", "i-c"]
+    assert state["failure"]["instance_id"] == "i-a"
+    assert state["failure"]["response_code"] == "1"
+    assert "docker pull failed" in state["failure"]["output_tail"]
+
+  def test_a_real_exit_code_stays_a_failure(self, gcr):
+    """127 from a missing binary must not be downgraded to a skip."""
+    fleet = Fleet(gcr, ["i-a"])
+    state = fleet.step(fleet.start(), _invocation("Failed", "", code=127))
+
+    assert state["phase"] == "failed"
+    assert state["failure"]["response_code"] == "127"
+
+  def test_undeliverable_is_a_failure(self, gcr):
+    fleet = Fleet(gcr, ["i-a", "i-b"])
+    state = fleet.step(
+      fleet.start(), _invocation("TimedOut", code=-1, details="DeliveryTimedOut")
+    )
+
+    assert state["phase"] == "failed"
+    assert state["failure"]["response_code"] == ""
+
+  def test_an_instance_that_finds_itself_busy_is_requeued(self, gcr):
+    """A materialization can start between the Lambda's read and the script's;
+    the script then reports a deferral, not a failure."""
+    fleet = Fleet(gcr, ["i-a", "i-b"])
+    state = fleet.step(
+      fleet.start(), _invocation("Success", "REFRESH_RESULT=deferred-busy")
+    )
+
+    assert state["phase"] == "running"
+    assert fleet.dispatched() == ["i-a", "i-b"]
+    assert state["queue"] == ["i-a"]
+    assert state["failure"] is None
+
+  @pytest.mark.parametrize("marker", ["skipped-no-script", "skipped-stale-env"])
+  def test_skips_are_outcomes_not_failures(self, gcr, marker):
+    fleet = Fleet(gcr, ["i-a"])
+    state = fleet.step(
+      fleet.start(), _invocation("Success", f"REFRESH_RESULT={marker}")
+    )
+
+    assert state["phase"] == "complete"
+    assert state["outcomes"] == [{"instance_id": "i-a", "result": marker}]
+
+  def test_a_hand_run_skip_with_a_raw_exit_code_gets_the_same_grace(self, gcr):
+    """The raw script exits 3 with the marker; the marker, not the code, decides."""
+    fleet = Fleet(gcr, ["i-a"])
+    state = fleet.step(
+      fleet.start(), _invocation("Failed", "REFRESH_RESULT=skipped-stale-env", code=3)
+    )
+
+    assert state["phase"] == "complete"
+    assert state["failure"] is None
+
+  def test_invocation_not_yet_registered_is_still_running(self, gcr):
+    fleet = Fleet(gcr, ["i-a"])
+    state = fleet.start()
+    fleet.ssm.get_command_invocation.side_effect = ClientError(
+      {"Error": {"Code": "InvocationDoesNotExist"}}, "GetCommandInvocation"
+    )
+    state = fleet.step(state)
+
+    assert state["phase"] == "running"
+
+  def test_a_refresh_already_in_flight_is_adopted_not_resent(self, gcr):
+    """A retried step whose first attempt dispatched must not double-refresh."""
+    fleet = Fleet(gcr, ["i-a"])
+    fleet.ssm.list_commands.return_value = {
+      "Commands": [{"CommandId": "cmd-earlier", "Status": "InProgress"}]
+    }
+    state = fleet.start()
+
+    assert fleet.dispatched() == []
+    assert state["current"] == {"instance_id": "i-a", "command_id": "cmd-earlier"}
+
+  def test_force_ignore_busy_skips_the_counter(self, gcr):
+    fleet = Fleet(gcr, ["i-a"], busy={"i-a"})
+    fleet.start(force_ignore_busy=True)
+
+    assert fleet.dispatched() == ["i-a"]
+
+  def test_no_instances_is_complete(self, gcr):
+    """Staging routinely runs with no graph fleet at all."""
+    fleet = Fleet(gcr, [])
+    state = fleet.start()
+
+    assert state["phase"] == "complete"
+    assert fleet.dispatched() == []
+
+  def test_a_terminal_walk_does_not_move(self, gcr):
+    fleet = Fleet(gcr, ["i-a", "i-b"])
+    state = fleet.step(fleet.start(), _invocation("Failed", code=1))
+    fleet.step(state)
+    fleet.step(state)
+
+    assert fleet.dispatched() == ["i-a"]
+
+  def test_log_is_per_step(self, gcr):
+    fleet = Fleet(gcr, ["i-a"])
+    state = fleet.start()
+    assert state["log"]
+    assert fleet.step(state)["log"] == []
+
+
+class TestDispatch:
   def test_dispatches_the_stack_owned_document(self, gcr):
     """Never AWS-RunShellScript: the failure-paging rule filters on the document
     name, so the generic document would silently un-scope the page."""
-    with patch.object(gcr, "ssm") as ssm:
-      ssm.send_command.return_value = {"Command": {"CommandId": "cmd-1"}}
-      gcr.start({"node_types": "writer"})
+    fleet = Fleet(gcr, ["i-a"])
+    fleet.start()
 
-    kwargs = ssm.send_command.call_args.kwargs
+    kwargs = fleet.ssm.send_command.call_args.kwargs
     assert kwargs["DocumentName"] == gcr.REFRESH_DOCUMENT
-    assert kwargs["DocumentName"] != "AWS-RunShellScript"
+    assert kwargs["InstanceIds"] == ["i-a"]
 
-  def test_execution_timeout_exceeds_the_busy_wait(self, gcr):
-    """Left implicit, a raised wait would silently truncate the command
-    mid-refresh."""
-    with patch.object(gcr, "ssm") as ssm:
-      ssm.send_command.return_value = {"Command": {"CommandId": "cmd-1"}}
-      result = gcr.start({"node_types": "writer", "max_wait_minutes": 50})
+  def test_execution_timeout_exceeds_the_instance_side_wait(self, gcr):
+    fleet = Fleet(gcr, ["i-a"])
+    fleet.start(force_restart=True)
 
-    assert result["execution_timeout_seconds"] > 50 * 60
-    params = ssm.send_command.call_args.kwargs["Parameters"]
-    assert params["ExecutionTimeout"] == [str(result["execution_timeout_seconds"])]
+    params = fleet.ssm.send_command.call_args.kwargs["Parameters"]
+    assert int(params["ExecutionTimeout"][0]) > int(params["MaxWaitMinutes"][0]) * 60
+    assert params["ForceRestart"] == ["true"]
+    assert params["ForceIgnoreBusy"] == ["false"]
 
-  def test_rate_control_defaults_are_applied_by_the_lambda(self, gcr):
-    """Not just by the caller — otherwise a hand-rolled invocation hits the fleet
-    at SSM's default concurrency of 50."""
-    with patch.object(gcr, "ssm") as ssm:
-      ssm.send_command.return_value = {"Command": {"CommandId": "cmd-1"}}
-      gcr.start({"node_types": "writer"})
+  def test_deadline_is_max_wait_from_start(self, gcr):
+    fleet = Fleet(gcr, [])
+    state = fleet.start(max_wait_minutes=10)
 
-    kwargs = ssm.send_command.call_args.kwargs
-    assert kwargs["MaxConcurrency"] == gcr.DEFAULT_MAX_CONCURRENCY
-    assert kwargs["MaxErrors"] == gcr.DEFAULT_MAX_ERRORS
-
-
-class TestStatusSkipClassification:
-  def _status(self, gcr, invocations):
-    class _Paginator:
-      def paginate(self, **_):
-        return [{"CommandInvocations": invocations}]
-
-    with patch.object(gcr, "ssm") as ssm:
-      ssm.get_paginator.return_value = _Paginator()
-      return gcr.status({"command_id": "cmd-1"})
-
-  def test_skips_arrive_as_success_and_classify_off_the_marker(self, gcr):
-    """The document normalizes skip exits to 0, so a skip is a Success
-    invocation whose only distinguishing feature is its stdout marker."""
-    result = self._status(
-      gcr, [_invocation("Success", 0, "REFRESH_RESULT=skipped-no-script")]
-    )
-    assert result["failed"] == 0
-    assert result["skipped"] == 1
-    assert result["refresh_results"]["skipped-no-script"] == 1
-
-  def test_stale_env_marker_is_a_skip_not_a_failure(self, gcr):
-    result = self._status(
-      gcr, [_invocation("Success", 0, "REFRESH_RESULT=skipped-stale-env")]
-    )
-    assert result["failed"] == 0
-    assert result["skipped"] == 1
-    assert result["refresh_results"]["skipped-stale-env"] == 1
-
-  def test_a_hand_run_skip_with_a_raw_exit_code_gets_the_same_grace(self, gcr):
-    """Running refresh-graph-container.sh outside the document exits 3 with the
-    marker on stdout; the marker, not the exit code, is the signal."""
-    result = self._status(
-      gcr,
-      [_invocation("Failed", 3, "[refresh] ...\nREFRESH_RESULT=skipped-stale-env")],
-    )
-    assert result["failed"] == 0
-    assert result["skipped"] == 1
-
-  def test_a_real_failure_still_counts(self, gcr):
-    """127 from a missing binary inside the script is a genuine failure and must
-    not be downgraded just because a marker-less non-zero exit could look like
-    the old skip shape."""
-    result = self._status(gcr, [_invocation("Failed", 127)])
-    assert result["failed"] == 1
-    assert result["skipped"] == 0
-    assert result["failures"][0]["response_code"] == "127"
-
-  def test_terminated_before_running_is_a_failure_with_no_exit_code(self, gcr):
-    """MaxErrors tripping elsewhere in the fleet terminates queued invocations;
-    SSM marks them Failed/Terminated with a plugin ResponseCode of -1."""
-    result = self._status(gcr, [_invocation("Failed", -1, status_details="Terminated")])
-    assert result["failed"] == 1
-    assert result["failures"][0]["response_code"] == ""
-    assert result["failures"][0]["status_details"] == "Terminated"
-
-  def test_refresh_result_is_read_from_stdout(self, gcr):
-    result = self._status(
-      gcr, [_invocation("Success", 0, "[refresh] ...\nREFRESH_RESULT=no-op\n")]
-    )
-    assert result["refresh_results"]["no-op"] == 1
-    assert result["failed"] == 0
-
-  def test_mixed_fleet_separates_the_three_outcomes(self, gcr):
-    result = self._status(
-      gcr,
-      [
-        _invocation("Success", 0, "REFRESH_RESULT=updated"),
-        _invocation("Success", 0, "REFRESH_RESULT=no-op"),
-        _invocation("Success", 0, "REFRESH_RESULT=skipped-no-script"),
-        _invocation("Failed", 1),
-      ],
-    )
-    assert result["refresh_results"] == {
-      "updated": 1,
-      "no-op": 1,
-      "skipped-no-script": 1,
-    }
-    assert result["failed"] == 1
-    assert result["skipped"] == 1
-
-  def test_incomplete_while_invocations_are_in_progress(self, gcr):
-    result = self._status(gcr, [_invocation("InProgress", None)])
-    assert result["complete"] is False
-
-  def test_complete_once_all_terminal(self, gcr):
-    result = self._status(gcr, [_invocation("Success", 0)])
-    assert result["complete"] is True
+    assert abs(state["deadline"] - (time.time() + 600)) < 5
 
 
 class TestHandler:
   def test_unknown_action_is_rejected(self, gcr):
     assert gcr.handler({"action": "nope"}, None)["statusCode"] == 400
 
-  def test_status_requires_a_command_id(self, gcr):
-    assert gcr.handler({"action": "status"}, None)["statusCode"] == 400
+  def test_step_requires_state(self, gcr):
+    assert gcr.handler({"action": "step"}, None)["statusCode"] == 400
 
   def test_operational_failures_propagate(self, gcr):
     """An unhandled exception is what increments the AWS/Lambda Errors metric
-    the stack's alarm pages on. Swallowed into a 500-shaped payload, a failed
-    dispatch was visible only as a red job in a workflow someone had to be
-    watching."""
-    with patch.object(gcr, "ssm") as ssm:
-      ssm.send_command.side_effect = RuntimeError("dispatch broke")
-      with pytest.raises(RuntimeError, match="dispatch broke"):
-        gcr.handler({"action": "start", "node_types": "writer"}, None)
-
-  def test_no_matching_instances_is_not_an_operational_failure(self, gcr):
-    """Staging routinely runs with no graph fleet at all; an empty tag match
-    must return cleanly, not page."""
-    with patch.object(gcr, "ssm") as ssm:
-      ssm.send_command.side_effect = ClientError(
-        {"Error": {"Code": "InvalidInstanceId"}}, "SendCommand"
-      )
-      result = gcr.handler({"action": "start", "node_types": "writer"}, None)
-    assert result["statusCode"] == 200
-    assert result["commands"] == [
-      {"node_type": "writer", "command_id": None, "matched": 0}
-    ]
+    the stack's alarm pages on."""
+    fleet = Fleet(gcr, ["i-a"])
+    fleet.ssm.send_command.side_effect = RuntimeError("dispatch broke")
+    with pytest.raises(RuntimeError, match="dispatch broke"):
+      fleet.run(gcr.handler, {"action": "start", "node_types": "writer"}, None)

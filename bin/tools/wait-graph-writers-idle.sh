@@ -7,9 +7,10 @@
 #
 # Reads `active_destructive_ops` per instance from the graph instance registry.
 # The instance-side twin is wait_until_idle in
-# bin/userdata/common/refresh-graph-container.sh; both must read the counter
-# the same way (negative = idle, stale heartbeat = crashed writer, missing row
-# = proceed), so change them together.
+# bin/userdata/common/refresh-graph-container.sh, and the fleet refresh walk
+# reads it too (_busy in bin/lambda/graph_container_refresh.py); all three must
+# read the counter the same way (negative = idle, stale heartbeat = crashed
+# writer, missing row = proceed), so change them together.
 set -euo pipefail
 
 ENVIRONMENT="$1"

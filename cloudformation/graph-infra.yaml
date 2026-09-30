@@ -901,18 +901,18 @@ Resources:
   # ========================================
   # GRAPH CONTAINER REFRESH
   # ========================================
-  # Fans a container refresh out across the graph fleet with one tag-targeted SSM
-  # command per node-type group; per-instance logic lives in
-  # refresh-graph-container.sh. Gives non-GitHub callers the same path, with
-  # rate-control defaults in one place.
+  # Walks a container refresh across the graph fleet one instance at a time,
+  # passing over busy instances and coming back to them, and stopping at the
+  # first failure; per-instance logic lives in refresh-graph-container.sh.
 
   # A stack-owned document rather than AWS-RunShellScript: its name is the only
   # environment-specific field in an SSM invocation event, so the failure rule
   # filters on it and the Lambda role's SendCommand is scoped to it.
   #
-  # Skips ("script not installed", the script's exit 3) exit 0 with a
-  # REFRESH_RESULT marker, since every non-zero exit counts toward MaxErrors and
-  # would halt the rest of the fleet. Real failures keep their non-zero exits.
+  # Skips ("script not installed", the script's exit 3) and deferrals (still
+  # busy, exit 4) exit 0 with a REFRESH_RESULT marker: every Failed invocation
+  # pages through GraphRefreshFailureRule, and the walk decides what they mean
+  # from the marker. Real failures keep their non-zero exits.
   #
   # SSM keeps only the first 2500 chars of inline output, so the marker is
   # echoed first, followed by a 2000-byte tail of the on-instance log.
@@ -929,8 +929,9 @@ Resources:
           Refresh the graph API container on this instance to the current image.
           Instances that have not yet cycled onto the refresh script (or whose
           /etc/environment predates the completeness contract) exit 0 with a
-          REFRESH_RESULT=skipped-* marker rather than consuming the MaxErrors
-          budget. Inline output carries the REFRESH_RESULT marker first, then a
+          REFRESH_RESULT=skipped-* marker, and a still-busy instance exits 0
+          with REFRESH_RESULT=deferred-busy, rather than paging as failures.
+          Inline output carries the REFRESH_RESULT marker first, then a
           bounded tail; full output is kept on the instance at
           /var/log/graph-refresh-last.log.
         parameters:
@@ -965,7 +966,7 @@ Resources:
                 - 'MAX_WAIT_MINUTES={{ MaxWaitMinutes }} FORCE_IGNORE_BUSY={{ ForceIgnoreBusy }} FORCE_RESTART={{ ForceRestart }} /usr/local/bin/refresh-graph-container.sh >"$LOG" 2>&1; rc=$?'
                 - 'grep "^REFRESH_RESULT=" "$LOG" || true'
                 - 'tail -c 2000 "$LOG"'
-                - '[ "$rc" -eq 3 ] && exit 0; exit $rc'
+                - '[ "$rc" -eq 3 ] && exit 0; [ "$rc" -eq 4 ] && exit 0; exit $rc'
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-graph-refresh"
@@ -984,13 +985,13 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       FunctionName: !Sub "${AWS::StackName}-graph-container-refresh"
-      Description: "Fleet-wide graph container refresh via tag-targeted SSM Run Command"
+      Description: "Graph container refresh walked across the fleet one instance at a time"
       PackageType: Image
       Architectures:
         - arm64
-      # Dispatch and aggregation only — the 30-minute busy-wait happens on the
-      # instance, which is precisely why this does not need to outlive it. A
-      # Lambda that waited would exceed the 15-minute ceiling and pay to idle.
+      # One step of the walk per call — the caller drives it and carries the
+      # state, so the walk's 30-minute busy budget never lives in a Lambda. One
+      # that waited would exceed the 15-minute ceiling and pay to idle.
       Timeout: 120
       MemorySize: 256
       Role: !GetAtt GraphContainerRefreshRole.Arn
@@ -998,6 +999,7 @@ Resources:
         Variables:
           ENVIRONMENT: !Ref Environment
           REFRESH_DOCUMENT_NAME: !Ref GraphRefreshDocument
+          INSTANCE_REGISTRY_TABLE: !Ref InstanceRegistry
       Code:
         ImageUri: !Ref LambdaImageUri
       ImageConfig:
@@ -1051,9 +1053,13 @@ Resources:
               - Effect: Allow
                 Action:
                   - ssm:ListCommands
-                  - ssm:ListCommandInvocations
                   - ssm:GetCommandInvocation
+                  - ec2:DescribeInstances
                 Resource: "*"
+              # The busy counter, read before each dispatch.
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !GetAtt InstanceRegistry.Arn
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-graph-container-refresh-role"

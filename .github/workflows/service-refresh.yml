@@ -41,7 +41,7 @@ on:
           - shared-replicas
         default: "writer"
       max_wait_minutes:
-        description: "Minutes to wait for in-flight destructive ops to finish"
+        description: "Minutes the refresh keeps coming back to instances busy with destructive ops"
         required: false
         type: string
         default: "30"
@@ -83,7 +83,7 @@ on:
         type: string
         default: "writer"
       max_wait_minutes:
-        description: "Minutes to wait for in-flight destructive ops on the target instance"
+        description: "Minutes the refresh keeps coming back to instances busy with destructive ops"
         required: false
         type: string
         default: "30"
@@ -128,8 +128,8 @@ permissions: {}
 
 jobs:
   # Computes the refresh job's timeout (Actions expressions have no arithmetic).
-  # It must exceed the poll budget (max_wait_minutes + 15), or the runner is
-  # killed before the poll's graceful give-up branch can fire.
+  # It must exceed the walk's budget (max_wait_minutes + 50), or the runner is
+  # killed before the loop's graceful give-up branch can fire.
   graph-refresh-budget:
     if: ${{ inputs.graph_refresh_enabled == true || inputs.graph_refresh_enabled == 'true' }}
     runs-on: ubuntu-latest
@@ -145,16 +145,17 @@ jobs:
             echo "::error::max_wait_minutes must be a positive integer, got '$MAX_WAIT'"
             exit 1
           fi
-          # +20 covers the poll loop's own +15 headroom plus runner startup.
-          echo "job_timeout_minutes=$((MAX_WAIT + 20))" >> $GITHUB_OUTPUT
-          echo "Refresh job timeout: $((MAX_WAIT + 20))m (busy-wait ceiling ${MAX_WAIT}m)"
+          # +60 covers the loop's +50 (the sequential refreshes themselves)
+          # plus runner startup.
+          echo "job_timeout_minutes=$((MAX_WAIT + 60))" >> $GITHUB_OUTPUT
+          echo "Refresh job timeout: $((MAX_WAIT + 60))m (busy budget ${MAX_WAIT}m)"
 
   # ============================================
   # Graph Container Refresh (fleet-wide, via SSM)
   # ============================================
-  # One Lambda invocation, one tag-targeted SSM command per node-type group.
-  # Not a job matrix: it caps at 256 jobs and would pay runner minutes per
-  # instance through the busy-wait.
+  # One instance at a time, stepped through the refresh Lambda: busy instances
+  # are passed over and come back around, the first failure stops the walk.
+  # Not a job matrix: it caps at 256 jobs and would run instances in parallel.
   refresh-graph:
     needs: [graph-refresh-budget]
     if: ${{ inputs.graph_refresh_enabled == true || inputs.graph_refresh_enabled == 'true' }}
@@ -215,98 +216,99 @@ jobs:
           set -uo pipefail
           echo "Invoking ${FUNCTION}"
 
-          PAYLOAD=$(jq -n \
+          # The Lambda walks the fleet one instance at a time, passing over busy
+          # instances and coming back to them, and stops at the first failure.
+          # Each call is one step; this loop carries the state between them.
+          invoke() {
+            aws lambda invoke --function-name "$FUNCTION" \
+              --cli-binary-format raw-in-base64-out \
+              --payload "file://$1" --region "$REGION" "$2" >/dev/null
+          }
+
+          jq -n \
             --arg env "$ENV_NAME" --arg nt "$NODE_TYPES" \
             --argjson wait "$MAX_WAIT" \
             --argjson ignore_busy "$([ "$FORCE_IGNORE_BUSY" = "true" ] && echo true || echo false)" \
             --argjson force_restart "$([ "$FORCE_RESTART" = "true" ] && echo true || echo false)" \
             '{action:"start", environment:$env, node_types:$nt, max_wait_minutes:$wait,
-              force_ignore_busy:$ignore_busy, force_restart:$force_restart}')
+              force_ignore_busy:$ignore_busy, force_restart:$force_restart}' > /tmp/request.json
 
-          aws lambda invoke --function-name "$FUNCTION" \
-            --cli-binary-format raw-in-base64-out \
-            --payload "$PAYLOAD" --region "$REGION" /tmp/start.json >/dev/null || {
+          invoke /tmp/request.json /tmp/state.json || {
             echo "::error::Failed to invoke ${FUNCTION}"; exit 1; }
-
-          cat /tmp/start.json | jq .
           # A propagated exception has no statusCode at all — its message is in
           # errorMessage (the Lambda raises operational failures so the stack's
           # errors alarm pages on them; see graph_container_refresh.handler).
-          if [ "$(jq -r '.statusCode' /tmp/start.json)" != "200" ]; then
-            echo "::error::Refresh dispatch failed: $(jq -r '.error // .errorMessage // "unknown"' /tmp/start.json)"
+          if [ "$(jq -r '.statusCode' /tmp/state.json)" != "200" ]; then
+            echo "::error::Refresh start failed: $(jq -r '.error // .errorMessage // "unknown"' /tmp/state.json)"
             exit 1
           fi
+          jq -r '.log[]' /tmp/state.json
 
-          IDS=$(jq -r '[.commands[].command_id | select(. != null)]' /tmp/start.json)
-          if [ "$(jq -r 'length' <<<"$IDS")" = "0" ]; then
-            echo "No graph instances matched — nothing to refresh."
-            echo "### Graph refresh: no instances matched" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "Dispatched commands: $IDS"
-
-          # Poll to terminal. The budget mirrors the instance-side ceiling plus
-          # headroom for the pull, restart and health check, and the job's own
-          # timeout is derived to exceed it (see graph-refresh-budget).
-          DEADLINE=$(( $(date +%s) + MAX_WAIT * 60 + 900 ))
-          echo '{}' > /tmp/status.json
+          # The walk's own deadline bounds waiting on busy instances; this one
+          # also covers the refreshes themselves, and the job's timeout is
+          # derived to exceed it (see graph-refresh-budget).
+          DEADLINE=$(( $(date +%s) + (MAX_WAIT + 50) * 60 ))
           POLL_ERRORS=0
-          while true; do
-            if aws lambda invoke --function-name "$FUNCTION" \
-                 --cli-binary-format raw-in-base64-out \
-                 --payload "$(jq -n --argjson ids "$IDS" '{action:"status", command_ids:$ids}')" \
-                 --region "$REGION" /tmp/status.json >/dev/null \
-               && [ "$(jq -r '.statusCode // empty' /tmp/status.json)" = "200" ]; then
+          while ! jq -e '.phase | IN("complete", "failed", "deferred")' /tmp/state.json >/dev/null; do
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "::error::Refresh did not finish within the budget and has stopped dispatching. In flight: $(jq -r '.current.instance_id // "none"' /tmp/state.json); not attempted: $(jq -r '.queue | join(", ")' /tmp/state.json)"
+              exit 1
+            fi
+            sleep 15
+            jq '{action: "step", state: .}' /tmp/state.json > /tmp/request.json
+            if invoke /tmp/request.json /tmp/next.json \
+               && [ "$(jq -r '.statusCode // empty' /tmp/next.json)" = "200" ]; then
+              mv /tmp/next.json /tmp/state.json
               POLL_ERRORS=0
+              jq -r '.log[]' /tmp/state.json
             else
-              # Ride out transient failures, but a poller that never reaches the
-              # Lambda must not read as "still in progress" until the deadline.
+              # Ride out transient failures, but a walk that cannot be stepped
+              # must not read as "still in progress" until the deadline.
               POLL_ERRORS=$((POLL_ERRORS + 1))
-              echo "::warning::status poll failed (${POLL_ERRORS} consecutive)"
+              echo "::warning::refresh step failed (${POLL_ERRORS} consecutive): $(jq -r '.error // .errorMessage // "no response"' /tmp/next.json 2>/dev/null)"
               if [ "$POLL_ERRORS" -ge 5 ]; then
-                echo "::error::Cannot reach ${FUNCTION} to read refresh status after ${POLL_ERRORS} attempts. The refresh may still be running on the fleet — check the SSM command history."
+                echo "::error::Cannot step the refresh through ${FUNCTION} after ${POLL_ERRORS} attempts. In flight: $(jq -r '.current.instance_id // "none"' /tmp/state.json) — check its SSM command history."
                 exit 1
               fi
             fi
-
-            if [ "$(jq -r '.complete // false' /tmp/status.json)" = "true" ]; then break; fi
-            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
-              echo "::warning::Refresh did not reach a terminal state within the budget; it may still be running on the fleet."
-              break
-            fi
-            sleep 20
           done
 
-          jq . /tmp/status.json
-
-          # Per-instance outcomes, so a fleet stuck on skipped-* stays visible
-          # behind a green job.
+          PHASE=$(jq -r '.phase' /tmp/state.json)
           {
-            echo "### Graph container refresh (${ENV_NAME}, ${NODE_TYPES})"
+            echo "### Graph container refresh (${ENV_NAME}, ${NODE_TYPES}): ${PHASE}"
             echo
-            echo "| Outcome | Instances |"
+            echo "| Instance | Outcome |"
             echo "| --- | --- |"
-            jq -r '.refresh_results // {} | to_entries[] | "| \(.key) | \(.value) |"' /tmp/status.json
-            echo
-            echo "| Invocation status | Count |"
-            echo "| --- | --- |"
-            jq -r '.counts // {} | to_entries[] | "| \(.key) | \(.value) |"' /tmp/status.json
+            jq -r '.outcomes[] | "| \(.instance_id) | \(.result) |"' /tmp/state.json
+            jq -r '.failure // empty | "| \(.instance_id) | **failed** (\(.status) \(.status_details), exit \(.response_code)) |"' /tmp/state.json
+            jq -r '.phase as $p | .queue[] | "| \(.) | \(if $p == "deferred" then "deferred: still busy" else "not attempted" end) |"' /tmp/state.json
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # `failed` excludes skips (script not installed yet, or stale
-          # /etc/environment): they exit 0 so they don't spend the SSM MaxErrors
-          # budget, and are surfaced here as warnings rather than failing the deploy.
-          SKIPPED=$(jq -r '.skipped // 0' /tmp/status.json)
-          if [ "${SKIPPED:-0}" -gt 0 ]; then
+          if [ "$(jq '.outcomes | length' /tmp/state.json)" = "0" ] && [ "$PHASE" = "complete" ]; then
+            echo "No graph instances matched — nothing to refresh."
+            exit 0
+          fi
+
+          # Skips (script not installed yet, or stale /etc/environment) leave the
+          # container deliberately untouched; a warning, not a failed deploy.
+          SKIPPED=$(jq '[.outcomes[] | select(.result | startswith("skipped-"))] | length' /tmp/state.json)
+          if [ "$SKIPPED" -gt 0 ]; then
             echo "::warning::${SKIPPED} instance(s) skipped — not yet cycled onto the new refresh scripts. Cycle them (graph-asg-refresh.yml) to pick them up."
           fi
 
-          FAILED=$(jq -r '.failed // 0' /tmp/status.json)
-          if [ "${FAILED:-0}" -gt 0 ]; then
-            echo "::error::${FAILED} instance(s) failed to refresh"
-            jq -r '.failures[]? | "  \(.instance_id): \(.status) (exit \(.response_code))"' /tmp/status.json
-            exit 1
-          fi
+          case "$PHASE" in
+            failed)
+              echo "::error::Refresh failed on $(jq -r '.failure.instance_id' /tmp/state.json) and stopped; $(jq '.queue | length' /tmp/state.json) instance(s) not attempted."
+              jq -r '.failure | "  status: \(.status) \(.status_details), exit \(.response_code), command \(.command_id)\n  output tail:\n\(.output_tail)"' /tmp/state.json
+              exit 1
+              ;;
+            deferred)
+              echo "::error::Still busy after ${MAX_WAIT} minute(s), left on the old image:"
+              jq -r '.busy as $b | .queue[] | "  \(.): \($b[.].kind // "busy") (last heartbeat \($b[.].last_at // "unknown"))"' /tmp/state.json
+              echo "Re-run Service Refresh once they are idle; instances already current no-op."
+              exit 1
+              ;;
+          esac
           echo "Refresh complete."
 
   # ============================================
