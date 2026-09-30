@@ -111,12 +111,24 @@ These secrets are **not required** for deployment but enhance workflow functiona
 | `ACTIONS_TOKEN` | GitHub PAT with `repo` scope | Push to protected branches, create tags/releases, PRs that auto-trigger CI |
 | `ANTHROPIC_API_KEY` | Claude API key | AI-generated release notes (`tag-release.yml`); without it the changelog falls back to a plain commit list |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token | The `@claude` PR/issue assistant workflow (`claude.yml`) |
-| `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` | Docker Hub credentials | Publishing release images to Docker Hub, gated by the `DOCKERHUB_PUBLISHING_ENABLED` variable |
 
 **ACTIONS_TOKEN details:**
 - Enables pushing to protected `main` branch, creating tags/releases, and PRs that auto-trigger CI workflows
 - Without it, workflows fall back to `github.token` which may fail on protected branches and won't trigger `on:pull_request` workflows
 - To create: [github.com/settings/tokens](https://github.com/settings/tokens) → new token with `repo` scope → `gh secret set ACTIONS_TOKEN`
+
+### Docker Hub publishing (optional)
+
+Release builds can also publish the image to Docker Hub. There's no stored credential: the workflow signs in over OIDC, the same way it assumes the AWS role. It's off unless `DOCKERHUB_PUBLISHING_ENABLED` is `true` (`setup-gha` sets it to `false`). To turn it on:
+
+1. In Docker Hub, create an **OIDC connection** for GitHub Actions under your organization's **Identity & auth** settings. This needs a Docker Team or Business plan. Add a ruleset per repository:
+   - subject claim `repo:<owner>/<repository>:*`
+   - the image-push scope on that repository
+   - **Read public repositories** ticked. The build pulls public images under the same login, and those pulls are refused without it.
+2. Set two GitHub variables: `DOCKERHUB_USERNAME` (your Docker Hub organization name) and `DOCKERHUB_OIDC_CONNECTION_ID` (the connection's ID).
+3. Set `DOCKERHUB_PUBLISHING_ENABLED` to `true`.
+
+The workflow asks for a 30-minute token (`DOCKERHUB_OIDC_EXPIREIN`), because the default of 300 seconds expires before a multi-arch build finishes pushing.
 
 ### GitHub Variables (`just setup-gha`)
 
