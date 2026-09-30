@@ -163,9 +163,6 @@ jobs:
       # default branch — filing prod's container scans under main makes those
       # alerts describe what is deployed. Staging keeps its own ref.
       sarif_ref: refs/heads/main
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   create-deployment:
     needs: [runner]
