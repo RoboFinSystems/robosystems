@@ -94,7 +94,7 @@ jobs:
         env:
           DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_OIDC_CONNECTION_ID }}
         with:
-          username: robofinsystems
+          username: ${{ vars.DOCKERHUB_USERNAME }}
 
       - name: Resolve image tag and check existence
         id: resolve
