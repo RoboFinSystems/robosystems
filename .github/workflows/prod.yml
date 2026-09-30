@@ -24,7 +24,7 @@ on:
         type: string
         default: "30"
       graph_refresh_force_ignore_busy:
-        description: "Skip busy-counter check and cycle graph containers immediately (emergency override)"
+        description: "Skip busy-lease check and cycle graph containers immediately (emergency override)"
         required: false
         type: boolean
         default: false
@@ -721,6 +721,12 @@ jobs:
   service-refresh:
     needs: [runner, create-deployment, stack-config, deploy-graph]
     if: ${{ !cancelled() && needs.deploy-graph.result == 'success' }}
+    # actions: write lets instances still busy at the deadline be handed to a
+    # follow-up Service Refresh run instead of failing the deploy.
+    permissions:
+      contents: read
+      id-token: write
+      actions: write
     uses: ./.github/workflows/service-refresh.yml
     with:
       environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
@@ -729,10 +735,11 @@ jobs:
       # Graph refresh (EC2 containers via SSM)
       graph_refresh_enabled: ${{ inputs.graph_container_refresh != false }}
       graph_node_types: "writer"
-      # Pre-refresh busy-counter wait (protects in-flight materialization
-      # on the shared-tier SEC master from mid-op cycling)
+      # Pre-refresh busy wait (protects in-flight materialization from mid-op
+      # cycling); instances still busy after it go to a follow-up run
       max_wait_minutes: ${{ inputs.graph_refresh_max_wait_minutes || '30' }}
       force_ignore_busy: ${{ (inputs.graph_refresh_force_ignore_busy && 'true') || 'false' }}
+      defer_to_followup: "true"
       # API/Dagster/Worker refresh disabled - ECS auto-deploys via version tags in task definitions
       api_refresh_enabled: "false"
       api_stack_name: ${{ needs.stack-config.outputs.api_stack }}

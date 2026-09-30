@@ -5,12 +5,13 @@
 # Usage: wait-graph-writers-idle.sh <environment> <region> <asg-name> <max-wait-minutes> [force]
 # Exit 0 when idle (or force=true), 1 on timeout, 2 when the ASG can't be read.
 #
-# Reads `active_destructive_ops` per instance from the graph instance registry.
-# The instance-side twin is wait_until_idle in
-# bin/userdata/common/refresh-graph-container.sh, and the fleet refresh walk
-# reads it too (_busy in bin/lambda/graph_container_refresh.py); all three must
-# read the counter the same way (negative = idle, stale heartbeat = crashed
-# writer, missing row = proceed), so change them together.
+# Reads the `active_leases` set (`<started_at>|<op_kind>|<id>` tokens) per
+# instance from the graph instance registry. The instance-side twin is
+# wait_until_idle in bin/userdata/common/refresh-graph-container.sh, and the
+# fleet refresh walk reads it too (_busy in bin/lambda/graph_container_refresh.py);
+# all three must read the leases the same way (no leases = idle, a stale or
+# unparseable lease = crashed holder, missing row = proceed), so change them
+# together.
 set -euo pipefail
 
 ENVIRONMENT="$1"
@@ -18,8 +19,7 @@ REGION="$2"
 ASG_NAME="$3"
 MAX_WAIT_ATTEMPTS="$4"
 FORCE_IGNORE_BUSY="${5:-false}"
-# Counter > 0 with a heartbeat older than 6h is a crashed writer (6h covers
-# full SEC backfills).
+# A lease older than 6h is a crashed holder (6h covers full SEC backfills).
 STALE_WINDOW_SECONDS=21600
 
 if [ "$FORCE_IGNORE_BUSY" = "true" ]; then
@@ -65,33 +65,22 @@ while [ "$WAIT_ATTEMPT" -lt "$MAX_WAIT_ATTEMPTS" ]; do
       continue
     fi
 
-    COUNT=$(echo "$ITEM" | jq -r '.active_destructive_ops.N // "0"')
-    LAST_AT=$(echo "$ITEM" | jq -r '.last_destructive_op_at.S // ""')
-    KIND=$(echo "$ITEM" | jq -r '.last_destructive_op_kind.S // "unknown"')
-
-    # A counter that went negative (a swallowed increment failure on the
-    # writer) is idle, not "still waiting".
-    if [ "${COUNT:-0}" -le 0 ] 2>/dev/null; then
-      if [ "${COUNT:-0}" -lt 0 ] 2>/dev/null; then
-        echo "    ::warning::Negative busy counter on ${INSTANCE_ID} (count=${COUNT}); treating as idle."
-      fi
-      continue
-    fi
-
-    if [ -n "$LAST_AT" ]; then
-      LAST_EPOCH=$(date -u -d "${LAST_AT}" +%s 2>/dev/null || echo 0)
-      AGE=$(($(date -u +%s) - LAST_EPOCH))
-      if [ "$LAST_EPOCH" -gt 0 ] && [ "$AGE" -gt "$STALE_WINDOW_SECONDS" ]; then
-        echo "    ::warning::Stale busy counter on ${INSTANCE_ID}: count=${COUNT}, kind=${KIND}, last=${LAST_AT} (${AGE}s ago > ${STALE_WINDOW_SECONDS}s). Treating as crashed."
+    COUNT=0
+    NOW=$(date -u +%s)
+    # `date -d` needs GNU coreutils; an unparseable lease reads as stale.
+    while IFS= read -r LEASE; do
+      [ -z "$LEASE" ] && continue
+      LEASE_EPOCH=$(date -u -d "${LEASE%%|*}" +%s 2>/dev/null || echo 0)
+      if [ "$LEASE_EPOCH" -le 0 ] || [ $((NOW - LEASE_EPOCH)) -gt "$STALE_WINDOW_SECONDS" ]; then
+        if [ "$WAIT_ATTEMPT" -eq 1 ]; then
+          echo "    ::warning::Stale busy lease on ${INSTANCE_ID}: ${LEASE}. Treating its holder as crashed."
+        fi
         continue
       fi
-      # An unparseable heartbeat disables stale detection; `date -d` needs GNU coreutils.
-      if [ "$LAST_EPOCH" -eq 0 ] && [ "$WAIT_ATTEMPT" -eq 1 ]; then
-        echo "    ::warning::Could not parse heartbeat '${LAST_AT}' on ${INSTANCE_ID} — stale-counter detection is inactive for this run"
-      fi
-    fi
+      COUNT=$((COUNT + 1))
+      echo "    ${INSTANCE_ID}: busy (${LEASE})"
+    done < <(echo "$ITEM" | jq -r '.active_leases.SS // [] | .[]')
 
-    echo "    ${INSTANCE_ID}: busy (count=${COUNT}, kind=${KIND}, last=${LAST_AT})"
     TOTAL_BUSY=$((TOTAL_BUSY + COUNT))
   done
 

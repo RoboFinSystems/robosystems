@@ -31,7 +31,7 @@ on:
         type: string
         default: "30"
       force_ignore_busy:
-        description: "Skip busy-counter check (emergency override)"
+        description: "Skip busy-lease check (emergency override)"
         required: false
         type: boolean
         default: false
@@ -67,7 +67,7 @@ on:
         type: string
         default: "30"
       force_ignore_busy:
-        description: "Skip busy-counter check (emergency override)"
+        description: "Skip busy-lease check (emergency override)"
         required: false
         type: boolean
         default: false
@@ -123,7 +123,7 @@ jobs:
           # SHARED_TIERS in .github/actions/refresh-graph-asg/action.yml.
           if [ -n "$TIER" ]; then TIERS=1; else TIERS=3; fi
 
-          # The busy-counter gate runs per tier in both modes and cannot be
+          # The busy-lease gate runs per tier in both modes and cannot be
           # deferred, so it is always in the budget. The completion wait only
           # applies when monitoring — that is the whole point of the async mode.
           if [ "$WAIT_FOR_COMPLETION" = "false" ]; then COMPLETION=0; else COMPLETION="$COMPLETION_WAIT"; fi

@@ -33,7 +33,7 @@ inputs:
     default: "30"
   force-ignore-busy:
     description: >-
-      If true, skip the busy-counter pre-check and start instance refresh
+      If true, skip the busy-lease pre-check and start instance refresh
       immediately even if a destructive operation is in flight. Emergency
       escape hatch — use sparingly, interrupted materializations may
       require a full graph rebuild.
@@ -46,7 +46,7 @@ inputs:
       return — the ASG carries them out regardless of whether anything is
       watching, so this trades the failure signal for not holding a runner
       through a fleet roll that can outlast any sensible job timeout. The
-      busy-counter gate still runs either way; it is the part that cannot be
+      busy-lease gate still runs either way; it is the part that cannot be
       deferred. Mirrors `wait_for_completion` on SharedReplicaRefreshConfig.
     required: false
     default: "true"
@@ -283,7 +283,7 @@ runs:
         fi
 
         # Fire-and-forget: the ASG carries the refresh out unwatched, and a large
-        # fleet's roll can outlast any job timeout. The busy-counter gate above
+        # fleet's roll can outlast any job timeout. The busy-lease gate above
         # still ran, since it must precede instance replacement.
         if [ "$WAIT_FOR_COMPLETION" != "true" ]; then
           echo ""

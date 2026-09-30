@@ -52,18 +52,18 @@ def _launch(env: str = "test", state: str = "running", **tags: str) -> str:
   return instance
 
 
-def _registry(
-  instance_id: str, count: int, age_seconds: int = 30, kind="materialization"
-):
-  last_at = (datetime.now(UTC) - timedelta(seconds=age_seconds)).isoformat()
+def _lease(age_seconds: int = 30, kind: str = "materialization") -> str:
+  """A lease token as instance_busy.py writes it."""
+  started = datetime.now(UTC) - timedelta(seconds=age_seconds)
+  return f"{started.isoformat(timespec='seconds')}|{kind}|{age_seconds:012x}"
+
+
+def _registry(instance_id: str, *leases: str):
+  item = {"instance_id": {"S": instance_id}}
+  if leases:
+    item["active_leases"] = {"SS": list(leases)}
   boto3.client("dynamodb", region_name="us-east-1").put_item(
-    TableName=REGISTRY,
-    Item={
-      "instance_id": {"S": instance_id},
-      "active_destructive_ops": {"N": str(count)},
-      "last_destructive_op_at": {"S": last_at},
-      "last_destructive_op_kind": {"S": kind},
-    },
+    TableName=REGISTRY, Item=item
   )
 
 
@@ -157,29 +157,78 @@ class TestTargeting:
 
     assert gcr._resolve_queue(["writer"], "test") == []
 
+  def test_instance_ids_narrow_the_queue_within_the_group(self, gcr):
+    a = _launch(LadybugRole="writer", WriterTier="ladybug-standard")
+    _launch(LadybugRole="writer", WriterTier="ladybug-standard")
+    replica = _launch(NodeType="shared_replica")
+
+    assert gcr._resolve_queue(["writer"], "test", [a, replica]) == [a]
+
+  @pytest.mark.parametrize(
+    "value, expected",
+    [
+      (None, None),
+      ("", None),
+      ("i-a, i-b", ["i-a", "i-b"]),
+      ("i-a i-b", ["i-a", "i-b"]),
+      (["i-a", " "], ["i-a"]),
+    ],
+  )
+  def test_instance_ids_accept_a_list_or_a_string(self, gcr, value, expected):
+    assert gcr._parse_instance_ids(value) == expected
+
+  def test_start_names_requested_instances_it_could_not_match(self, gcr):
+    a = _launch(LadybugRole="writer", WriterTier="ladybug-standard")
+    with patch.object(gcr, "ssm") as ssm:
+      ssm.list_commands.return_value = {"Commands": []}
+      ssm.send_command.return_value = {"Command": {"CommandId": "cmd"}}
+      state = gcr.start(
+        {"node_types": "writer", "environment": "test", "instance_ids": [a, "i-gone"]}
+      )
+    assert state["current"]["instance_id"] == a
+    assert any("i-gone" in line for line in state["log"])
+
   def test_unknown_group_raises(self, gcr):
     with pytest.raises(ValueError, match="Unknown node_type"):
       gcr._filters_for("nonsense", "test")
 
 
-class TestBusyCounter:
+class TestBusyLeases:
   """Fails open exactly like its twins in refresh-graph-container.sh and
   wait-graph-writers-idle.sh — the instance repeats the check before acting."""
 
   def test_missing_row_is_idle(self, gcr):
     assert gcr._busy("i-unknown") is None
 
-  @pytest.mark.parametrize("count", [0, -1])
-  def test_non_positive_counter_is_idle(self, gcr, count):
-    _registry("i-a", count)
+  def test_no_leases_is_idle(self, gcr):
+    _registry("i-a")
     assert gcr._busy("i-a") is None
 
-  def test_fresh_heartbeat_is_busy(self, gcr):
-    _registry("i-a", 1, kind="materialization")
-    assert gcr._busy("i-a")["kind"] == "materialization"
+  def test_live_lease_is_busy(self, gcr):
+    _registry("i-a", _lease(kind="extensions_materialize"))
+    busy = gcr._busy("i-a")
+    assert busy["kind"] == "extensions_materialize"
+    assert busy["count"] == "1"
 
-  def test_stale_heartbeat_is_a_crashed_writer(self, gcr):
-    _registry("i-a", 1, age_seconds=gcr.STALE_WINDOW_SECONDS + 60)
+  def test_stale_lease_is_a_crashed_holder(self, gcr):
+    _registry("i-a", _lease(age_seconds=gcr.STALE_WINDOW_SECONDS + 60))
+    assert gcr._busy("i-a") is None
+
+  def test_a_leak_does_not_outlive_its_window_on_a_busy_instance(self, gcr):
+    """The counter this replaced shared one heartbeat, which every healthy op
+    refreshed: a leaked count on an active writer read as busy forever."""
+    leaked = _lease(age_seconds=gcr.STALE_WINDOW_SECONDS + 60, kind="leaked")
+    live = _lease(age_seconds=10, kind="materialization")
+    _registry("i-a", leaked, live)
+    busy = gcr._busy("i-a")
+    assert busy["count"] == "1"
+    assert busy["kind"] == "materialization"
+    # And once the live op releases, the leak alone reads as idle.
+    _registry("i-a", leaked)
+    assert gcr._busy("i-a") is None
+
+  def test_unparseable_lease_is_idle(self, gcr):
+    _registry("i-a", "garbage")
     assert gcr._busy("i-a") is None
 
   def test_unreadable_registry_is_idle(self, gcr):

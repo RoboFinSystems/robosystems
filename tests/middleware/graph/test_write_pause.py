@@ -9,6 +9,7 @@ can wait for it. The pause lapses on its own and fails open.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -68,30 +69,35 @@ def paused(ssm):
 
 
 @pytest.fixture
-def counter():
+def lease():
   with (
-    patch.object(ib, "_update_counter_async") as async_update,
-    patch.object(ib, "_update_counter") as sync_update,
+    patch.object(ib, "_acquire_async", return_value="lease-1") as acquire_async,
+    patch.object(ib, "_release_async") as release_async,
+    patch.object(ib, "_acquire", return_value="lease-1") as acquire,
+    patch.object(ib, "_release") as release,
   ):
-    yield async_update, sync_update
+    yield SimpleNamespace(
+      acquire_async=acquire_async,
+      release_async=release_async,
+      acquire=acquire,
+      release=release,
+    )
 
 
-async def test_a_new_write_is_refused_before_it_is_counted(paused, counter):
-  async_update, _ = counter
+async def test_a_new_write_is_refused_before_it_is_counted(paused, lease):
   with pytest.raises(write_pause.GraphWritesPausedError):
     await ib.begin_destructive_op("i-abc", ib.OP_KIND_MATERIALIZATION)
-  async_update.assert_not_called()
+  lease.acquire_async.assert_not_called()
 
 
-async def test_work_admitted_before_the_pause_runs_to_completion(paused, counter):
+async def test_work_admitted_before_the_pause_runs_to_completion(paused, lease):
   """The Graph API marks each table call busy; a pause must not cut one off."""
-  async_update, sync_update = counter
   async with ib.instance_busy("i-abc", ib.OP_KIND_MATERIALIZATION):
     pass
   with ib.instance_busy_sync("i-abc", ib.OP_KIND_MATERIALIZATION):
     pass
-  assert async_update.await_count == 2
-  assert sync_update.call_count == 2
+  lease.release_async.assert_awaited_once_with("i-abc", "lease-1")
+  lease.release.assert_called_once_with("i-abc", "lease-1")
 
 
 async def test_a_refused_ledger_materialization_is_an_error_on_the_result(paused):
@@ -105,15 +111,17 @@ async def test_a_refused_ledger_materialization_is_an_error_on_the_result(paused
       "robosystems.graph_api.client.factory.get_graph_client",
       new=AsyncMock(return_value=client),
     ),
-    patch.object(ib, "_update_counter_async") as counted,
+    patch.object(ib, "_acquire_async") as acquired,
+    patch.object(ib, "_release_async") as released,
   ):
     result = await ExtensionsMaterializer().materialize("kg0123456789abcdef01")
 
   assert result.status == "error"
   assert "paused for maintenance" in result.errors[0]
   client.__aexit__.assert_awaited()
-  # The finally's decrement names no instance, which is a no-op.
-  assert all(not c.args[0] for c in counted.call_args_list)
+  # Refused before a lease was taken; the finally releases the empty lease.
+  acquired.assert_not_called()
+  released.assert_awaited_once_with("i-abc", "")
 
 
 def test_the_stale_graph_sensor_waits_out_the_pause(paused):
@@ -178,7 +186,7 @@ async def test_a_forked_subgraph_is_refused_before_it_is_queued(paused):
   enqueue.assert_not_awaited()
 
 
-async def test_a_queued_file_write_is_refused_at_its_start(paused, counter):
+async def test_a_queued_file_write_is_refused_at_its_start(paused, lease):
   from robosystems.dagster.jobs.graph import _counted_materialize_table
 
   client = AsyncMock()
@@ -186,20 +194,20 @@ async def test_a_queued_file_write_is_refused_at_its_start(paused, counter):
   with pytest.raises(write_pause.GraphWritesPausedError):
     await _counted_materialize_table(client, "kg1", "Entity", ["f1"])
   client.materialize_table.assert_not_awaited()
-  counter[0].assert_not_called()
+  lease.acquire_async.assert_not_called()
 
 
-async def test_a_file_write_is_counted_for_the_drain(ssm, counter):
+async def test_a_file_write_is_counted_for_the_drain(ssm, lease):
   from robosystems.dagster.jobs.graph import _counted_materialize_table
 
-  async_update, _ = counter
   client = AsyncMock()
   client._instance_id = "i-abc"
   client.materialize_table.return_value = {"rows_ingested": 3}
   assert await _counted_materialize_table(client, "kg1", "Entity", ["f1"]) == {
     "rows_ingested": 3
   }
-  assert [c.kwargs["delta"] for c in async_update.await_args_list] == [1, -1]
+  lease.acquire_async.assert_awaited_once()
+  lease.release_async.assert_awaited_once_with("i-abc", "lease-1")
 
 
 def test_a_deferred_ledger_run_does_not_fail_the_dagster_run(paused):
@@ -246,7 +254,5 @@ def test_a_broken_ssm_client_fails_open(monkeypatch):
   assert write_pause.graph_writes_paused_until(now=NOW) is None
 
 
-async def test_writes_proceed_without_a_pause(ssm, counter):
-  async_update, _ = counter
-  await ib.begin_destructive_op("i-abc", ib.OP_KIND_MATERIALIZATION)
-  async_update.assert_awaited_once()
+async def test_writes_proceed_without_a_pause(ssm, lease):
+  assert await ib.begin_destructive_op("i-abc", ib.OP_KIND_MATERIALIZATION) == "lease-1"

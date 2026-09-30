@@ -485,13 +485,13 @@ async def _counted_materialize_table(
   )
 
   instance_id = client._instance_id or ""
-  await begin_destructive_op(instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+  lease = await begin_destructive_op(instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
   try:
     return await client.materialize_table(
       graph_id=graph_id, table_name=table_name, file_ids=file_ids
     )
   finally:
-    await end_destructive_op(instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+    await end_destructive_op(instance_id, lease)
 
 
 @op(out={"staging_result": Out(dict)})
@@ -872,8 +872,9 @@ def materialize_graph_tables(
       end_destructive_op,
     )
 
-    # "" is a no-op for the busy-counter primitives.
+    # "" is a no-op for the busy-lease primitives.
     busy_instance_id = ""
+    busy_lease = ""
 
     try:
       from robosystems.graph_api.client.factory import get_graph_client
@@ -882,13 +883,12 @@ def materialize_graph_tables(
         get_graph_client(graph_id=graph_id, operation_type="write")
       )
 
-      # Busy counter lets the deploy-time instance refresh wait for us. Set
-      # only once counted: a start refused by a maintenance pause never was.
-      instance_id = client._instance_id or ""
-      loop.run_until_complete(
-        begin_destructive_op(instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+      # Busy lease lets the deploy-time instance refresh wait for us. A start
+      # refused by a maintenance pause holds none.
+      busy_instance_id = client._instance_id or ""
+      busy_lease = loop.run_until_complete(
+        begin_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
       )
-      busy_instance_id = instance_id
 
       if config.rebuild:
         context.log.info("[10%] Rebuild requested - regenerating graph database")
@@ -1090,11 +1090,9 @@ def materialize_graph_tables(
             f"Could not clear rebuilding status on {graph_id}: {settle_err}"
           )
       try:
-        loop.run_until_complete(
-          end_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
-        )
+        loop.run_until_complete(end_destructive_op(busy_instance_id, busy_lease))
       except Exception as cleanup_err:
-        context.log.warning(f"Busy counter cleanup failed (non-fatal): {cleanup_err}")
+        context.log.warning(f"Busy lease cleanup failed (non-fatal): {cleanup_err}")
       loop.close()
 
 

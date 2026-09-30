@@ -38,16 +38,16 @@ def test_materialize_rejects_read_only(monkeypatch, app_client):
   assert "not allowed" in response.json()["detail"]
 
 
-def test_materialize_endpoint_publishes_busy_counter(monkeypatch, app_client):
-  """Endpoint must increment + decrement the busy counter so GHA pre-refresh
-  workflows don't cycle the container mid-materialization. Regression: SEC
-  prod ran a 60-min materialization without ever flipping
-  active_destructive_ops, so a service-refresh fired and killed the run.
+def test_materialize_endpoint_holds_a_busy_lease(monkeypatch, app_client):
+  """Endpoint must hold a busy lease so GHA pre-refresh workflows don't
+  cycle the container mid-materialization. Regression: SEC prod ran a 60-min
+  materialization without ever marking the instance busy, so a
+  service-refresh fired and killed the run.
   """
   cluster_service = SimpleNamespace(read_only=False)
   app_client.dependency_overrides[get_ladybug_service] = lambda: cluster_service
 
-  # Stub out the real materialization body — we only care about the counter.
+  # Stub out the real materialization body — we only care about the lease.
   async def fake_impl(**kwargs):
     return materialize.TableMaterializationResponse(
       status="success",
@@ -57,14 +57,13 @@ def test_materialize_endpoint_publishes_busy_counter(monkeypatch, app_client):
       execution_time_ms=0.0,
     )
 
-  counter_mock = AsyncMock()
+  acquire = AsyncMock(return_value="lease-1")
+  release = AsyncMock()
 
   with (
     patch.object(materialize, "_materialize_table_impl", side_effect=fake_impl),
-    patch(
-      "robosystems.middleware.graph.instance_busy._update_counter_async",
-      counter_mock,
-    ),
+    patch("robosystems.middleware.graph.instance_busy._acquire_async", acquire),
+    patch("robosystems.middleware.graph.instance_busy._release_async", release),
   ):
     client = TestClient(app_client)
     response = client.post(
@@ -73,25 +72,14 @@ def test_materialize_endpoint_publishes_busy_counter(monkeypatch, app_client):
     )
 
   assert response.status_code == 200, response.text
-  # Increment on entry, decrement on exit.
-  assert counter_mock.await_count == 2
-  deltas = [
-    call.kwargs.get("delta", call.args[1] if len(call.args) > 1 else None)
-    for call in counter_mock.await_args_list
-  ]
-  assert deltas == [1, -1]
-  # All increments tagged with the materialization op_kind.
-  kinds = [
-    call.kwargs.get("op_kind", call.args[2] if len(call.args) > 2 else None)
-    for call in counter_mock.await_args_list
-  ]
-  assert kinds == [
-    materialize.OP_KIND_MATERIALIZATION,
-    materialize.OP_KIND_MATERIALIZATION,
-  ]
+  # Lease taken on entry, tagged with the op kind, and released on exit.
+  acquire.assert_awaited_once()
+  assert acquire.await_args.args[1] == materialize.OP_KIND_MATERIALIZATION
+  release.assert_awaited_once()
+  assert release.await_args.args[1] == "lease-1"
 
 
-def test_fork_endpoint_publishes_busy_counter(monkeypatch, app_client):
+def test_fork_endpoint_holds_a_busy_lease(monkeypatch, app_client):
   """fork_from_parent_duckdb runs the same multi-table COPY workflow as
   materialize_table and must mark the instance busy for the same reason —
   otherwise GHA service-refresh can kill a fork mid-run.
@@ -109,14 +97,13 @@ def test_fork_endpoint_publishes_busy_counter(monkeypatch, app_client):
       execution_time_ms=0.0,
     )
 
-  counter_mock = AsyncMock()
+  acquire = AsyncMock(return_value="lease-1")
+  release = AsyncMock()
 
   with (
     patch.object(materialize, "_fork_from_parent_duckdb_impl", side_effect=fake_impl),
-    patch(
-      "robosystems.middleware.graph.instance_busy._update_counter_async",
-      counter_mock,
-    ),
+    patch("robosystems.middleware.graph.instance_busy._acquire_async", acquire),
+    patch("robosystems.middleware.graph.instance_busy._release_async", release),
   ):
     client = TestClient(app_client)
     response = client.post(
@@ -125,18 +112,15 @@ def test_fork_endpoint_publishes_busy_counter(monkeypatch, app_client):
     )
 
   assert response.status_code == 200, response.text
-  assert counter_mock.await_count == 2
-  deltas = [
-    call.kwargs.get("delta", call.args[1] if len(call.args) > 1 else None)
-    for call in counter_mock.await_args_list
-  ]
-  assert deltas == [1, -1]
+  acquire.assert_awaited_once()
+  release.assert_awaited_once()
+  assert release.await_args.args[1] == "lease-1"
 
 
-def test_materialize_endpoint_decrements_counter_on_failure(monkeypatch, app_client):
-  """instance_busy is a context manager: counter must decrement even when
-  the body raises. Otherwise a single failed materialization would pin the
-  counter >0 and block all future refreshes until staleness expires.
+def test_materialize_endpoint_releases_lease_on_failure(monkeypatch, app_client):
+  """instance_busy is a context manager: the lease must be released even
+  when the body raises. Otherwise a single failed materialization would hold
+  the instance busy until the lease goes stale.
   """
   cluster_service = SimpleNamespace(read_only=False)
   app_client.dependency_overrides[get_ladybug_service] = lambda: cluster_service
@@ -144,14 +128,13 @@ def test_materialize_endpoint_decrements_counter_on_failure(monkeypatch, app_cli
   async def boom(**kwargs):
     raise RuntimeError("simulated COPY failure")
 
-  counter_mock = AsyncMock()
+  acquire = AsyncMock(return_value="lease-1")
+  release = AsyncMock()
 
   with (
     patch.object(materialize, "_materialize_table_impl", side_effect=boom),
-    patch(
-      "robosystems.middleware.graph.instance_busy._update_counter_async",
-      counter_mock,
-    ),
+    patch("robosystems.middleware.graph.instance_busy._acquire_async", acquire),
+    patch("robosystems.middleware.graph.instance_busy._release_async", release),
   ):
     client = TestClient(app_client)
     with pytest.raises(RuntimeError, match="simulated COPY failure"):
@@ -160,12 +143,9 @@ def test_materialize_endpoint_decrements_counter_on_failure(monkeypatch, app_cli
         json={},
       )
 
-  assert counter_mock.await_count == 2
-  deltas = [
-    call.kwargs.get("delta", call.args[1] if len(call.args) > 1 else None)
-    for call in counter_mock.await_args_list
-  ]
-  assert deltas == [1, -1]
+  acquire.assert_awaited_once()
+  release.assert_awaited_once()
+  assert release.await_args.args[1] == "lease-1"
 
 
 # ---------------------------------------------------------------------------

@@ -1,367 +1,214 @@
-"""Tests for the instance busy counter primitive.
+"""Tests for the instance busy-lease primitive, against a moto DynamoDB table.
 
-Covers lifecycle semantics (increment on entry, decrement on exit even on
-exception), graceful handling of missing instance_id, and swallowing of
-DynamoDB failures so a broken counter never blocks real work.
+Covers the lease lifecycle (added on entry, removed on exit even on exception),
+per-lease staleness (a leaked lease expires on its own clock however busy the
+instance stays), graceful handling of a missing instance_id, and swallowing of
+DynamoDB failures so a broken signal never blocks real work.
 """
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
+import boto3
 import pytest
 from botocore.exceptions import ClientError
+from moto import mock_aws
 
+from robosystems.config import env
 from robosystems.middleware.graph import instance_busy as ib
 
+pytestmark = pytest.mark.unit
 
-@pytest.fixture
-def mock_table():
-  """Mock DynamoDB Table with a no-op update_item."""
-  table = MagicMock()
-  table.update_item = MagicMock(return_value={})
-  return table
+INSTANCE = "i-abc123"
 
 
 @pytest.fixture
-def mock_resource(mock_table):
-  """Mock DynamoDB resource whose Table() returns our mock_table."""
-  resource = MagicMock()
-  resource.Table = MagicMock(return_value=mock_table)
-  return resource
+def table(monkeypatch):
+  monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+  monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+  with mock_aws():
+    resource = boto3.resource("dynamodb", region_name="us-east-1")
+    tbl = resource.create_table(
+      TableName=env.INSTANCE_REGISTRY_TABLE,
+      KeySchema=[{"AttributeName": "instance_id", "KeyType": "HASH"}],
+      AttributeDefinitions=[{"AttributeName": "instance_id", "AttributeType": "S"}],
+      BillingMode="PAY_PER_REQUEST",
+    )
+    tbl.put_item(Item={"instance_id": INSTANCE, "status": "healthy"})
+    with patch.object(ib, "get_dynamodb_resource", return_value=resource):
+      yield tbl
 
 
-@pytest.fixture
-def patched_ddb(mock_resource, mock_table):
-  """Patch get_dynamodb_resource to return the mock resource."""
-  with patch.object(ib, "get_dynamodb_resource", return_value=mock_resource):
-    yield mock_table
+def _leases(tbl) -> set[str]:
+  item = tbl.get_item(Key={"instance_id": INSTANCE}).get("Item", {})
+  return set(item.get(ib.LEASE_ATTRIBUTE, set()))
 
 
-class TestInstanceBusyAsync:
-  """Async context manager lifecycle and error handling."""
+def _lease_started(hours_ago: float, kind: str = "materialization") -> str:
+  started = datetime.now(UTC) - timedelta(hours=hours_ago)
+  return f"{started.isoformat(timespec='seconds')}|{kind}|deadbeef0000"
 
-  async def test_increment_on_entry_decrement_on_exit(self, patched_ddb):
-    async with ib.instance_busy("i-abc123", ib.OP_KIND_MATERIALIZATION):
-      # After entry, exactly one update_item call with delta=+1
-      assert patched_ddb.update_item.call_count == 1
-      kwargs = patched_ddb.update_item.call_args.kwargs
-      assert kwargs["Key"] == {"instance_id": "i-abc123"}
-      assert kwargs["ExpressionAttributeValues"][":delta"] == 1
-      assert kwargs["ExpressionAttributeValues"][":kind"] == ib.OP_KIND_MATERIALIZATION
-      assert "active_destructive_ops" in kwargs["UpdateExpression"]
-      assert "last_destructive_op_at" in kwargs["UpdateExpression"]
-      assert "last_destructive_op_kind" in kwargs["UpdateExpression"]
 
-    # After exit, second call with delta=-1
-    assert patched_ddb.update_item.call_count == 2
-    exit_kwargs = patched_ddb.update_item.call_args.kwargs
-    assert exit_kwargs["ExpressionAttributeValues"][":delta"] == -1
-    assert exit_kwargs["Key"] == {"instance_id": "i-abc123"}
+class TestLeaseLifecycle:
+  async def test_lease_held_for_the_block_and_released_after(self, table):
+    async with ib.instance_busy(INSTANCE, ib.OP_KIND_MATERIALIZATION):
+      (lease,) = _leases(table)
+      assert lease.split("|")[1] == ib.OP_KIND_MATERIALIZATION
+    assert _leases(table) == set()
 
-  async def test_decrement_runs_when_body_raises(self, patched_ddb):
+  async def test_lease_released_when_body_raises(self, table):
     with pytest.raises(ValueError, match="boom"):
-      async with ib.instance_busy("i-abc123", ib.OP_KIND_SEC_STAGING):
+      async with ib.instance_busy(INSTANCE, ib.OP_KIND_SEC_STAGING):
         raise ValueError("boom")
+    assert _leases(table) == set()
 
-    # Both increment and decrement should still have run
-    assert patched_ddb.update_item.call_count == 2
-    assert (
-      patched_ddb.update_item.call_args_list[0].kwargs["ExpressionAttributeValues"][
-        ":delta"
-      ]
-      == 1
-    )
-    assert (
-      patched_ddb.update_item.call_args_list[1].kwargs["ExpressionAttributeValues"][
-        ":delta"
-      ]
-      == -1
-    )
+  async def test_concurrent_ops_hold_separate_leases(self, table):
+    async with ib.instance_busy(INSTANCE, ib.OP_KIND_MATERIALIZATION):
+      async with ib.instance_busy(INSTANCE, ib.OP_KIND_BULK_TABLE_INSERT):
+        assert len(_leases(table)) == 2
+      (remaining,) = _leases(table)
+      assert remaining.split("|")[1] == ib.OP_KIND_MATERIALIZATION
+    assert _leases(table) == set()
 
-  async def test_empty_instance_id_is_skipped(self, patched_ddb):
+  def test_sync_variant(self, table):
+    with ib.instance_busy_sync(INSTANCE, ib.OP_KIND_DAGSTER_MATERIALIZATION):
+      assert len(_leases(table)) == 1
+    assert _leases(table) == set()
+
+  async def test_begin_returns_the_lease_end_releases(self, table):
+    lease = await ib.begin_destructive_op(INSTANCE, ib.OP_KIND_SEC_STAGING)
+    assert _leases(table) == {lease}
+    await ib.end_destructive_op(INSTANCE, lease)
+    assert _leases(table) == set()
+
+  async def test_end_releases_only_its_own_lease(self, table):
+    first = await ib.begin_destructive_op(INSTANCE, ib.OP_KIND_MATERIALIZATION)
+    second = await ib.begin_destructive_op(INSTANCE, ib.OP_KIND_MATERIALIZATION)
+    await ib.end_destructive_op(INSTANCE, first)
+    assert _leases(table) == {second}
+
+  async def test_empty_lease_or_instance_is_a_no_op(self, table):
     async with ib.instance_busy("", ib.OP_KIND_BULK_TABLE_CREATE):
       pass
-    # No update_item calls at all when instance_id is empty
-    assert patched_ddb.update_item.call_count == 0
+    await ib.end_destructive_op(INSTANCE, "")
+    assert await ib.begin_destructive_op("", ib.OP_KIND_MATERIALIZATION) == ""
+    assert _leases(table) == set()
 
-  async def test_client_error_on_increment_is_swallowed(self, patched_ddb):
-    patched_ddb.update_item.side_effect = ClientError(
+
+class TestStaleness:
+  """The failure the counter had: a leak kept alive by other ops' heartbeats."""
+
+  async def test_leaked_lease_is_pruned_by_the_next_acquire(self, table):
+    leaked = _lease_started(hours_ago=7)
+    table.update_item(
+      Key={"instance_id": INSTANCE},
+      UpdateExpression=f"ADD {ib.LEASE_ATTRIBUTE} :l",
+      ExpressionAttributeValues={":l": {leaked}},
+    )
+    async with ib.instance_busy(INSTANCE, ib.OP_KIND_MATERIALIZATION):
+      assert leaked not in _leases(table)
+    assert _leases(table) == set()
+
+  async def test_live_lease_survives_other_ops(self, table):
+    live = _lease_started(hours_ago=5)
+    table.update_item(
+      Key={"instance_id": INSTANCE},
+      UpdateExpression=f"ADD {ib.LEASE_ATTRIBUTE} :l",
+      ExpressionAttributeValues={":l": {live}},
+    )
+    async with ib.instance_busy(INSTANCE, ib.OP_KIND_MATERIALIZATION):
+      pass
+    assert _leases(table) == {live}
+
+  def test_unparseable_lease_is_stale(self):
+    assert ib._is_stale("not-a-timestamp|materialization|x", now=0)
+
+
+class TestFailuresNeverBlockWork:
+  @pytest.fixture
+  def failing(self):
+    tbl = MagicMock()
+    tbl.update_item.side_effect = ClientError(
       error_response={"Error": {"Code": "ThrottlingException", "Message": "slow"}},
       operation_name="UpdateItem",
     )
-    # Should NOT raise — a broken counter must not block real work
-    async with ib.instance_busy("i-abc123", ib.OP_KIND_MATERIALIZATION):
+    resource = MagicMock()
+    resource.Table.return_value = tbl
+    with patch.object(ib, "get_dynamodb_resource", return_value=resource):
+      yield tbl
+
+  async def test_acquire_failure_is_swallowed(self, failing):
+    async with ib.instance_busy(INSTANCE, ib.OP_KIND_MATERIALIZATION):
       pass
-    # Both enter and exit were attempted (even though enter failed)
-    assert patched_ddb.update_item.call_count == 2
+    # The failed acquire wrote nothing, so there is nothing to release.
+    assert failing.update_item.call_count == 1
 
-  async def test_generic_exception_on_increment_is_swallowed(self, patched_ddb):
-    patched_ddb.update_item.side_effect = RuntimeError("network gone")
-    async with ib.instance_busy("i-abc123", ib.OP_KIND_MATERIALIZATION):
-      pass
-    assert patched_ddb.update_item.call_count == 2
+  async def test_begin_failure_returns_no_lease(self, failing):
+    assert await ib.begin_destructive_op(INSTANCE, ib.OP_KIND_MATERIALIZATION) == ""
 
-  async def test_client_error_on_decrement_is_swallowed(self, patched_ddb):
-    # Increment succeeds, decrement fails — still must not raise
-    call_count = {"n": 0}
+  async def test_release_failure_is_swallowed(self, failing):
+    await ib.end_destructive_op(INSTANCE, _lease_started(hours_ago=0))
 
-    def flaky_update(**_kwargs):
-      call_count["n"] += 1
-      if call_count["n"] == 2:
-        raise ClientError(
-          error_response={"Error": {"Code": "InternalError", "Message": "x"}},
-          operation_name="UpdateItem",
-        )
-      return {}
-
-    patched_ddb.update_item.side_effect = flaky_update
-
-    async with ib.instance_busy("i-abc123", ib.OP_KIND_EXTENSIONS_MATERIALIZE):
+  def test_sync_failure_is_swallowed(self, failing):
+    with ib.instance_busy_sync(INSTANCE, ib.OP_KIND_SEC_STAGING):
       pass
 
-    assert call_count["n"] == 2
-
-  async def test_body_exception_still_propagates_on_ddb_failure(self, patched_ddb):
-    """If DDB fails AND the body raises, the body exception wins."""
-    patched_ddb.update_item.side_effect = ClientError(
-      error_response={"Error": {"Code": "ThrottlingException", "Message": "x"}},
-      operation_name="UpdateItem",
-    )
+  async def test_body_exception_wins_over_ddb_failure(self, failing):
     with pytest.raises(ValueError, match="business error"):
-      async with ib.instance_busy("i-abc123", ib.OP_KIND_MATERIALIZATION):
+      async with ib.instance_busy(INSTANCE, ib.OP_KIND_MATERIALIZATION):
         raise ValueError("business error")
-
-  async def test_table_name_is_instance_registry(self, patched_ddb, mock_resource):
-    from robosystems.config import env
-
-    async with ib.instance_busy("i-abc123", ib.OP_KIND_MATERIALIZATION):
-      pass
-    mock_resource.Table.assert_called_with(env.INSTANCE_REGISTRY_TABLE)
-
-
-class TestInstanceBusySync:
-  """Synchronous variant for sync call sites (Dagster ops)."""
-
-  def test_sync_increment_and_decrement(self, patched_ddb):
-    with ib.instance_busy_sync("i-sync", ib.OP_KIND_DAGSTER_MATERIALIZATION):
-      assert patched_ddb.update_item.call_count == 1
-      assert (
-        patched_ddb.update_item.call_args.kwargs["ExpressionAttributeValues"][":delta"]
-        == 1
-      )
-
-    assert patched_ddb.update_item.call_count == 2
-    assert (
-      patched_ddb.update_item.call_args.kwargs["ExpressionAttributeValues"][":delta"]
-      == -1
-    )
-
-  def test_sync_decrements_on_exception(self, patched_ddb):
-    with pytest.raises(RuntimeError, match="sync boom"):
-      with ib.instance_busy_sync("i-sync", ib.OP_KIND_DAGSTER_MATERIALIZATION):
-        raise RuntimeError("sync boom")
-
-    assert patched_ddb.update_item.call_count == 2
-
-  def test_sync_swallows_ddb_failure(self, patched_ddb):
-    patched_ddb.update_item.side_effect = ClientError(
-      error_response={"Error": {"Code": "ThrottlingException", "Message": "x"}},
-      operation_name="UpdateItem",
-    )
-    # Must not raise
-    with ib.instance_busy_sync("i-sync", ib.OP_KIND_SEC_STAGING):
-      pass
-
-  def test_sync_skips_empty_instance_id(self, patched_ddb):
-    with ib.instance_busy_sync("", ib.OP_KIND_BULK_TABLE_CREATE):
-      pass
-    assert patched_ddb.update_item.call_count == 0
 
 
 class TestResolveInstanceIdForGraph:
-  """Resolver helper that takes a graph_id and returns the hosting instance_id.
+  """Resolver for orchestration callers that have a graph_id but no client."""
 
-  Used by orchestration-layer callers (SEC stager, Dagster ops, etc.) that
-  have a graph_id but no GraphClient handy.
-  """
-
-  async def test_happy_path_returns_client_instance_id(self):
-    """When the factory returns a client, the resolver reads _instance_id."""
-    mock_client = MagicMock()
-    mock_client._instance_id = "i-happy"
-    mock_client.close = MagicMock(return_value=None)
-
-    async def _fake_close():
-      return None
-
-    mock_client.close = _fake_close
-
-    async def _fake_create_client(**_kwargs):
-      return mock_client
-
+  @staticmethod
+  def _factory(create_client):
     mock_factory = MagicMock()
-    mock_factory.create_client = _fake_create_client
-
-    with patch.dict(
+    mock_factory.create_client = create_client
+    return patch.dict(
       "sys.modules",
       {
         "robosystems.graph_api.client.factory": MagicMock(
           GraphClientFactory=mock_factory
         )
       },
-    ):
-      result = await ib.resolve_instance_id_for_graph("kg_test")
+    )
 
-    assert result == "i-happy"
+  @staticmethod
+  def _client(instance_id, closes):
+    client = MagicMock()
+    client._instance_id = instance_id
 
-  async def test_returns_empty_when_instance_id_missing(self):
-    """If the client has no _instance_id attribute set, return empty string."""
-    mock_client = MagicMock()
-    mock_client._instance_id = None
+    async def _close():
+      closes.append(True)
 
-    async def _fake_close():
-      return None
+    client.close = _close
+    return client
 
-    mock_client.close = _fake_close
+  async def test_returns_the_client_instance_id_and_closes_it(self):
+    closes: list[bool] = []
+    client = self._client("i-happy", closes)
 
-    async def _fake_create_client(**_kwargs):
-      return mock_client
+    async def create(**_kwargs):
+      return client
 
-    mock_factory = MagicMock()
-    mock_factory.create_client = _fake_create_client
+    with self._factory(create):
+      assert await ib.resolve_instance_id_for_graph("kg_test") == "i-happy"
+    assert closes == [True]
 
-    with patch.dict(
-      "sys.modules",
-      {
-        "robosystems.graph_api.client.factory": MagicMock(
-          GraphClientFactory=mock_factory
-        )
-      },
-    ):
-      result = await ib.resolve_instance_id_for_graph("kg_test")
+  async def test_missing_instance_id_is_empty(self):
+    client = self._client(None, [])
 
-    assert result == ""
+    async def create(**_kwargs):
+      return client
 
-  async def test_factory_failure_returns_empty_string(self):
-    """Any exception during client creation is swallowed — returns empty."""
+    with self._factory(create):
+      assert await ib.resolve_instance_id_for_graph("kg_test") == ""
 
-    async def _failing_create_client(**_kwargs):
+  async def test_factory_failure_is_empty(self):
+    async def create(**_kwargs):
       raise RuntimeError("allocation manager down")
 
-    mock_factory = MagicMock()
-    mock_factory.create_client = _failing_create_client
-
-    with patch.dict(
-      "sys.modules",
-      {
-        "robosystems.graph_api.client.factory": MagicMock(
-          GraphClientFactory=mock_factory
-        )
-      },
-    ):
-      result = await ib.resolve_instance_id_for_graph("kg_test")
-
-    assert result == ""
-
-  async def test_client_closed_in_finally(self):
-    """The short-lived client must always be closed, even on read error."""
-    close_called = {"n": 0}
-
-    async def _fake_close():
-      close_called["n"] += 1
-
-    mock_client = MagicMock()
-    mock_client._instance_id = "i-close-test"
-    mock_client.close = _fake_close
-
-    async def _fake_create_client(**_kwargs):
-      return mock_client
-
-    mock_factory = MagicMock()
-    mock_factory.create_client = _fake_create_client
-
-    with patch.dict(
-      "sys.modules",
-      {
-        "robosystems.graph_api.client.factory": MagicMock(
-          GraphClientFactory=mock_factory
-        )
-      },
-    ):
-      result = await ib.resolve_instance_id_for_graph("kg_test")
-
-    assert result == "i-close-test"
-    assert close_called["n"] == 1
-
-
-class TestImperativeHelpers:
-  """Imperative begin/end helpers for call sites where a context manager
-  would require heavy re-indentation."""
-
-  async def test_begin_increments(self, patched_ddb):
-    await ib.begin_destructive_op("i-imp", ib.OP_KIND_MATERIALIZATION)
-    assert patched_ddb.update_item.call_count == 1
-    assert (
-      patched_ddb.update_item.call_args.kwargs["ExpressionAttributeValues"][":delta"]
-      == 1
-    )
-
-  async def test_end_decrements(self, patched_ddb):
-    await ib.end_destructive_op("i-imp", ib.OP_KIND_MATERIALIZATION)
-    assert patched_ddb.update_item.call_count == 1
-    assert (
-      patched_ddb.update_item.call_args.kwargs["ExpressionAttributeValues"][":delta"]
-      == -1
-    )
-
-  async def test_begin_end_pair(self, patched_ddb):
-    """Typical try/finally pair semantic."""
-    await ib.begin_destructive_op("i-pair", ib.OP_KIND_SEC_STAGING)
-    try:
-      pass  # work would happen here
-    finally:
-      await ib.end_destructive_op("i-pair", ib.OP_KIND_SEC_STAGING)
-
-    assert patched_ddb.update_item.call_count == 2
-    deltas = [
-      call.kwargs["ExpressionAttributeValues"][":delta"]
-      for call in patched_ddb.update_item.call_args_list
-    ]
-    assert deltas == [1, -1]
-
-  async def test_begin_swallows_ddb_failure(self, patched_ddb):
-    patched_ddb.update_item.side_effect = ClientError(
-      error_response={"Error": {"Code": "ThrottlingException", "Message": "x"}},
-      operation_name="UpdateItem",
-    )
-    # Must not raise
-    await ib.begin_destructive_op("i-imp", ib.OP_KIND_MATERIALIZATION)
-
-  async def test_end_swallows_ddb_failure(self, patched_ddb):
-    patched_ddb.update_item.side_effect = ClientError(
-      error_response={"Error": {"Code": "ThrottlingException", "Message": "x"}},
-      operation_name="UpdateItem",
-    )
-    await ib.end_destructive_op("i-imp", ib.OP_KIND_MATERIALIZATION)
-
-
-class TestOpKindConstants:
-  """Sanity check that the op_kind labels are stable string constants."""
-
-  def test_op_kinds_are_strings(self):
-    assert isinstance(ib.OP_KIND_MATERIALIZATION, str)
-    assert isinstance(ib.OP_KIND_DAGSTER_MATERIALIZATION, str)
-    assert isinstance(ib.OP_KIND_SEC_STAGING, str)
-    assert isinstance(ib.OP_KIND_EXTENSIONS_MATERIALIZE, str)
-    assert isinstance(ib.OP_KIND_BULK_TABLE_CREATE, str)
-    assert isinstance(ib.OP_KIND_BULK_TABLE_INSERT, str)
-
-  def test_op_kinds_are_unique(self):
-    kinds = {
-      ib.OP_KIND_MATERIALIZATION,
-      ib.OP_KIND_DAGSTER_MATERIALIZATION,
-      ib.OP_KIND_SEC_STAGING,
-      ib.OP_KIND_EXTENSIONS_MATERIALIZE,
-      ib.OP_KIND_BULK_TABLE_CREATE,
-      ib.OP_KIND_BULK_TABLE_INSERT,
-    }
-    assert len(kinds) == 6
+    with self._factory(create):
+      assert await ib.resolve_instance_id_for_graph("kg_test") == ""

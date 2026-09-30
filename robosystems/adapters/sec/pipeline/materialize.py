@@ -58,7 +58,7 @@ def sec_graph_materialized(
     context.log.info(msg)
 
   async def run_materialization():
-    # Busy counter so a deploy's pre-refresh waits; see stage.py.
+    # Busy lease so a deploy's pre-refresh waits; see stage.py.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_DAGSTER_MATERIALIZATION,
       begin_destructive_op,
@@ -67,7 +67,9 @@ def sec_graph_materialized(
     )
 
     busy_instance_id = await resolve_instance_id_for_graph(config.graph_id)
-    await begin_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+    busy_lease = await begin_destructive_op(
+      busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION
+    )
     try:
       result = await processor.materialize_from_duckdb(
         rebuild=config.rebuild_graph,
@@ -78,7 +80,7 @@ def sec_graph_materialized(
       )
       return result
     finally:
-      await end_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+      await end_destructive_op(busy_instance_id, busy_lease)
 
   result = asyncio.run(run_materialization())
 
@@ -193,7 +195,7 @@ def sec_historical_materialized(
     )
     context.log.info(f"Subgraph status: {subgraph_result.get('status')}")
 
-    # Busy counter so a deploy's pre-refresh waits; see stage.py.
+    # Busy lease so a deploy's pre-refresh waits; see stage.py.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_DAGSTER_MATERIALIZATION,
       begin_destructive_op,
@@ -202,7 +204,9 @@ def sec_historical_materialized(
     )
 
     busy_instance_id = await resolve_instance_id_for_graph(graph_id)
-    await begin_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+    busy_lease = await begin_destructive_op(
+      busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION
+    )
     try:
       result = await processor.materialize_from_duckdb(
         rebuild=config.rebuild_graph,
@@ -213,7 +217,7 @@ def sec_historical_materialized(
       )
       return result
     finally:
-      await end_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+      await end_destructive_op(busy_instance_id, busy_lease)
 
   result = asyncio.run(run_materialization())
 
