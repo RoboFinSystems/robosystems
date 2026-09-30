@@ -27,6 +27,10 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.line_item import LineItem
+from robosystems.operations.taxonomy_block.coa_mappings import (
+  in_block,
+  owned_mapping_taxonomy_ids,
+)
 from robosystems.operations.taxonomy_block.immutability import (
   assert_history_undisturbed,
 )
@@ -52,9 +56,7 @@ def preflight_delete(session: Session, taxonomy_id: str) -> DeletePreflight:
   ]
   structure_ids = [
     row[0]
-    for row in session.execute(
-      select(Structure.id).where(Structure.taxonomy_id == taxonomy_id)
-    ).all()
+    for row in session.execute(select(Structure.id).where(in_block(taxonomy_id))).all()
   ]
 
   if not element_ids and not structure_ids:
@@ -96,7 +98,7 @@ def preflight_delete(session: Session, taxonomy_id: str) -> DeletePreflight:
       select(Association.id)
       .join(Structure, Association.structure_id == Structure.id)
       .where(
-        Structure.taxonomy_id != taxonomy_id,
+        ~in_block(taxonomy_id),
         (
           Association.from_element_id.in_(element_ids)
           | Association.to_element_id.in_(element_ids)
@@ -132,9 +134,7 @@ def cascade_delete_taxonomy(
   ]
   structure_ids = [
     row[0]
-    for row in session.execute(
-      select(Structure.id).where(Structure.taxonomy_id == taxonomy_id)
-    ).all()
+    for row in session.execute(select(Structure.id).where(in_block(taxonomy_id))).all()
   ]
 
   fact_set_ids = []
@@ -176,9 +176,14 @@ def cascade_delete_taxonomy(
   # Rules — those hosted by this taxonomy or targeting any of its atoms
   # (including rules hosted elsewhere that target this taxonomy's
   # associations, whose FK would otherwise block the association delete).
+  mapping_taxonomy_ids = list(
+    session.execute(owned_mapping_taxonomy_ids(taxonomy_id)).scalars().all()
+  )
+  block_taxonomy_ids = [taxonomy_id, *mapping_taxonomy_ids]
+
   rule_predicates = [
-    Rule.taxonomy_id == taxonomy_id,
-    Rule.target_taxonomy_id == taxonomy_id,
+    Rule.taxonomy_id.in_(block_taxonomy_ids),
+    Rule.target_taxonomy_id.in_(block_taxonomy_ids),
   ]
   if structure_ids:
     rule_predicates.append(Rule.target_structure_id.in_(structure_ids))
@@ -248,9 +253,12 @@ def cascade_delete_taxonomy(
   # `entity_taxonomies.taxonomy_id` is RESTRICT, and a CoA is adopted by the
   # entity at creation.
   session.execute(
-    delete(EntityTaxonomy).where(EntityTaxonomy.taxonomy_id == taxonomy_id)
+    delete(EntityTaxonomy).where(EntityTaxonomy.taxonomy_id.in_(block_taxonomy_ids))
   )
 
+  # The chart's mapping taxonomies FK it through `source_taxonomy_id`.
+  if mapping_taxonomy_ids:
+    session.execute(delete(Taxonomy).where(Taxonomy.id.in_(mapping_taxonomy_ids)))
   session.execute(delete(Taxonomy).where(Taxonomy.id == taxonomy_id))
   session.flush()
 

@@ -10,6 +10,7 @@ reported.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -53,10 +54,9 @@ def _session_for(
   has_rs_gaap: bool = True,
 ):
   """A session whose ``execute`` answers, in call order: the active-chart
-  probe, the "does this tenant carry rs-gaap" probe, the new chart's
-  elements, then — when rs-gaap is present — the mapping-structure lookup
-  and the library elements for the template's targets (minus
-  ``library_misses``)."""
+  probe, the rs-gaap taxonomy probe, the new chart's elements, then — when
+  rs-gaap is present — the library elements for the template's targets
+  (minus ``library_misses``). The mapping-structure lookup is stubbed."""
   template = CHART_TEMPLATES[template_key]
   coa_rows = [(code, f"elem_{code}") for code, *_ in template.accounts]
   targets = sorted(
@@ -70,11 +70,11 @@ def _session_for(
   session = MagicMock()
   answers = [
     _scalar_result(existing_chart),
-    _scalar_result(has_rs_gaap),
+    _scalar_result("tax_rs_gaap" if has_rs_gaap else None),
     _row_result(coa_rows),
   ]
   if has_rs_gaap:
-    answers += [_scalar_result("struct_map"), _row_result(library_rows)]
+    answers.append(_row_result(library_rows))
   session.execute.side_effect = answers
   return session
 
@@ -87,6 +87,10 @@ class TestInitializeChartOfAccounts:
       patch(f"{_MOD}.create_chart_block", return_value="tax_new") as create,
       patch(f"{_MOD}.create_mapping_association") as map_assoc,
       patch(f"{_MOD}.resolve_parent_entity", return_value=None) as entity,
+      patch(
+        f"{_MOD}.find_mapping_structure",
+        return_value=SimpleNamespace(id="struct_map"),
+      ),
     ):
       self.create = create
       self.map_assoc = map_assoc
@@ -126,6 +130,7 @@ class TestInitializeChartOfAccounts:
     assert all(e.trait for e in payload.elements)
     assert [s.block_type for s in payload.structures] == ["coa_mapping"]
     assert payload.structures[0].name == template.mappings["rs-gaap"].structure_name
+    assert payload.structures[0].target_framework == "rs-gaap"
     assert payload.metadata == {
       "template": "saas",
       "template_version": "v1",

@@ -46,6 +46,7 @@ from robosystems.models.extensions import (
 from robosystems.operations.information_block.rules.expressions import (
   build_rollup_expression,
 )
+from robosystems.operations.taxonomy_block.coa_mappings import in_block
 
 _AUTO = "auto"
 _STRUCTURE_RULES = "ReportLevelModelStructureRule"
@@ -215,9 +216,7 @@ def refresh_auto_rules(
   )
 
   structures = list(
-    session.execute(select(Structure).where(Structure.taxonomy_id == taxonomy.id))
-    .scalars()
-    .all()
+    session.execute(select(Structure).where(in_block(str(taxonomy.id)))).scalars().all()
   )
   emit_auto_rules(session, taxonomy, structures, created_by=updated_by)
 

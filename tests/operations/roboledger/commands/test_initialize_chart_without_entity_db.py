@@ -61,7 +61,7 @@ def tenant():
 
 @pytest.mark.parametrize("template", sorted(CHART_TEMPLATES))
 def test_a_template_initializes_before_any_entity_exists(tenant, template):
-  from robosystems.models.extensions import Element
+  from robosystems.models.extensions import Element, Structure, Taxonomy
 
   targets = sorted(
     {
@@ -72,6 +72,19 @@ def test_a_template_initializes_before_any_entity_exists(tenant, template):
     }
   )
   with extensions_session(GRAPH) as session:
+    session.add(
+      Taxonomy(
+        id="tax_rs_gaap",
+        name="rs-gaap",
+        taxonomy_type="reporting_standard",
+        standard="rs-gaap",
+        version="v1",
+        is_shared=True,
+        is_locked=True,
+        created_by="library-seeder",
+      )
+    )
+    session.flush()
     for i, qname in enumerate(targets):
       session.add(
         Element(
@@ -79,6 +92,7 @@ def test_a_template_initializes_before_any_entity_exists(tenant, template):
           name=qname,
           qname=qname,
           source="rs-gaap",
+          taxonomy_id="tax_rs_gaap",
           created_by="library-seeder",
         )
       )
@@ -86,4 +100,13 @@ def test_a_template_initializes_before_any_entity_exists(tenant, template):
     result = initialize_chart_of_accounts(
       session, InitializeChartOfAccountsRequest(template=template), "u"
     )
+    mapping = session.query(Structure).filter_by(block_type="coa_mapping").one()
+    anchor = session.get(Taxonomy, mapping.taxonomy_id)
+    assert anchor is not None
+    anchor_row = (
+      anchor.taxonomy_type,
+      anchor.source_taxonomy_id,
+      anchor.target_taxonomy_id,
+    )
   assert result.mappings_created > 0
+  assert anchor_row == ("mapping", result.taxonomy_id, "tax_rs_gaap")

@@ -36,6 +36,13 @@ from robosystems.operations.taxonomy_block.cascade import (
   cascade_delete_taxonomy,
   preflight_delete,
 )
+from robosystems.operations.taxonomy_block.coa_mappings import (
+  BOOK_FRAMEWORK,
+  COA_MAPPING_BLOCK_TYPE,
+  create_mapping_structure,
+  in_block,
+  mapping_frameworks,
+)
 from robosystems.operations.taxonomy_block.rule_persistence import (
   persist_tenant_rules,
 )
@@ -268,16 +275,28 @@ def create(
 
   structures_by_name: dict[str, Structure] = {}
   for req in payload.structures:
-    structure = Structure(
-      name=req.name,
-      description=req.description,
-      block_type=req.block_type,
-      taxonomy_id=taxonomy.id,
-      is_active=True,
-      metadata_=dict(req.metadata),
-      created_by=created_by,
-    )
-    session.add(structure)
+    if req.block_type == COA_MAPPING_BLOCK_TYPE:
+      structure = create_mapping_structure(
+        session,
+        chart_id=str(taxonomy.id),
+        framework=req.target_framework or BOOK_FRAMEWORK,
+        name=req.name,
+        description=req.description,
+        concept_arrangement=req.concept_arrangement,
+        metadata=req.metadata,
+        created_by=created_by,
+      )
+    else:
+      structure = Structure(
+        name=req.name,
+        description=req.description,
+        block_type=req.block_type,
+        taxonomy_id=taxonomy.id,
+        is_active=True,
+        metadata_=dict(req.metadata),
+        created_by=created_by,
+      )
+      session.add(structure)
     structures_by_name[req.name] = structure
 
   session.flush()
@@ -472,12 +491,14 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
   )
   structures_rows = (
     session.execute(
-      select(Structure)
-      .where(Structure.taxonomy_id == taxonomy_id)
-      .order_by(Structure.name)
+      select(Structure).where(in_block(taxonomy_id)).order_by(Structure.name)
     )
     .scalars()
     .all()
+  )
+  framework_by_structure = mapping_frameworks(
+    session,
+    [str(s.id) for s in structures_rows if s.block_type == COA_MAPPING_BLOCK_TYPE],
   )
 
   structure_ids = [s.id for s in structures_rows]
@@ -538,6 +559,7 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
       block_type=s.block_type,
       description=s.description,
       role_uri=None,
+      target_framework=framework_by_structure.get(str(s.id)),
     )
     for s in structures_rows
   ]

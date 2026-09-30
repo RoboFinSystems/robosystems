@@ -23,7 +23,6 @@ from sqlalchemy import delete, text
 from robosystems.logger import logger
 from robosystems.models.api.fact_provenance import PivotProvenance
 from robosystems.models.extensions import Fact, VerificationResult
-from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
 from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
@@ -44,6 +43,10 @@ from robosystems.operations.roboledger.reports.network_picker import (
   get_render_network,
   load_close_target_concept,
   load_entity_reporting_style,
+)
+from robosystems.operations.taxonomy_block.coa_mappings import (
+  BOOK_FRAMEWORK,
+  find_mapping_structure,
 )
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -426,12 +429,7 @@ def stamp_canonical_statement_sets(
   Statement-rule verification afterwards is non-fatal; a failed check is a
   finding on the month (``rule_summary``), not a reason to refuse the close.
   """
-  mapping = (
-    session.query(Structure)
-    .filter(Structure.block_type == "coa_mapping")
-    .order_by(Structure.created_at.desc())
-    .first()
-  )
+  mapping = find_mapping_structure(session, BOOK_FRAMEWORK)
   if mapping is None:
     return StatementStampResult(stamped=False, note="no_coa_mapping")
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions import cents_to_dollars
@@ -17,6 +17,10 @@ from robosystems.models.api.extensions.account_rollups import (
 from robosystems.models.extensions.roboledger import COA_SOURCES, Structure
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
+)
+from robosystems.operations.taxonomy_block.coa_mappings import (
+  BOOK_FRAMEWORK,
+  find_mapping_structure,
 )
 
 
@@ -112,18 +116,10 @@ def get_account_rollups(
 ) -> AccountRollupsResponse:
   """Return CoA accounts grouped by reporting element with balances.
 
-  Without `mapping_id`, uses the first active `coa_mapping` structure (empty
-  response if none). Raises `MappingNotFoundError` for an unknown id.
+  Without `mapping_id`, uses the book mapping (empty response if none). Raises `MappingNotFoundError` for an unknown id.
   """
   if not mapping_id:
-    mapping = session.execute(
-      select(Structure)
-      .where(
-        Structure.block_type == "coa_mapping",
-        Structure.is_active.is_(True),
-      )
-      .limit(1)
-    ).scalar_one_or_none()
+    mapping = find_mapping_structure(session, BOOK_FRAMEWORK)
 
     if not mapping:
       return AccountRollupsResponse(

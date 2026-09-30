@@ -116,7 +116,7 @@ Dimensions are key/value tags attached through the association tables in `dimens
 
 ### Chart of accounts via Element
 
-There is no dedicated `Account` model. The chart of accounts is modeled with `Element` — the same model used for XBRL reporting elements — with company accounts and standardized US GAAP elements distinguished by their `Taxonomy` (`type='chart_of_accounts'` vs `type='reporting'`). `Association` then carries CoA→GAAP rollup mappings through the same pattern as XBRL presentation and calculation links. `Account = Element` in `element.py` is an alias for CoA-flavored call sites.
+There is no dedicated `Account` model. The chart of accounts is modeled with `Element` — the same model used for XBRL reporting elements — with company accounts and standardized US GAAP elements distinguished by their `Taxonomy` (`type='chart_of_accounts'` vs `type='reporting'`). `Association` then carries CoA→GAAP rollup mappings through the same pattern as XBRL presentation and calculation links. Each mapping's `coa_mapping` Structure is anchored to a `mapping` Taxonomy the chart owns — `source_taxonomy_id` is the chart, `target_taxonomy_id` the framework it maps into — so a chart holds one mapping per framework, and readers pick one by framework (`operations/taxonomy_block/coa_mappings.py`), never by row order. `Account = Element` in `element.py` is an alias for CoA-flavored call sites.
 
 ## Conventions
 

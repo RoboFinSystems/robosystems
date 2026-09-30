@@ -1426,8 +1426,12 @@ class OLTPLoader:
     """
     from robosystems.db.extensions import extensions_session
     from robosystems.models.extensions import Element, EntityTaxonomy
-    from robosystems.models.extensions.roboledger import Structure, Taxonomy
+    from robosystems.models.extensions.roboledger import Taxonomy
     from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
+    from robosystems.operations.taxonomy_block.coa_mappings import (
+      BOOK_FRAMEWORK,
+      ensure_mapping_structure,
+    )
     from robosystems.utils.ulid import generate_prefixed_ulid
 
     try:
@@ -1502,27 +1506,15 @@ class OLTPLoader:
             f"No entity found in graph {graph_id}, skipping EntityTaxonomy adoption"
           )
 
-        existing_mapping = (
-          session.query(Structure)
-          .filter(Structure.block_type == "coa_mapping", Structure.is_active.is_(True))
-          .first()
+        mapping_structure = ensure_mapping_structure(
+          session,
+          chart_id=str(existing_coa.id),
+          framework=BOOK_FRAMEWORK,
+          name="CoA to US GAAP Mapping",
+          description="Maps Chart of Accounts to US GAAP reporting concepts",
+          created_by=created_by,
         )
-
-        if not existing_mapping:
-          mapping_structure = Structure(
-            id=generate_prefixed_ulid("struct"),
-            name="CoA to US GAAP Mapping",
-            description="Maps Chart of Accounts to US GAAP reporting concepts",
-            block_type="coa_mapping",
-            taxonomy_id=existing_coa.id,
-            is_active=True,
-            created_by=created_by,
-          )
-          session.add(mapping_structure)
-          session.flush()
-          logger.info(
-            f"Created mapping structure for {graph_id}: {mapping_structure.id}"
-          )
+        logger.info(f"Mapping structure for {graph_id}: {mapping_structure.id}")
 
     except Exception as e:
       logger.warning(f"Failed to ensure mapping structure for {graph_id}: {e}")
