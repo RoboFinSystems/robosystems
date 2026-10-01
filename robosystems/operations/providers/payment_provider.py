@@ -188,7 +188,7 @@ class StripePaymentProvider(PaymentProvider):
         extra={"session_id": session_id},
       )
       return session.status
-    except self.stripe.error.InvalidRequestError:
+    except self.stripe.InvalidRequestError:
       # Only an `open` session can be expired; re-read rather than parse the
       # error text.
       session = self.stripe.checkout.Session.retrieve(session_id)
@@ -271,7 +271,7 @@ class StripePaymentProvider(PaymentProvider):
     except ValueError as e:
       logger.error(f"Invalid webhook payload: {e}")
       raise
-    except self.stripe.error.SignatureVerificationError as e:
+    except self.stripe.SignatureVerificationError as e:
       logger.error(f"Invalid webhook signature: {e}")
       raise ValueError("Invalid webhook signature") from e
 
@@ -623,14 +623,14 @@ class StripePaymentProvider(PaymentProvider):
         ],
       }
 
-    except self.stripe.error.InvalidRequestError as e:
+    except self.stripe.InvalidRequestError as e:
       # Nothing to bill (canceled, fully credited). Rare, so warn.
       logger.warning(
         f"No upcoming invoice for subscription {subscription_id}: {e}",
         extra={"customer_id": customer_id, "subscription_id": subscription_id},
       )
       return None
-    except self.stripe.error.StripeError as e:
+    except self.stripe.StripeError as e:
       logger.error(f"Failed to get upcoming invoice: {e}", exc_info=True)
       raise
     except Exception as e:
@@ -649,7 +649,7 @@ class StripePaymentProvider(PaymentProvider):
         f"Canceled Stripe subscription {subscription_id}",
         extra={"subscription_id": subscription_id},
       )
-    except self.stripe.error.InvalidRequestError as e:
+    except self.stripe.InvalidRequestError as e:
       if self._subscription_already_terminal(subscription_id):
         logger.warning(
           f"Stripe subscription {subscription_id} already canceled or missing; "
@@ -680,7 +680,7 @@ class StripePaymentProvider(PaymentProvider):
         f"Set Stripe subscription {subscription_id} to cancel at period end",
         extra={"subscription_id": subscription_id},
       )
-    except self.stripe.error.InvalidRequestError as e:
+    except self.stripe.InvalidRequestError as e:
       if self._subscription_already_terminal(subscription_id):
         logger.warning(
           f"Stripe subscription {subscription_id} already canceled or missing; "
@@ -738,7 +738,7 @@ class StripePaymentProvider(PaymentProvider):
     try:
       subscription = self.stripe.Subscription.retrieve(subscription_id)
       return subscription.status == "canceled"
-    except self.stripe.error.InvalidRequestError:
+    except self.stripe.InvalidRequestError:
       return True
     except Exception:
       return False
