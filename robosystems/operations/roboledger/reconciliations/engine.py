@@ -71,10 +71,14 @@ def _ledger_balances(
   if len(retained) == 1:
     balances[retained[0]] += prior_years_result
   elif prior_years_result:
+    reason = (
+      f"{len(retained)} chart accounts are marked as retained earnings"
+      if retained
+      else "no chart account is marked as retained earnings"
+    )
     notes.append(
-      "Earlier years' results could not be placed: the chart has "
-      f"{len(retained)} retained-earnings accounts, so that account will not "
-      "tie."
+      f"Earlier years' results could not be placed ({reason}), so retained "
+      "earnings will not tie."
     )
   return balances, notes
 

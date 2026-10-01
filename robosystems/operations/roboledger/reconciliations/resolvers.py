@@ -81,10 +81,12 @@ class SourceLedgerResolver:
 
     by_source_id: dict[str, str] = {}
     linked = session.execute(
-      select(Element.id, Element.external_id, Element.connection_id).where(
+      select(Element.id, Element.external_id, Element.connection_id)
+      .where(
         Element.external_source == _QUICKBOOKS,
         Element.external_id.isnot(None),
       )
+      .order_by(Element.id)
     ).all()
     for element_id, external_id, element_connection_id in linked:
       # A reconnected company can leave an earlier connection's copy of the

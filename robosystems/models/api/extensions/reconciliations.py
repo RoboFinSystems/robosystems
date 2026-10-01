@@ -88,13 +88,19 @@ class ReconciliationPreviewResponse(BaseModel):
       "period end may be activity not yet synced, not a fault in the mirror."
     ),
   )
-  accounts_compared: int
+  accounts_compared: int = Field(
+    ..., description="Accounts with a balance on either side; zero on both is left out."
+  )
   accounts_tied: int
   accounts_different: int = Field(
     ..., description="Every account that does not tie, whatever the reason."
   )
   total_difference: float = Field(
-    ..., description="Sum of the absolute differences across accounts."
+    ...,
+    description=(
+      "Sum of the absolute differences across accounts, not a net figure: one "
+      "missing transaction counts on each account it touches."
+    ),
   )
   rows: list[ReconciliationRow] = Field(
     ...,

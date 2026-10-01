@@ -282,6 +282,23 @@ def test_the_live_connections_element_is_the_mirror(ext_session, books):
   assert stale not in {row.element_id for row in result.rows}
 
 
+def test_earlier_years_with_no_retained_earnings_account_say_so(ext_session, books):
+  """The account is there but the sync never marked it, so 2025's result has
+  nowhere to go and the note names the cause."""
+  ext_session.get(Element, books["retained"]).metadata_ = {}
+  ext_session.commit()
+
+  result, _ = _preview(ext_session, _source(*_TIED))
+
+  (row,) = result.rows
+  assert (row.account_name, row.status, row.difference) == (
+    "Retained Earnings",
+    "different",
+    1000.00,
+  )
+  assert any("no chart account is marked" in note for note in result.notes)
+
+
 def test_a_stale_sync_is_called_out(ext_session, books):
   with patch.object(
     SourceLedgerResolver,
