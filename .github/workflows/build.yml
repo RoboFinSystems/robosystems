@@ -47,7 +47,7 @@ on:
 
 jobs:
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       id-token: write
       contents: read
@@ -264,7 +264,7 @@ jobs:
   # Scan Docker image for vulnerabilities
   scan:
     needs: docker
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       id-token: write
@@ -304,7 +304,7 @@ jobs:
 
   # Build Lambda container image
   lambda:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       id-token: write
       contents: read
@@ -403,7 +403,7 @@ jobs:
   # Scan Lambda image for vulnerabilities
   scan-lambda:
     needs: lambda
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       id-token: write

@@ -42,7 +42,7 @@ on:
 jobs:
   # Guard: Verify staging environment is enabled
   check-staging-enabled:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check if staging is enabled
         run: |
@@ -59,7 +59,7 @@ jobs:
 
   runner:
     needs: [check-staging-enabled]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       runners_available: ${{ steps.select.outputs.runners_available }}
       runner_type: ${{ steps.select.outputs.runner_type }}

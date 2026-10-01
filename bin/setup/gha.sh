@@ -529,7 +529,7 @@ function setup_full_config() {
     # (graph_container_refresh parameter, defaults to true)
 
     # GitHub Actions Runner Configuration
-    # Default: "github-hosted" uses GitHub-hosted runners (ubuntu-latest)
+    # Default: "github-hosted" uses GitHub-hosted runners (ubuntu-24.04)
     # For self-hosted: set RUNNER_LABELS to e.g. "self-hosted,Linux,X64"
     # RUNNER_SCOPE: "repo" (check repo only), "org" (org only), "both" (repo then org)
     gh variable set RUNNER_LABELS --body "github-hosted"

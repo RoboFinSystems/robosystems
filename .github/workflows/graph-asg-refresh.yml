@@ -96,7 +96,7 @@ jobs:
   # busy-wait runs per tier, sequentially, plus the completion wait; a fixed cap
   # would kill a slow refresh before the action's own timeout errors can fire.
   budget:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       job_timeout_minutes: ${{ steps.compute.outputs.job_timeout_minutes }}
@@ -135,7 +135,7 @@ jobs:
 
   refresh-asgs:
     needs: [budget]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Must exceed the action's own internal budget, or its timeout branches can
     # never report. Derived, never fixed — see the budget job.
     timeout-minutes: ${{ fromJSON(needs.budget.outputs.job_timeout_minutes) }}
@@ -188,7 +188,7 @@ jobs:
   notify-failure:
     needs: [refresh-asgs]
     if: failure()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Notify failure
         run: |

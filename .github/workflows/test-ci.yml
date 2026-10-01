@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   runner:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       runners_available: ${{ steps.select.outputs.runners_available }}
@@ -49,7 +49,7 @@ jobs:
   # for a second human approver). Standard changes ride the test gate alone.
   change-classification:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read

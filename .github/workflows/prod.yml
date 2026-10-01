@@ -41,7 +41,7 @@ on:
 
 jobs:
   runner:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       runners_available: ${{ steps.select.outputs.runners_available }}
       runner_type: ${{ steps.select.outputs.runner_type }}

@@ -29,7 +29,7 @@ concurrency:
 jobs:
   publish:
     if: vars.DOCS_BUCKET != '' && vars.DOCS_BASE_URL != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       DOCS_BUCKET: ${{ vars.DOCS_BUCKET }}

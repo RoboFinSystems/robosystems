@@ -70,7 +70,7 @@ on:
         description: "GitHub Actions runner configuration (JSON array)"
         required: false
         type: string
-        default: '["ubuntu-latest"]'
+        default: '["ubuntu-24.04"]'
       aws_region:
         description: "AWS region"
         required: false
@@ -156,7 +156,7 @@ jobs:
   # killed before the loop's graceful give-up branch can fire.
   graph-refresh-budget:
     if: ${{ inputs.graph_refresh_enabled == true || inputs.graph_refresh_enabled == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       job_timeout_minutes: ${{ steps.budget.outputs.job_timeout_minutes }}
@@ -183,7 +183,7 @@ jobs:
   refresh-graph:
     needs: [graph-refresh-budget]
     if: ${{ inputs.graph_refresh_enabled == true || inputs.graph_refresh_enabled == 'true' }}
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || fromJSON(inputs.runner_config) }}
     # Must exceed the poll budget computed inside the step below, or the runner
     # kills the job before the poll can report anything. Derived, never fixed —
     # see graph-refresh-budget.
@@ -357,7 +357,7 @@ jobs:
   handoff-deferred-graph-refresh:
     needs: [refresh-graph]
     if: ${{ needs.refresh-graph.result == 'success' && needs.refresh-graph.outputs.phase == 'deferred' }}
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || fromJSON(inputs.runner_config) }}
     timeout-minutes: 5
     permissions:
       actions: write
@@ -395,7 +395,7 @@ jobs:
   # ============================================
   refresh-api:
     if: ${{ inputs.api_refresh_enabled == true || inputs.api_refresh_enabled == 'true' }}
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || fromJSON(inputs.runner_config) }}
     timeout-minutes: 10
     permissions:
       id-token: write
@@ -445,7 +445,7 @@ jobs:
   # ============================================
   refresh-dagster-daemon:
     if: ${{ inputs.dagster_refresh_enabled == true || inputs.dagster_refresh_enabled == 'true' }}
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || fromJSON(inputs.runner_config) }}
     timeout-minutes: 15
     permissions:
       id-token: write
@@ -478,7 +478,7 @@ jobs:
   # ============================================
   refresh-dagster-webserver:
     if: ${{ inputs.dagster_refresh_enabled == true || inputs.dagster_refresh_enabled == 'true' }}
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || fromJSON(inputs.runner_config) }}
     timeout-minutes: 10
     permissions:
       id-token: write
@@ -511,7 +511,7 @@ jobs:
   # ============================================
   refresh-worker:
     if: ${{ inputs.worker_refresh_enabled == true || inputs.worker_refresh_enabled == 'true' }}
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || fromJSON(inputs.runner_config) }}
     timeout-minutes: 15
     permissions:
       id-token: write

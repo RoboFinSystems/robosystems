@@ -47,13 +47,13 @@ runs:
 
         # If no labels or "github-hosted", use GitHub-hosted runners (skip API check)
         if [ -z "$RUNNER_LABELS" ] || [ "$RUNNER_LABELS" = "github-hosted" ]; then
-          echo "✅ Using GitHub-hosted runners (ubuntu-latest)"
+          echo "✅ Using GitHub-hosted runners (ubuntu-24.04)"
           echo ""
           echo "runners_available=false" >> $GITHUB_OUTPUT
           echo "runner_type=github-hosted" >> $GITHUB_OUTPUT
           {
             echo 'runner_config<<EOF'
-            echo '["ubuntu-latest"]'
+            echo '["ubuntu-24.04"]'
             echo 'EOF'
           } >> $GITHUB_OUTPUT
           exit 0
@@ -72,7 +72,7 @@ runs:
         RUNNER_CONFIG_JSON=$(printf '%s\n' "${REQUIRED_LABELS[@]}" | jq -R . | jq -s . 2>/dev/null)
         if [ -z "$RUNNER_CONFIG_JSON" ] || [ "$RUNNER_CONFIG_JSON" = "null" ]; then
           echo "⚠️ Failed to build runner config JSON, using fallback"
-          RUNNER_CONFIG_JSON='["ubuntu-latest"]'
+          RUNNER_CONFIG_JSON='["ubuntu-24.04"]'
         fi
 
         # Extract org and repo from repository name
@@ -174,7 +174,7 @@ runs:
           } >> $GITHUB_OUTPUT
         else
           echo "⚠️ No suitable self-hosted runners available"
-          echo "🔄 Falling back to GitHub-hosted runners (ubuntu-latest)"
+          echo "🔄 Falling back to GitHub-hosted runners (ubuntu-24.04)"
           echo ""
           echo "💡 To use self-hosted runners:"
           echo "   - For forks: Add a self-hosted runner to your repository"
@@ -186,7 +186,7 @@ runs:
           echo "runner_type=github-hosted" >> $GITHUB_OUTPUT
           {
             echo 'runner_config<<EOF'
-            echo '["ubuntu-latest"]'
+            echo '["ubuntu-24.04"]'
             echo 'EOF'
           } >> $GITHUB_OUTPUT
         fi

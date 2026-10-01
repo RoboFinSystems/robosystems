@@ -46,7 +46,7 @@ jobs:
   # For scheduled runs, determine task type and check if enabled
   schedule-gate:
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
@@ -99,7 +99,7 @@ jobs:
       ((github.event_name == 'workflow_dispatch' && inputs.task == 'update-ami') ||
       (github.event_name == 'schedule' && needs.schedule-gate.outputs.should_run == 'true' && needs.schedule-gate.outputs.task == 'update-ami'))
     needs: [schedule-gate]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       ami_id: ${{ steps.ami.outputs.ami_id }}
@@ -184,7 +184,7 @@ jobs:
       needs.ami-get-latest.result == 'success' &&
       needs.ami-get-latest.outputs.ami_changed == 'true'
     needs: [ami-get-latest]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Configure AWS credentials
@@ -217,7 +217,7 @@ jobs:
       needs.ami-update-ssm.result == 'success' &&
       needs.ami-get-latest.outputs.trigger_deploy == 'true'
     needs: [ami-get-latest, ami-update-ssm]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       deploy_ref: ${{ steps.dispatch.outputs.deploy_ref }}
@@ -259,7 +259,7 @@ jobs:
       ((github.event_name == 'workflow_dispatch' && inputs.task == 'docker-cleanup') ||
       (github.event_name == 'schedule' && needs.schedule-gate.outputs.should_run == 'true' && needs.schedule-gate.outputs.task == 'docker-cleanup'))
     needs: [schedule-gate]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Must exceed the step's own internal budget, or the runner kills the job
     # before the "still running past budget" branch can report anything. That
     # budget is 1200s per environment, and a scheduled run does staging and prod
@@ -347,7 +347,7 @@ jobs:
     if: |
       always() &&
       needs.ami-get-latest.result != 'skipped'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       id-token: write
@@ -431,7 +431,7 @@ jobs:
   summary:
     needs: [ami-get-latest, ami-update-ssm, ami-dispatch-deploy, docker-cleanup, notify]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Generate Docker Cleanup Summary
