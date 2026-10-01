@@ -86,7 +86,9 @@ runs:
 
         classification="normal"
         reason="platform or application code changed"
-        if [[ "$author" == dependabot* ]]; then
+        # gh reports the bot as app/dependabot, the REST API as dependabot[bot].
+        dependabot='^(app/)?dependabot(\[bot\])?$'
+        if [[ "$author" =~ $dependabot ]]; then
           classification="standard"
           reason="opened by Dependabot: a dependency version bump gated by the test suite"
         else
