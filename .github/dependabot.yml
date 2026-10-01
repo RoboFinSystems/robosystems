@@ -19,6 +19,10 @@ updates:
       interval: "monthly"
     labels:
       - "dependencies"
+    ignore:
+      # hold: pyproject caps dbt-core <1.12 (beta parser dep + unused metricflow subtree)
+      - dependency-name: "dbt-core"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       # The opentelemetry-* family is version-coupled (api/sdk/exporters on
       # 1.x, instrumentations on the paired 0.xxb0) and must move in lockstep
