@@ -11,6 +11,12 @@ updates:
       # hold: v9's prune-cache flip bloats the cache; v10's guard covers events we don't use
       - dependency-name: "astral-sh/setup-uv"
         update-types: ["version-update:semver-major"]
+    groups:
+      # One PR per run for minor/patch pins; majors stay individual for review
+      actions-minor-patch:
+        patterns:
+          - "*"
+        update-types: ["minor", "patch"]
 
   # Python — uv dependencies in pyproject.toml and uv.lock
   - package-ecosystem: "uv"
@@ -23,6 +29,9 @@ updates:
       # hold: pyproject caps dbt-core <1.12 (beta parser dep + unused metricflow subtree)
       - dependency-name: "dbt-core"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # hold: stripe-python 12+ removes stripe.error; upgrade deliberately, not via Dependabot
+      - dependency-name: "stripe"
+        update-types: ["version-update:semver-major"]
     groups:
       # The opentelemetry-* family is version-coupled (api/sdk/exporters on
       # 1.x, instrumentations on the paired 0.xxb0) and must move in lockstep
@@ -41,6 +50,12 @@ updates:
         patterns:
           - "dbt-core"
           - "dbt-duckdb"
+      # Everything else at minor/patch in one PR per run; listed last so the
+      # lockstep groups above claim their packages first, and majors stay individual
+      python-minor-patch:
+        patterns:
+          - "*"
+        update-types: ["minor", "patch"]
 
   # Docker — base images in Dockerfiles
   - package-ecosystem: "docker"
