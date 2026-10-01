@@ -723,6 +723,112 @@ class TestPreviewReconciliationsOp:
     assert exc.value.status_code == 422
 
 
+_SIGN_OFF = (
+  "robosystems.operations.roboledger.commands.reconciliations.sign_off_reconciliation"
+)
+
+
+class TestSignOffReconciliationOp:
+  """Each refusal has its own status, so a client can tell "not yours to
+  sign" from "not ready to sign"."""
+
+  async def _call(self, side_effect):
+    from robosystems.models.api.extensions.reconciliations import (
+      SignOffReconciliationRequest,
+    )
+    from robosystems.routers.extensions.roboledger.operations import (
+      sign_off_reconciliation_op,
+    )
+
+    with (
+      patch(_SIGN_OFF, side_effect=side_effect) as command,
+      _mock_session_ctx() as mock_session,
+      patch("robosystems.middleware.extensions.mark_graph_stale") as mark,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+      self.mark = mark
+      envelope = await sign_off_reconciliation_op(
+        body=SignOffReconciliationRequest(structure_id="struct_rec", period="2026-08"),
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    return envelope, command
+
+  @pytest.mark.asyncio
+  async def test_the_reviewer_is_the_caller(self) -> None:
+    from robosystems.models.api.extensions.reconciliations import (
+      ReconciliationSummary,
+    )
+
+    summary = ReconciliationSummary(
+      structure_id="struct_rec",
+      name="Source ledger (QuickBooks)",
+      scope="ledger",
+      method="source_ledger",
+      required_for_close=True,
+      materiality=0,
+      period="2026-08",
+      as_of=date(2026, 8, 31),
+      status="reviewed",
+      review_required=False,
+      separate_reviewer=False,
+    )
+    envelope, command = await self._call([summary])
+
+    assert isinstance(envelope, OperationEnvelope)
+    assert command.call_args.kwargs == {
+      "graph_id": GRAPH_ID,
+      "created_by": "usr_test123",
+    }
+    # The review is an event, and events are materialized.
+    self.mark.assert_called_once_with(GRAPH_ID, "reconciliation_signed_off")
+
+  @pytest.mark.asyncio
+  async def test_403_without_a_membership_on_the_graph(self) -> None:
+    from robosystems.operations.roboledger.commands.reconciliations import (
+      NotAGraphMemberError,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+      await self._call(NotAGraphMemberError())
+    assert exc.value.status_code == 403
+
+  @pytest.mark.asyncio
+  async def test_409_when_the_period_does_not_reconcile(self) -> None:
+    from robosystems.operations.roboledger.commands.reconciliations import (
+      ReconciliationNotReconciledError,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+      await self._call(
+        ReconciliationNotReconciledError("Source ledger", "2026-08", "unreconciled")
+      )
+    assert exc.value.status_code == 409
+
+  @pytest.mark.asyncio
+  async def test_409_when_a_separate_reviewer_is_required(self) -> None:
+    from robosystems.operations.roboledger.commands.reconciliations import (
+      SeparateReviewerError,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+      await self._call(SeparateReviewerError("you ran this one"))
+    assert exc.value.status_code == 409
+
+  @pytest.mark.asyncio
+  async def test_404_for_an_unknown_reconciliation(self) -> None:
+    from robosystems.operations.roboledger.commands.reconciliations import (
+      ReconciliationNotFoundError,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+      await self._call(ReconciliationNotFoundError("struct_rec"))
+    assert exc.value.status_code == 404
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Journal entry CRUD route tests (native-accounting write path)
 # ═══════════════════════════════════════════════════════════════════════════

@@ -8,8 +8,10 @@ reconciles is the ``VerificationResult`` of one rule on the block.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -28,7 +30,7 @@ from robosystems.models.extensions import (
   Taxonomy,
   VerificationResult,
 )
-from robosystems.models.extensions.roboledger import Fact, FactSet
+from robosystems.models.extensions.roboledger import Event, Fact, FactSet
 from robosystems.operations.information_block.reconciliation import (
   RECONCILIATION_BLOCK_TYPE,
   RECONCILIATION_FACTSET_TYPE,
@@ -57,6 +59,12 @@ _CONCEPTS: tuple[tuple[str, str, bool], ...] = (
 
 # The differing accounts kept on the period's FactSet; the counts stay exact.
 MAX_STORED_DIFFERENCES = 100
+
+SIGN_OFF_EVENT_TYPE = "reconciliation_signed_off"
+
+# How the standing comparison came to be: someone ran the operation, or a
+# source sync refreshed it.
+ComparedVia = Literal["operation", "sync"]
 
 # Arbitrary but must stay stable, as the period fence's class is.
 _SEED_LOCK_CLASS = 872402
@@ -257,6 +265,20 @@ def _entity_id(session: Session) -> str:
   return str(row.id)
 
 
+def balance_digest(comparison: ReconciliationPreviewResponse) -> str:
+  """A fingerprint of every compared balance, both sides, to the cent.
+
+  Two comparisons with the same digest saw the same figures. A sign-off pins
+  it, so any later change to a balance at that period end lapses the review.
+  """
+  lines = sorted(
+    f"{row.element_id or ''}|{row.source_account_id or ''}|"
+    f"{round(row.ledger_balance * 100)}|{round(row.independent_balance * 100)}"
+    for row in comparison.rows
+  )
+  return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:32]
+
+
 def record_ledger_reconciliation(
   session: Session,
   structure: Structure,
@@ -265,10 +287,19 @@ def record_ledger_reconciliation(
   side: IndependentSide,
   comparison: ReconciliationPreviewResponse,
   created_by: str,
+  compared_via: ComparedVia = "operation",
 ) -> VerificationResult | None:
   """Replace the period's standing set with this comparison and evaluate the
   block's rule against it. Flushes; the caller owns the commit.
+
+  ``comparison`` must carry every row, tied ones included: the digest is
+  taken over all of them. Raises ``RuntimeError`` when it does not.
   """
+  if len(comparison.rows) != comparison.accounts_compared:
+    raise RuntimeError(
+      "A reconciliation is recorded from every compared row, tied ones "
+      f"included; got {len(comparison.rows)} of {comparison.accounts_compared}."
+    )
   concepts = ensure_reconciliation_concepts(session, created_by)
   entity_id = _entity_id(session)
   provenance = ObservedProvenance(
@@ -287,6 +318,9 @@ def record_ledger_reconciliation(
     "differences_truncated": len(differences) > MAX_STORED_DIFFERENCES,
     "accounts_tied": comparison.accounts_tied,
     "notes": comparison.notes,
+    "balance_digest": balance_digest(comparison),
+    "compared_by": created_by,
+    "compared_via": compared_via,
   }
 
   standing = session.execute(
@@ -355,3 +389,71 @@ def record_ledger_reconciliation(
     created_by=created_by,
   )
   return results[0] if results else None
+
+
+def standing_sign_offs(
+  session: Session, structure_ids: list[str], period: str
+) -> dict[str, list[Event]]:
+  """Each block's live sign-offs for the period, latest first, by structure id."""
+  if not structure_ids:
+    return {}
+  rows = session.execute(
+    select(Event)
+    .where(
+      Event.event_type == SIGN_OFF_EVENT_TYPE,
+      Event.event_category == "approval",
+      Event.status != "voided",
+      Event.metadata_["period"].astext == period,
+      Event.metadata_["structure_id"].astext.in_(structure_ids),
+    )
+    .order_by(Event.occurred_at.desc(), Event.id.desc())
+  ).scalars()
+  sign_offs: dict[str, list[Event]] = {}
+  for event in rows:
+    structure_id = str((event.metadata_ or {}).get("structure_id"))
+    sign_offs.setdefault(structure_id, []).append(event)
+  return sign_offs
+
+
+def record_sign_off(
+  session: Session,
+  *,
+  structure: Structure,
+  window: ReconciliationWindow,
+  fact_set: FactSet,
+  reviewer_id: str,
+  note: str | None,
+) -> Event:
+  """The review as an ``approval`` support event, pinned to the comparison it
+  approved. It writes no books: the status is terminal from the start, so the
+  inbox and the unposted-event gate never see it.
+  """
+  compared = fact_set.metadata_ or {}
+  now = datetime.now(UTC)
+  event = Event(
+    event_type=SIGN_OFF_EVENT_TYPE,
+    event_category="approval",
+    event_class="support",
+    occurred_at=now,
+    effective_at=datetime.combine(window.period_end, datetime.min.time()),
+    status="committed",
+    source="manual",
+    description=f"Reviewed: {structure.name}, {window.period}",
+    metadata_={
+      "structure_id": str(structure.id),
+      "period": window.period,
+      "fact_set_id": str(fact_set.id),
+      "balance_digest": compared.get("balance_digest"),
+      "compared_by": compared.get("compared_by"),
+      "compared_via": compared.get("compared_via"),
+      "self_reviewed": (
+        compared.get("compared_via") == "operation"
+        and compared.get("compared_by") == reviewer_id
+      ),
+      "note": note,
+    },
+    created_by=reviewer_id,
+  )
+  session.add(event)
+  session.flush()
+  return event

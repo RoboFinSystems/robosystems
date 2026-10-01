@@ -158,6 +158,33 @@ class SetReconciliationPolicyRequest(BaseModel):
       "A difference up to this amount still counts as reconciled. Omit to keep."
     ),
   )
+  review_required: bool | None = Field(
+    None,
+    description=(
+      "Whether the close also waits for a sign-off, not just for the two "
+      "sides to reconcile. Omit to keep."
+    ),
+  )
+  separate_reviewer: bool | None = Field(
+    None,
+    description=(
+      "Whether the person who signs off must be someone other than the "
+      "person who ran the comparison. It can only be turned on when the "
+      "graph has at least two members who can write. Omit to keep."
+    ),
+  )
+
+
+class SignOffReconciliationRequest(BaseModel):
+  """Sign off a reconciliation for a period as its reviewer."""
+
+  structure_id: str = Field(..., description="The reconciliation block.")
+  period: str = Field(
+    ..., description="The period signed off, as YYYY-MM.", examples=["2026-08"]
+  )
+  note: str | None = Field(
+    None, description="What the reviewer looked at, kept on the sign-off."
+  )
 
 
 class ReconciliationPolicyResponse(BaseModel):
@@ -166,6 +193,8 @@ class ReconciliationPolicyResponse(BaseModel):
   structure_id: str
   required_for_close: bool
   materiality: float
+  review_required: bool
+  separate_reviewer: bool
 
 
 class ReconciliationSummary(BaseModel):
@@ -228,6 +257,43 @@ class ReconciliationSummary(BaseModel):
   )
   fact_set_id: str | None = Field(
     None, description="The FactSet holding the period's comparison."
+  )
+  compared_by: str | None = Field(
+    None, description="The user whose action ran the last comparison."
+  )
+  compared_via: str | None = Field(
+    None,
+    description=(
+      "`operation` when someone ran refresh-reconciliations; `sync` when a "
+      "source sync refreshed it."
+    ),
+  )
+  review_required: bool = Field(
+    ..., description="Whether the close also waits for a sign-off."
+  )
+  separate_reviewer: bool = Field(
+    ...,
+    description=(
+      "Whether the reviewer must be someone other than the person who ran "
+      "the comparison."
+    ),
+  )
+  reviewed_by: str | None = Field(
+    None,
+    description=(
+      "The user who signed off the comparison as it stands. Null when nobody "
+      "has, or when the balances changed after the sign-off."
+    ),
+  )
+  reviewed_at: datetime | None = Field(
+    None, description="When the standing sign-off was made."
+  )
+  self_reviewed: bool | None = Field(
+    None,
+    description=(
+      "True when the reviewer is the person who ran the comparison they "
+      "signed off. Null when there is no standing sign-off."
+    ),
   )
   differences: list[ReconciliationRow] = Field(
     default_factory=list,
