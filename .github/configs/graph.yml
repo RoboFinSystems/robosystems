@@ -271,16 +271,16 @@ production:
       # Memory overrides for replica hardware (r7g.large = 16GB RAM)
       # These override the writer's 10GB settings which exceed container capacity
       instance:
-        # r7g.large (16GB) memory-optimized. Full-report reads on LadybugDB 0.18
-        # need buffer pool + query working set + OS to stay inside the instance
-        # with the admission guard's headroom (min_available_mb) still free; 8GB
-        # is not enough. 16GB leaves ~3GB of working-set headroom above an 8GB
-        # buffer pool.
+        # r7g.large (16GB) memory-optimized; the container is limited to 13GB.
+        # Opening sec (~110GB, LadybugDB 0.18) holds ~5.3GB outside the buffer
+        # pool, so the pool is sized to leave admission control's
+        # min_available_mb free when it is full. Measure the open-time footprint
+        # again before raising it, and whenever sec or the engine grows.
         # Replicas serve sec ONLY (SHARED_REPOSITORIES=sec); sec_historical stays
         # on the shared master.
         type: r7g.large # 16GB RAM, 2 vCPUs, memory-optimized ARM64 - read-only replica
-        max_memory_mb: 10240 # 10GB LadybugDB cap (pool + query exec); leaves the admission guard's headroom free on a 16GB instance
-        memory_per_db_mb: 8192 # 8GB buffer pool for sec (was 3.5GB) - 2.3x cache for the ~110GB graph
+        max_memory_mb: 10240 # Reported by the replica's status endpoint only; memory_per_db_mb is the enforced cap
+        memory_per_db_mb: 6144 # 6GB buffer pool for sec: full, it leaves ~1.8GB free in the container
         duckdb_memory_limit: "0" # No DuckDB queries on replicas
         duckdb_max_threads: 0 # No DuckDB queries on replicas
 
