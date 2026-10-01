@@ -590,6 +590,66 @@ def test_a_balance_that_changes_after_the_review_lapses_it(reconciled, books):
   assert len(_sign_off_events(session)) == 2
 
 
+def test_balances_that_return_to_signed_figures_are_reviewed_again(reconciled, books):
+  """A sign-off applies to the figures it pinned, whatever was signed since."""
+  session, structure_id = reconciled
+  _sign_off(session, structure_id)
+  from .conftest import entry
+
+  entry(session, date(2026, 8, 30), books["software"], books["cash"], 4_000)
+  session.commit()
+  moved = (
+    ("35", "Checking", 134_000),
+    ("50", "Services", -50_000),
+    ("70", "Software", 16_000),
+    ("3", "Retained Earnings", -100_000),
+  )
+  _refresh(session, source_report(*moved))
+  members = ("usr", "usr2")
+  assert _sign_off(session, structure_id, by="usr2", members=members).reviewed_by == (
+    "usr2"
+  )
+
+  entry(session, date(2026, 8, 30), books["cash"], books["software"], 4_000)
+  session.commit()
+  (rec,) = _refresh(session, source_report(*TIED)).reconciliations
+
+  assert (rec.status, rec.reviewed_by) == ("reviewed", "usr")
+  assert len(_sign_off_events(session)) == 2
+
+
+def test_a_reviewed_period_still_refuses_a_non_member(reconciled):
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    NotAGraphMemberError,
+  )
+
+  session, structure_id = reconciled
+  _sign_off(session, structure_id)
+
+  with pytest.raises(NotAGraphMemberError):
+    _sign_off(session, structure_id, by="usr_org_admin", members=("usr",))
+
+
+def test_a_comparison_without_its_tied_rows_is_not_recorded(ledger):
+  """The sign-off's digest covers every row, so a partial comparison would
+  pin less than the reviewer saw."""
+  from robosystems.operations.roboledger.commands import reconciliations as commands
+
+  whole = commands.compute_reconciliations
+
+  def open_rows_only(*args, **kwargs):
+    return whole(*args, **{**kwargs, "include_tied": False})
+
+  with (
+    patch.object(commands, "compute_reconciliations", open_rows_only),
+    pytest.raises(RuntimeError, match="every compared row"),
+  ):
+    _refresh(ledger, source_report(*TIED))
+  ledger.rollback()
+
+  assert _blocks(ledger) == []
+
+
 # ── Review policy ───────────────────────────────────────────────────────────
 
 
@@ -636,6 +696,20 @@ def test_a_separate_reviewer_cannot_be_the_person_who_ran_it(reconciled):
 
   rec = _sign_off(session, structure_id, by="usr2", members=("usr", "usr2"))
   assert (rec.status, rec.reviewed_by, rec.self_reviewed) == ("reviewed", "usr2", False)
+
+
+def test_a_reviewer_left_as_the_only_member_is_told_the_way_out(reconciled):
+  """The two-member check runs when the policy is turned on; the graph can
+  lose a member afterwards."""
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    SeparateReviewerError,
+  )
+
+  session, structure_id = reconciled
+  _policy(session, structure_id, members=("usr", "usr2"), separate_reviewer=True)
+
+  with pytest.raises(SeparateReviewerError, match="turn `separate_reviewer` off"):
+    _sign_off(session, structure_id, by="usr", members=("usr",))
 
 
 def test_a_comparison_the_sync_ran_has_no_person_to_conflict_with(closed_through_july):

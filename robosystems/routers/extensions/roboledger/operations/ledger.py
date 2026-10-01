@@ -543,8 +543,9 @@ set_reconciliation_policy_op = _registrar.register(
       "the difference up to which it still counts as reconciled; whether the "
       "close also waits for a sign-off (`review_required`); and whether the "
       "reviewer must be someone other than the person who ran the comparison "
-      "(`separate_reviewer`, which needs at least two members of the graph "
-      "who can write). Omitted fields keep their value. The next "
+      "(`separate_reviewer`, which can only be turned on while the graph has "
+      "at least two members who can write; if it later has one, turn it off "
+      "or add a member). Omitted fields keep their value. The next "
       "refresh-reconciliations uses the new materiality; comparisons already "
       "recorded are not re-judged."
     ),
@@ -574,7 +575,8 @@ sign_off_reconciliation_op = _registrar.register(
       "`separate_reviewer` set refuses that case instead. The sign-off stands "
       "for the balances as they were compared: if any of them changes "
       "afterwards, the period goes back to reconciled or unreconciled and "
-      "needs signing off again. Signing off a period already reviewed "
+      "needs signing off again, unless the balances return to the ones "
+      "already signed. Signing off a period already reviewed "
       "changes nothing. Returns the reconciliation's standing for the period."
     ),
     command=cmd_sign_off_reconciliation,

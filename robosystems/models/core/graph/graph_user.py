@@ -274,19 +274,23 @@ class GraphUser(Model):
 
   @classmethod
   def explicit_write_member_ids(cls, graph_id: str, session: Session) -> set[str]:
-    """Users holding their own ``member`` or ``admin`` row on the graph.
+    """Active users holding their own ``member`` or ``admin`` row on the graph.
 
     Explicit rows only: an org OWNER/ADMIN's implicit admin grant is not a
-    membership. Subgraphs resolve to their parent.
+    membership. A deactivated user keeps their row but is not counted.
+    Subgraphs resolve to their parent.
     """
     from robosystems.middleware.graph.types import parse_graph_id
+    from robosystems.models.core.user.user import User
 
     parent_id, _ = parse_graph_id(graph_id)
     rows = (
       session.query(cls.user_id)
+      .join(User, User.id == cls.user_id)
       .filter(
         cls.graph_id == parent_id,
         cls.role.in_([GraphRole.MEMBER.value, GraphRole.ADMIN.value]),
+        User.is_active.is_(True),
       )
       .all()
     )

@@ -293,8 +293,13 @@ def record_ledger_reconciliation(
   block's rule against it. Flushes; the caller owns the commit.
 
   ``comparison`` must carry every row, tied ones included: the digest is
-  taken over all of them.
+  taken over all of them. Raises ``RuntimeError`` when it does not.
   """
+  if len(comparison.rows) != comparison.accounts_compared:
+    raise RuntimeError(
+      "A reconciliation is recorded from every compared row, tied ones "
+      f"included; got {len(comparison.rows)} of {comparison.accounts_compared}."
+    )
   concepts = ensure_reconciliation_concepts(session, created_by)
   entity_id = _entity_id(session)
   provenance = ObservedProvenance(
@@ -388,8 +393,8 @@ def record_ledger_reconciliation(
 
 def standing_sign_offs(
   session: Session, structure_ids: list[str], period: str
-) -> dict[str, Event]:
-  """Each block's latest live sign-off for the period, by structure id."""
+) -> dict[str, list[Event]]:
+  """Each block's live sign-offs for the period, latest first, by structure id."""
   if not structure_ids:
     return {}
   rows = session.execute(
@@ -403,10 +408,11 @@ def standing_sign_offs(
     )
     .order_by(Event.occurred_at.desc(), Event.id.desc())
   ).scalars()
-  latest: dict[str, Event] = {}
+  sign_offs: dict[str, list[Event]] = {}
   for event in rows:
-    latest.setdefault(str((event.metadata_ or {}).get("structure_id")), event)
-  return latest
+    structure_id = str((event.metadata_ or {}).get("structure_id"))
+    sign_offs.setdefault(structure_id, []).append(event)
+  return sign_offs
 
 
 def record_sign_off(

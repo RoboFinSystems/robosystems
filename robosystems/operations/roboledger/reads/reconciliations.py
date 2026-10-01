@@ -25,14 +25,17 @@ from robosystems.operations.roboledger.fiscal_calendar import period_date_range
 _QNAME_PREFIX = "rs-rec:"
 
 
-def _standing_review(sign_off: Event | None, fact_set: FactSet | None) -> Event | None:
-  """The sign-off, if it still describes the comparison as it stands: any
-  change to a balance since changes the digest and lapses the review."""
-  if sign_off is None or fact_set is None:
+def _standing_review(sign_offs: list[Event], fact_set: FactSet | None) -> Event | None:
+  """The latest sign-off that pinned the comparison as it stands. A change to
+  any balance changes the digest, so a sign-off of other figures does not
+  apply; one of these figures does, whatever was signed in between."""
+  current = (fact_set.metadata_ or {}).get("balance_digest") if fact_set else None
+  if not current:
     return None
-  pinned = (sign_off.metadata_ or {}).get("balance_digest")
-  current = (fact_set.metadata_ or {}).get("balance_digest")
-  return sign_off if pinned and pinned == current else None
+  for sign_off in sign_offs:
+    if (sign_off.metadata_ or {}).get("balance_digest") == current:
+      return sign_off
+  return None
 
 
 def _status(
@@ -121,7 +124,7 @@ def list_reconciliations(session: Session, period: str) -> ReconciliationListRes
     fact_set_id = str(fact_set.id) if fact_set is not None else ""
     provenance = fact_set.provenance if fact_set is not None else None
     metadata = (fact_set.metadata_ or {}) if fact_set is not None else {}
-    review = _standing_review(sign_offs.get(str(structure.id)), fact_set)
+    review = _standing_review(sign_offs.get(str(structure.id), []), fact_set)
     summaries.append(
       ReconciliationSummary(
         structure_id=str(structure.id),

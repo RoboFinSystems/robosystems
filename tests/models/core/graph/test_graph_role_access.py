@@ -376,3 +376,19 @@ class TestExplicitWriteMembers:
     assert GraphUser.explicit_write_member_ids(f"{graph.graph_id}_dev", test_db) == {
       test_user.id
     }
+
+  def test_a_deactivated_member_is_not_counted(self, test_db, test_user, test_org):
+    graph = _create_org_graph(test_db, test_org.id)
+    member = _create_user(test_db, test_user.password_hash)
+    left = _create_user(test_db, test_user.password_hash)
+    for user in (member, left):
+      GraphUser.create(
+        user_id=user.id,
+        graph_id=graph.graph_id,
+        role=GraphRole.MEMBER,
+        session=test_db,
+      )
+    left.is_active = False
+    test_db.commit()
+
+    assert GraphUser.explicit_write_member_ids(graph.graph_id, test_db) == {member.id}

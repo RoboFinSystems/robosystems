@@ -217,6 +217,9 @@ def sign_off_reconciliation(
   # A refresh in flight would replace the comparison being signed.
   lock_reconciliation_writes(session, graph_id)
   structure = _load_reconciliation(session, body.structure_id)
+  members = _explicit_write_members(graph_id)
+  if created_by not in members:
+    raise NotAGraphMemberError()
 
   rec = _summary(session, str(structure.id), body.period)
   if rec.status == "reviewed":
@@ -224,18 +227,21 @@ def sign_off_reconciliation(
   if rec.status != "reconciled":
     raise ReconciliationNotReconciledError(structure.name, body.period, rec.status)
 
-  if created_by not in _explicit_write_members(graph_id):
-    raise NotAGraphMemberError()
-
   if (
     rec.separate_reviewer
     and rec.compared_via == "operation"
     and rec.compared_by == created_by
   ):
+    way_out = (
+      "Ask another member to sign off, or to run refresh-reconciliations so "
+      "that you can."
+      if len(members) > 1
+      else "This graph no longer has another member who can write: add one, "
+      "or turn `separate_reviewer` off with set-reconciliation-policy."
+    )
     raise SeparateReviewerError(
       f"{structure.name!r} requires a reviewer other than the person who ran "
-      "the comparison, and you ran this one. Ask another member to sign off, "
-      "or to run refresh-reconciliations so that you can."
+      f"the comparison, and you ran this one. {way_out}"
     )
 
   fact_set = session.get(FactSet, rec.fact_set_id)
