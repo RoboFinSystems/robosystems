@@ -43,6 +43,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   WritebackFailed,
+  drafts_close_posts,
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   build_fiscal_calendar_response,
@@ -476,15 +477,7 @@ def backfill_plan_history(
   processed: list[BackfillPeriodOutcome] = []
   for period in candidates[: body.max_periods]:
     ps, pe = period_date_range(period)
-    draft_count = (
-      session.query(Entry)
-      .filter(
-        Entry.posting_date >= ps,
-        Entry.posting_date <= pe,
-        Entry.status == "draft",
-      )
-      .count()
-    )
+    draft_count = drafts_close_posts(session, ps, pe).count()
     if draft_count:
       processed.append(
         BackfillPeriodOutcome(

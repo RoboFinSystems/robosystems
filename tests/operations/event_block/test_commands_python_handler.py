@@ -393,6 +393,47 @@ class TestDslHandlerResolution:
     assert resp.would_succeed is False
     assert any("closed period" in e for e in resp.validation_errors)
 
+  def test_dsl_preview_refuses_a_retired_account(self) -> None:
+    """Preview and execute must agree: the engine refuses the same line."""
+    handler = self._handler()
+    handler.transaction_template = {
+      "transactions": [
+        {
+          "entry_template": {
+            "debit": {"element_id": "elem_cash", "amount": "{{ event.amount }}"},
+            "credit": {"element_id": "elem_old", "amount": "{{ event.amount }}"},
+          }
+        }
+      ]
+    }
+    session = MagicMock()
+    session.get.return_value = MagicMock(agent_type="vendor")
+    session.execute.return_value.all.return_value = [
+      ("elem_old", "4000", "Old Revenue")
+    ]
+    body = _make_body(
+      event_type="invoice_issued",
+      event_category="purchase",
+      metadata={},
+      agent_id="agt_vendor",
+      amount=12_500,
+    )
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.get_python_handler",
+        return_value=None,
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.resolve_handler",
+        return_value=handler,
+      ),
+      patch("robosystems.operations.event_block.commands.assert_period_not_closed"),
+    ):
+      resp = preview_event_block(session, body, created_by="usr_test")
+    assert resp.would_succeed is False
+    assert any("inactive account" in e for e in resp.validation_errors)
+    assert len(resp.planned_transactions) == 1
+
 
 class TestCreateDualityFields:
   """Stream 1 of event-driven-ledger: create-side flow-through of REA fields."""

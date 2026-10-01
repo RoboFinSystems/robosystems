@@ -30,6 +30,7 @@ from robosystems.models.extensions.roboledger import (
 from robosystems.models.extensions.rule import Rule
 from robosystems.models.extensions.trait import Trait
 from robosystems.operations.roboledger.commands._guards import (
+  assert_accounts_postable,
   assert_period_not_closed,
 )
 from robosystems.operations.roboledger.entry_status import (
@@ -1152,6 +1153,10 @@ class ScheduleService:
         reason=f"No in-scope fact for element '{debit_element_id}' in this period.",
       )
 
+    # Before the staleness check: an unchanged draft on a retired account
+    # would still post at close.
+    assert_accounts_postable(session, (debit_element_id, credit_element_id))
+
     amount_dollars = fact_row.value
     amount_cents = round(amount_dollars * 100)
 
@@ -1363,6 +1368,7 @@ class ScheduleService:
 
     # A draft in a closed period could never be posted.
     self._assert_period_not_closed(session, posting_date)
+    assert_accounts_postable(session, (li["element_id"] for li in normalized))
 
     entry = Entry(
       type=entry_type,
