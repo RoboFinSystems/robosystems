@@ -30,7 +30,7 @@ jobs:
   create-branch:
     permissions:
       contents: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       new_version: ${{ steps.new-version.outputs.new_version }}
@@ -168,7 +168,7 @@ jobs:
     if: inputs.deploy_target == 'staging' || inputs.deploy_target == 'all'
     permissions:
       actions: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       run_id: ${{ steps.dispatch.outputs.run_id }}
@@ -210,7 +210,7 @@ jobs:
       (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped')
     permissions:
       actions: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       run_id: ${{ steps.dispatch.outputs.run_id }}
@@ -253,7 +253,7 @@ jobs:
   create-summary:
     needs: [create-branch, create-tag, deploy-staging, deploy-prod]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: Create summary

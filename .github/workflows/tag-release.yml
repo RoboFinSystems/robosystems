@@ -44,7 +44,7 @@ on:
 
 jobs:
   tag:
-    runs-on: ubuntu-latest # Use GitHub-hosted runners for memory-intensive git/Claude operations
+    runs-on: ubuntu-24.04 # Use GitHub-hosted runners for memory-intensive git/Claude operations
     timeout-minutes: 15
     permissions:
       contents: write

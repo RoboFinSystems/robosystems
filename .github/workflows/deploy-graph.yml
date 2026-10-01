@@ -250,7 +250,7 @@ on:
 jobs:
   # Step 0: Resolve AMI (lookup latest if not provided)
   resolve-ami:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       id-token: write
       contents: read
@@ -299,7 +299,7 @@ jobs:
 
   # Step 1: Prepare Writer Matrix
   prepare-writer-matrix:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
@@ -314,9 +314,14 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Install yq
+        env:
+          # Bump both together; the checksum is yq_linux_amd64 from the release's checksums file
+          YQ_VERSION: v4.53.6
+          YQ_SHA256: c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385
         run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          wget -qO "${RUNNER_TEMP}/yq" "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  ${RUNNER_TEMP}/yq" | sha256sum --check --strict
+          sudo install -m 0755 "${RUNNER_TEMP}/yq" /usr/local/bin/yq
 
       - name: Prepare Writer Matrix
         id: set-matrix
@@ -475,7 +480,7 @@ jobs:
     needs: [prepare-writer-matrix]
     # An AZ move replaces writers too.
     if: (inputs.cycle_writers == 'true' || inputs.writer_az_change_allowed == 'true') && fromJson(needs.prepare-writer-matrix.outputs.lbug_matrix).include[0] != null
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       id-token: write
@@ -566,7 +571,7 @@ jobs:
     needs: [prepare-writer-matrix, pause-graph-writes, deploy-graph-ladybug]
     # Not only on success: a cancel after the put must still clear it.
     if: always() && needs.pause-graph-writes.result != 'skipped'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       id-token: write
