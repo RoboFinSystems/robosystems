@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from stripe import StripeObject
 
 from robosystems.dagster.jobs.billing import (
   _handle_charge_refunded,
@@ -19,6 +20,11 @@ from robosystems.models.core.billing import (
   BillingInvoiceLineItem,
   BillingSubscription,
 )
+
+
+def _stripe_object(data: dict) -> StripeObject:
+  """What the Stripe SDK returns: since stripe 15 a StripeObject is not a dict."""
+  return StripeObject.construct_from(data, "sk_test")
 
 
 def refunded_charge(charge_id: str, payment_intent: str, amount_refunded: int):
@@ -105,7 +111,10 @@ class TestChargeRefunded:
         "stripe.StripeClient.raw_request",
         return_value=invoice_payments_list(invoice_id, payment_intent),
       ),
-      patch("stripe.Charge.retrieve", return_value={"amount_refunded": live_total}),
+      patch(
+        "stripe.Charge.retrieve",
+        return_value=_stripe_object({"amount_refunded": live_total}),
+      ),
     ):
       await _handle_charge_refunded(
         refunded_charge(charge_id, payment_intent, event_total), session, MagicMock()
@@ -255,7 +264,7 @@ class TestTerminalStatesStayTerminal:
 
     with patch(
       "stripe.Subscription.retrieve",
-      return_value={"status": "active", "cancel_at_period_end": True},
+      return_value=_stripe_object({"status": "active", "cancel_at_period_end": True}),
     ):
       await _handle_subscription_updated(
         subscription_updated(sub, "active"), test_db, MagicMock()
@@ -309,7 +318,7 @@ class TestPortalReactivation:
 
     with patch(
       "stripe.Subscription.retrieve",
-      return_value={"status": "active", "cancel_at_period_end": False},
+      return_value=_stripe_object({"status": "active", "cancel_at_period_end": False}),
     ):
       await _handle_subscription_updated(
         subscription_updated(sub, "active"), test_db, MagicMock()

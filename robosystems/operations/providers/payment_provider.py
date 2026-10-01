@@ -267,7 +267,7 @@ class StripePaymentProvider(PaymentProvider):
         f"Verified Stripe webhook: {event['type']}",
         extra={"event_type": event["type"], "event_id": event["id"]},
       )
-      return event
+      return event.to_dict()
     except ValueError as e:
       logger.error(f"Invalid webhook payload: {e}")
       raise
@@ -525,8 +525,8 @@ class StripePaymentProvider(PaymentProvider):
         customer=customer_id, type="card"
       )
 
-      customer = self.stripe.Customer.retrieve(customer_id)
-      default_payment_method = customer.get("invoice_settings", {}).get(
+      customer = self.stripe.Customer.retrieve(customer_id).to_dict()
+      default_payment_method = (customer.get("invoice_settings") or {}).get(
         "default_payment_method"
       )
 
@@ -717,14 +717,15 @@ class StripePaymentProvider(PaymentProvider):
       payment={"type": "payment_intent", "payment_intent": payment_intent_id},
       limit=1,
     )
-    payments = client.deserialize(response, api_mode="V1").get("data") or []
+    payments = client.deserialize(response, api_mode="V1").to_dict().get("data") or []
     return payments[0].get("invoice") if payments else None
 
   def charge_amount_refunded(self, charge_id: str) -> int:
-    return int(self.stripe.Charge.retrieve(charge_id).get("amount_refunded") or 0)
+    charge = self.stripe.Charge.retrieve(charge_id).to_dict()
+    return int(charge.get("amount_refunded") or 0)
 
   def get_subscription_state(self, subscription_id: str) -> dict[str, Any]:
-    subscription = self.stripe.Subscription.retrieve(subscription_id)
+    subscription = self.stripe.Subscription.retrieve(subscription_id).to_dict()
     return {
       "status": subscription.get("status"),
       "cancel_at_period_end": bool(subscription.get("cancel_at_period_end")),
