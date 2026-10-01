@@ -272,6 +272,26 @@ class GraphUser(Model):
     )
     return role is not None and role.at_least(GraphRole.ADMIN)
 
+  @classmethod
+  def explicit_write_member_ids(cls, graph_id: str, session: Session) -> set[str]:
+    """Users holding their own ``member`` or ``admin`` row on the graph.
+
+    Explicit rows only: an org OWNER/ADMIN's implicit admin grant is not a
+    membership. Subgraphs resolve to their parent.
+    """
+    from robosystems.middleware.graph.types import parse_graph_id
+
+    parent_id, _ = parse_graph_id(graph_id)
+    rows = (
+      session.query(cls.user_id)
+      .filter(
+        cls.graph_id == parent_id,
+        cls.role.in_([GraphRole.MEMBER.value, GraphRole.ADMIN.value]),
+      )
+      .all()
+    )
+    return {str(user_id) for (user_id,) in rows}
+
   def update_role(self, role: str | GraphRole, session: Session) -> None:
     """Update the user's role for this graph."""
     self.role = GraphRole.coerce(role).value

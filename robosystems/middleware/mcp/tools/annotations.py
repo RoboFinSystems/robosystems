@@ -77,6 +77,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   # Replaces the period's recorded comparison; reads QuickBooks to make it.
   "refresh-reconciliations": _write(destructive=True, idempotent=True, open_world=True),
   "set-reconciliation-policy": _REPLACES,
+  # Adds a review record; signing a period already reviewed adds nothing.
+  "sign-off-reconciliation": _ADDS_ONCE,
   "resolve-reconciling-item": _REPLACES_ONCE_PER_STATE,
   "update-journal-entry": _REPLACES,
   "delete-journal-entry": _REPLACES,

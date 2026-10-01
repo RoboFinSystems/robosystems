@@ -45,8 +45,10 @@ from robosystems.models.api.extensions.reconciliations import (
   ReconciliationListResponse,
   ReconciliationPolicyResponse,
   ReconciliationPreviewResponse,
+  ReconciliationSummary,
   RefreshReconciliationsRequest,
   SetReconciliationPolicyRequest,
+  SignOffReconciliationRequest,
 )
 from robosystems.models.api.extensions.reconciling_items import (
   PreviewReconcilingItemRequest,
@@ -125,7 +127,10 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   update_journal_entry as cmd_update_journal_entry,
 )
 from robosystems.operations.roboledger.commands.reconciliations import (
+  NotAGraphMemberError,
   ReconciliationNotFoundError,
+  ReconciliationNotReconciledError,
+  SeparateReviewerError,
 )
 from robosystems.operations.roboledger.commands.reconciliations import (
   preview_reconciliations as cmd_preview_reconciliations,
@@ -135,6 +140,9 @@ from robosystems.operations.roboledger.commands.reconciliations import (
 )
 from robosystems.operations.roboledger.commands.reconciliations import (
   set_reconciliation_policy as cmd_set_reconciliation_policy,
+)
+from robosystems.operations.roboledger.commands.reconciliations import (
+  sign_off_reconciliation as cmd_sign_off_reconciliation,
 )
 from robosystems.operations.roboledger.commands.reconciling_items import (
   NotAReconcilingItemError,
@@ -531,20 +539,57 @@ set_reconciliation_policy_op = _registrar.register(
     summary="Set Reconciliation Policy",
     description=(
       "Change how much the close cares about one reconciliation: whether the "
-      "period's close waits on it (`required_for_close`), and its "
-      "`materiality`, the difference up to which it still counts as "
-      "reconciled. Omitted fields keep their value. The next "
+      "period's close waits on it (`required_for_close`); its `materiality`, "
+      "the difference up to which it still counts as reconciled; whether the "
+      "close also waits for a sign-off (`review_required`); and whether the "
+      "reviewer must be someone other than the person who ran the comparison "
+      "(`separate_reviewer`, which needs at least two members of the graph "
+      "who can write). Omitted fields keep their value. The next "
       "refresh-reconciliations uses the new materiality; comparisons already "
       "recorded are not re-judged."
     ),
     command=cmd_set_reconciliation_policy,
     request_model=SetReconciliationPolicyRequest,
     result_type=ReconciliationPolicyResponse,
+    requires_graph_id=True,
     error_map={
       ReconciliationNotFoundError: 404,
+      SeparateReviewerError: 409,
       RowLockedError: 409,
       ValueError: 422,
     },
+  )
+)
+
+sign_off_reconciliation_op = _registrar.register(
+  OperationSpec(
+    name="sign-off-reconciliation",
+    summary="Sign Off Reconciliation",
+    description=(
+      "Record your review of a reconciliation for a period. Only a period "
+      "that reconciles can be signed off, and only by a member of the graph: "
+      "access that comes from an organization role is not enough. The "
+      "sign-off records who ran the comparison and who reviewed it, and says "
+      "so when they are the same person; a reconciliation with "
+      "`separate_reviewer` set refuses that case instead. The sign-off stands "
+      "for the balances as they were compared: if any of them changes "
+      "afterwards, the period goes back to reconciled or unreconciled and "
+      "needs signing off again. Signing off a period already reviewed "
+      "changes nothing. Returns the reconciliation's standing for the period."
+    ),
+    command=cmd_sign_off_reconciliation,
+    request_model=SignOffReconciliationRequest,
+    result_type=ReconciliationSummary,
+    requires_graph_id=True,
+    error_map={
+      ReconciliationNotFoundError: 404,
+      NotAGraphMemberError: 403,
+      ReconciliationNotReconciledError: 409,
+      SeparateReviewerError: 409,
+      RowLockedError: 409,
+      ValueError: 422,
+    },
+    mark_stale_reason="reconciliation_signed_off",
   )
 )
 

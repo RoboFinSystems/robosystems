@@ -688,7 +688,12 @@ class FiscalCalendarService:
     unreconciled_count = len(unreconciled)
     if unreconciled_count > 0 and not allow_unreconciled_accounts:
       blockers.append(CloseableGateResult.UNRECONCILED_ACCOUNTS)
-    unreconciled_sample = [f"{rec.name}: {rec.status}" for rec in unreconciled[:5]]
+    # `reconciled` here means the block asks for a review it has not had.
+    unreconciled_sample = [
+      f"{rec.name}: "
+      + ("awaiting review" if rec.status == "reconciled" else rec.status)
+      for rec in unreconciled[:5]
+    ]
 
     return CloseableGateResult(
       is_closeable=not blockers,

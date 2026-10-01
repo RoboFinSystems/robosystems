@@ -837,6 +837,20 @@ class ReconciliationMechanics(BaseModel):
       "the two sides must agree to the cent."
     ),
   )
+  review_required: bool = Field(
+    False,
+    description=(
+      "Whether the close waits for a sign-off as well, not just for the two "
+      "sides to reconcile."
+    ),
+  )
+  separate_reviewer: bool = Field(
+    False,
+    description=(
+      "Whether the person who signs off must be someone other than the "
+      "person who ran the comparison."
+    ),
+  )
 
 
 # New block-type mechanics models add a `kind` literal and extend this

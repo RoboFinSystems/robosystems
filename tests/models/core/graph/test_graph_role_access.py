@@ -333,3 +333,46 @@ class TestExportGracePeriod:
       test_user.id, _kg_id(), test_db, allow_deprovisioned=True
     )
     assert role is None
+
+
+class TestExplicitWriteMembers:
+  """Sign-off asks for a membership of the user's own, not access that comes
+  from an org role."""
+
+  def test_only_explicit_member_and_admin_rows_count(
+    self, test_db, test_user, test_org
+  ):
+    graph = _create_org_graph(test_db, test_org.id)
+    member = _create_user(test_db, test_user.password_hash)
+    admin = _create_user(test_db, test_user.password_hash)
+    viewer = _create_user(test_db, test_user.password_hash)
+    for user, role in (
+      (member, GraphRole.MEMBER),
+      (admin, GraphRole.ADMIN),
+      (viewer, GraphRole.VIEWER),
+    ):
+      GraphUser.create(
+        user_id=user.id, graph_id=graph.graph_id, role=role, session=test_db
+      )
+
+    members = GraphUser.explicit_write_member_ids(graph.graph_id, test_db)
+
+    assert members == {member.id, admin.id}
+    # The org owner can write, but through the org, with no row of their own.
+    assert GraphUser.user_has_write_access(test_user.id, graph.graph_id, test_db)
+    assert test_user.id not in members
+
+  def test_a_subgraph_resolves_to_its_parents_members(
+    self, test_db, test_user, test_org
+  ):
+    graph = _create_org_graph(test_db, test_org.id)
+    GraphUser.create(
+      user_id=test_user.id,
+      graph_id=graph.graph_id,
+      role=GraphRole.ADMIN,
+      session=test_db,
+    )
+
+    assert GraphUser.explicit_write_member_ids(f"{graph.graph_id}_dev", test_db) == {
+      test_user.id
+    }

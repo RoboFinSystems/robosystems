@@ -123,6 +123,8 @@ def test_the_block_is_made_of_existing_parts(ledger):
     "element_id": None,
     "required_for_close": True,
     "materiality": 0.0,
+    "review_required": False,
+    "separate_reviewer": False,
   }
   arcs = (
     ledger.execute(select(Association).where(Association.structure_id == structure.id))
@@ -229,6 +231,7 @@ def test_materiality_applies_from_the_next_comparison(ledger):
   policy = set_reconciliation_policy(
     ledger,
     SetReconciliationPolicyRequest(structure_id=structure_id, materiality=250.00),
+    graph_id=GRAPH_ID,
     created_by="usr",
   )
   ledger.commit()
@@ -250,6 +253,7 @@ def test_a_block_can_be_released_from_the_close(ledger):
   policy = set_reconciliation_policy(
     ledger,
     SetReconciliationPolicyRequest(structure_id=structure_id, required_for_close=False),
+    graph_id=GRAPH_ID,
     created_by="usr",
   )
   ledger.commit()
@@ -264,6 +268,7 @@ def test_policy_on_something_that_is_not_a_reconciliation_is_not_found(ledger):
     set_reconciliation_policy(
       ledger,
       SetReconciliationPolicyRequest(structure_id="struct_missing", materiality=1),
+      graph_id=GRAPH_ID,
       created_by="usr",
     )
 
@@ -364,6 +369,7 @@ def test_a_released_block_does_not_hold_the_close(closed_through_july):
     SetReconciliationPolicyRequest(
       structure_id=result.reconciliations[0].structure_id, required_for_close=False
     ),
+    graph_id=GRAPH_ID,
     created_by="usr",
   )
   closed_through_july.commit()
@@ -419,3 +425,269 @@ def test_a_sync_before_the_calendar_exists_refreshes_nothing(ledger):
 
   assert period is None
   fetch.assert_not_called()
+
+
+# ── Sign-off ────────────────────────────────────────────────────────────────
+
+_MEMBERS = (
+  "robosystems.operations.roboledger.commands.reconciliations._explicit_write_members"
+)
+
+
+def _sign_off(session, structure_id, *, by="usr", members=("usr",), period="2026-08"):
+  from robosystems.models.api.extensions.reconciliations import (
+    SignOffReconciliationRequest,
+  )
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    sign_off_reconciliation,
+  )
+
+  with patch(_MEMBERS, return_value=set(members)):
+    result = sign_off_reconciliation(
+      session,
+      SignOffReconciliationRequest(
+        structure_id=structure_id, period=period, note="Tied to QuickBooks."
+      ),
+      graph_id=GRAPH_ID,
+      created_by=by,
+    )
+  session.commit()
+  return result
+
+
+def _sign_off_events(session):
+  from robosystems.models.extensions.roboledger import Event
+
+  return list(
+    session.execute(
+      select(Event).where(Event.event_type == "reconciliation_signed_off")
+    ).scalars()
+  )
+
+
+@pytest.fixture()
+def reconciled(closed_through_july):
+  result = _refresh(closed_through_july, source_report(*TIED))
+  return closed_through_july, result.reconciliations[0].structure_id
+
+
+def test_the_only_member_of_a_graph_can_sign_off(reconciled):
+  """One user ran the comparison and reviews it: recorded as such, not refused."""
+  session, structure_id = reconciled
+
+  rec = _sign_off(session, structure_id)
+
+  assert rec.status == "reviewed"
+  assert (rec.reviewed_by, rec.compared_by, rec.compared_via) == (
+    "usr",
+    "usr",
+    "operation",
+  )
+  assert rec.self_reviewed is True
+  assert rec.reviewed_at is not None
+
+
+def test_the_sign_off_is_a_support_event_that_writes_no_books(reconciled):
+  session, structure_id = reconciled
+
+  _sign_off(session, structure_id)
+
+  (event,) = _sign_off_events(session)
+  assert (event.event_class, event.event_category, event.status) == (
+    "support",
+    "approval",
+    "committed",
+  )
+  assert event.created_by == "usr"
+  assert event.amount is None
+  assert event.metadata_["structure_id"] == structure_id
+  assert event.metadata_["period"] == "2026-08"
+  assert event.metadata_["note"] == "Tied to QuickBooks."
+  assert event.metadata_["balance_digest"]
+  # The close gate's unposted-event check does not see it.
+  assert _gate(session).is_closeable
+
+
+def test_access_through_the_org_alone_cannot_sign_off(reconciled):
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    NotAGraphMemberError,
+  )
+
+  session, structure_id = reconciled
+
+  with pytest.raises(NotAGraphMemberError, match="organization role"):
+    _sign_off(session, structure_id, by="usr_org_admin", members=("usr",))
+
+  assert _sign_off_events(session) == []
+
+
+@pytest.mark.parametrize(
+  ("report", "period", "reason"),
+  [
+    (_BILL_REMOVED, "2026-08", "do not reconcile"),
+    (TIED, "2026-06", "has not been compared"),
+  ],
+)
+def test_only_a_reconciled_period_can_be_signed_off(
+  closed_through_july, report, period, reason
+):
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    ReconciliationNotReconciledError,
+  )
+
+  structure_id = (
+    _refresh(closed_through_july, source_report(*report))
+    .reconciliations[0]
+    .structure_id
+  )
+
+  with pytest.raises(ReconciliationNotReconciledError, match=reason):
+    _sign_off(closed_through_july, structure_id, period=period)
+
+
+def test_signing_off_twice_adds_nothing(reconciled):
+  session, structure_id = reconciled
+  _sign_off(session, structure_id)
+
+  rec = _sign_off(session, structure_id, by="usr2", members=("usr", "usr2"))
+
+  assert (rec.status, rec.reviewed_by) == ("reviewed", "usr")
+  assert len(_sign_off_events(session)) == 1
+
+
+def test_a_refresh_with_the_same_balances_keeps_the_review(reconciled):
+  session, structure_id = reconciled
+  _sign_off(session, structure_id)
+
+  (rec,) = _refresh(session, source_report(*TIED)).reconciliations
+
+  assert (rec.status, rec.reviewed_by) == ("reviewed", "usr")
+
+
+def test_a_balance_that_changes_after_the_review_lapses_it(reconciled, books):
+  """The books moved after the review. Both sides still tie, but the reviewer
+  never saw these figures."""
+  session, structure_id = reconciled
+  _sign_off(session, structure_id)
+  from .conftest import entry
+
+  entry(session, date(2026, 8, 30), books["software"], books["cash"], 4_000)
+  session.commit()
+  moved = (
+    ("35", "Checking", 134_000),
+    ("50", "Services", -50_000),
+    ("70", "Software", 16_000),
+    ("3", "Retained Earnings", -100_000),
+  )
+
+  (rec,) = _refresh(session, source_report(*moved)).reconciliations
+
+  assert rec.status == "reconciled"
+  assert (rec.reviewed_by, rec.reviewed_at, rec.self_reviewed) == (None, None, None)
+
+  again = _sign_off(session, structure_id)
+  assert again.status == "reviewed"
+  assert len(_sign_off_events(session)) == 2
+
+
+# ── Review policy ───────────────────────────────────────────────────────────
+
+
+def _policy(session, structure_id, *, members=("usr",), **fields):
+  with patch(_MEMBERS, return_value=set(members)):
+    result = set_reconciliation_policy(
+      session,
+      SetReconciliationPolicyRequest(structure_id=structure_id, **fields),
+      graph_id=GRAPH_ID,
+      created_by="usr",
+    )
+  session.commit()
+  return result
+
+
+def test_a_separate_reviewer_needs_two_members(reconciled):
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    SeparateReviewerError,
+  )
+
+  session, structure_id = reconciled
+
+  with pytest.raises(SeparateReviewerError, match="this graph has 1"):
+    _policy(session, structure_id, separate_reviewer=True)
+  session.rollback()
+
+  policy = _policy(
+    session, structure_id, members=("usr", "usr2"), separate_reviewer=True
+  )
+  assert policy.separate_reviewer is True
+
+
+def test_a_separate_reviewer_cannot_be_the_person_who_ran_it(reconciled):
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    SeparateReviewerError,
+  )
+
+  session, structure_id = reconciled
+  _policy(session, structure_id, members=("usr", "usr2"), separate_reviewer=True)
+
+  with pytest.raises(SeparateReviewerError, match="you ran this one"):
+    _sign_off(session, structure_id, by="usr", members=("usr", "usr2"))
+  session.rollback()
+
+  rec = _sign_off(session, structure_id, by="usr2", members=("usr", "usr2"))
+  assert (rec.status, rec.reviewed_by, rec.self_reviewed) == ("reviewed", "usr2", False)
+
+
+def test_a_comparison_the_sync_ran_has_no_person_to_conflict_with(closed_through_july):
+  """The sync refreshed it, so the one who started the sync may review it even
+  where a separate reviewer is required."""
+  session = closed_through_july
+  structure_id = (
+    _refresh(session, source_report(*TIED), period="2026-07")
+    .reconciliations[0]
+    .structure_id
+  )
+  _policy(session, structure_id, members=("usr", "usr2"), separate_reviewer=True)
+  _refresh_next(session, source_report(*TIED))
+
+  rec = _sign_off(session, structure_id, by="usr", members=("usr", "usr2"))
+
+  assert (rec.status, rec.compared_via, rec.self_reviewed) == (
+    "reviewed",
+    "sync",
+    False,
+  )
+
+
+def test_a_block_that_requires_review_holds_the_close_until_signed(reconciled):
+  session, structure_id = reconciled
+  _policy(session, structure_id, review_required=True)
+
+  gate = _gate(session)
+  assert gate.blockers == ["unreconciled_accounts"]
+  assert gate.unreconciled_account_sample == [
+    "Source ledger (QuickBooks): awaiting review"
+  ]
+
+  _sign_off(session, structure_id)
+  assert _gate(session).is_closeable
+
+
+def test_a_comparison_recorded_before_sign_off_existed_asks_for_a_refresh(reconciled):
+  from sqlalchemy.orm.attributes import flag_modified
+
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    ReconciliationNotReconciledError,
+  )
+
+  session, structure_id = reconciled
+  fact_set = session.query(FactSet).one()
+  fact_set.metadata_ = {
+    k: v for k, v in fact_set.metadata_.items() if k != "balance_digest"
+  }
+  flag_modified(fact_set, "metadata_")
+  session.commit()
+
+  with pytest.raises(ReconciliationNotReconciledError, match="run refresh"):
+    _sign_off(session, structure_id)
+  assert _sign_off_events(session) == []
