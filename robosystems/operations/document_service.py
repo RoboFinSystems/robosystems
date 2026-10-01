@@ -19,9 +19,9 @@ logger = logging.getLogger(__name__)
 def _apply_frontmatter(
   content: str,
   title: str | None,
-  tags: list[str] | None | object,
-  folder: str | None | object,
-) -> tuple[str, str | None, list[str] | None | object, str | None | object]:
+  tags: list[str] | object | None,
+  folder: str | object | None,
+) -> tuple[str, str | None, list[str] | object | None, str | object | None]:
   """Strip YAML frontmatter from content and let it fill unset fields.
 
   "Unset" is Ellipsis (update_document's not-provided sentinel) or None;

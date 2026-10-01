@@ -808,7 +808,7 @@ async def execute_operation(
   ctx: OperationContext,
   runner: OperationRunner | AsyncOperationRunner,
   idempotency_cache: IdempotencyCache | None = None,
-  on_fresh_success: Callable[[OperationEnvelope], None | Awaitable[None]] | None = None,
+  on_fresh_success: Callable[[OperationEnvelope], Awaitable[None] | None] | None = None,
 ) -> OperationEnvelope:
   """Run an operation and return its `OperationEnvelope`.
 

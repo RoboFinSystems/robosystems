@@ -32,6 +32,22 @@ updates:
       # hold: stripe-python 12+ removes stripe.error; upgrade deliberately, not via Dependabot
       - dependency-name: "stripe"
         update-types: ["version-update:semver-major"]
+      # Graph-engine pins move only with a deliberate engine upgrade: ladybug pairs
+      # with LADYBUG_EXT_VERSION in the Dockerfile, duckdb with the Arrow-export
+      # seam, lancedb with an on-disk format check. 0.x minors are not "safe"
+      - dependency-name: "ladybug"
+      - dependency-name: "duckdb"
+      - dependency-name: "lancedb"
+      # hold: majors on these carry a pyproject `# hold:` comment with the reason
+      - dependency-name: "pandas"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pyarrow"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "webauthn"
+        update-types: ["version-update:semver-major"]
+      # hold: 2.1 changes the default postgresql:// driver to psycopg 3 (see pyproject)
+      - dependency-name: "sqlalchemy"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       # The opentelemetry-* family is version-coupled (api/sdk/exporters on
       # 1.x, instrumentations on the paired 0.xxb0) and must move in lockstep
