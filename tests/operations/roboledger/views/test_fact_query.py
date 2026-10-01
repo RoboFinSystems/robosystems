@@ -6,6 +6,8 @@ Covers LadybugDB-specific behaviors:
 - Inline node anchoring for single-element / single-ticker filters (fast
   path, avoids full Fact scans).
 - Parameterized fallback for multi-value / non-ticker filters.
+- With an entity filter, element / period / report predicates applied after
+  the MATCH, so the planner cannot join them by a backward edge scan.
 - `DISTINCT` and `ORDER BY` intentionally omitted (both broken together
   in LadybugDB) — dedup + sort happen in Python.
 - `has_dimensions = false` stays in WHERE (inline boolean filters
@@ -295,6 +297,89 @@ class TestQueryFactGrid:
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"], entity="NVDA")
     query = mock_repository.execute_query.call_args[0][0]
     assert query.startswith("MATCH (ent:Entity {ticker: 'NVDA'})")
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_entity_filter_defers_dimension_predicates(self, mock_repository):
+    """With an entity filter, a filtered Element / Period / Report inside the
+    MATCH lets the planner scan that node's edges backwards across every
+    filer (25s timeouts on SEC). They are applied after the MATCH instead."""
+    with patch(PATCH_REPO, return_value=mock_repository):
+      await query_fact_grid(
+        MOCK_GRAPH_ID,
+        elements=["us-gaap:Revenues"],
+        entity="NVDA",
+        form="10-K",
+        fiscal_year=2026,
+        period_type="annual",
+      )
+    query = mock_repository.execute_query.call_args[0][0]
+    params = mock_repository.execute_query.call_args[0][1]
+    match, late = query.split("\nWITH ")
+
+    assert "-[:FACT_HAS_ELEMENT]->(el:Element)," in match
+    assert "f.has_dimensions = false" in match
+    for predicate in ("el.", "p.duration_type", "r.form", "r.fiscal_year_focus"):
+      assert predicate not in match.split("\nWHERE ")[1]
+
+    assert late.startswith("el, p, f, u, ent, r\nWHERE ")
+    assert "el.qname IN $elements" in late
+    assert "p.duration_type = 'annual'" in late
+    assert "r.form = $form" in late
+    assert "r.fiscal_year_focus = $fiscal_year" in late
+    assert params["elements"] == ["us-gaap:Revenues"]
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_entity_predicate_stays_in_the_match(self, mock_repository):
+    """The entity is what the MATCH must be narrowed by."""
+    with patch(PATCH_REPO, return_value=mock_repository):
+      await query_fact_grid(
+        MOCK_GRAPH_ID,
+        canonical_concepts=["revenue", "net_income"],
+        entities=["NVDA", "AAPL"],
+        period_type="instant",
+      )
+    query = mock_repository.execute_query.call_args[0][0]
+    match, late = query.split("\nWITH ")
+    assert "ent.ticker IN $entities" in match
+    assert late.startswith("el, p, f, u, ent\nWHERE ")
+    assert "el.canonical_concept IN $canonical_concepts" in late
+    assert "p.period_type = 'instant'" in late
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_schedule_filter_stays_in_the_match(self, mock_repository):
+    """It is a predicate on the fact, so it narrows alongside the entity."""
+    with (
+      patch(PATCH_REPO, return_value=mock_repository),
+      patch(
+        "robosystems.operations.roboledger.views.fact_query._has_ledger_schema",
+        return_value=True,
+      ),
+    ):
+      await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"], entity="DRIFT")
+    query = mock_repository.execute_query.call_args[0][0]
+    match, late = query.split("\nWITH ")
+    assert "sfs.factset_type = 'schedule'" in match
+    assert "sfs.factset_type" not in late
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_without_entity_filter_nothing_is_deferred(self, mock_repository):
+    """The element is the only anchor there is, so it stays in the MATCH."""
+    with patch(PATCH_REPO, return_value=mock_repository):
+      await query_fact_grid(
+        MOCK_GRAPH_ID,
+        canonical_concepts=["revenue", "net_income"],
+        period_type="annual",
+        form="10-K",
+      )
+    query = mock_repository.execute_query.call_args[0][0]
+    assert "WITH" not in query
+    assert "el.canonical_concept IN $canonical_concepts" in query
+    assert "p.duration_type = 'annual'" in query
+    assert "r.form = $form" in query
 
   @pytest.mark.asyncio
   @pytest.mark.unit

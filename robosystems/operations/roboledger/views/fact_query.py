@@ -3,10 +3,12 @@
 
 Single-element / single-ticker filters are anchored as node-pattern
 properties interpolated into the query (``(el:Element {qname: '...'})``);
-``_safe_str`` / ``_is_ticker`` guard that interpolation. Dedup, sort and ``limit`` run in Python: dedup keeps the most
-precise fact, which DISTINCT cannot express, and ``ORDER BY ... LIMIT`` is not
-a cheap top-N in LadybugDB (it materializes and sorts every match, which times
-out on large anchored patterns).
+``_safe_str`` / ``_is_ticker`` guard that interpolation. With an entity filter
+the element, period and report predicates are applied after the MATCH instead,
+so the entity's facts drive every join. Dedup, sort and ``limit`` run in
+Python: dedup keeps the most precise fact, which DISTINCT cannot express, and
+``ORDER BY ... LIMIT`` is not a cheap top-N in LadybugDB (it materializes and
+sorts every match, which times out on large anchored patterns).
 """
 
 from __future__ import annotations
@@ -49,9 +51,12 @@ def _build_element_match(
   elements: list[str] | None,
   canonical_concepts: list[str] | None,
   parameters: dict[str, Any],
+  inline: bool = True,
 ) -> tuple[str, list[str]]:
+  """The Element node pattern and its predicates. ``inline=False`` keeps the
+  pattern bare, so every filter comes back as a predicate."""
   if elements and len(elements) == 1 and not canonical_concepts:
-    safe = _safe_str(elements[0])
+    safe = _safe_str(elements[0]) if inline else None
     if safe:
       return f"(el:Element {{qname: '{safe}'}})", []
     parameters["elements"] = elements
@@ -59,7 +64,7 @@ def _build_element_match(
 
   if not elements and len(canonical_concepts or []) == 1:
     assert canonical_concepts is not None
-    safe = _safe_str(canonical_concepts[0])
+    safe = _safe_str(canonical_concepts[0]) if inline else None
     if safe:
       return f"(el:Element {{canonical_concept: '{safe}'}})", []
     parameters["canonical_concepts"] = canonical_concepts
@@ -215,54 +220,54 @@ async def query_fact_grid(
   """
   parameters: dict[str, Any] = {}
 
-  element_pattern, element_where = _build_element_match(
-    elements, canonical_concepts, parameters
-  )
   entity_list = entities if entities else ([entity] if entity else None)
   entity_filter, entity_where = _build_entity_match(entity_list, parameters)
-  entity_pattern = entity_filter or "(ent:Entity)"
+  element_pattern, element_where = _build_element_match(
+    elements, canonical_concepts, parameters, inline=entity_filter is None
+  )
 
-  # Lead with the selective node (Entity if filtered, else Element), never
-  # (f:Fact): the planner seeds from the first pattern, and a Fact lead scans
-  # every fact and times out.
   if entity_filter:
-    lead = f"{entity_pattern}<-[:FACT_HAS_ENTITY]-(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}"
+    lead = f"{entity_filter}<-[:FACT_HAS_ENTITY]-(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}"
   else:
-    lead = f"{element_pattern}<-[:FACT_HAS_ELEMENT]-(f:Fact)-[:FACT_HAS_ENTITY]->{entity_pattern}"
+    lead = f"{element_pattern}<-[:FACT_HAS_ELEMENT]-(f:Fact)-[:FACT_HAS_ENTITY]->(ent:Entity)"
 
   match_parts = [
     lead,
     "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
     "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
   ]
+  carried = ["el", "p", "f", "u", "ent"]
 
-  where_clauses = ["f.has_dimensions = false", *element_where, *entity_where]
+  fact_where = ["f.has_dimensions = false", *entity_where]
+  # Predicates on the nodes around the fact: its element, period and report.
+  dimension_where = [*element_where]
 
   tenant = not is_shared_repository_or_subgraph(graph_id) and not is_subgraph(graph_id)
   if tenant and await run_off_loop(_has_ledger_schema, graph_id):
-    where_clauses.append(_NOT_A_SCHEDULE_FACT)
+    fact_where.append(_NOT_A_SCHEDULE_FACT)
 
   if periods:
-    where_clauses.append("p.end_date IN $periods")
+    dimension_where.append("p.end_date IN $periods")
     parameters["periods"] = periods
 
   if period_type == "instant":
-    where_clauses.append("p.period_type = 'instant'")
+    dimension_where.append("p.period_type = 'instant'")
   elif period_type == "annual":
-    where_clauses.append("p.duration_type = 'annual'")
+    dimension_where.append("p.duration_type = 'annual'")
   elif period_type == "quarterly":
-    where_clauses.append("p.duration_type = 'quarterly'")
+    dimension_where.append("p.duration_type = 'quarterly'")
 
   if form or fiscal_year is not None or fiscal_period:
     match_parts.append("(r:Report)-[:REPORT_HAS_FACT]->(f)")
+    carried.append("r")
     if form:
-      where_clauses.append("r.form = $form")
+      dimension_where.append("r.form = $form")
       parameters["form"] = form
     if fiscal_year is not None:
-      where_clauses.append("r.fiscal_year_focus = $fiscal_year")
+      dimension_where.append("r.fiscal_year_focus = $fiscal_year")
       parameters["fiscal_year"] = fiscal_year
     if fiscal_period:
-      where_clauses.append("r.fiscal_period_focus = $fiscal_period")
+      dimension_where.append("r.fiscal_period_focus = $fiscal_period")
       parameters["fiscal_period"] = fiscal_period
 
   # No DISTINCT / ORDER BY / LIMIT: dedup and sort run in Python (see module
@@ -284,8 +289,18 @@ async def query_fact_grid(
     "        f.identifier as fact_id\n      "
   )
 
+  # The planner orders joins by its own estimates, not by the order written: a
+  # filtered Element, Period or Report inside the MATCH can be joined by
+  # scanning its edges backwards across every filer. With an entity filter
+  # those predicates wait until after the MATCH, so each edge extends from
+  # that entity's facts.
   query = "MATCH " + ", ".join(match_parts)
-  query += "\nWHERE " + "\n  AND ".join(where_clauses)
+  if entity_filter and dimension_where:
+    query += "\nWHERE " + "\n  AND ".join(fact_where)
+    query += f"\nWITH {', '.join(carried)}"
+    query += "\nWHERE " + "\n  AND ".join(dimension_where)
+  else:
+    query += "\nWHERE " + "\n  AND ".join([*fact_where, *dimension_where])
   query += return_clause
 
   # "read" routes shared repos (SEC) to the replicas; tenant graphs ignore it.
