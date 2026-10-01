@@ -1,4 +1,10 @@
-"""The QuickBooks TrialBalance report parser."""
+"""The QuickBooks TrialBalance report parser.
+
+The fixtures follow the shape of a real production response (read
+2026-10-01): flat data rows carrying only ``ColData``, an empty string for a
+blank amount, sub-accounts as their own ``Parent:Child`` rows, and one
+``GrandTotal`` section at the end. Names and amounts are made up.
+"""
 
 from __future__ import annotations
 
@@ -24,20 +30,52 @@ def _row(account_id: str | None, name: str, debit: str, credit: str) -> dict:
   first = {"value": name}
   if account_id is not None:
     first["id"] = account_id
-  return {"ColData": [first, {"value": debit}, {"value": credit}], "type": "Data"}
+  return {"ColData": [first, {"value": debit}, {"value": credit}]}
+
+
+_GRAND_TOTAL = {
+  "Summary": {"ColData": [{"value": "TOTAL"}, {"value": "5.00"}, {"value": "5.00"}]},
+  "type": "Section",
+  "group": "GrandTotal",
+}
 
 
 def _report(rows: list[dict], columns: dict | None = None) -> dict:
   return {
     "Header": {
+      "Time": "2026-10-01T15:10:00-07:00",
       "ReportName": "TrialBalance",
       "ReportBasis": "Accrual",
       "StartPeriod": "2026-01-01",
       "EndPeriod": "2026-08-31",
+      "SummarizeColumnsBy": "Total",
+      "Currency": "USD",
+      "Option": [{"Name": "NoReportData", "Value": "false"}],
     },
     "Columns": columns or _COLUMNS,
     "Rows": {"Row": rows},
   }
+
+
+def test_reads_a_report_as_quickbooks_returns_it():
+  report = parse_trial_balance_report(
+    _report(
+      [
+        _row("35", "Checking", "11110.60", ""),
+        _row("70", "General & Administrative", "10.00", ""),
+        _row("71", "General & Administrative:Software", "25.50", ""),
+        _row("61", "Notes Payable", "", "11146.10"),
+        _GRAND_TOTAL,
+      ]
+    )
+  )
+
+  assert [(a.account_id, a.name, a.net_cents) for a in report.accounts] == [
+    ("35", "Checking", 1_111_060),
+    ("70", "General & Administrative", 1_000),
+    ("71", "General & Administrative:Software", 2_550),
+    ("61", "Notes Payable", -1_114_610),
+  ]
 
 
 def test_reads_each_account_in_cents_with_its_source_id():
@@ -61,14 +99,13 @@ def test_reads_each_account_in_cents_with_its_source_id():
 
 
 def test_the_total_row_is_not_an_account():
-  total = {
-    "Summary": {"ColData": [{"value": "TOTAL"}, {"value": "5.00"}, {"value": "5.00"}]},
-    "type": "Section",
-    "group": "GrandTotal",
-  }
   report = parse_trial_balance_report(
     _report(
-      [_row("35", "Checking", "5.00", ""), _row(None, "TOTAL", "5.00", "5.00"), total]
+      [
+        _row("35", "Checking", "5.00", ""),
+        _row(None, "TOTAL", "5.00", "5.00"),
+        _GRAND_TOTAL,
+      ]
     )
   )
 
@@ -76,6 +113,8 @@ def test_the_total_row_is_not_an_account():
 
 
 def test_reads_accounts_nested_under_a_section():
+  """Not seen in a real TrialBalance, which is flat; kept so a sectioned
+  report would still be read."""
   section = {
     "Header": {
       "ColData": [{"value": "Expenses", "id": "70"}, {"value": ""}, {"value": ""}]
