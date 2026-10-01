@@ -317,6 +317,31 @@ def test_subgraph_memory_is_configured_separately_from_parent(mock_graph_config)
   assert instance["memory_per_subgraph_mb"] == 256
 
 
+def test_prod_replica_buffer_pool_fits_under_the_admission_floor(monkeypatch):
+  """A full buffer pool on a prod replica leaves admission control's floor free.
+
+  The pool fills and stays full, so it has to fit beside what opening sec
+  already holds. Both constants were measured on a prod replica (2026-10-01),
+  not derived. Re-measure before changing either.
+  """
+  from robosystems.config.defaults import AdmissionDefaults
+
+  container_limit_mb = 13 * 1024  # run-graph-container.sh on a 16GB instance
+  open_footprint_mb = 5400  # resident outside the pool once sec is open
+
+  monkeypatch.setattr(
+    "robosystems.config.graph_tier.env.LBUG_NODE_TYPE", "shared_replica"
+  )
+  instance = GraphTierConfig.get_tier_config("ladybug-shared", "production")["instance"]
+  pool_mb = instance["memory_per_db_mb"]
+
+  free_when_full = container_limit_mb - open_footprint_mb - pool_mb
+  assert free_when_full >= AdmissionDefaults.MIN_AVAILABLE_MB + 512, (
+    f"A full {pool_mb}MB pool leaves {free_when_full}MB free in the container; "
+    f"admission rejects below {AdmissionDefaults.MIN_AVAILABLE_MB:.0f}MB"
+  )
+
+
 def test_backup_hosting_days_never_exceed_the_s3_lifecycle():
   """The S3 lifecycle rule deletes backup objects at 90 days, and the final
   deprovisioning backup creates no GraphBackup row, so no tier can promise
