@@ -573,6 +573,19 @@ class QBClient:
     transactions = self.client.get_report("JournalReport", params)
     return transactions
 
+  @_QB_REPORT_RETRY
+  def get_trial_balance(self, start_date: str, end_date: str):
+    """Fetch the TrialBalance report on the accrual basis, the basis the
+    JournalReport mirror is on."""
+    return self.client.get_report(
+      "TrialBalance",
+      {
+        "start_date": start_date,
+        "end_date": end_date,
+        "accounting_method": "Accrual",
+      },
+    )
+
   # -- CDC (Change Data Capture) ----------------------------------------
 
   def _cdc_base_url(self) -> str:

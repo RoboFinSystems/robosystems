@@ -96,6 +96,15 @@ from robosystems.models.api.extensions.publish_lists import (
 from robosystems.models.api.extensions.publish_lists import (
   PublishListResponse as PydanticPublishListResponse,
 )
+from robosystems.models.api.extensions.reconciliations import (
+  ReconciliationListResponse as PydanticReconciliationListResponse,
+)
+from robosystems.models.api.extensions.reconciliations import (
+  ReconciliationRow as PydanticReconciliationRow,
+)
+from robosystems.models.api.extensions.reconciliations import (
+  ReconciliationSummary as PydanticReconciliationSummary,
+)
 from robosystems.models.api.extensions.reports import (
   FactRowResponse as PydanticFactRowResponse,
 )
@@ -466,6 +475,24 @@ class AccountRollupGroup:
 @pydantic_type(model=PydanticAccountRollupsResponse, all_fields=True)
 class AccountRollups:
   """Account rollups — CoA accounts grouped by reporting element with balances."""
+
+
+# ── Reconciliations ───────────────────────────────────────────────────────
+
+
+@pydantic_type(model=PydanticReconciliationRow, all_fields=True)
+class ReconciliationRow:
+  """One account: the ledger's balance, the independent balance, the difference."""
+
+
+@pydantic_type(model=PydanticReconciliationSummary, all_fields=True)
+class ReconciliationSummary:
+  """One reconciliation's standing for a period."""
+
+
+@pydantic_type(model=PydanticReconciliationListResponse, all_fields=True)
+class ReconciliationList:
+  """Every reconciliation's standing for one period."""
 
 
 # ── Trial balance ─────────────────────────────────────────────────────────

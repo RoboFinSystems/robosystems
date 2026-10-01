@@ -224,7 +224,12 @@ _KEY_RULES: list[str] = [
   "unposted_source_events (source events dated in the month never committed "
   "— inbox lines still captured or classified, or a QuickBooks transaction "
   "whose automatic posting failed; once the month closes they can never post "
-  "into it, so commit or void each; unposted_source_event_sample names them). "
+  "into it, so commit or void each; unposted_source_event_sample names them), "
+  "and unreconciled_accounts (a reconciliation the close waits on is not "
+  "reconciled for the month, or was never compared for it; run "
+  "refresh-reconciliations, which compares the ledger with the books it was "
+  "synced from and lists the accounts that do not tie; "
+  "unreconciled_account_sample names them). "
   "Resolve before close-period; get-fiscal-calendar reports them.",
   "JE PUBLISH SEMANTICS: journal_entry_recorded events with source='manual' "
   "publish to QuickBooks at close through the outbox; source='system' posts "

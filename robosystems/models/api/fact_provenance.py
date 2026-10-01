@@ -34,6 +34,11 @@ discipline as `ArtifactMechanics`, which discriminates on `kind`):
                  citable by accession + filing date. No posted-ledger lineage
                  in this graph — distinct from `asserted` (manual/custom).
 
+* `observed` — balances read from a system outside the ledger (a synced
+                 accounting system's trial balance, a bank) and set beside
+                 the ledger's own for a reconciliation. The reading is the
+                 origin; it is neither a user's assertion nor a filing.
+
 Carried at the **FactSet grain** (one descriptor per period-construction);
 facts inherit their parent FactSet's provenance. Stamping is mandatory at
 emission — see `operations/roboledger/fact_set.create_fact_set` (the
@@ -231,6 +236,30 @@ class FiledProvenance(BaseModel):
   form: str | None = Field(None, description="Filing form type (10-K, 10-Q, ...).")
 
 
+class ObservedProvenance(BaseModel):
+  """Balances read from a system outside the ledger, for a reconciliation.
+
+  The set compares what that system says with what the ledger says at
+  `as_of`. Distinct from `asserted` (nobody typed the value in) and from
+  `filed` (nothing was filed): the source was read, and `observed_at` says
+  when, because a later reading of the same date can differ.
+  """
+
+  origin: Literal["observed"] = "observed"
+  source: str = Field(..., description="System the balances were read from.")
+  method: str = Field(
+    ..., description="Reconciliation method the reading served (source_ledger, ...)."
+  )
+  as_of: str = Field(..., description="Date the balances are stated at (YYYY-MM-DD).")
+  observed_at: str = Field(..., description="When the source was read (ISO 8601, UTC).")
+  connection_id: str | None = Field(
+    None, description="Connection the source was read through, when there is one."
+  )
+  basis: str | None = Field(
+    None, description="Accounting basis the source reported on, when it states one."
+  )
+
+
 # New provenance classes add an `origin` literal and extend this union.
 # Pydantic dispatches on `origin` via the discriminator tag.
 FactProvenance = Annotated[
@@ -240,6 +269,7 @@ FactProvenance = Annotated[
   | AssertedProvenance
   | DocumentProvenance
   | ForecastProvenance
-  | FiledProvenance,
+  | FiledProvenance
+  | ObservedProvenance,
   Field(discriminator="origin"),
 ]

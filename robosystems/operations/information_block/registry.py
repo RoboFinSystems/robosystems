@@ -29,6 +29,7 @@ from robosystems.models.api.extensions.schedules import (
 from robosystems.models.api.information_block import (
   ForecastMechanics,
   MetricMechanics,
+  ReconciliationMechanics,
   RollforwardMechanics,
   ScheduleMechanics,
   StatementMechanics,
@@ -36,6 +37,9 @@ from robosystems.models.api.information_block import (
 from robosystems.operations.information_block import disclosure as disclosure_handlers
 from robosystems.operations.information_block import forecast as forecast_handlers
 from robosystems.operations.information_block import metric as metric_handlers
+from robosystems.operations.information_block import (
+  reconciliation as reconciliation_handlers,
+)
 from robosystems.operations.information_block import rollforward as rollforward_handlers
 from robosystems.operations.information_block import schedule as schedule_handlers
 from robosystems.operations.information_block.statement import (
@@ -311,6 +315,49 @@ METRIC_BLOCK = BlockTypeRegistryEntry(
 )
 
 
+RECONCILIATION_BLOCK = BlockTypeRegistryEntry(
+  id=reconciliation_handlers.RECONCILIATION_BLOCK_TYPE,
+  display_name=reconciliation_handlers.RECONCILIATION_DISPLAY_NAME,
+  display_plural="Reconciliations",
+  category=reconciliation_handlers.RECONCILIATION_CATEGORY,
+  icon="scale",
+  description=(
+    "Ties the ledger to a balance outside it. Each period end carries one "
+    "comparison: what the ledger holds, what the independent source says, "
+    "and what is left unexplained. The block reconciles for a period when "
+    "its rule passes. Comparisons are written by `refresh-reconciliations`; "
+    "how much the close cares is set with `set-reconciliation-policy`."
+  ),
+  concept_arrangement_default="adjustment",
+  member_arrangement_default=None,
+  mechanics_schema=ReconciliationMechanics,
+  create_request_model=_EmptyPayload,
+  update_request_model=_EmptyPayload,
+  delete_request_model=_EmptyPayload,
+  construction_mode="derivative",
+  dispatch_create=make_not_implemented_handler(
+    "create-reconciliation-block",
+    "Reconciliation blocks are not created through this operation. "
+    "`refresh-reconciliations` creates the ones a ledger needs and records "
+    "each period's comparison.",
+  ),
+  dispatch_update=make_not_implemented_handler(
+    "update-reconciliation-block",
+    "Reconciliation blocks are not updated through this operation. Use "
+    "`set-reconciliation-policy` to change whether the close waits on one "
+    "and its materiality.",
+  ),
+  dispatch_delete=make_not_implemented_handler(
+    "delete-reconciliation-block",
+    "Reconciliation blocks are not deleted through this operation. To stop "
+    "one holding the close, set `required_for_close` to false with "
+    "`set-reconciliation-policy`.",
+  ),
+  dispatch_build_envelope=reconciliation_handlers.build_envelope,
+  surfaces_in_library=False,
+)
+
+
 REGISTRY: dict[str, BlockTypeRegistryEntry] = {
   SCHEDULE_BLOCK.id: SCHEDULE_BLOCK,
   ROLLFORWARD_BLOCK.id: ROLLFORWARD_BLOCK,
@@ -322,6 +369,7 @@ REGISTRY: dict[str, BlockTypeRegistryEntry] = {
   COMPREHENSIVE_INCOME_BLOCK.id: COMPREHENSIVE_INCOME_BLOCK,
   DISCLOSURE_BLOCK.id: DISCLOSURE_BLOCK,
   METRIC_BLOCK.id: METRIC_BLOCK,
+  RECONCILIATION_BLOCK.id: RECONCILIATION_BLOCK,
 }
 
 
@@ -348,6 +396,7 @@ __all__ = [
   "FORECAST_BLOCK",
   "INCOME_STATEMENT_BLOCK",
   "METRIC_BLOCK",
+  "RECONCILIATION_BLOCK",
   "REGISTRY",
   "ROLLFORWARD_BLOCK",
   "SCHEDULE_BLOCK",

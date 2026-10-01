@@ -209,6 +209,7 @@ def close_period(
   allow_stranded_obligations: bool = False,
   allow_reconciling_items: bool = False,
   allow_unposted_source_events: bool = False,
+  allow_unreconciled_accounts: bool = False,
   fence_wait_ms: int | None = None,
 ) -> ClosePeriodResponse:
   """Close a fiscal period and commit.
@@ -244,6 +245,7 @@ def close_period(
       allow_stranded_obligations=allow_stranded_obligations,
       allow_reconciling_items=allow_reconciling_items,
       allow_unposted_source_events=allow_unposted_source_events,
+      allow_unreconciled_accounts=allow_unreconciled_accounts,
       note=note,
     )
     session.commit()
@@ -519,6 +521,7 @@ def backfill_plan_history(
           allow_stranded_obligations=body.allow_stranded_obligations,
           allow_reconciling_items=body.allow_reconciling_items,
           allow_unposted_source_events=body.allow_unposted_source_events,
+          allow_unreconciled_accounts=body.allow_unreconciled_accounts,
         )
       else:
         close_result = close_period(
@@ -535,6 +538,7 @@ def backfill_plan_history(
           allow_stranded_obligations=body.allow_stranded_obligations,
           allow_reconciling_items=body.allow_reconciling_items,
           allow_unposted_source_events=body.allow_unposted_source_events,
+          allow_unreconciled_accounts=body.allow_unreconciled_accounts,
         )
       processed.append(
         BackfillPeriodOutcome(
@@ -595,6 +599,7 @@ def _restamp_closed_period(
   allow_stranded_obligations: bool,
   allow_reconciling_items: bool,
   allow_unposted_source_events: bool = False,
+  allow_unreconciled_accounts: bool = False,
 ) -> ClosePeriodResponse:
   """Reopen and re-close a period in one transaction under one fence.
 
@@ -625,6 +630,7 @@ def _restamp_closed_period(
       allow_stranded_obligations=allow_stranded_obligations,
       allow_reconciling_items=allow_reconciling_items,
       allow_unposted_source_events=allow_unposted_source_events,
+      allow_unreconciled_accounts=allow_unreconciled_accounts,
       note=note,
     )
     session.commit()

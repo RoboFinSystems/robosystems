@@ -298,6 +298,7 @@ async def close_period_op(
           allow_stranded_obligations=body.allow_stranded_obligations,
           allow_reconciling_items=body.allow_reconciling_items,
           allow_unposted_source_events=body.allow_unposted_source_events,
+          allow_unreconciled_accounts=body.allow_unreconciled_accounts,
         )
     except CloseGateFailed as e:
       if e.no_calendar:
@@ -343,6 +344,9 @@ async def close_period_op(
         detail["unposted_source_event_sample"] = list(
           e.gate.unposted_source_event_sample
         )
+      if e.gate.unreconciled_account_count:
+        detail["unreconciled_account_count"] = e.gate.unreconciled_account_count
+        detail["unreconciled_account_sample"] = list(e.gate.unreconciled_account_sample)
       if e.gate.sync_stale_days is not None:
         detail["sync_stale_days"] = e.gate.sync_stale_days
       raise HTTPException(status_code=422, detail=detail)

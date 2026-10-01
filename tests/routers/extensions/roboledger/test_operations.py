@@ -634,6 +634,96 @@ def _mock_session_ctx():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Reconciliations
+# ═══════════════════════════════════════════════════════════════════════════
+
+_PREVIEW_RECONCILIATIONS = (
+  "robosystems.operations.roboledger.commands.reconciliations.preview_reconciliations"
+)
+
+
+class TestPreviewReconciliationsOp:
+  """The source-ledger refusals subclass ``ValueError``, which the map also
+  carries: each must reach its own status, not the 422."""
+
+  async def _call(self, side_effect):
+    from robosystems.models.api.extensions.reconciliations import (
+      PreviewReconciliationsRequest,
+    )
+    from robosystems.routers.extensions.roboledger.operations import (
+      preview_reconciliations_op,
+    )
+
+    with (
+      patch(_PREVIEW_RECONCILIATIONS, side_effect=side_effect) as command,
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+      envelope = await preview_reconciliations_op(
+        body=PreviewReconciliationsRequest(period="2026-08"),
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    return envelope, command
+
+  @pytest.mark.asyncio
+  async def test_passes_the_graph_and_no_author(self) -> None:
+    from robosystems.models.api.extensions.reconciliations import (
+      ReconciliationPreviewResponse,
+    )
+
+    result = ReconciliationPreviewResponse(
+      period="2026-08",
+      as_of=date(2026, 8, 31),
+      fiscal_year_start=date(2026, 1, 1),
+      method="source_ledger",
+      source="quickbooks",
+      accounts_compared=4,
+      accounts_tied=4,
+      accounts_different=0,
+      total_difference=0,
+      rows=[],
+    )
+    envelope, command = await self._call([result])
+
+    assert isinstance(envelope, OperationEnvelope)
+    assert command.call_args.kwargs == {"graph_id": GRAPH_ID}
+
+  @pytest.mark.asyncio
+  async def test_409_when_the_graph_has_no_synced_ledger(self) -> None:
+    from robosystems.operations.roboledger.reconciliations import NoSourceLedgerError
+
+    with pytest.raises(HTTPException) as exc:
+      await self._call(NoSourceLedgerError("no connected QuickBooks ledger"))
+    assert exc.value.status_code == 409
+
+  @pytest.mark.asyncio
+  async def test_502_when_the_report_is_not_in_the_expected_shape(self) -> None:
+    from robosystems.adapters.quickbooks.reports import TrialBalanceReportError
+
+    with pytest.raises(HTTPException) as exc:
+      await self._call(TrialBalanceReportError("no Debit/Credit columns"))
+    assert exc.value.status_code == 502
+
+  @pytest.mark.asyncio
+  async def test_401_when_quickbooks_needs_reconnecting(self) -> None:
+    from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
+
+    with pytest.raises(HTTPException) as exc:
+      await self._call(QBAuthFailedError("invalid_grant", recoverable=False))
+    assert exc.value.status_code == 401
+
+  @pytest.mark.asyncio
+  async def test_422_for_a_malformed_period(self) -> None:
+    with pytest.raises(HTTPException) as exc:
+      await self._call(ValueError("Invalid period format '2026-8'."))
+    assert exc.value.status_code == 422
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Journal entry CRUD route tests (native-accounting write path)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1829,6 +1919,7 @@ class TestClosePeriodOp:
       allow_stranded_obligations=True,
       allow_reconciling_items=True,
       allow_unposted_source_events=True,
+      allow_unreconciled_accounts=True,
     )
     with (
       patch(
@@ -1863,6 +1954,7 @@ class TestClosePeriodOp:
       "allow_stranded_obligations",
       "allow_reconciling_items",
       "allow_unposted_source_events",
+      "allow_unreconciled_accounts",
     }
     dropped = overrides - set(kwargs)
     assert not dropped, (

@@ -99,6 +99,9 @@ class PeriodCloseTask(BaseTask):
           allow_unposted_source_events=bool(
             self.params.get("allow_unposted_source_events", False)
           ),
+          allow_unreconciled_accounts=bool(
+            self.params.get("allow_unreconciled_accounts", False)
+          ),
           # Usually what holds the fence is another close of the same
           # period; waiting it out yields "already closed" with a receipt.
           fence_wait_ms=self.budget_seconds * 1000,

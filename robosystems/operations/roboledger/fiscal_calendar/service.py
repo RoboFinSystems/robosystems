@@ -74,6 +74,9 @@ class CloseableGateResult:
   unposted_source_event_count: int = 0
   unposted_source_event_sample: list[str] = field(default_factory=list)
 
+  unreconciled_account_count: int = 0
+  unreconciled_account_sample: list[str] = field(default_factory=list)
+
   SEQUENCE = "sequence_violation"
   PERIOD_INCOMPLETE = "period_incomplete"
   SYNC_STALE = "sync_stale"
@@ -83,6 +86,7 @@ class CloseableGateResult:
   STRANDED_OBLIGATIONS = "stranded_obligations"
   RECONCILING_ITEMS = "reconciling_items"
   UNPOSTED_SOURCE_EVENTS = "unposted_source_events"
+  UNRECONCILED_ACCOUNTS = "unreconciled_accounts"
 
 
 class FiscalCalendarError(ValueError):
@@ -518,6 +522,7 @@ class FiscalCalendarService:
     allow_stranded_obligations: bool = False,
     allow_reconciling_items: bool = False,
     allow_unposted_source_events: bool = False,
+    allow_unreconciled_accounts: bool = False,
   ) -> CloseableGateResult:
     """Check whether `period` can be closed now. Read-only; every blocker is
     returned, not just the first.
@@ -526,7 +531,8 @@ class FiscalCalendarService:
     no stranded obligations (bypass: `allow_stranded_obligations`); no
     unresolved reconciling items (bypass: `allow_reconciling_items`); no
     source event dated in the period left uncommitted (bypass:
-    `allow_unposted_source_events`).
+    `allow_unposted_source_events`); every reconciliation the close waits on
+    is reconciled for the period (bypass: `allow_unreconciled_accounts`).
 
     `has_sync_connection` and `last_sync_at` come from the platform DB and
     are distinct: no connection passes the sync gate, but a connection that
@@ -672,6 +678,18 @@ class FiscalCalendarService:
         for event in unposted_query.order_by(posting_date.asc()).limit(5)
       ]
 
+    # Reconciliations the close waits on. One not compared for this period
+    # blocks too: nothing has checked it.
+    from robosystems.operations.roboledger.reads.reconciliations import (
+      unreconciled_for_close,
+    )
+
+    unreconciled = unreconciled_for_close(session, period)
+    unreconciled_count = len(unreconciled)
+    if unreconciled_count > 0 and not allow_unreconciled_accounts:
+      blockers.append(CloseableGateResult.UNRECONCILED_ACCOUNTS)
+    unreconciled_sample = [f"{rec.name}: {rec.status}" for rec in unreconciled[:5]]
+
     return CloseableGateResult(
       is_closeable=not blockers,
       blockers=blockers,
@@ -685,6 +703,8 @@ class FiscalCalendarService:
       reconciling_item_sample=reconciling_sample,
       unposted_source_event_count=unposted_count,
       unposted_source_event_sample=unposted_sample,
+      unreconciled_account_count=unreconciled_count,
+      unreconciled_account_sample=unreconciled_sample,
     )
 
   @staticmethod
