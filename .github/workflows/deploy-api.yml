@@ -373,7 +373,7 @@ jobs:
                 ParameterKey=FargateWeight,ParameterValue=${FARGATE_OD_WEIGHT} \
                 ParameterKey=FargateBase,ParameterValue=${{ inputs.fargate_base }} \
                 ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\" \
-                ParameterKey=EmailFromAddress,ParameterValue=\"${{ inputs.aws_sns_alert_email }}\" \
+                ParameterKey=EmailFromAddress,ParameterValue=\"${{ vars.EMAIL_FROM_ADDRESS || inputs.aws_sns_alert_email }}\" \
                 ParameterKey=SNSAlertEmail,ParameterValue=\"${{ inputs.aws_sns_alert_email }}\" \
                 ParameterKey=ApiTargetErrorThreshold,ParameterValue=${{ vars.API_TARGET_ERROR_THRESHOLD || '5' }} \
                 ParameterKey=SharedProcessedBucketArn,ParameterValue=\"${{ inputs.shared_processed_bucket_arn }}\" \

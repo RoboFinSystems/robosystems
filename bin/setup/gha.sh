@@ -194,6 +194,11 @@ function setup_full_config() {
         fi
     fi
 
+    # Sender of transactional email; kept when already set so moving the alert
+    # address never moves it
+    EMAIL_FROM_ADDRESS=$(gh variable get EMAIL_FROM_ADDRESS 2>/dev/null || echo "")
+    EMAIL_FROM_ADDRESS="${EMAIL_FROM_ADDRESS:-$AWS_SNS_ALERT_EMAIL}"
+
     read -p "Enter ECR Repository Name [robosystems]: " ECR_REPOSITORY
     ECR_REPOSITORY=${ECR_REPOSITORY:-"robosystems"}
 
@@ -532,6 +537,7 @@ function setup_full_config() {
 
     # Notification Configuration
     gh variable set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
+    gh variable set EMAIL_FROM_ADDRESS --body "$EMAIL_FROM_ADDRESS"
 
     # Application 5xx count over 5 minutes above which the API error alarm fires
     # (api stack). Deliberately low until there is a traffic baseline; retune

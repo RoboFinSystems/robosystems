@@ -342,6 +342,7 @@ configures, in script order:
 | WAF                        | `WAF_*`                                                                                                                                |
 | Networking                 | `VPC_MAX_AVAILABILITY_ZONES`, `VPC_ENDPOINT_MODE`, `VPC_SECOND_OCTET`                                                                  |
 | Runners & alerting         | `RUNNER_LABELS`, `RUNNER_SCOPE`, `AWS_SNS_ALERT_EMAIL`, `API_TARGET_ERROR_THRESHOLD`                                                   |
+| Transactional email        | `EMAIL_FROM_ADDRESS` (the sender; a verified SES identity — defaults to the alert address)                                             |
 | Observability & publishing | `OBSERVABILITY_ENABLED_*`, `DOCKERHUB_PUBLISHING_ENABLED`                                                                              |
 
 **Defaults worth knowing before the first deploy** (everything else is safe as
