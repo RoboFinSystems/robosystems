@@ -140,31 +140,55 @@ runs:
         # finished review, whose body begins "**Claude finished"; a failed run
         # begins "**Claude encountered an error". Anchor on those openings, so
         # that a review which quotes these very words in its text still counts.
+        FINISHED="**Claude finished"
+        ERRORED="**Claude encountered an error"
         has_review() {
           gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq "[.[] | select(.user.login == \"$REVIEWER\") | select(.body | startswith(\"**Claude finished\"))] | length"
+            --jq "[.[] | select(.user.login == \"$REVIEWER\") | select(.body | startswith(\"$FINISHED\"))] | length"
         }
-        has_request() {
+        # created_at of the most recent review request, empty when there is none.
+        last_request_at() {
           gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"$REVIEW_REQUEST\"))] | length"
+            --jq ".[] | select(.body | contains(\"$REVIEW_REQUEST\")) | .created_at" | sort | tail -n1
+        }
+        # Body of the most recent failed review run posted at or after $1.
+        errored_since() {
+          gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.user.login == \"$REVIEWER\") | select(.body | startswith(\"$ERRORED\")) | select(.created_at >= \"$1\") | [.created_at, .body] | @tsv" \
+            | sort | tail -n1 | cut -f2-
+        }
+        request_review() {
+          if [ -z "$REVIEW_TOKEN" ]; then
+            echo "::error::No usable review request on #$PR and no review token available to post one. Comment '$REVIEW_REQUEST' on the pull request, then re-run this job."
+            exit 1
+          fi
+          GH_TOKEN="$REVIEW_TOKEN" gh pr comment "$PR" --repo "$REPO" --body "$REVIEW_REQUEST" >/dev/null
+          echo "Requested the automated review on #$PR."
         }
         if [ "$(has_review)" -gt 0 ]; then
           echo "Review by $REVIEWER already on the pull request."
           exit 0
         fi
-        if [ "$(has_request)" -eq 0 ]; then
-          if [ -z "$REVIEW_TOKEN" ]; then
-            echo "::error::No review request on #$PR and no review token available to post one. Comment '$REVIEW_REQUEST' on the pull request, then re-run this job."
-            exit 1
-          fi
-          GH_TOKEN="$REVIEW_TOKEN" gh pr comment "$PR" --repo "$REPO" --body "$REVIEW_REQUEST" >/dev/null
-          echo "Requested the automated review on #$PR."
+        requested_at=$(last_request_at)
+        if [ -z "$requested_at" ]; then
+          request_review
+        elif [ -n "$(errored_since "$requested_at")" ]; then
+          # A re-run after a failed review: the old request has been spent, so ask again.
+          echo "The last automated review on #$PR failed; requesting it again."
+          request_review
         fi
+        requested_at=$(last_request_at)
         deadline=$(( $(date +%s) + TIMEOUT_MIN * 60 ))
         while [ "$(date +%s)" -lt "$deadline" ]; do
           if [ "$(has_review)" -gt 0 ]; then
             echo "Review by $REVIEWER posted on #$PR."
             exit 0
+          fi
+          failed=$(errored_since "$requested_at")
+          if [ -n "$failed" ]; then
+            run_url=$(grep -oE 'https://github\.com/[^) ]+/actions/runs/[0-9]+' <<<"$failed" | head -n1 || true)
+            echo "::error::The automated review run on #$PR failed before posting a review${run_url:+ ($run_url)}. Its log names the reason; re-run this job once the cause is fixed and it will request the review again."
+            exit 1
           fi
           sleep 30
         done

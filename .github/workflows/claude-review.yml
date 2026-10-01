@@ -85,3 +85,19 @@ jobs:
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
             actions: read
+
+      # The action hides Claude's output on public repositories, so a run the
+      # API rejects (expired token, usage limit) fails with no reason in the
+      # log. Print only the final result message of a failed run - it carries
+      # the API error, not the conversation.
+      - name: Report why Claude failed
+        if: failure()
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file || format('{0}/claude-execution-output.json', runner.temp) }}
+        run: |
+          reason=$(jq -r '[.[] | select(.type == "result")] | last | (.result // .errors // "no result message") | tostring | .[0:500]' "$EXECUTION_FILE" 2>/dev/null || echo "execution file unreadable")
+          echo "::error::Claude run failed: $reason"
+          echo "### Claude run failed" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$reason" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
