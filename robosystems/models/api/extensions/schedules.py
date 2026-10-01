@@ -338,17 +338,14 @@ class UpdateScheduleRequest(BaseModel):
 
 
 class DeleteScheduleRequest(BaseModel):
-  """Delete a schedule — cascades through facts and associations.
+  """Delete a schedule and everything under it. Permanent and irreversible.
 
-  Hard deletes the Structure, all Facts tied to it, all
-  Associations tied to it, and its draft entries and unposted
-  obligations. This is a permanent, irreversible operation, and it is
-  refused once any of the schedule's entries has posted: the schedule
-  is their support. For ending a schedule early without removing history, use
-  `terminate-schedule` (no entry) or
-  `create-event-block(event_type='asset_disposed')` (the handler voids
-  the remaining obligation chain + posts the disposal entry atomically;
-  recognized facts stay as history).
+  Removes the Structure, its Facts and Associations, its draft entries and
+  its unposted obligations. Refused once any of the schedule's entries has
+  posted, because the schedule is their support. To end a schedule early
+  and keep its history, use `terminate-schedule` (no entry) or
+  `create-event-block(event_type='asset_disposed')`, whose handler voids
+  the remaining obligations and posts the disposal entry in one step.
   """
 
   structure_id: str

@@ -62,8 +62,8 @@ def _delete_executes(
     # `lock_by_id` bounds its wait, so a `SET LOCAL lock_timeout` lands here
     # before the row itself comes back from `session.get`.
     _exec_result(),
-    _exec_result(fetchone_row=landed_row),  # landed-entry guard
     _exec_result(scalars_all=[]),  # draft posting dates, for the fence
+    _exec_result(fetchone_row=landed_row),  # landed-entry guard
     _exec_result(),  # SET LOCAL lock_timeout around the void
     _exec_result(),  # draft line items
     _exec_result(),  # draft entries
@@ -191,7 +191,7 @@ def test_delete_schedule_deletes_drafts_after_fencing_their_periods() -> None:
   structure.block_type = "schedule"
 
   executes = _delete_executes()
-  executes[2] = _exec_result(scalars_all=[date(2026, 9, 30)])
+  executes[1] = _exec_result(scalars_all=[date(2026, 9, 30)])
   session = MagicMock()
   session.get.return_value = structure
   session.execute.side_effect = executes

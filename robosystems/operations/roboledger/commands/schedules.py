@@ -443,6 +443,9 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
   """
   structure = _load_schedule_or_404(session, body.structure_id)
 
+  # Fence, then count: a close that posts one of these drafts either finished
+  # before the fence, and is counted, or waits behind it.
+  _fence_draft_periods(session, structure.id)
   landed = _landed_entry_count(session, structure.id)
   if landed:
     raise ValueError(
@@ -450,8 +453,6 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
       "entries exist, and the schedule is their support. Use "
       "terminate-schedule to stop it and keep its history."
     )
-
-  _fence_draft_periods(session, structure.id)
 
   # Bounded: the void locks rows the promotion sweep holds.
   from robosystems.operations.locking import bounded_lock_wait
