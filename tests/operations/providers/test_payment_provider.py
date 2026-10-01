@@ -67,7 +67,7 @@ class TestStripeCustomerOperations:
 
   def test_create_customer_stripe_api_error(self, stripe_provider):
     """Test handling of Stripe API errors during customer creation."""
-    from stripe.error import StripeError
+    from stripe import StripeError
 
     stripe_provider.stripe.Customer.create.side_effect = StripeError(
       "API error occurred"
@@ -128,8 +128,9 @@ class TestStripeCheckoutSessions:
   def _with_stripe_errors(self, stripe_provider):
     import stripe as stripe_module
 
-    stripe_provider.stripe.error = stripe_module.error
-    return stripe_module.error.InvalidRequestError("already complete", "id")
+    stripe_provider.stripe.InvalidRequestError = stripe_module.InvalidRequestError
+    stripe_provider.stripe.StripeError = stripe_module.StripeError
+    return stripe_module.InvalidRequestError("already complete", "id")
 
   def test_expire_checkout_session_returns_expired(self, stripe_provider):
     expired = Mock()
@@ -236,9 +237,10 @@ class TestStripeSubscriptionOperations:
         provider.stripe = Mock()
         provider.stripe.Subscription = Mock()
         # cancel_subscription's idempotency check catches
-        # stripe.error.InvalidRequestError; except-clauses need the real
+        # stripe.InvalidRequestError; except-clauses need the real
         # exception classes, not Mock attributes.
-        provider.stripe.error = stripe_module.error
+        provider.stripe.InvalidRequestError = stripe_module.InvalidRequestError
+        provider.stripe.StripeError = stripe_module.StripeError
         return provider
 
   def test_create_subscription_success(self, stripe_provider):
@@ -365,8 +367,7 @@ class TestStripeWebhookVerification:
         provider = StripePaymentProvider()
         provider.stripe = Mock()
         provider.stripe.Webhook = Mock()
-        provider.stripe.error = Mock()
-        provider.stripe.error.SignatureVerificationError = SignatureVerificationError
+        provider.stripe.SignatureVerificationError = SignatureVerificationError
         return provider
 
   def test_verify_webhook_success(self, stripe_provider):
@@ -391,8 +392,7 @@ class TestStripeWebhookVerification:
     class SignatureVerificationError(Exception):
       pass
 
-    stripe_provider.stripe.error = Mock()
-    stripe_provider.stripe.error.SignatureVerificationError = SignatureVerificationError
+    stripe_provider.stripe.SignatureVerificationError = SignatureVerificationError
 
     stripe_provider.stripe.Webhook.construct_event.side_effect = (
       SignatureVerificationError("Invalid signature")
@@ -597,9 +597,8 @@ class TestStripeInvoiceOperations:
     class MockStripeError(Exception):
       pass
 
-    stripe_provider.stripe.error = Mock()
-    stripe_provider.stripe.error.InvalidRequestError = MockInvalidRequestError
-    stripe_provider.stripe.error.StripeError = MockStripeError
+    stripe_provider.stripe.InvalidRequestError = MockInvalidRequestError
+    stripe_provider.stripe.StripeError = MockStripeError
 
     stripe_provider.stripe.Invoice.create_preview.side_effect = MockInvalidRequestError(
       "No upcoming invoice"
@@ -707,11 +706,12 @@ class TestStripeCancelIdempotency:
         provider = StripePaymentProvider()
         provider.stripe = Mock()
         # Except-clauses need the real exception classes, not Mock attributes.
-        provider.stripe.error = stripe_module.error
+        provider.stripe.InvalidRequestError = stripe_module.InvalidRequestError
+        provider.stripe.StripeError = stripe_module.StripeError
         return provider
 
   def _invalid_request(self):
-    from stripe.error import InvalidRequestError
+    from stripe import InvalidRequestError
 
     return InvalidRequestError("No such subscription", "id")
 
@@ -732,7 +732,7 @@ class TestStripeCancelIdempotency:
     stripe_provider.cancel_subscription("sub_already")
 
   def test_cancel_failure_on_live_subscription_reraises(self, stripe_provider):
-    from stripe.error import InvalidRequestError
+    from stripe import InvalidRequestError
 
     stripe_provider.stripe.Subscription.cancel.side_effect = self._invalid_request()
     stripe_provider.stripe.Subscription.retrieve.return_value = Mock(status="active")
@@ -753,7 +753,7 @@ class TestStripeCancelIdempotency:
     stripe_provider.cancel_subscription_at_period_end("sub_gone")
 
   def test_period_end_failure_on_live_subscription_reraises(self, stripe_provider):
-    from stripe.error import InvalidRequestError
+    from stripe import InvalidRequestError
 
     stripe_provider.stripe.Subscription.modify.side_effect = self._invalid_request()
     stripe_provider.stripe.Subscription.retrieve.return_value = Mock(status="active")
