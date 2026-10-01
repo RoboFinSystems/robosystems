@@ -60,7 +60,7 @@ class TestRegistry:
   def test_list_registered_returns_all_entries(self) -> None:
     entries = list_registered()
     # Schedule + rollforward + forecast + 5 statement block types +
-    # disclosure + metric.
+    # disclosure + metric + reconciliation.
     assert [e.id for e in entries] == [
       "schedule",
       "rollforward",
@@ -68,6 +68,7 @@ class TestRegistry:
       *STATEMENT_BLOCK_IDS,
       "regulatory_disclosure",
       "metric",
+      "reconciliation",
     ]
 
   def test_entry_is_frozen(self) -> None:

@@ -60,6 +60,7 @@ class IndependentSide:
   source_account_ids: dict[str, str] = field(default_factory=dict)
   unmatched: list[UnmatchedBalance] = field(default_factory=list)
   basis: str | None = None
+  connection_id: str | None = None
   last_sync_at: datetime | None = None
 
 
@@ -119,6 +120,7 @@ class SourceLedgerResolver:
       source_account_ids={eid: sid for sid, eid in by_source_id.items()},
       unmatched=unmatched,
       basis=report.basis,
+      connection_id=connection_id,
       last_sync_at=last_sync_at,
     )
 

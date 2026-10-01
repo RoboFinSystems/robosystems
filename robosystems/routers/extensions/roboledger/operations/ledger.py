@@ -42,7 +42,11 @@ from robosystems.models.api.extensions.journal_entries import (
 )
 from robosystems.models.api.extensions.reconciliations import (
   PreviewReconciliationsRequest,
+  ReconciliationListResponse,
+  ReconciliationPolicyResponse,
   ReconciliationPreviewResponse,
+  RefreshReconciliationsRequest,
+  SetReconciliationPolicyRequest,
 )
 from robosystems.models.api.extensions.reconciling_items import (
   PreviewReconcilingItemRequest,
@@ -121,7 +125,16 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   update_journal_entry as cmd_update_journal_entry,
 )
 from robosystems.operations.roboledger.commands.reconciliations import (
+  ReconciliationNotFoundError,
+)
+from robosystems.operations.roboledger.commands.reconciliations import (
   preview_reconciliations as cmd_preview_reconciliations,
+)
+from robosystems.operations.roboledger.commands.reconciliations import (
+  refresh_reconciliations as cmd_refresh_reconciliations,
+)
+from robosystems.operations.roboledger.commands.reconciliations import (
+  set_reconciliation_policy as cmd_set_reconciliation_policy,
 )
 from robosystems.operations.roboledger.commands.reconciling_items import (
   NotAReconcilingItemError,
@@ -473,6 +486,63 @@ preview_reconciliations_op = _registrar.register(
       QBAuthUnavailableError: 503,
       QBAuthFailedError: 401,
       TrialBalanceReportError: 502,
+      ValueError: 422,
+    },
+  )
+)
+
+refresh_reconciliations_op = _registrar.register(
+  OperationSpec(
+    name="refresh-reconciliations",
+    summary="Refresh Reconciliations",
+    description=(
+      "Compare the ledger with its independent sources at a period end and "
+      "record the result on each reconciliation block. For a ledger synced "
+      "from QuickBooks this reads QuickBooks' own trial balance and records "
+      "one comparison for the whole ledger: how many accounts were compared, "
+      "how many do not tie, and the total difference. The block reconciles "
+      "for the period when the difference is within its materiality. Running "
+      "it again replaces the period's comparison, so the answer is always as "
+      "of the last run. Returns every reconciliation's standing for the "
+      "period, with the accounts that did not tie. Creates the block the "
+      "first time it runs. Use preview-reconciliations to see the comparison "
+      "without recording it."
+    ),
+    command=cmd_refresh_reconciliations,
+    request_model=RefreshReconciliationsRequest,
+    result_type=ReconciliationListResponse,
+    requires_graph_id=True,
+    error_map={
+      NoSourceLedgerError: 409,
+      RowLockedError: 409,
+      # Intuit unreachable or busy; the connection is fine. Before the base.
+      QBAuthUnavailableError: 503,
+      QBAuthFailedError: 401,
+      TrialBalanceReportError: 502,
+      ValueError: 422,
+    },
+    mark_stale_reason="reconciliations_refreshed",
+  )
+)
+
+set_reconciliation_policy_op = _registrar.register(
+  OperationSpec(
+    name="set-reconciliation-policy",
+    summary="Set Reconciliation Policy",
+    description=(
+      "Change how much the close cares about one reconciliation: whether the "
+      "period's close waits on it (`required_for_close`), and its "
+      "`materiality`, the difference up to which it still counts as "
+      "reconciled. Omitted fields keep their value. The next "
+      "refresh-reconciliations uses the new materiality; comparisons already "
+      "recorded are not re-judged."
+    ),
+    command=cmd_set_reconciliation_policy,
+    request_model=SetReconciliationPolicyRequest,
+    result_type=ReconciliationPolicyResponse,
+    error_map={
+      ReconciliationNotFoundError: 404,
+      RowLockedError: 409,
       ValueError: 422,
     },
   )

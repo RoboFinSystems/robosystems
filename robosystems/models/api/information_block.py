@@ -21,6 +21,7 @@ from robosystems.models.api.extensions.forecasts import (
   DeleteForecastRequest,
   UpdateForecastRequest,
 )
+from robosystems.models.api.extensions.reconciliations import ReconciliationMethod
 from robosystems.models.api.extensions.rollforward import (
   AttributionFilter,
   CreateRollforwardRequest,
@@ -805,6 +806,39 @@ class StatementMechanics(BaseModel):
   )
 
 
+class ReconciliationMechanics(BaseModel):
+  """Mechanics for `block_type='reconciliation'`: what is compared, against
+  what, and how much the close cares.
+
+  A `ledger`-scope reconciliation checks the whole ledger against one
+  source (the synced accounting system's own trial balance). An
+  `account`-scope one ties a single account to an independent balance.
+  """
+
+  kind: Literal["reconciliation"] = "reconciliation"
+  scope: Literal["ledger", "account"] = Field(
+    ..., description="Whether the block covers the whole ledger or one account."
+  )
+  method: ReconciliationMethod = Field(
+    ..., description="Where the independent side comes from."
+  )
+  element_id: str | None = Field(
+    None, description="The account reconciled; null for a ledger-scope block."
+  )
+  required_for_close: bool = Field(
+    True,
+    description="Whether the period's close waits on this reconciliation.",
+  )
+  materiality: float = Field(
+    0.0,
+    ge=0,
+    description=(
+      "A difference up to this amount still counts as reconciled. Zero means "
+      "the two sides must agree to the cent."
+    ),
+  )
+
+
 # New block-type mechanics models add a `kind` literal and extend this
 # union. Pydantic dispatches on `kind` via the discriminator tag.
 ArtifactMechanics = Annotated[
@@ -812,7 +846,8 @@ ArtifactMechanics = Annotated[
   | StatementMechanics
   | MetricMechanics
   | RollforwardMechanics
-  | ForecastMechanics,
+  | ForecastMechanics
+  | ReconciliationMechanics,
   Field(discriminator="kind"),
 ]
 
@@ -1195,6 +1230,7 @@ _LEGACY_BLOCK_TYPES = Literal[
   "comprehensive_income",
   "regulatory_disclosure",
   "metric",
+  "reconciliation",
 ]
 
 

@@ -16,12 +16,6 @@ from pydantic import BaseModel, Field
 # accounting system's own trial balance, which checks the mirror of its books.
 ReconciliationMethod = Literal["source_ledger"]
 
-# `tied`: both sides agree to the cent. `different`: both sides know the
-# account and disagree. `not_in_ledger`: the source reports an account the
-# ledger has no chart account for. `not_in_source`: the ledger holds a
-# balance on an account the source does not have.
-ReconciliationRowStatus = Literal["tied", "different", "not_in_ledger", "not_in_source"]
-
 
 class PreviewReconciliationsRequest(BaseModel):
   """Compare the ledger's balances at a period end with an independent source."""
@@ -49,22 +43,37 @@ class ReconciliationRow(BaseModel):
   element_id: str | None = Field(
     None, description="The chart account; null when the ledger has none for it."
   )
-  account_code: str | None = None
-  account_name: str
+  account_code: str | None = Field(None, description="The chart account's code.")
+  account_name: str = Field(
+    ..., description="The account's name in the ledger, else in the source."
+  )
   source_account_id: str | None = Field(
     None, description="The account's id in the source system, when it has one."
   )
-  statement: Literal["balance_sheet", "income_statement"] | None = Field(
+  statement: str | None = Field(
     None,
     description=(
-      "Balance-sheet accounts are compared cumulatively to the period end; "
-      "income-statement accounts from the start of the fiscal year."
+      "`balance_sheet` or `income_statement`. Balance-sheet accounts are "
+      "compared cumulatively to the period end; income-statement accounts "
+      "from the start of the fiscal year. Null when the ledger has no account."
     ),
   )
-  ledger_balance: float
-  independent_balance: float
+  ledger_balance: float = Field(
+    ..., description="What the ledger holds, from landed entries."
+  )
+  independent_balance: float = Field(
+    ..., description="What the independent source says."
+  )
   difference: float = Field(..., description="Ledger minus independent.")
-  status: ReconciliationRowStatus
+  status: str = Field(
+    ...,
+    description=(
+      "`tied`: both sides agree to the cent. `different`: both know the "
+      "account and disagree. `not_in_ledger`: the source reports an account "
+      "the ledger has none for. `not_in_source`: the ledger holds a balance "
+      "on an account the source does not have."
+    ),
+  )
 
 
 class ReconciliationPreviewResponse(BaseModel):
@@ -112,4 +121,128 @@ class ReconciliationPreviewResponse(BaseModel):
   notes: list[str] = Field(
     default_factory=list,
     description="How the comparison was made, and anything that qualifies it.",
+  )
+
+
+# How far a reconciliation has got for a period. `not_started`: nothing has
+# been compared. `unreconciled`: the sides differ by more than the block's
+# materiality. `explained`: they differ, and items account for all of it.
+# `reconciled`: nothing is left unexplained. `reviewed`: reconciled and
+# signed off.
+ReconciliationStatus = Literal[
+  "not_started", "unreconciled", "explained", "reconciled", "reviewed"
+]
+
+
+class RefreshReconciliationsRequest(BaseModel):
+  """Compare each reconciliation at a period end and record the result."""
+
+  period: str = Field(
+    ...,
+    description="Period to reconcile at its last day, as YYYY-MM.",
+    examples=["2026-08"],
+  )
+
+
+class SetReconciliationPolicyRequest(BaseModel):
+  """Change how much the close cares about one reconciliation."""
+
+  structure_id: str = Field(..., description="The reconciliation block.")
+  required_for_close: bool | None = Field(
+    None, description="Whether the period's close waits on it. Omit to keep."
+  )
+  materiality: float | None = Field(
+    None,
+    ge=0,
+    description=(
+      "A difference up to this amount still counts as reconciled. Omit to keep."
+    ),
+  )
+
+
+class ReconciliationPolicyResponse(BaseModel):
+  """A reconciliation's policy after a change."""
+
+  structure_id: str
+  required_for_close: bool
+  materiality: float
+
+
+class ReconciliationSummary(BaseModel):
+  """One reconciliation's standing for a period."""
+
+  structure_id: str = Field(..., description="The reconciliation block.")
+  name: str = Field(..., description="The block's name.")
+  scope: str = Field(
+    ...,
+    description=(
+      "`ledger`: the whole ledger against one source. `account`: one account "
+      "against an independent balance."
+    ),
+  )
+  method: str = Field(
+    ...,
+    description=(
+      "Where the independent side comes from. `source_ledger` is the synced "
+      "accounting system's own trial balance."
+    ),
+  )
+  element_id: str | None = Field(
+    None, description="The account reconciled; null for a ledger-scope block."
+  )
+  required_for_close: bool = Field(
+    ..., description="Whether the period's close waits on this reconciliation."
+  )
+  materiality: float = Field(
+    ..., description="A difference up to this amount still counts as reconciled."
+  )
+  period: str = Field(..., description="The period, as YYYY-MM.")
+  as_of: date = Field(..., description="The period's last day.")
+  status: str = Field(
+    ...,
+    description=(
+      "`not_started`: not compared for this period. `unreconciled`: the "
+      "sides differ by more than the materiality. `explained`: they differ "
+      "and items account for all of it. `reconciled`: nothing is left "
+      "unexplained. `reviewed`: reconciled and signed off."
+    ),
+  )
+  unreconciled_difference: float | None = Field(
+    None,
+    description=(
+      "What is left unexplained at the last comparison; null when the period "
+      "has not been compared."
+    ),
+  )
+  accounts_compared: int | None = Field(
+    None, description="Ledger-scope only: accounts with a balance on either side."
+  )
+  accounts_different: int | None = Field(
+    None, description="Ledger-scope only: accounts that do not tie."
+  )
+  source: str | None = Field(
+    None, description="The system the independent side was read from."
+  )
+  compared_at: datetime | None = Field(
+    None, description="When the two sides were last compared."
+  )
+  fact_set_id: str | None = Field(
+    None, description="The FactSet holding the period's comparison."
+  )
+  differences: list[ReconciliationRow] = Field(
+    default_factory=list,
+    description=(
+      "Ledger-scope only: the accounts that did not tie at the last "
+      "comparison, largest difference first."
+    ),
+  )
+
+
+class ReconciliationListResponse(BaseModel):
+  """Every reconciliation's standing for one period."""
+
+  period: str = Field(..., description="The period, as YYYY-MM.")
+  as_of: date = Field(..., description="The period's last day.")
+  reconciliations: list[ReconciliationSummary] = Field(
+    ..., description="One entry per reconciliation block, oldest block first."
   )

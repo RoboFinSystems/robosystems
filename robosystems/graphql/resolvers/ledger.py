@@ -50,6 +50,7 @@ from robosystems.graphql.types.ledger import (
   PeriodDrafts,
   PublishListDetail,
   PublishListList,
+  ReconciliationList,
   Report,
   ReportBundleDownload,
   ReportDownloadFormat,
@@ -66,7 +67,10 @@ from robosystems.graphql.types.report_package import ReportPackage
 from robosystems.models.api.extensions.reports import (
   ReportLifecycle as PydanticReportLifecycle,
 )
-from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
+from robosystems.operations.roboledger.fiscal_calendar import (
+  FiscalCalendarService,
+  parse_period,
+)
 from robosystems.operations.roboledger.reads import (
   account_rollups as reads_account_rollups,
 )
@@ -102,6 +106,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   publish_lists as reads_publish_lists,
+)
+from robosystems.operations.roboledger.reads import (
+  reconciliations as reads_reconciliations,
 )
 from robosystems.operations.roboledger.reads import (
   reports as reads_reports,
@@ -518,6 +525,33 @@ class LedgerQuery:
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return AccountRollups.from_pydantic(response)
+
+  # ── Reconciliations ─────────────────────────────────────────────────────
+
+  @strawberry.field
+  def reconciliations(
+    self, info: Info[GraphQLContext, None], period: str
+  ) -> ReconciliationList | None:
+    """Every reconciliation's standing at a period end.
+
+    A reconciliation not yet compared for the period is `not_started`.
+    Comparisons are recorded by the `refresh-reconciliations` operation.
+
+    Args:
+      period: The period, as YYYY-MM.
+    """
+    try:
+      parse_period(period)
+    except ValueError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(
+        message=str(exc), extensions={"code": "INVALID_PERIOD"}
+      ) from exc
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_reconciliations.list_reconciliations(session, period)
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return ReconciliationList.from_pydantic(response)
 
   # ── Trial balance ───────────────────────────────────────────────────────
 

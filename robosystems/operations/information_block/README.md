@@ -1,6 +1,6 @@
 # Information Block Operations
 
-Registry-driven construction and reading of structured financial data blocks — schedules, statements, rollforwards, forecasts, disclosures, and metrics.
+Registry-driven construction and reading of structured financial data blocks — schedules, statements, rollforwards, forecasts, disclosures, metrics, and reconciliations.
 
 ## What is an Information Block?
 
@@ -28,6 +28,7 @@ Every block has a `block_type` that determines how it is constructed and read. `
 | `text_block.py` | Envelope builder for narrative (`Nonnumeric`) disclosure structures |
 | `metric.py` | Derivative metric handler — renders the standing metric time series |
 | `metrics.py` | `compute-metrics` / `assert-metrics` — the metric write paths |
+| `reconciliation.py` | Reconciliation handler — renders the period-by-period comparisons that `refresh-reconciliations` records |
 | `chart.py` | Chart View projection (panels and series over a rendering) |
 | `rules/` | Rule evaluation engine — `engine.py`, `evaluators.py`, `expressions.py`, `commands.py` |
 
@@ -37,9 +38,9 @@ Every block has a `block_type` that determines how it is constructed and read. `
 | ---- | ------- | ----------- |
 | `declarative` | The user declares mechanics plus seed params; the system generates atoms | `schedule`, `rollforward`, `forecast` |
 | `compositional` | Atoms already exist; the block is a view assembled at read time | `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`, `regulatory_disclosure` |
-| `derivative` | Facts are computed from other blocks | `metric` |
+| `derivative` | Facts are computed from other blocks | `metric`, `reconciliation` |
 
-Ten block types are registered. Not all of them are authored through `create-information-block`: statements are produced by `create-report`, disclosure structures are authored as vocabulary through `create-taxonomy-block`, and metrics are written by `compute-metrics` / `assert-metrics`. Those types install not-implemented create/update/delete handlers (HTTP 501) via `make_not_implemented_handler`, while their `build_envelope` paths are fully wired and serve read envelopes normally.
+Eleven block types are registered. Not all of them are authored through `create-information-block`: statements are produced by `create-report`, disclosure structures are authored as vocabulary through `create-taxonomy-block`, metrics are written by `compute-metrics` / `assert-metrics`, and reconciliations are created and recorded by `refresh-reconciliations` (`operations/roboledger/reconciliations/`). Those types install not-implemented create/update/delete handlers (HTTP 501) via `make_not_implemented_handler`, while their `build_envelope` paths are fully wired and serve read envelopes normally.
 
 ## Adding a block type
 
@@ -48,7 +49,7 @@ Ten block types are registered. Not all of them are authored through `create-inf
    - `update(session, payload, updated_by) -> str`
    - `delete(session, payload, deleted_by) -> str`
    - `build_envelope(session, structure_id) -> InformationBlockEnvelope | None`
-2. **Add a mechanics model** to `models/api/information_block.py` and add it to the `ArtifactMechanics` discriminated union (existing arms: `ScheduleMechanics`, `RollforwardMechanics`, `ForecastMechanics`, `StatementMechanics`, `MetricMechanics`).
+2. **Add a mechanics model** to `models/api/information_block.py` and add it to the `ArtifactMechanics` discriminated union (existing arms: `ScheduleMechanics`, `RollforwardMechanics`, `ForecastMechanics`, `StatementMechanics`, `MetricMechanics`, `ReconciliationMechanics`).
 3. **Register the entry** in `registry.py` — declare a `BlockTypeRegistryEntry` and insert it into `REGISTRY`. The generic REST operations and the MCP tools pick it up from there; no further wiring.
 4. **Widen the database CHECK constraint** — add the new `block_type` value in `migrations/extensions/versions/` and to `_widen_library_checks` in `db/extensions.py`.
 
@@ -93,7 +94,7 @@ The engine loads rules via `envelope.load_rules_for_structure` (so element- and 
 
 ## FactSet construction
 
-`operations/roboledger/fact_set.py::create_fact_set` is the single blessed writer. It validates a typed `FactProvenance` descriptor and writes `fact_sets.provenance`; `ProvenanceRequiredError` plus a `before_insert` model backstop reject any unstamped insert. Every producer — the report pivot, schedules, statement sets, text blocks, metrics, forecasts — routes through it, so every FactSet is stamped and `provenance` surfaces on the envelope as JSON. The union arms are `pivot`, `schedule`, `derived`, `asserted`, `document`, `forecast`, and `filed`.
+`operations/roboledger/fact_set.py::create_fact_set` is the single blessed writer. It validates a typed `FactProvenance` descriptor and writes `fact_sets.provenance`; `ProvenanceRequiredError` plus a `before_insert` model backstop reject any unstamped insert. Every producer — the report pivot, schedules, statement sets, text blocks, metrics, forecasts — routes through it, so every FactSet is stamped and `provenance` surfaces on the envelope as JSON. The union arms are `pivot`, `schedule`, `derived`, `asserted`, `document`, `forecast`, `filed`, and `observed`.
 
 ## Not implemented
 
