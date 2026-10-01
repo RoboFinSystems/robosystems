@@ -3,11 +3,17 @@
 from unittest.mock import Mock, patch
 
 import pytest
+from stripe import StripeObject
 
 from robosystems.operations.providers.payment_provider import (
   PaymentProvider,
   StripePaymentProvider,
 )
+
+
+def _stripe_object(data: dict) -> StripeObject:
+  """What the Stripe SDK returns: since stripe 15 a StripeObject is not a dict."""
+  return StripeObject.construct_from(data, "sk_test")
 
 
 class TestPaymentProviderAbstractInterface:
@@ -256,7 +262,9 @@ class TestStripeSubscriptionOperations:
     mock_payment_methods.data = [mock_pm]
     stripe_provider.stripe.PaymentMethod.list.return_value = mock_payment_methods
 
-    mock_customer = {"invoice_settings": {"default_payment_method": None}}
+    mock_customer = _stripe_object(
+      {"invoice_settings": {"default_payment_method": None}}
+    )
     stripe_provider.stripe.Customer.retrieve.return_value = mock_customer
 
     result = stripe_provider.create_subscription(
@@ -285,7 +293,9 @@ class TestStripeSubscriptionOperations:
     mock_payment_methods.data = [mock_pm]
     stripe_provider.stripe.PaymentMethod.list.return_value = mock_payment_methods
 
-    mock_customer = {"invoice_settings": {"default_payment_method": None}}
+    mock_customer = _stripe_object(
+      {"invoice_settings": {"default_payment_method": None}}
+    )
     stripe_provider.stripe.Customer.retrieve.return_value = mock_customer
 
     metadata = {"user_id": "user_123", "graph_id": "kg_456", "tier": "enterprise"}
@@ -300,9 +310,9 @@ class TestStripeSubscriptionOperations:
     payment_methods = Mock()
     payment_methods.data = [mock_pm]
     stripe_provider.stripe.PaymentMethod.list.return_value = payment_methods
-    stripe_provider.stripe.Customer.retrieve.return_value = {
-      "invoice_settings": {"default_payment_method": None}
-    }
+    stripe_provider.stripe.Customer.retrieve.return_value = _stripe_object(
+      {"invoice_settings": {"default_payment_method": None}}
+    )
 
   def test_create_subscription_refuses_an_incomplete_subscription(
     self, stripe_provider
@@ -372,18 +382,21 @@ class TestStripeWebhookVerification:
 
   def test_verify_webhook_success(self, stripe_provider):
     """Test successful webhook verification."""
-    mock_event = {
-      "id": "evt_test123",
-      "type": "payment_intent.succeeded",
-      "data": {"object": {}},
-    }
+    mock_event = _stripe_object(
+      {
+        "id": "evt_test123",
+        "type": "payment_intent.succeeded",
+        "data": {"object": {}},
+      }
+    )
     stripe_provider.stripe.Webhook.construct_event.return_value = mock_event
 
     result = stripe_provider.verify_webhook(
       payload=b'{"test": "data"}', signature="sig_test"
     )
 
-    assert result == mock_event
+    assert type(result) is dict
+    assert result == mock_event.to_dict()
     stripe_provider.stripe.Webhook.construct_event.assert_called_once()
 
   def test_verify_webhook_invalid_signature(self, stripe_provider):
@@ -447,7 +460,9 @@ class TestStripePaymentMethods:
     mock_list.data = [mock_pm1, mock_pm2]
     stripe_provider.stripe.PaymentMethod.list.return_value = mock_list
 
-    mock_customer = {"invoice_settings": {"default_payment_method": "pm_1"}}
+    mock_customer = _stripe_object(
+      {"invoice_settings": {"default_payment_method": "pm_1"}}
+    )
     stripe_provider.stripe.Customer.retrieve.return_value = mock_customer
 
     result = stripe_provider.list_payment_methods("cus_123")
