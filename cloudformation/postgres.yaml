@@ -50,6 +50,9 @@ Parameters:
       - db.t4g.micro
       - db.t4g.small
       - db.t4g.medium
+      - db.t4g.large
+      - db.t4g.xlarge
+      - db.t4g.2xlarge
       - db.r7g.large
       - db.r7g.xlarge
       - db.r7g.2xlarge
@@ -219,6 +222,15 @@ Mappings:
     db.t4g.medium:
       MemoryLowBytes: 268435456 # 256 MB of 4 GB
       ConnectionsHighCount: 270 # 60% of ~450
+    db.t4g.large:
+      MemoryLowBytes: 536870912 # 512 MB of 8 GB
+      ConnectionsHighCount: 540 # 60% of ~900
+    db.t4g.xlarge:
+      MemoryLowBytes: 1073741824 # 1 GB of 16 GB
+      ConnectionsHighCount: 1080 # 60% of ~1800
+    db.t4g.2xlarge:
+      MemoryLowBytes: 2147483648 # 2 GB of 32 GB
+      ConnectionsHighCount: 2160 # 60% of ~3600
     db.r7g.large:
       MemoryLowBytes: 1073741824 # 1 GB of 16 GB
       ConnectionsHighCount: 1080 # 60% of ~1800
