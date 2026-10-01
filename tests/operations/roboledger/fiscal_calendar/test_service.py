@@ -50,6 +50,18 @@ def _no_reconciling_items(monkeypatch):
   set_reconciling_items(monkeypatch, [])
 
 
+@pytest.fixture(autouse=True)
+def _no_reconciliations(monkeypatch):
+  """Answer the reconciliation lookup at its boundary, for the same reason:
+  the stub cannot model it. It runs against a real database in
+  `tests/operations/roboledger/reconciliations/test_reconciliation_block_db.py`.
+  """
+  monkeypatch.setattr(
+    "robosystems.operations.roboledger.reads.reconciliations.unreconciled_for_close",
+    lambda session, period: [],
+  )
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # In-memory session stub
 # ────────────────────────────────────────────────────────────────────────────

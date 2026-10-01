@@ -288,3 +288,84 @@ def test_the_block_reads_as_an_information_block(ledger):
   by_row = {row.element_qname: row.values for row in rendering.rows}
   assert by_row["rs-rec:UnreconciledDifference"] == [0.0, 240.00]
   assert by_row["rs-rec:AccountsDifferent"] == [0.0, 2.0]
+
+
+# ── The close gate ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def closed_through_july(ledger):
+  from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
+
+  ledger.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  ledger.commit()
+  return ledger
+
+
+def _gate(session, **allow):
+  from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
+
+  return FiscalCalendarService().closeable_gate(
+    session, GRAPH_ID, "2026-08", today=date(2026, 10, 1), **allow
+  )
+
+
+def test_a_ledger_with_no_reconciliation_closes_as_before(closed_through_july):
+  gate = _gate(closed_through_july)
+
+  assert gate.is_closeable
+  assert gate.unreconciled_account_count == 0
+
+
+def test_a_reconciled_period_passes_the_gate(closed_through_july):
+  _refresh(closed_through_july, source_report(*TIED))
+
+  gate = _gate(closed_through_july)
+
+  assert gate.is_closeable
+  assert gate.unreconciled_account_count == 0
+
+
+def test_a_difference_holds_the_close_and_names_the_block(closed_through_july):
+  _refresh(closed_through_july, source_report(*_BILL_REMOVED))
+
+  gate = _gate(closed_through_july)
+
+  assert gate.blockers == ["unreconciled_accounts"]
+  assert gate.unreconciled_account_count == 1
+  assert gate.unreconciled_account_sample == [
+    "Source ledger (QuickBooks): unreconciled"
+  ]
+
+
+def test_a_period_nobody_compared_holds_the_close(closed_through_july):
+  """The block exists from an earlier month; August was never compared."""
+  _refresh(closed_through_july, source_report(*TIED), period="2026-07")
+
+  gate = _gate(closed_through_july)
+
+  assert gate.blockers == ["unreconciled_accounts"]
+  assert gate.unreconciled_account_sample == ["Source ledger (QuickBooks): not_started"]
+
+
+def test_the_bypass_lifts_the_gate_and_keeps_the_count(closed_through_july):
+  _refresh(closed_through_july, source_report(*_BILL_REMOVED))
+
+  gate = _gate(closed_through_july, allow_unreconciled_accounts=True)
+
+  assert gate.is_closeable
+  assert gate.unreconciled_account_count == 1
+
+
+def test_a_released_block_does_not_hold_the_close(closed_through_july):
+  result = _refresh(closed_through_july, source_report(*_BILL_REMOVED))
+  set_reconciliation_policy(
+    closed_through_july,
+    SetReconciliationPolicyRequest(
+      structure_id=result.reconciliations[0].structure_id, required_for_close=False
+    ),
+    created_by="usr",
+  )
+  closed_through_july.commit()
+
+  assert _gate(closed_through_july).is_closeable

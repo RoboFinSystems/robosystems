@@ -137,6 +137,9 @@ def _gate_payload(exc: CloseGateFailed, *, period: str) -> dict[str, Any]:
     payload["unposted_source_event_sample"] = list(
       exc.gate.unposted_source_event_sample
     )
+  if exc.gate.unreconciled_account_count:
+    payload["unreconciled_account_count"] = exc.gate.unreconciled_account_count
+    payload["unreconciled_account_sample"] = list(exc.gate.unreconciled_account_sample)
   if exc.gate.sync_stale_days is not None:
     payload["sync_stale_days"] = exc.gate.sync_stale_days
   return payload

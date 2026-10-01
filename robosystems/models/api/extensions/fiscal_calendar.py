@@ -181,6 +181,16 @@ class ClosePeriodRequest(BaseModel):
       "override is recorded in the close audit note."
     ),
   )
+  allow_unreconciled_accounts: bool = Field(
+    False,
+    description=(
+      "Override the reconciliation gate — close even though a reconciliation "
+      "the close waits on is not reconciled for the period, or was never "
+      "compared for it. The books are then closed without that check. Prefer "
+      "refresh-reconciliations and clearing what it reports first. The "
+      "override is recorded in the close audit note."
+    ),
+  )
 
 
 class ReopenPeriodRequest(BaseModel):
@@ -272,6 +282,15 @@ class BackfillPlanHistoryRequest(BaseModel):
       "Override the unposted-source-event gate on each reclose. Only needed "
       "when a source event inside the backfill window was never committed "
       "and you have decided not to commit or void it first."
+    ),
+  )
+  allow_unreconciled_accounts: bool = Field(
+    False,
+    description=(
+      "Override the reconciliation gate on each reclose. Needed when a month "
+      "inside the backfill window has a reconciliation the close waits on "
+      "that was never compared for it, which is every month closed before "
+      "the reconciliation existed."
     ),
   )
   restamp: bool = Field(
@@ -456,6 +475,23 @@ class FiscalCalendarResponse(BaseModel):
     description=(
       "Source identifiers (or event ids) of up to 5 unposted source events, "
       "so the blocker names what is holding the close."
+    ),
+  )
+  unreconciled_account_count: int = Field(
+    0,
+    description=(
+      "Reconciliations the close waits on that are not reconciled for this "
+      "period, including any never compared for it. Run "
+      "refresh-reconciliations and clear what it reports, release one with "
+      "set-reconciliation-policy, or close over them knowingly with "
+      "allow_unreconciled_accounts."
+    ),
+  )
+  unreconciled_account_sample: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Name and status of up to 5 of those reconciliations, so the blocker "
+      "names what is holding the close."
     ),
   )
   last_close_at: datetime | None = None

@@ -127,3 +127,18 @@ def list_reconciliations(session: Session, period: str) -> ReconciliationListRes
   return ReconciliationListResponse(
     period=period, as_of=as_of, reconciliations=summaries
   )
+
+
+_CLOSEABLE_STATUSES = frozenset({"reconciled", "reviewed"})
+
+
+def unreconciled_for_close(
+  session: Session, period: str
+) -> list[ReconciliationSummary]:
+  """The reconciliations a close of ``period`` waits on that are not
+  reconciled for it, including any never compared."""
+  return [
+    rec
+    for rec in list_reconciliations(session, period).reconciliations
+    if rec.required_for_close and rec.status not in _CLOSEABLE_STATUSES
+  ]

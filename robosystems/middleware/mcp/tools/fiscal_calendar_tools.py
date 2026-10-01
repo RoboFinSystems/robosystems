@@ -107,6 +107,9 @@ class GetFiscalCalendarTool:
   - `reconciling_items`: posted events whose source payload changed
     afterwards and that nobody has dispositioned — resolve each with
     resolve-reconciling-item (count + sample ride on the response)
+  - `unreconciled_accounts`: a reconciliation the close waits on is not
+    reconciled for the period, or was never compared for it — run
+    refresh-reconciliations (count + sample ride on the response)
 - `last_sync_at`: most recent QB sync timestamp (null if no QB connection)
 - `periods`: list of all fiscal period rows with status
 
@@ -202,6 +205,9 @@ class ClosePeriodTool:
 - allow_unposted_source_events (optional): lifts the unposted-source-event
   gate, closing without bank-feed lines or QuickBooks transactions dated in
   the period that were never committed; they stay out of the period.
+- allow_unreconciled_accounts (optional): lifts the reconciliation gate,
+  closing although a reconciliation the close waits on is not reconciled
+  for the period. refresh-reconciliations reports what does not tie.
 
 **RETURNS:**
 Two shapes. Usually the receipt below, returned once the close lands. If the
@@ -242,6 +248,8 @@ The receipt:
 - source events dated in the period that were never committed: inbox lines,
   QuickBooks transactions whose automatic posting failed (lifted by
   allow_unposted_source_events)
+- a reconciliation the close waits on is not reconciled for the period, or
+  was never compared for it (lifted by allow_unreconciled_accounts)
 - the balance sheet equation does not balance for the period
 
 **NOTES:**
@@ -299,6 +307,15 @@ The receipt:
               "recorded in the close audit note."
             ),
           },
+          "allow_unreconciled_accounts": {
+            "type": "boolean",
+            "description": (
+              "Override the reconciliation gate (default false). Closes "
+              "although a reconciliation the close waits on is not reconciled "
+              "for the period; the override is recorded in the close audit "
+              "note."
+            ),
+          },
           "note": {
             "type": "string",
             "description": "Optional note captured in the audit event",
@@ -352,6 +369,9 @@ The receipt:
           ),
           "allow_unposted_source_events": bool(
             arguments.get("allow_unposted_source_events", False)
+          ),
+          "allow_unreconciled_accounts": bool(
+            arguments.get("allow_unreconciled_accounts", False)
           ),
           "note": arguments.get("note"),
         },
@@ -462,6 +482,9 @@ The receipt:
           allow_reconciling_items=bool(arguments.get("allow_reconciling_items", False)),
           allow_unposted_source_events=bool(
             arguments.get("allow_unposted_source_events", False)
+          ),
+          allow_unreconciled_accounts=bool(
+            arguments.get("allow_unreconciled_accounts", False)
           ),
         )
         if gate.is_closeable:
@@ -683,6 +706,9 @@ class BackfillPlanHistoryTool:
 - allow_unposted_source_events (optional): override the unposted-source-event
   gate on each reclose — only when a source event inside the backfill window
   was never committed and you have decided not to commit or void it first.
+- allow_unreconciled_accounts (optional): override the reconciliation gate
+  on each reclose — needed for months closed before a reconciliation
+  existed, which were never compared.
 - restamp (optional, default false): also re-derive months that already
   have canonical sets — the healing pass after an engine improvement.
   Advance start_period between chunks (a restamp run is not
@@ -744,6 +770,14 @@ class BackfillPlanHistoryTool:
               "backfill window was never committed."
             ),
           },
+          "allow_unreconciled_accounts": {
+            "type": "boolean",
+            "description": (
+              "Override the reconciliation gate on each reclose (default "
+              "false). Needed for months closed before a reconciliation "
+              "existed, which were never compared."
+            ),
+          },
           "allow_stranded_obligations": {
             "type": "boolean",
             "description": (
@@ -794,6 +828,9 @@ class BackfillPlanHistoryTool:
       allow_reconciling_items=bool(arguments.get("allow_reconciling_items", False)),
       allow_unposted_source_events=bool(
         arguments.get("allow_unposted_source_events", False)
+      ),
+      allow_unreconciled_accounts=bool(
+        arguments.get("allow_unreconciled_accounts", False)
       ),
       restamp=bool(arguments.get("restamp", False)),
       note=arguments.get("note"),
