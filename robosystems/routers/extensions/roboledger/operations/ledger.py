@@ -14,6 +14,7 @@ from robosystems.adapters.quickbooks.client.api import (
   QBAuthFailedError,
   QBAuthUnavailableError,
 )
+from robosystems.adapters.quickbooks.reports import TrialBalanceReportError
 from robosystems.middleware.extensions import OperationSpec
 from robosystems.models.api.common import DeleteResult
 from robosystems.models.api.event_block import (
@@ -38,6 +39,10 @@ from robosystems.models.api.extensions.journal_entries import (
   DeleteJournalEntryRequest,
   JournalEntryResponse,
   UpdateJournalEntryRequest,
+)
+from robosystems.models.api.extensions.reconciliations import (
+  PreviewReconciliationsRequest,
+  ReconciliationPreviewResponse,
 )
 from robosystems.models.api.extensions.reconciling_items import (
   PreviewReconcilingItemRequest,
@@ -115,6 +120,9 @@ from robosystems.operations.roboledger.commands.journal_entries import (
 from robosystems.operations.roboledger.commands.journal_entries import (
   update_journal_entry as cmd_update_journal_entry,
 )
+from robosystems.operations.roboledger.commands.reconciliations import (
+  preview_reconciliations as cmd_preview_reconciliations,
+)
 from robosystems.operations.roboledger.commands.reconciling_items import (
   NotAReconcilingItemError,
   ReconcilingItemNotFoundError,
@@ -126,6 +134,7 @@ from robosystems.operations.roboledger.commands.reconciling_items import (
 from robosystems.operations.roboledger.commands.reconciling_items import (
   resolve_reconciling_item as cmd_resolve_reconciling_item,
 )
+from robosystems.operations.roboledger.reconciliations import NoSourceLedgerError
 from robosystems.routers.extensions.roboledger._common import make_registrar
 
 router = APIRouter()
@@ -431,6 +440,41 @@ resolve_reconciling_item_op = _registrar.register(
       ValueError: 422,
     },
     mark_stale_reason="reconciling_item_resolved",
+  )
+)
+
+# ── Reconciliations ──────────────────────────────────────────────────────────
+
+preview_reconciliations_op = _registrar.register(
+  OperationSpec(
+    name="preview-reconciliations",
+    summary="Preview Reconciliations",
+    description=(
+      "Compare the ledger's account balances at a period end with the books "
+      "they were synced from. Reads QuickBooks' own trial balance for the "
+      "period end and sets it beside the ledger's, account by account: each "
+      "row carries both balances, the difference, and whether the account "
+      "ties. Balance-sheet accounts are compared cumulatively; income and "
+      "expense accounts from the start of the fiscal year. A difference means "
+      "the ledger's copy of the books has drifted from the source (a "
+      "transaction deleted or back-dated there after it was synced, or "
+      "activity not yet synced), so run this before trusting any other "
+      "figure on a synced ledger. Writes nothing. Only for a graph with a "
+      "connected QuickBooks ledger."
+    ),
+    command=cmd_preview_reconciliations,
+    request_model=PreviewReconciliationsRequest,
+    result_type=ReconciliationPreviewResponse,
+    requires_created_by=False,
+    requires_graph_id=True,
+    error_map={
+      NoSourceLedgerError: 409,
+      # Intuit unreachable or busy; the connection is fine. Before the base.
+      QBAuthUnavailableError: 503,
+      QBAuthFailedError: 401,
+      TrialBalanceReportError: 502,
+      ValueError: 422,
+    },
   )
 )
 

@@ -75,6 +75,10 @@ _EXEMPT: dict[str, str] = {
     "Resolves handlers and returns the projected debits and credits. Writes "
     "nothing at all."
   ),
+  "preview-reconciliations": (
+    "Reads the source's trial balance and the ledger's and returns the "
+    "comparison. Writes nothing at all."
+  ),
   "preview-reconciling-item": (
     "Reads a flagged event's posted entries against its accepted payload and "
     "returns the difference. Writes nothing at all — resolve-reconciling-item "

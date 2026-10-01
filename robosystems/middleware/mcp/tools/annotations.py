@@ -72,6 +72,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "execute-event-block": _write(destructive=True, idempotent=True, open_world=True),
   "preview-event-block": _READ,
   "preview-reconciling-item": _READ,
+  # Reads the trial balance from QuickBooks.
+  "preview-reconciliations": _READ._replace(open_world=True),
   "resolve-reconciling-item": _REPLACES_ONCE_PER_STATE,
   "update-journal-entry": _REPLACES,
   "delete-journal-entry": _REPLACES,

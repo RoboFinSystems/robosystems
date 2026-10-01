@@ -40,6 +40,18 @@ _TRIAL_BALANCE_SQL = text("""
 """).bindparams(landed_entry_bindparam())
 
 
+def get_net_balances_cents(
+  session: Session,
+  start_date: date | None = None,
+  end_date: date | None = None,
+) -> dict[str, int]:
+  """Each account's landed debits minus credits over the window, in cents."""
+  result = session.execute(
+    _TRIAL_BALANCE_SQL, {"start_date": start_date, "end_date": end_date}
+  )
+  return {str(row.id): int(row.total_debits) - int(row.total_credits) for row in result}
+
+
 def get_trial_balance(
   session: Session,
   start_date: date | None = None,

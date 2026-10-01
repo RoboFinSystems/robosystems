@@ -24,14 +24,11 @@ def get_fiscal_year_start_month(session: Session) -> int:
   return 1
 
 
-def qb_sync_state(platform_db: Session, graph_id: str) -> tuple[bool, datetime | None]:
-  """`(has_connection, last_sync_at)` for the graph's live QB connection.
-
-  `(True, None)` means connected but never synced, which the close gate
-  treats as stale. Disconnected and severed rows don't count; among the
-  rest a connected one wins, then the most recently updated.
+def live_qb_connection(platform_db: Session, graph_id: str) -> Connection | None:
+  """The graph's live QB connection. Disconnected and severed rows don't
+  count; among the rest a connected one wins, then the most recently updated.
   """
-  connection = (
+  return (
     platform_db.query(Connection)
     .filter(
       Connection.graph_id == graph_id,
@@ -47,6 +44,15 @@ def qb_sync_state(platform_db: Session, graph_id: str) -> tuple[bool, datetime |
     )
     .first()
   )
+
+
+def qb_sync_state(platform_db: Session, graph_id: str) -> tuple[bool, datetime | None]:
+  """`(has_connection, last_sync_at)` for the graph's live QB connection.
+
+  `(True, None)` means connected but never synced, which the close gate
+  treats as stale.
+  """
+  connection = live_qb_connection(platform_db, graph_id)
   if connection is None:
     return (False, None)
   return (True, connection.last_sync)
