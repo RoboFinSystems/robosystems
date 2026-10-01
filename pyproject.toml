@@ -104,7 +104,7 @@ dependencies = [
     "requests>=2.34.2,<3.0",
     "retrying>=1.4.0,<2.0",
     "uuid6>=2025.0.0",
-    "webauthn>=2.7.0,<3.0",
+    "webauthn>=2.7.0,<4.0",
     "zstandard>=0.23,<1",
 ]
 
