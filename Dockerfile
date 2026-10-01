@@ -1,5 +1,7 @@
 # Stage 0: Extension Repository (pull LadybugDB extensions)
-FROM ghcr.io/ladybugdb/extension-repo:latest AS extensions
+# Pinned by digest: upstream re-pushes :latest and purges old version directories.
+# Move it only with LADYBUG_EXT_VERSION, to a digest that still holds that version.
+FROM ghcr.io/ladybugdb/extension-repo:latest@sha256:842f4e8540a5bc5365f6245ba6ded0a5aa336d454cadb9ad41fb425833b17e98 AS extensions
 
 # Stage 1: Builder
 # Using Python 3.13 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
@@ -25,10 +27,11 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /usr/local/bin/uv
 
 # Copy LadybugDB extensions from official extension repository
-# Extensions pulled from ghcr.io/ladybugdb/extension-repo:latest
+# Extensions pulled from the pinned extension-repo stage above
 ARG TARGETARCH=arm64
-# Extension version: pinned to match the ladybug Python package for ABI compatibility.
-# This version is used for both the repo source path and the runtime install path.
+# The engine's extension version (the directory it loads from), which is not
+# necessarily the ladybug wheel's version. Used for both the repo source path
+# and the runtime install path.
 ARG LADYBUG_EXT_VERSION=0.18.1
 
 # Create extension directories using internal version (where LadybugDB looks).
