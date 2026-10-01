@@ -1,7 +1,7 @@
 # Stage 0: Extension Repository (pull LadybugDB extensions)
 # Pinned by digest: upstream re-pushes :latest and purges old version directories.
 # Move it only with LADYBUG_EXT_VERSION, to a digest that still holds that version.
-FROM ghcr.io/ladybugdb/extension-repo:latest@sha256:842f4e8540a5bc5365f6245ba6ded0a5aa336d454cadb9ad41fb425833b17e98 AS extensions
+FROM ghcr.io/ladybugdb/extension-repo:latest@sha256:28a44c71ebd342838666c5457d6ef7fd6c597d50c92f46f8e6babc9da4e1627d AS extensions
 
 # Stage 1: Builder
 # Using Python 3.13 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
