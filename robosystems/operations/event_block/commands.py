@@ -36,6 +36,8 @@ from robosystems.operations.locking import (
 )
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
+  InactiveAccountError,
+  assert_accounts_postable,
   assert_period_not_closed,
 )
 from robosystems.operations.roboledger.entry_status import (
@@ -890,6 +892,18 @@ def preview_event_block(
       )
     except (TemplateInterpolationError, EngineValidationError) as e:
       errors.append(f"Entry {i}: {e}")
+
+  try:
+    assert_accounts_postable(
+      session,
+      (
+        element_id
+        for txn in planned
+        for element_id in (txn.debit_element_id, txn.credit_element_id)
+      ),
+    )
+  except InactiveAccountError as e:
+    errors.append(str(e))
 
   return PreviewEventBlockResponse(
     matched_handler=matched_handler_response,

@@ -388,12 +388,71 @@ def update_schedule(
   )
 
 
+def _landed_entry_count(session: Session, structure_id: str) -> int:
+  row = session.execute(
+    text(
+      "SELECT COUNT(*) AS c FROM entries "
+      "WHERE source_structure_id = :sid AND status IN :landed_entry_statuses"
+    ).bindparams(landed_entry_bindparam()),
+    {"sid": structure_id},
+  ).fetchone()
+  return int(row.c) if row and row.c else 0
+
+
+def _fence_draft_periods(session: Session, structure_id: str) -> None:
+  """Fence before the draft deletes lock rows: fence, then rows, as every
+  ledger writer does."""
+  from robosystems.operations.roboledger.commands._guards import (
+    assert_period_not_closed,
+  )
+
+  draft_dates = (
+    session.execute(
+      text(
+        "SELECT DISTINCT posting_date FROM entries "
+        "WHERE source_structure_id = :sid AND status = 'draft'"
+      ),
+      {"sid": structure_id},
+    )
+    .scalars()
+    .all()
+  )
+  assert_period_not_closed(session, *draft_dates)
+
+
+def _delete_draft_entries(session: Session, structure_id: str) -> None:
+  session.execute(
+    text(
+      "DELETE FROM line_items WHERE entry_id IN ("
+      "SELECT id FROM entries "
+      "WHERE source_structure_id = :sid AND status = 'draft')"
+    ),
+    {"sid": structure_id},
+  )
+  session.execute(
+    text("DELETE FROM entries WHERE source_structure_id = :sid AND status = 'draft'"),
+    {"sid": structure_id},
+  )
+
+
 def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
-  """Delete a schedule and everything under it, in FK order. Pending
-  obligations are voided first so they can't outlive their originator and
-  trip the close gate. Raises `ScheduleNotFoundError`.
+  """Delete a schedule and everything under it, in FK order. Obligations are
+  voided and drafts deleted first so neither outlives the schedule and trips
+  the close gate. Raises `ScheduleNotFoundError`, or ``ValueError`` when
+  landed entries exist: the schedule's facts are their support.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
+
+  landed = _landed_entry_count(session, structure.id)
+  if landed:
+    raise ValueError(
+      f"Cannot delete schedule {structure.id!r}: {landed} posted closing "
+      "entries exist, and the schedule is their support. Use "
+      "terminate-schedule to stop it and keep its history."
+    )
+
+  _fence_draft_periods(session, structure.id)
+
   # Bounded: the void locks rows the promotion sweep holds.
   from robosystems.operations.locking import bounded_lock_wait
 
@@ -402,11 +461,15 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
     "This schedule's pending obligations are being written by another "
     "process. Retry in a moment.",
   ):
+    # Classified too: the guard above leaves them only draft entries, which
+    # are deleted below.
     ScheduleService().void_pending_obligations(
       session,
       structure=structure,
       void_reason="schedule_deleted",
+      include_classified=True,
     )
+  _delete_draft_entries(session, structure.id)
   association_ids = (
     session.execute(
       select(Association.id).where(Association.structure_id == structure.id)
@@ -696,16 +759,10 @@ def rebuild_schedule(
   ) = _reconstruct_schedule_definition(session, structure)
 
   # Landed entries depend on the facts a rebuild regenerates.
-  posted_row = session.execute(
-    text(
-      "SELECT COUNT(*) AS c FROM entries "
-      "WHERE source_structure_id = :sid AND status IN :landed_entry_statuses"
-    ).bindparams(landed_entry_bindparam()),
-    {"sid": structure.id},
-  ).fetchone()
-  if posted_row and posted_row.c:
+  landed = _landed_entry_count(session, structure.id)
+  if landed:
     raise ValueError(
-      f"Cannot rebuild schedule {structure.id!r}: {posted_row.c} posted "
+      f"Cannot rebuild schedule {structure.id!r}: {landed} posted "
       "closing entries exist. Reopen the affected periods and void those "
       "entries first — reopening alone leaves entries posted, so it does "
       "not clear this guard."
@@ -719,24 +776,7 @@ def rebuild_schedule(
 
   service = ScheduleService()
 
-  # Fence before the draft deletes lock rows: fence, then rows, as every
-  # ledger writer does.
-  from robosystems.operations.roboledger.commands._guards import (
-    assert_period_not_closed,
-  )
-
-  draft_dates = (
-    session.execute(
-      text(
-        "SELECT DISTINCT posting_date FROM entries "
-        "WHERE source_structure_id = :sid AND status = 'draft'"
-      ),
-      {"sid": structure.id},
-    )
-    .scalars()
-    .all()
-  )
-  assert_period_not_closed(session, *draft_dates)
+  _fence_draft_periods(session, structure.id)
 
   # Bounded: contends with the promotion sweep over these rows.
   from robosystems.operations.locking import bounded_lock_wait, lock_by_id
@@ -777,18 +817,7 @@ def rebuild_schedule(
     session.query(Rule).filter(Rule.id.in_(rule_ids)).delete(synchronize_session=False)
 
   # The rebuilt obligation chain re-drafts these on the next promote.
-  session.execute(
-    text(
-      "DELETE FROM line_items WHERE entry_id IN ("
-      "SELECT id FROM entries "
-      "WHERE source_structure_id = :sid AND status = 'draft')"
-    ),
-    {"sid": structure.id},
-  )
-  session.execute(
-    text("DELETE FROM entries WHERE source_structure_id = :sid AND status = 'draft'"),
-    {"sid": structure.id},
-  )
+  _delete_draft_entries(session, structure.id)
   session.flush()
 
   structure = service.create_schedule(

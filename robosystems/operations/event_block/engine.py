@@ -19,6 +19,7 @@ from robosystems.models.extensions.roboledger.event_handler import EventHandler
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.roboledger.commands._guards import (
+  assert_accounts_postable,
   assert_period_not_closed,
 )
 
@@ -97,8 +98,8 @@ def apply_handler(
   template entry.
 
   Raises ``EngineValidationError`` on an unbalanced entry, a missing element,
-  or a negative amount, and ``TemplateInterpolationError`` on a bad template
-  expression.
+  or a negative amount, ``TemplateInterpolationError`` on a bad template
+  expression, and ``InactiveAccountError`` on a retired account.
   """
   template = handler.transaction_template
   if not template or "transactions" not in template:
@@ -150,6 +151,7 @@ def apply_handler(
       debit_element_id = str(interpolate(debit_element_id, context))
     if "{{" in credit_element_id:
       credit_element_id = str(interpolate(credit_element_id, context))
+    assert_accounts_postable(session, (debit_element_id, credit_element_id))
 
     debit_cents = _resolve_amount(debit_spec["amount"], context)
     credit_cents = _resolve_amount(credit_spec["amount"], context)

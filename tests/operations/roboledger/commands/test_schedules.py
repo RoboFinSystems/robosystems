@@ -49,6 +49,29 @@ class _Query:
     return 1
 
 
+def _delete_executes(
+  *,
+  landed: int = 0,
+  association_ids: list[str] | None = None,
+  rule_ids: list[str] | None = None,
+) -> list[MagicMock]:
+  """`delete_schedule`'s `session.execute` calls, in order."""
+  landed_row = MagicMock()
+  landed_row.c = landed
+  return [
+    # `lock_by_id` bounds its wait, so a `SET LOCAL lock_timeout` lands here
+    # before the row itself comes back from `session.get`.
+    _exec_result(),
+    _exec_result(fetchone_row=landed_row),  # landed-entry guard
+    _exec_result(scalars_all=[]),  # draft posting dates, for the fence
+    _exec_result(),  # SET LOCAL lock_timeout around the void
+    _exec_result(),  # draft line items
+    _exec_result(),  # draft entries
+    _exec_result(scalars_all=association_ids or []),
+    _exec_result(scalars_all=rule_ids or []),
+  ]
+
+
 def test_delete_schedule_removes_information_block_dependents_before_structure() -> (
   None
 ):
@@ -63,16 +86,9 @@ def test_delete_schedule_removes_information_block_dependents_before_structure()
   deleted_models: list[type] = []
   session = MagicMock()
   session.get.return_value = structure
-  session.execute.side_effect = [
-    # `lock_by_id` bounds its wait, so a `SET LOCAL lock_timeout`
-    # lands here before the row itself comes back from `session.get`.
-    _exec_result(),
-    # The pending-obligation void bounds its wait, so a `SET LOCAL
-    # lock_timeout` lands here.
-    _exec_result(),
-    _exec_result(scalars_all=["assoc_1", "assoc_2"]),
-    _exec_result(scalars_all=["rule_1"]),
-  ]
+  session.execute.side_effect = _delete_executes(
+    association_ids=["assoc_1", "assoc_2"], rule_ids=["rule_1"]
+  )
   session.query.side_effect = lambda model: _Query(model, deleted_models)
 
   with patch(
@@ -111,14 +127,7 @@ def test_delete_schedule_voids_pending_obligations_before_deletion() -> None:
   deleted_models: list[type] = []
   session = MagicMock()
   session.get.return_value = structure
-  session.execute.side_effect = [
-    # `lock_by_id` bounds its wait, so a `SET LOCAL lock_timeout`
-    # lands here before the row itself comes back from `session.get`.
-    _exec_result(),
-    _exec_result(),  # SET LOCAL lock_timeout around the void
-    _exec_result(scalars_all=[]),
-    _exec_result(scalars_all=[]),
-  ]
+  session.execute.side_effect = _delete_executes()
   session.query.side_effect = lambda model: _Query(model, deleted_models)
 
   with patch(
@@ -138,6 +147,72 @@ def test_delete_schedule_voids_pending_obligations_before_deletion() -> None:
   # Schedule deletion does NOT pass voided_by_event_id — there is no
   # successor event, the schedule simply ceases to exist.
   assert "voided_by_event_id" not in kwargs or kwargs.get("voided_by_event_id") is None
+  # Classified obligations go too: their drafts are deleted with the schedule,
+  # and one left behind would be stranded at every later close.
+  assert kwargs["include_classified"] is True
+
+
+def test_delete_schedule_refuses_when_entries_have_landed() -> None:
+  """Posted entries rest on the schedule's facts, so the schedule stays."""
+  from unittest.mock import patch
+
+  import pytest
+
+  structure = MagicMock()
+  structure.id = "struct_sched"
+  structure.block_type = "schedule"
+
+  session = MagicMock()
+  session.get.return_value = structure
+  session.execute.side_effect = _delete_executes(landed=3)
+
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.void_pending_obligations",
+      return_value=0,
+    ) as void,
+    pytest.raises(ValueError, match="terminate-schedule"),
+  ):
+    delete_schedule(session, DeleteScheduleRequest(structure_id="struct_sched"))
+
+  void.assert_not_called()
+  session.query.assert_not_called()
+  session.delete.assert_not_called()
+  session.commit.assert_not_called()
+
+
+def test_delete_schedule_deletes_drafts_after_fencing_their_periods() -> None:
+  from datetime import date
+  from unittest.mock import patch
+
+  structure = MagicMock()
+  structure.id = "struct_sched"
+  structure.block_type = "schedule"
+
+  executes = _delete_executes()
+  executes[2] = _exec_result(scalars_all=[date(2026, 9, 30)])
+  session = MagicMock()
+  session.get.return_value = structure
+  session.execute.side_effect = executes
+  session.query.side_effect = lambda model: _Query(model, [])
+
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.void_pending_obligations",
+      return_value=0,
+    ),
+    patch(
+      "robosystems.operations.roboledger.commands._guards.assert_period_not_closed"
+    ) as fence,
+  ):
+    delete_schedule(session, DeleteScheduleRequest(structure_id="struct_sched"))
+
+  fence.assert_called_once_with(session, date(2026, 9, 30))
+  statements = [str(call.args[0]) for call in session.execute.call_args_list]
+  assert "DELETE FROM line_items" in statements[4]
+  assert "DELETE FROM entries" in statements[5]
 
 
 def test_update_schedule_keeps_omitted_metadata_null_in_typed_mechanics() -> None:

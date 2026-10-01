@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import or_, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from robosystems.logger import logger
 from robosystems.models.extensions.roboledger.entry import Entry
@@ -88,6 +88,24 @@ class WritebackFailed(PeriodCloseError):
       f"QuickBooks. Fix the offending entries and retry the close."
     )
     self.failed_events = failed_events
+
+
+def drafts_close_posts(
+  session: Session, period_start: date, period_end: date
+) -> Query[Entry]:
+  """The window's drafts a close posts: all but a retracted event's leftovers."""
+  retracted_event_ids = session.query(Event.id).filter(
+    Event.status.in_(WRITEBACK_EXCLUDED_EVENT_STATUSES)
+  )
+  return session.query(Entry).filter(
+    Entry.posting_date >= period_start,
+    Entry.posting_date <= period_end,
+    Entry.status == "draft",
+    or_(
+      Entry.triggered_by_event_id.is_(None),
+      ~Entry.triggered_by_event_id.in_(retracted_event_ids),
+    ),
+  )
 
 
 @dataclass
@@ -238,24 +256,9 @@ class PeriodCloseService:
 
     # Drafts the pre-publish step published are already posted.
     now = datetime.now(UTC)
-    retracted_event_ids = session.query(Event.id).filter(
-      Event.status.in_(WRITEBACK_EXCLUDED_EVENT_STATUSES)
-    )
-    posted_locally = (
-      session.query(Entry)
-      .filter(
-        Entry.posting_date >= period_start,
-        Entry.posting_date <= period_end,
-        Entry.status == "draft",
-        or_(
-          Entry.triggered_by_event_id.is_(None),
-          ~Entry.triggered_by_event_id.in_(retracted_event_ids),
-        ),
-      )
-      .update(
-        {Entry.status: "posted", Entry.posted_at: now},
-        synchronize_session=False,
-      )
+    posted_locally = drafts_close_posts(session, period_start, period_end).update(
+      {Entry.status: "posted", Entry.posted_at: now},
+      synchronize_session=False,
     )
     entries_posted = posted_locally + published_to_qb
     session.flush()
