@@ -32,6 +32,10 @@ RUN uv export --only-group lambda --no-hashes --frozen > requirements.txt && \
     pip install --no-cache-dir -r requirements.txt && \
     rm -f requirements.txt pyproject.toml uv.lock
 
+# Deployed Lambda never runs pip; the base image's copy carries its own
+# vendored urllib3, msgpack and setuptools
+RUN python -m pip uninstall -y --root-user-action=ignore pip
+
 # Copy all Lambda function code
 # Each function has a lambda_handler entry point
 COPY bin/lambda/api_key_rotation.py ./
