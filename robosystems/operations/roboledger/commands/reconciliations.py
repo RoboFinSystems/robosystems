@@ -19,6 +19,10 @@ from robosystems.operations.information_block.reconciliation import (
   RECONCILIATION_BLOCK_TYPE,
 )
 from robosystems.operations.locking import lock_by_id
+from robosystems.operations.roboledger.fiscal_calendar import (
+  FiscalCalendarService,
+  next_period,
+)
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   get_fiscal_year_start_month,
 )
@@ -32,6 +36,7 @@ from robosystems.operations.roboledger.reconciliations import (
 )
 from robosystems.operations.roboledger.reconciliations.blocks import (
   ensure_ledger_reconciliation,
+  find_ledger_reconciliation,
   lock_reconciliation_writes,
   reconciliation_rule,
   record_ledger_reconciliation,
@@ -90,6 +95,31 @@ def refresh_reconciliations(
     created_by=created_by,
   )
   return list_reconciliations(session, body.period)
+
+
+def refresh_next_period(
+  session: Session, *, graph_id: str, created_by: str
+) -> str | None:
+  """Refresh the next period to close, on a ledger that already reconciles.
+
+  Called after a sync so the close gate is not a step someone has to
+  remember. A ledger with no reconciliation block is left alone (returns
+  ``None``): the first refresh is a person's decision. Raises as
+  `refresh_reconciliations` does.
+  """
+  if find_ledger_reconciliation(session, "source_ledger") is None:
+    return None
+  calendar = FiscalCalendarService().get(session, graph_id)
+  if calendar is None or not calendar.closed_through_period:
+    return None
+  period = next_period(calendar.closed_through_period)
+  refresh_reconciliations(
+    session,
+    RefreshReconciliationsRequest(period=period),
+    graph_id=graph_id,
+    created_by=created_by,
+  )
+  return period
 
 
 def set_reconciliation_policy(

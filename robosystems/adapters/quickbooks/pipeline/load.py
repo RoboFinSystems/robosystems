@@ -71,6 +71,8 @@ def _run_qb_load(
 
   _trigger_auto_map_if_needed(context, config)
 
+  _refresh_reconciliations_if_enrolled(context, config)
+
   try:
     from robosystems.operations.extensions.staleness import mark_graph_stale
 
@@ -336,6 +338,29 @@ def _bootstrap_fiscal_calendar_if_needed(
     context.log.info("Fiscal calendar already initialized (race); skipping bootstrap")
   except Exception as e:
     context.log.warning(f"Failed to bootstrap fiscal calendar (non-fatal): {e}")
+
+
+def _refresh_reconciliations_if_enrolled(
+  context: AssetExecutionContext, config: QBSyncConfig
+) -> None:
+  """Re-compare the next period to close against QuickBooks, on a ledger that
+  already has a reconciliation block. Best-effort: a failure leaves the
+  period's last comparison in place and the sync succeeds.
+  """
+  from robosystems.db.extensions import extensions_session
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    refresh_next_period,
+  )
+
+  try:
+    with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
+      period = refresh_next_period(
+        session, graph_id=config.graph_id, created_by=config.user_id
+      )
+    if period is not None:
+      context.log.info(f"Refreshed reconciliations for {period} after QB sync")
+  except Exception as e:
+    context.log.warning(f"Failed to refresh reconciliations (non-fatal): {e}")
 
 
 def _trigger_auto_map_if_needed(

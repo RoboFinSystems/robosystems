@@ -369,3 +369,53 @@ def test_a_released_block_does_not_hold_the_close(closed_through_july):
   closed_through_july.commit()
 
   assert _gate(closed_through_july).is_closeable
+
+
+# ── After a sync ────────────────────────────────────────────────────────────
+
+
+def _refresh_next(session, report: TrialBalanceReport):
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    refresh_next_period,
+  )
+
+  with patch.object(
+    SourceLedgerResolver,
+    "_fetch",
+    return_value=(report, LIVE_CONNECTION, SYNCED_AT),
+  ) as fetch:
+    period = refresh_next_period(session, graph_id=GRAPH_ID, created_by="usr")
+  session.commit()
+  return period, fetch
+
+
+def test_a_sync_does_not_enrol_a_ledger_that_never_reconciled(closed_through_july):
+  period, fetch = _refresh_next(closed_through_july, source_report(*TIED))
+
+  assert period is None
+  fetch.assert_not_called()
+  assert _blocks(closed_through_july) == []
+
+
+def test_a_sync_refreshes_the_next_period_to_close(closed_through_july):
+  """July was reconciled by hand; the sync keeps August current from then on."""
+  _refresh(closed_through_july, source_report(*TIED), period="2026-07")
+
+  period, _ = _refresh_next(closed_through_july, source_report(*_BILL_REMOVED))
+
+  assert period == "2026-08"
+  (august,) = list_reconciliations(closed_through_july, "2026-08").reconciliations
+  assert august.status == "unreconciled"
+  assert _gate(closed_through_july).blockers == ["unreconciled_accounts"]
+
+  _refresh_next(closed_through_july, source_report(*TIED))
+  assert _gate(closed_through_july).is_closeable
+
+
+def test_a_sync_before_the_calendar_exists_refreshes_nothing(ledger):
+  _refresh(ledger, source_report(*TIED), period="2026-07")
+
+  period, fetch = _refresh_next(ledger, source_report(*TIED))
+
+  assert period is None
+  fetch.assert_not_called()
