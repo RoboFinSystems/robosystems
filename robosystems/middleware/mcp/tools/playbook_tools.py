@@ -181,6 +181,12 @@ _SCHEDULE_AUTHORING: list[str] = [
   "schedule_metadata.periodic_amounts to explicit per-period cents — its "
   "length must match the number of months and its sum must equal "
   "original_amount less residual_value.",
+  "COST BOOKED BEFORE THE FIRST PERIOD: when the cost went on the books "
+  "before the schedule starts (a policy paid in December that amortizes "
+  "from January, an asset bought the month before it is placed in service), "
+  "set schedule_metadata.acquired_on to that date. The schedule then carries "
+  "its full cost from then until it starts, so the account's schedule "
+  "reconciliation ties in the months between.",
   "MATCH THE CALENDAR WATERMARK — set the schedule's closed_through to the "
   "last day of the calendar's closed_through month (calendar '2026-05' → "
   "schedule closed_through '2026-05-31'). This flags every period at/before "

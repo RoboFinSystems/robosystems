@@ -153,6 +153,7 @@ def create_schedule(
       useful_life_months=body.schedule_metadata.useful_life_months,
       asset_element_id=body.schedule_metadata.asset_element_id,
       periodic_amounts=body.schedule_metadata.periodic_amounts,
+      acquired_on=body.schedule_metadata.acquired_on,
     )
 
   # Default to the calendar's boundary: pending obligations inside an
@@ -321,6 +322,11 @@ def update_schedule(
       "useful_life_months": body.schedule_metadata.useful_life_months,
       "asset_element_id": body.schedule_metadata.asset_element_id,
       "periodic_amounts": body.schedule_metadata.periodic_amounts,
+      "acquired_on": (
+        body.schedule_metadata.acquired_on.isoformat()
+        if body.schedule_metadata.acquired_on
+        else None
+      ),
     }
 
   structure.metadata_ = metadata
@@ -667,6 +673,11 @@ def _reconstruct_schedule_definition(
       useful_life_months=raw_meta.get("useful_life_months", 0),
       asset_element_id=raw_meta.get("asset_element_id"),
       periodic_amounts=raw_meta.get("periodic_amounts"),
+      acquired_on=(
+        date.fromisoformat(raw_meta["acquired_on"])
+        if raw_meta.get("acquired_on")
+        else None
+      ),
     )
     if raw_meta
     else None

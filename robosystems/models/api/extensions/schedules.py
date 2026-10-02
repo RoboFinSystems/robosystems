@@ -68,6 +68,18 @@ class ScheduleMetadataRequest(BaseModel):
   asset_element_id: str | None = Field(
     None, description="BS asset element for net book value"
   )
+  acquired_on: date | None = Field(
+    None,
+    description=(
+      "The date the cost went on the books, when that is before the "
+      "schedule's first period: a policy paid in December that starts "
+      "amortizing in January, or an asset bought the month before it is "
+      "placed in service. From this date until the first period the "
+      "schedule carries its full cost, so the schedule reconciliation does "
+      "not report that balance as unscheduled. Leave it out when the cost "
+      "is booked in the first period."
+    ),
+  )
   periodic_amounts: list[int] | None = Field(
     None,
     description=(
