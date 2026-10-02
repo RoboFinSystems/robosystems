@@ -228,10 +228,10 @@ def _stamp_report_bundle(
   graph_id: str,
   report_def: Report,
 ) -> None:
-  """Build, upload and stamp the Tavi model for a Report about to publish.
+  """Build, upload and stamp the holon for a Report about to publish.
 
-  The Tavi is the report's anchor artifact: ``bundle_url`` points at it, and
-  the holon and XBRL 2.1 are derived from the bundle on first download. Runs
+  The holon is the report's anchor artifact: ``bundle_url`` points at it, and
+  the Tavi and XBRL 2.1 are derived from the bundle on first download. Runs
   before the caller commits. Any S3 failure raises :class:`BundleUploadError`:
   an orphan S3 object is acceptable, a published Report without a bundle is
   not.
@@ -242,8 +242,8 @@ def _stamp_report_bundle(
   bundle = build_report_bundle(session, graph_id, report_def.id)
   bucket = env.USER_DATA_BUCKET
   key = get_report_bundle_key(graph_id, report_def.id, report_def.generation_count)
-  ok = S3Client().upload_bytes(
-    content=serialize_to_tavi(bundle),
+  ok = S3Client().upload_string(
+    content=serialize_to_holon_jsonld(bundle),
     bucket=bucket,
     key=key,
     content_type=PUBLICATION_MEDIA_TYPES[REPORT_ANCHOR_EXTENSION],
@@ -251,7 +251,7 @@ def _stamp_report_bundle(
   )
   if not ok:
     raise BundleUploadError(
-      f"Failed to upload Tavi bundle for report {report_def.id} "
+      f"Failed to upload holon bundle for report {report_def.id} "
       f"to s3://{bucket}/{key}; aborting publish."
     )
   report_def.bundle_url = get_report_bundle_uri(
@@ -935,20 +935,20 @@ def revoke_report_share(
 
 
 PUBLICATION_MEDIA_TYPES: dict[str, str] = {
-  REPORT_ANCHOR_EXTENSION: "application/json",
   ".holon.jsonld": "application/ld+json",
+  ".tavi.json": "application/json",
 }
 
 # What a share carries across. The anchor is stamped at publish (a generation
-# stamped before the Tavi became the anchor has it only once downloaded); the
-# holon is derived on demand. Either is built here when storage lacks it.
+# stamped before the holon became the anchor has it only once downloaded); the
+# Tavi is derived on demand. Either is built here when storage lacks it.
 PUBLICATION_EXTENSIONS: tuple[str, ...] = tuple(PUBLICATION_MEDIA_TYPES)
 
 
 def _encode_publication_artifact(extension: str, bundle: StatementBundle) -> str:
   if extension == ".holon.jsonld":
     return serialize_to_holon_jsonld(bundle)
-  if extension == REPORT_ANCHOR_EXTENSION:
+  if extension == ".tavi.json":
     return serialize_to_tavi(bundle).decode("utf-8")
   raise ValueError(f"No publication encoder for {extension!r}")
 

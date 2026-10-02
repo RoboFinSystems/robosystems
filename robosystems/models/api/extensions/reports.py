@@ -548,7 +548,7 @@ class ReportBundleDownloadResponse(BaseModel):
   """Presigned-URL response for a published Report's serialization bundle.
 
   Every flavor resolves to a short-lived presigned URL pointing at the
-  bundle in S3 — the Tavi model is stamped at publish time; the holon and
+  bundle in S3 — the holon is stamped at publish time; the Tavi and
   XBRL 2.1 are materialized on first download and cached by
   `generation_count`.
   The client follows `download_url` to fetch the artifact directly

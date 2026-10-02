@@ -1,7 +1,7 @@
 """Tests for ``get_report_download_url`` — the presigned-URL read that
 replaced the retired ``GET .../reports/{id}/download`` REST endpoint.
 
-Covers every flavor (the Tavi model stamped at publish; XBRL and the holon
+Covers every flavor (the holon stamped at publish; XBRL and the Tavi
 materialized + cached on first download), the cache hit/miss split, and the
 not-found / not-available / signing-failure error paths.
 """
@@ -23,7 +23,7 @@ _REPORTS = "robosystems.operations.roboledger.reads.reports"
 
 
 def _report(
-  bundle_url: str | None = "s3://bkt/report-bundles/kg1/rpt_1/g3.tavi.json",
+  bundle_url: str | None = "s3://bkt/report-bundles/kg1/rpt_1/g3.holon.jsonld",
   *,
   generation_count: int = 3,
   generation_status: str = "published",
@@ -168,18 +168,18 @@ class TestRetiredFlatJsonLd:
       get_report_download_url(session, "kg1", "rpt_1", flavor="jsonld")
 
   @pytest.mark.unit
-  def test_the_default_flavor_is_the_tavi(self):
+  def test_the_default_flavor_is_the_holon(self):
     session = _session(_report())
     with patch(f"{_REPORTS}.S3Client") as s3_cls:
       s3 = s3_cls.return_value
       s3.object_exists.return_value = True
-      s3.generate_presigned_url.return_value = "https://signed.example/tavi"
+      s3.generate_presigned_url.return_value = "https://signed.example/holon"
       resp = get_report_download_url(session, "kg1", "rpt_1")
 
     assert resp is not None
-    assert resp.format == "tavi"
+    assert resp.format == "holon-jsonld"
     _, kwargs = s3.generate_presigned_url.call_args
-    assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.tavi.json"
+    assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.holon.jsonld"
 
 
 class TestXbrl:

@@ -156,11 +156,11 @@ def _bundle_env(side_effect=None, response=None, access_error=None):
     yield signed, access
 
 
-def _download(fmt="tavi"):
+def _download(fmt="holon-jsonld"):
   return ReportBundleDownloadResponse(
-    download_url="https://bucket.s3.amazonaws.com/r/g1.tavi.json?X-Amz-Signature=x",
+    download_url="https://bucket.s3.amazonaws.com/r/g1.holon.jsonld?X-Amz-Signature=x",
     expires_at=datetime(2026, 9, 25, 23, 10, tzinfo=UTC),
-    content_type="application/json",
+    content_type="application/ld+json",
     format=fmt,
     generation_count=1,
   )
@@ -171,8 +171,8 @@ def test_bundle_definition_warns_the_link_is_a_credential(client):
   assert defn["name"] == "get-report-bundle"
   assert defn["inputSchema"]["required"] == ["report_id"]
   assert defn["inputSchema"]["properties"]["format"]["enum"] == [
-    "tavi",
     "holon-jsonld",
+    "tavi",
     "xbrl-2.1",
   ]
   assert "Never place the link" in defn["description"]
@@ -183,15 +183,15 @@ def test_bundle_is_a_viewer_read():
 
 
 @pytest.mark.asyncio
-async def test_bundle_defaults_to_tavi_on_a_read_check(client):
+async def test_bundle_defaults_to_the_holon_on_a_read_check(client):
   with _bundle_env(response=_download()) as (signed, access):
     result = await GetReportBundleTool(client).execute({"report_id": "rpt_01"})
 
   access.assert_called_once_with("kgtest123")
   assert signed.call_args.args[1:] == ("kgtest123", "rpt_01")
-  assert signed.call_args.kwargs == {"flavor": "tavi"}
+  assert signed.call_args.kwargs == {"flavor": "holon-jsonld"}
   assert result["report_id"] == "rpt_01"
-  assert result["format"] == "tavi"
+  assert result["format"] == "holon-jsonld"
   assert result["download_url"].startswith("https://")
   assert result["expires_at"] == "2026-09-25T23:10:00Z"
 

@@ -689,7 +689,9 @@ def test_share_carries_the_senders_holon_into_the_recipients_prefix() -> None:
     if isinstance(call.args[0], ReportModel)
   )
   assert shared.generation_count == 3
-  assert str(shared.bundle_url).endswith("report-bundles/kg_tgt/rpt_copy/g3.tavi.json")
+  assert str(shared.bundle_url).endswith(
+    "report-bundles/kg_tgt/rpt_copy/g3.holon.jsonld"
+  )
 
 
 # ── regenerate_report filing-status gate ──────────────────────────────────

@@ -7,11 +7,12 @@ produces*, so every demo (the bespoke ``download_bundles.py`` scripts and the
 
 For a report at ``(graph_id, report_id)`` it writes, under ``out_dir``:
 
-* ``{stem}.tavi.json``         — the Project Tavi compiled model, stamped at
-  publish (the same standards form the SEC surface publishes per filing —
-  what report-components renders with no RDF step)
+* ``{stem}.tavi.json``         — the Project Tavi compiled model (the same
+  standards form the SEC surface publishes per filing — what
+  report-components renders with no RDF step)
 * ``{stem}.holon.jsonld``      — the **native holon** (scene / boundary /
-  projection named graphs) — the artifact the holon viewer consumes
+  projection named graphs), stamped at publish — the artifact the holon
+  viewer consumes
 * ``{stem}.zip``               — the XBRL 2.1 report package
 * ``{stem}-xbrl-validation.md``  — Arelle verdict (over the XBRL zip)
 
