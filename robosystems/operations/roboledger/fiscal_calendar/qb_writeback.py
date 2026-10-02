@@ -25,7 +25,7 @@ from robosystems.models.extensions.roboledger.event import Event
 WRITEBACK_EVENT_SOURCES = ("schedule", "manual")
 
 # Retracted events can keep leftover draft rows; close neither publishes
-# nor posts them.
+# nor posts them, and the schedule commands' period fence skips them.
 WRITEBACK_EXCLUDED_EVENT_STATUSES = ("voided", "superseded")
 
 # ``native`` is absent: there RoboSystems is the system of record.

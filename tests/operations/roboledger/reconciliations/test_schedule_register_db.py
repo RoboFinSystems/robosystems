@@ -363,6 +363,88 @@ def test_the_cost_account_carries_what_the_asset_cost(native):
   )
 
 
+def test_ending_an_asset_schedule_early_keeps_its_cost_for_earlier_periods(native):
+  from robosystems.models.api.extensions.schedules import TerminateScheduleRequest
+  from robosystems.operations.roboledger.commands.schedules import terminate_schedule
+
+  session, accounts = native
+  entry(session, date(2026, 1, 3), accounts["equipment"], accounts["cash"], 120_000)
+  structure_id = _schedule(
+    session,
+    "Roaster",
+    accounts["depreciation"],
+    accounts["accumulated"],
+    asset=accounts["equipment"],
+  )
+  for month in (1, 2, 3):
+    _book_month(session, structure_id, month)
+  terminate_schedule(
+    session,
+    TerminateScheduleRequest(
+      structure_id=structure_id, new_end_date=date(2026, 3, 31), reason="Sold"
+    ),
+    created_by="usr",
+  )
+  session.commit()
+
+  assert _rows(_preview(session, "2026-02")) == {
+    "Equipment": (1_200.00, 1_200.00, "tied"),
+    "Accumulated Depreciation": (-200.00, -200.00, "tied"),
+  }
+
+
+def test_a_schedule_from_before_its_period_bounds_were_stored_still_compares(prepaid):
+  """The oldest schedules carry no cost and no period bounds in their stored
+  definition. What they recognize is still in their facts."""
+  from sqlalchemy.orm.attributes import flag_modified
+
+  from robosystems.models.extensions import Structure
+
+  session, _, structure_id = prepaid
+  schedule = session.get(Structure, structure_id)
+  schedule.metadata_ = {
+    "entry_template": schedule.metadata_["entry_template"],
+    "schedule_metadata": {"method": "straight_line", "original_amount": 0},
+  }
+  flag_modified(schedule, "metadata_")
+  session.commit()
+
+  assert _rows(_preview(session)) == {"Prepaid Insurance": (400.00, 400.00, "tied")}
+
+
+def test_a_disposal_that_has_not_been_processed_changes_nothing(native):
+  """A disposal still in the inbox has posted no entry, so the asset is
+  still on the books and still on its schedule."""
+  session, accounts = native
+  entry(session, date(2026, 1, 3), accounts["equipment"], accounts["cash"], 120_000)
+  structure_id = _schedule(
+    session,
+    "Roaster",
+    accounts["depreciation"],
+    accounts["accumulated"],
+    asset=accounts["equipment"],
+  )
+  _book_month(session, structure_id, 1)
+  session.add(
+    Event(
+      event_type="asset_disposed",
+      event_category="adjustment",
+      event_class="economic",
+      occurred_at=datetime(2026, 1, 20, tzinfo=UTC),
+      status="captured",
+      source="manual",
+      metadata_={"schedule_id": structure_id},
+      created_by="usr",
+    )
+  )
+  session.commit()
+
+  assert _rows(_preview(session, "2026-01")) == {
+    "Equipment": (1_200.00, 1_200.00, "tied"),
+    "Accumulated Depreciation": (-100.00, -100.00, "tied"),
+  }
+
+
 def test_a_disposed_asset_carries_nothing_from_then_on(native):
   session, accounts = native
   structure_id = _schedule(
@@ -402,13 +484,20 @@ def test_a_disposed_asset_carries_nothing_from_then_on(native):
 def test_a_schedule_ended_early_carries_nothing_from_its_last_month(prepaid):
   """What is left in the account after the schedule stops has no schedule
   behind it."""
+  from robosystems.models.api.extensions.schedules import TerminateScheduleRequest
+  from robosystems.operations.roboledger.commands.schedules import terminate_schedule
+
   session, _, structure_id = prepaid
-  ScheduleService().truncate_schedule(
+  # Through the command, as a user would: it also re-anchors the schedule's
+  # stored basis to the shortened total.
+  terminate_schedule(
     session,
-    structure_id=structure_id,
-    new_end_date=date(2026, 7, 31),
-    reason="Policy cancelled",
-    updated_by="usr",
+    TerminateScheduleRequest(
+      structure_id=structure_id,
+      new_end_date=date(2026, 7, 31),
+      reason="Policy cancelled",
+    ),
+    created_by="usr",
   )
   session.commit()
 

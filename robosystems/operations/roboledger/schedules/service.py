@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 
-from sqlalchemy import select, text, update
+from sqlalchemy import bindparam, select, text, update
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -1481,8 +1481,41 @@ class ScheduleService:
         f"fact ({bounds.first_start}). Deactivate the schedule instead."
       )
 
+    # Fence before the deletes take row locks: fence, then rows, as every
+    # ledger writer does against close. A kept period's auto-reversal is dated
+    # after the cutoff but belongs to that period, so it stays. A retracted
+    # event's leftover is a draft no close posts, so it is not fenced.
+    from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+      WRITEBACK_EXCLUDED_EVENT_STATUSES,
+    )
+
+    stale_dates = (
+      session.execute(
+        text("""
+          SELECT DISTINCT e.posting_date FROM entries e
+          LEFT JOIN events ev ON ev.id = e.triggered_by_event_id
+          WHERE e.source_structure_id = :sid
+            AND e.status = 'draft'
+            AND e.posting_date > :new_end
+            AND (ev.id IS NULL OR ev.status NOT IN :retracted)
+            AND (e.reversal_of IS NULL
+                 OR e.reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
+        """).bindparams(bindparam("retracted", expanding=True)),
+        {
+          "sid": structure_id,
+          "new_end": new_end_date,
+          "retracted": list(WRITEBACK_EXCLUDED_EVENT_STATUSES),
+        },
+      )
+      .scalars()
+      .all()
+    )
+    assert_period_not_closed(session, *stale_dates)
+
     # A landed entry (reversed included) after the cutoff is the record of
-    # that period's recognition; truncating under it would orphan it.
+    # that period's recognition; truncating under it would orphan it. Counted
+    # under the fence, so a close posting one of the drafts has either
+    # finished, and is counted, or waits.
     overlap = session.execute(
       text("""
         SELECT COUNT(*) AS c
@@ -1500,26 +1533,6 @@ class ScheduleService:
         "entries first — reopening alone leaves entries posted, so it does "
         "not clear this guard."
       )
-
-    # Fence before the deletes take row locks: fence, then rows, as every
-    # ledger writer does against close. A kept period's auto-reversal is dated
-    # after the cutoff but belongs to that period, so it stays.
-    stale_dates = (
-      session.execute(
-        text("""
-          SELECT DISTINCT posting_date FROM entries
-          WHERE source_structure_id = :sid
-            AND status = 'draft'
-            AND posting_date > :new_end
-            AND (reversal_of IS NULL
-                 OR reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
-        """),
-        {"sid": structure_id, "new_end": new_end_date},
-      )
-      .scalars()
-      .all()
-    )
-    assert_period_not_closed(session, *stale_dates)
 
     session.execute(
       text("""

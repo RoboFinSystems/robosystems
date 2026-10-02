@@ -34,7 +34,9 @@ _STATEMENT = "statement"
 # credits, and the cost account it names. Liabilities are left out, since a
 # payment settles one outside any schedule.
 _CARRYING_TRAITS = frozenset({"asset", "contraAsset"})
-_RETRACTED_EVENT_STATUSES = ("voided", "superseded")
+# A disposal counts once its handler has posted the entry that takes the
+# asset off the books; one still in the inbox has changed nothing.
+_PROCESSED_EVENT_STATUSES = ("committed", "fulfilled")
 
 
 class NoSourceLedgerError(ValueError):
@@ -277,14 +279,14 @@ class ScheduleRegisterResolver:
 
     for schedule in schedules:
       schedule_id = str(schedule.id)
-      recognized_cents = recognized.get(schedule_id)
-      if recognized_cents is None:
+      recognition = recognized.get(schedule_id, _NOTHING_RECOGNIZED)
+      if not recognition.started:
         # Not started by the period end. It still carries its cost from the
         # day that cost went on the books, when the schedule says when.
         booked_on = _schedule_metadata(schedule).get("booked_on")
         if not booked_on or booked_on > as_of.isoformat():
           continue
-        recognized_cents = 0
+      recognized_cents = recognition.through
       note = _ended_note(schedule, disposed.get(schedule_id), as_of)
       credit_id = _credit_id(schedule)
       asset_id = _asset_id(schedule)
@@ -295,11 +297,13 @@ class ScheduleRegisterResolver:
         # schedule's own running balance is written by.
         draws_down = credit_id in debit_normal and traits[credit_id] != "contraAsset"
         cents = (
-          _cost_basis(schedule) - recognized_cents if draws_down else -recognized_cents
+          _cost_basis(schedule, recognition.planned) - recognized_cents
+          if draws_down
+          else -recognized_cents
         )
         _add(credit_id, schedule, 0 if note else cents, note)
 
-      cost = int(_schedule_metadata(schedule).get("original_amount") or 0)
+      cost = _stated_cost(schedule)
       if (
         cost
         and asset_id
@@ -353,34 +357,51 @@ def _ended_note(
   return None
 
 
-def _cost_basis(schedule: Structure) -> int:
+def _stated_cost(schedule: Structure) -> int:
+  """The cost the schedule was set up with, in cents; zero when it states
+  none. Ending a schedule early re-anchors ``original_amount`` to what was
+  recognized, so the cost it started from is kept beside it."""
+  stored = _schedule_metadata(schedule)
+  return int(
+    stored.get("original_amount_at_start") or stored.get("original_amount") or 0
+  )
+
+
+def _cost_basis(schedule: Structure, planned_cents: int) -> int:
   """What a draw-down schedule starts from, in cents: its stated cost, else
   the whole of what it was set up to recognize."""
-  original = int(_schedule_metadata(schedule).get("original_amount") or 0)
-  if original > 0:
-    return original
-  metadata = schedule.metadata_ or {}
-  start = date.fromisoformat(metadata["period_start"])
-  end = date.fromisoformat(metadata["period_end"])
-  months = (end.year - start.year) * 12 + (end.month - start.month) + 1
-  return int(metadata.get("monthly_amount") or 0) * months
+  return _stated_cost(schedule) or planned_cents
 
 
-def _recognized_by_schedule(session: Session, as_of: date) -> dict[str, int]:
-  """Cents each started schedule has recognized through ``as_of``, by plan:
-  every period's amount, whether a schedule entry or an earlier entry booked it."""
+@dataclass(frozen=True)
+class _Recognition:
+  through: int  # cents recognized by plan through the period end
+  planned: int  # cents the schedule recognizes over its whole life
+  started: bool  # whether any of its periods has ended by then
+
+
+_NOTHING_RECOGNIZED = _Recognition(through=0, planned=0, started=False)
+
+
+def _recognized_by_schedule(session: Session, as_of: date) -> dict[str, _Recognition]:
+  """What each schedule has recognized through ``as_of`` by plan, and what it
+  recognizes in all: every period's amount, whether a schedule entry or an
+  earlier entry booked it. Read from the facts, which every schedule has,
+  never from the stored definition, which the oldest ones lack."""
   rows = session.execute(
     text("""
-      SELECT structure_id, SUM(ROUND((value * 100)::numeric)) AS cents
+      SELECT structure_id,
+             SUM(cents) FILTER (WHERE period_end <= :as_of) AS through,
+             SUM(cents) AS planned
       FROM (
         -- One amount per period, as the schedule's own drafting reads it.
         SELECT DISTINCT ON (f.structure_id, f.period_start, f.period_end)
-               f.structure_id, f.value
+               f.structure_id, f.period_end,
+               ROUND((f.value * 100)::numeric) AS cents
         FROM facts f
         JOIN structures s ON s.id = f.structure_id
         WHERE s.block_type = 'schedule'
           AND f.period_type = 'duration'
-          AND f.period_end <= :as_of
           AND f.element_id = s.metadata->'entry_template'->>'debit_element_id'
         ORDER BY f.structure_id, f.period_start, f.period_end, f.id
       ) per_period
@@ -388,7 +409,14 @@ def _recognized_by_schedule(session: Session, as_of: date) -> dict[str, int]:
     """),
     {"as_of": as_of},
   )
-  return {str(row.structure_id): int(row.cents) for row in rows}
+  return {
+    str(row.structure_id): _Recognition(
+      through=int(row.through or 0),
+      planned=int(row.planned),
+      started=row.through is not None,
+    )
+    for row in rows
+  }
 
 
 def _disposal_dates(session: Session, as_of: date) -> dict[str, date]:
@@ -397,7 +425,7 @@ def _disposal_dates(session: Session, as_of: date) -> dict[str, date]:
     select(schedule_id, func.min(Event.occurred_at))
     .where(
       Event.event_type == "asset_disposed",
-      Event.status.notin_(_RETRACTED_EVENT_STATUSES),
+      Event.status.in_(_PROCESSED_EVENT_STATUSES),
       Event.occurred_at <= datetime.combine(as_of, time.max, tzinfo=UTC),
     )
     .group_by(schedule_id)
