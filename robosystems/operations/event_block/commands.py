@@ -64,6 +64,7 @@ from .registry import (
   HandlerNotFoundError,
   resolve_handler,
 )
+from .reserved import refuse_reserved_event_type
 from .template import (
   TemplateInterpolationError,
   build_handler_context,
@@ -411,6 +412,7 @@ def create_event_block_in_session(
   The envelope is built here because ``commit()`` expires the instance, and
   reading attributes afterwards can raise on a write that succeeded.
   """
+  refuse_reserved_event_type(body.event_type)
   _validate_event_source(body.source, graph_id)
   _validate_routed_connection(body.metadata, graph_id)
   _assert_not_duplicate(session, body)
@@ -590,6 +592,7 @@ def update_event_block(
   peek = session.get(Event, body.event_id)
   if peek is None:
     raise EventNotFoundError(f"Event not found: {body.event_id}")
+  refuse_reserved_event_type(str(peek.event_type))
   _refuse_system_metadata(body.metadata_patch)
   # Period fence before the event row lock, matching close's order. A commit
   # fences its current date; a re-date fences the date it moves to and the

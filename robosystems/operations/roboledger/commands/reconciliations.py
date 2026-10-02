@@ -54,7 +54,9 @@ from robosystems.operations.roboledger.reconciliations.blocks import (
   find_ledger_reconciliation,
   has_reconciliations,
   lock_reconciliation_writes,
+  preparers,
   reconciliation_rule,
+  record_policy_change,
   record_reconciliation,
   record_sign_off,
 )
@@ -463,26 +465,31 @@ def sign_off_reconciliation(
   if rec.status != "reconciled":
     raise ReconciliationNotReconciledError(structure.name, body.period, rec.status)
 
-  if (
-    rec.separate_reviewer
-    and rec.compared_via == "operation"
-    and rec.compared_by == created_by
-  ):
-    way_out = (
-      "Ask another member to sign off, or to run refresh-reconciliations so "
-      "that you can."
-      if len(members) > 1
-      else "This graph no longer has another member who can write: add one, "
-      "or turn `separate_reviewer` off with set-reconciliation-policy."
-    )
-    raise SeparateReviewerError(
-      f"{structure.name!r} requires a reviewer other than the person who ran "
-      f"the comparison, and you ran this one. {way_out}"
-    )
-
   fact_set = session.get(FactSet, rec.fact_set_id)
   if fact_set is None:
     raise ReconciliationNotReconciledError(structure.name, body.period, "not_started")
+  compared = fact_set.metadata_ or {}
+  if rec.separate_reviewer and created_by in preparers(compared):
+    supplied = compared.get("prepared_by") == created_by
+    if len(members) < 2:
+      way_out = (
+        "This graph no longer has another member who can write: add one, or "
+        "turn `separate_reviewer` off with set-reconciliation-policy."
+      )
+    elif supplied:
+      way_out = "Ask another member to sign off."
+    else:
+      way_out = (
+        "Ask another member to sign off, or to run refresh-reconciliations "
+        "so that you can."
+      )
+    raise SeparateReviewerError(
+      f"{structure.name!r} requires a reviewer other than the person who ran "
+      "the comparison or recorded its balance, and "
+      f"{'you recorded its balance' if supplied else 'you ran this one'}. "
+      f"{way_out}"
+    )
+
   if not (fact_set.metadata_ or {}).get("balance_digest"):
     raise ReconciliationNotReconciledError(structure.name, body.period, "unpinned")
   record_sign_off(
@@ -514,6 +521,7 @@ def set_reconciliation_policy(
   structure = _load_reconciliation(session, body.structure_id)
 
   mechanics = ReconciliationMechanics.model_validate(structure.artifact_mechanics)
+  before = mechanics.model_dump(mode="json")
   if body.required_for_close is not None:
     mechanics.required_for_close = body.required_for_close
   if body.review_required is not None:
@@ -533,8 +541,18 @@ def set_reconciliation_policy(
     if rule is not None:
       rule.metadata_ = {**(rule.metadata_ or {}), "tolerance": body.materiality}
       flag_modified(rule, "metadata_")
-  structure.artifact_mechanics = mechanics.model_dump(mode="json")
+  after = mechanics.model_dump(mode="json")
+  structure.artifact_mechanics = after
   session.flush()
+  changes = {
+    field: {"from": before[field], "to": after[field]}
+    for field in after
+    if before[field] != after[field]
+  }
+  if changes:
+    record_policy_change(
+      session, structure=structure, changes=changes, changed_by=created_by
+    )
 
   return ReconciliationPolicyResponse(
     structure_id=str(structure.id),

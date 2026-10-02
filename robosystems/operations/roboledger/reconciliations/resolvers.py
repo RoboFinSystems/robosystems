@@ -100,6 +100,8 @@ class IndependentSide:
   components: dict[str, list[IndependentComponent]] = field(default_factory=dict)
   # Accounts stated at a date other than the period's last day.
   as_of: dict[str, date] = field(default_factory=dict)
+  # Who supplied an account's independent balance, when a person did.
+  prepared_by: dict[str, str] = field(default_factory=dict)
   basis: str | None = None
   connection_id: str | None = None
   last_sync_at: datetime | None = None
@@ -452,4 +454,5 @@ class StatementResolver:
         for eid, obs in observations.items()
         if obs.as_of != window.period_end
       },
+      prepared_by={eid: obs.recorded_by for eid, obs in observations.items()},
     )

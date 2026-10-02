@@ -90,6 +90,7 @@ from robosystems.operations.event_block.registry import (
   HandlerAmbiguousError,
   HandlerNotFoundError,
 )
+from robosystems.operations.event_block.reserved import ReservedEventTypeError
 from robosystems.operations.event_block.template import TemplateInterpolationError
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
@@ -234,6 +235,7 @@ create_event_block_op = _registrar.register(
         409,
         lambda _e: "Event already ingested for this source and external_id",
       ),
+      ReservedEventTypeError: 422,
       HandlerNotFoundError: 404,
       HandlerAmbiguousError: 409,
       TemplateInterpolationError: 422,
@@ -280,6 +282,7 @@ update_event_block_op = _registrar.register(
     result_type=EventBlockEnvelope,
     error_map={
       EventNotFoundError: 404,
+      ReservedEventTypeError: 422,
       InvalidEventTransitionError: 422,
       # The event's rows already posted (or published to QB): reverse instead.
       EventEffectsAlreadyLandedError: 422,
@@ -615,6 +618,7 @@ set_reconciliation_policy_op = _registrar.register(
       RowLockedError: 409,
       ValueError: 422,
     },
+    mark_stale_reason="reconciliation_policy_changed",
   )
 )
 
