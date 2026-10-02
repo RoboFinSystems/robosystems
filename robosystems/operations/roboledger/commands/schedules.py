@@ -556,11 +556,16 @@ def _rewrite_sum_equals_rule(session: Session, structure: Structure) -> bool:
   flag_modified(rule, "metadata_")
 
   # The stored basis must match too, or rebuild-schedule would spread the
-  # original amount over the surviving months. The old basis stays in the
-  # `truncations` audit log.
+  # original amount over the surviving months. The cost it started from is
+  # kept as `original_amount_at_start`.
   mechanics_metadata = dict(structure.metadata_ or {})
   schedule_meta = dict(mechanics_metadata.get("schedule_metadata") or {})
   if schedule_meta.get("original_amount"):
+    # The cost the schedule started from: the periods before the cutoff
+    # still carry it, and the re-anchored figure below is not it.
+    schedule_meta.setdefault(
+      "original_amount_at_start", schedule_meta["original_amount"]
+    )
     # Generation expenses original_amount less residual_value.
     schedule_meta["original_amount"] = round(new_total * 100) + int(
       schedule_meta.get("residual_value") or 0
