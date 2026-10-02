@@ -229,7 +229,9 @@ _KEY_RULES: list[str] = [
   "reconciled for the month, or was never compared for it; run "
   "refresh-reconciliations, which compares the ledger with the books it was "
   "synced from and each scheduled asset account with its schedules, and "
-  "lists what does not tie; unreconciled_account_sample names them). "
+  "lists what does not tie; an account waiting on a statement needs "
+  "record-statement-balance with that period's statement; "
+  "unreconciled_account_sample names them). "
   "Resolve before close-period; get-fiscal-calendar reports them.",
   "JE PUBLISH SEMANTICS: journal_entry_recorded events with source='manual' "
   "publish to QuickBooks at close through the outbox; source='system' posts "

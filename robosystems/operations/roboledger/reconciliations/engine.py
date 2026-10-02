@@ -160,6 +160,20 @@ def _undrafted_schedule_balances(session: Session, as_of: date) -> dict[str, int
   return balances
 
 
+_ACCOUNT_METHOD_NOTES = {
+  "schedule_register": (
+    "Each account's balance is compared with what its schedules say it "
+    "carries at {as_of}. A difference is a balance with no schedule behind "
+    "it, or a scheduled amount the ledger does not hold."
+  ),
+  "statement": (
+    "Each account's balance is compared with the ending balance of its "
+    "statement, at the statement's own date. A difference is activity on "
+    "one side the other does not have yet, or an error on either."
+  ),
+}
+
+
 def _compute_account_scope(
   session: Session,
   *,
@@ -167,9 +181,16 @@ def _compute_account_scope(
   side: IndependentSide,
   include_tied: bool,
 ) -> ReconciliationPreviewResponse:
-  landed = get_net_balances_cents(session, None, window.period_end)
-  drafts = _draft_balances(session, window.period_end)
-  undrafted = _undrafted_schedule_balances(session, window.period_end)
+  # Usually one date, the period's last day; a statement can end earlier.
+  dates = {
+    side.as_of.get(element_id, window.period_end)
+    for element_id in side.covered_element_ids
+  }
+  landed = {d: get_net_balances_cents(session, None, d) for d in dates}
+  awaiting_close = {
+    d: (_draft_balances(session, d), _undrafted_schedule_balances(session, d))
+    for d in dates
+  }
   elements = {
     str(element.id): element
     for element in session.execute(
@@ -182,9 +203,11 @@ def _compute_account_scope(
   total_difference_cents = 0
   awaiting_close_cents = 0
   for element_id, element in elements.items():
+    stated_at = side.as_of.get(element_id, window.period_end)
+    drafts, undrafted = awaiting_close[stated_at]
     awaiting = drafts.get(element_id, 0) + undrafted.get(element_id, 0)
     awaiting_close_cents += abs(awaiting)
-    ledger_cents = landed.get(element_id, 0) + awaiting
+    ledger_cents = landed[stated_at].get(element_id, 0) + awaiting
     independent_cents = side.balances.get(element_id, 0)
     status = "tied" if ledger_cents == independent_cents else "different"
     row = _row(
@@ -195,11 +218,14 @@ def _compute_account_scope(
       independent=independent_cents,
       status=status,
     )
+    row.as_of = stated_at if stated_at != window.period_end else None
     row.components = [
       ReconciliationComponent(
-        structure_id=component.structure_id,
         name=component.name,
         amount=cents_to_dollars(component.amount_cents),
+        structure_id=component.structure_id,
+        event_id=component.event_id,
+        document_id=component.document_id,
         note=component.note,
       )
       for component in side.components.get(element_id, [])
@@ -210,11 +236,7 @@ def _compute_account_scope(
   open_rows.sort(key=lambda r: (-abs(r.difference), r.account_name))
   tied.sort(key=lambda r: (r.account_code or "", r.account_name))
 
-  notes = [
-    "Each account's balance is compared with what its schedules say it "
-    f"carries at {window.period_end}. A difference is a balance with no "
-    "schedule behind it, or a scheduled amount the ledger does not hold."
-  ]
+  notes = [_ACCOUNT_METHOD_NOTES[side.method].format(as_of=window.period_end)]
   if awaiting_close_cents:
     notes.append(
       "The ledger side includes "

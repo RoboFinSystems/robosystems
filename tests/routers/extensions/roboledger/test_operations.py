@@ -727,6 +727,90 @@ _SIGN_OFF = (
   "robosystems.operations.roboledger.commands.reconciliations.sign_off_reconciliation"
 )
 
+_RECORD_STATEMENT = (
+  "robosystems.operations.roboledger.commands.reconciliations.record_statement_balance"
+)
+
+
+class TestRecordStatementBalanceOp:
+  async def _call(self, side_effect):
+    from robosystems.models.api.extensions.reconciliations import (
+      RecordStatementBalanceRequest,
+    )
+    from robosystems.routers.extensions.roboledger.operations import (
+      record_statement_balance_op,
+    )
+
+    with (
+      patch(_RECORD_STATEMENT, side_effect=side_effect) as command,
+      _mock_session_ctx() as mock_session,
+      patch("robosystems.middleware.extensions.mark_graph_stale") as mark,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+      self.mark = mark
+      envelope = await record_statement_balance_op(
+        body=RecordStatementBalanceRequest(
+          element_id="elem_cash", as_of=date(2026, 8, 31), balance=4800.0
+        ),
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    return envelope, command
+
+  @pytest.mark.asyncio
+  async def test_the_recorded_balance_marks_the_graph_stale(self) -> None:
+    from robosystems.models.api.extensions.reconciliations import (
+      ReconciliationSummary,
+    )
+
+    summary = ReconciliationSummary(
+      structure_id="struct_rec",
+      name="Checking (statement)",
+      scope="account",
+      method="statement",
+      required_for_close=False,
+      materiality=0,
+      period="2026-08",
+      as_of=date(2026, 8, 31),
+      status="reconciled",
+      review_required=False,
+      separate_reviewer=False,
+    )
+    envelope, command = await self._call([summary])
+
+    assert isinstance(envelope, OperationEnvelope)
+    assert command.call_args.kwargs == {
+      "graph_id": GRAPH_ID,
+      "created_by": "usr_test123",
+    }
+    # The observation is an event and the comparison is facts: both materialize.
+    self.mark.assert_called_once_with(GRAPH_ID, "statement_balance_recorded")
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("error", "status"),
+    [("StatementAccountNotFoundError", 404), ("StatementDocumentNotFoundError", 404)],
+  )
+  async def test_404_for_an_unknown_account_or_document(self, error, status) -> None:
+    from robosystems.operations.roboledger.commands import reconciliations
+
+    with pytest.raises(HTTPException) as exc:
+      await self._call(getattr(reconciliations, error)("missing"))
+    assert exc.value.status_code == status
+
+  @pytest.mark.asyncio
+  async def test_422_for_an_account_that_takes_no_statement(self) -> None:
+    from robosystems.operations.roboledger.commands.reconciliations import (
+      StatementAccountError,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+      await self._call(StatementAccountError("not a balance-sheet account"))
+    assert exc.value.status_code == 422
+
 
 class TestSignOffReconciliationOp:
   """Each refusal has its own status, so a client can tell "not yours to

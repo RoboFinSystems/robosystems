@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field
 # Where the independent balance comes from. `source_ledger` is the synced
 # accounting system's own trial balance, which checks the mirror of its books.
 # `schedule_register` is what an account's schedules say it carries.
-ReconciliationMethod = Literal["source_ledger", "schedule_register"]
+# `statement` is the ending balance of a statement recorded for the account.
+ReconciliationMethod = Literal["source_ledger", "schedule_register", "statement"]
 
 
 class PreviewReconciliationsRequest(BaseModel):
@@ -32,7 +33,8 @@ class PreviewReconciliationsRequest(BaseModel):
       "Which check to preview. `source_ledger` compares every account with "
       "the synced accounting system's own trial balance. `schedule_register` "
       "compares each asset account a schedule carries a balance on with what "
-      "its schedules say it holds."
+      "its schedules say it holds. `statement` compares each account that "
+      "has a statement balance recorded in the period with that balance."
     ),
   )
   include_tied: bool = Field(
@@ -46,20 +48,28 @@ class PreviewReconciliationsRequest(BaseModel):
 
 class ReconciliationComponent(BaseModel):
   """One part of an account's independent balance: what a single schedule
-  says the account carries."""
+  says the account carries, or a recorded statement balance."""
 
-  structure_id: str = Field(..., description="The schedule.")
-  name: str = Field(..., description="The schedule's name.")
+  name: str = Field(
+    ..., description="The schedule's name, or the statement and its date."
+  )
   amount: float = Field(
-    ...,
-    description=(
-      "What the schedule says the account carries at the period end, debit-positive."
-    ),
+    ..., description="What this part says the account holds, debit-positive."
+  )
+  structure_id: str | None = Field(
+    None, description="The schedule, for a `schedule_register` part."
+  )
+  event_id: str | None = Field(
+    None, description="The recorded balance, for a `statement` part."
+  )
+  document_id: str | None = Field(
+    None, description="The statement document given as evidence, when one was."
   )
   note: str | None = Field(
     None,
     description=(
-      "Why the schedule carries nothing, when it has been disposed of or ended early."
+      "Why a schedule carries nothing (disposed of, or ended early), or the "
+      "note recorded with a statement balance."
     ),
   )
 
@@ -110,11 +120,20 @@ class ReconciliationRow(BaseModel):
       "on an account the source does not have."
     ),
   )
+  as_of: date | None = Field(
+    None,
+    description=(
+      "The date both balances are stated at, when it is not the period's "
+      "last day: a statement that ends mid-period is compared with the "
+      "ledger at the statement's own date."
+    ),
+  )
   components: list[ReconciliationComponent] = Field(
     default_factory=list,
     description=(
-      "`schedule_register` only: the schedules that make up the independent "
-      "balance, one entry each."
+      "Account-scope methods only: what makes up the independent balance. "
+      "One entry per schedule for `schedule_register`; the recorded "
+      "statement for `statement`."
     ),
   )
 
@@ -218,6 +237,40 @@ class SetReconciliationPolicyRequest(BaseModel):
   )
 
 
+class RecordStatementBalanceRequest(BaseModel):
+  """Record the ending balance of a statement for one account."""
+
+  element_id: str = Field(
+    ...,
+    description=(
+      "The balance-sheet account the statement is for (a chart-of-accounts element id)."
+    ),
+  )
+  as_of: date = Field(
+    ..., description="The statement's ending date.", examples=["2026-08-31"]
+  )
+  balance: float = Field(
+    ...,
+    description=(
+      "The ending balance as the statement shows it, as a positive number "
+      "in the account's normal direction: money in a bank account, or the "
+      "amount owed on a loan or a card. Negative for the opposite, such as "
+      "an overdrawn bank account."
+    ),
+    examples=[18250.75],
+  )
+  document_id: str | None = Field(
+    None,
+    description=(
+      "The statement itself, as a document already added with "
+      "create-document. Kept on the record as evidence."
+    ),
+  )
+  note: str | None = Field(
+    None, description="Anything worth keeping with the recorded balance."
+  )
+
+
 class SignOffReconciliationRequest(BaseModel):
   """Sign off a reconciliation for a period as its reviewer."""
 
@@ -257,7 +310,8 @@ class ReconciliationSummary(BaseModel):
     description=(
       "Where the independent side comes from. `source_ledger` is the synced "
       "accounting system's own trial balance. `schedule_register` is what "
-      "the account's schedules say it carries."
+      "the account's schedules say it carries. `statement` is the ending "
+      "balance of a statement recorded for the account."
     ),
   )
   element_id: str | None = Field(
@@ -309,11 +363,19 @@ class ReconciliationSummary(BaseModel):
       "comparison, debit-positive."
     ),
   )
+  balance_as_of: date | None = Field(
+    None,
+    description=(
+      "Account-scope only: the date the two balances are stated at. The "
+      "period's last day, unless a statement ended earlier in the period."
+    ),
+  )
   components: list[ReconciliationComponent] = Field(
     default_factory=list,
     description=(
-      "Account-scope only: what makes up the independent balance. For "
-      "`schedule_register`, one entry per schedule."
+      "Account-scope only: what makes up the independent balance. One entry "
+      "per schedule for `schedule_register`; the recorded statement for "
+      "`statement`."
     ),
   )
   source: str | None = Field(

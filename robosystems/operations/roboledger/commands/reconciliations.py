@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
+
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -11,13 +13,14 @@ from robosystems.models.api.extensions.reconciliations import (
   ReconciliationPolicyResponse,
   ReconciliationPreviewResponse,
   ReconciliationSummary,
+  RecordStatementBalanceRequest,
   RefreshReconciliationsRequest,
   SetReconciliationPolicyRequest,
   SignOffReconciliationRequest,
 )
 from robosystems.models.api.information_block import ReconciliationMechanics
-from robosystems.models.extensions import Structure
-from robosystems.models.extensions.roboledger import FactSet
+from robosystems.models.extensions import Element, Structure
+from robosystems.models.extensions.roboledger import COA_SOURCES, FactSet
 from robosystems.operations.information_block.reconciliation import (
   RECONCILIATION_BLOCK_TYPE,
 )
@@ -38,6 +41,7 @@ from robosystems.operations.roboledger.reconciliations import (
   ReconciliationWindow,
   ScheduleRegisterResolver,
   SourceLedgerResolver,
+  StatementResolver,
   compute_reconciliations,
   reconciliation_window,
 )
@@ -53,6 +57,9 @@ from robosystems.operations.roboledger.reconciliations.blocks import (
   reconciliation_rule,
   record_reconciliation,
   record_sign_off,
+)
+from robosystems.operations.roboledger.reconciliations.observations import (
+  record_statement_observation,
 )
 
 
@@ -80,6 +87,22 @@ class ReconciliationNotReconciledError(Exception):
     )
     super().__init__(f"Cannot sign off {name!r} for {period}: {reason}.")
     self.status = status
+
+
+class StatementAccountNotFoundError(Exception):
+  def __init__(self, element_id: str) -> None:
+    super().__init__(f"Account {element_id!r} not found.")
+    self.element_id = element_id
+
+
+class StatementAccountError(ValueError):
+  """The account cannot be reconciled to a statement."""
+
+
+class StatementDocumentNotFoundError(Exception):
+  def __init__(self, document_id: str) -> None:
+    super().__init__(f"Document {document_id!r} not found on this graph.")
+    self.document_id = document_id
 
 
 class NotAGraphMemberError(Exception):
@@ -137,6 +160,8 @@ def preview_reconciliations(
   window = reconciliation_window(body.period, get_fiscal_year_start_month(session))
   if body.method == "schedule_register":
     side = _schedule_register_side(session, window)
+  elif body.method == "statement":
+    side = _statement_side(session, window)
   else:
     side = SourceLedgerResolver(graph_id).resolve(session, window)
   return compute_reconciliations(
@@ -149,6 +174,58 @@ def _schedule_register_side(session: Session, window: ReconciliationWindow):
   # zero once no schedule reaches it.
   reconciled = frozenset(account_reconciliations(session, "schedule_register"))
   return ScheduleRegisterResolver(also_cover=reconciled).resolve(session, window)
+
+
+def _statement_side(session: Session, window: ReconciliationWindow):
+  reconciled = frozenset(account_reconciliations(session, "statement"))
+  return StatementResolver(reconciled).resolve(session, window)
+
+
+def _record_account_side(
+  session: Session,
+  side,
+  *,
+  window: ReconciliationWindow,
+  created_by: str,
+  compared_via: ComparedVia,
+  create: bool,
+) -> None:
+  """Compare an account-scope side and record each account on its block.
+
+  With ``create``, an account with no block gets one, required for close
+  only if it ties: a difference found on first contact is reported without
+  holding the close. Without it, an account with no block is skipped.
+  """
+  if not side.covered_element_ids:
+    return
+  comparison = compute_reconciliations(
+    session, window=window, side=side, include_tied=True
+  )
+  blocks = account_reconciliations(session, side.method)
+  for row in sorted(
+    comparison.rows, key=lambda r: (r.account_code or "", r.account_name)
+  ):
+    structure = blocks.get(str(row.element_id))
+    if structure is None:
+      if not create:
+        continue
+      structure = create_account_reconciliation(
+        session,
+        method=side.method,
+        element_id=str(row.element_id),
+        account_name=row.account_name,
+        required_for_close=row.status == "tied",
+        created_by=created_by,
+      )
+    record_reconciliation(
+      session,
+      structure,
+      window=window,
+      side=side,
+      comparison=account_comparison(comparison, row),
+      created_by=created_by,
+      compared_via=compared_via,
+    )
 
 
 def refresh_reconciliations(
@@ -164,8 +241,9 @@ def refresh_reconciliations(
 
   A synced ledger is compared with its source, on one ledger-wide block.
   Each asset account a schedule carries a balance on is compared with its
-  schedules, on a block of its own. Run as an ``operation``, a missing block
-  is created; a new account block starts out required for close only if it
+  schedules, and each account with a statement recorded in the period with
+  that statement, on a block of its own. Run as an ``operation``, a missing
+  schedule block is created; it starts out required for close only if it
   ties, so a difference found on first contact is reported without holding
   the close. Run by a ``sync``, only existing blocks are refreshed.
 
@@ -198,7 +276,12 @@ def refresh_reconciliations(
 
   lock_reconciliation_writes(session, graph_id)
   register = _schedule_register_side(session, window)
-  if mirror is None and not register.covered_element_ids:
+  statements = _statement_side(session, window)
+  if (
+    mirror is None
+    and not register.covered_element_ids
+    and not statements.covered_element_ids
+  ):
     raise NothingToReconcileError()
 
   if mirror is not None and mirror_comparison is not None:
@@ -214,38 +297,112 @@ def refresh_reconciliations(
       compared_via=compared_via,
     )
 
-  if register.covered_element_ids:
-    comparison = compute_reconciliations(
-      session, window=window, side=register, include_tied=True
-    )
-    blocks = account_reconciliations(session, register.method)
-    for row in sorted(
-      comparison.rows, key=lambda r: (r.account_code or "", r.account_name)
-    ):
-      structure = blocks.get(str(row.element_id))
-      if structure is None:
-        if not create:
-          continue
-        structure = create_account_reconciliation(
-          session,
-          method=register.method,
-          element_id=str(row.element_id),
-          account_name=row.account_name,
-          required_for_close=row.status == "tied",
-          created_by=created_by,
-        )
-      record_reconciliation(
-        session,
-        structure,
-        window=window,
-        side=register,
-        comparison=account_comparison(comparison, row),
-        created_by=created_by,
-        compared_via=compared_via,
-      )
+  _record_account_side(
+    session,
+    register,
+    window=window,
+    created_by=created_by,
+    compared_via=compared_via,
+    create=create,
+  )
+  # A statement block exists only once a statement has been recorded for the
+  # account, so there is nothing for a refresh to create.
+  _record_account_side(
+    session,
+    statements,
+    window=window,
+    created_by=created_by,
+    compared_via=compared_via,
+    create=False,
+  )
   response = list_reconciliations(session, body.period)
   response.notes = skipped
   return response
+
+
+def _statement_document_exists(graph_id: str, document_id: str) -> bool:
+  from robosystems.database import SessionFactory
+  from robosystems.models.core import Document
+
+  with SessionFactory() as platform_session:
+    return (
+      Document.get_by_id_and_graph(document_id, graph_id, platform_session) is not None
+    )
+
+
+def record_statement_balance(
+  session: Session,
+  body: RecordStatementBalanceRequest,
+  *,
+  graph_id: str,
+  created_by: str,
+) -> ReconciliationSummary:
+  """Record a statement's ending balance for an account and reconcile the
+  account to it for the period the statement ends in. Flushes; the caller
+  owns the commit.
+
+  The first statement recorded for an account creates its ``statement``
+  block, which does not hold the close until `set_reconciliation_policy`
+  says so: a required statement is a statement owed every period. Recording
+  the same account and date again replaces the earlier balance.
+
+  Raises `StatementAccountNotFoundError`, `StatementAccountError` when the
+  account is not a balance-sheet chart account, `StatementDocumentNotFoundError`,
+  and ``RowLockedError`` when another reconciliation write is in flight.
+  """
+  element = session.get(Element, body.element_id)
+  if element is None:
+    raise StatementAccountNotFoundError(body.element_id)
+  if element.source not in COA_SOURCES or element.period_type != "instant":
+    raise StatementAccountError(
+      f"{element.name!r} is not a balance-sheet account in the chart of "
+      "accounts. A statement states a balance, so only an asset, liability "
+      "or equity account can be reconciled to one."
+    )
+  if body.document_id and not _statement_document_exists(graph_id, body.document_id):
+    raise StatementDocumentNotFoundError(body.document_id)
+
+  period = body.as_of.strftime("%Y-%m")
+  window = reconciliation_window(period, get_fiscal_year_start_month(session))
+  lock_reconciliation_writes(session, graph_id)
+  record_statement_observation(
+    session,
+    element=element,
+    as_of=body.as_of,
+    # Through the decimal text, so the cents are the ones the caller typed.
+    stated_cents=int(
+      (Decimal(str(body.balance)) * 100).to_integral_value(rounding=ROUND_HALF_UP)
+    ),
+    document_id=body.document_id,
+    note=body.note,
+    created_by=created_by,
+  )
+
+  element_id = str(element.id)
+  structure = account_reconciliations(session, "statement").get(element_id)
+  if structure is None:
+    structure = create_account_reconciliation(
+      session,
+      method="statement",
+      element_id=element_id,
+      account_name=element.name,
+      required_for_close=False,
+      created_by=created_by,
+    )
+  side = StatementResolver(frozenset({element_id})).resolve(session, window)
+  comparison = compute_reconciliations(
+    session, window=window, side=side, include_tied=True
+  )
+  (row,) = comparison.rows
+  record_reconciliation(
+    session,
+    structure,
+    window=window,
+    side=side,
+    comparison=account_comparison(comparison, row),
+    created_by=created_by,
+  )
+  return _summary(session, str(structure.id), period)
 
 
 def refresh_next_period(
