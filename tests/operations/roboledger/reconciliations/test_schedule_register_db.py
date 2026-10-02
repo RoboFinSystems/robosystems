@@ -579,6 +579,17 @@ def test_an_account_that_tied_and_then_drifts_holds_the_close(prepaid):
   ]
 
 
+def test_an_unscheduled_entry_after_the_comparison_makes_the_account_stale(prepaid):
+  session, accounts, _ = prepaid
+  _refresh(session)
+  entry(session, date(2026, 8, 12), accounts["prepaid"], accounts["cash"], 60_000)
+  session.commit()
+
+  (rec,) = list_reconciliations(session, "2026-08").reconciliations
+
+  assert rec.status == "stale"
+
+
 def test_a_sync_refreshes_account_blocks_and_creates_none(prepaid):
   session, accounts, _ = prepaid
 

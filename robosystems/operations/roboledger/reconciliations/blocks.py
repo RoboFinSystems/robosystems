@@ -444,6 +444,8 @@ def record_reconciliation(
     "compared_by": created_by,
     "compared_via": compared_via,
   }
+  if not account_scope:
+    metadata["ledger_digest"] = comparison._ledger_digest
   if account_scope:
     (row,) = comparison.rows
     metadata["components"] = [

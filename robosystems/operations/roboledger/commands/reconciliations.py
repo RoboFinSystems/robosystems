@@ -83,6 +83,10 @@ class ReconciliationNotReconciledError(Exception):
         "its comparison was recorded before sign-off existed and cannot be "
         "pinned; run refresh-reconciliations again first"
       ),
+      "stale": (
+        "the books have changed since it was compared; run "
+        "refresh-reconciliations and review the new comparison"
+      ),
     }.get(
       status,
       "the two sides do not reconcile; clear what refresh-reconciliations reports",

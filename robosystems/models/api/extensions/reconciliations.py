@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 # Where the independent balance comes from. `source_ledger` is the synced
 # accounting system's own trial balance, which checks the mirror of its books.
@@ -184,15 +184,17 @@ class ReconciliationPreviewResponse(BaseModel):
     default_factory=list,
     description="How the comparison was made, and anything that qualifies it.",
   )
+  # A fingerprint of the ledger balances a ledger-scope comparison read, kept
+  # with the recorded comparison so a later read can tell the books moved.
+  _ledger_digest: str | None = PrivateAttr(default=None)
 
 
 # How far a reconciliation has got for a period. `not_started`: nothing has
-# been compared. `unreconciled`: the sides differ by more than the block's
-# materiality. `explained`: they differ, and items account for all of it.
-# `reconciled`: nothing is left unexplained. `reviewed`: reconciled and
-# signed off.
+# been compared. `stale`: the books have changed since it was compared.
+# `unreconciled`: the sides differ by more than the block's materiality.
+# `reconciled`: they agree within it. `reviewed`: reconciled and signed off.
 ReconciliationStatus = Literal[
-  "not_started", "unreconciled", "explained", "reconciled", "reviewed"
+  "not_started", "stale", "unreconciled", "reconciled", "reviewed"
 ]
 
 
@@ -328,10 +330,11 @@ class ReconciliationSummary(BaseModel):
   status: str = Field(
     ...,
     description=(
-      "`not_started`: not compared for this period. `unreconciled`: the "
-      "sides differ by more than the materiality. `explained`: they differ "
-      "and items account for all of it. `reconciled`: nothing is left "
-      "unexplained. `reviewed`: reconciled and signed off."
+      "`not_started`: not compared for this period. `stale`: the books "
+      "have changed since it was compared, so run refresh-reconciliations. "
+      "`unreconciled`: the sides differ by more than the materiality. "
+      "`reconciled`: they agree within it. `reviewed`: reconciled and "
+      "signed off."
     ),
   )
   unreconciled_difference: float | None = Field(

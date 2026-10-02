@@ -261,6 +261,17 @@ def test_a_refresh_compares_the_statement_with_the_ledger_as_it_now_stands(books
   )
 
 
+def test_an_entry_after_the_statement_was_compared_makes_it_stale(books):
+  session, accounts = books
+  _record(session, accounts["cash"], 4_800.00)
+  entry(session, date(2026, 8, 30), accounts["supplies"], accounts["cash"], 2_500)
+  session.commit()
+
+  (rec,) = list_reconciliations(session, "2026-08").reconciliations
+
+  assert rec.status == "stale"
+
+
 def test_a_period_with_no_statement_has_not_started(books):
   session, accounts = books
   _record(session, accounts["cash"], 4_800.00)
