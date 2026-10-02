@@ -79,6 +79,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "set-reconciliation-policy": _REPLACES,
   # Adds a review record; signing a period already reviewed adds nothing.
   "sign-off-reconciliation": _ADDS_ONCE,
+  # Replaces the balance recorded for that account and date.
+  "record-statement-balance": _REPLACES,
   "resolve-reconciling-item": _REPLACES_ONCE_PER_STATE,
   "update-journal-entry": _REPLACES,
   "delete-journal-entry": _REPLACES,

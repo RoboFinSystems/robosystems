@@ -225,11 +225,14 @@ def ensure_ledger_reconciliation(
   )
 
 
-_ACCOUNT_BLOCK_LABELS = {"schedule_register": "schedules"}
+_ACCOUNT_BLOCK_LABELS = {"schedule_register": "schedules", "statement": "statement"}
 _ACCOUNT_BLOCK_DESCRIPTIONS = {
   "schedule_register": (
     "The account's balance against what its schedules say it carries at each "
     "period end."
+  ),
+  "statement": (
+    "The account's balance against the ending balance of its statement each period."
   ),
 }
 
@@ -368,6 +371,7 @@ def balance_digest(comparison: ReconciliationPreviewResponse) -> str:
   lines = sorted(
     f"{row.element_id or ''}|{row.source_account_id or ''}|"
     f"{round(row.ledger_balance * 100)}|{round(row.independent_balance * 100)}"
+    + (f"|{row.as_of.isoformat()}" if row.as_of else "")
     for row in comparison.rows
   )
   return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:32]
@@ -436,11 +440,11 @@ def record_reconciliation(
     "compared_via": compared_via,
   }
   if account_scope:
+    (row,) = comparison.rows
     metadata["components"] = [
-      component.model_dump(mode="json")
-      for row in comparison.rows
-      for component in row.components
+      component.model_dump(mode="json") for component in row.components
     ]
+    metadata["balance_as_of"] = (row.as_of or window.period_end).isoformat()
 
   standing = session.execute(
     select(FactSet)

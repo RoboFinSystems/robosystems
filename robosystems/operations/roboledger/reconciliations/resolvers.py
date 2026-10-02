@@ -24,8 +24,11 @@ from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger import Event
 from robosystems.operations.roboledger.reads.fiscal_calendar import live_qb_connection
 
+from .observations import statement_observations
+
 _QUICKBOOKS = "quickbooks"
 _SCHEDULES = "schedules"
+_STATEMENT = "statement"
 
 # Where a schedule carries a balance the ledger should hold: the account it
 # credits, and the cost account it names. Liabilities are left out, since a
@@ -43,8 +46,9 @@ class NothingToReconcileError(NoSourceLedgerError):
 
   def __init__(self) -> None:
     super().__init__(
-      "Nothing to reconcile: this graph has no connected source ledger, and "
-      "no schedule carries a balance on an asset account."
+      "Nothing to reconcile: this graph has no connected source ledger, no "
+      "schedule carries a balance on an asset account, and no statement "
+      "balance is recorded for the period."
     )
 
 
@@ -68,9 +72,11 @@ class UnmatchedBalance:
 class IndependentComponent:
   """One part of an account's independent balance, debit-positive cents."""
 
-  structure_id: str
   name: str
   amount_cents: int
+  structure_id: str | None = None
+  event_id: str | None = None
+  document_id: str | None = None
   note: str | None = None
 
 
@@ -92,6 +98,8 @@ class IndependentSide:
   source_account_ids: dict[str, str] = field(default_factory=dict)
   unmatched: list[UnmatchedBalance] = field(default_factory=list)
   components: dict[str, list[IndependentComponent]] = field(default_factory=dict)
+  # Accounts stated at a date other than the period's last day.
+  as_of: dict[str, date] = field(default_factory=dict)
   basis: str | None = None
   connection_id: str | None = None
   last_sync_at: datetime | None = None
@@ -404,3 +412,44 @@ def _primary_traits(session: Session, element_ids: set[str]) -> dict[str, str]:
     )
   )
   return {str(element_id): str(identifier) for element_id, identifier in rows}
+
+
+class StatementResolver:
+  """The ending balance of each account's statement in the period.
+
+  An account is covered for a period once a statement ending in it has been
+  recorded; the latest one stands. A statement that ends before the period's
+  last day is compared with the ledger at the statement's own date.
+  """
+
+  def __init__(self, element_ids: frozenset[str]) -> None:
+    self.element_ids = element_ids
+
+  def resolve(self, session: Session, window: ReconciliationWindow) -> IndependentSide:
+    observations = statement_observations(
+      session, self.element_ids, window.period_end.replace(day=1), window.period_end
+    )
+    return IndependentSide(
+      method="statement",
+      source=_STATEMENT,
+      scope="account",
+      balances={eid: obs.amount_cents for eid, obs in observations.items()},
+      covered_element_ids=frozenset(observations),
+      components={
+        eid: [
+          IndependentComponent(
+            name=f"Statement ending {obs.as_of.isoformat()}",
+            amount_cents=obs.amount_cents,
+            event_id=obs.event_id,
+            document_id=obs.document_id,
+            note=obs.note,
+          )
+        ]
+        for eid, obs in observations.items()
+      },
+      as_of={
+        eid: obs.as_of
+        for eid, obs in observations.items()
+        if obs.as_of != window.period_end
+      },
+    )

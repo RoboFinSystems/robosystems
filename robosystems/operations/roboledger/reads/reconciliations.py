@@ -143,6 +143,7 @@ def list_reconciliations(session: Session, period: str) -> ReconciliationListRes
         accounts_different=_count(fact_set_id, "AccountsDifferent"),
         ledger_balance=values.get((fact_set_id, "LedgerBalance")),
         independent_balance=values.get((fact_set_id, "IndependentBalance")),
+        balance_as_of=metadata.get("balance_as_of"),
         components=[
           ReconciliationComponent.model_validate(component)
           for component in metadata.get("components") or []

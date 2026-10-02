@@ -46,6 +46,7 @@ from robosystems.models.api.extensions.reconciliations import (
   ReconciliationPolicyResponse,
   ReconciliationPreviewResponse,
   ReconciliationSummary,
+  RecordStatementBalanceRequest,
   RefreshReconciliationsRequest,
   SetReconciliationPolicyRequest,
   SignOffReconciliationRequest,
@@ -131,9 +132,14 @@ from robosystems.operations.roboledger.commands.reconciliations import (
   ReconciliationNotFoundError,
   ReconciliationNotReconciledError,
   SeparateReviewerError,
+  StatementAccountNotFoundError,
+  StatementDocumentNotFoundError,
 )
 from robosystems.operations.roboledger.commands.reconciliations import (
   preview_reconciliations as cmd_preview_reconciliations,
+)
+from robosystems.operations.roboledger.commands.reconciliations import (
+  record_statement_balance as cmd_record_statement_balance,
 )
 from robosystems.operations.roboledger.commands.reconciliations import (
   refresh_reconciliations as cmd_refresh_reconciliations,
@@ -513,7 +519,9 @@ refresh_reconciliations_op = _registrar.register(
       "result on its block. A ledger synced from QuickBooks is compared with "
       "QuickBooks' own trial balance, on one block for the whole ledger. Each "
       "asset account a schedule carries a balance on is compared with what "
-      "its schedules say it holds, on a block of its own. A block reconciles "
+      "its schedules say it holds, on a block of its own. Each account with a "
+      "statement balance recorded in the period (record-statement-balance) is "
+      "compared with that balance. A block reconciles "
       "for the period when its difference is within its materiality. Running "
       "it again replaces the period's comparison, so the answer is always as "
       "of the last run. A block is created the first time its check applies, "
@@ -539,6 +547,42 @@ refresh_reconciliations_op = _registrar.register(
       ValueError: 422,
     },
     mark_stale_reason="reconciliations_refreshed",
+  )
+)
+
+record_statement_balance_op = _registrar.register(
+  OperationSpec(
+    name="record-statement-balance",
+    summary="Record Statement Balance",
+    description=(
+      "Record the ending balance of a statement (a bank, card or loan "
+      "statement) for one balance-sheet account, and reconcile the account "
+      "to it. Give the balance as the statement shows it, as a positive "
+      "number in the account's normal direction, with the statement's ending "
+      "date. The ledger's balance at that date is set beside it, counting "
+      "the drafts the close will post, and the result is recorded on the "
+      "account's statement reconciliation for the period the statement ends "
+      "in. Attach the statement as evidence by passing the `document_id` of "
+      "a document added with create-document. Writes no books. The first "
+      "statement recorded for an account creates its reconciliation, which "
+      "does not hold the close: turn `required_for_close` on with "
+      "set-reconciliation-policy to make every period's close wait for a "
+      "statement on that account. Recording the same account and date again "
+      "replaces the earlier balance. A difference is not explained here: it "
+      "is activity one side has and the other does not yet, or an error on "
+      "either. Returns the reconciliation's standing for the period."
+    ),
+    command=cmd_record_statement_balance,
+    request_model=RecordStatementBalanceRequest,
+    result_type=ReconciliationSummary,
+    requires_graph_id=True,
+    error_map={
+      StatementAccountNotFoundError: 404,
+      StatementDocumentNotFoundError: 404,
+      RowLockedError: 409,
+      ValueError: 422,
+    },
+    mark_stale_reason="statement_balance_recorded",
   )
 )
 

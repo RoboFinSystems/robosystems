@@ -10,6 +10,7 @@ from .resolvers import (
   Resolver,
   ScheduleRegisterResolver,
   SourceLedgerResolver,
+  StatementResolver,
   UnmatchedBalance,
 )
 
@@ -22,6 +23,7 @@ __all__ = [
   "Resolver",
   "ScheduleRegisterResolver",
   "SourceLedgerResolver",
+  "StatementResolver",
   "UnmatchedBalance",
   "compute_reconciliations",
   "reconciliation_window",
