@@ -14,6 +14,7 @@ a comparison made before the close still describes the books after it.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, date, datetime, time
 
 from sqlalchemy import func, select, text
@@ -49,6 +50,26 @@ def reconciliation_window(
     period=period,
     period_end=period_end,
     fiscal_year_start=date(year, fiscal_year_start_month, 1),
+  )
+
+
+def _ledger_fingerprint(
+  cumulative: dict[str, int], year_to_date: dict[str, int]
+) -> str:
+  lines = [
+    f"{element_id}|{cumulative.get(element_id, 0)}|{year_to_date.get(element_id, 0)}"
+    for element_id in sorted(set(cumulative) | set(year_to_date))
+  ]
+  return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:32]
+
+
+def ledger_digest(session: Session, window: ReconciliationWindow) -> str:
+  """A fingerprint of every account's landed balance at the period end, and
+  for the fiscal year to it. Any entry landing in, leaving or moving within
+  the window changes it."""
+  return _ledger_fingerprint(
+    get_net_balances_cents(session, None, window.period_end),
+    get_net_balances_cents(session, window.fiscal_year_start, window.period_end),
   )
 
 
@@ -372,7 +393,7 @@ def compute_reconciliations(
       "activity not yet synced."
     )
 
-  return ReconciliationPreviewResponse(
+  comparison = ReconciliationPreviewResponse(
     period=window.period,
     as_of=window.period_end,
     fiscal_year_start=window.fiscal_year_start,
@@ -387,3 +408,5 @@ def compute_reconciliations(
     rows=open_rows + (tied if include_tied else []),
     notes=notes,
   )
+  comparison._ledger_digest = _ledger_fingerprint(cumulative, year_to_date)
+  return comparison

@@ -693,6 +693,8 @@ class FiscalCalendarService:
       + (
         "awaiting review"
         if rec.review_required and rec.status == "reconciled"
+        else "out of date, run refresh-reconciliations"
+        if rec.status == "stale"
         else rec.status
       )
       for rec in unreconciled[:5]

@@ -126,10 +126,15 @@ def ensure_reconciliation_concepts(
       taxonomy_type="custom_ontology",
       is_shared=False,
       is_active=True,
-      is_locked=False,
+      # Locked: the taxonomy operations refuse to change or delete it, and
+      # every reconciliation block hangs off it.
+      is_locked=True,
       created_by=created_by,
     )
     session.add(taxonomy)
+    session.flush()
+  elif not taxonomy.is_locked:
+    taxonomy.is_locked = True
     session.flush()
 
   existing = {
@@ -439,12 +444,21 @@ def record_reconciliation(
     "compared_by": created_by,
     "compared_via": compared_via,
   }
+  if not account_scope:
+    if comparison._ledger_digest is None:
+      # It rides on a private attribute, which a dump and re-validate drops.
+      raise RuntimeError(
+        "A ledger-scope comparison must carry its ledger fingerprint; record "
+        "the object compute_reconciliations returned."
+      )
+    metadata["ledger_digest"] = comparison._ledger_digest
   if account_scope:
     (row,) = comparison.rows
     metadata["components"] = [
       component.model_dump(mode="json") for component in row.components
     ]
     metadata["balance_as_of"] = (row.as_of or window.period_end).isoformat()
+    metadata["prepared_by"] = side.prepared_by.get(str(row.element_id))
 
   standing = session.execute(
     select(FactSet)
@@ -533,7 +547,7 @@ def standing_sign_offs(
     .where(
       Event.event_type == SIGN_OFF_EVENT_TYPE,
       Event.event_category == "approval",
-      Event.status != "voided",
+      Event.status == "committed",
       Event.metadata_["period"].astext == period,
       Event.metadata_["structure_id"].astext.in_(structure_ids),
     )
@@ -544,6 +558,46 @@ def standing_sign_offs(
     structure_id = str((event.metadata_ or {}).get("structure_id"))
     sign_offs.setdefault(structure_id, []).append(event)
   return sign_offs
+
+
+POLICY_CHANGE_EVENT_TYPE = "reconciliation_policy_changed"
+
+
+def preparers(comparison_metadata: dict) -> set[str]:
+  """The people a comparison's figures came from: whoever ran it by hand, and
+  whoever supplied its independent balance. A sync-run comparison has no
+  person behind the run."""
+  people = set()
+  if comparison_metadata.get("compared_via") == "operation":
+    people.add(comparison_metadata.get("compared_by"))
+  people.add(comparison_metadata.get("prepared_by"))
+  return {str(person) for person in people if person}
+
+
+def record_policy_change(
+  session: Session,
+  *,
+  structure: Structure,
+  changes: dict[str, dict],
+  changed_by: str,
+) -> Event:
+  """A change to a block's policy as a ``control`` support event, so loosening
+  what the close waits on leaves a record of who did it and what it was."""
+  now = datetime.now(UTC)
+  event = Event(
+    event_type=POLICY_CHANGE_EVENT_TYPE,
+    event_category="control",
+    event_class="support",
+    occurred_at=now,
+    status="committed",
+    source="manual",
+    description=f"Reconciliation policy changed: {structure.name}",
+    metadata_={"structure_id": str(structure.id), "changes": changes},
+    created_by=changed_by,
+  )
+  session.add(event)
+  session.flush()
+  return event
 
 
 def record_sign_off(
@@ -577,10 +631,8 @@ def record_sign_off(
       "balance_digest": compared.get("balance_digest"),
       "compared_by": compared.get("compared_by"),
       "compared_via": compared.get("compared_via"),
-      "self_reviewed": (
-        compared.get("compared_via") == "operation"
-        and compared.get("compared_by") == reviewer_id
-      ),
+      "prepared_by": compared.get("prepared_by"),
+      "self_reviewed": reviewer_id in preparers(compared),
       "note": note,
     },
     created_by=reviewer_id,

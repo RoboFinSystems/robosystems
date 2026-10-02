@@ -7,6 +7,8 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
+from robosystems.adapters.quickbooks.reports import TrialBalanceReportError
 from robosystems.models.api.extensions.reconciliations import (
   PreviewReconciliationsRequest,
   ReconciliationListResponse,
@@ -41,6 +43,7 @@ from robosystems.operations.roboledger.reconciliations import (
   ReconciliationWindow,
   ScheduleRegisterResolver,
   SourceLedgerResolver,
+  SourceLedgerUnavailableError,
   StatementResolver,
   compute_reconciliations,
   reconciliation_window,
@@ -54,7 +57,9 @@ from robosystems.operations.roboledger.reconciliations.blocks import (
   find_ledger_reconciliation,
   has_reconciliations,
   lock_reconciliation_writes,
+  preparers,
   reconciliation_rule,
+  record_policy_change,
   record_reconciliation,
   record_sign_off,
 )
@@ -80,6 +85,10 @@ class ReconciliationNotReconciledError(Exception):
       "unpinned": (
         "its comparison was recorded before sign-off existed and cannot be "
         "pinned; run refresh-reconciliations again first"
+      ),
+      "stale": (
+        "the books have changed since it was compared; run "
+        "refresh-reconciliations and review the new comparison"
       ),
     }.get(
       status,
@@ -256,6 +265,7 @@ def refresh_reconciliations(
 
   # The source is read before the write lock, so a slow report holds nothing.
   mirror = None
+  source_failure: Exception | None = None
   skipped: list[str] = []
   mirror_block = find_ledger_reconciliation(session, "source_ledger")
   if create or mirror_block is not None:
@@ -268,6 +278,15 @@ def refresh_reconciliations(
           "connected source ledger. Its earlier comparisons stand, and a "
           "period it was never compared for stays not started."
         )
+    except (
+      SourceLedgerUnavailableError,
+      QBAuthFailedError,
+      TrialBalanceReportError,
+    ) as exc:
+      # The source failing must not stop the checks that need no source.
+      source_failure = exc
+      name = mirror_block.name if mirror_block is not None else "The source ledger"
+      skipped.append(f"{name} was not compared: {exc}")
   mirror_comparison = (
     compute_reconciliations(session, window=window, side=mirror, include_tied=True)
     if mirror is not None
@@ -282,6 +301,8 @@ def refresh_reconciliations(
     and not register.covered_element_ids
     and not statements.covered_element_ids
   ):
+    if source_failure is not None:
+      raise source_failure
     raise NothingToReconcileError()
 
   if mirror is not None and mirror_comparison is not None:
@@ -421,13 +442,18 @@ def refresh_next_period(
   if calendar is None or not calendar.closed_through_period:
     return None
   period = next_period(calendar.closed_through_period)
-  refresh_reconciliations(
-    session,
-    RefreshReconciliationsRequest(period=period),
-    graph_id=graph_id,
-    created_by=created_by,
-    compared_via="sync",
-  )
+  try:
+    refresh_reconciliations(
+      session,
+      RefreshReconciliationsRequest(period=period),
+      graph_id=graph_id,
+      created_by=created_by,
+      compared_via="sync",
+    )
+  except NothingToReconcileError:
+    # Blocks exist but none applies to this period yet, such as a statement
+    # block still waiting for the period's statement.
+    return None
   return period
 
 
@@ -463,26 +489,31 @@ def sign_off_reconciliation(
   if rec.status != "reconciled":
     raise ReconciliationNotReconciledError(structure.name, body.period, rec.status)
 
-  if (
-    rec.separate_reviewer
-    and rec.compared_via == "operation"
-    and rec.compared_by == created_by
-  ):
-    way_out = (
-      "Ask another member to sign off, or to run refresh-reconciliations so "
-      "that you can."
-      if len(members) > 1
-      else "This graph no longer has another member who can write: add one, "
-      "or turn `separate_reviewer` off with set-reconciliation-policy."
-    )
-    raise SeparateReviewerError(
-      f"{structure.name!r} requires a reviewer other than the person who ran "
-      f"the comparison, and you ran this one. {way_out}"
-    )
-
   fact_set = session.get(FactSet, rec.fact_set_id)
   if fact_set is None:
     raise ReconciliationNotReconciledError(structure.name, body.period, "not_started")
+  compared = fact_set.metadata_ or {}
+  if rec.separate_reviewer and created_by in preparers(compared):
+    supplied = compared.get("prepared_by") == created_by
+    if len(members) < 2:
+      way_out = (
+        "This graph no longer has another member who can write: add one, or "
+        "turn `separate_reviewer` off with set-reconciliation-policy."
+      )
+    elif supplied:
+      way_out = "Ask another member to sign off."
+    else:
+      way_out = (
+        "Ask another member to sign off, or to run refresh-reconciliations "
+        "so that you can."
+      )
+    raise SeparateReviewerError(
+      f"{structure.name!r} requires a reviewer other than the person who ran "
+      "the comparison or recorded its balance, and "
+      f"{'you recorded its balance' if supplied else 'you ran this one'}. "
+      f"{way_out}"
+    )
+
   if not (fact_set.metadata_ or {}).get("balance_digest"):
     raise ReconciliationNotReconciledError(structure.name, body.period, "unpinned")
   record_sign_off(
@@ -514,6 +545,7 @@ def set_reconciliation_policy(
   structure = _load_reconciliation(session, body.structure_id)
 
   mechanics = ReconciliationMechanics.model_validate(structure.artifact_mechanics)
+  before = mechanics.model_dump(mode="json")
   if body.required_for_close is not None:
     mechanics.required_for_close = body.required_for_close
   if body.review_required is not None:
@@ -533,8 +565,18 @@ def set_reconciliation_policy(
     if rule is not None:
       rule.metadata_ = {**(rule.metadata_ or {}), "tolerance": body.materiality}
       flag_modified(rule, "metadata_")
-  structure.artifact_mechanics = mechanics.model_dump(mode="json")
+  after = mechanics.model_dump(mode="json")
+  structure.artifact_mechanics = after
   session.flush()
+  changes = {
+    field: {"from": before[field], "to": after[field]}
+    for field in after
+    if before[field] != after[field]
+  }
+  if changes:
+    record_policy_change(
+      session, structure=structure, changes=changes, changed_by=created_by
+    )
 
   return ReconciliationPolicyResponse(
     structure_id=str(structure.id),

@@ -17,6 +17,7 @@ from robosystems.models.api.extensions.reconciliations import (
 from robosystems.models.api.information_block import ReconciliationMechanics
 from robosystems.models.extensions import Element, Structure, VerificationResult
 from robosystems.models.extensions.roboledger import Event, Fact, FactSet
+from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.operations.information_block.reconciliation import (
   RECONCILIATION_BLOCK_TYPE,
   RECONCILIATION_FACTSET_TYPE,
@@ -40,13 +41,99 @@ def _standing_review(sign_offs: list[Event], fact_set: FactSet | None) -> Event 
 
 
 def _status(
-  result: VerificationResult | None, review: Event | None
+  result: VerificationResult | None, review: Event | None, *, stale: bool
 ) -> ReconciliationStatus:
   if result is None:
     return "not_started"
+  if stale:
+    return "stale"
   if result.status != "pass":
     return "unreconciled"
   return "reviewed" if review is not None else "reconciled"
+
+
+def _stale_blocks(
+  session: Session,
+  period: str,
+  structures: list[Structure],
+  fact_sets: dict[str, FactSet],
+) -> set[str]:
+  """The blocks whose recorded comparison no longer describes the books.
+
+  A ledger-scope comparison keeps a fingerprint of the ledger balances it
+  read; an account-scope one is compared again in full, since both its sides
+  are local. Either way a comparison is only as good as the books it saw.
+
+  Only an open period can go stale. A closed period's comparison is the
+  record the close was made on, and the close itself moves landed balances
+  by posting the period's drafts; reopening the period puts it back in play.
+  """
+  from robosystems.operations.roboledger.reads.fiscal_calendar import (
+    get_fiscal_year_start_month,
+  )
+  from robosystems.operations.roboledger.reconciliations.blocks import (
+    account_comparison,
+    balance_digest,
+  )
+  from robosystems.operations.roboledger.reconciliations.engine import (
+    compute_reconciliations,
+    ledger_digest,
+    reconciliation_window,
+  )
+  from robosystems.operations.roboledger.reconciliations.resolvers import (
+    ScheduleRegisterResolver,
+    StatementResolver,
+  )
+
+  compared = [s for s in structures if str(s.id) in fact_sets]
+  if not compared:
+    return set()
+  closed_through = session.execute(
+    select(FiscalCalendar.closed_through_period).limit(1)
+  ).scalar()
+  if closed_through and period <= closed_through:
+    return set()
+  window = reconciliation_window(period, get_fiscal_year_start_month(session))
+
+  def _account_digests(method: str) -> dict[str, str]:
+    element_ids = frozenset(
+      str(s.artifact_mechanics.get("element_id"))
+      for s in compared
+      if s.artifact_mechanics.get("method") == method
+    )
+    resolver = (
+      StatementResolver(element_ids)
+      if method == "statement"
+      else ScheduleRegisterResolver(also_cover=element_ids)
+    )
+    comparison = compute_reconciliations(
+      session, window=window, side=resolver.resolve(session, window), include_tied=True
+    )
+    return {
+      str(row.element_id): balance_digest(account_comparison(comparison, row))
+      for row in comparison.rows
+    }
+
+  stale: set[str] = set()
+  ledger_now: str | None = None
+  account_now: dict[str, dict[str, str]] = {}
+  for structure in compared:
+    recorded = fact_sets[str(structure.id)].metadata_ or {}
+    mechanics = structure.artifact_mechanics or {}
+    if mechanics.get("scope") == "ledger":
+      if ledger_now is None:
+        ledger_now = ledger_digest(session, window)
+      current = ledger_now
+      was = recorded.get("ledger_digest")
+    else:
+      method = str(mechanics.get("method"))
+      if method not in account_now:
+        account_now[method] = _account_digests(method)
+      current = account_now[method].get(str(mechanics.get("element_id")))
+      was = recorded.get("balance_digest")
+    if not was or was != current:
+      stale.add(str(structure.id))
+  return stale
 
 
 def _observed_at(provenance: dict | None) -> datetime | None:
@@ -113,6 +200,7 @@ def list_reconciliations(session: Session, period: str) -> ReconciliationListRes
   )
 
   sign_offs = standing_sign_offs(session, structure_ids, period)
+  stale = _stale_blocks(session, period, list(structures), fact_sets)
 
   def _count(fact_set_id: str, name: str) -> int | None:
     value = values.get((fact_set_id, name))
@@ -125,7 +213,13 @@ def list_reconciliations(session: Session, period: str) -> ReconciliationListRes
     fact_set_id = str(fact_set.id) if fact_set is not None else ""
     provenance = fact_set.provenance if fact_set is not None else None
     metadata = (fact_set.metadata_ or {}) if fact_set is not None else {}
-    review = _standing_review(sign_offs.get(str(structure.id), []), fact_set)
+    is_stale = str(structure.id) in stale
+    # A sign-off covers the figures it saw, and nobody has seen these.
+    review = (
+      None
+      if is_stale
+      else _standing_review(sign_offs.get(str(structure.id), []), fact_set)
+    )
     summaries.append(
       ReconciliationSummary(
         structure_id=str(structure.id),
@@ -137,7 +231,7 @@ def list_reconciliations(session: Session, period: str) -> ReconciliationListRes
         materiality=mechanics.materiality,
         period=period,
         as_of=as_of,
-        status=_status(results.get(fact_set_id), review),
+        status=_status(results.get(fact_set_id), review, stale=is_stale),
         unreconciled_difference=values.get((fact_set_id, "UnreconciledDifference")),
         accounts_compared=_count(fact_set_id, "AccountsCompared"),
         accounts_different=_count(fact_set_id, "AccountsDifferent"),

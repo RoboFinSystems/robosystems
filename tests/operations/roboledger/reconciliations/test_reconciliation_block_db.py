@@ -720,6 +720,116 @@ def test_a_comparison_without_its_tied_rows_is_not_recorded(ledger):
   assert _blocks(ledger) == []
 
 
+def test_a_comparison_that_lost_its_ledger_fingerprint_is_not_recorded(ledger):
+  """Without it the block would read stale for good, with nothing to say why."""
+  from robosystems.models.api.extensions.reconciliations import (
+    ReconciliationPreviewResponse,
+  )
+  from robosystems.operations.roboledger.commands import reconciliations as commands
+
+  whole = commands.compute_reconciliations
+
+  def round_tripped(*args, **kwargs):
+    comparison = whole(*args, **kwargs)
+    return ReconciliationPreviewResponse.model_validate(comparison.model_dump())
+
+  with (
+    patch.object(commands, "compute_reconciliations", round_tripped),
+    pytest.raises(RuntimeError, match="ledger fingerprint"),
+  ):
+    _refresh(ledger, source_report(*TIED))
+  ledger.rollback()
+
+  assert _blocks(ledger) == []
+
+
+# ── Staleness ───────────────────────────────────────────────────────────────
+
+
+def test_an_entry_posted_after_the_comparison_makes_it_stale(reconciled, books):
+  """The close must not pass on a comparison of books that have since moved."""
+  from .conftest import entry
+
+  session, _ = reconciled
+  entry(session, date(2026, 8, 30), books["software"], books["cash"], 4_000)
+  session.commit()
+
+  (rec,) = list_reconciliations(session, "2026-08").reconciliations
+  gate = _gate(session)
+
+  assert rec.status == "stale"
+  assert gate.blockers == ["unreconciled_accounts"]
+  assert gate.unreconciled_account_sample == [
+    "Source ledger (QuickBooks): out of date, run refresh-reconciliations"
+  ]
+
+
+def test_a_sign_off_does_not_cover_books_that_moved_afterwards(reconciled, books):
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    ReconciliationNotReconciledError,
+  )
+
+  from .conftest import entry
+
+  session, structure_id = reconciled
+  _sign_off(session, structure_id)
+  entry(session, date(2026, 8, 30), books["software"], books["cash"], 4_000)
+  session.commit()
+
+  (rec,) = list_reconciliations(session, "2026-08").reconciliations
+  assert (rec.status, rec.reviewed_by) == ("stale", None)
+
+  with pytest.raises(ReconciliationNotReconciledError, match="have changed since"):
+    _sign_off(session, structure_id, by="usr2", members=("usr", "usr2"))
+
+
+def test_an_entry_in_a_later_period_does_not_stale_this_one(reconciled, books):
+  from .conftest import entry
+
+  session, _ = reconciled
+  entry(session, date(2026, 9, 12), books["software"], books["cash"], 4_000)
+  session.commit()
+
+  (rec,) = list_reconciliations(session, "2026-08").reconciliations
+  assert rec.status == "reconciled"
+
+
+def test_the_close_posting_its_drafts_does_not_stale_the_closed_period(reconciled):
+  """A closed period's comparison is the record the close was made on."""
+  from robosystems.models.extensions.roboledger import Entry
+  from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
+
+  session, structure_id = reconciled
+  _sign_off(session, structure_id)
+  session.query(Entry).filter(Entry.status == "draft").update({"status": "posted"})
+  session.query(FiscalCalendar).update({"closed_through_period": "2026-08"})
+  session.commit()
+
+  (rec,) = list_reconciliations(session, "2026-08").reconciliations
+  assert (rec.status, rec.reviewed_by) == ("reviewed", "usr")
+
+  # Reopened, the period is in play again and the comparison is out of date.
+  session.query(FiscalCalendar).update({"closed_through_period": "2026-07"})
+  session.commit()
+  (rec,) = list_reconciliations(session, "2026-08").reconciliations
+  assert rec.status == "stale"
+
+
+def test_a_comparison_from_before_staleness_was_tracked_asks_for_a_refresh(reconciled):
+  from sqlalchemy.orm.attributes import flag_modified
+
+  session, _ = reconciled
+  fact_set = session.query(FactSet).one()
+  fact_set.metadata_ = {
+    k: v for k, v in fact_set.metadata_.items() if k != "ledger_digest"
+  }
+  flag_modified(fact_set, "metadata_")
+  session.commit()
+
+  (rec,) = list_reconciliations(session, "2026-08").reconciliations
+  assert rec.status == "stale"
+
+
 # ── Review policy ───────────────────────────────────────────────────────────
 
 

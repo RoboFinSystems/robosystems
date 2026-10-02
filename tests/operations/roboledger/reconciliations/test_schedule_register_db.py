@@ -778,6 +778,17 @@ def test_an_account_that_tied_and_then_drifts_holds_the_close(prepaid):
   ]
 
 
+def test_an_unscheduled_entry_after_the_comparison_makes_the_account_stale(prepaid):
+  session, accounts, _ = prepaid
+  _refresh(session)
+  entry(session, date(2026, 8, 12), accounts["prepaid"], accounts["cash"], 60_000)
+  session.commit()
+
+  (rec,) = list_reconciliations(session, "2026-08").reconciliations
+
+  assert rec.status == "stale"
+
+
 def test_a_sync_refreshes_account_blocks_and_creates_none(prepaid):
   session, accounts, _ = prepaid
 
@@ -814,6 +825,68 @@ def test_an_account_no_schedule_reaches_any_more_compares_against_zero(prepaid):
     0.00,
   )
   assert rec.components == []
+
+
+def test_a_source_that_cannot_be_read_does_not_stop_the_other_checks(prepaid):
+  """QuickBooks is rate-limiting. The schedule check needs no source, so it
+  is still recorded, and the refresh says what it could not compare."""
+  from robosystems.operations.roboledger.reconciliations import (
+    SourceLedgerUnavailableError,
+  )
+
+  session, _, _ = prepaid
+  failure = SourceLedgerUnavailableError("QuickBooks could not be read just now.")
+  with patch.object(SourceLedgerResolver, "_fetch", side_effect=failure):
+    result = refresh_reconciliations(
+      session,
+      RefreshReconciliationsRequest(period="2026-08"),
+      graph_id=GRAPH_ID,
+      created_by="usr",
+    )
+  session.commit()
+
+  assert [(r.name, r.status) for r in result.reconciliations] == [
+    ("Prepaid Insurance (schedules)", "reconciled")
+  ]
+  assert result.notes == [
+    "The source ledger was not compared: QuickBooks could not be read just now."
+  ]
+
+
+def test_a_source_failure_is_the_answer_when_no_other_check_applies(native):
+  from robosystems.operations.roboledger.reconciliations import (
+    SourceLedgerUnavailableError,
+  )
+
+  session, _ = native
+  failure = SourceLedgerUnavailableError("QuickBooks could not be read just now.")
+  with (
+    patch.object(SourceLedgerResolver, "_fetch", side_effect=failure),
+    pytest.raises(SourceLedgerUnavailableError),
+  ):
+    refresh_reconciliations(
+      session,
+      RefreshReconciliationsRequest(period="2026-08"),
+      graph_id=GRAPH_ID,
+      created_by="usr",
+    )
+
+
+def test_a_transport_failure_reading_the_report_is_reported_as_unavailable():
+  from quickbooks.exceptions import QuickbooksException
+
+  from robosystems.operations.roboledger.reconciliations import (
+    ReconciliationWindow,
+    SourceLedgerUnavailableError,
+  )
+
+  class _Client:
+    def get_trial_balance(self, start, end):
+      raise QuickbooksException("ThrottleExceeded", 3001)
+
+  window = ReconciliationWindow("2026-08", date(2026, 8, 31), date(2026, 1, 1))
+  with pytest.raises(SourceLedgerUnavailableError, match="QuickbooksException"):
+    SourceLedgerResolver._read_report(_Client(), window)
 
 
 def test_a_ledger_with_nothing_to_check_is_refused(native):

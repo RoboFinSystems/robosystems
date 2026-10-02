@@ -30,6 +30,7 @@ class BalanceObservation:
   amount_cents: int
   document_id: str | None
   note: str | None
+  recorded_by: str
 
 
 def _observation(event: Event) -> BalanceObservation:
@@ -41,6 +42,7 @@ def _observation(event: Event) -> BalanceObservation:
     amount_cents=int(event.amount or 0),
     document_id=metadata.get("document_id"),
     note=metadata.get("note"),
+    recorded_by=str(event.created_by),
   )
 
 

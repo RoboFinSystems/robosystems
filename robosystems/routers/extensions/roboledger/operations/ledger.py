@@ -90,6 +90,7 @@ from robosystems.operations.event_block.registry import (
   HandlerAmbiguousError,
   HandlerNotFoundError,
 )
+from robosystems.operations.event_block.reserved import ReservedEventTypeError
 from robosystems.operations.event_block.template import TemplateInterpolationError
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
@@ -161,7 +162,10 @@ from robosystems.operations.roboledger.commands.reconciling_items import (
 from robosystems.operations.roboledger.commands.reconciling_items import (
   resolve_reconciling_item as cmd_resolve_reconciling_item,
 )
-from robosystems.operations.roboledger.reconciliations import NoSourceLedgerError
+from robosystems.operations.roboledger.reconciliations import (
+  NoSourceLedgerError,
+  SourceLedgerUnavailableError,
+)
 from robosystems.routers.extensions.roboledger._common import make_registrar
 
 router = APIRouter()
@@ -234,6 +238,7 @@ create_event_block_op = _registrar.register(
         409,
         lambda _e: "Event already ingested for this source and external_id",
       ),
+      ReservedEventTypeError: 422,
       HandlerNotFoundError: 404,
       HandlerAmbiguousError: 409,
       TemplateInterpolationError: 422,
@@ -280,6 +285,7 @@ update_event_block_op = _registrar.register(
     result_type=EventBlockEnvelope,
     error_map={
       EventNotFoundError: 404,
+      ReservedEventTypeError: 422,
       InvalidEventTransitionError: 422,
       # The event's rows already posted (or published to QB): reverse instead.
       EventEffectsAlreadyLandedError: 422,
@@ -501,6 +507,7 @@ preview_reconciliations_op = _registrar.register(
     requires_graph_id=True,
     error_map={
       NoSourceLedgerError: 409,
+      SourceLedgerUnavailableError: 503,
       # Intuit unreachable or busy; the connection is fine. Before the base.
       QBAuthUnavailableError: 503,
       QBAuthFailedError: 401,
@@ -540,6 +547,7 @@ refresh_reconciliations_op = _registrar.register(
     error_map={
       NoSourceLedgerError: 409,
       RowLockedError: 409,
+      SourceLedgerUnavailableError: 503,
       # Intuit unreachable or busy; the connection is fine. Before the base.
       QBAuthUnavailableError: 503,
       QBAuthFailedError: 401,
@@ -615,6 +623,7 @@ set_reconciliation_policy_op = _registrar.register(
       RowLockedError: 409,
       ValueError: 422,
     },
+    mark_stale_reason="reconciliation_policy_changed",
   )
 )
 
