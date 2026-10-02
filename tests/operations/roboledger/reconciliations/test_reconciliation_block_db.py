@@ -720,6 +720,29 @@ def test_a_comparison_without_its_tied_rows_is_not_recorded(ledger):
   assert _blocks(ledger) == []
 
 
+def test_a_comparison_that_lost_its_ledger_fingerprint_is_not_recorded(ledger):
+  """Without it the block would read stale for good, with nothing to say why."""
+  from robosystems.models.api.extensions.reconciliations import (
+    ReconciliationPreviewResponse,
+  )
+  from robosystems.operations.roboledger.commands import reconciliations as commands
+
+  whole = commands.compute_reconciliations
+
+  def round_tripped(*args, **kwargs):
+    comparison = whole(*args, **kwargs)
+    return ReconciliationPreviewResponse.model_validate(comparison.model_dump())
+
+  with (
+    patch.object(commands, "compute_reconciliations", round_tripped),
+    pytest.raises(RuntimeError, match="ledger fingerprint"),
+  ):
+    _refresh(ledger, source_report(*TIED))
+  ledger.rollback()
+
+  assert _blocks(ledger) == []
+
+
 # ── Staleness ───────────────────────────────────────────────────────────────
 
 

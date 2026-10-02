@@ -445,6 +445,12 @@ def record_reconciliation(
     "compared_via": compared_via,
   }
   if not account_scope:
+    if comparison._ledger_digest is None:
+      # It rides on a private attribute, which a dump and re-validate drops.
+      raise RuntimeError(
+        "A ledger-scope comparison must carry its ledger fingerprint; record "
+        "the object compute_reconciliations returned."
+      )
     metadata["ledger_digest"] = comparison._ledger_digest
   if account_scope:
     (row,) = comparison.rows
