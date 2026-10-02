@@ -313,6 +313,31 @@ def test_delete_still_refuses_a_live_draft_in_a_closed_month(ext_session):
   assert session.get(Structure, structure_id) is not None
 
 
+def test_ending_early_takes_a_leftover_draft_in_a_closed_month(ext_session):
+  """The same leftover, past the cutoff of a schedule being ended early."""
+  session = ext_session
+  structure_id = _drafted(session, as_of=datetime(2026, 4, 15, tzinfo=UTC))
+  january, february, march = sorted(
+    _schedule_entries(session, structure_id), key=lambda e: e.posting_date
+  )
+  january.status = "posted"
+  session.get(Event, february.triggered_by_event_id).status = "voided"
+  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-02"))
+  session.commit()
+  kept, open_month = january.id, march.posting_date
+
+  ScheduleService().truncate_schedule(
+    session,
+    structure_id=structure_id,
+    new_end_date=date(2026, 1, 31),
+    reason="Sold",
+    updated_by="usr",
+  )
+
+  assert open_month == date(2026, 3, 31)
+  assert [e.id for e in _schedule_entries(session, structure_id)] == [kept]
+
+
 def test_rebuild_counts_entries_a_close_landed_before_the_fence(ext_session):
   session = ext_session
   structure_id = _drafted(session)
