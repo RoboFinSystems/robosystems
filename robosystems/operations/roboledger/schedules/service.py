@@ -69,7 +69,7 @@ class ScheduleMetadata:
   useful_life_months: int = 0
   asset_element_id: str | None = None
   periodic_amounts: list[int] | None = None  # cents; see Request model
-  acquired_on: date | None = None  # see Request model
+  booked_on: date | None = None  # see Request model
 
 
 @dataclass
@@ -247,9 +247,9 @@ class ScheduleService:
         "useful_life_months": schedule_metadata.useful_life_months,
         "asset_element_id": schedule_metadata.asset_element_id,
         "periodic_amounts": schedule_metadata.periodic_amounts,
-        "acquired_on": (
-          schedule_metadata.acquired_on.isoformat()
-          if schedule_metadata.acquired_on
+        "booked_on": (
+          schedule_metadata.booked_on.isoformat()
+          if schedule_metadata.booked_on
           else None
         ),
       }

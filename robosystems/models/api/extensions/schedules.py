@@ -68,7 +68,7 @@ class ScheduleMetadataRequest(BaseModel):
   asset_element_id: str | None = Field(
     None, description="BS asset element for net book value"
   )
-  acquired_on: date | None = Field(
+  booked_on: date | None = Field(
     None,
     description=(
       "The date the cost went on the books, when that is before the "

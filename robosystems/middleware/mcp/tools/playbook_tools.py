@@ -184,7 +184,7 @@ _SCHEDULE_AUTHORING: list[str] = [
   "COST BOOKED BEFORE THE FIRST PERIOD: when the cost went on the books "
   "before the schedule starts (a policy paid in December that amortizes "
   "from January, an asset bought the month before it is placed in service), "
-  "set schedule_metadata.acquired_on to that date. The schedule then carries "
+  "set schedule_metadata.booked_on to that date. The schedule then carries "
   "its full cost from then until it starts, so the account's schedule "
   "reconciliation ties in the months between.",
   "MATCH THE CALENDAR WATERMARK — set the schedule's closed_through to the "

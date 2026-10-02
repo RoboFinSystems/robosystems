@@ -86,7 +86,7 @@ def _schedule(
   asset: str | None = None,
   auto_reverse: bool = False,
   closed_through: date | None = None,
-  acquired_on: date | None = None,
+  booked_on: date | None = None,
 ) -> str:
   created = create_schedule(
     session,
@@ -100,7 +100,7 @@ def _schedule(
         debit_element_id=debit, credit_element_id=credit, auto_reverse=auto_reverse
       ),
       schedule_metadata=ScheduleMetadataRequest(
-        original_amount=original, asset_element_id=asset, acquired_on=acquired_on
+        original_amount=original, asset_element_id=asset, booked_on=booked_on
       ),
       closed_through=closed_through,
     ),
@@ -460,7 +460,7 @@ def test_a_prepaid_paid_before_it_starts_is_carried_from_the_day_it_was_paid(nat
     "Insurance policy",
     accounts["insurance"],
     accounts["prepaid"],
-    acquired_on=date(2025, 12, 20),
+    booked_on=date(2025, 12, 20),
   )
 
   assert _preview(session, "2025-11").rows == []
@@ -486,7 +486,7 @@ def test_an_asset_bought_before_it_is_placed_in_service_is_carried_at_cost(nativ
     start=date(2026, 3, 1),
     end=date(2027, 2, 28),
     asset=accounts["equipment"],
-    acquired_on=date(2026, 2, 10),
+    booked_on=date(2026, 2, 10),
   )
 
   assert _rows(_preview(session, "2026-02")) == {
@@ -496,7 +496,7 @@ def test_an_asset_bought_before_it_is_placed_in_service_is_carried_at_cost(nativ
 
 
 def test_the_date_can_be_added_to_a_schedule_without_touching_the_rest(native):
-  """An existing schedule gets its acquisition date by naming that one field."""
+  """An existing schedule gets its booked date by naming that one field."""
   from robosystems.models.api.extensions.schedules import UpdateScheduleRequest
   from robosystems.operations.roboledger.commands.schedules import update_schedule
 
@@ -517,7 +517,7 @@ def test_the_date_can_be_added_to_a_schedule_without_touching_the_rest(native):
     session,
     UpdateScheduleRequest(
       structure_id=structure_id,
-      schedule_metadata=ScheduleMetadataRequest(acquired_on=date(2026, 2, 10)),
+      schedule_metadata=ScheduleMetadataRequest(booked_on=date(2026, 2, 10)),
     ),
     updated_by="usr",
   )
@@ -527,7 +527,7 @@ def test_the_date_can_be_added_to_a_schedule_without_touching_the_rest(native):
   assert (
     stored.schedule_metadata.original_amount,
     stored.schedule_metadata.asset_element_id,
-    stored.schedule_metadata.acquired_on,
+    stored.schedule_metadata.booked_on,
   ) == (120_000, accounts["equipment"], date(2026, 2, 10))
   assert _rows(_preview(session, "2026-02"))["Equipment"] == (
     1_200.00,
@@ -536,7 +536,7 @@ def test_the_date_can_be_added_to_a_schedule_without_touching_the_rest(native):
   )
 
 
-def test_the_acquisition_date_survives_a_rebuild(native):
+def test_the_booked_date_survives_a_rebuild(native):
   from robosystems.models.api.extensions.schedules import RebuildScheduleRequest
   from robosystems.operations.roboledger.commands.schedules import rebuild_schedule
 
@@ -546,7 +546,7 @@ def test_the_acquisition_date_survives_a_rebuild(native):
     "Insurance policy",
     accounts["insurance"],
     accounts["prepaid"],
-    acquired_on=date(2025, 12, 20),
+    booked_on=date(2025, 12, 20),
   )
 
   rebuild_schedule(
@@ -555,7 +555,7 @@ def test_the_acquisition_date_survives_a_rebuild(native):
   session.commit()
 
   envelope = get_information_block(session, structure_id)
-  assert envelope.artifact.mechanics.schedule_metadata.acquired_on == date(2025, 12, 20)
+  assert envelope.artifact.mechanics.schedule_metadata.booked_on == date(2025, 12, 20)
   assert _preview(session, "2025-12").rows[0].independent_balance == 1_200.00
 
 
