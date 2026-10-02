@@ -76,6 +76,42 @@ def account(
   return str(element.id)
 
 
+def classified_account(
+  session, name: str, trait: str, *, balance_type: str = "debit"
+) -> str:
+  """A chart account carrying its financial-statement element as a trait,
+  the way a synced or initialized chart does."""
+  from robosystems.models.extensions import ElementTrait, Trait
+
+  trait_row = (
+    session.query(Trait)
+    .filter(
+      Trait.category == "elementsOfFinancialStatements", Trait.identifier == trait
+    )
+    .first()
+  )
+  if trait_row is None:
+    trait_row = Trait(category="elementsOfFinancialStatements", identifier=trait)
+    session.add(trait_row)
+    session.flush()
+  element = Element(
+    name=name,
+    code=name[:8],
+    balance_type=balance_type,
+    period_type="instant"
+    if trait in ("asset", "contraAsset", "liability")
+    else "duration",
+    created_by="test",
+  )
+  session.add(element)
+  session.flush()
+  session.add(
+    ElementTrait(element_id=element.id, trait_id=trait_row.id, is_primary=True)
+  )
+  session.flush()
+  return str(element.id)
+
+
 def entry(
   session, posting_date: date, debit: str, credit: str, cents: int, *, status="posted"
 ):

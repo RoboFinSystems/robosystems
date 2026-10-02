@@ -2,19 +2,25 @@
 
 from .engine import compute_reconciliations, reconciliation_window
 from .resolvers import (
+  IndependentComponent,
   IndependentSide,
   NoSourceLedgerError,
+  NothingToReconcileError,
   ReconciliationWindow,
   Resolver,
+  ScheduleRegisterResolver,
   SourceLedgerResolver,
   UnmatchedBalance,
 )
 
 __all__ = [
+  "IndependentComponent",
   "IndependentSide",
   "NoSourceLedgerError",
+  "NothingToReconcileError",
   "ReconciliationWindow",
   "Resolver",
+  "ScheduleRegisterResolver",
   "SourceLedgerResolver",
   "UnmatchedBalance",
   "compute_reconciliations",

@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 
 # Where the independent balance comes from. `source_ledger` is the synced
 # accounting system's own trial balance, which checks the mirror of its books.
-ReconciliationMethod = Literal["source_ledger"]
+# `schedule_register` is what an account's schedules say it carries.
+ReconciliationMethod = Literal["source_ledger", "schedule_register"]
 
 
 class PreviewReconciliationsRequest(BaseModel):
@@ -25,11 +26,40 @@ class PreviewReconciliationsRequest(BaseModel):
     description="Period to compare at its last day, as YYYY-MM.",
     examples=["2026-08"],
   )
+  method: ReconciliationMethod = Field(
+    "source_ledger",
+    description=(
+      "Which check to preview. `source_ledger` compares every account with "
+      "the synced accounting system's own trial balance. `schedule_register` "
+      "compares each asset account a schedule carries a balance on with what "
+      "its schedules say it holds."
+    ),
+  )
   include_tied: bool = Field(
     False,
     description=(
       "Also return the accounts that tie. Off by default: the differences are "
       "the work, and the counts cover the rest."
+    ),
+  )
+
+
+class ReconciliationComponent(BaseModel):
+  """One part of an account's independent balance: what a single schedule
+  says the account carries."""
+
+  structure_id: str = Field(..., description="The schedule.")
+  name: str = Field(..., description="The schedule's name.")
+  amount: float = Field(
+    ...,
+    description=(
+      "What the schedule says the account carries at the period end, debit-positive."
+    ),
+  )
+  note: str | None = Field(
+    None,
+    description=(
+      "Why the schedule carries nothing, when it has been disposed of or ended early."
     ),
   )
 
@@ -59,7 +89,13 @@ class ReconciliationRow(BaseModel):
     ),
   )
   ledger_balance: float = Field(
-    ..., description="What the ledger holds, from landed entries."
+    ...,
+    description=(
+      "What the ledger holds. For `source_ledger`, landed entries only. For "
+      "`schedule_register`, the balance as the period's close will leave it: "
+      "landed entries, drafts awaiting the close, and schedule entries not "
+      "yet drafted."
+    ),
   )
   independent_balance: float = Field(
     ..., description="What the independent source says."
@@ -72,6 +108,13 @@ class ReconciliationRow(BaseModel):
       "account and disagree. `not_in_ledger`: the source reports an account "
       "the ledger has none for. `not_in_source`: the ledger holds a balance "
       "on an account the source does not have."
+    ),
+  )
+  components: list[ReconciliationComponent] = Field(
+    default_factory=list,
+    description=(
+      "`schedule_register` only: the schedules that make up the independent "
+      "balance, one entry each."
     ),
   )
 
@@ -213,7 +256,8 @@ class ReconciliationSummary(BaseModel):
     ...,
     description=(
       "Where the independent side comes from. `source_ledger` is the synced "
-      "accounting system's own trial balance."
+      "accounting system's own trial balance. `schedule_register` is what "
+      "the account's schedules say it carries."
     ),
   )
   element_id: str | None = Field(
@@ -240,7 +284,9 @@ class ReconciliationSummary(BaseModel):
     None,
     description=(
       "What is left unexplained at the last comparison; null when the period "
-      "has not been compared."
+      "has not been compared. For a ledger-scope block, the sum of every "
+      "account's absolute difference. For an account-scope block, the ledger "
+      "balance minus the independent one."
     ),
   )
   accounts_compared: int | None = Field(
@@ -248,6 +294,27 @@ class ReconciliationSummary(BaseModel):
   )
   accounts_different: int | None = Field(
     None, description="Ledger-scope only: accounts that do not tie."
+  )
+  ledger_balance: float | None = Field(
+    None,
+    description=(
+      "Account-scope only: the account's balance at the last comparison, "
+      "debit-positive, as the period's close will leave it."
+    ),
+  )
+  independent_balance: float | None = Field(
+    None,
+    description=(
+      "Account-scope only: what the independent source said at the last "
+      "comparison, debit-positive."
+    ),
+  )
+  components: list[ReconciliationComponent] = Field(
+    default_factory=list,
+    description=(
+      "Account-scope only: what makes up the independent balance. For "
+      "`schedule_register`, one entry per schedule."
+    ),
   )
   source: str | None = Field(
     None, description="The system the independent side was read from."

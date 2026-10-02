@@ -471,17 +471,22 @@ preview_reconciliations_op = _registrar.register(
     name="preview-reconciliations",
     summary="Preview Reconciliations",
     description=(
-      "Compare the ledger's account balances at a period end with the books "
-      "they were synced from. Reads QuickBooks' own trial balance for the "
-      "period end and sets it beside the ledger's, account by account: each "
-      "row carries both balances, the difference, and whether the account "
-      "ties. Balance-sheet accounts are compared cumulatively; income and "
-      "expense accounts from the start of the fiscal year. A difference means "
-      "the ledger's copy of the books has drifted from the source (a "
-      "transaction deleted or back-dated there after it was synced, or "
-      "activity not yet synced), so run this before trusting any other "
-      "figure on a synced ledger. Writes nothing. Only for a graph with a "
-      "connected QuickBooks ledger."
+      "Compare the ledger at a period end with something outside it, without "
+      "recording anything. `method` picks the check. `source_ledger` (the "
+      "default) reads QuickBooks' own trial balance for the period end and "
+      "sets it beside the ledger's, account by account: balance-sheet "
+      "accounts cumulatively, income and expense accounts from the start of "
+      "the fiscal year. A difference there means the ledger's copy of the "
+      "books has drifted from the source (a transaction deleted or back-dated "
+      "there after it was synced, or activity not yet synced), so run it "
+      "before trusting any other figure on a synced ledger; it needs a "
+      "connected QuickBooks ledger. `schedule_register` compares each asset "
+      "account a schedule carries a balance on (a prepaid, accumulated "
+      "depreciation, a fixed-asset cost account) with what its schedules say "
+      "it holds, and lists the schedules behind each figure. A difference "
+      "there is a balance with no schedule behind it, or a scheduled amount "
+      "the ledger does not hold. Each row carries both balances, the "
+      "difference, and whether the account ties."
     ),
     command=cmd_preview_reconciliations,
     request_model=PreviewReconciliationsRequest,
@@ -504,17 +509,21 @@ refresh_reconciliations_op = _registrar.register(
     name="refresh-reconciliations",
     summary="Refresh Reconciliations",
     description=(
-      "Compare the ledger with its independent sources at a period end and "
-      "record the result on each reconciliation block. For a ledger synced "
-      "from QuickBooks this reads QuickBooks' own trial balance and records "
-      "one comparison for the whole ledger: how many accounts were compared, "
-      "how many do not tie, and the total difference. The block reconciles "
-      "for the period when the difference is within its materiality. Running "
+      "Run every reconciliation that applies at a period end and record each "
+      "result on its block. A ledger synced from QuickBooks is compared with "
+      "QuickBooks' own trial balance, on one block for the whole ledger. Each "
+      "asset account a schedule carries a balance on is compared with what "
+      "its schedules say it holds, on a block of its own. A block reconciles "
+      "for the period when its difference is within its materiality. Running "
       "it again replaces the period's comparison, so the answer is always as "
-      "of the last run. Returns every reconciliation's standing for the "
-      "period, with the accounts that did not tie. Creates the block the "
-      "first time it runs. Use preview-reconciliations to see the comparison "
-      "without recording it."
+      "of the last run. A block is created the first time its check applies, "
+      "and from then on the period's close waits on it until "
+      "set-reconciliation-policy releases it. The one exception is an account "
+      "block whose first comparison does not tie: it is created without "
+      "holding the close, so a difference found on first contact is reported "
+      "and becomes a close requirement only when you turn it on. Returns "
+      "every reconciliation's standing for the period. Use "
+      "preview-reconciliations to see a comparison without recording it."
     ),
     command=cmd_refresh_reconciliations,
     request_model=RefreshReconciliationsRequest,

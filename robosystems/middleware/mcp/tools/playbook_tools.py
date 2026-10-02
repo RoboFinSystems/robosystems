@@ -228,8 +228,8 @@ _KEY_RULES: list[str] = [
   "and unreconciled_accounts (a reconciliation the close waits on is not "
   "reconciled for the month, or was never compared for it; run "
   "refresh-reconciliations, which compares the ledger with the books it was "
-  "synced from and lists the accounts that do not tie; "
-  "unreconciled_account_sample names them). "
+  "synced from and each scheduled asset account with its schedules, and "
+  "lists what does not tie; unreconciled_account_sample names them). "
   "Resolve before close-period; get-fiscal-calendar reports them.",
   "JE PUBLISH SEMANTICS: journal_entry_recorded events with source='manual' "
   "publish to QuickBooks at close through the outbox; source='system' posts "
