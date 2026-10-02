@@ -86,6 +86,7 @@ def _schedule(
   asset: str | None = None,
   auto_reverse: bool = False,
   closed_through: date | None = None,
+  booked_on: date | None = None,
 ) -> str:
   created = create_schedule(
     session,
@@ -99,7 +100,7 @@ def _schedule(
         debit_element_id=debit, credit_element_id=credit, auto_reverse=auto_reverse
       ),
       schedule_metadata=ScheduleMetadataRequest(
-        original_amount=original, asset_element_id=asset
+        original_amount=original, asset_element_id=asset, booked_on=booked_on
       ),
       closed_through=closed_through,
     ),
@@ -447,6 +448,115 @@ def test_months_before_the_watermark_count_without_schedule_entries(native):
   assert _rows(_preview(session, "2026-06")) == {
     "Prepaid Insurance": (600.00, 600.00, "tied")
   }
+
+
+def test_a_prepaid_paid_before_it_starts_is_carried_from_the_day_it_was_paid(native):
+  """Next year's policy is paid in December. The schedule says when, so
+  December's balance has a schedule behind it."""
+  session, accounts = native
+  entry(session, date(2025, 12, 20), accounts["prepaid"], accounts["cash"], 120_000)
+  _schedule(
+    session,
+    "Insurance policy",
+    accounts["insurance"],
+    accounts["prepaid"],
+    booked_on=date(2025, 12, 20),
+  )
+
+  assert _preview(session, "2025-11").rows == []
+  (row,) = _preview(session, "2025-12").rows
+  assert (row.ledger_balance, row.independent_balance, row.status) == (
+    1_200.00,
+    1_200.00,
+    "tied",
+  )
+  assert [(c.name, c.amount) for c in row.components] == [
+    ("Insurance policy", 1_200.00)
+  ]
+
+
+def test_an_asset_bought_before_it_is_placed_in_service_is_carried_at_cost(native):
+  session, accounts = native
+  entry(session, date(2026, 2, 10), accounts["equipment"], accounts["cash"], 120_000)
+  _schedule(
+    session,
+    "Roaster",
+    accounts["depreciation"],
+    accounts["accumulated"],
+    start=date(2026, 3, 1),
+    end=date(2027, 2, 28),
+    asset=accounts["equipment"],
+    booked_on=date(2026, 2, 10),
+  )
+
+  assert _rows(_preview(session, "2026-02")) == {
+    "Equipment": (1_200.00, 1_200.00, "tied"),
+    "Accumulated Depreciation": (0.00, 0.00, "tied"),
+  }
+
+
+def test_the_date_can_be_added_to_a_schedule_without_touching_the_rest(native):
+  """An existing schedule gets its booked date by naming that one field."""
+  from robosystems.models.api.extensions.schedules import UpdateScheduleRequest
+  from robosystems.operations.roboledger.commands.schedules import update_schedule
+
+  session, accounts = native
+  entry(session, date(2026, 2, 10), accounts["equipment"], accounts["cash"], 120_000)
+  structure_id = _schedule(
+    session,
+    "Roaster",
+    accounts["depreciation"],
+    accounts["accumulated"],
+    start=date(2026, 3, 1),
+    end=date(2027, 2, 28),
+    asset=accounts["equipment"],
+  )
+  assert _preview(session, "2026-02").rows == []
+
+  update_schedule(
+    session,
+    UpdateScheduleRequest(
+      structure_id=structure_id,
+      schedule_metadata=ScheduleMetadataRequest(booked_on=date(2026, 2, 10)),
+    ),
+    updated_by="usr",
+  )
+  session.commit()
+
+  stored = get_information_block(session, structure_id).artifact.mechanics
+  assert (
+    stored.schedule_metadata.original_amount,
+    stored.schedule_metadata.asset_element_id,
+    stored.schedule_metadata.booked_on,
+  ) == (120_000, accounts["equipment"], date(2026, 2, 10))
+  assert _rows(_preview(session, "2026-02"))["Equipment"] == (
+    1_200.00,
+    1_200.00,
+    "tied",
+  )
+
+
+def test_the_booked_date_survives_a_rebuild(native):
+  from robosystems.models.api.extensions.schedules import RebuildScheduleRequest
+  from robosystems.operations.roboledger.commands.schedules import rebuild_schedule
+
+  session, accounts = native
+  structure_id = _schedule(
+    session,
+    "Insurance policy",
+    accounts["insurance"],
+    accounts["prepaid"],
+    booked_on=date(2025, 12, 20),
+  )
+
+  rebuild_schedule(
+    session, RebuildScheduleRequest(structure_id=structure_id), created_by="usr"
+  )
+  session.commit()
+
+  envelope = get_information_block(session, structure_id)
+  assert envelope.artifact.mechanics.schedule_metadata.booked_on == date(2025, 12, 20)
+  assert _preview(session, "2025-12").rows[0].independent_balance == 1_200.00
 
 
 def test_only_asset_accounts_that_carry_a_balance_are_compared(native):

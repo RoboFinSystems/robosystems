@@ -214,8 +214,10 @@ class ScheduleRegisterResolver:
 
   A schedule carries a balance on the account it credits (a prepaid drawing
   down from cost, or depreciation accumulating) and on the cost account it
-  names. One that was disposed of, or ended early, carries nothing from then
-  on: whatever is left in the account has no schedule behind it.
+  names. It speaks from its first period, or from its ``booked_on`` date
+  when the cost was booked earlier. One that was disposed of, or ended early,
+  carries nothing from then on: whatever is left in the account has no
+  schedule behind it.
   ``also_cover`` adds accounts no schedule reaches any more, which then
   compare against zero.
 
@@ -275,8 +277,14 @@ class ScheduleRegisterResolver:
 
     for schedule in schedules:
       schedule_id = str(schedule.id)
-      if schedule_id not in recognized:
-        continue  # Not started by the period end.
+      recognized_cents = recognized.get(schedule_id)
+      if recognized_cents is None:
+        # Not started by the period end. It still carries its cost from the
+        # day that cost went on the books, when the schedule says when.
+        booked_on = _schedule_metadata(schedule).get("booked_on")
+        if not booked_on or booked_on > as_of.isoformat():
+          continue
+        recognized_cents = 0
       note = _ended_note(schedule, disposed.get(schedule_id), as_of)
       credit_id = _credit_id(schedule)
       asset_id = _asset_id(schedule)
@@ -287,9 +295,7 @@ class ScheduleRegisterResolver:
         # schedule's own running balance is written by.
         draws_down = credit_id in debit_normal and traits[credit_id] != "contraAsset"
         cents = (
-          _cost_basis(schedule) - recognized[schedule_id]
-          if draws_down
-          else -recognized[schedule_id]
+          _cost_basis(schedule) - recognized_cents if draws_down else -recognized_cents
         )
         _add(credit_id, schedule, 0 if note else cents, note)
 
