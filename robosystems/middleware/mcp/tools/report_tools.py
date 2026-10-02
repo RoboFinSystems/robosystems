@@ -121,8 +121,8 @@ class DeleteReportTool:
 
 
 _BUNDLE_FORMATS = (
-  XbrlFlavor.TAVI.value,
   RdfFlavor.HOLON_JSONLD.value,
+  XbrlFlavor.TAVI.value,
   XbrlFlavor.XBRL_2_1.value,
 )
 
@@ -144,7 +144,7 @@ class GetReportBundleTool:
 
 **PARAMETERS:**
 - `report_id`: the report. List them with query-graphql: `{ reports { reports { id name generationStatus } } }`
-- `format`: `tavi` (default) is the Project Tavi compiled model, the report in the form XBRL tools read; `holon-jsonld` the JSON-LD holon; `xbrl-2.1` the XBRL 2.1 package
+- `format`: `holon-jsonld` (default) is the JSON-LD holon, the one format that carries the whole report; `tavi` the Project Tavi compiled model; `xbrl-2.1` the XBRL 2.1 package
 
 **RETURNS:** `download_url`, `expires_at`, `content_type`, `format`, and `omitted_content` — what the report carries that this format does not.
 
@@ -163,7 +163,7 @@ class GetReportBundleTool:
           "format": {
             "type": "string",
             "enum": list(_BUNDLE_FORMATS),
-            "description": "Serialization to link. Defaults to tavi.",
+            "description": "Serialization to link. Defaults to holon-jsonld.",
           },
         },
         "required": ["report_id"],
@@ -179,7 +179,7 @@ class GetReportBundleTool:
     report_id = arguments.get("report_id")
     if not isinstance(report_id, str) or not report_id:
       return {"error": "invalid_input", "message": "report_id is required"}
-    flavor = arguments.get("format") or XbrlFlavor.TAVI.value
+    flavor = arguments.get("format") or RdfFlavor.HOLON_JSONLD.value
     if flavor not in _BUNDLE_FORMATS:
       return {
         "error": "invalid_input",

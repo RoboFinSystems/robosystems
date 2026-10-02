@@ -747,12 +747,11 @@ class ReportDownloadFormat(Enum):
   names are `HOLON_JSONLD` / `XBRL_2_1` while the resolver forwards
   the `.value` to the ops read.
 
-  `TAVI` is the Project Tavi compiled model, stamped at publish — the
-  report in the standards form the SEC pipeline publishes per filing,
-  rendered by report-components with no RDF step; `HOLON_JSONLD` is the
-  dataset-form named-graph holon (scene / boundary / projection) and
-  `XBRL_2_1` the XBRL 2.1 package, both materialized on first download off
-  the same bundle.
+  `HOLON_JSONLD` is the dataset-form named-graph holon (scene / boundary /
+  projection), stamped at publish — the one flavor that carries the whole
+  report; `TAVI` is the Project Tavi compiled model, the standards form the
+  SEC pipeline also publishes per filing, and `XBRL_2_1` the XBRL 2.1
+  package, both materialized on first download off the same bundle.
   """
 
   HOLON_JSONLD = "holon-jsonld"

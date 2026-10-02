@@ -225,9 +225,10 @@ def get_backup_prefix(
 # =============================================================================
 
 
-# The artifact stamped at publish and named by ``Report.bundle_url``: the Tavi
-# compiled model. Generations stamped before it are ``.jsonld``.
-REPORT_ANCHOR_EXTENSION = ".tavi.json"
+# The artifact stamped at publish and named by ``Report.bundle_url``: the
+# holon, which carries the whole report. Earlier generations are stamped
+# ``.tavi.json`` or, before that, ``.jsonld``.
+REPORT_ANCHOR_EXTENSION = ".holon.jsonld"
 
 
 def get_report_bundle_key(
@@ -243,7 +244,7 @@ def get_report_bundle_key(
 
   Example:
       >>> get_report_bundle_key("kg456", "rpt_01K8", 1)
-      'report-bundles/kg456/rpt_01K8/g1.tavi.json'
+      'report-bundles/kg456/rpt_01K8/g1.holon.jsonld'
   """
   config = GRAPH_STORAGE[GraphStorageType.REPORT_BUNDLES]
   return f"{config.prefix}{graph_id}/{report_id}/g{generation_count}{extension}"

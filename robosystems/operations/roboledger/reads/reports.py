@@ -320,15 +320,15 @@ def get_report_download_url(
   session: Session,
   graph_id: str,
   report_id: str,
-  flavor: str = XbrlFlavor.TAVI.value,
+  flavor: str = RdfFlavor.HOLON_JSONLD.value,
   expires_in: int = PRESIGN_DEFAULT_SECONDS,
 ) -> ReportBundleDownloadResponse | None:
   """Resolve a presigned URL for a published Report's serialization bundle.
 
-  The API never streams bytes. The Tavi model is stamped at publish; the
-  holon and XBRL 2.1 are materialized on first download and cached under a
+  The API never streams bytes. The holon is stamped at publish; the Tavi
+  and XBRL 2.1 are materialized on first download and cached under a
   ``generation_count``-versioned key, which never goes stale. (A generation
-  stamped before the Tavi became the anchor materializes it the same way.)
+  stamped before the holon became the anchor materializes it the same way.)
 
   Returns ``None`` when ``report_id`` doesn't resolve. Raises
   :class:`ReportBundleNotAvailableError` when the report exists but has

@@ -1,9 +1,9 @@
 """Tests for the publication artifacts a share carries across
 (``_load_publication_artifacts`` / ``_copy_publication_artifacts``).
 
-The Tavi is stamped at publish as the anchor; the holon is derived on demand.
+The holon is stamped at publish as the anchor; the Tavi is derived on demand.
 A share builds whichever artifact storage lacks (a generation stamped before
-the Tavi became the anchor has none until downloaded), off one bundle, and
+the holon became the anchor has none until downloaded), off one bundle, and
 copies each under the recipient's keys with its own media type.
 """
 
@@ -16,8 +16,10 @@ import pytest
 
 from robosystems.operations.roboledger.commands.reports import (
   PUBLICATION_MEDIA_TYPES,
+  BundleUploadError,
   _copy_publication_artifacts,
   _load_publication_artifacts,
+  _stamp_report_bundle,
 )
 
 _CMD = "robosystems.operations.roboledger.commands.reports"
@@ -34,28 +36,28 @@ def _s3(stored: dict[str, str]) -> MagicMock:
 
 @pytest.mark.unit
 def test_missing_artifacts_are_built_off_one_bundle() -> None:
-  s3 = _s3({"g1.tavi.json": "{tavi}"})
+  s3 = _s3({"g1.holon.jsonld": "{holon}"})
   with (
     patch(f"{_CMD}.S3Client", return_value=s3),
     patch(f"{_CMD}.build_report_bundle") as build,
-    patch(f"{_CMD}.serialize_to_holon_jsonld", return_value="{holon}"),
-    patch(f"{_CMD}.serialize_to_tavi") as tavi,
+    patch(f"{_CMD}.serialize_to_holon_jsonld") as holon,
+    patch(f"{_CMD}.serialize_to_tavi", return_value=b"{tavi}"),
     patch("robosystems.db.extensions.extensions_session"),
   ):
     artifacts = _load_publication_artifacts("kg1", "rpt_1", 1)
 
-  assert artifacts == {".tavi.json": "{tavi}", ".holon.jsonld": "{holon}"}
+  assert artifacts == {".holon.jsonld": "{holon}", ".tavi.json": "{tavi}"}
   build.assert_called_once()
-  tavi.assert_not_called()
+  holon.assert_not_called()
   uploads = {
     call.kwargs["key"].rsplit("/", 1)[-1]: call.kwargs["content_type"]
     for call in s3.upload_string.call_args_list
   }
-  assert uploads == {"g1.holon.jsonld": "application/ld+json"}
+  assert uploads == {"g1.tavi.json": "application/json"}
 
 
 @pytest.mark.unit
-def test_a_generation_stamped_before_the_tavi_anchor_gets_one_built() -> None:
+def test_a_generation_stamped_before_the_holon_anchor_gets_one_built() -> None:
   s3 = _s3({"g1.jsonld": "{flat}"})
   with (
     patch(f"{_CMD}.S3Client", return_value=s3),
@@ -129,7 +131,9 @@ def test_copy_writes_each_artifact_under_its_own_media_type() -> None:
     for call in s3.upload_string.call_args_list
   )
   assert report.generation_count == 1
-  assert report.bundle_url is not None and report.bundle_url.endswith("/g1.tavi.json")
+  assert report.bundle_url is not None and report.bundle_url.endswith(
+    "/g1.holon.jsonld"
+  )
 
 
 @pytest.mark.unit
@@ -138,6 +142,44 @@ def test_copy_without_the_anchor_leaves_bundle_url_unset() -> None:
   s3.upload_string.return_value = True
   report = SimpleNamespace(id="rpt_copy", generation_count=0, bundle_url=None)
   with patch(f"{_CMD}.S3Client", return_value=s3):
-    _copy_publication_artifacts({".holon.jsonld": "{holon}"}, "kg2", report, 1)  # type: ignore[arg-type]
+    _copy_publication_artifacts({".tavi.json": "{tavi}"}, "kg2", report, 1)  # type: ignore[arg-type]
+
+  assert report.bundle_url is None
+
+
+@pytest.mark.unit
+def test_publish_stamps_the_holon_as_the_anchor() -> None:
+  s3 = MagicMock()
+  s3.upload_string.return_value = True
+  report = SimpleNamespace(id="rpt_1", generation_count=1, bundle_url=None)
+  with (
+    patch(f"{_CMD}.S3Client", return_value=s3),
+    patch(f"{_CMD}.build_report_bundle"),
+    patch(f"{_CMD}.serialize_to_holon_jsonld", return_value="{holon}"),
+    patch(f"{_CMD}.serialize_to_tavi") as tavi,
+  ):
+    _stamp_report_bundle(MagicMock(), "kg1", report)  # type: ignore[arg-type]
+
+  tavi.assert_not_called()
+  _, kwargs = s3.upload_string.call_args
+  assert kwargs["content"] == "{holon}"
+  assert kwargs["key"] == "report-bundles/kg1/rpt_1/g2.holon.jsonld"
+  assert kwargs["content_type"] == "application/ld+json"
+  assert report.generation_count == 2
+  assert report.bundle_url.endswith("/report-bundles/kg1/rpt_1/g2.holon.jsonld")
+
+
+@pytest.mark.unit
+def test_publish_aborts_when_the_holon_cannot_be_stored() -> None:
+  s3 = MagicMock()
+  s3.upload_string.return_value = False
+  report = SimpleNamespace(id="rpt_1", generation_count=0, bundle_url=None)
+  with (
+    patch(f"{_CMD}.S3Client", return_value=s3),
+    patch(f"{_CMD}.build_report_bundle"),
+    patch(f"{_CMD}.serialize_to_holon_jsonld", return_value="{holon}"),
+    pytest.raises(BundleUploadError, match="holon"),
+  ):
+    _stamp_report_bundle(MagicMock(), "kg1", report)  # type: ignore[arg-type]
 
   assert report.bundle_url is None

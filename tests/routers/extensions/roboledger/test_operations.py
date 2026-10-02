@@ -1245,8 +1245,9 @@ class TestCreateReportOp:
       patch(
         "robosystems.operations.roboledger.commands.reports.create_report",
         side_effect=BundleUploadError(
-          "Failed to upload JSON-LD bundle for report rpt_01 to "
-          "s3://test-bucket/graph-bundles/kg.../rpt_01/g1.tavi.json; aborting publish."
+          "Failed to upload holon bundle for report rpt_01 to "
+          "s3://test-bucket/report-bundles/kg.../rpt_01/g1.holon.jsonld; "
+          "aborting publish."
         ),
       ),
       patch("robosystems.db.extensions.extensions_session") as mock_session,

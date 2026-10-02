@@ -167,8 +167,8 @@ serialization flavors of the Report bundle via the published Python SDK
 
 | File | Format |
 |---|---|
-| `output/roboledger-demo.tavi.json` | Tavi compiled model — the anchor stamped at publish |
-| `output/roboledger-demo.holon.jsonld` | holon — dataset-form JSON-LD (scene / boundary / projection) |
+| `output/roboledger-demo.tavi.json` | Tavi compiled model |
+| `output/roboledger-demo.holon.jsonld` | holon — dataset-form JSON-LD (scene / boundary / projection), the anchor stamped at publish |
 | `output/roboledger-demo.zip` | XBRL 2.1 report package — `instance.xml` + `report.xsd` + presentation/calc/definition linkbases |
 
 `output/` is gitignored (each run stamps fresh graph/report IDs).
