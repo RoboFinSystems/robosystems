@@ -495,6 +495,47 @@ def test_an_asset_bought_before_it_is_placed_in_service_is_carried_at_cost(nativ
   }
 
 
+def test_the_date_can_be_added_to_a_schedule_without_touching_the_rest(native):
+  """An existing schedule gets its acquisition date by naming that one field."""
+  from robosystems.models.api.extensions.schedules import UpdateScheduleRequest
+  from robosystems.operations.roboledger.commands.schedules import update_schedule
+
+  session, accounts = native
+  entry(session, date(2026, 2, 10), accounts["equipment"], accounts["cash"], 120_000)
+  structure_id = _schedule(
+    session,
+    "Roaster",
+    accounts["depreciation"],
+    accounts["accumulated"],
+    start=date(2026, 3, 1),
+    end=date(2027, 2, 28),
+    asset=accounts["equipment"],
+  )
+  assert _preview(session, "2026-02").rows == []
+
+  update_schedule(
+    session,
+    UpdateScheduleRequest(
+      structure_id=structure_id,
+      schedule_metadata=ScheduleMetadataRequest(acquired_on=date(2026, 2, 10)),
+    ),
+    updated_by="usr",
+  )
+  session.commit()
+
+  stored = get_information_block(session, structure_id).artifact.mechanics
+  assert (
+    stored.schedule_metadata.original_amount,
+    stored.schedule_metadata.asset_element_id,
+    stored.schedule_metadata.acquired_on,
+  ) == (120_000, accounts["equipment"], date(2026, 2, 10))
+  assert _rows(_preview(session, "2026-02"))["Equipment"] == (
+    1_200.00,
+    1_200.00,
+    "tied",
+  )
+
+
 def test_the_acquisition_date_survives_a_rebuild(native):
   from robosystems.models.api.extensions.schedules import RebuildScheduleRequest
   from robosystems.operations.roboledger.commands.schedules import rebuild_schedule

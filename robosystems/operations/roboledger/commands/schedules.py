@@ -315,17 +315,13 @@ def update_schedule(
     metadata["entry_template"] = new_template
 
   if body.schedule_metadata is not None:
+    # Only the fields the caller named change. Replacing the whole block
+    # would reset the rest to defaults, so adding a date to an existing
+    # schedule would wipe its cost basis.
     metadata["schedule_metadata"] = {
-      "method": body.schedule_metadata.method,
-      "original_amount": body.schedule_metadata.original_amount,
-      "residual_value": body.schedule_metadata.residual_value,
-      "useful_life_months": body.schedule_metadata.useful_life_months,
-      "asset_element_id": body.schedule_metadata.asset_element_id,
-      "periodic_amounts": body.schedule_metadata.periodic_amounts,
-      "acquired_on": (
-        body.schedule_metadata.acquired_on.isoformat()
-        if body.schedule_metadata.acquired_on
-        else None
+      **(metadata.get("schedule_metadata") or {}),
+      **body.schedule_metadata.model_dump(
+        mode="json", include=body.schedule_metadata.model_fields_set
       ),
     }
 
