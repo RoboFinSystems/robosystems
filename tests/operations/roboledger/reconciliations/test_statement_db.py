@@ -303,6 +303,39 @@ def test_a_required_statement_holds_the_close_until_one_is_recorded(books):
   assert "unreconciled_accounts" not in gate().blockers
 
 
+def test_a_corrected_balance_lapses_the_sign_off_and_the_original_restores_it(books):
+  """The period is closed and signed off. A statement can still be recorded
+  for it, since it writes no books, but the review was of the first balance."""
+  from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
+
+  session, accounts = books
+  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-08"))
+  rec = _record(session, accounts["loan"], 4_800.00)
+  with patch(f"{_COMMANDS}._explicit_write_members", return_value={"usr"}):
+    sign_off_reconciliation(
+      session,
+      SignOffReconciliationRequest(structure_id=rec.structure_id, period="2026-08"),
+      graph_id=GRAPH_ID,
+      created_by="usr",
+    )
+  session.commit()
+
+  corrected = _record(session, accounts["loan"], 4_900.00)
+  restored = _record(session, accounts["loan"], 4_800.00)
+
+  assert (corrected.status, corrected.reviewed_by) == ("unreconciled", None)
+  assert (restored.status, restored.reviewed_by) == ("reviewed", "usr")
+
+
+def test_the_cents_recorded_are_the_ones_typed(books):
+  session, accounts = books
+
+  _record(session, accounts["cash"], 4_800.005)
+
+  (event,) = _observations(session)
+  assert event.amount == 480_001
+
+
 def test_a_statement_reconciliation_can_be_previewed_and_signed_off(books):
   session, accounts = books
   rec = _record(session, accounts["loan"], 4_800.00)

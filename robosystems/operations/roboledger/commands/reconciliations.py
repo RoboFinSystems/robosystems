@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
+
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -367,7 +369,10 @@ def record_statement_balance(
     session,
     element=element,
     as_of=body.as_of,
-    stated_cents=round(body.balance * 100),
+    # Through the decimal text, so the cents are the ones the caller typed.
+    stated_cents=int(
+      (Decimal(str(body.balance)) * 100).to_integral_value(rounding=ROUND_HALF_UP)
+    ),
     document_id=body.document_id,
     note=body.note,
     created_by=created_by,

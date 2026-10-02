@@ -568,7 +568,10 @@ record_statement_balance_op = _registrar.register(
       "does not hold the close: turn `required_for_close` on with "
       "set-reconciliation-policy to make every period's close wait for a "
       "statement on that account. Recording the same account and date again "
-      "replaces the earlier balance. A difference is not explained here: it "
+      "replaces the earlier balance; when more than one statement ends in a "
+      "period, the one with the latest date stands. Recording a balance that "
+      "differs from one already signed off lapses that sign-off. A "
+      "difference is not explained here: it "
       "is activity one side has and the other does not yet, or an error on "
       "either. Returns the reconciliation's standing for the period."
     ),

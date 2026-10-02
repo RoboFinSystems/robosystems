@@ -44,7 +44,7 @@ def _observation(event: Event) -> BalanceObservation:
   )
 
 
-def _live_statements(session: Session, element_ids: set[str], start: date, end: date):
+def _live_statements(element_ids: set[str], start: date, end: date):
   return (
     select(Event)
     .where(
@@ -67,7 +67,7 @@ def statement_observations(
     return {}
   latest: dict[str, BalanceObservation] = {}
   for event in session.execute(
-    _live_statements(session, set(element_ids), start, end)
+    _live_statements(set(element_ids), start, end)
   ).scalars():
     latest.setdefault(str(event.resource_element_id), _observation(event))
   return latest
@@ -91,7 +91,7 @@ def record_statement_observation(
   """
   amount = stated_cents if element.balance_type == "debit" else -stated_cents
   live = session.execute(
-    _live_statements(session, {str(element.id)}, as_of, as_of).limit(1)
+    _live_statements({str(element.id)}, as_of, as_of).limit(1)
   ).scalar_one_or_none()
   if live is not None:
     current = _observation(live)
