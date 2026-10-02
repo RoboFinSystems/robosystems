@@ -133,7 +133,7 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
     ]
     categories.append(ClosingBookCategory(label="Schedules", items=schedule_items))
 
-  # Trial Balance, when anything is posted
+  # Reconciliations and the Trial Balance, when anything is posted
   has_posted = session.execute(
     text(
       "SELECT EXISTS(SELECT 1 FROM entries WHERE status IN :landed_entry_statuses)"
@@ -141,6 +141,20 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
   ).scalar()
 
   if has_posted:
+    # One entry for the whole worklist: the blocks are per period, and a
+    # ledger that has never reconciled starts here too.
+    categories.append(
+      ClosingBookCategory(
+        label="Reconciliations",
+        items=[
+          ClosingBookItem(
+            id="reconciliations",
+            name="Reconciliations",
+            item_type="reconciliations",
+          ),
+        ],
+      )
+    )
     categories.append(
       ClosingBookCategory(
         label="Trial Balance",

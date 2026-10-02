@@ -8,9 +8,10 @@ class ClosingBookItem(BaseModel):
   period (statement, schedule, rollup, etc.).
 
   `item_type` discriminates: 'statement', 'schedule',
-  'account_rollups', 'period_close', 'trial_balance'. Statement items
-  carry `report_id` to fetch the rendered facts; schedule items
-  carry `status` ('complete' | 'draft' | 'pending').
+  'account_rollups', 'period_close', 'reconciliations', 'trial_balance'.
+  Statement items carry `report_id` to fetch the rendered facts; schedule
+  items carry `status` ('complete' | 'draft' | 'pending'). The single
+  'reconciliations' item opens the period's reconciliation worklist.
   """
 
   id: str
