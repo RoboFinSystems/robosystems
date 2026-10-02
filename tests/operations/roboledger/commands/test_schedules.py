@@ -539,8 +539,8 @@ def _rebuild_session(
   execute call order:
     1. SET LOCAL lock_timeout — `_load_schedule_or_404` bounds its wait and
        then takes the row through `session.get`, not `execute` (see below)
-    2. posted-entry guard → fetchone → MagicMock(c=posted_count)
-    3. draft posting dates for the period fence → scalars().all() (empty)
+    2. draft posting dates for the period fence → scalars().all() (empty)
+    3. posted-entry guard → fetchone → MagicMock(c=posted_count)
     4. SET LOCAL lock_timeout (bounded wait around the obligation void)
     5. select(Rule.id) for cascade delete → scalars().all()
     6. DELETE line_items (draft sweep) → execute (result unused)
@@ -561,10 +561,10 @@ def _rebuild_session(
   session = MagicMock()
   session.execute.side_effect = [
     _exec_result(),  # SET LOCAL lock_timeout — the schedule row lock
-    _exec_result(fetchone_row=MagicMock(c=posted_count)),  # posted-entry guard
-    # Draft posting dates for the period fence, taken before any row lock.
-    # Empty → no fence statement follows.
+    # Draft posting dates for the period fence, taken before the count and
+    # any row lock. Empty → no fence statement follows.
     _exec_result(scalars_all=[]),
+    _exec_result(fetchone_row=MagicMock(c=posted_count)),  # posted-entry guard
     # The void of the old obligation chain bounds its wait for the rows the
     # promotion sweep may hold, so a `SET LOCAL lock_timeout` lands here.
     _exec_result(),

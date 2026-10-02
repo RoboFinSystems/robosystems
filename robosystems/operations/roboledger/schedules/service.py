@@ -1481,26 +1481,6 @@ class ScheduleService:
         f"fact ({bounds.first_start}). Deactivate the schedule instead."
       )
 
-    # A landed entry (reversed included) after the cutoff is the record of
-    # that period's recognition; truncating under it would orphan it.
-    overlap = session.execute(
-      text("""
-        SELECT COUNT(*) AS c
-        FROM entries
-        WHERE source_structure_id = :sid
-          AND status IN :landed_entry_statuses
-          AND posting_date > :new_end
-      """).bindparams(landed_entry_bindparam()),
-      {"sid": structure_id, "new_end": new_end_date},
-    ).fetchone()
-    if overlap and overlap.c:
-      raise ValueError(
-        f"Cannot truncate: {overlap.c} posted entries exist for periods "
-        f"after {new_end_date}. Reopen the affected periods and void those "
-        "entries first — reopening alone leaves entries posted, so it does "
-        "not clear this guard."
-      )
-
     # Fence before the deletes take row locks: fence, then rows, as every
     # ledger writer does against close. A kept period's auto-reversal is dated
     # after the cutoff but belongs to that period, so it stays.
@@ -1520,6 +1500,28 @@ class ScheduleService:
       .all()
     )
     assert_period_not_closed(session, *stale_dates)
+
+    # A landed entry (reversed included) after the cutoff is the record of
+    # that period's recognition; truncating under it would orphan it. Counted
+    # under the fence, so a close posting one of the drafts has either
+    # finished, and is counted, or waits.
+    overlap = session.execute(
+      text("""
+        SELECT COUNT(*) AS c
+        FROM entries
+        WHERE source_structure_id = :sid
+          AND status IN :landed_entry_statuses
+          AND posting_date > :new_end
+      """).bindparams(landed_entry_bindparam()),
+      {"sid": structure_id, "new_end": new_end_date},
+    ).fetchone()
+    if overlap and overlap.c:
+      raise ValueError(
+        f"Cannot truncate: {overlap.c} posted entries exist for periods "
+        f"after {new_end_date}. Reopen the affected periods and void those "
+        "entries first — reopening alone leaves entries posted, so it does "
+        "not clear this guard."
+      )
 
     session.execute(
       text("""

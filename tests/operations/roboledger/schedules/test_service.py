@@ -1971,9 +1971,9 @@ class TestTruncateSchedule:
     delete_result = MagicMock(rowcount=15)
     # The sequence of session.execute calls:
     # 1. bounds (SELECT) — fetchone
-    # 2. overlap (SELECT) — fetchone
-    # 3. stale-draft posting dates (SELECT DISTINCT) — scalars().all(), for
-    #    the period fence taken before the deletes lock any rows
+    # 2. stale-draft posting dates (SELECT DISTINCT) — scalars().all(), for
+    #    the period fence taken before the count and the deletes
+    # 3. overlap (SELECT) — fetchone
     # 4. DELETE line_items (draft stale)
     # 5. DELETE entries (draft stale)
     # 6. DELETE facts → rowcount=15
@@ -1987,8 +1987,8 @@ class TestTruncateSchedule:
           )
         )
       ),
-      MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
       stale_dates,
+      MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
       MagicMock(),  # delete line_items
       MagicMock(),  # delete entries
       delete_result,  # delete facts
@@ -2024,8 +2024,8 @@ class TestTruncateSchedule:
           )
         )
       ),
-      MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
       stale_dates,
+      MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
       MagicMock(),
       MagicMock(),
       MagicMock(rowcount=15),
@@ -2080,8 +2080,8 @@ class TestTruncateSchedule:
           )
         )
       ),
-      MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
       _no_stale_dates(),  # period fence read before the deletes
+      MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
       MagicMock(),
       MagicMock(),
       MagicMock(rowcount=10),
@@ -2108,8 +2108,8 @@ class TestTruncateSchedule:
           )
         )
       ),
-      MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
       _no_stale_dates(),  # period fence read before the deletes
+      MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
       MagicMock(),
       MagicMock(),
       MagicMock(rowcount=10),
@@ -2165,6 +2165,7 @@ class TestTruncateSchedule:
           )
         )
       ),
+      _no_stale_dates(),  # period fence read, before the count
       MagicMock(fetchone=MagicMock(return_value=MagicMock(c=2))),  # 2 posted after
     ]
     svc = ScheduleService()

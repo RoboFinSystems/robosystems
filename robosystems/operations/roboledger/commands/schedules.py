@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import bindparam, or_, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -403,18 +403,28 @@ def _landed_entry_count(session: Session, structure_id: str) -> int:
 
 def _fence_draft_periods(session: Session, structure_id: str) -> None:
   """Fence before the draft deletes lock rows: fence, then rows, as every
-  ledger writer does."""
+  ledger writer does.
+
+  Only the drafts a close posts are fenced. A retracted event's leftover is
+  one no close posts, so it can sit in a closed month without being part of
+  its books, and must not hold the schedule there.
+  """
   from robosystems.operations.roboledger.commands._guards import (
     assert_period_not_closed,
+  )
+  from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+    WRITEBACK_EXCLUDED_EVENT_STATUSES,
   )
 
   draft_dates = (
     session.execute(
       text(
-        "SELECT DISTINCT posting_date FROM entries "
-        "WHERE source_structure_id = :sid AND status = 'draft'"
-      ),
-      {"sid": structure_id},
+        "SELECT DISTINCT e.posting_date FROM entries e "
+        "LEFT JOIN events ev ON ev.id = e.triggered_by_event_id "
+        "WHERE e.source_structure_id = :sid AND e.status = 'draft' "
+        "AND (ev.id IS NULL OR ev.status NOT IN :retracted)"
+      ).bindparams(bindparam("retracted", expanding=True)),
+      {"sid": structure_id, "retracted": list(WRITEBACK_EXCLUDED_EVENT_STATUSES)},
     )
     .scalars()
     .all()
@@ -769,7 +779,10 @@ def rebuild_schedule(
     source_transaction_id,
   ) = _reconstruct_schedule_definition(session, structure)
 
-  # Landed entries depend on the facts a rebuild regenerates.
+  # Landed entries depend on the facts a rebuild regenerates. Fence, then
+  # count: a close that posts one of these drafts either finished before the
+  # fence, and is counted, or waits behind it.
+  _fence_draft_periods(session, structure.id)
   landed = _landed_entry_count(session, structure.id)
   if landed:
     raise ValueError(
@@ -786,8 +799,6 @@ def rebuild_schedule(
   closed_through = _calendar_closed_through_date(session)
 
   service = ScheduleService()
-
-  _fence_draft_periods(session, structure.id)
 
   # Bounded: contends with the promotion sweep over these rows.
   from robosystems.operations.locking import bounded_lock_wait, lock_by_id

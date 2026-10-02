@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import UTC, date, datetime
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -21,6 +22,7 @@ from robosystems.models.api.extensions.schedules import (
   CreateScheduleRequest,
   DeleteScheduleRequest,
   EntryTemplateRequest,
+  RebuildScheduleRequest,
 )
 from robosystems.models.extensions import Fact, Structure
 from robosystems.models.extensions.element import Element
@@ -28,13 +30,18 @@ from robosystems.models.extensions.entity import Entity
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.event_handler import EventHandler
+from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.event_block.engine import apply_handler
 from robosystems.operations.event_block.promotion import promote_pending_obligations
-from robosystems.operations.roboledger.commands._guards import InactiveAccountError
+from robosystems.operations.roboledger.commands._guards import (
+  ClosedPeriodError,
+  InactiveAccountError,
+)
 from robosystems.operations.roboledger.commands.schedules import (
   create_schedule,
   delete_schedule,
+  rebuild_schedule,
 )
 from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   drafts_close_posts,
@@ -46,6 +53,8 @@ pytestmark = pytest.mark.unit
 GRAPH_ID = "kg0123456789abcdef02"
 AS_OF = datetime(2026, 2, 15, tzinfo=UTC)
 JAN_START, JAN_END = date(2026, 1, 1), date(2026, 1, 31)
+_COMMANDS = "robosystems.operations.roboledger.commands.schedules"
+_SERVICE = "robosystems.operations.roboledger.schedules.service"
 
 
 @pytest.fixture()
@@ -248,6 +257,108 @@ def test_delete_takes_its_drafts_and_obligations_with_it(ext_session):
     .count()
   )
   assert live_obligations == 0
+
+
+def _drafted(session, *, as_of: datetime = AS_OF) -> str:
+  structure_id, _, _ = _schedule(session)
+  promote_pending_obligations(session, GRAPH_ID, as_of=as_of, dispatch_handlers=True)
+  session.commit()
+  return structure_id
+
+
+def _close_lands_the_drafts(session, structure_id: str):
+  """Stands in for a close that finished just before the caller took the
+  period fence: by the time the fence is held, the drafts are posted."""
+
+  def _land(*_args, **_kwargs) -> None:
+    session.execute(
+      text(
+        "UPDATE entries SET status = 'posted' "
+        "WHERE source_structure_id = :sid AND status = 'draft'"
+      ),
+      {"sid": structure_id},
+    )
+
+  return _land
+
+
+def test_delete_takes_a_voided_obligations_leftover_draft_in_a_closed_month(
+  ext_session,
+):
+  """A close leaves a voided obligation's draft behind as a draft. It is not
+  part of the closed month's books, so it must not hold the schedule."""
+  session = ext_session
+  structure_id = _drafted(session)
+  (leftover,) = _schedule_entries(session, structure_id)
+  session.get(Event, leftover.triggered_by_event_id).status = "voided"
+  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-01"))
+  session.commit()
+
+  delete_schedule(session, DeleteScheduleRequest(structure_id=structure_id))
+
+  assert session.get(Structure, structure_id) is None
+  assert _schedule_entries(session, structure_id) == []
+
+
+def test_delete_still_refuses_a_live_draft_in_a_closed_month(ext_session):
+  session = ext_session
+  structure_id = _drafted(session)
+  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-01"))
+  session.commit()
+
+  with pytest.raises(ClosedPeriodError):
+    delete_schedule(session, DeleteScheduleRequest(structure_id=structure_id))
+  session.rollback()
+
+  assert session.get(Structure, structure_id) is not None
+
+
+def test_rebuild_counts_entries_a_close_landed_before_the_fence(ext_session):
+  session = ext_session
+  structure_id = _drafted(session)
+  facts_before = session.query(Fact).filter(Fact.structure_id == structure_id).count()
+
+  with (
+    patch(
+      f"{_COMMANDS}._fence_draft_periods",
+      side_effect=_close_lands_the_drafts(session, structure_id),
+    ),
+    pytest.raises(ValueError, match="posted closing entries exist"),
+  ):
+    rebuild_schedule(session, RebuildScheduleRequest(structure_id=structure_id))
+  session.rollback()
+
+  assert (
+    session.query(Fact).filter(Fact.structure_id == structure_id).count()
+    == facts_before
+  )
+
+
+def test_truncate_counts_entries_a_close_landed_before_the_fence(ext_session):
+  session = ext_session
+  structure_id = _drafted(session, as_of=datetime(2026, 4, 15, tzinfo=UTC))
+  facts_before = session.query(Fact).filter(Fact.structure_id == structure_id).count()
+
+  with (
+    patch(
+      f"{_SERVICE}.assert_period_not_closed",
+      side_effect=_close_lands_the_drafts(session, structure_id),
+    ),
+    pytest.raises(ValueError, match="Cannot truncate"),
+  ):
+    ScheduleService().truncate_schedule(
+      session,
+      structure_id=structure_id,
+      new_end_date=date(2026, 1, 31),
+      reason="Sold",
+      updated_by="usr",
+    )
+  session.rollback()
+
+  assert (
+    session.query(Fact).filter(Fact.structure_id == structure_id).count()
+    == facts_before
+  )
 
 
 def test_a_voided_events_draft_is_not_work_a_close_will_post(ext_session):
