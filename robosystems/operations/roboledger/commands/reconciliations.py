@@ -178,11 +178,18 @@ def refresh_reconciliations(
 
   # The source is read before the write lock, so a slow report holds nothing.
   mirror = None
-  if create or find_ledger_reconciliation(session, "source_ledger") is not None:
+  skipped: list[str] = []
+  mirror_block = find_ledger_reconciliation(session, "source_ledger")
+  if create or mirror_block is not None:
     try:
       mirror = SourceLedgerResolver(graph_id).resolve(session, window)
     except NoSourceLedgerError:
-      mirror = None
+      if mirror_block is not None:
+        skipped.append(
+          f"{mirror_block.name} was not compared: this graph no longer has a "
+          "connected source ledger. Its earlier comparisons stand, and a "
+          "period it was never compared for stays not started."
+        )
   mirror_comparison = (
     compute_reconciliations(session, window=window, side=mirror, include_tied=True)
     if mirror is not None
@@ -236,7 +243,9 @@ def refresh_reconciliations(
         created_by=created_by,
         compared_via=compared_via,
       )
-  return list_reconciliations(session, body.period)
+  response = list_reconciliations(session, body.period)
+  response.notes = skipped
+  return response
 
 
 def refresh_next_period(

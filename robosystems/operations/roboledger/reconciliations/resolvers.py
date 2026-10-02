@@ -210,6 +210,11 @@ class ScheduleRegisterResolver:
   on: whatever is left in the account has no schedule behind it.
   ``also_cover`` adds accounts no schedule reaches any more, which then
   compare against zero.
+
+  The balance is worked out from the amounts the schedule recognizes each
+  period, not from its own running-balance facts: those were written as an
+  accumulated amount on every account until draw-down was added, and
+  schedules from before then still hold them that way.
   """
 
   def __init__(self, also_cover: frozenset[str] = frozenset()) -> None:
@@ -226,8 +231,7 @@ class ScheduleRegisterResolver:
       ).scalars()
       if not _template(schedule).get("auto_reverse")
     ]
-    carried = _carried_by_schedule(session, as_of)
-    opening = _opening_by_schedule(session)
+    recognized = _recognized_by_schedule(session, as_of)
     disposed = _disposal_dates(session, as_of)
 
     candidate_ids = {
@@ -263,24 +267,31 @@ class ScheduleRegisterResolver:
 
     for schedule in schedules:
       schedule_id = str(schedule.id)
-      if schedule_id not in carried:
+      if schedule_id not in recognized:
         continue  # Not started by the period end.
       note = _ended_note(schedule, disposed.get(schedule_id), as_of)
       credit_id = _credit_id(schedule)
       asset_id = _asset_id(schedule)
 
       if credit_id and traits.get(credit_id) in _CARRYING_TRAITS:
-        if schedule_id in opening:
-          draws_down = opening[schedule_id] > 0
-        else:
-          draws_down = credit_id in debit_normal and traits[credit_id] != "contraAsset"
-        cents = carried[schedule_id] if draws_down else -carried[schedule_id]
+        # A debit-normal asset that is not a contra draws down from cost;
+        # anything else accumulates as a credit balance. The same rule the
+        # schedule's own running balance is written by.
+        draws_down = credit_id in debit_normal and traits[credit_id] != "contraAsset"
+        cents = (
+          _cost_basis(schedule) - recognized[schedule_id]
+          if draws_down
+          else -recognized[schedule_id]
+        )
         _add(credit_id, schedule, 0 if note else cents, note)
 
+      cost = int(_schedule_metadata(schedule).get("original_amount") or 0)
       if (
-        asset_id and asset_id != credit_id and traits.get(asset_id) in _CARRYING_TRAITS
+        cost
+        and asset_id
+        and asset_id != credit_id
+        and traits.get(asset_id) in _CARRYING_TRAITS
       ):
-        cost = int((_schedule_metadata(schedule)).get("original_amount") or 0)
         _add(asset_id, schedule, 0 if note else cost, note)
 
     for element_id in self.also_cover:
@@ -328,44 +339,42 @@ def _ended_note(
   return None
 
 
-_CREDIT_ELEMENT_SQL = "s.metadata->'entry_template'->>'credit_element_id'"
+def _cost_basis(schedule: Structure) -> int:
+  """What a draw-down schedule starts from, in cents: its stated cost, else
+  the whole of what it was set up to recognize."""
+  original = int(_schedule_metadata(schedule).get("original_amount") or 0)
+  if original > 0:
+    return original
+  metadata = schedule.metadata_ or {}
+  start = date.fromisoformat(metadata["period_start"])
+  end = date.fromisoformat(metadata["period_end"])
+  months = (end.year - start.year) * 12 + (end.month - start.month) + 1
+  return int(metadata.get("monthly_amount") or 0) * months
 
 
-def _carried_by_schedule(session: Session, as_of: date) -> dict[str, int]:
-  """Each started schedule's balance on its credited account at ``as_of``,
-  as the schedule states it: remaining cost, or the amount accumulated."""
+def _recognized_by_schedule(session: Session, as_of: date) -> dict[str, int]:
+  """Cents each started schedule has recognized through ``as_of``, by plan:
+  every period's amount, whether a schedule entry or an earlier entry booked it."""
   rows = session.execute(
-    text(f"""
-      SELECT DISTINCT ON (f.structure_id) f.structure_id, f.value
-      FROM facts f
-      JOIN structures s ON s.id = f.structure_id
-      WHERE s.block_type = 'schedule'
-        AND f.period_type = 'instant'
-        AND f.period_end <= :as_of
-        AND f.element_id = {_CREDIT_ELEMENT_SQL}
-      ORDER BY f.structure_id, f.period_end DESC
+    text("""
+      SELECT structure_id, SUM(ROUND((value * 100)::numeric)) AS cents
+      FROM (
+        -- One amount per period, as the schedule's own drafting reads it.
+        SELECT DISTINCT ON (f.structure_id, f.period_start, f.period_end)
+               f.structure_id, f.value
+        FROM facts f
+        JOIN structures s ON s.id = f.structure_id
+        WHERE s.block_type = 'schedule'
+          AND f.period_type = 'duration'
+          AND f.period_end <= :as_of
+          AND f.element_id = s.metadata->'entry_template'->>'debit_element_id'
+        ORDER BY f.structure_id, f.period_start, f.period_end, f.id
+      ) per_period
+      GROUP BY structure_id
     """),
     {"as_of": as_of},
   )
-  return {str(row.structure_id): round(float(row.value) * 100) for row in rows}
-
-
-def _opening_by_schedule(session: Session) -> dict[str, int]:
-  """Each schedule's opening balance on its credited account: cost for one
-  that draws down, zero for one that accumulates."""
-  rows = session.execute(
-    text(f"""
-      SELECT DISTINCT ON (f.structure_id) f.structure_id, f.value
-      FROM facts f
-      JOIN structures s ON s.id = f.structure_id
-      WHERE s.block_type = 'schedule'
-        AND f.period_type = 'instant'
-        AND f.period_start IS NULL
-        AND f.element_id = {_CREDIT_ELEMENT_SQL}
-      ORDER BY f.structure_id, f.period_end ASC
-    """)
-  )
-  return {str(row.structure_id): round(float(row.value) * 100) for row in rows}
+  return {str(row.structure_id): int(row.cents) for row in rows}
 
 
 def _disposal_dates(session: Session, as_of: date) -> dict[str, date]:

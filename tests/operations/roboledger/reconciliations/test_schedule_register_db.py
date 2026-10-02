@@ -260,6 +260,57 @@ def test_two_schedules_on_one_account_add_up(prepaid):
   ]
 
 
+def test_a_schedule_from_before_draw_down_still_reads_as_remaining_cost(prepaid):
+  """Older schedules hold an accumulated amount on every credited account
+  and have no opening balance fact. The carried balance does not read them."""
+  from robosystems.models.extensions.roboledger import Fact
+
+  session, accounts, structure_id = prepaid
+  running = session.query(Fact).filter(
+    Fact.structure_id == structure_id,
+    Fact.element_id == accounts["prepaid"],
+    Fact.period_type == "instant",
+  )
+  running.filter(Fact.period_start.is_(None)).delete(synchronize_session=False)
+  for fact in running:
+    fact.value = round(1_200.00 - fact.value, 2)
+  session.commit()
+
+  assert _rows(_preview(session)) == {"Prepaid Insurance": (400.00, 400.00, "tied")}
+
+
+def test_a_second_fact_for_a_period_is_not_counted_twice(prepaid):
+  """The close drafts one entry per schedule and period, from one fact."""
+  from robosystems.models.extensions.roboledger import Fact
+
+  session, accounts, structure_id = prepaid
+  august = (
+    session.query(Fact)
+    .filter(
+      Fact.structure_id == structure_id,
+      Fact.element_id == accounts["insurance"],
+      Fact.period_end == date(2026, 8, 31),
+    )
+    .one()
+  )
+  session.add(
+    Fact(
+      element_id=august.element_id,
+      value=august.value,
+      period_start=august.period_start,
+      period_end=august.period_end,
+      period_type="duration",
+      unit="USD",
+      entity_id=august.entity_id,
+      structure_id=structure_id,
+      fact_set_id=august.fact_set_id,
+    )
+  )
+  session.commit()
+
+  assert _rows(_preview(session)) == {"Prepaid Insurance": (400.00, 400.00, "tied")}
+
+
 @pytest.mark.parametrize(
   ("trait", "balance_type"), [("contraAsset", "debit"), ("asset", "credit")]
 )

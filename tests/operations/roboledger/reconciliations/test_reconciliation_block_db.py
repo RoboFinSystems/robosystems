@@ -255,6 +255,29 @@ def test_a_synced_ledger_with_a_schedule_gets_both_checks(ledger):
     "reconciled",
     1_100.00,
   )
+  assert result.notes == []
+
+  # The source is disconnected afterwards: the schedule check still runs, and
+  # the refresh says the mirror check did not.
+  from robosystems.operations.roboledger.reconciliations import NoSourceLedgerError
+
+  with patch.object(
+    SourceLedgerResolver, "_fetch", side_effect=NoSourceLedgerError("no source")
+  ):
+    later = refresh_reconciliations(
+      ledger,
+      RefreshReconciliationsRequest(period="2026-09"),
+      graph_id=GRAPH_ID,
+      created_by="usr",
+    )
+  ledger.commit()
+
+  assert [(r.scope, r.status) for r in later.reconciliations] == [
+    ("ledger", "not_started"),
+    ("account", "reconciled"),
+  ]
+  (note,) = later.notes
+  assert "Source ledger (QuickBooks) was not compared" in note
 
 
 def test_a_period_never_compared_has_not_started(ledger):

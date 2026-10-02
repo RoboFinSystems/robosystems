@@ -116,6 +116,8 @@ def _draft_balances(session: Session, as_of: date) -> dict[str, int]:
 def _undrafted_schedule_balances(session: Session, as_of: date) -> dict[str, int]:
   """Debits minus credits, by account, of matured schedule entries that have
   no entry yet. The close gate holds until they are drafted."""
+  # One amount per obligation, read the way the schedule's own drafting
+  # reads it, so a stray second fact for a period is not counted twice.
   rows = session.execute(
     text("""
       SELECT s.metadata->'entry_template'->>'debit_element_id' AS debit_id,
@@ -124,16 +126,22 @@ def _undrafted_schedule_balances(session: Session, as_of: date) -> dict[str, int
       FROM events ev
       JOIN structures s
         ON s.id = ev.metadata->>'schedule_id' AND s.block_type = 'schedule'
-      JOIN facts f
-        ON f.structure_id = s.id
-       AND f.element_id = s.metadata->'entry_template'->>'debit_element_id'
-       AND f.period_type = 'duration'
-       AND f.fact_scope = 'in_scope'
-       AND f.period_start = (ev.metadata->>'period_start')::date
-       AND f.period_end = (ev.metadata->>'period_end')::date
+      JOIN LATERAL (
+        SELECT value, period_start, period_end
+        FROM facts
+        WHERE structure_id = s.id
+          AND element_id = s.metadata->'entry_template'->>'debit_element_id'
+          AND period_type = 'duration'
+          AND fact_scope = 'in_scope'
+          AND period_start = (ev.metadata->>'period_start')::date
+          AND period_end = (ev.metadata->>'period_end')::date
+        ORDER BY id
+        LIMIT 1
+      ) f ON TRUE
       WHERE ev.event_type = 'schedule_entry_due'
         AND ev.status IN ('pending', 'classified')
         AND ev.occurred_at <= :as_of_end
+        AND s.metadata->'entry_template'->>'credit_element_id' IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM entries e
           WHERE e.source_structure_id = s.id

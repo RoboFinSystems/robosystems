@@ -379,3 +379,10 @@ class ReconciliationListResponse(BaseModel):
   reconciliations: list[ReconciliationSummary] = Field(
     ..., description="One entry per reconciliation block, oldest block first."
   )
+  notes: list[str] = Field(
+    default_factory=list,
+    description=(
+      "What a refresh could not compare, such as a check skipped because its "
+      "source is no longer connected. Empty on a plain read."
+    ),
+  )
