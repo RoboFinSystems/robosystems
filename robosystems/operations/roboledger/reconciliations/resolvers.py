@@ -41,6 +41,11 @@ class NoSourceLedgerError(ValueError):
   """The graph has no synced ledger to compare against."""
 
 
+class SourceLedgerUnavailableError(Exception):
+  """The source could not be read just now: it is rate-limiting, down, or
+  timed out. Nothing is wrong with the comparison itself."""
+
+
 class NothingToReconcileError(NoSourceLedgerError):
   """No check applies to this ledger."""
 
@@ -205,10 +210,25 @@ class SourceLedgerResolver:
       qb_credentials=credentials,
       connection_id=connection_id,
     )
-    raw = client.get_trial_balance(
-      window.fiscal_year_start.isoformat(), window.period_end.isoformat()
-    )
-    return parse_trial_balance_report(raw), connection_id, last_sync_at
+    return self._read_report(client, window), connection_id, last_sync_at
+
+  @staticmethod
+  def _read_report(client, window: ReconciliationWindow) -> TrialBalanceReport:
+    """The source's trial balance, with its transport failures turned into
+    one error a caller can tell from a fault in the comparison."""
+    import requests
+    from quickbooks.exceptions import QuickbooksException
+
+    try:
+      raw = client.get_trial_balance(
+        window.fiscal_year_start.isoformat(), window.period_end.isoformat()
+      )
+    except (QuickbooksException, requests.RequestException, TimeoutError) as exc:
+      raise SourceLedgerUnavailableError(
+        "QuickBooks could not be read just now "
+        f"({type(exc).__name__}). Try again in a few minutes."
+      ) from exc
+    return parse_trial_balance_report(raw)
 
 
 class ScheduleRegisterResolver:

@@ -832,6 +832,7 @@ class ReconciliationMechanics(BaseModel):
   materiality: float = Field(
     0.0,
     ge=0,
+    allow_inf_nan=False,
     description=(
       "A difference up to this amount still counts as reconciled. Zero means "
       "the two sides must agree to the cent."

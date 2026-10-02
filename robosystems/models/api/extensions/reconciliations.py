@@ -18,6 +18,9 @@ from pydantic import BaseModel, Field, PrivateAttr
 # `statement` is the ending balance of a statement recorded for the account.
 ReconciliationMethod = Literal["source_ledger", "schedule_register", "statement"]
 
+# Far above any real balance; keeps a typo or a non-number out of the books.
+_MAX_AMOUNT = 1e13
+
 
 class PreviewReconciliationsRequest(BaseModel):
   """Compare the ledger's balances at a period end with an independent source."""
@@ -218,6 +221,8 @@ class SetReconciliationPolicyRequest(BaseModel):
   materiality: float | None = Field(
     None,
     ge=0,
+    le=_MAX_AMOUNT,
+    allow_inf_nan=False,
     description=(
       "A difference up to this amount still counts as reconciled. Omit to keep."
     ),
@@ -253,6 +258,9 @@ class RecordStatementBalanceRequest(BaseModel):
   )
   balance: float = Field(
     ...,
+    ge=-_MAX_AMOUNT,
+    le=_MAX_AMOUNT,
+    allow_inf_nan=False,
     description=(
       "The ending balance as the statement shows it, as a positive number "
       "in the account's normal direction: money in a bank account, or the "

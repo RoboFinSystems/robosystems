@@ -162,7 +162,10 @@ from robosystems.operations.roboledger.commands.reconciling_items import (
 from robosystems.operations.roboledger.commands.reconciling_items import (
   resolve_reconciling_item as cmd_resolve_reconciling_item,
 )
-from robosystems.operations.roboledger.reconciliations import NoSourceLedgerError
+from robosystems.operations.roboledger.reconciliations import (
+  NoSourceLedgerError,
+  SourceLedgerUnavailableError,
+)
 from robosystems.routers.extensions.roboledger._common import make_registrar
 
 router = APIRouter()
@@ -504,6 +507,7 @@ preview_reconciliations_op = _registrar.register(
     requires_graph_id=True,
     error_map={
       NoSourceLedgerError: 409,
+      SourceLedgerUnavailableError: 503,
       # Intuit unreachable or busy; the connection is fine. Before the base.
       QBAuthUnavailableError: 503,
       QBAuthFailedError: 401,
@@ -543,6 +547,7 @@ refresh_reconciliations_op = _registrar.register(
     error_map={
       NoSourceLedgerError: 409,
       RowLockedError: 409,
+      SourceLedgerUnavailableError: 503,
       # Intuit unreachable or busy; the connection is fine. Before the base.
       QBAuthUnavailableError: 503,
       QBAuthFailedError: 401,

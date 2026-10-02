@@ -283,6 +283,44 @@ def test_a_period_with_no_statement_has_not_started(books):
     _refresh(session, "2026-09")
 
 
+def test_a_sync_on_a_ledger_waiting_for_its_statement_refreshes_nothing(books):
+  """The statement block exists, the next period's statement does not yet.
+  That is not a failure for the sync to log."""
+  from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
+  from robosystems.operations.roboledger.commands.reconciliations import (
+    refresh_next_period,
+  )
+
+  session, accounts = books
+  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-08"))
+  _record(session, accounts["cash"], 4_800.00)
+
+  with patch.object(
+    SourceLedgerResolver, "_fetch", side_effect=NoSourceLedgerError("no source")
+  ):
+    period = refresh_next_period(session, graph_id=GRAPH_ID, created_by="usr")
+
+  assert period is None
+
+
+@pytest.mark.parametrize("balance", [float("nan"), float("inf"), 1e15])
+def test_a_balance_that_is_not_a_real_amount_is_refused(balance):
+  from pydantic import ValidationError
+
+  with pytest.raises(ValidationError):
+    RecordStatementBalanceRequest(
+      element_id="elem_cash", as_of=date(2026, 8, 31), balance=balance
+    )
+
+
+@pytest.mark.parametrize("materiality", [float("nan"), float("inf"), 1e15])
+def test_a_materiality_that_is_not_a_real_amount_is_refused(materiality):
+  from pydantic import ValidationError
+
+  with pytest.raises(ValidationError):
+    SetReconciliationPolicyRequest(structure_id="struct_1", materiality=materiality)
+
+
 def test_a_required_statement_holds_the_close_until_one_is_recorded(books):
   from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
   from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService

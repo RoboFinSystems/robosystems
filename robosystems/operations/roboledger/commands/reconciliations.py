@@ -7,6 +7,8 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
+from robosystems.adapters.quickbooks.reports import TrialBalanceReportError
 from robosystems.models.api.extensions.reconciliations import (
   PreviewReconciliationsRequest,
   ReconciliationListResponse,
@@ -41,6 +43,7 @@ from robosystems.operations.roboledger.reconciliations import (
   ReconciliationWindow,
   ScheduleRegisterResolver,
   SourceLedgerResolver,
+  SourceLedgerUnavailableError,
   StatementResolver,
   compute_reconciliations,
   reconciliation_window,
@@ -262,6 +265,7 @@ def refresh_reconciliations(
 
   # The source is read before the write lock, so a slow report holds nothing.
   mirror = None
+  source_failure: Exception | None = None
   skipped: list[str] = []
   mirror_block = find_ledger_reconciliation(session, "source_ledger")
   if create or mirror_block is not None:
@@ -274,6 +278,15 @@ def refresh_reconciliations(
           "connected source ledger. Its earlier comparisons stand, and a "
           "period it was never compared for stays not started."
         )
+    except (
+      SourceLedgerUnavailableError,
+      QBAuthFailedError,
+      TrialBalanceReportError,
+    ) as exc:
+      # The source failing must not stop the checks that need no source.
+      source_failure = exc
+      name = mirror_block.name if mirror_block is not None else "The source ledger"
+      skipped.append(f"{name} was not compared: {exc}")
   mirror_comparison = (
     compute_reconciliations(session, window=window, side=mirror, include_tied=True)
     if mirror is not None
@@ -288,6 +301,8 @@ def refresh_reconciliations(
     and not register.covered_element_ids
     and not statements.covered_element_ids
   ):
+    if source_failure is not None:
+      raise source_failure
     raise NothingToReconcileError()
 
   if mirror is not None and mirror_comparison is not None:
@@ -427,13 +442,18 @@ def refresh_next_period(
   if calendar is None or not calendar.closed_through_period:
     return None
   period = next_period(calendar.closed_through_period)
-  refresh_reconciliations(
-    session,
-    RefreshReconciliationsRequest(period=period),
-    graph_id=graph_id,
-    created_by=created_by,
-    compared_via="sync",
-  )
+  try:
+    refresh_reconciliations(
+      session,
+      RefreshReconciliationsRequest(period=period),
+      graph_id=graph_id,
+      created_by=created_by,
+      compared_via="sync",
+    )
+  except NothingToReconcileError:
+    # Blocks exist but none applies to this period yet, such as a statement
+    # block still waiting for the period's statement.
+    return None
   return period
 
 

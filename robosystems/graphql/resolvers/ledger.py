@@ -549,7 +549,9 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_reconciliations.list_reconciliations(session, period)
-    except (ValueError, ProgrammingError):
+    except ProgrammingError:
+      # Only a missing schema means the ledger is not there. A ValueError
+      # here is a fault in saved data and must not be reported as that.
       _raise_ledger_not_initialized()
     return ReconciliationList.from_pydantic(response)
 
