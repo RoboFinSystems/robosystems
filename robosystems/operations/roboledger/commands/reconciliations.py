@@ -33,17 +33,25 @@ from robosystems.operations.roboledger.reads.reconciliations import (
   list_reconciliations,
 )
 from robosystems.operations.roboledger.reconciliations import (
+  NoSourceLedgerError,
+  NothingToReconcileError,
+  ReconciliationWindow,
+  ScheduleRegisterResolver,
   SourceLedgerResolver,
   compute_reconciliations,
   reconciliation_window,
 )
 from robosystems.operations.roboledger.reconciliations.blocks import (
   ComparedVia,
+  account_comparison,
+  account_reconciliations,
+  create_account_reconciliation,
   ensure_ledger_reconciliation,
   find_ledger_reconciliation,
+  has_reconciliations,
   lock_reconciliation_writes,
   reconciliation_rule,
-  record_ledger_reconciliation,
+  record_reconciliation,
   record_sign_off,
 )
 
@@ -120,16 +128,27 @@ def _summary(session: Session, structure_id: str, period: str) -> Reconciliation
 def preview_reconciliations(
   session: Session, body: PreviewReconciliationsRequest, *, graph_id: str
 ) -> ReconciliationPreviewResponse:
-  """Compare the ledger at a period end with its synced source. Writes nothing.
+  """Compare the ledger at a period end by one method. Writes nothing.
 
-  Raises ``ValueError`` on a malformed period, `NoSourceLedgerError` when the
-  graph has no synced ledger, and the QuickBooks client's own errors.
+  Raises ``ValueError`` on a malformed period. For ``source_ledger`` it also
+  raises `NoSourceLedgerError` when the graph has no synced ledger, and the
+  QuickBooks client's own errors.
   """
   window = reconciliation_window(body.period, get_fiscal_year_start_month(session))
-  side = SourceLedgerResolver(graph_id).resolve(session, window)
+  if body.method == "schedule_register":
+    side = _schedule_register_side(session, window)
+  else:
+    side = SourceLedgerResolver(graph_id).resolve(session, window)
   return compute_reconciliations(
     session, window=window, side=side, include_tied=body.include_tied
   )
+
+
+def _schedule_register_side(session: Session, window: ReconciliationWindow):
+  # An account that once had a schedule keeps its block, and compares against
+  # zero once no schedule reaches it.
+  reconciled = frozenset(account_reconciliations(session, "schedule_register"))
+  return ScheduleRegisterResolver(also_cover=reconciled).resolve(session, window)
 
 
 def refresh_reconciliations(
@@ -140,33 +159,93 @@ def refresh_reconciliations(
   created_by: str,
   compared_via: ComparedVia = "operation",
 ) -> ReconciliationListResponse:
-  """Compare at the period end and record the result on the block, creating
-  the block on first use. Flushes; the caller owns the commit.
+  """Run every check that applies at the period end and record each result
+  on its block. Flushes; the caller owns the commit.
 
-  Raises as `preview_reconciliations` does, and ``RowLockedError`` when
-  another refresh of this graph is in flight.
+  A synced ledger is compared with its source, on one ledger-wide block.
+  Each asset account a schedule carries a balance on is compared with its
+  schedules, on a block of its own. Run as an ``operation``, a missing block
+  is created; a new account block starts out required for close only if it
+  ties, so a difference found on first contact is reported without holding
+  the close. Run by a ``sync``, only existing blocks are refreshed.
+
+  Raises ``ValueError`` on a malformed period, `NothingToReconcileError`
+  when no check applies, the QuickBooks client's own errors, and
+  ``RowLockedError`` when another refresh of this graph is in flight.
   """
+  create = compared_via == "operation"
   window = reconciliation_window(body.period, get_fiscal_year_start_month(session))
+
   # The source is read before the write lock, so a slow report holds nothing.
-  side = SourceLedgerResolver(graph_id).resolve(session, window)
-  comparison = compute_reconciliations(
-    session, window=window, side=side, include_tied=True
+  mirror = None
+  skipped: list[str] = []
+  mirror_block = find_ledger_reconciliation(session, "source_ledger")
+  if create or mirror_block is not None:
+    try:
+      mirror = SourceLedgerResolver(graph_id).resolve(session, window)
+    except NoSourceLedgerError:
+      if mirror_block is not None:
+        skipped.append(
+          f"{mirror_block.name} was not compared: this graph no longer has a "
+          "connected source ledger. Its earlier comparisons stand, and a "
+          "period it was never compared for stays not started."
+        )
+  mirror_comparison = (
+    compute_reconciliations(session, window=window, side=mirror, include_tied=True)
+    if mirror is not None
+    else None
   )
 
   lock_reconciliation_writes(session, graph_id)
-  structure = ensure_ledger_reconciliation(
-    session, method=side.method, source=side.source, created_by=created_by
-  )
-  record_ledger_reconciliation(
-    session,
-    structure,
-    window=window,
-    side=side,
-    comparison=comparison,
-    created_by=created_by,
-    compared_via=compared_via,
-  )
-  return list_reconciliations(session, body.period)
+  register = _schedule_register_side(session, window)
+  if mirror is None and not register.covered_element_ids:
+    raise NothingToReconcileError()
+
+  if mirror is not None and mirror_comparison is not None:
+    record_reconciliation(
+      session,
+      ensure_ledger_reconciliation(
+        session, method=mirror.method, source=mirror.source, created_by=created_by
+      ),
+      window=window,
+      side=mirror,
+      comparison=mirror_comparison,
+      created_by=created_by,
+      compared_via=compared_via,
+    )
+
+  if register.covered_element_ids:
+    comparison = compute_reconciliations(
+      session, window=window, side=register, include_tied=True
+    )
+    blocks = account_reconciliations(session, register.method)
+    for row in sorted(
+      comparison.rows, key=lambda r: (r.account_code or "", r.account_name)
+    ):
+      structure = blocks.get(str(row.element_id))
+      if structure is None:
+        if not create:
+          continue
+        structure = create_account_reconciliation(
+          session,
+          method=register.method,
+          element_id=str(row.element_id),
+          account_name=row.account_name,
+          required_for_close=row.status == "tied",
+          created_by=created_by,
+        )
+      record_reconciliation(
+        session,
+        structure,
+        window=window,
+        side=register,
+        comparison=account_comparison(comparison, row),
+        created_by=created_by,
+        compared_via=compared_via,
+      )
+  response = list_reconciliations(session, body.period)
+  response.notes = skipped
+  return response
 
 
 def refresh_next_period(
@@ -179,7 +258,7 @@ def refresh_next_period(
   ``None``): the first refresh is a person's decision. Raises as
   `refresh_reconciliations` does.
   """
-  if find_ledger_reconciliation(session, "source_ledger") is None:
+  if not has_reconciliations(session):
     return None
   calendar = FiscalCalendarService().get(session, graph_id)
   if calendar is None or not calendar.closed_through_period:

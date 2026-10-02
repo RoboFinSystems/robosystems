@@ -172,7 +172,7 @@ def test_the_concepts_stay_out_of_the_chart_of_accounts(ledger):
     .scalars()
     .all()
   )
-  assert len(concepts) == 4
+  assert len(concepts) == 6
   assert {c.source for c in concepts} == {"system"}
   assert "system" not in COA_SOURCES
   # The graph builds a system element's qname from its code.
@@ -194,7 +194,7 @@ def test_refreshing_again_replaces_the_periods_comparison(ledger):
     .scalars()
     .all()
     .__len__()
-    == 4
+    == 6
   )
 
 
@@ -208,6 +208,76 @@ def test_each_period_keeps_its_own_comparison(ledger):
   july = list_reconciliations(ledger, "2026-07").reconciliations[0]
   assert (august.status, july.status) == ("reconciled", "unreconciled")
   assert august.fact_set_id != july.fact_set_id
+
+
+def test_a_synced_ledger_with_a_schedule_gets_both_checks(ledger):
+  """The mirror check on one ledger-wide block, the schedule check on a block
+  for the scheduled account."""
+  from robosystems.models.api.extensions.schedules import (
+    CreateScheduleRequest,
+    EntryTemplateRequest,
+    ScheduleMetadataRequest,
+  )
+  from robosystems.operations.roboledger.commands.schedules import create_schedule
+
+  from .conftest import classified_account, entry
+
+  cash = ledger.execute(select(Element.id).where(Element.name == "Checking")).scalar()
+  prepaid = classified_account(ledger, "Prepaid Insurance", "asset")
+  expense = classified_account(ledger, "Insurance", "expense")
+  entry(ledger, date(2026, 8, 3), prepaid, cash, 120_000)
+  create_schedule(
+    ledger,
+    CreateScheduleRequest(
+      name="Insurance policy",
+      element_ids=[expense, prepaid],
+      period_start=date(2026, 8, 1),
+      period_end=date(2027, 7, 31),
+      monthly_amount=10_000,
+      entry_template=EntryTemplateRequest(
+        debit_element_id=expense, credit_element_id=prepaid
+      ),
+      schedule_metadata=ScheduleMetadataRequest(original_amount=120_000),
+    ),
+    created_by="usr",
+  )
+  ledger.commit()
+
+  result = _refresh(ledger, source_report(*TIED))
+
+  assert [(r.scope, r.method) for r in result.reconciliations] == [
+    ("ledger", "source_ledger"),
+    ("account", "schedule_register"),
+  ]
+  account = result.reconciliations[1]
+  assert (account.name, account.status, account.ledger_balance) == (
+    "Prepaid Insurance (schedules)",
+    "reconciled",
+    1_100.00,
+  )
+  assert result.notes == []
+
+  # The source is disconnected afterwards: the schedule check still runs, and
+  # the refresh says the mirror check did not.
+  from robosystems.operations.roboledger.reconciliations import NoSourceLedgerError
+
+  with patch.object(
+    SourceLedgerResolver, "_fetch", side_effect=NoSourceLedgerError("no source")
+  ):
+    later = refresh_reconciliations(
+      ledger,
+      RefreshReconciliationsRequest(period="2026-09"),
+      graph_id=GRAPH_ID,
+      created_by="usr",
+    )
+  ledger.commit()
+
+  assert [(r.scope, r.status) for r in later.reconciliations] == [
+    ("ledger", "not_started"),
+    ("account", "reconciled"),
+  ]
+  (note,) = later.notes
+  assert "Source ledger (QuickBooks) was not compared" in note
 
 
 def test_a_period_never_compared_has_not_started(ledger):

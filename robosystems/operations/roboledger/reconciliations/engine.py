@@ -5,21 +5,28 @@ landed balance to the period end, an income-statement account's from the start
 of the fiscal year. Retained earnings also carries every earlier year's
 result, because the ledger keeps that in the income and expense accounts
 rather than closing them into equity.
+
+An account-scope side is compared with the balance the period's close will
+leave: landed entries, the drafts the close posts, and schedule entries not
+yet drafted. That figure does not move as the close drafts and posts them, so
+a comparison made before the close still describes the books after it.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime, time
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions import cents_to_dollars
 from robosystems.models.api.extensions.reconciliations import (
+  ReconciliationComponent,
   ReconciliationPreviewResponse,
   ReconciliationRow,
 )
 from robosystems.models.extensions.element import Element
+from robosystems.models.extensions.roboledger import Entry, LineItem
 from robosystems.operations.roboledger.fiscal_calendar import period_date_range
 from robosystems.operations.roboledger.reads.trial_balance import (
   get_net_balances_cents,
@@ -83,6 +90,155 @@ def _ledger_balances(
   return balances, notes
 
 
+def _draft_balances(session: Session, as_of: date) -> dict[str, int]:
+  """Debits minus credits, by account, of the drafts a close will post."""
+  # Function-level: the close service imports the gate, which reads
+  # reconciliations.
+  from robosystems.operations.roboledger.fiscal_calendar.close_service import (
+    drafts_close_posts,
+  )
+
+  drafts = drafts_close_posts(session, date.min, as_of).with_entities(Entry.id)
+  rows = session.execute(
+    select(
+      LineItem.element_id,
+      func.coalesce(func.sum(LineItem.debit_amount), 0),
+      func.coalesce(func.sum(LineItem.credit_amount), 0),
+    )
+    .where(LineItem.entry_id.in_(drafts))
+    .group_by(LineItem.element_id)
+  )
+  return {
+    str(element_id): int(debits) - int(credits) for element_id, debits, credits in rows
+  }
+
+
+def _undrafted_schedule_balances(session: Session, as_of: date) -> dict[str, int]:
+  """Debits minus credits, by account, of matured schedule entries that have
+  no entry yet. The close gate holds until they are drafted."""
+  # One amount per obligation, read the way the schedule's own drafting
+  # reads it, so a stray second fact for a period is not counted twice.
+  rows = session.execute(
+    text("""
+      SELECT s.metadata->'entry_template'->>'debit_element_id' AS debit_id,
+             s.metadata->'entry_template'->>'credit_element_id' AS credit_id,
+             f.value
+      FROM events ev
+      JOIN structures s
+        ON s.id = ev.metadata->>'schedule_id' AND s.block_type = 'schedule'
+      JOIN LATERAL (
+        SELECT value, period_start, period_end
+        FROM facts
+        WHERE structure_id = s.id
+          AND element_id = s.metadata->'entry_template'->>'debit_element_id'
+          AND period_type = 'duration'
+          AND fact_scope = 'in_scope'
+          AND period_start = (ev.metadata->>'period_start')::date
+          AND period_end = (ev.metadata->>'period_end')::date
+        ORDER BY id
+        LIMIT 1
+      ) f ON TRUE
+      WHERE ev.event_type = 'schedule_entry_due'
+        AND ev.status IN ('pending', 'classified')
+        AND ev.occurred_at <= :as_of_end
+        AND s.metadata->'entry_template'->>'credit_element_id' IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM entries e
+          WHERE e.source_structure_id = s.id
+            AND e.reversal_of IS NULL
+            AND e.posting_date >= f.period_start
+            AND e.posting_date <= f.period_end
+        )
+    """),
+    {"as_of_end": datetime.combine(as_of, time.max, tzinfo=UTC)},
+  )
+  balances: dict[str, int] = {}
+  for row in rows:
+    cents = round(float(row.value) * 100)
+    balances[row.debit_id] = balances.get(row.debit_id, 0) + cents
+    balances[row.credit_id] = balances.get(row.credit_id, 0) - cents
+  return balances
+
+
+def _compute_account_scope(
+  session: Session,
+  *,
+  window: ReconciliationWindow,
+  side: IndependentSide,
+  include_tied: bool,
+) -> ReconciliationPreviewResponse:
+  landed = get_net_balances_cents(session, None, window.period_end)
+  drafts = _draft_balances(session, window.period_end)
+  undrafted = _undrafted_schedule_balances(session, window.period_end)
+  elements = {
+    str(element.id): element
+    for element in session.execute(
+      select(Element).where(Element.id.in_(sorted(side.covered_element_ids)))
+    ).scalars()
+  }
+
+  tied: list[ReconciliationRow] = []
+  open_rows: list[ReconciliationRow] = []
+  total_difference_cents = 0
+  awaiting_close_cents = 0
+  for element_id, element in elements.items():
+    awaiting = drafts.get(element_id, 0) + undrafted.get(element_id, 0)
+    awaiting_close_cents += abs(awaiting)
+    ledger_cents = landed.get(element_id, 0) + awaiting
+    independent_cents = side.balances.get(element_id, 0)
+    status = "tied" if ledger_cents == independent_cents else "different"
+    row = _row(
+      element,
+      name=element.name,
+      source_account_id=None,
+      ledger=ledger_cents,
+      independent=independent_cents,
+      status=status,
+    )
+    row.components = [
+      ReconciliationComponent(
+        structure_id=component.structure_id,
+        name=component.name,
+        amount=cents_to_dollars(component.amount_cents),
+        note=component.note,
+      )
+      for component in side.components.get(element_id, [])
+    ]
+    (tied if status == "tied" else open_rows).append(row)
+    total_difference_cents += abs(ledger_cents - independent_cents)
+
+  open_rows.sort(key=lambda r: (-abs(r.difference), r.account_name))
+  tied.sort(key=lambda r: (r.account_code or "", r.account_name))
+
+  notes = [
+    "Each account's balance is compared with what its schedules say it "
+    f"carries at {window.period_end}. A difference is a balance with no "
+    "schedule behind it, or a scheduled amount the ledger does not hold."
+  ]
+  if awaiting_close_cents:
+    notes.append(
+      "The ledger side includes "
+      f"{cents_to_dollars(awaiting_close_cents):,.2f} of drafts and schedule "
+      "entries the close will post."
+    )
+
+  return ReconciliationPreviewResponse(
+    period=window.period,
+    as_of=window.period_end,
+    fiscal_year_start=window.fiscal_year_start,
+    method=side.method,
+    source=side.source,
+    report_basis=side.basis,
+    last_sync_at=side.last_sync_at,
+    accounts_compared=len(tied) + len(open_rows),
+    accounts_tied=len(tied),
+    accounts_different=len(open_rows),
+    total_difference=cents_to_dollars(total_difference_cents),
+    rows=open_rows + (tied if include_tied else []),
+    notes=notes,
+  )
+
+
 def _row(
   element: Element | None,
   *,
@@ -117,7 +273,12 @@ def compute_reconciliations(
   side: IndependentSide,
   include_tied: bool = False,
 ) -> ReconciliationPreviewResponse:
-  """Compare every account at the period end. Writes nothing."""
+  """Compare at the period end: every account for a ledger-scope side, the
+  accounts it covers for an account-scope one. Writes nothing."""
+  if side.scope == "account":
+    return _compute_account_scope(
+      session, window=window, side=side, include_tied=include_tied
+    )
   cumulative = get_net_balances_cents(session, None, window.period_end)
   year_to_date = get_net_balances_cents(
     session, window.fiscal_year_start, window.period_end

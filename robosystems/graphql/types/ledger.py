@@ -97,6 +97,9 @@ from robosystems.models.api.extensions.publish_lists import (
   PublishListResponse as PydanticPublishListResponse,
 )
 from robosystems.models.api.extensions.reconciliations import (
+  ReconciliationComponent as PydanticReconciliationComponent,
+)
+from robosystems.models.api.extensions.reconciliations import (
   ReconciliationListResponse as PydanticReconciliationListResponse,
 )
 from robosystems.models.api.extensions.reconciliations import (
@@ -478,6 +481,11 @@ class AccountRollups:
 
 
 # ── Reconciliations ───────────────────────────────────────────────────────
+
+
+@pydantic_type(model=PydanticReconciliationComponent, all_fields=True)
+class ReconciliationComponent:
+  """One schedule's part of an account's independent balance."""
 
 
 @pydantic_type(model=PydanticReconciliationRow, all_fields=True)

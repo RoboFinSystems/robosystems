@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.reconciliations import (
+  ReconciliationComponent,
   ReconciliationListResponse,
   ReconciliationRow,
   ReconciliationStatus,
@@ -140,6 +141,12 @@ def list_reconciliations(session: Session, period: str) -> ReconciliationListRes
         unreconciled_difference=values.get((fact_set_id, "UnreconciledDifference")),
         accounts_compared=_count(fact_set_id, "AccountsCompared"),
         accounts_different=_count(fact_set_id, "AccountsDifferent"),
+        ledger_balance=values.get((fact_set_id, "LedgerBalance")),
+        independent_balance=values.get((fact_set_id, "IndependentBalance")),
+        components=[
+          ReconciliationComponent.model_validate(component)
+          for component in metadata.get("components") or []
+        ],
         source=(provenance or {}).get("source"),
         compared_at=_observed_at(provenance),
         fact_set_id=fact_set_id or None,

@@ -237,9 +237,10 @@ class FiledProvenance(BaseModel):
 
 
 class ObservedProvenance(BaseModel):
-  """Balances read from a system outside the ledger, for a reconciliation.
+  """Balances read from a source outside the ledger, for a reconciliation:
+  another system, or the tenant's own schedules.
 
-  The set compares what that system says with what the ledger says at
+  The set compares what that source says with what the ledger says at
   `as_of`. Distinct from `asserted` (nobody typed the value in) and from
   `filed` (nothing was filed): the source was read, and `observed_at` says
   when, because a later reading of the same date can differ.

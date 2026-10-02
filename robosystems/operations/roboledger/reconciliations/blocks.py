@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from robosystems.models.api.extensions.reconciliations import (
   ReconciliationMethod,
   ReconciliationPreviewResponse,
+  ReconciliationRow,
 )
 from robosystems.models.api.fact_provenance import ObservedProvenance
 from robosystems.models.api.information_block import ReconciliationMechanics
@@ -48,14 +49,22 @@ _NAMESPACE = "rs-rec"
 UNRECONCILED_DIFFERENCE = f"{_NAMESPACE}:UnreconciledDifference"
 ACCOUNTS_COMPARED = f"{_NAMESPACE}:AccountsCompared"
 ACCOUNTS_DIFFERENT = f"{_NAMESPACE}:AccountsDifferent"
+LEDGER_BALANCE = f"{_NAMESPACE}:LedgerBalance"
+INDEPENDENT_BALANCE = f"{_NAMESPACE}:IndependentBalance"
 _ROOT = f"{_NAMESPACE}:ReconciliationAbstract"
 
-# (qname, name, monetary) in presentation order.
+# (qname, name, monetary).
 _CONCEPTS: tuple[tuple[str, str, bool], ...] = (
   (UNRECONCILED_DIFFERENCE, "Unreconciled difference", True),
   (ACCOUNTS_COMPARED, "Accounts compared", False),
   (ACCOUNTS_DIFFERENT, "Accounts that do not tie", False),
+  (LEDGER_BALANCE, "Ledger balance", True),
+  (INDEPENDENT_BALANCE, "Independent balance", True),
 )
+
+# What each scope's block presents, in order.
+_LEDGER_CONCEPTS = (UNRECONCILED_DIFFERENCE, ACCOUNTS_COMPARED, ACCOUNTS_DIFFERENT)
+_ACCOUNT_CONCEPTS = (LEDGER_BALANCE, INDEPENDENT_BALANCE, UNRECONCILED_DIFFERENCE)
 
 # The differing accounts kept on the period's FactSet; the counts stay exact.
 MAX_STORED_DIFFERENCES = 100
@@ -163,6 +172,17 @@ def ensure_reconciliation_concepts(
   )
 
 
+def has_reconciliations(session: Session) -> bool:
+  return (
+    session.execute(
+      select(Structure.id)
+      .where(Structure.block_type == RECONCILIATION_BLOCK_TYPE)
+      .limit(1)
+    ).scalar()
+    is not None
+  )
+
+
 def find_ledger_reconciliation(
   session: Session, method: ReconciliationMethod
 ) -> Structure | None:
@@ -191,15 +211,89 @@ def ensure_ledger_reconciliation(
   if structure is not None:
     return structure
 
-  concepts = ensure_reconciliation_concepts(session, created_by)
-  mechanics = ReconciliationMechanics(scope="ledger", method=method)
   source_name = _SOURCE_LEDGER_NAMES.get(source, source)
-  structure = Structure(
+  return _create_block(
+    session,
+    mechanics=ReconciliationMechanics(scope="ledger", method=method),
     name=f"Source ledger ({source_name})",
     description=(
       f"The ledger's account balances against {source_name}'s own trial "
       "balance at each period end."
     ),
+    presents=_LEDGER_CONCEPTS,
+    created_by=created_by,
+  )
+
+
+_ACCOUNT_BLOCK_LABELS = {"schedule_register": "schedules"}
+_ACCOUNT_BLOCK_DESCRIPTIONS = {
+  "schedule_register": (
+    "The account's balance against what its schedules say it carries at each "
+    "period end."
+  ),
+}
+
+
+def account_reconciliations(
+  session: Session, method: ReconciliationMethod
+) -> dict[str, Structure]:
+  """The account-scope blocks for ``method``, by the account they reconcile."""
+  rows = session.execute(
+    select(Structure)
+    .where(
+      Structure.block_type == RECONCILIATION_BLOCK_TYPE,
+      Structure.is_active.is_(True),
+      Structure.artifact_mechanics["scope"].astext == "account",
+      Structure.artifact_mechanics["method"].astext == method,
+    )
+    .order_by(Structure.created_at.asc(), Structure.id.asc())
+  ).scalars()
+  blocks: dict[str, Structure] = {}
+  for structure in rows:
+    blocks.setdefault(str(structure.artifact_mechanics.get("element_id")), structure)
+  return blocks
+
+
+def create_account_reconciliation(
+  session: Session,
+  *,
+  method: ReconciliationMethod,
+  element_id: str,
+  account_name: str,
+  required_for_close: bool,
+  created_by: str,
+) -> Structure:
+  """A new account-scope block. The caller holds `lock_reconciliation_writes`
+  and has checked that the account has none for ``method``."""
+  return _create_block(
+    session,
+    mechanics=ReconciliationMechanics(
+      scope="account",
+      method=method,
+      element_id=element_id,
+      required_for_close=required_for_close,
+    ),
+    name=f"{account_name} ({_ACCOUNT_BLOCK_LABELS[method]})",
+    description=_ACCOUNT_BLOCK_DESCRIPTIONS[method],
+    presents=_ACCOUNT_CONCEPTS,
+    created_by=created_by,
+  )
+
+
+def _create_block(
+  session: Session,
+  *,
+  mechanics: ReconciliationMechanics,
+  name: str,
+  description: str,
+  presents: tuple[str, ...],
+  created_by: str,
+) -> Structure:
+  """A reconciliation Structure with its presentation arcs and its rule."""
+  concepts = ensure_reconciliation_concepts(session, created_by)
+  structure = Structure(
+    name=name,
+    description=description,
     block_type=RECONCILIATION_BLOCK_TYPE,
     taxonomy_id=concepts.taxonomy_id,
     concept_arrangement="set",
@@ -211,7 +305,7 @@ def ensure_ledger_reconciliation(
   session.add(structure)
   session.flush()
 
-  for order, (qname, _, _) in enumerate(_CONCEPTS, 1):
+  for order, qname in enumerate(presents, 1):
     session.add(
       Association(
         structure_id=structure.id,
@@ -279,7 +373,23 @@ def balance_digest(comparison: ReconciliationPreviewResponse) -> str:
   return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:32]
 
 
-def record_ledger_reconciliation(
+def account_comparison(
+  comparison: ReconciliationPreviewResponse, row: ReconciliationRow
+) -> ReconciliationPreviewResponse:
+  """One account's part of an account-scope comparison, as its block records it."""
+  tied = row.status == "tied"
+  return comparison.model_copy(
+    update={
+      "accounts_compared": 1,
+      "accounts_tied": 1 if tied else 0,
+      "accounts_different": 0 if tied else 1,
+      "total_difference": row.difference,
+      "rows": [row],
+    }
+  )
+
+
+def record_reconciliation(
   session: Session,
   structure: Structure,
   *,
@@ -292,14 +402,17 @@ def record_ledger_reconciliation(
   """Replace the period's standing set with this comparison and evaluate the
   block's rule against it. Flushes; the caller owns the commit.
 
-  ``comparison`` must carry every row, tied ones included: the digest is
-  taken over all of them. Raises ``RuntimeError`` when it does not.
+  A ledger-scope block records the whole comparison; an account-scope one
+  records its account's part (`account_comparison`). ``comparison`` must
+  carry every row, tied ones included: the digest is taken over all of them.
+  Raises ``RuntimeError`` when it does not.
   """
   if len(comparison.rows) != comparison.accounts_compared:
     raise RuntimeError(
       "A reconciliation is recorded from every compared row, tied ones "
       f"included; got {len(comparison.rows)} of {comparison.accounts_compared}."
     )
+  account_scope = (structure.artifact_mechanics or {}).get("scope") == "account"
   concepts = ensure_reconciliation_concepts(session, created_by)
   entity_id = _entity_id(session)
   provenance = ObservedProvenance(
@@ -322,6 +435,12 @@ def record_ledger_reconciliation(
     "compared_by": created_by,
     "compared_via": compared_via,
   }
+  if account_scope:
+    metadata["components"] = [
+      component.model_dump(mode="json")
+      for row in comparison.rows
+      for component in row.components
+    ]
 
   standing = session.execute(
     select(FactSet)
@@ -359,11 +478,19 @@ def record_ledger_reconciliation(
     standing.provenance = provenance.model_dump(mode="json")
     standing.metadata_ = metadata
 
-  values = {
-    UNRECONCILED_DIFFERENCE: (comparison.total_difference, "USD"),
-    ACCOUNTS_COMPARED: (float(comparison.accounts_compared), "pure"),
-    ACCOUNTS_DIFFERENT: (float(comparison.accounts_different), "pure"),
-  }
+  if account_scope:
+    (row,) = comparison.rows
+    values = {
+      LEDGER_BALANCE: (row.ledger_balance, "USD"),
+      INDEPENDENT_BALANCE: (row.independent_balance, "USD"),
+      UNRECONCILED_DIFFERENCE: (row.difference, "USD"),
+    }
+  else:
+    values = {
+      UNRECONCILED_DIFFERENCE: (comparison.total_difference, "USD"),
+      ACCOUNTS_COMPARED: (float(comparison.accounts_compared), "pure"),
+      ACCOUNTS_DIFFERENT: (float(comparison.accounts_different), "pure"),
+    }
   for qname, (value, unit) in values.items():
     session.add(
       Fact(
