@@ -55,7 +55,15 @@ class TestClassification:
     assert is_mutating_tool(name)
 
   @pytest.mark.parametrize(
-    "name", ["read-graph-cypher", "get-graph-schema", "recall", "list-agents"]
+    "name",
+    [
+      "read-graph-cypher",
+      "get-graph-schema",
+      "recall",
+      "list-agents",
+      "preview-event-block",
+      "preview-reconciling-item",
+    ],
   )
   def test_reads_are_not(self, name):
     assert not is_mutating_tool(name)

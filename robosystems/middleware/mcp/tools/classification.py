@@ -47,6 +47,9 @@ READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
     "list-event-blocks",
     "get-event-handler",
     "list-event-handlers",
+    # Dry runs: they plan journal lines and persist nothing.
+    "preview-event-block",
+    "preview-reconciling-item",
     # Information block reads
     "get-information-block",
     "list-information-blocks",

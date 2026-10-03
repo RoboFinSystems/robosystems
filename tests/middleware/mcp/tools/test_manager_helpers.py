@@ -193,6 +193,50 @@ class TestGetToolDefinitionHelpers:
     assert tools.sync_connection_tool is None
     assert tools.bind_text_block_tool is None
 
+  def test_read_only_tenant_gets_only_the_read_classified_operations(self, mock_client):
+    """The registrar's dry runs reach a read-only surface (graph viewers,
+    the analyst); every operation classified as a write stays off it."""
+    from robosystems.middleware.mcp.tools.classification import is_mutating_tool
+
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      mock_env.ROBOLEDGER_ENABLED = True
+      tools = GraphMCPTools(
+        mock_client, schema_extensions=["roboledger"], read_only=True
+      )
+
+    built = set(tools._registrar_dispatch)
+    assert {"preview-event-block", "preview-reconciling-item"} <= built
+    assert not [name for name in built if is_mutating_tool(name)]
+    # Advertised as well as dispatchable.
+    advertised = {d["name"] for d in tools.get_tool_definitions_as_dict()}
+    assert built <= advertised
+    for write in ("create-agent", "update-event-block", "preview-reconciliations"):
+      assert write not in advertised
+
+  def test_read_only_shared_repo_gets_no_operations(self, mock_client):
+    """A shared repository has no ledger for the previews to read."""
+    mock_client.graph_id = "sec"
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch.object(GraphMCPTools, "_is_shared_repository", return_value=True),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      mock_env.ROBOLEDGER_ENABLED = True
+      tools = GraphMCPTools(
+        mock_client, schema_extensions=["roboledger"], read_only=True
+      )
+
+    assert tools._registrar_dispatch == {}
+
   def test_split_oltp_reads_stay_off_shared_repos(self, mock_client):
     """The unbundled reads are extensions-OLTP-backed, and the OLTP DB has no
     per-graph schema for a shared repo — the new gates must exclude SEC even

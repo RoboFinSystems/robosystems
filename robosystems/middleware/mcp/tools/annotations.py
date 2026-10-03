@@ -70,9 +70,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   # Creates the entry in QuickBooks; the event id is the request id, so a
   # repeat creates nothing.
   "execute-event-block": _write(destructive=True, idempotent=True, open_world=True),
-  "preview-event-block": _READ,
-  "preview-reconciling-item": _READ,
-  # Reads the trial balance from QuickBooks.
+  # Reads the trial balance from QuickBooks, so it stays behind the write
+  # role: a viewer does not get to spend the tenant's QuickBooks calls.
   "preview-reconciliations": _READ._replace(open_world=True),
   # Replaces the period's recorded comparison; reads QuickBooks to make it.
   "refresh-reconciliations": _write(destructive=True, idempotent=True, open_world=True),

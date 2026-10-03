@@ -495,17 +495,20 @@ class GraphMCPTools:
     # ── Registrar-generated tools ──────────────────────────────────────
     self._cached_meta: GraphExtensionContext | None = None
     self._registrar_dispatch: dict[str, _RegistrarMCPTool] = {}
-    if not read_only:
+    # A read-only tenant surface keeps the operations classified as reads
+    # (the previews). A shared repository has no ledger behind them.
+    if not read_only or not self._is_shared_repository():
       from .registrar import build_tools_for_extension
 
       for ext in self.schema_extensions:
-        self._registrar_dispatch.update(
-          build_tools_for_extension(
-            extension=ext,
-            client=self.client,
-            meta_getter=self._get_cached_meta,
-          )
+        built = build_tools_for_extension(
+          extension=ext,
+          client=self.client,
+          meta_getter=self._get_cached_meta,
         )
+        if read_only:
+          built = {n: t for n, t in built.items() if not is_mutating_tool(n)}
+        self._registrar_dispatch.update(built)
 
     logger.info(
       f"Initialized Graph MCP tools (extensions={list(self.schema_extensions)}, "
