@@ -157,6 +157,11 @@ on:
         description: "ARN of public data bucket (from S3 stack)"
         required: true
         type: string
+      public_data_cdn_url:
+        description: "CloudFront CDN URL for public data (from S3 stack)"
+        required: false
+        type: string
+        default: ""
 
       # Database Configuration (from Postgres stack outputs)
       database_endpoint:
@@ -380,6 +385,7 @@ jobs:
                 ParameterKey=DeploymentBucketArn,ParameterValue=\"${{ inputs.deployment_bucket_arn }}\" \
                 ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\" \
                 ParameterKey=PublicDataBucketArn,ParameterValue=\"${{ inputs.public_data_bucket_arn }}\" \
+                ParameterKey=PublicDataCDNURL,ParameterValue=\"${{ inputs.public_data_cdn_url }}\" \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
                 ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
                 ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }} \

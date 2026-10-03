@@ -620,6 +620,7 @@ jobs:
       deployment_bucket_arn: ${{ needs.deploy-s3.outputs.deployment_bucket_arn }}
       user_data_bucket_arn: ${{ needs.deploy-s3.outputs.user_data_bucket_arn }}
       public_data_bucket_arn: ${{ needs.deploy-s3.outputs.public_data_bucket_arn }}
+      public_data_cdn_url: ${{ needs.deploy-s3.outputs.public_data_cdn_url }}
       # Other Configuration
       prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}

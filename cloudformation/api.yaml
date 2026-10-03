@@ -208,6 +208,10 @@ Parameters:
     Type: String
   PublicDataBucketArn:
     Type: String
+  PublicDataCDNURL:
+    Type: String
+    Default: ""
+    Description: CloudFront CDN URL for public data (from S3 stack output)
 
 Conditions:
   HasObservabilityStack: !Not [!Equals [!Ref PrometheusStackName, ""]]
@@ -723,6 +727,10 @@ Resources:
               Value: !Select [5, !Split [":", !Ref DeploymentBucketArn]]
             - Name: PUBLIC_DATA_BUCKET
               Value: !Select [5, !Split [":", !Ref PublicDataBucketArn]]
+            # The bucket is private behind the CDN: links to a filing's files
+            # are only reachable through this host.
+            - Name: PUBLIC_DATA_CDN_URL
+              Value: !Ref PublicDataCDNURL
             # Observability Configuration
             - Name: OTEL_ENABLED
               Value: !If [HasObservabilityStack, "true", "false"]
