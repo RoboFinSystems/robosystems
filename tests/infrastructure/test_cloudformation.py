@@ -274,3 +274,33 @@ class TestAlarmDimensionsMatchEmitters:
     metric, dims = alarms["DatabaseCapacityAlarm"]
     assert metric == "DatabaseUtilizationPercent"
     assert dims == frozenset({"NodeType"})
+
+
+_ENV_NAME_RE = re.compile(r"-\s+Name:\s+(PUBLIC_DATA_BUCKET|PUBLIC_DATA_CDN_URL)\b")
+_PARAM_KEY_RE = re.compile(r"ParameterKey=(PublicDataBucketArn|PublicDataCDNURL)\b")
+
+
+@pytest.mark.unit
+class TestPublicDataBucketComesWithItsCdn:
+  """The public bucket is private behind the CDN, so a process that knows only
+  the bucket hands out links nobody can open."""
+
+  def test_templates_with_the_bucket_are_discoverable(self):
+    stems = {
+      t.stem for t in CFN_DIR.glob("*.yaml") if "PUBLIC_DATA_BUCKET" in t.read_text()
+    }
+    assert {"api", "worker", "dagster"} <= stems
+
+  @pytest.mark.parametrize(
+    "template", sorted(CFN_DIR.glob("*.yaml")), ids=lambda p: p.stem
+  )
+  def test_every_container_given_the_bucket_is_given_the_cdn(self, template):
+    names = _ENV_NAME_RE.findall(template.read_text())
+    assert names.count("PUBLIC_DATA_CDN_URL") == names.count("PUBLIC_DATA_BUCKET")
+
+  @pytest.mark.parametrize(
+    "workflow", sorted(WORKFLOW_DIR.glob("deploy-*.yml")), ids=lambda p: p.stem
+  )
+  def test_every_deploy_passing_the_bucket_passes_the_cdn(self, workflow):
+    keys = _PARAM_KEY_RE.findall(workflow.read_text())
+    assert keys.count("PublicDataCDNURL") == keys.count("PublicDataBucketArn")

@@ -126,6 +126,10 @@ Parameters:
   PublicDataBucketArn:
     Type: String
     Description: ARN of public data bucket (from S3 stack output)
+  PublicDataCDNURL:
+    Type: String
+    Default: ""
+    Description: CloudFront CDN URL for public data (from S3 stack output)
 
   # Monitoring
   LogRetentionDays:
@@ -465,6 +469,8 @@ Resources:
             # tools read when an operator calls them from this process.
             - Name: PUBLIC_DATA_BUCKET
               Value: !Select [5, !Split [":", !Ref PublicDataBucketArn]]
+            - Name: PUBLIC_DATA_CDN_URL
+              Value: !Ref PublicDataCDNURL
             # Dagster event-log storage, so worker tasks can report runless
             # AssetMaterialization events; DagsterInstance.get() fails without it.
             - Name: DAGSTER_HOME
