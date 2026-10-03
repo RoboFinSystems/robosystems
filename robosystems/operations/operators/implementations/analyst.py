@@ -25,6 +25,7 @@ from robosystems.operations.operators.operator_registry import register_operator
 from robosystems.operations.operators.tool_loop import (
   DEFAULT_MAX_ERROR_RETRIES,
   ToolLoopResult,
+  WriteGuard,
   run_tool_loop,
 )
 
@@ -89,6 +90,7 @@ class AnalystOperator(Operator):
   OPERATOR_TYPE = "analyst"
   LOOP_DESCRIPTION = "Analyst tool loop"
   WRITE_TOOLS: tuple[str, ...] = ()
+  WRITE_GUARDS: dict[str, WriteGuard] = {}
 
   # Advertised in the system prompt as preferred over raw Cypher.
   CURATED_TOOL_HINTS: dict[str, str] = {
@@ -209,6 +211,7 @@ class AnalystOperator(Operator):
       max_credits=self._get_max_credits(ctx),
       effort=limits.get("effort"),
       write_tools=frozenset(write_tools),
+      write_guards=self.WRITE_GUARDS,
     )
 
     await ctx.progress.report("Done", percent=100)

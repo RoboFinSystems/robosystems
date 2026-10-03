@@ -22,6 +22,7 @@ from robosystems.operations.operators.operator_registry import get_operator
 from robosystems.operations.operators.progress import NoOpProgress
 from robosystems.operations.operators.tool_loop import (
   ToolLoopResult,
+  WriteRefusedError,
   run_tool_loop,
   write_record,
 )
@@ -256,6 +257,82 @@ class TestLoopRecordsWrites:
     )
     assert result.hit_cap is True
     assert [w["id"] for w in result.writes] == ["b1"]
+
+
+class TestWriteGuards:
+  async def test_a_refused_call_is_never_dispatched_or_recorded(self):
+    tools = _tools(["create-taxonomy-block"], {"create-taxonomy-block": {"id": "t1"}})
+    ai = MagicMock()
+    ai.create_message = AsyncMock(
+      side_effect=[
+        _turn(("create-taxonomy-block", {"taxonomy_type": "chart_of_accounts"})),
+        _turn(text="I can't do that here."),
+      ]
+    )
+
+    def refuse(arguments):
+      raise WriteRefusedError("not from the console")
+
+    result = await run_tool_loop(
+      _ctx(tools, ai),
+      system="s",
+      tool_names=["create-taxonomy-block"],
+      max_iterations=3,
+      max_tokens=100,
+      write_tools=frozenset({"create-taxonomy-block"}),
+      write_guards={"create-taxonomy-block": refuse},
+    )
+
+    tools.call_tool.assert_not_awaited()
+    assert result.writes == []
+    # The model is told why, as the tool's own error.
+    answered = ai.create_message.await_args_list[1].kwargs["messages"][-1].content
+    block = answered[0]["toolResult"]
+    assert block["status"] == "error"
+    assert "not from the console" in block["content"][0]["text"]
+
+  async def test_a_guard_can_pin_an_argument(self):
+    tools = _tools(["update-agent"], {"update-agent": {"id": "agt_1"}})
+    ai = MagicMock()
+    ai.create_message = AsyncMock(
+      side_effect=[_turn(("update-agent", {"agent_id": "agt_1"})), _turn(text="Done.")]
+    )
+
+    result = await run_tool_loop(
+      _ctx(tools, ai),
+      system="s",
+      tool_names=["update-agent"],
+      max_iterations=3,
+      max_tokens=100,
+      write_tools=frozenset({"update-agent"}),
+      write_guards={"update-agent": lambda args: {**args, "pinned": True}},
+    )
+
+    tools.call_tool.assert_awaited_once_with(
+      "update-agent", {"agent_id": "agt_1", "pinned": True}, return_raw=True
+    )
+    assert [w["id"] for w in result.writes] == ["agt_1"]
+
+  async def test_the_author_hands_its_guards_to_the_loop(self):
+    kwargs = await _loop_kwargs(AuthorOperator(), _tools(["read-graph-cypher"]))
+    assert kwargs["write_guards"] is AuthorOperator.WRITE_GUARDS
+    analyst = await _loop_kwargs(AnalystOperator(), _tools(["read-graph-cypher"]))
+    assert analyst["write_guards"] == {}
+
+  def test_every_guard_narrows_an_allowlisted_tool(self):
+    assert set(AuthorOperator.WRITE_GUARDS) <= set(AuthorOperator.WRITE_TOOLS)
+
+  def test_a_chart_of_accounts_is_never_created_from_the_console(self):
+    # Creating one would demote the chart the books run on.
+    guard = AuthorOperator.WRITE_GUARDS["create-taxonomy-block"]
+    with pytest.raises(WriteRefusedError, match="primary chart"):
+      guard({"name": "New chart", "taxonomy_type": "chart_of_accounts"})
+
+  @pytest.mark.parametrize("taxonomy_type", ["custom_ontology", "reporting_extension"])
+  def test_other_taxonomy_blocks_pass_unchanged(self, taxonomy_type):
+    guard = AuthorOperator.WRITE_GUARDS["create-taxonomy-block"]
+    arguments = {"name": "Metrics", "taxonomy_type": taxonomy_type}
+    assert guard(arguments) == arguments
 
 
 class TestWriteRecord:

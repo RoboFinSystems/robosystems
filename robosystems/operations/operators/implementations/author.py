@@ -17,11 +17,23 @@ from robosystems.operations.operators.base import (
 from robosystems.operations.operators.implementations.analyst import AnalystOperator
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.operator_registry import register_operator
+from robosystems.operations.operators.tool_loop import WriteGuard, WriteRefusedError
 
 # A backstop against a runaway loop, not the budget: max_credits governs. A
 # write plan cut off by a per-mode step cap would leave some writes landed
 # and some not.
 _STEP_CAP = 25
+
+
+def _no_chart_of_accounts(arguments: dict[str, Any]) -> dict[str, Any]:
+  # Creating a chart links it as the entity's primary one and demotes the
+  # chart the books run on.
+  if arguments.get("taxonomy_type") == "chart_of_accounts":
+    raise WriteRefusedError(
+      "A chart of accounts is set up on the Chart of Accounts page, not from "
+      "the console: creating one here would replace the entity's primary chart."
+    )
+  return arguments
 
 
 @register_operator("author")
@@ -47,6 +59,12 @@ class AuthorOperator(AnalystOperator):
     "update-agent",
     "remember",
   )
+
+  # The allowlist names tools; these narrow a tool to the arguments it may
+  # be called with.
+  WRITE_GUARDS: dict[str, WriteGuard] = {
+    "create-taxonomy-block": _no_chart_of_accounts,
+  }
 
   spec = OperatorSpec(
     name="Author Operator",
