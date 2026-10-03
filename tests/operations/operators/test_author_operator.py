@@ -108,6 +108,20 @@ class TestDeclaration:
   def test_analyst_writes_nothing(self):
     assert AnalystOperator.WRITE_TOOLS == ()
 
+  def test_its_extra_reads_are_classified_as_reads(self):
+    from robosystems.middleware.mcp.tools.classification import is_mutating_tool
+
+    assert "preview-event-block" in AuthorOperator.READ_ONLY_TOOLS
+    assert "preview-event-block" not in AnalystOperator.READ_ONLY_TOOLS
+    assert not [t for t in AuthorOperator.READ_ONLY_TOOLS if is_mutating_tool(t)]
+
+  def test_ledger_bound_writes_are_the_ones_a_person_still_approves(self):
+    # A classified line waits on its commit; a drafted entry on close-period.
+    assert {"update-event-block", "promote-obligations", "create-report"} <= set(
+      AuthorOperator.WRITE_TOOLS
+    )
+    assert "update-event-block" in AuthorOperator.WRITE_GUARDS
+
 
 class TestRun:
   async def test_advertises_allowed_writes_and_never_gated_ones(self):
@@ -134,6 +148,16 @@ class TestRun:
     assert "AUTHORING" in kwargs["system"]
     assert "`create-information-block`" in kwargs["system"]
     assert "never invent" in kwargs["system"]
+
+  async def test_prompt_states_the_inbox_rule_only_where_the_tool_is(self):
+    with_inbox = await _loop_kwargs(
+      AuthorOperator(), _tools(["read-graph-cypher", "update-event-block"])
+    )
+    assert "only classifies" in with_inbox["system"]
+    without = await _loop_kwargs(
+      AuthorOperator(), _tools(["read-graph-cypher", "create-agent"])
+    )
+    assert "only classifies" not in without["system"]
 
   async def test_prompt_says_so_when_the_graph_has_no_write_tools(self):
     kwargs = await _loop_kwargs(AuthorOperator(), _tools(["read-graph-cypher"]))
@@ -333,6 +357,89 @@ class TestWriteGuards:
     guard = AuthorOperator.WRITE_GUARDS["create-taxonomy-block"]
     arguments = {"name": "Metrics", "taxonomy_type": taxonomy_type}
     assert guard(arguments) == arguments
+
+
+class TestClassifyGuard:
+  guard = staticmethod(AuthorOperator.WRITE_GUARDS["update-event-block"])
+
+  def test_a_classification_passes_and_is_stamped_as_the_ai(self):
+    out = self.guard(
+      {
+        "event_id": "evt_1",
+        "transition_to": "classified",
+        "metadata_patch": {"classified_element_id": "el_1", "basis": "Stripe fee"},
+      }
+    )
+    assert out["metadata_patch"] == {
+      "classified_element_id": "el_1",
+      "basis": "Stripe fee",
+      "classified_by": "ai",
+    }
+
+  def test_it_cannot_claim_a_person_classified_the_line(self):
+    out = self.guard(
+      {
+        "event_id": "evt_1",
+        "transition_to": "classified",
+        "metadata_patch": {"accept_suggestion": True, "classified_by": "user"},
+      }
+    )
+    assert out["metadata_patch"]["classified_by"] == "ai"
+
+  def test_a_split_passes(self):
+    allocations = [
+      {"element_id": "el_1", "amount": 600},
+      {"element_id": "el_2", "amount": 400},
+    ]
+    out = self.guard(
+      {
+        "event_id": "evt_1",
+        "transition_to": "classified",
+        "metadata_patch": {"classified_allocations": allocations},
+      }
+    )
+    assert out["metadata_patch"]["classified_allocations"] == allocations
+
+  @pytest.mark.parametrize(
+    "transition", ["committed", "voided", "superseded", "pending", "fulfilled", None]
+  )
+  def test_every_other_transition_is_refused(self, transition):
+    arguments = {"event_id": "evt_1", "metadata_patch": {"accept_suggestion": True}}
+    if transition is not None:
+      arguments["transition_to"] = transition
+    with pytest.raises(WriteRefusedError, match="only classifies"):
+      self.guard(arguments)
+
+  @pytest.mark.parametrize(
+    "extra",
+    [
+      {"description": "edited"},
+      {"effective_at": "2026-04-30T23:59:59Z"},
+      {"superseded_by_id": "evt_2"},
+    ],
+  )
+  def test_a_field_correction_riding_along_is_refused(self, extra):
+    with pytest.raises(WriteRefusedError):
+      self.guard({"event_id": "evt_1", "transition_to": "classified", **extra})
+
+  def test_metadata_outside_the_classification_is_refused(self):
+    with pytest.raises(WriteRefusedError):
+      self.guard(
+        {
+          "event_id": "evt_1",
+          "transition_to": "classified",
+          "metadata_patch": {"classified_element_id": "el_1", "source_amount": 1},
+        }
+      )
+
+  def test_the_caller_arguments_are_not_mutated(self):
+    arguments = {
+      "event_id": "evt_1",
+      "transition_to": "classified",
+      "metadata_patch": {"accept_suggestion": True},
+    }
+    self.guard(arguments)
+    assert arguments["metadata_patch"] == {"accept_suggestion": True}
 
 
 class TestWriteRecord:

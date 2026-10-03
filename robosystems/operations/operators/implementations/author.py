@@ -1,6 +1,8 @@
 """AuthorOperator — makes the change a console request asks for (a metric
-block, a forecast, a counterparty) through a narrow set of additive,
-reversible write tools, on top of the analyst's read surface.
+block, a forecast, a counterparty, a draft report, an inbox classification)
+through a narrow set of write tools, on top of the analyst's read surface.
+Each write is additive and reversible, or waits on a step only a person
+takes.
 """
 
 from __future__ import annotations
@@ -36,12 +38,46 @@ def _no_chart_of_accounts(arguments: dict[str, Any]) -> dict[str, Any]:
   return arguments
 
 
+_CLASSIFY_ARGUMENTS = frozenset({"event_id", "transition_to", "metadata_patch"})
+_CLASSIFY_METADATA = frozenset(
+  {
+    "classified_element_id",
+    "classified_allocations",
+    "accept_suggestion",
+    "basis",
+    "classified_by",
+  }
+)
+
+
+def _classify_only(arguments: dict[str, Any]) -> dict[str, Any]:
+  # Committing a line is the person's approval, so it never happens here.
+  patch = arguments.get("metadata_patch") or {}
+  if (
+    arguments.get("transition_to") != "classified"
+    or set(arguments) - _CLASSIFY_ARGUMENTS
+    or not isinstance(patch, dict)
+    or set(patch) - _CLASSIFY_METADATA
+  ):
+    raise WriteRefusedError(
+      "From the console, update-event-block only classifies an inbox line: "
+      "transition_to 'classified' with a metadata_patch of "
+      "classified_element_id, classified_allocations or accept_suggestion, "
+      "and a basis. Committing, voiding or editing an event is the user's "
+      "step in the Inbox."
+    )
+  return {**arguments, "metadata_patch": {**patch, "classified_by": "ai"}}
+
+
 @register_operator("author")
 class AuthorOperator(AnalystOperator):
   """Reads like the analyst, and writes through the tools below only."""
 
   OPERATOR_TYPE = "author"
   LOOP_DESCRIPTION = "Author tool loop"
+
+  # The dry run that shows the entry an inbox line would post.
+  READ_ONLY_TOOLS = [*AnalystOperator.READ_ONLY_TOOLS, "preview-event-block"]
 
   # The safety boundary: anything that would need an approval card stays
   # off this list. No deletes, journal edits, period close/reopen, sync,
@@ -58,19 +94,27 @@ class AuthorOperator(AnalystOperator):
     "create-agent",
     "update-agent",
     "remember",
+    # A draft; filing and sharing it are held for a person.
+    "create-report",
+    # Ledger-bound, so each waits on a person's step: a classified line on
+    # its commit in the Inbox, a drafted entry on close-period.
+    "update-event-block",
+    "promote-obligations",
   )
 
   # The allowlist names tools; these narrow a tool to the arguments it may
   # be called with.
   WRITE_GUARDS: dict[str, WriteGuard] = {
     "create-taxonomy-block": _no_chart_of_accounts,
+    "update-event-block": _classify_only,
   }
 
   spec = OperatorSpec(
     name="Author Operator",
     description=(
       "Makes the change a request asks for (metric and forecast blocks, "
-      "counterparties, memories) through additive, reversible writes, and "
+      "counterparties, memories, draft reports, inbox classifications) "
+      "through writes that are reversible or wait on a person's step, and "
       "reports each write it made"
     ),
     capabilities=[OperatorCapability.CUSTOM],
@@ -78,8 +122,9 @@ class AuthorOperator(AnalystOperator):
     read_only=False,
     version="1.0.0",
     requires_credits=True,
-    # The cached tools + system prefix measured on a cold /do (~61K tokens).
-    cold_start_tokens=62_000,
+    # The cached tools + system prefix: ~61K tokens measured on a cold /do,
+    # plus ~5K of tool schemas added since (sized from their definitions).
+    cold_start_tokens=67_000,
     execution_profile={
       OperatorMode.QUICK: ExecutionProfile(
         min_time=5, max_time=30, avg_time=12, tool_calls=6
@@ -116,6 +161,21 @@ class AuthorOperator(AnalystOperator):
         "and describe the change the user would need to make instead."
       )
     names = ", ".join(f"`{t}`" for t in write_tools)
+    ledger_rules = ""
+    if "update-event-block" in write_tools:
+      ledger_rules += (
+        "\n- Inbox lines: `update-event-block` here only classifies "
+        "(`transition_to: 'classified'` with a `metadata_patch` of "
+        "`classified_element_id`, or `classified_allocations` for a split, or "
+        "`accept_suggestion: true`, plus a short `basis`). It never commits, "
+        "voids or edits a line: approving one is the user's click in the "
+        "Inbox, so say that instead of trying."
+      )
+    if "create-report" in write_tools:
+      ledger_rules += (
+        "\n- `create-report` makes a draft. Filing and sharing it are the "
+        "user's steps in the app."
+      )
     return f"""
 
 AUTHORING (this request may ask you to change the graph, not just read it):
@@ -123,4 +183,4 @@ AUTHORING (this request may ask you to change the graph, not just read it):
 - Read before you write. Find the real ids (elements, blocks, agents) with the read tools; never invent one. If what the user named does not exist or is ambiguous, stop and ask instead of guessing.
 - Make exactly the change asked for. Do not create extra blocks, edit objects the user did not mention, or repeat a write that already succeeded.
 - A write tool that returns an error changed nothing: read the message, fix the arguments, and retry at most once.
-- When done, say plainly what you created or changed, naming each object, and anything you could not do. If the request was only a question, answer it and write nothing."""
+- When done, say plainly what you created or changed, naming each object, and anything you could not do. If the request was only a question, answer it and write nothing.{ledger_rules}"""
