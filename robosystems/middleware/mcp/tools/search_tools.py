@@ -136,6 +136,9 @@ class SearchDocumentsTool(_SearchToolMixin):
 
 **RELATED TOOLS:**
 - get-document-section / get-document — read what a hit points at
+- search-text — once you know the filing, search INSIDE its whole text (cover
+  page, footnotes, anything between the indexed sections); pass a hit's
+  accession_number as `accession` with its ticker
 - read-graph-cypher — structured data (numbers, relationships), not prose
 - list-documents — browses by metadata; does not search content
 - resolve-element — takes a qname from get-document-section's xbrl_elements on

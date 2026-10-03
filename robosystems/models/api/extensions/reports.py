@@ -864,3 +864,125 @@ class InformationBlockResponse(BaseModel):
   calculation: list[dict[str, Any]] | None = None
   text: list[dict[str, Any]] | None = None
   note: str | None = None
+
+
+# ── Filing-text views (describe-filing + search-text + read-text) ─────────────
+#
+# xbrlkit's text tools over one filing read whole: its own document on the SEC
+# repository (an 8-K with its exhibits included), its text blocks on a tenant.
+
+# xbrlkit's caps (`xbrlkit.serve.tools.MAX_WINDOW` / `MAX_HITS` / `MAX_READ`),
+# restated so the request models need not import the tool module; the view
+# tests pin them equal.
+SEARCH_TEXT_MAX_WINDOW = 1500
+SEARCH_TEXT_MAX_HITS = 25
+READ_TEXT_MAX_LENGTH = 8000
+
+
+class FilingSelector(ReportSelector):
+  """Which filing a text view reads. On the SEC repository a ticker opens the
+  filer's filings from any processed year: the latest annual report unless
+  fiscal_year, period_type, accession or form say otherwise. A tenant graph
+  takes report_id."""
+
+  accession: str | None = Field(
+    None,
+    description=(
+      "SEC only, with ticker: one filing by accession number — a report, or an "
+      "8-K from resolved_report.recent_releases"
+    ),
+  )
+  form: str | None = Field(
+    None,
+    description="SEC only, with ticker: '8-K' reads the latest earnings release",
+  )
+
+
+class DescribeFilingRequest(FilingSelector):
+  """Request for the describe-filing view op — how a filing is laid out."""
+
+
+class SearchTextRequest(FilingSelector):
+  """Request for the search-text view op — words inside one filing."""
+
+  query: str = Field(
+    ...,
+    min_length=1,
+    max_length=500,
+    description=(
+      "Words matched in order across any spacing, case-insensitive; `|` "
+      "between alternative phrases, a trailing `*` for a stem. Not a regular "
+      "expression."
+    ),
+  )
+  window: int | None = Field(
+    None,
+    ge=40,
+    le=SEARCH_TEXT_MAX_WINDOW,
+    description="Characters of context around each match (default 300)",
+  )
+  max_hits: int | None = Field(
+    None,
+    ge=1,
+    le=SEARCH_TEXT_MAX_HITS,
+    description="Matches to return (default 10)",
+  )
+
+
+class ReadTextRequest(FilingSelector):
+  """Request for the read-text view op — a window of one filing's text."""
+
+  offset: int = Field(0, ge=0, description="Character offset to start from")
+  length: int | None = Field(
+    None,
+    ge=1,
+    le=READ_TEXT_MAX_LENGTH,
+    description="Characters to return (default 4000)",
+  )
+
+
+class _FilingTextResponse(BaseModel):
+  model_config = ConfigDict(extra="allow")
+
+  graph_id: str
+  report_id: str | None = None
+  accession: str | None = None
+  # How the filing was picked, when it was resolved from a ticker: accession,
+  # form, filing date, fiscal period; for an 8-K its items and the filer's
+  # recent releases.
+  resolved_report: dict[str, Any] | None = None
+
+
+class DescribeFilingResponse(_FilingTextResponse):
+  """The describe-filing view op's result: xbrlkit's layout of the filing."""
+
+  profile: dict[str, Any] | None = None
+  filing: dict[str, Any] | None = None
+  entity: dict[str, Any] | None = None
+  counts: dict[str, Any] | None = None
+  sections: dict[str, Any] | None = None
+
+
+class SearchTextResponse(_FilingTextResponse):
+  """The search-text view op's result: matches in document order."""
+
+  query: str
+  total: int
+  hits: list[dict[str, Any]] = Field(default_factory=list)
+  text_chars: int
+  text: str | None = None
+  sections: list[dict[str, Any]] | None = None
+  sections_omitted: int | None = None
+  terms: list[dict[str, Any]] | None = None
+  note: str | None = None
+
+
+class ReadTextResponse(_FilingTextResponse):
+  """The read-text view op's result: one window of the filing's text."""
+
+  offset: int
+  length: int
+  text: str
+  text_chars: int
+  next_offset: int | None = None
+  section: str | None = None

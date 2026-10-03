@@ -10,6 +10,15 @@ from robosystems.operations.roboledger.views.fact_grid_builder import (
   summarize_by_element,
 )
 from robosystems.operations.roboledger.views.fact_query import query_fact_grid
+from robosystems.operations.roboledger.views.filing_text import (
+  FilingRef,
+  QueryError,
+  filing_info,
+  query_describe_filing,
+  query_read_text,
+  query_search_text,
+  resolve_filing,
+)
 from robosystems.operations.roboledger.views.financial_statement_query import (
   deduplicate_facts,
   query_financial_statement,
@@ -29,15 +38,22 @@ from robosystems.operations.roboledger.views.information_blocks import (
 __all__ = [
   "BlockNotFoundError",
   "FactGridBuilder",
+  "FilingRef",
+  "QueryError",
   "ReportNotFoundError",
   "ReportNotPublishedError",
   "ReportSelectorError",
   "ReportTooLargeError",
   "deduplicate_facts",
+  "filing_info",
+  "query_describe_filing",
   "query_disclosures",
   "query_fact_grid",
   "query_financial_statement",
   "query_information_block",
+  "query_read_text",
+  "query_search_text",
+  "resolve_filing",
   "resolve_report",
   "resolved_report_info",
   "summarize_by_element",

@@ -246,3 +246,32 @@ class TestAllJobsConsistency:
     ]
     names = [job.name for job in all_jobs]
     assert len(names) == len(set(names)), "Duplicate job names found"
+
+
+@pytest.mark.unit
+class TestEdgarPullJobs:
+  """Every job that pulls from EDGAR carries the tag the run queue limits to
+  one, so two pulls never add their rates."""
+
+  def test_pulling_jobs_carry_the_edgar_tag(self):
+    from robosystems.adapters.sec.pipeline.jobs import (
+      sec_current_reports_job,
+      sec_download_job,
+      sec_filing_documents_job,
+    )
+
+    for job in (sec_download_job, sec_current_reports_job, sec_filing_documents_job):
+      assert job.tags.get("edgar") == "pull", job.name
+
+  @pytest.mark.parametrize(
+    "path", ["dagster_home/dagster.yaml", "dagster_home/dagster_prod.yaml"]
+  )
+  def test_the_run_queue_limits_edgar_pulls_to_one(self, path):
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[4]
+    config = yaml.safe_load((root / path).read_text())
+    limits = config["run_coordinator"]["config"]["tag_concurrency_limits"]
+    assert {"key": "edgar", "limit": 1} in limits

@@ -182,6 +182,56 @@ class SECiXBRLIndexConfig(Config):
   )
 
 
+class SECCurrentReportsConfig(Config):
+  """8-K earnings releases: discovered through EFTS, fetched once, kept.
+
+  One request per filing (its ``-xbrl.zip``) once EFTS has said which 8-Ks
+  report a wanted item. A zip already in the raw bucket is read from there,
+  so a re-run costs only the EFTS pages.
+  """
+
+  items: list[str] = Field(
+    default=["2.02", "7.01"],
+    description="8-K items to keep: 2.02 results of operations, 7.01 Reg FD",
+  )
+  since_days: int | None = Field(
+    default=None,
+    description="Discover only the last N days of the quarter (the nightly run); "
+    "None reads the whole quarter",
+  )
+  in_corpus_only: bool = Field(
+    default=True,
+    description="Keep only filers the XBRL corpus already holds",
+  )
+  republish: bool = Field(
+    default=False,
+    description="Rewrite the public files of filings already published",
+  )
+  dry_run: bool = Field(default=False, description="Discover only; fetch nothing")
+  efts_rate: float = 5.0  # requests per second
+  download_rate: float = 5.0  # requests per second
+  download_concurrency: int = 5
+
+
+class SECFilingDocumentsConfig(Config):
+  """The primary documents of filings processed before inline XBRL.
+
+  Their zip held the instance only, so their public folder has the holon and
+  the Tavi but not the document; the manifest names it, and one request
+  fetches it. Inline filings already carry theirs, so a quarter from 2021 on
+  finds nothing to do.
+  """
+
+  form_types: list[str] = Field(
+    default=["10-K", "20-F", "40-F"],
+    description="Forms whose primary document to fetch",
+  )
+  dry_run: bool = Field(default=False, description="List only; fetch nothing")
+  download_rate: float = 5.0  # requests per second
+  download_concurrency: int = 5
+  manifest_workers: int = 16
+
+
 class SECFilingCatalogConfig(Config):
   """Per-filer catalog on the public CDN, partitioned by quarter.
 

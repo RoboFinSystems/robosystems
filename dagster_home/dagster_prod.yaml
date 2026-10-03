@@ -119,6 +119,11 @@ run_coordinator:
         limit: 1
         value:
           applyLimitPerUniqueValue: true
+      # One EDGAR pull at a time: the XBRL download and the document jobs
+      # each pace themselves under EDGAR's fair-access limit, and two at once
+      # would add their rates. Every pulling job carries `edgar: pull`.
+      - key: "edgar"
+        limit: 1
 
 # Telemetry - disable for privacy
 telemetry:

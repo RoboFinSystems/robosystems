@@ -90,6 +90,7 @@ class TestGetToolDefinitionHelpers:
     assert "live-financial-statement" in names
     assert "disclosures" in names
     assert "information-block" in names
+    assert {"describe-filing", "search-text", "read-text"} <= names
 
   def test_live_statement_tool_absent_on_shared_repo(self, mock_client):
     """Shared-repo graphs (SEC) must NOT get the OLTP live-statement tool
@@ -112,6 +113,7 @@ class TestGetToolDefinitionHelpers:
     assert "live-financial-statement" not in names
     # The pair reads the published filing on a shared repo, so it serves SEC too.
     assert {"disclosures", "information-block"} <= names
+    assert {"describe-filing", "search-text", "read-text"} <= names
 
   def test_graphql_tools_absent_on_shared_repo(self, mock_client):
     """The GraphQL escape hatch reads the extensions OLTP schema, which a
@@ -302,7 +304,10 @@ class TestCallToolErrors:
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
-  @pytest.mark.parametrize("name", ["disclosures", "information-block"])
+  @pytest.mark.parametrize(
+    "name",
+    ["disclosures", "information-block", "describe-filing", "search-text", "read-text"],
+  )
   async def test_disabled_block_views_raise(self, tools, name):
     result = await tools.call_tool(name, {})
     assert "not available" in result or "Error" in result

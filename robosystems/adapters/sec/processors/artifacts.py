@@ -81,6 +81,36 @@ def gzip_artifact(data: bytes) -> bytes:
   return gzip.compress(data, compresslevel=6, mtime=0)
 
 
+def document_media_type(name: str) -> str:
+  return DOCUMENT_MEDIA_TYPES.get(
+    os.path.splitext(name)[1].lower(), "application/octet-stream"
+  )
+
+
+def put_public_artifact(
+  s3_client: Any,
+  bucket: str,
+  key: str,
+  data: bytes,
+  media_type: str,
+  *,
+  cache_control: str = ARTIFACT_CACHE_CONTROL,
+  compress: bool = False,
+) -> bool:
+  """One object into the public-data bucket the way every artifact is
+  written: gzipped deterministically when ``compress``, with its storage class
+  named on the PUT."""
+  return s3_client.upload_bytes(
+    gzip_artifact(data) if compress else data,
+    bucket,
+    key,
+    content_type=media_type,
+    cache_control=cache_control,
+    content_encoding=GZIP_ENCODING if compress else None,
+    storage_class=PUBLIC_DATA_STORAGE_CLASS,
+  )
+
+
 @dataclass
 class Representation:
   """One public form of the filing, as the manifest and the catalog list it."""
@@ -219,6 +249,8 @@ class FilingArtifactWriter:
     self._write_tavi(model, coordinates, representations, errors)
     self._write_holon(model, external_values, coordinates, representations, errors)
     self._write_document(model, instance_path, coordinates, representations, errors)
+    if not any(r.kind == "document" for r in representations):
+      self._carry_document(coordinates, representations)
     manifest_key = self._write_manifest(
       model,
       coordinates,
@@ -301,9 +333,7 @@ class FilingArtifactWriter:
     if path is None or name is None:
       return
     try:
-      media_type = DOCUMENT_MEDIA_TYPES.get(
-        os.path.splitext(name)[1].lower(), "application/octet-stream"
-      )
+      media_type = document_media_type(name)
       key = get_filing_artifact_key(*coordinates, name)
       with open(path, "rb") as f:
         data = f.read()
@@ -317,6 +347,34 @@ class FilingArtifactWriter:
     except Exception as e:
       errors.append(f"document: {e}")
       logger.warning(f"Primary document copy failed for {coordinates[2]}: {e}")
+
+  def _carry_document(
+    self, coordinates: tuple[str, str, str], representations: list[Representation]
+  ) -> None:
+    """Keep the document a filing's last manifest listed when this run could
+    not write one: a pre-inline zip holds no document, and the one fetched
+    for it afterwards (``sec_filing_documents``) is still in the folder."""
+    assert self.bucket is not None
+    key = get_filing_artifact_key(*coordinates, FILING_ARTIFACT_MANIFEST)
+    try:
+      body = self.s3_client.s3_client.get_object(Bucket=self.bucket, Key=key)
+      previous = json.loads(body["Body"].read())
+    except Exception:
+      return
+    for entry in previous.get("representations") or []:
+      if entry.get("kind") == "document" and entry.get("url"):
+        known = {"kind", "name", "media_type", "bytes", "url"}
+        representations.append(
+          Representation(
+            "document",
+            str(entry.get("name") or ""),
+            str(entry.get("media_type") or ""),
+            int(entry.get("bytes") or 0),
+            str(entry["url"]),
+            {k: v for k, v in entry.items() if k not in known},
+          )
+        )
+        return
 
   def _write_manifest(
     self,
@@ -379,14 +437,15 @@ class FilingArtifactWriter:
   def _put(
     self, data: bytes, key: str, media_type: str, cache_control: str, compress: bool
   ) -> bool:
-    return self.s3_client.upload_bytes(
-      gzip_artifact(data) if compress else data,
+    assert self.bucket is not None
+    return put_public_artifact(
+      self.s3_client,
       self.bucket,
       key,
-      content_type=media_type,
+      data,
+      media_type,
       cache_control=cache_control,
-      content_encoding=GZIP_ENCODING if compress else None,
-      storage_class=PUBLIC_DATA_STORAGE_CLASS,
+      compress=compress,
     )
 
   def _url(self, key: str) -> str:

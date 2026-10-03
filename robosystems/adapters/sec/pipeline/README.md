@@ -147,6 +147,40 @@ uv run dagster asset materialize -m robosystems.dagster \
   --select sec_filing_catalog --partition 2026-Q3
 ```
 
+### 8. Filed documents — `sec_current_reports`, `sec_filing_documents`
+
+The documents the XBRL path does not bring, fetched from EDGAR once and served
+from the public bucket (`documents.py`). Neither goes into OpenSearch: the
+`describe-filing` / `search-text` / `read-text` tools read a filing whole from
+its folder, as `information-block` does.
+
+- **`sec_current_reports`** — 8-K earnings releases. EFTS lists the quarter's
+  8-Ks with the items each reports (a window over EFTS' 10k ceiling is
+  halved); those reporting a wanted item (2.02 / 7.01 by default) from a filer
+  the corpus holds have their `-xbrl.zip` fetched — one request, the exhibits
+  ride inside — into `sec/8k/filed={quarter}/` in the raw bucket, apart from
+  the `sec/year=` tree the process stage reads. The 8-K and its EX-99 exhibits
+  (classified by the 8-K's own exhibit index, then the file's heading, then
+  its name) go to the filing's public folder with a `manifest.json`, and the
+  filer's releases list `current-reports/{cik}.json` gains the filing — how an
+  8-K is found, since it is in neither the graph nor the catalog. A zip
+  already in raw is read from there, so a re-run costs only the EFTS pages.
+- **`sec_filing_documents`** — the primary document of a filing processed
+  before inline XBRL. Its zip held the instance only, so its folder has the
+  holon and the Tavi but not the document; the manifest names it, one request
+  fetches it, and the manifest lists it. The work list comes from the
+  processed Report rows and the manifests, so EDGAR sees only the document
+  requests. A reprocess keeps the fetched document in the manifest.
+
+Both are quarter-partitioned and run a selected range in one run, a quarter at
+a time. Every job that pulls from EDGAR (these two and `sec_download`) carries
+the `edgar` run tag, which `dagster.yaml` limits to one at a time.
+
+```bash
+uv run dagster asset materialize -m robosystems.dagster \
+  --select sec_current_reports --partition 2026-Q3
+```
+
 ## Nightly chain
 
 ```
@@ -166,6 +200,9 @@ sec_stage_to_materialize_sensor
 sec_post_stage_index_sensor
   → text indexing
   → filer catalog (companies/*.json + index.json on the public CDN)
+
+sec_current_reports_sensor
+  → 8-K earnings releases, the last 7 days (after the download, never beside it)
 
 sec_post_materialize_publish_sensor
   → lbug S3 publish
@@ -189,15 +226,18 @@ automated chain; nothing runs on its own after a fresh deploy.
 | `sec_post_stage_index_sensor` | `sec_narratives_index_job`, `sec_ixbrl_index_job` | stage → OpenSearch indexing |
 | `sec_post_materialize_publish_sensor` | `sec_lbug_s3_publish_job`, `sec_duckdb_s3_publish_job`, `shared_replicas_refresh_job` | materialize → publish → replica refresh |
 | `sec_master_sleep_on_failure_sensor` | — | halts the chain on failure instead of looping |
+| `sec_current_reports_sensor` | `sec_current_reports_job` | download → the week's 8-K earnings releases |
 | `sec_processing_sensor` | `sec_process_job` | backfill: discovers pending SourceFiles across all quarters, polls every 5 min |
 
 `sec_processing_sensor` is for bulk and manual processing, not the nightly path.
 
 ## Jobs
 
-Seventeen jobs are exported. The nightly path uses `sec_download_job`,
+Twenty-one jobs are exported. The nightly path uses `sec_download_job`,
 `sec_process_job`, `sec_incremental_stage_job`, `sec_materialize_job`,
-`sec_lbug_s3_publish_job`, `sec_duckdb_s3_publish_job`, plus the two index jobs.
+`sec_lbug_s3_publish_job`, `sec_duckdb_s3_publish_job`, the two index jobs,
+`sec_filing_catalog_job` and `sec_current_reports_job`;
+`sec_filing_documents_job` is a backfill run by hand.
 The rest cover the historical corpus (`sec_historical_stage_job`,
 `sec_historical_materialize_job`, `sec_historical_staged_materialize_job`,
 `sec_historical_duckdb_s3_publish_job`, `sec_historical_lbug_s3_publish_job`),

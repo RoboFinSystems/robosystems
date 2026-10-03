@@ -35,7 +35,13 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "footing, text blocks. The expensive call; one block per call.\n"
     '- Map a concept like "revenue" to its XBRL element qname → '
     "`resolve-element`.\n"
-    "- Full-text search across filings → `search-documents`.\n"
+    "- Which filings discuss something, across the corpus → `search-documents`.\n"
+    "- One filing read whole — a 10-K, 10-Q, 20-F or 40-F from any processed "
+    "year, or an 8-K earnings release with its exhibits → `search-text` for "
+    "where it says something (cover page, footnotes, exhibits), then "
+    "`read-text` from a hit's offset; `describe-filing` maps its Items. Each "
+    "takes a `ticker`, with `form: '8-K'` for the latest release or "
+    "`accession` for one filing.\n"
     "- Raw graph traversal → `read-graph-cypher`.\n"
     "\n"
     "NOTES\n"
@@ -76,8 +82,9 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "than one FactSet, so an un-deduplicated result repeats rows.\n"
     "- Text is not a Cypher question here: string matching (`CONTAINS`, "
     "`STARTS WITH`, `ENDS WITH`, `=~`) on `Fact.value` or `Fact.uri` is "
-    "refused. `search-documents` searches filing text; `disclosures` then "
-    "`information-block` reads one section whole.\n"
+    "refused. `search-documents` searches filing text; `search-text` searches "
+    "inside one filing; `disclosures` then `information-block` reads one "
+    "section whole.\n"
     "- `get-example-queries` carries these as working patterns; run it first."
   ),
   guarded_string_properties=("Fact.value", "Fact.uri"),

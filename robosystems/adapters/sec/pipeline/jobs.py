@@ -15,6 +15,7 @@ from dagster import (
 from .artifact import sec_knowledge_artifacts
 from .catalog import sec_filing_catalog
 from .configs import sec_quarter_partitions
+from .documents import sec_current_reports, sec_filing_documents
 from .download import sec_raw_filings
 from .duckdb_s3_publish import (
   sec_duckdb_s3_published,
@@ -42,13 +43,35 @@ from .text_index import (
 # happens on the LadybugDB instance via the Graph API, and a long
 # orchestration run should not be Spot-interrupted.
 
+# Every job that pulls from EDGAR carries this tag; the run queue admits one
+# at a time (tag_concurrency_limits in dagster.yaml / dagster_prod.yaml), so
+# two pulls never add their request rates against EDGAR's fair-access limit.
+EDGAR_PULL_TAGS = {"edgar": "pull"}
+
 sec_download_job = define_asset_job(
   name="sec_download",
   description="Download SEC XBRL filings from EFTS to S3.",
   selection=AssetSelection.assets(
     sec_raw_filings,
   ),
-  tags={"pipeline": "sec", "phase": "download"},
+  tags={"pipeline": "sec", "phase": "download", **EDGAR_PULL_TAGS},
+  partitions_def=sec_quarter_partitions,
+)
+
+# A range of quarters runs as one run, a quarter at a time.
+sec_current_reports_job = define_asset_job(
+  name="sec_current_reports_capture",
+  description="Fetch and publish 8-K earnings releases (items 2.02 / 7.01).",
+  selection=AssetSelection.assets(sec_current_reports),
+  tags={"pipeline": "sec", "phase": "current_reports", **EDGAR_PULL_TAGS},
+  partitions_def=sec_quarter_partitions,
+)
+
+sec_filing_documents_job = define_asset_job(
+  name="sec_filing_documents_fetch",
+  description="Fetch the primary documents of filings processed before inline XBRL.",
+  selection=AssetSelection.assets(sec_filing_documents),
+  tags={"pipeline": "sec", "phase": "filing_documents", **EDGAR_PULL_TAGS},
   partitions_def=sec_quarter_partitions,
 )
 

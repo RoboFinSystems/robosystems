@@ -354,6 +354,36 @@ class TestFilingArtifactWriter:
     assert _write(writer, model=_model(filing_date=None)) is None
     s3.upload_bytes.assert_not_called()
 
+  def test_a_reprocess_keeps_a_document_fetched_after_it(self, writer, s3):
+    # A pre-inline zip holds no document; the one sec_filing_documents added
+    # to the folder must survive the manifest's rewrite.
+    fetched = {
+      "kind": "document",
+      "name": "a10-k2017.htm",
+      "media_type": "text/html",
+      "bytes": 1234,
+      "url": f"{CDN}/{FOLDER}/a10-k2017.htm",
+    }
+    previous = json.dumps({"representations": [{"kind": "holon"}, fetched]})
+    s3.s3_client.get_object.return_value = {
+      "Body": MagicMock(read=MagicMock(return_value=previous.encode()))
+    }
+    result = _write(writer)
+
+    assert result is not None
+    assert [r.kind for r in result.representations] == ["tavi", "holon", "document"]
+    manifest = json.loads(_uploads(s3)[f"{FOLDER}/manifest.json"][0])
+    assert manifest["representations"][-1] == fetched
+    s3.s3_client.get_object.assert_called_once_with(
+      Bucket="public", Key=f"{FOLDER}/manifest.json"
+    )
+
+  def test_a_written_document_reads_no_previous_manifest(self, writer, s3, tmp_path):
+    doc = tmp_path / "nvda-20240128.htm"
+    doc.write_text("<html>doc</html>")
+    _write(writer, instance_path=str(doc))
+    s3.s3_client.get_object.assert_not_called()
+
 
 @pytest.mark.unit
 class TestHelpers:

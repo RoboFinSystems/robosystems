@@ -152,6 +152,11 @@ def build_instructions(
       "a report's sections → `disclosures` (the map, cheap) then "
       "`information-block` (one section whole: breakdowns, footing, text)"
     )
+  if has("search-text") and has("read-text"):
+    report_bits.append(
+      "words inside one filing's whole text → `search-text`, then `read-text` "
+      "from a hit's offset"
+    )
   if report_bits:
     sections.append(_block("REPORTING & ANALYSIS", "- " + "; ".join(report_bits) + "."))
 

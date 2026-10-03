@@ -105,6 +105,19 @@ def get_raw_key(source: DataSourceType, *parts: str) -> str:
   return config.raw_prefix.rstrip("/")
 
 
+def get_current_report_raw_key(partition: str, cik: str, accession: str) -> str:
+  """Raw key of one 8-K's ``-xbrl.zip``, by filing quarter. Apart from the
+  XBRL filings' ``sec/year=`` tree, which the process stage reads.
+
+  Example:
+      >>> get_current_report_raw_key("2025-Q4", "0000320193", "0000320193-25-000077")
+      'sec/8k/filed=2025-Q4/0000320193/0000320193-25-000077.zip'
+  """
+  return get_raw_key(
+    DataSourceType.SEC, "8k", f"filed={partition}", cik, f"{accession}.zip"
+  )
+
+
 def get_processed_key(source: DataSourceType, *parts: str) -> str:
   """Build an S3 key for processed data; ``parts`` follow the source prefix.
 
@@ -274,6 +287,9 @@ FILING_ARTIFACT_MANIFEST = "manifest.json"
 FILING_CATALOG_PREFIX = "companies/"
 FILING_CATALOG_INDEX_KEY = "companies/index.json"
 FILING_ROBOTS_KEY = "robots.txt"
+# One releases list per filer: the 8-Ks captured for it, newest first. An
+# 8-K is in neither the graph nor the catalog, so this is how one is found.
+CURRENT_REPORTS_LIST_PREFIX = "current-reports/"
 
 # Every write to the public bucket names its storage class on the PUT rather
 # than leaving it to the bucket's day-0 lifecycle rule, which bills a transition
@@ -308,6 +324,16 @@ def get_filing_artifact_key(
       '2025/0000066740/0000066740-25-000006/holon.jsonld'
   """
   return f"{get_filing_artifact_prefix(year, cik, accession)}/{name}"
+
+
+def get_current_reports_list_key(cik: str) -> str:
+  """Key of one filer's 8-K releases list, by its ten-digit CIK.
+
+  Example:
+      >>> get_current_reports_list_key("0000320193")
+      'current-reports/0000320193.json'
+  """
+  return f"{CURRENT_REPORTS_LIST_PREFIX}{cik}.json"
 
 
 def get_filing_catalog_key(ticker: str) -> str:

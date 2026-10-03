@@ -4,7 +4,8 @@ All start STOPPED; enable them in the Dagster UI. Nightly chain (every run
 tagged ``mode=incremental``): download → process (batched) → wake master →
 incremental DuckDB stage → full LadybugDB rebuild → lbug S3 → duckdb S3 →
 replica refresh + master sleep; text indexing and the filer catalog branch off
-staging. ``sec_processing_sensor`` is the separate backfill driver.
+staging, and the 8-K earnings releases off the download.
+``sec_processing_sensor`` is the separate backfill driver.
 """
 
 import re
@@ -33,6 +34,7 @@ from robosystems.dagster.jobs.shared_repository import (
 
 from .configs import SEC_HISTORICAL_FORM_TYPES, SEC_PRIMARY_START_YEAR
 from .jobs import (
+  sec_current_reports_job,
   sec_download_job,
   sec_duckdb_s3_publish_job,
   sec_filing_catalog_job,
@@ -412,6 +414,76 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
       "mode": "incremental",
       "quarter": partition_key,
       "batch_id": batch_id or "",
+    },
+  )
+
+
+# The nightly 8-K pass looks back a week, which covers a weekend and a missed
+# night; a zip already captured is not fetched again.
+CURRENT_REPORTS_NIGHTLY_LOOKBACK_DAYS = 7
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.SUCCESS,
+  monitored_jobs=[sec_download_job],
+  request_job=sec_current_reports_job,
+  default_status=DefaultSensorStatus.STOPPED,
+  minimum_interval_seconds=60,
+  description="Chain: download → 8-K earnings releases",
+)
+def sec_current_reports_sensor(context: RunStatusSensorContext):
+  """After the nightly XBRL download, capture the week's 8-K earnings
+  releases.
+
+  Chained off the download rather than scheduled beside it so the two EDGAR
+  pulls run one after the other (the ``edgar`` run-queue limit holds that for
+  manual launches too).
+  """
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping chain sensor in dev environment")
+    return
+
+  dagster_run = context.dagster_run
+  run_tags = dagster_run.tags or {}
+  if run_tags.get("mode") != "incremental":
+    context.log.info("Skipping - not an incremental pipeline run")
+    return
+
+  partition_key = run_tags.get("dagster/partition")
+  if not partition_key:
+    context.log.warning("No partition key found on completed run")
+    return
+
+  job_name, phase = "sec_current_reports_capture", "current_reports"
+  run_config = {
+    "ops": {
+      "sec_current_reports": {
+        "config": {"since_days": CURRENT_REPORTS_NIGHTLY_LOOKBACK_DAYS}
+      }
+    }
+  }
+
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name=job_name,
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(f"{job_name} already running, skipping")
+    return
+
+  yield RunRequest(
+    run_key=f"sec-{phase}-chain-{partition_key}-{dagster_run.run_id[:8]}",
+    job_name=job_name,
+    partition_key=partition_key,
+    run_config=run_config,
+    tags={
+      "pipeline": "sec",
+      "phase": phase,
+      "mode": "incremental",
+      "batch_id": run_tags.get("batch_id", ""),
     },
   )
 

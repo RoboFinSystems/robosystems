@@ -129,6 +129,7 @@ Require `roboledger` in `schema_extensions`. These read LadybugDB (OLAP).
 | `build-fact-grid` | Cross-company comparison over canonical concepts | `FACT_GRID_ENABLED` |
 | `disclosures` | The map of a report's sections — one row per disclosure family, or one family's blocks; cheap, call it first | — |
 | `information-block` | One section read whole: rows in presentation order, breakdowns by the section's own axes, calculation footing, text blocks; the expensive call | — |
+| `describe-filing` / `search-text` / `read-text` | xbrlkit's text tools over one filing read whole from its public folder — any processed 10-K / 10-Q / 20-F / 40-F, or an 8-K earnings release with its exhibits; a tenant's report as its text blocks. Words, not a regular expression | — |
 
 `financial-statement-analysis` resolves the latest relevant SEC filing when no
 `report_id` is given (ticker and form-code resolution live in

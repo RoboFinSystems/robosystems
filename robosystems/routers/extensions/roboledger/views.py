@@ -1,7 +1,8 @@
 """RoboLedger analytical views: `build-fact-grid`, `financial-statement-analysis`,
-and the `disclosures` / `information-block` pair.
+the `disclosures` / `information-block` pair, and the filing-text trio
+`describe-filing` / `search-text` / `read-text`.
 
-The first two read the LadybugDB graph; the pair runs xbrlkit's tools over the
+The first two read the LadybugDB graph; the rest run xbrlkit's tools over the
 report held whole (the published filing on a shared repository, the ledger's
 own report on a tenant). A separate router from the operations package so the
 mount gates on `FACT_GRID_ENABLED`: a deployment serving SEC research without
@@ -33,13 +34,20 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.extensions.reports import (
   AnalyticalStatementFactRow,
+  DescribeFilingRequest,
+  DescribeFilingResponse,
   DisclosuresRequest,
   DisclosuresResponse,
+  FilingSelector,
   FinancialStatementAnalysisRequest,
   FinancialStatementAnalysisResponse,
   InformationBlockRequest,
   InformationBlockResponse,
+  ReadTextRequest,
+  ReadTextResponse,
   ResolvedReportInfo,
+  SearchTextRequest,
+  SearchTextResponse,
 )
 from robosystems.models.api.views import (
   CreateViewRequest,
@@ -53,14 +61,21 @@ from robosystems.operations.roboledger.reads.reports import ANALYSIS_STATEMENT_T
 from robosystems.operations.roboledger.views import (
   BlockNotFoundError,
   FactGridBuilder,
+  FilingRef,
+  QueryError,
   ReportNotFoundError,
   ReportSelectorError,
   ReportTooLargeError,
   deduplicate_facts,
+  filing_info,
+  query_describe_filing,
   query_disclosures,
   query_fact_grid,
   query_financial_statement,
   query_information_block,
+  query_read_text,
+  query_search_text,
+  resolve_filing,
   resolve_report,
   resolved_report_info,
   summarize_by_element,
@@ -351,7 +366,7 @@ async def financial_statement_analysis_op(
 def _report_selector_errors(exc: ValueError) -> HTTPException:
   """Selector errors → 400, missing report/block → 404, too large → 422;
   anything else falls through to the dispatcher's policy."""
-  if isinstance(exc, ReportSelectorError):
+  if isinstance(exc, (ReportSelectorError, QueryError)):
     return HTTPException(status_code=400, detail=str(exc))
   if isinstance(exc, (ReportNotFoundError, BlockNotFoundError)):
     return HTTPException(status_code=404, detail=str(exc))
@@ -490,5 +505,178 @@ async def information_block_op(
     return InformationBlockResponse(
       **result, resolved_report=resolved_report_info(resolved)
     )
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ── Filing text: describe, search, read ─────────────────────────────────────
+# xbrlkit's text tools over one filing read whole: on a shared repository its
+# own document from its public folder (an 8-K with its exhibits included), on
+# a tenant its text blocks. Neither the graph nor EDGAR is in the path.
+
+
+async def _resolve_filing(graph_id: str, body: FilingSelector) -> FilingRef:
+  return await resolve_filing(
+    graph_id,
+    report_id=body.report_id,
+    ticker=body.ticker,
+    fiscal_year=body.fiscal_year,
+    period_type=body.period_type,
+    accession=body.accession,
+    form=body.form,
+  )
+
+
+@router.post(
+  "/describe-filing",
+  response_model=OperationEnvelope[DescribeFilingResponse],
+  operation_id="describeFiling",
+  summary="Describe Filing",
+  description=(
+    "How one filing is laid out: entity, periods, statements and disclosures "
+    "by role, axes, and its text — the Items of a 10-K or 10-Q and its largest "
+    "text blocks, each with the character offset `read-text` pages from. On "
+    "the SEC shared repository the filing is read from its public folder — "
+    "its own document, from any processed year — and a `ticker` picks it: "
+    "the latest annual report, narrowed by `fiscal_year` / `period_type`, or "
+    "one `accession`, or with `form: 8-K` the latest earnings release and its "
+    "exhibits. Tenant graphs take `report_id` and read the report's text "
+    "blocks."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/describe-filing",
+  method="POST",
+  business_event_type="ledger_describe_filing",
+)
+async def describe_filing_op(
+  body: DescribeFilingRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = OperationContext(
+    domain="roboledger",
+    operation_name="describe-filing",
+    graph_id=graph_id,
+    user_id=str(user.id),
+    idempotency_key=None,  # see _require_readable_graph: reads keep no replay
+    body_fingerprint=fingerprint_body(body),
+  )
+
+  async def _runner():
+    try:
+      ref = await _resolve_filing(graph_id, body)
+      result = await query_describe_filing(graph_id, ref)
+    except ValueError as exc:
+      raise _report_selector_errors(exc) from exc
+    return DescribeFilingResponse(**result, resolved_report=filing_info(ref))
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/search-text",
+  response_model=OperationEnvelope[SearchTextResponse],
+  operation_id="searchText",
+  summary="Search Text",
+  description=(
+    "Every place one filing's whole text says something, in document order, "
+    "with the surrounding text and the section each match falls in; on no "
+    "match, how often each word of the query occurs alone. The query is "
+    "words matched in order across any spacing (`|` between alternative "
+    "phrases, a trailing `*` for a stem), not a regular expression. On the "
+    "SEC shared repository the text is the filing's own document — cover "
+    "page, footnotes and exhibits included — so this finds what no indexed "
+    "section carries. Same "
+    "filing selection as `describe-filing`."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/search-text",
+  method="POST",
+  business_event_type="ledger_search_text",
+)
+async def search_text_op(
+  body: SearchTextRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = OperationContext(
+    domain="roboledger",
+    operation_name="search-text",
+    graph_id=graph_id,
+    user_id=str(user.id),
+    idempotency_key=None,  # see _require_readable_graph: reads keep no replay
+    body_fingerprint=fingerprint_body(body),
+  )
+
+  async def _runner():
+    try:
+      ref = await _resolve_filing(graph_id, body)
+      result = await query_search_text(
+        graph_id, ref, body.query, window=body.window, max_hits=body.max_hits
+      )
+    except ValueError as exc:
+      raise _report_selector_errors(exc) from exc
+    return SearchTextResponse(**result, resolved_report=filing_info(ref))
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/read-text",
+  response_model=OperationEnvelope[ReadTextResponse],
+  operation_id="readText",
+  summary="Read Text",
+  description=(
+    "One window of a filing's whole text from a character offset — a "
+    "`search-text` hit's, or a section's from `describe-filing` — with "
+    "`next_offset` while more follows. Same filing selection as "
+    "`describe-filing`."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/read-text",
+  method="POST",
+  business_event_type="ledger_read_text",
+)
+async def read_text_op(
+  body: ReadTextRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = OperationContext(
+    domain="roboledger",
+    operation_name="read-text",
+    graph_id=graph_id,
+    user_id=str(user.id),
+    idempotency_key=None,  # see _require_readable_graph: reads keep no replay
+    body_fingerprint=fingerprint_body(body),
+  )
+
+  async def _runner():
+    try:
+      ref = await _resolve_filing(graph_id, body)
+      result = await query_read_text(
+        graph_id, ref, offset=body.offset, length=body.length
+      )
+    except ValueError as exc:
+      raise _report_selector_errors(exc) from exc
+    return ReadTextResponse(**result, resolved_report=filing_info(ref))
 
   return await _dispatch(ctx, _runner, cache)
