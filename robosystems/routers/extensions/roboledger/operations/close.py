@@ -140,11 +140,10 @@ class ReopenPeriodOperation(ReopenPeriodRequest):
     ...,
     pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
     description=(
-      "Period to reopen, in YYYY-MM. Any closed period may be reopened. "
-      "Reopening the current `closed_through` retreats it by one month; "
-      "reopening an earlier period leaves `closed_through` where it is "
-      "(a prior-period adjustment), and its re-close restores the period "
-      "without moving the pointer."
+      "Period to reopen, in YYYY-MM. Only the latest closed period (the "
+      "current `closed_through`) can be reopened, and reopening it retreats "
+      "`closed_through` by one month. To reach an earlier period, reopen "
+      "the later ones first, latest to earliest."
     ),
   )
 
