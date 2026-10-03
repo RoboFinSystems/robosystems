@@ -41,6 +41,7 @@ Step-by-step setup for each client is in [Connect Claude, ChatGPT or any MCP cli
 - **Concepts in your words.** "Operating lease liability" or "deferred revenue" is matched to the tags companies actually report.
 - **Disclosures, section by section.** A filing's notes and schedules, one at a time and whole: the rows, the breakdowns and the text, with the arithmetic checked.
 - **The narrative.** Search risk factors, MD&A, business descriptions and disclosure text across filers, then read the passage in context.
+- **One filing, read whole.** A filing's own document — an annual or quarterly report from any year in the corpus, or an earnings release with its exhibits — searched for the words you name and read from wherever they fall: the cover page, a footnote to a table, an exhibit, a passage between the sections.
 - **Anything else.** The client can query the graph directly when no ready-made view answers the question.
 
 Reading the SEC graph through an MCP client uses no RoboSystems credits. The reasoning happens in your AI client; RoboSystems returns the data.
@@ -62,6 +63,8 @@ These rules decide whether a number is right. The model is given them, and they'
 - "Which companies mention goodwill impairment in their latest 10-K?"
 - "Read the revenue recognition note from [ticker]'s latest annual report."
 - "What does [ticker] say about customer concentration in its risk factors?"
+- "What guidance did [ticker] give in its latest earnings release?"
+- "Does [ticker]'s 2017 annual report mention tariffs anywhere?"
 
 ## Go deeper
 
