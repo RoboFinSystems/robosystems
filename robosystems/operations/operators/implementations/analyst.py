@@ -110,11 +110,13 @@ class AnalystOperator(Operator):
     ),
     "disclosures": (
       "the map of a report's or filing's sections (notes, statements, cover "
-      "page) — call it first, with the report identifier or ticker"
+      "page) — the way in when the question is what a report or filing "
+      "discloses; takes the report identifier or a ticker"
     ),
     "information-block": (
       "one section from that map read whole: rows, breakdowns, calculation "
-      "footing, text. The expensive call; one block per call"
+      "footing, text. The expensive call, so find the block with "
+      "`disclosures` first; one block per call"
     ),
     "get-fiscal-calendar": "fiscal periods, close status, and the close target",
     "get-period-close-status": "close readiness for a specific period",
