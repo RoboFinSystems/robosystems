@@ -112,7 +112,7 @@ class DescribeFilingTool(BaseTool):
 **PARAMETERS:**
 - `ticker` — on SEC, the filer: its latest annual report unless `fiscal_year` / `period_type` / `accession` / `form` say otherwise; any processed year reads
 - `form: "8-K"` — the latest earnings release; `accession` — one filing (a report, or an 8-K from `recent_releases`)
-- `report_id` — a tenant's report
+- `report_id` — a tenant's report, or a report in the SEC graph on its own (not beside a ticker)
 
 **RETURNS:**
 - `profile.text` — "primary document" when the filing's own document is read, "tagged text blocks" when it has none (a tenant report)
@@ -156,7 +156,7 @@ class SearchTextTool(BaseTool):
 - `search-documents` finds WHICH filings discuss something, across the corpus, ranked; `search-text` finds WHERE in one filing, exhaustively. Find the filing first, then search inside it
 
 **PARAMETERS:**
-- `query` (required) — words matched in order across any spacing, case-insensitive: `customer concentration`. Split phrases with `|` to match any of them; end a word with `*` for a stem (`terminat*`). Not a regular expression
+- `query` (required) — words matched in order across any spacing, case-insensitive: `customer concentration`. Split phrases with `|` to match any of them; end a word with `*` for a stem (`terminat*`); a `*` on its own is ignored. Not a regular expression
 - `ticker` (+ `fiscal_year` / `period_type`, or `form: "8-K"`, or `accession`) / `report_id` — as for `describe-filing`
 - `window` — characters of context around each match (default 300, max {SEARCH_MAX_WINDOW}); `max_hits` (default 10, max {SEARCH_MAX_HITS})
 

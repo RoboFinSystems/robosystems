@@ -20,6 +20,8 @@ from robosystems.adapters.sec.pipeline.configs import (
 from robosystems.adapters.sec.pipeline.documents import (
   discovery_window,
   quarter_bounds,
+  quarter_of,
+  refuse_concurrent_edgar_pull,
   sec_filing_documents,
 )
 from robosystems.adapters.sec.processors.current_reports import CurrentReportHit
@@ -102,9 +104,21 @@ class TestWindows:
       date(2025, 11, 5),
     )
 
+  def test_the_look_back_reaches_into_the_previous_quarter(self):
+    # A night missed on September 30 is caught up by the October 3 run.
+    assert discovery_window("2025-Q4", 7, date(2025, 10, 3)) == (
+      date(2025, 9, 26),
+      date(2025, 10, 3),
+    )
+
   def test_empty_windows(self):
     assert discovery_window("2026-Q1", None, date(2025, 11, 5)) is None
     assert discovery_window("2025-Q3", 7, date(2025, 11, 5)) is None
+
+  def test_quarter_of(self):
+    assert quarter_of(date(2025, 9, 30)) == "2025-Q3"
+    assert quarter_of(date(2025, 10, 1)) == "2025-Q4"
+    assert quarter_of(date(2026, 1, 15)) == "2026-Q1"
 
 
 @pytest.mark.unit
@@ -172,7 +186,8 @@ class TestCaptureCurrentReports:
       f"https://cdn.example.com/{folder}/ex991.htm"
     )
 
-  def test_fetches_once_and_keeps_the_zip_raw(self, env):
+  def test_fetches_once_and_keeps_the_zip_raw_under_its_filing_quarter(self, env):
+    # The run's partition is 2025-Q4 either way; the key follows the filing.
     writer = _Writer()
     stats, fetch = self._run(writer, None, fetched=(200, _zip()))
     assert stats["fetched"] == 1 and stats["published"] == 1
@@ -180,6 +195,7 @@ class TestCaptureCurrentReports:
     assert "-xbrl.zip" in fetch.call_args.args[0]
     raw_key = "sec/8k/filed=2025-Q4/0000320193/0000320193-25-000077.zip"
     assert writer.objects[raw_key][0] == _zip()
+    assert quarter_of(date.fromisoformat(HIT.filing_date)) == "2025-Q4"
 
   def test_no_zip_on_edgar(self, env):
     writer = _Writer()
@@ -282,6 +298,74 @@ class TestFilingDocuments:
 
 
 @pytest.mark.unit
+class TestEdgarPullGuard:
+  def _context(self, runs):
+    context = MagicMock()
+    context.run_id = "self-run"
+    context.instance.get_runs.return_value = runs
+    return context
+
+  def test_another_started_pull_fails_fast(self):
+    from dagster import Failure
+
+    other = MagicMock(run_id="other-run-1", job_name="sec_download")
+    with pytest.raises(Failure, match="sec_download"):
+      refuse_concurrent_edgar_pull(self._context([other]))
+
+  def test_only_itself_running_is_fine(self):
+    me = MagicMock(run_id="self-run", job_name="sec_current_reports_capture")
+    refuse_concurrent_edgar_pull(self._context([me]))
+
+
+@pytest.mark.unit
+def test_release_lists_fold_a_combined_filing_under_each_registrant(env):
+  combined = CurrentReportHit(
+    accession="0000092122-25-000050",
+    cik="0000092122",
+    ciks=("0000092122", "0001000000", "0002000000"),
+    filing_date="2025-07-31",
+    items=("2.02",),
+  )
+  writer = _Writer()
+  with (
+    patch("robosystems.operations.aws.s3.S3Client", return_value=writer),
+    patch(
+      "robosystems.adapters.sec.pipeline.text_index._get_s3_client",
+      return_value=MagicMock(),
+    ),
+    patch.object(module, "_read_object", return_value=None),
+  ):
+    stats = module._update_release_lists(
+      [combined], {"0000092122", "0001000000"}, MagicMock()
+    )
+  assert stats == Counter({"lists_written": 2})
+  assert set(writer.objects) == {
+    "current-reports/0000092122.json",
+    "current-reports/0001000000.json",
+  }
+  listed = json.loads(writer.body("current-reports/0001000000.json"))
+  assert listed["releases"][0]["folder"].endswith(
+    "/2025/0000092122/0000092122-25-000050/"
+  )
+
+
+@pytest.mark.unit
+def test_release_list_write_failure_is_counted(env):
+  writer = _Writer()
+  writer.upload_bytes = lambda *a, **k: False
+  with (
+    patch("robosystems.operations.aws.s3.S3Client", return_value=writer),
+    patch(
+      "robosystems.adapters.sec.pipeline.text_index._get_s3_client",
+      return_value=MagicMock(),
+    ),
+    patch.object(module, "_read_object", return_value=None),
+  ):
+    stats = module._update_release_lists([HIT], None, MagicMock())
+  assert stats == Counter({"lists_failed": 1})
+
+
+@pytest.mark.unit
 def test_release_lists_merge_newest_first(env):
   older = {
     "accession": "0000320193-25-000050",
@@ -299,7 +383,7 @@ def test_release_lists_merge_newest_first(env):
     ),
     patch.object(module, "_read_object", return_value=existing),
   ):
-    stats = module._update_release_lists([HIT], MagicMock())
+    stats = module._update_release_lists([HIT], None, MagicMock())
   assert stats == Counter({"lists_written": 1})
   listed = json.loads(writer.body("current-reports/0000320193.json"))
   assert [r["accession"] for r in listed["releases"]] == [

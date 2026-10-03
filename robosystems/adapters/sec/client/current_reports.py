@@ -33,9 +33,14 @@ def filing_zip_url(cik: str, accession: str) -> str:
   return filing_file_url(cik, accession, f"{accession}-xbrl.zip")
 
 
-def _total(efts: EftsClient, params: dict) -> int:
+def _total(efts: EftsClient, params: dict) -> tuple[int, bool]:
+  """The window's hit count, and whether EFTS capped it: past 10,000 it
+  answers ``{"value": 10000, "relation": "gte"}``, never the real count, so
+  the relation is what says a window must split."""
   first = efts._fetch_page(params, offset=0, size=1)
-  return int(first.get("hits", {}).get("total", {}).get("value", 0) or 0)
+  total = first.get("hits", {}).get("total", {}) or {}
+  value = int(total.get("value", 0) or 0)
+  return value, total.get("relation") == "gte" or value >= EFTS_MAX_RESULTS
 
 
 def _windows(
@@ -45,11 +50,11 @@ def _windows(
   params = EftsClient.build_params(
     forms=[CURRENT_REPORT_FORM], start_date=start.isoformat(), end_date=end.isoformat()
   )
-  total = _total(efts, params)
-  if total <= EFTS_MAX_RESULTS or start >= end:
-    if total > EFTS_MAX_RESULTS:
+  total, capped = _total(efts, params)
+  if not capped or start >= end:
+    if capped:
       log(
-        f"EFTS: {start} alone holds {total} 8-Ks; the first {EFTS_MAX_RESULTS} are read"
+        f"EFTS: {start} alone holds over {EFTS_MAX_RESULTS} 8-Ks; only those are read"
       )
     yield params, min(total, EFTS_MAX_RESULTS)
     return
@@ -78,7 +83,8 @@ def discover_current_reports(
     while offset < total:
       size = min(EFTS_MAX_PAGE_SIZE, total - offset)
       page = efts._fetch_page(params, offset=offset, size=size)
-      hits = page.get("hits", {}).get("hits", []) or []
+      # EFTS answers a full page whatever size was asked; keep to the window.
+      hits = (page.get("hits", {}).get("hits", []) or [])[:size]
       for raw in hits:
         seen += 1
         hit = CurrentReportHit.from_efts(raw)

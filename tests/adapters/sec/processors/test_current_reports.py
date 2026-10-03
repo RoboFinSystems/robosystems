@@ -90,6 +90,15 @@ class TestCurrentReportHit:
   def test_none_without_a_filer(self):
     assert CurrentReportHit.from_efts({"_id": "x:y", "_source": {"ciks": []}}) is None
 
+  def test_a_combined_filing_lists_every_registrant(self):
+    hit = CurrentReportHit.from_efts(_efts_hit(ciks=["92122", "0000092122", "1000000"]))
+    assert hit is not None
+    assert hit.cik == "0000092122"
+    assert hit.ciks == ("0000092122", "0001000000")
+    assert hit.registrants() == ("0000092122", "0001000000")
+    assert hit.registrants({"0001000000"}) == ("0001000000",)
+    assert hit.registrants({"0000000009"}) == ()
+
   def test_wanted_items(self):
     hit = CurrentReportHit.from_efts(_efts_hit(items=["7.01", "9.01"]))
     assert hit is not None
@@ -114,6 +123,10 @@ class TestExhibitType:
       ("amrizeq32025pressrelease.htm", "Amrize Delivers Strong Third Quarter", None),
       # The heading wins over the name.
       ("release.htm", "Document Exhibit 99.2 Investor presentation", "EX-99.2"),
+      # "ex" inside a word is not an exhibit number.
+      ("text2.htm", "", None),
+      ("index1.htm", "", None),
+      ("annex1.htm", "", None),
     ],
   )
   def test_reads_heading_then_name(self, name, head, expected):
@@ -251,6 +264,12 @@ class TestMissingDocument:
         "primary_document": "x.htm",
         "is_inline_xbrl": False,
         "representations": [{"kind": "document"}],
+      },
+      # The XBRL instance named as the primary document is not a document.
+      {
+        "primary_document": "acme-20161231.xml",
+        "is_inline_xbrl": False,
+        "representations": [],
       },
     ],
   )

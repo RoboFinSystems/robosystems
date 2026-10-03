@@ -25,7 +25,15 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from dagster import AssetExecutionContext, BackfillPolicy, MaterializeResult, asset
+from dagster import (
+  AssetExecutionContext,
+  BackfillPolicy,
+  DagsterRunStatus,
+  Failure,
+  MaterializeResult,
+  RunsFilter,
+  asset,
+)
 
 from robosystems.config import env
 from robosystems.config.storage.shared import (
@@ -62,16 +70,53 @@ def quarter_bounds(partition: str) -> tuple[date, date]:
   return start, end
 
 
+def quarter_of(day: date) -> str:
+  """The ``YYYY-QN`` partition a filing date falls in."""
+  return f"{day.year}-Q{(day.month - 1) // 3 + 1}"
+
+
 def discovery_window(
   partition: str, since_days: int | None, today: date
 ) -> tuple[date, date] | None:
   """The dates to discover in, or None when the window is empty (a future
-  quarter, or a nightly run whose look-back ends before the quarter starts)."""
+  quarter, or a nightly run whose quarter ended before its look-back begins).
+
+  A look-back reaches into the previous quarter when it has to: a nightly run
+  on October 3 covers September 26 on, so a night missed at a quarter's end is
+  caught up, and what it finds is kept under its own filing quarter.
+  """
   start, end = quarter_bounds(partition)
   end = min(end, today)
   if since_days is not None:
-    start = max(start, today - timedelta(days=since_days))
+    start = today - timedelta(days=since_days)
   return (start, end) if start <= end else None
+
+
+# Jobs that pull from EDGAR, which the `edgar` run tag keeps to one at a time
+# in the run queue. A run launched past the queue (the asset's Materialize
+# button, the CLI) carries no tag, so the assets check for themselves.
+EDGAR_PULL_JOBS = (
+  "sec_download",
+  "sec_current_reports_capture",
+  "sec_filing_documents_fetch",
+)
+
+
+def refuse_concurrent_edgar_pull(context: AssetExecutionContext) -> None:
+  """Fail before the first request when another EDGAR pull is running."""
+  filters = [RunsFilter(tags={"edgar": "pull"}, statuses=[DagsterRunStatus.STARTED])]
+  filters += [
+    RunsFilter(job_name=job, statuses=[DagsterRunStatus.STARTED])
+    for job in EDGAR_PULL_JOBS
+  ]
+  for run_filter in filters:
+    for run in context.instance.get_runs(filters=run_filter, limit=5):
+      if run.run_id != context.run_id:
+        raise Failure(
+          f"Another EDGAR pull is running ({run.job_name} {run.run_id[:8]}); "
+          "two at once would exceed EDGAR's rate limit. Wait for it, or launch "
+          "through the job so the run queue orders them."
+        )
 
 
 def _run_partitions(context: AssetExecutionContext) -> list[str]:
@@ -224,7 +269,9 @@ async def _capture_current_reports(
         published.append(hit)
         return
 
-      raw_key = get_current_report_raw_key(partition, hit.cik, hit.accession)
+      raw_key = get_current_report_raw_key(
+        quarter_of(date.fromisoformat(hit.filing_date)), hit.cik, hit.accession
+      )
       zip_bytes = await asyncio.to_thread(_read_object, s3, raw_bucket, raw_key)
       if zip_bytes is None:
         async with semaphore:
@@ -303,11 +350,15 @@ async def _capture_current_reports(
   return stats, published
 
 
-def _update_release_lists(hits: list[Any], log: Any) -> Counter:
-  """Merge the published 8-Ks into each filer's releases list, newest first.
+def _update_release_lists(
+  hits: list[Any], corpus: set[str] | None, log: Any
+) -> Counter:
+  """Merge the published 8-Ks into each registrant's releases list, newest
+  first — a combined filing under every registrant the corpus holds.
 
-  Whole-file rewrites, one per filer; runs that pull are serialized by the
-  ``edgar`` run-queue limit, so no two write the same list at once.
+  Whole-file rewrites, one per filer. Runs that pull are serialized by the
+  ``edgar`` run-queue limit and :func:`refuse_concurrent_edgar_pull`, so no
+  two write the same list at once.
   """
   from robosystems.adapters.sec.processors.artifacts import (
     JSON_MEDIA_TYPE,
@@ -325,7 +376,8 @@ def _update_release_lists(hits: list[Any], log: Any) -> Counter:
   cdn_url = env.PUBLIC_DATA_CDN_URL
   by_cik: dict[str, list[Any]] = {}
   for hit in hits:
-    by_cik.setdefault(hit.cik, []).append(hit)
+    for cik in hit.registrants(corpus):
+      by_cik.setdefault(cik, []).append(hit)
 
   def one(cik: str) -> bool:
     key = get_current_reports_list_key(cik)
@@ -377,6 +429,7 @@ def sec_current_reports(
 
   from .text_index import _get_s3_client
 
+  refuse_concurrent_edgar_pull(context)
   partitions = _run_partitions(context)
   today = datetime.now(UTC).date()
   efts = EftsClient(xbrlkit_config(), per_sec=config.efts_rate)
@@ -397,7 +450,7 @@ def sec_current_reports(
     seen, hits = discover_current_reports(
       efts, window[0], window[1], config.items, context.log.info
     )
-    in_corpus = [h for h in hits if corpus is None or h.cik in corpus]
+    in_corpus = [h for h in hits if h.registrants(corpus)]
     totals["eight_ks_seen"] += seen
     totals["wanted"] += len(in_corpus)
     context.log.info(
@@ -409,7 +462,7 @@ def sec_current_reports(
     stats, published = asyncio.run(
       _capture_current_reports(in_corpus, partition, config, context.log)
     )
-    stats.update(_update_release_lists(published, context.log))
+    stats.update(_update_release_lists(published, corpus, context.log))
     context.log.info(f"{partition}: {dict(stats)}")
     totals.update(stats)
 
@@ -513,6 +566,7 @@ def sec_filing_documents(
   from .catalog import filings_by_cik, read_corpus, read_manifests
   from .text_index import _get_s3_client
 
+  refuse_concurrent_edgar_pull(context)
   s3 = _get_s3_client()
   partitions = _run_partitions(context)
   totals: Counter = Counter()

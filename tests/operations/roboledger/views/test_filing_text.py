@@ -302,6 +302,11 @@ class TestResolution:
     [
       ({}, ReportSelectorError),
       ({"ticker": "ACME", "accession": "12345"}, ReportSelectorError),
+      ({"ticker": "../x"}, ReportSelectorError),
+      ({"ticker": "A" * 11}, ReportSelectorError),
+      ({"report_id": REPORT_ID, "ticker": "ACME"}, ReportSelectorError),
+      ({"report_id": REPORT_ID, "accession": ACCESSION}, ReportSelectorError),
+      ({"report_id": REPORT_ID, "form": "8-K"}, ReportSelectorError),
       ({"ticker": "NOPE"}, ReportNotFoundError),
       ({"ticker": "ACME", "fiscal_year": 2001}, ReportNotFoundError),
       ({"ticker": "ACME", "accession": "0000099999-25-000001"}, ReportNotFoundError),
@@ -310,6 +315,11 @@ class TestResolution:
   async def test_errors(self, cdn, kwargs, error):
     with pytest.raises(error):
       await resolve_filing("sec", **kwargs)
+
+  async def test_class_tickers_resolve(self, cdn):
+    cdn.objects["companies/brk.b.json"] = cdn.objects["companies/acme.json"]
+    ref = await resolve_filing("sec", ticker="brk.b")
+    assert ref.accession == ACCESSION
 
   async def test_accession_is_sec_only(self, monkeypatch):
     monkeypatch.setattr(
@@ -352,6 +362,88 @@ class TestReportText:
     # The policy was a fragment URL in the holon; it was read in.
     assert f"{OLD_FOLDER}/fact_abc.html" in cdn.reads
 
+  async def test_an_old_filing_with_a_fetched_document_keeps_its_blocks(
+    self, cdn, no_cache
+  ):
+    # sec_filing_documents added the document; the blocks are still located
+    # from their fragments, since a classic document carries no inline tags.
+    cdn.objects[f"{OLD_FOLDER}/manifest.json"] = _manifest(
+      "10-K",
+      [
+        {"kind": "holon", "name": "holon.jsonld"},
+        {"kind": "document", "name": "old.htm"},
+      ],
+      is_inline_xbrl=False,
+    )
+    cdn.objects[f"{OLD_FOLDER}/old.htm"] = (
+      "<html><body><p>FORM 10-K</p><p>Item 7. Management's Discussion</p>"
+      f"<p>{OLD_POLICY}</p></body></html>"
+    )
+    ref = await resolve_filing("sec", ticker="ACME", fiscal_year=2017)
+    out = await query_describe_filing("sec", ref)
+    assert out["profile"]["text"] == "primary document"
+    [block] = out["sections"]["text_blocks"]
+    assert block["id"] == "us-gaap:RevenueRecognitionPolicyTextBlock"
+    assert block["offset"] is not None
+
+  async def test_an_instance_named_as_the_document_is_not_read(self, cdn, no_cache):
+    cdn.objects[f"{OLD_FOLDER}/manifest.json"] = _manifest(
+      "10-K",
+      [
+        {"kind": "holon", "name": "holon.jsonld"},
+        {"kind": "document", "name": "acme-20161231.xml"},
+      ],
+      is_inline_xbrl=False,
+    )
+    cdn.objects[f"{OLD_FOLDER}/acme-20161231.xml"] = "<xbrl><context/></xbrl>"
+    ref = await resolve_filing("sec", ticker="ACME", fiscal_year=2017)
+    out = await query_search_text("sec", ref, "three years")
+    assert out["text"] == "tagged text blocks"
+    assert f"{OLD_FOLDER}/acme-20161231.xml" not in cdn.reads
+
+  async def test_the_budget_is_checked_before_the_download(
+    self, cdn, no_cache, monkeypatch
+  ):
+    from robosystems.operations.roboledger.views.information_blocks import (
+      ReportTooLargeError,
+    )
+
+    monkeypatch.setattr(module, "DOCUMENT_BUDGET_CHARS", 100)
+    cdn.objects[f"{FOLDER}/manifest.json"] = _manifest(
+      "10-K",
+      [
+        {"kind": "holon", "name": "holon.jsonld"},
+        {"kind": "document", "name": "acme-10k.htm", "bytes": 101},
+      ],
+    )
+    ref = await resolve_filing("sec", ticker="ACME")
+    with pytest.raises(ReportTooLargeError):
+      await query_search_text("sec", ref, "widgets")
+    assert f"{FOLDER}/acme-10k.htm" not in cdn.reads
+
+  async def test_an_8ks_documents_are_budgeted_together(
+    self, cdn, no_cache, monkeypatch
+  ):
+    from robosystems.operations.roboledger.views.information_blocks import (
+      ReportTooLargeError,
+    )
+
+    monkeypatch.setattr(module, "DOCUMENT_BUDGET_CHARS", 150)
+    cdn.objects[f"{EIGHT_K_FOLDER}/manifest.json"] = _manifest(
+      "8-K",
+      [
+        {"kind": "exhibit", "name": "ex991.htm", "exhibit": "EX-99.1", "bytes": 100},
+        {"kind": "document", "name": "acme-8k.htm", "bytes": 100},
+      ],
+      items=["2.02"],
+    )
+    ref = await resolve_filing("sec", ticker="ACME", form="8-K")
+    with pytest.raises(ReportTooLargeError):
+      await query_search_text("sec", ref, "guidance")
+    assert not any(
+      k.startswith(EIGHT_K_FOLDER) and k.endswith(".htm") for k in cdn.reads
+    )
+
   async def test_describe_counts_facts_after_the_cache(self, cdn, monkeypatch):
     redis = _FakeRedis()
     monkeypatch.setattr(module, "_cache", lambda: redis)
@@ -361,6 +453,16 @@ class TestReportText:
     assert out["profile"]["text"] == "primary document"
     assert out["filing"]["form"] == "10-K"
     assert out["counts"]["text_blocks"] == 1
+    # The model it read is kept under information-block's own key, and a
+    # second describe reads neither the manifest nor the holon again.
+    assert (
+      f"ib:model:v{information_blocks.MODEL_CACHE_VERSION}:sec:{ref.report_id}"
+      in redis.store
+    )
+    reads = len(cdn.reads)
+    again = await query_describe_filing("sec", ref)
+    assert again["counts"] == out["counts"]
+    assert len(cdn.reads) == reads
 
   async def test_cached_text_is_built_once(self, cdn, monkeypatch):
     redis = _FakeRedis()

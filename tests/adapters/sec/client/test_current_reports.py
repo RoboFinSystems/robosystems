@@ -13,20 +13,27 @@ from robosystems.adapters.sec.client.current_reports import (
 
 
 class _FakeEfts:
-  """EFTS over a fixed list of (file_date, accession, items) filings."""
+  """EFTS over a fixed list of (file_date, accession, items) filings, answering
+  as EFTS does: a count past the ceiling comes back as the ceiling with
+  ``relation: gte``, never the real number, and a probe's ``size`` is ignored."""
 
-  def __init__(self, filings: list[tuple[str, str, list[str]]]):
+  def __init__(self, filings: list[tuple[str, str, list[str]]], ceiling: int = 10_000):
     self.filings = filings
+    self.ceiling = ceiling
     self.calls = 0
 
   def _fetch_page(self, params: dict, offset: int = 0, size: int = 100) -> dict:
     self.calls += 1
     start, end = params["startdt"], params["enddt"]
     rows = [f for f in self.filings if start <= f[0] <= end]
-    page = rows[offset : offset + size]
+    page = rows[offset : offset + max(size, 100)]
+    capped = len(rows) > self.ceiling
     return {
       "hits": {
-        "total": {"value": len(rows)},
+        "total": {
+          "value": self.ceiling if capped else len(rows),
+          "relation": "gte" if capped else "eq",
+        },
         "hits": [
           {
             "_id": f"{acc}:doc.htm",
@@ -59,18 +66,36 @@ class TestDiscoverCurrentReports:
     ]
 
   def test_halves_a_window_over_the_ceiling(self, monkeypatch):
+    # EFTS reports a capped window as exactly the ceiling with relation
+    # "gte"; a window that is read as fitting would silently lose the rest.
     from robosystems.adapters.sec.client import current_reports as module
 
     monkeypatch.setattr(module, "EFTS_MAX_RESULTS", 3)
     days = ["2025-10-01", "2025-10-02", "2025-10-20", "2025-11-15", "2025-12-30"]
     efts = _FakeEfts(
-      [(day, f"0000000001-25-00000{i}", ["2.02"]) for i, day in enumerate(days)]
+      [(day, f"0000000001-25-00000{i}", ["2.02"]) for i, day in enumerate(days)],
+      ceiling=3,
     )
     seen, hits = discover_current_reports(
       efts, date(2025, 10, 1), date(2025, 12, 31), ["2.02"]
     )
     assert seen == 5
     assert len(hits) == 5
+
+  def test_a_single_day_over_the_ceiling_is_read_once_and_logged(self, monkeypatch):
+    from robosystems.adapters.sec.client import current_reports as module
+
+    monkeypatch.setattr(module, "EFTS_MAX_RESULTS", 2)
+    efts = _FakeEfts(
+      [("2025-10-01", f"0000000001-25-00000{i}", ["2.02"]) for i in range(4)],
+      ceiling=2,
+    )
+    logged: list[str] = []
+    seen, hits = discover_current_reports(
+      efts, date(2025, 10, 1), date(2025, 10, 1), ["2.02"], logged.append
+    )
+    assert seen == 2 and len(hits) == 2
+    assert logged and "over 2" in logged[0]
 
   def test_query_excludes_amendments(self):
     captured: list[dict] = []

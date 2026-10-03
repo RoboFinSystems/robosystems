@@ -174,11 +174,16 @@ its folder, as `information-block` does.
 
 Both are quarter-partitioned and run a selected range in one run, a quarter at
 a time. Every job that pulls from EDGAR (these two and `sec_download`) carries
-the `edgar` run tag, which `dagster.yaml` limits to one at a time.
+the `edgar` run tag, which `dagster.yaml` limits to one at a time, and the two
+assets refuse to start while another pull is running — a run launched past
+the queue (the Materialize button, `dagster asset materialize`) carries no
+tag, so launch them through their jobs. The releases lists are read-merge-
+written, which is safe only because of that: never run the capture by hand
+beside the nightly chain.
 
 ```bash
-uv run dagster asset materialize -m robosystems.dagster \
-  --select sec_current_reports --partition 2026-Q3
+uv run dagster job launch -m robosystems.dagster \
+  -j sec_current_reports_capture --partition 2026-Q3
 ```
 
 ## Nightly chain

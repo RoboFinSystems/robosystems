@@ -36,8 +36,12 @@ _HEAD_SCAN_BYTES = 20_000
 _HEAD_CHARS = 400
 _EXHIBIT_HEAD_RE = re.compile(r"\bexhibit\s+(\d{1,3})(?:\.(\d{1,3}))?\b", re.IGNORECASE)
 # Filer agents name exhibits freely: ex99-1, ex99_1, ex991, xex991,
-# exhibit991. The digits after "ex" are the exhibit number run together.
-_EXHIBIT_NAME_RE = re.compile(r"ex(?:hibit)?[-_ ]?(\d{1,4})(?:[-_.](\d{1,2}))?")
+# exhibit991. The digits after "ex" are the exhibit number run together. An
+# "ex" inside a word (index1, annex1) is not one; one glued to a form code
+# (a8-kex991, 20251028xex991) is, so only two letters before it disqualify.
+_EXHIBIT_NAME_RE = re.compile(
+  r"(?<![a-z][a-z])ex(?:hibit)?[-_ ]?(\d{1,4})(?:[-_.](\d{1,2}))?"
+)
 # Item 601 exhibit numbers with two digits, so a run like "1045" reads 10.45
 # and not 1.045.
 _TWO_DIGIT_EXHIBITS = frozenset(
@@ -62,6 +66,9 @@ class CurrentReportHit:
   entity_name: str | None = None
   ticker: str | None = None
   report_date: str | None = None
+  # Every registrant on the filing: a combined 8-K (a utility holding company
+  # with its operating subsidiaries) is one filing listed under each.
+  ciks: tuple[str, ...] = ()
 
   @classmethod
   def from_efts(cls, hit: dict[str, Any]) -> CurrentReportHit | None:
@@ -77,9 +84,11 @@ class CurrentReportHit:
     if not accession or not ciks or not filing_date:
       return None
     name, ticker = _parse_display_name((source.get("display_names") or [None])[0])
+    padded = tuple(dict.fromkeys(str(c).zfill(10) for c in ciks))
     return cls(
       accession=accession,
-      cik=str(ciks[0]).zfill(10),
+      cik=padded[0],
+      ciks=padded,
       filing_date=str(filing_date),
       items=tuple(str(i) for i in source.get("items") or []),
       primary_document=filename or None,
@@ -90,6 +99,12 @@ class CurrentReportHit:
 
   def wanted(self, items: tuple[str, ...] | list[str]) -> bool:
     return bool(set(self.items) & set(items))
+
+  def registrants(self, corpus: set[str] | None = None) -> tuple[str, ...]:
+    """The CIKs this filing is listed under: every registrant, or those the
+    corpus holds."""
+    ciks = self.ciks or (self.cik,)
+    return ciks if corpus is None else tuple(c for c in ciks if c in corpus)
 
 
 def _parse_display_name(display: str | None) -> tuple[str | None, str | None]:
@@ -313,12 +328,16 @@ def missing_document(manifest: dict[str, Any] | None) -> str | None:
 
   A filing from before inline XBRL was processed from an instance-only zip,
   so its folder holds the holon and the Tavi but not the document they were
-  tagged from; the manifest still names it.
+  tagged from; the manifest still names it. A manifest that names the XBRL
+  instance itself (a filing whose submissions record had no primary
+  document) names nothing worth reading.
   """
   if not manifest:
     return None
   name = manifest.get("primary_document")
   if not name or manifest.get("is_inline_xbrl"):
+    return None
+  if not str(name).lower().endswith(_DOCUMENT_SUFFIXES):
     return None
   kinds = {r.get("kind") for r in manifest.get("representations") or []}
   return None if "document" in kinds else str(name)
