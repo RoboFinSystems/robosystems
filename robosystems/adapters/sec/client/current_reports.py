@@ -9,9 +9,11 @@ ceiling is halved until each piece fits.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterable
 from datetime import date, timedelta
 
+import requests
 from xbrlkit.edgar import EftsClient
 from xbrlkit.edgar.efts import EFTS_MAX_PAGE_SIZE, EFTS_MAX_RESULTS
 
@@ -30,11 +32,31 @@ def filing_zip_url(cik: str, accession: str) -> str:
   return filing_file_url(cik, accession, f"{accession}-xbrl.zip")
 
 
+CONNECTION_RETRIES = 3
+CONNECTION_RETRY_DELAY = 2.0  # seconds, doubled each retry
+
+
+def _page(efts: EftsClient, params: dict, offset: int, size: int) -> dict:
+  """One EFTS page. The client retries a 429 and a 5xx but not a dropped
+  connection, and its session sits idle while a quarter's filings are fetched:
+  the first request of the next quarter then lands on a connection the network
+  has already closed. The session opens a new one on the retry."""
+  attempt = 0
+  while True:
+    try:
+      return efts._fetch_page(params, offset=offset, size=size)
+    except (requests.ConnectionError, requests.Timeout):
+      if attempt >= CONNECTION_RETRIES:
+        raise
+      time.sleep(CONNECTION_RETRY_DELAY * 2**attempt)
+      attempt += 1
+
+
 def _total(efts: EftsClient, params: dict) -> tuple[int, bool]:
   """The window's hit count, and whether EFTS capped it: past 10,000 it
   answers ``{"value": 10000, "relation": "gte"}``, never the real count, so
   the relation is what says a window must split."""
-  first = efts._fetch_page(params, offset=0, size=1)
+  first = _page(efts, params, offset=0, size=1)
   total = first.get("hits", {}).get("total", {}) or {}
   value = int(total.get("value", 0) or 0)
   return value, total.get("relation") == "gte" or value >= EFTS_MAX_RESULTS
@@ -79,7 +101,7 @@ def discover_current_reports(
     offset = 0
     while offset < total:
       size = min(EFTS_MAX_PAGE_SIZE, total - offset)
-      page = efts._fetch_page(params, offset=offset, size=size)
+      page = _page(efts, params, offset=offset, size=size)
       # EFTS answers a full page whatever size was asked; keep to the window.
       hits = (page.get("hits", {}).get("hits", []) or [])[:size]
       for raw in hits:
