@@ -76,9 +76,6 @@ class AuthorOperator(AnalystOperator):
   OPERATOR_TYPE = "author"
   LOOP_DESCRIPTION = "Author tool loop"
 
-  # The dry run that shows the entry an inbox line would post.
-  READ_ONLY_TOOLS = [*AnalystOperator.READ_ONLY_TOOLS, "preview-event-block"]
-
   # The safety boundary: anything that would need an approval card stays
   # off this list. No deletes, journal edits, period close/reopen, sync,
   # schema or raw-Cypher writes.

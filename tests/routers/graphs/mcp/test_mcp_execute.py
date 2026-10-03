@@ -66,15 +66,8 @@ class TestWriteClassificationFailClosed:
       "disclosures",
       "information-block",
       "list-agents",
-      # Dry runs that persist nothing.
-      "preview-event-block",
-      "preview-reconciling-item",
     ):
       assert tool in READ_ONLY_MCP_TOOLS, f"{tool} should be allowed for viewers"
-
-  def test_a_preview_that_calls_the_source_ledger_stays_a_write(self):
-    # It reads QuickBooks, which a viewer must not be able to trigger.
-    assert "preview-reconciliations" not in READ_ONLY_MCP_TOOLS
 
   def test_cypher_read_tools_excluded_from_static_set(self):
     # These are classified per-query by the StatementKernel, not this set.

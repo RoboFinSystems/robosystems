@@ -307,8 +307,8 @@ class _RegistrarMCPTool(BaseTool):
     self._log_tool_execution(self.spec.name, arguments)
     graph_id = self.client.graph_id
 
-    # Role authorization (fail-closed) is enforced once, upstream, in
-    # `validate_mcp_access`: a registrar op is a write unless it is listed in
+    # Write-role authorization (fail-closed) is enforced once, upstream, in
+    # `validate_mcp_access`: registrar ops are writes, absent from
     # `READ_ONLY_MCP_TOOLS`. This layer has no `current_user` to recheck.
 
     # ── 1. Feature gate ─────────────────────────────────────────────────

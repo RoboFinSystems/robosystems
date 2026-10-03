@@ -108,12 +108,11 @@ class TestDeclaration:
   def test_analyst_writes_nothing(self):
     assert AnalystOperator.WRITE_TOOLS == ()
 
-  def test_its_extra_reads_are_classified_as_reads(self):
-    from robosystems.middleware.mcp.tools.classification import is_mutating_tool
-
-    assert "preview-event-block" in AuthorOperator.READ_ONLY_TOOLS
-    assert "preview-event-block" not in AnalystOperator.READ_ONLY_TOOLS
-    assert not [t for t in AuthorOperator.READ_ONLY_TOOLS if is_mutating_tool(t)]
+  def test_it_reads_what_the_analyst_reads_and_no_dry_run(self):
+    # The previews take the locks of the writes they preview, so they stay
+    # behind the write classification and off both operators.
+    assert AuthorOperator.READ_ONLY_TOOLS == AnalystOperator.READ_ONLY_TOOLS
+    assert not [t for t in AuthorOperator.READ_ONLY_TOOLS if t.startswith("preview-")]
 
   def test_ledger_bound_writes_are_the_ones_a_person_still_approves(self):
     # A classified line waits on its commit; a drafted entry on close-period.

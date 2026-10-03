@@ -82,8 +82,6 @@ class AnalystOperator(Operator):
     "agent-activity",
     "get-event-block",
     "list-event-blocks",
-    # What changed on a reconciling item, and what each treatment would post.
-    "preview-reconciling-item",
     "get-event-handler",
     "list-event-handlers",
     "get-document",
