@@ -8,6 +8,28 @@ from typing import Any
 from robosystems.logger import logger
 from robosystems.security.operation_audit import AuditCaller
 
+# Under these keys a dict maps names to schemas, so a "title" there is a
+# field's name; under the data keys the values are payloads, not schemas.
+_NAME_MAPS = frozenset({"properties", "$defs", "definitions", "patternProperties"})
+_DATA_KEYS = frozenset({"default", "enum", "const", "example", "examples"})
+
+
+def without_titles(node: Any, names: bool = False) -> Any:
+  """A JSON schema minus its ``title`` annotations. Pydantic writes one per
+  field, repeating the field's name; in an operator's cached prefix they are
+  tokens that tell the model nothing."""
+  if isinstance(node, dict):
+    return {
+      key: value
+      if key in _DATA_KEYS and not names
+      else without_titles(value, names=not names and key in _NAME_MAPS)
+      for key, value in node.items()
+      if names or key != "title" or not isinstance(value, str)
+    }
+  if isinstance(node, list):
+    return [without_titles(item) for item in node]
+  return node
+
 
 class _RemoteToolHandle:
   """Tool-shaped handle whose ``execute`` goes through ``call_tool``.
@@ -103,7 +125,7 @@ class HttpToolAccess:
       {
         "name": defn["name"],
         "description": defn["description"],
-        "inputSchema": defn["inputSchema"],
+        "inputSchema": without_titles(defn["inputSchema"]),
       }
       for defn in self._tools.get_tool_definitions_as_dict()
       if defn["name"] in wanted

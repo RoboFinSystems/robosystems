@@ -8,7 +8,7 @@ so the divergence was invisible.
 """
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -122,3 +122,88 @@ class TestToolAccessParity:
     a = http.get_tool_instance(FakeTool)
     b = http.get_tool_instance(FakeTool)
     assert a._tool_name == b._tool_name
+
+
+@pytest.mark.unit
+class TestWithoutTitles:
+  """An operator's tool schemas drop Pydantic's ``title`` annotations and
+  nothing else."""
+
+  def test_annotations_go_and_a_field_named_title_stays(self):
+    from robosystems.operations.operators.tool_access import without_titles
+
+    schema = {
+      "title": "CreateDocumentRequest",
+      "type": "object",
+      "properties": {
+        "title": {"title": "Title", "type": "string", "description": "Shown"},
+        "tags": {
+          "title": "Tags",
+          "type": "array",
+          "items": {"title": "Tag", "type": "string"},
+        },
+      },
+      "required": ["title"],
+    }
+
+    assert without_titles(schema) == {
+      "type": "object",
+      "properties": {
+        "title": {"type": "string", "description": "Shown"},
+        "tags": {"type": "array", "items": {"type": "string"}},
+      },
+      "required": ["title"],
+    }
+
+  def test_example_and_default_payloads_are_left_alone(self):
+    from robosystems.operations.operators.tool_access import without_titles
+
+    schema = {
+      "type": "object",
+      "examples": [{"title": "Q3 board memo"}],
+      "properties": {
+        "doc": {
+          "title": "Doc",
+          "default": {"title": "Untitled"},
+          "anyOf": [{"title": "A", "type": "object"}, {"const": {"title": "x"}}],
+        }
+      },
+      "$defs": {"title": {"title": "Title", "type": "string"}},
+    }
+
+    out = without_titles(schema)
+    assert out["examples"] == [{"title": "Q3 board memo"}]
+    assert out["properties"]["doc"] == {
+      "default": {"title": "Untitled"},
+      "anyOf": [{"type": "object"}, {"const": {"title": "x"}}],
+    }
+    assert out["$defs"] == {"title": {"type": "string"}}
+
+  def test_a_field_named_like_a_data_key_is_still_a_schema(self):
+    from robosystems.operations.operators.tool_access import without_titles
+
+    schema = {"properties": {"default": {"title": "Default", "type": "boolean"}}}
+    assert without_titles(schema) == {"properties": {"default": {"type": "boolean"}}}
+
+  @pytest.mark.asyncio
+  async def test_the_http_surface_serves_schemas_without_them(self):
+    access = HttpToolAccess("kg_test", read_only=False)
+    access._tools = MagicMock()
+    access._tools.get_tool_definitions_as_dict.return_value = [
+      {
+        "name": "create-agent",
+        "description": "d",
+        "inputSchema": {
+          "title": "CreateAgentRequest",
+          "type": "object",
+          "properties": {"name": {"title": "Name", "type": "string"}},
+        },
+      }
+    ]
+
+    schemas = await access.get_tool_schemas(["create-agent"])
+
+    assert schemas[0]["inputSchema"] == {
+      "type": "object",
+      "properties": {"name": {"type": "string"}},
+    }
