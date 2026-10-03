@@ -344,35 +344,65 @@ def missing_document(manifest: dict[str, Any] | None) -> str | None:
 
 
 def release_entry(
-  hit: CurrentReportHit, bucket: str, cdn_url: str | None
+  hit: CurrentReportHit,
+  bucket: str,
+  cdn_url: str | None,
+  representations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-  """One 8-K as a filer's releases list carries it."""
+  """One 8-K as a filer's releases list carries it: when, what it reports,
+  where its folder is, and the files in it (``document``, ``exhibits`` by
+  exhibit number), so a reader can link them without opening the manifest."""
   from robosystems.config.storage.shared import (
     get_filing_artifact_prefix,
     get_public_data_url,
   )
 
   prefix = get_filing_artifact_prefix(hit.filing_date[:4], hit.cik, hit.accession)
-  return {
+  entry: dict[str, Any] = {
     "accession": hit.accession,
     "filing_date": hit.filing_date,
     "report_date": hit.report_date,
     "items": list(hit.items),
     "folder": get_public_data_url(bucket, prefix + "/", cdn_url),
   }
+  if representations is not None:
+    document = next(
+      (
+        r["name"]
+        for r in representations
+        if r.get("kind") == "document" and r.get("name")
+      ),
+      None,
+    )
+    if document:
+      entry["document"] = document
+    exhibits = {
+      str(r.get("exhibit") or r["name"]): r["name"]
+      for r in representations
+      if r.get("kind") == "exhibit" and r.get("name")
+    }
+    if exhibits:
+      entry["exhibits"] = exhibits
+  return entry
 
 
 def merge_releases(
   existing: list[dict[str, Any]],
-  hits: list[CurrentReportHit],
+  hits: list[tuple[CurrentReportHit, list[dict[str, Any]] | None]],
   bucket: str,
   cdn_url: str | None,
 ) -> list[dict[str, Any]]:
   """A filer's releases list with ``hits`` folded in, one entry per
-  accession, newest first."""
+  accession, newest first. A hit without its representations (published on
+  an earlier run) keeps the file names its entry already carries."""
   merged = {entry["accession"]: entry for entry in existing if entry.get("accession")}
-  for hit in hits:
-    merged[hit.accession] = release_entry(hit, bucket, cdn_url)
+  for hit, representations in hits:
+    entry = release_entry(hit, bucket, cdn_url, representations)
+    previous = merged.get(hit.accession) or {}
+    for key in ("document", "exhibits"):
+      if key not in entry and key in previous:
+        entry[key] = previous[key]
+    merged[hit.accession] = entry
   return sorted(
     merged.values(),
     key=lambda e: (e.get("filing_date") or "", e["accession"]),

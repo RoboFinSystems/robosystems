@@ -875,6 +875,41 @@ class TestResolveReport:
       "fiscal_period": "FY",
     }
 
+  def test_links_say_where_a_resolved_filing_is_served(self, monkeypatch) -> None:
+    monkeypatch.setattr(module.env, "PUBLIC_DATA_BUCKET", "public-data-test")
+    monkeypatch.setattr(module.env, "PUBLIC_DATA_CDN_URL", "https://cdn.example.com")
+    monkeypatch.setattr(module.env, "VIEWER_URL", "https://viewer.example.com")
+    folder_on_edgar = ACCESSION.replace("-", "")
+    resolved = {
+      "identifier": "rpt_abc",
+      "form": "10-K",
+      "filing_date": "2025-02-05",
+      "accession": ACCESSION,
+      "cik": CIK,
+      "uri": f"https://www.sec.gov/Archives/edgar/data/12345/{folder_on_edgar}/acme-20241231.htm",
+      "is_inline_xbrl": True,
+    }
+    links = (resolved_report_info(resolved) or {})["links"]
+    folder = f"https://cdn.example.com/2025/{CIK}/{ACCESSION}"
+    assert links["holon"] == f"{folder}/holon.jsonld"
+    assert links["tavi"] == f"{folder}/tavi.json"
+    assert links["as_filed"] == f"{folder}/acme-20241231.htm"
+    assert links["manifest"] == f"{folder}/manifest.json"
+    assert links["folder"] == f"{folder}/"
+    assert links["viewer"] == (
+      "https://viewer.example.com/?url=https%3A%2F%2Fcdn.example.com%2F2025%2F"
+      f"{CIK}%2F{ACCESSION}%2Fholon.jsonld"
+    )
+    assert links["edgar"] == (
+      f"https://www.sec.gov/Archives/edgar/data/12345/{folder_on_edgar}/"
+    )
+    # A classic filing's document is in the folder only after the backfill,
+    # which the graph does not record: no as_filed from the resolver.
+    classic = {**resolved, "is_inline_xbrl": False}
+    assert "as_filed" not in (resolved_report_info(classic) or {})["links"]
+    # No coordinates, no links.
+    assert "links" not in (resolved_report_info({"identifier": "rpt_abc"}) or {})
+
   async def test_a_year_with_no_filing_is_not_found(self) -> None:
     with (
       patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=True),

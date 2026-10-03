@@ -53,7 +53,9 @@ async def resolve_sec_report(
     f"WHERE {' AND '.join(where_parts)} "
     "RETURN r.identifier AS identifier, "
     "r.form AS form, r.filing_date AS filing_date, "
-    "r.fiscal_year_focus AS fiscal_year, r.fiscal_period_focus AS fiscal_period "
+    "r.fiscal_year_focus AS fiscal_year, r.fiscal_period_focus AS fiscal_period, "
+    "r.accession_number AS accession, ent.cik AS cik, "
+    "r.uri AS uri, r.is_inline_xbrl AS is_inline_xbrl "
     "ORDER BY r.filing_date DESC LIMIT 1"
   )
 

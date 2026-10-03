@@ -118,6 +118,7 @@ class DescribeFilingTool(BaseTool):
 - `profile.text` — "primary document" when the filing's own document is read, "tagged text blocks" when it has none (a tenant report)
 - `filing` (form, dates, `items` on an 8-K), `entity`, `counts`, `periods`, `statements`, `disclosures`, `axes`
 - `sections.items` — each Item's `id`, `label`, `offset`, `chars`; `sections.text_blocks` — the largest blocks
+- `resolved_report.links` on SEC — `viewer` opens the filing in the xbrlkit viewer (give the user that URL to show it), `holon`, `tavi`, `as_filed`, an 8-K's `exhibits`, `edgar`
 
 **RELATED TOOLS:**
 - `search-text` — find words inside this filing; `read-text` — page it from an offset
@@ -165,6 +166,7 @@ class SearchTextTool(BaseTool):
 - `sections` — where all matches fall when there are more than the hits shown
 - `terms` — on no match, how often each of your words occurs alone: search again with the wording the filing uses
 - `text` — "primary document", or "tagged text blocks" for a filing without its document
+- `resolved_report.links` on SEC — `viewer` opens the filing in the xbrlkit viewer (give the user that URL to show it), `as_filed`, an 8-K's `exhibits`, `edgar`
 
 **NOTES:**
 - Pass a hit's `offset` to `read-text` to read on from it before quoting
@@ -233,6 +235,7 @@ class ReadTextTool(BaseTool):
 
 **RETURNS:**
 - `text`, `offset`, `length`, `text_chars` (the whole text), `next_offset`, and the `section` the window starts in
+- `resolved_report.links` on SEC — `viewer`, `as_filed`, `edgar`, as for `search-text`
 """,
       "inputSchema": {
         "type": "object",

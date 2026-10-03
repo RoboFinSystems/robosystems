@@ -163,7 +163,18 @@ def _filing(accession: str, filing_date: str, fiscal_year: int, kinds: list[str]
     "fiscal_year": fiscal_year,
     "fiscal_period": "FY",
     "report_id": f"rpt-{accession}",
-    "representations": [{"kind": k} for k in kinds],
+    # As the catalog writes them: each representation names its file.
+    "representations": [
+      {
+        "kind": k,
+        "name": {
+          "holon": "holon.jsonld",
+          "tavi": "tavi.json",
+          "document": "acme-10k.htm",
+        }[k],
+      }
+      for k in kinds
+    ],
   }
 
 
@@ -200,7 +211,11 @@ def cdn(monkeypatch: pytest.MonkeyPatch):
           "cik": CIK,
           "releases": [
             _release(NEWER_FD, "2025-03-01", ["7.01", "9.01"]),
-            _release(EIGHT_K, "2025-01-30", ["2.02", "9.01"]),
+            {
+              **_release(EIGHT_K, "2025-01-30", ["2.02", "9.01"]),
+              "document": "acme-8k.htm",
+              "exhibits": {"EX-99.1": "ex991.htm"},
+            },
           ],
         }
       ),
@@ -268,6 +283,18 @@ class TestResolution:
     ref = await resolve_filing("sec", ticker="acme")
     assert (ref.accession, ref.cik, ref.filing_date) == (ACCESSION, CIK, "2025-02-05")
     assert ref.resolved and ref.resolved["fiscal_year"] == 2024
+    links = ref.resolved["links"]
+    assert links["holon"].endswith(f"/{FOLDER}/holon.jsonld")
+    assert links["as_filed"].endswith(f"/{FOLDER}/acme-10k.htm")
+    assert links["viewer"].startswith(module.env.VIEWER_URL.rstrip("/") + "/?url=")
+    assert "holon.jsonld" in links["viewer"]
+    assert links["edgar"].endswith(f"/12345/{ACCESSION.replace('-', '')}/")
+
+  async def test_a_pre_inline_filing_links_what_its_folder_holds(self, cdn):
+    ref = await resolve_filing("sec", ticker="ACME", fiscal_year=2017)
+    assert ref.resolved
+    assert "as_filed" not in ref.resolved["links"]
+    assert ref.resolved["links"]["holon"].endswith(f"/{OLD_FOLDER}/holon.jsonld")
 
   async def test_any_processed_year(self, cdn):
     ref = await resolve_filing("sec", ticker="ACME", fiscal_year=2017)
@@ -281,6 +308,12 @@ class TestResolution:
     ref = await resolve_filing("sec", ticker="ACME", form="8-K")
     assert ref.accession == EIGHT_K and ref.form == "8-K"
     assert ref.resolved
+    links = ref.resolved["links"]
+    assert "viewer" not in links and "holon" not in links
+    assert links["as_filed"].endswith(f"/{EIGHT_K_FOLDER}/acme-8k.htm")
+    assert list(links["exhibits"]) == ["EX-99.1"]
+    assert links["exhibits"]["EX-99.1"].endswith(f"/{EIGHT_K_FOLDER}/ex991.htm")
+    assert links["edgar"].endswith(f"/12345/{EIGHT_K.replace('-', '')}/")
     recent = [r["accession"] for r in ref.resolved["recent_releases"]]
     assert recent == [NEWER_FD, EIGHT_K]
 

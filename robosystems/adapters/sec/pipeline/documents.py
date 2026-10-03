@@ -253,7 +253,8 @@ async def _capture_current_reports(
   limiter = AsyncRateLimiter(rate=config.download_rate)
   semaphore = asyncio.Semaphore(config.download_concurrency)
   stats: Counter = Counter()
-  published: list[Any] = []
+  # (hit, its representations) — None for one published on an earlier run.
+  published: list[tuple[Any, list[dict[str, Any]] | None]] = []
 
   async with aiohttp.ClientSession(headers=SEC_CONFIG["headers"]) as session:
 
@@ -266,7 +267,7 @@ async def _capture_current_reports(
         writer.object_exists, public_bucket, manifest_key
       ):
         stats["already_published"] += 1
-        published.append(hit)
+        published.append((hit, None))
         return
 
       raw_key = get_current_report_raw_key(
@@ -341,7 +342,7 @@ async def _capture_current_reports(
       ):
         stats["published"] += 1
         stats["exhibits"] += sum(1 for r in representations if r["kind"] == "exhibit")
-        published.append(hit)
+        published.append((hit, representations))
       else:
         stats["failed"] += 1
 
@@ -351,7 +352,9 @@ async def _capture_current_reports(
 
 
 def _update_release_lists(
-  hits: list[Any], corpus: set[str] | None, log: Any
+  hits: list[tuple[Any, list[dict[str, Any]] | None]],
+  corpus: set[str] | None,
+  log: Any,
 ) -> Counter:
   """Merge the published 8-Ks into each registrant's releases list, newest
   first — a combined filing under every registrant the corpus holds.
@@ -375,9 +378,9 @@ def _update_release_lists(
   bucket = env.PUBLIC_DATA_BUCKET
   cdn_url = env.PUBLIC_DATA_CDN_URL
   by_cik: dict[str, list[Any]] = {}
-  for hit in hits:
+  for hit, representations in hits:
     for cik in hit.registrants(corpus):
-      by_cik.setdefault(cik, []).append(hit)
+      by_cik.setdefault(cik, []).append((hit, representations))
 
   def one(cik: str) -> bool:
     key = get_current_reports_list_key(cik)

@@ -343,6 +343,7 @@ async def financial_statement_analysis_op(
         filing_date=resolved.get("filing_date"),
         fiscal_year=resolved.get("fiscal_year"),
         fiscal_period=resolved.get("fiscal_period"),
+        links=(resolved_report_info(resolved) or {}).get("links"),
       )
 
     return FinancialStatementAnalysisResponse(

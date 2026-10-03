@@ -702,6 +702,10 @@ class ResolvedReportInfo(BaseModel):
   filing_date: str | None = None
   fiscal_year: int | None = None
   fiscal_period: str | None = None
+  # Where the filing is served, on a shared repository: `viewer` (the xbrlkit
+  # viewer over the published holon), `holon`, `tavi`, `as_filed`, `exhibits`,
+  # `manifest`, `folder`, `edgar`.
+  links: dict[str, Any] | None = None
 
 
 class AnalyticalStatementFactRow(BaseModel):

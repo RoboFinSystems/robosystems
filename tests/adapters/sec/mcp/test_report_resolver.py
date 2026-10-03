@@ -90,6 +90,11 @@ class TestResolveSecReport:
       await resolve_sec_report(MOCK_GRAPH, ticker="NVDA", fiscal_year=2025)
     query, params = mock_repository.execute_query.call_args[0]
     assert "r.fiscal_year_focus = $fiscal_year" in query
+    # The filing's coordinates and its document ride along, so the views
+    # can say where the filing is served without a second read.
+    assert "r.accession_number AS accession" in query
+    assert "ent.cik AS cik" in query
+    assert "r.uri AS uri, r.is_inline_xbrl AS is_inline_xbrl" in query
     assert params["fiscal_year"] == 2025
 
   @pytest.mark.asyncio

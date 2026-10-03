@@ -26,7 +26,12 @@ from robosystems.config import env
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.config.storage.shared import (
   FILING_ARTIFACT_HOLON,
+  FILING_ARTIFACT_MANIFEST,
+  FILING_ARTIFACT_TAVI,
   get_filing_artifact_key,
+  get_filing_artifact_prefix,
+  get_public_data_url,
+  get_viewer_link,
 )
 from robosystems.config.valkey_registry import ValkeyDatabase, create_async_redis_client
 from robosystems.logger import logger
@@ -70,6 +75,8 @@ MODEL_CACHE_TTL_TENANT_SECONDS = 5 * 60
 MODEL_CACHE_VERSION = "4"
 # Text-block fragments fetched from the public bucket per request.
 FRAGMENT_WORKERS = 8
+# What a filed document the tools can read is named like.
+_DOCUMENT_SUFFIXES = (".htm", ".html", ".txt")
 # What one response may read into the model: the text of the block or family
 # it returns, never the filing's. A fragment past the budget stays a pointer
 # and the entry says so.
@@ -346,16 +353,84 @@ async def resolve_report(
 
 
 def resolved_report_info(resolved: dict[str, Any] | None) -> dict[str, Any] | None:
-  """The ``resolved_report`` block the sibling views return."""
+  """The ``resolved_report`` block the sibling views return, with where the
+  filing is served when the resolver said which filing it is."""
   if not resolved:
     return None
-  return {
+  info: dict[str, Any] = {
     "report_id": resolved.get("identifier"),
     "form": resolved.get("form"),
     "filing_date": resolved.get("filing_date"),
     "fiscal_year": resolved.get("fiscal_year"),
     "fiscal_period": resolved.get("fiscal_period"),
   }
+  accession = str(resolved.get("accession") or "")
+  cik = str(resolved.get("cik") or "")
+  filing_date = str(resolved.get("filing_date") or "")
+  if accession and cik and len(filing_date) >= 4 and env.PUBLIC_DATA_BUCKET:
+    # The Report's uri is the primary document's EDGAR URL. The processor
+    # copies an inline document into the folder; a classic filing's arrives
+    # only with the document backfill, which the graph does not record.
+    representations = []
+    name = str(resolved.get("uri") or "").rsplit("/", 1)[-1]
+    if resolved.get("is_inline_xbrl") and name.lower().endswith(_DOCUMENT_SUFFIXES):
+      representations.append({"kind": "document", "name": name})
+    info["links"] = public_filing_links(cik, accession, filing_date, representations)
+  return info
+
+
+def public_filing_links(
+  cik: str,
+  accession: str,
+  filing_date: str,
+  representations: list[dict[str, Any]] | None = None,
+  *,
+  has_holon: bool = True,
+) -> dict[str, Any]:
+  """Where one filing is served: ``viewer`` (the xbrlkit viewer over the
+  published holon — what to hand a person who wants to see the filing),
+  ``holon`` and ``tavi``, ``as_filed`` when the document's name is known,
+  ``exhibits`` (an 8-K's EX-99 files), the folder's ``manifest`` and the
+  filing on ``edgar``. The holon and the Tavi sit at their fixed names unless
+  ``representations`` names them; an 8-K has neither (``has_holon=False``).
+  """
+  from robosystems.adapters.sec.client.edgar import edgar_filing_folder_url
+
+  year, bucket, cdn = filing_date[:4], env.PUBLIC_DATA_BUCKET, env.PUBLIC_DATA_CDN_URL
+
+  def url(name: str) -> str:
+    return get_public_data_url(
+      bucket, get_filing_artifact_key(year, cik, accession, name), cdn
+    )
+
+  links: dict[str, Any] = {}
+  names: dict[str, str] = (
+    {"holon": FILING_ARTIFACT_HOLON, "tavi": FILING_ARTIFACT_TAVI} if has_holon else {}
+  )
+  exhibits: dict[str, str] = {}
+  for rep in representations or []:
+    kind, name = rep.get("kind"), rep.get("name")
+    if not name:
+      continue
+    if kind == "exhibit":
+      exhibits[str(rep.get("exhibit") or name)] = url(str(name))
+    elif kind in ("holon", "tavi", "document"):
+      names[str(kind)] = str(name)
+  if "holon" in names:
+    links["holon"] = url(names["holon"])
+    links["viewer"] = get_viewer_link(env.VIEWER_URL, links["holon"])
+  if "tavi" in names:
+    links["tavi"] = url(names["tavi"])
+  if "document" in names:
+    links["as_filed"] = url(names["document"])
+  if exhibits:
+    links["exhibits"] = exhibits
+  links["manifest"] = url(FILING_ARTIFACT_MANIFEST)
+  links["folder"] = get_public_data_url(
+    bucket, get_filing_artifact_prefix(year, cik, accession) + "/", cdn
+  )
+  links["edgar"] = edgar_filing_folder_url(cik, accession)
+  return links
 
 
 async def query_disclosures(

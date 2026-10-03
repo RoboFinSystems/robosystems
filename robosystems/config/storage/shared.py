@@ -336,6 +336,18 @@ def get_current_reports_list_key(cik: str) -> str:
   return f"{CURRENT_REPORTS_LIST_PREFIX}{cik}.json"
 
 
+def get_viewer_link(viewer_url: str, url: str) -> str:
+  """The xbrlkit viewer opened on a published representation.
+
+  Example:
+      >>> get_viewer_link("https://xbrlkit.com", "https://cdn/2025/c/a/holon.jsonld")
+      'https://xbrlkit.com/?url=https%3A%2F%2Fcdn%2F2025%2Fc%2Fa%2Fholon.jsonld'
+  """
+  from urllib.parse import quote
+
+  return f"{viewer_url.rstrip('/')}/?url={quote(url, safe='')}"
+
+
 def get_filing_catalog_key(ticker: str) -> str:
   """Key of one filer's catalog file, by lower-cased ticker.
 

@@ -75,6 +75,7 @@ from .information_blocks import (
   _external_text_blocks,
   _inline_fragments,
   load_report_model,
+  public_filing_links,
   resolve_report,
 )
 from .information_blocks import _cache_key as model_cache_key
@@ -246,20 +247,27 @@ async def resolve_filing(
 
 
 def _report_ref(cik: str, entry: dict[str, Any]) -> FilingRef:
+  accession = str(entry.get("accession") or "")
+  filing_date = str(entry.get("filing_date") or "")
+  resolved: dict[str, Any] = {
+    "report_id": entry.get("report_id"),
+    "accession": accession,
+    "form": entry.get("form"),
+    "filing_date": entry.get("filing_date"),
+    "fiscal_year": entry.get("fiscal_year"),
+    "fiscal_period": entry.get("fiscal_period"),
+  }
+  if accession and len(filing_date) >= 4:
+    resolved["links"] = public_filing_links(
+      cik, accession, filing_date, entry.get("representations") or []
+    )
   return FilingRef(
     report_id=entry.get("report_id"),
-    accession=entry.get("accession"),
+    accession=accession or None,
     cik=cik,
     filing_date=entry.get("filing_date"),
     form=entry.get("form"),
-    resolved={
-      "report_id": entry.get("report_id"),
-      "accession": entry.get("accession"),
-      "form": entry.get("form"),
-      "filing_date": entry.get("filing_date"),
-      "fiscal_year": entry.get("fiscal_year"),
-      "fiscal_period": entry.get("fiscal_period"),
-    },
+    resolved=resolved,
   )
 
 
@@ -278,21 +286,32 @@ async def _release_ref(
   if entry is None:
     what = accession or "8-K earnings release"
     raise ReportNotFoundError(f"No {what} captured for {symbol}.")
+  filing_date = str(entry.get("filing_date") or "")
+  resolved: dict[str, Any] = {
+    "accession": entry["accession"],
+    "form": CURRENT_REPORT_FORM,
+    "filing_date": entry.get("filing_date"),
+    "items": entry.get("items"),
+    "recent_releases": [
+      {k: r.get(k) for k in ("accession", "filing_date", "items")}
+      for r in releases[:RECENT_RELEASES]
+    ],
+  }
+  if len(filing_date) >= 4:
+    representations: list[dict[str, Any]] = []
+    if entry.get("document"):
+      representations.append({"kind": "document", "name": entry["document"]})
+    for exhibit, name in (entry.get("exhibits") or {}).items():
+      representations.append({"kind": "exhibit", "name": name, "exhibit": exhibit})
+    resolved["links"] = public_filing_links(
+      cik, entry["accession"], filing_date, representations, has_holon=False
+    )
   return FilingRef(
     accession=entry["accession"],
     cik=cik,
     filing_date=entry.get("filing_date"),
     form=CURRENT_REPORT_FORM,
-    resolved={
-      "accession": entry["accession"],
-      "form": CURRENT_REPORT_FORM,
-      "filing_date": entry.get("filing_date"),
-      "items": entry.get("items"),
-      "recent_releases": [
-        {k: r.get(k) for k in ("accession", "filing_date", "items")}
-        for r in releases[:RECENT_RELEASES]
-      ],
-    },
+    resolved=resolved,
   )
 
 
@@ -314,6 +333,13 @@ async def _graph_report(graph_id: str, report_id: str) -> FilingRef:
       f"Report {report_id!r} carries no accession, filer or filing date, so it "
       "has no published filing to read."
     )
+  assert ref.accession and ref.cik and ref.filing_date
+  ref.resolved = {
+    "report_id": report_id,
+    "accession": ref.accession,
+    "filing_date": ref.filing_date,
+    "links": public_filing_links(ref.cik, ref.accession, ref.filing_date),
+  }
   return ref
 
 
