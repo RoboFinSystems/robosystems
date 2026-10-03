@@ -13,7 +13,7 @@ A report is a snapshot. Live statements move with every sync and every entry, an
 
 Ask your AI assistant, or open **Reports → Create Report**. The report is built from your mapped chart of accounts, so map your accounts first. See [Map your chart of accounts](map-your-chart-of-accounts.md).
 
-In the app, choose the period: this month or last, this quarter or last, monthly year to date, a full year by month, year over year, or dates of your own. Then choose which statements to include.
+In the app, choose the period: this month or last, this quarter or last, monthly year to date, a full year by month, year over year, or dates of your own.
 
 - "Create a report for September."
 - "Create a report for the third quarter and tell me anything that looks off."
