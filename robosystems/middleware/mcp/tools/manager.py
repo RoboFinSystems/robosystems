@@ -189,6 +189,9 @@ class GraphMCPTools:
     self.financial_statement_analysis_tool = None
     self.disclosures_tool = None
     self.information_block_tool = None
+    self.describe_filing_tool = None
+    self.search_text_tool = None
+    self.read_text_tool = None
     self.resolve_element_tool = None
     self.resolve_structure_tool = None
 
@@ -210,6 +213,12 @@ class GraphMCPTools:
 
       self.disclosures_tool = DisclosuresTool(graph_client)
       self.information_block_tool = InformationBlockTool(graph_client)
+      # xbrlkit's text tools over the same filing's whole text.
+      from .filing_text_tools import DescribeFilingTool, ReadTextTool, SearchTextTool
+
+      self.describe_filing_tool = DescribeFilingTool(graph_client)
+      self.search_text_tool = SearchTextTool(graph_client)
+      self.read_text_tool = ReadTextTool(graph_client)
       # OLTP-backed, so tenant graphs only.
       if not self._is_shared_repository():
         self.live_financial_statement_tool = LiveFinancialStatementTool(graph_client)
@@ -716,6 +725,12 @@ class GraphMCPTools:
       tools.append(self.disclosures_tool.get_tool_definition())
     if self.information_block_tool is not None:
       tools.append(self.information_block_tool.get_tool_definition())
+    if self.describe_filing_tool is not None:
+      tools.append(self.describe_filing_tool.get_tool_definition())
+    if self.search_text_tool is not None:
+      tools.append(self.search_text_tool.get_tool_definition())
+    if self.read_text_tool is not None:
+      tools.append(self.read_text_tool.get_tool_definition())
     return tools
 
   def _tool_unavailable_reason(self, tool_name: str, feature_flag: str) -> str:
@@ -966,6 +981,20 @@ class GraphMCPTools:
             "This graph does not have the roboledger schema extension."
           )
         result = await self.information_block_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name in ("describe-filing", "search-text", "read-text"):
+        tool = {
+          "describe-filing": self.describe_filing_tool,
+          "search-text": self.search_text_tool,
+          "read-text": self.read_text_tool,
+        }[name]
+        if tool is None:
+          raise ValueError(
+            f"{name} tool is not available. "
+            "This graph does not have the roboledger schema extension."
+          )
+        result = await tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "live-financial-statement":

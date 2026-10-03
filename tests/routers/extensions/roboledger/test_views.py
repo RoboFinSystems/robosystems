@@ -24,12 +24,16 @@ import pytest
 from fastapi import HTTPException
 
 from robosystems.models.api.extensions.reports import (
+  DescribeFilingRequest,
   DisclosuresRequest,
   FinancialStatementAnalysisRequest,
   InformationBlockRequest,
+  ReadTextRequest,
+  SearchTextRequest,
 )
 from robosystems.models.api.views import CreateViewRequest
 from robosystems.models.api.views.view_config import DEFAULT_FACT_LIMIT
+from robosystems.operations.roboledger.views.filing_text import FilingRef, QueryError
 from robosystems.operations.roboledger.views.information_blocks import (
   BlockNotFoundError,
   ReportNotFoundError,
@@ -38,9 +42,12 @@ from robosystems.operations.roboledger.views.information_blocks import (
 )
 from robosystems.routers.extensions.roboledger.views import (
   build_fact_grid_op,
+  describe_filing_op,
   disclosures_op,
   financial_statement_analysis_op,
   information_block_op,
+  read_text_op,
+  search_text_op,
 )
 
 MODULE = "robosystems.routers.extensions.roboledger.views"
@@ -847,3 +854,119 @@ class TestInformationBlockOperations:
       )
     assert exc_info.value.status_code == 404
     assert "Pensions" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+class TestFilingTextOperations:
+  """describe-filing / search-text / read-text: the envelope over the view."""
+
+  REF = FilingRef(
+    accession="0000012345-25-000077",
+    resolved={"accession": "0000012345-25-000077", "form": "8-K"},
+  )
+
+  @pytest.mark.unit
+  async def test_search_text_wraps_the_matches(self):
+    body = SearchTextRequest(ticker="ACME", form="8-K", query="guidance", max_hits=5)
+    payload = {
+      "graph_id": "sec",
+      "accession": "0000012345-25-000077",
+      "query": "guidance",
+      "total": 1,
+      "hits": [
+        {"offset": 120, "match": "guidance", "text": "...", "section": "EX-99.1"}
+      ],
+      "text_chars": 900,
+      "text": "primary document",
+    }
+    with (
+      patch(
+        f"{MODULE}.resolve_filing", new_callable=AsyncMock, return_value=self.REF
+      ) as resolve,
+      patch(
+        f"{MODULE}.query_search_text", new_callable=AsyncMock, return_value=payload
+      ) as query,
+    ):
+      envelope = await search_text_op(
+        body=body,
+        graph_id="sec",
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    assert envelope.operation == "search-text"
+    assert envelope.result["total"] == 1
+    assert envelope.result["resolved_report"] == {
+      "accession": "0000012345-25-000077",
+      "form": "8-K",
+    }
+    assert resolve.call_args.kwargs["form"] == "8-K"
+    assert query.call_args.args == ("sec", self.REF, "guidance")
+    assert query.call_args.kwargs == {"window": None, "max_hits": 5}
+
+  @pytest.mark.unit
+  async def test_read_text_and_describe_filing(self):
+    ref = FilingRef(report_id="rpt_abc")
+    page = {
+      "graph_id": GRAPH_ID,
+      "report_id": "rpt_abc",
+      "offset": 0,
+      "length": 3,
+      "text": "abc",
+      "text_chars": 3,
+    }
+    layout = {
+      "graph_id": GRAPH_ID,
+      "report_id": "rpt_abc",
+      "profile": {"text": "tagged text blocks"},
+    }
+    with (
+      patch(f"{MODULE}.resolve_filing", new_callable=AsyncMock, return_value=ref),
+      patch(
+        f"{MODULE}.query_read_text", new_callable=AsyncMock, return_value=page
+      ) as read,
+      patch(
+        f"{MODULE}.query_describe_filing", new_callable=AsyncMock, return_value=layout
+      ),
+    ):
+      read_env = await read_text_op(
+        body=ReadTextRequest(report_id="rpt_abc", offset=0, length=3),
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+      describe_env = await describe_filing_op(
+        body=DescribeFilingRequest(report_id="rpt_abc"),
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    assert read_env.operation == "read-text" and read_env.result["text"] == "abc"
+    assert read.call_args.kwargs == {"offset": 0, "length": 3}
+    assert describe_env.operation == "describe-filing"
+    assert describe_env.result["profile"]["text"] == "tagged text blocks"
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize(
+    ("error", "status"),
+    [
+      (QueryError("query is required"), 400),
+      (ReportSelectorError("form 8-K needs a ticker"), 400),
+      (ReportNotFoundError("No 8-K earnings release found for ACME."), 404),
+    ],
+  )
+  async def test_errors_map_to_http(self, error, status):
+    with (
+      patch(f"{MODULE}.resolve_filing", new_callable=AsyncMock, side_effect=error),
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      await search_text_op(
+        body=SearchTextRequest(ticker="ACME", query="x"),
+        graph_id="sec",
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    assert exc_info.value.status_code == status

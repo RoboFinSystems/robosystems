@@ -24,6 +24,9 @@ READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
     "resolve-element",
     "disclosures",
     "information-block",
+    "describe-filing",
+    "search-text",
+    "read-text",
     "get-report-bundle",
     # Fiscal calendar / close reads
     "get-fiscal-calendar",

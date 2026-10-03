@@ -19,7 +19,9 @@ from dagster import (
 )
 
 from robosystems.adapters.sec.pipeline.sensors import (
+  CURRENT_REPORTS_NIGHTLY_LOOKBACK_DAYS,
   _get_quarters_to_scan,
+  sec_current_reports_sensor,
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
   sec_master_sleep_on_failure_sensor,
@@ -1068,3 +1070,54 @@ def test_every_job_that_materializes_a_sec_graph_is_serialized():
   assert set(defined) == set(materializers)
   for name, db in materializers.items():
     assert defined[name].tags.get("materialize_db") == db, name
+
+
+@pytest.mark.unit
+class TestSecCurrentReportsSensor:
+  """download → 8-K capture, a week's look-back."""
+
+  TAGS = {"mode": "incremental", "dagster/partition": "2025-Q4", "batch_id": "b1"}
+
+  def _run(self, job_name, tags=None, active=None):
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_current_reports_sensor",
+        job_name=job_name,
+        run_id="run-abcdef12",
+        tags=self.TAGS if tags is None else tags,
+        instance=instance,
+        get_runs_return=active or [],
+      )
+      return list(sec_current_reports_sensor(context))
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_download_triggers_the_capture_with_a_look_back(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    [request] = self._run("sec_download")
+    assert request.job_name == "sec_current_reports_capture"
+    assert request.partition_key == "2025-Q4"
+    assert request.tags["mode"] == "incremental"
+    assert request.run_config == {
+      "ops": {
+        "sec_current_reports": {
+          "config": {"since_days": CURRENT_REPORTS_NIGHTLY_LOOKBACK_DAYS}
+        }
+      }
+    }
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_manual_runs_do_not_chain(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    assert self._run("sec_download", tags={"dagster/partition": "2025-Q4"}) == []
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_while_the_next_job_runs(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    assert self._run("sec_download", active=[MagicMock()]) == []
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_in_dev(self, mock_env):
+    mock_env.ENVIRONMENT = "dev"
+    assert self._run("sec_download") == []

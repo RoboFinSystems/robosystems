@@ -83,6 +83,9 @@ run_coordinator:
         limit: 1
         value:
           applyLimitPerUniqueValue: true
+      # Parity with dagster_prod.yaml: one EDGAR pull at a time.
+      - key: "edgar"
+        limit: 1
 
 # Telemetry - disable for privacy
 telemetry:

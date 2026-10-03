@@ -1,8 +1,9 @@
 """Dagster assets, jobs, sensors and schedules for the SEC pipeline.
 
 Stages: download → process → DuckDB stage → LadybugDB materialize → publish
-(S3, R2, Hugging Face), plus text indexing, knowledge artifacts and the public
-filer catalog. See README.md in this directory; ``get_dagster_components()``
+(S3, R2, Hugging Face), plus text indexing, knowledge artifacts, the public
+filer catalog, and the filed documents the XBRL path does not bring (8-K
+earnings releases, pre-inline primary documents). See README.md in this directory; ``get_dagster_components()``
 is what dagster/definitions.py collects.
 """
 
@@ -18,8 +19,10 @@ from robosystems.adapters.sec.pipeline.configs import (
   SEC_PRIMARY_START_YEAR,
   SEC_QUARTERS,
   SEC_START_YEAR,
+  SECCurrentReportsConfig,
   SECDownloadConfig,
   SECFilingCatalogConfig,
+  SECFilingDocumentsConfig,
   SECHFPublishConfig,
   SECHistoricalStageConfig,
   SECIncrementalStageConfig,
@@ -27,6 +30,10 @@ from robosystems.adapters.sec.pipeline.configs import (
   SECProcessConfig,
   SECStageConfig,
   sec_quarter_partitions,
+)
+from robosystems.adapters.sec.pipeline.documents import (
+  sec_current_reports,
+  sec_filing_documents,
 )
 from robosystems.adapters.sec.pipeline.download import sec_raw_filings
 from robosystems.adapters.sec.pipeline.duckdb_s3_publish import (
@@ -36,9 +43,11 @@ from robosystems.adapters.sec.pipeline.duckdb_s3_publish import (
 from robosystems.adapters.sec.pipeline.hf_publish import sec_lbug_hf_published
 from robosystems.adapters.sec.pipeline.jobs import (
   sec_artifact_generation_job,
+  sec_current_reports_job,
   sec_download_job,
   sec_duckdb_s3_publish_job,
   sec_filing_catalog_job,
+  sec_filing_documents_job,
   sec_historical_duckdb_s3_publish_job,
   sec_historical_lbug_s3_publish_job,
   sec_historical_materialize_job,
@@ -66,6 +75,7 @@ from robosystems.adapters.sec.pipeline.s3_publish import (
   sec_lbug_s3_published,
 )
 from robosystems.adapters.sec.pipeline.sensors import (
+  sec_current_reports_sensor,
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
   sec_master_sleep_on_failure_sensor,
@@ -112,6 +122,8 @@ def get_dagster_components():
       sec_narratives_indexed,
       sec_ixbrl_disclosures_indexed,
       sec_filing_catalog,
+      sec_current_reports,
+      sec_filing_documents,
     ],
     "jobs": [
       sec_download_job,
@@ -133,6 +145,8 @@ def get_dagster_components():
       sec_narratives_index_job,
       sec_ixbrl_index_job,
       sec_filing_catalog_job,
+      sec_current_reports_job,
+      sec_filing_documents_job,
     ],
     "sensors": [
       sec_processing_sensor,
@@ -142,6 +156,7 @@ def get_dagster_components():
       sec_post_stage_index_sensor,
       sec_wake_to_stage_sensor,
       sec_master_sleep_on_failure_sensor,
+      sec_current_reports_sensor,
     ],
     "schedules": [
       sec_incremental_download_schedule,
@@ -157,8 +172,10 @@ __all__ = [
   "SEC_QUARTERS",
   "SEC_START_YEAR",
   "SECArtifactConfig",
+  "SECCurrentReportsConfig",
   "SECDownloadConfig",
   "SECFilingCatalogConfig",
+  "SECFilingDocumentsConfig",
   "SECHFPublishConfig",
   "SECHistoricalStageConfig",
   "SECIncrementalStageConfig",
@@ -167,6 +184,9 @@ __all__ = [
   "SECStageConfig",
   "get_dagster_components",
   "sec_artifact_generation_job",
+  "sec_current_reports",
+  "sec_current_reports_job",
+  "sec_current_reports_sensor",
   "sec_download_job",
   "sec_duckdb_incremental_staged",
   "sec_duckdb_s3_publish_job",
@@ -174,6 +194,8 @@ __all__ = [
   "sec_duckdb_staged",
   "sec_filing_catalog",
   "sec_filing_catalog_job",
+  "sec_filing_documents",
+  "sec_filing_documents_job",
   "sec_graph_materialized",
   "sec_historical_duckdb_s3_publish_job",
   "sec_historical_duckdb_s3_published",
