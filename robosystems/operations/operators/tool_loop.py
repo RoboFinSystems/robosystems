@@ -4,6 +4,7 @@ go back to the model as error results so it can correct itself."""
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -15,7 +16,10 @@ from robosystems.operations.operators.ai_client import (
 )
 
 if TYPE_CHECKING:
-  from robosystems.operations.operators.operator_context import OperatorContext
+  from robosystems.operations.operators.operator_context import (
+    OperatorContext,
+    ToolAccess,
+  )
 
 # Caps what the model sees; the caller gets the full rows separately.
 _MAX_TOOL_RESULT_CHARS = 12000
@@ -46,6 +50,17 @@ _ANSWER_NOW_CREDITS = (
 _NO_ANSWER = (
   "I gathered results but couldn't compose a final answer within the step limit."
 )
+
+
+class WriteRefusedError(Exception):
+  """Raised by a write guard. The call is not dispatched, and the message
+  goes back to the model as the tool's error."""
+
+
+# Takes a call's arguments and the tool surface (to read what the call
+# targets) and returns the arguments to dispatch, so a guard can pin a field
+# as well as refuse.
+WriteGuard = Callable[[dict[str, Any], "ToolAccess"], Awaitable[dict[str, Any]]]
 
 
 @dataclass
@@ -122,6 +137,7 @@ async def run_tool_loop(
   user_message: str | None = None,
   effort: str | None = None,
   write_tools: frozenset[str] = frozenset(),
+  write_guards: Mapping[str, WriteGuard] | None = None,
 ) -> ToolLoopResult:
   """Run a bounded tool-use loop and return the model's final answer.
 
@@ -135,7 +151,9 @@ async def run_tool_loop(
   as the opening turn, for per-request context that must stay out of the
   cached system prefix. Each successful call to one of ``write_tools`` is
   recorded in ``writes``, whatever stops the loop, so a partial run shows
-  what landed.
+  what landed. ``write_guards`` narrows a tool to the calls an operator may
+  make: a refused call, or one its guard could not check, is answered as an
+  error and never dispatched.
   """
   tools = await ctx.tools.get_tool_schemas(tool_names)
   if not tools:
@@ -247,6 +265,31 @@ async def run_tool_loop(
           )
         )
         continue
+      guard = write_guards.get(name) if write_guards else None
+      if guard is not None:
+        refusal: str | None = None
+        try:
+          args = await guard(args, ctx.tools)
+        except WriteRefusedError as refused:
+          refusal = str(refused)
+        except Exception:
+          # A guard that cannot decide refuses.
+          logger.warning(
+            "run_tool_loop: guard for %s failed on graph %s",
+            name,
+            ctx.graph_id,
+            exc_info=True,
+          )
+          refusal = f"{name} could not be checked, so it was not run."
+        if refusal is not None:
+          tool_results.append(
+            tool_result_block(
+              call.id,
+              _serialize_tool_result({"error": "not_allowed_here", "message": refusal}),
+              is_error=True,
+            )
+          )
+          continue
       try:
         result = await ctx.tools.call_tool(name, args, return_raw=True)
         # Some tools return {"error": ...} instead of raising.

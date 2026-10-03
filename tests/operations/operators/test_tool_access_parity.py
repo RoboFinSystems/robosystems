@@ -8,7 +8,7 @@ so the divergence was invisible.
 """
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -122,3 +122,161 @@ class TestToolAccessParity:
     a = http.get_tool_instance(FakeTool)
     b = http.get_tool_instance(FakeTool)
     assert a._tool_name == b._tool_name
+
+
+@pytest.mark.unit
+class TestWithoutTitles:
+  """An operator's tool schemas drop the titles that repeat a name, and
+  nothing else."""
+
+  def test_a_field_s_generated_title_goes_and_the_field_stays(self):
+    from robosystems.operations.operators.tool_access import without_titles
+
+    schema = {
+      "title": "CreateDocumentRequest",
+      "type": "object",
+      "properties": {
+        "title": {"title": "Title", "type": "string", "description": "Shown"},
+        "period_start": {"title": "Period Start", "type": "string"},
+        "tags": {
+          "title": "Tags",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {"event_id": {"title": "Event Id", "type": "string"}},
+          },
+        },
+      },
+      "required": ["title"],
+      "$defs": {"PeriodSpec": {"title": "PeriodSpec", "type": "object"}},
+    }
+
+    assert without_titles(schema) == {
+      # No name to compare the root with, so it stays.
+      "title": "CreateDocumentRequest",
+      "type": "object",
+      "properties": {
+        "title": {"type": "string", "description": "Shown"},
+        "period_start": {"type": "string"},
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {"event_id": {"type": "string"}},
+          },
+        },
+      },
+      "required": ["title"],
+      "$defs": {"PeriodSpec": {"type": "object"}},
+    }
+
+  def test_a_title_that_says_something_is_kept(self):
+    from robosystems.operations.operators.tool_access import without_titles
+
+    schema = {
+      "properties": {
+        "payload": {
+          "title": "Payload",
+          "anyOf": [
+            {"title": "payload when block_type is 'schedule'", "type": "object"},
+            {"title": "payload when block_type is 'forecast'", "type": "object"},
+          ],
+        },
+        "amount": {"title": "Amount in cents", "type": "integer"},
+      }
+    }
+
+    out = without_titles(schema)
+    assert "title" not in out["properties"]["payload"]
+    assert [o["title"] for o in out["properties"]["payload"]["anyOf"]] == [
+      "payload when block_type is 'schedule'",
+      "payload when block_type is 'forecast'",
+    ]
+    assert out["properties"]["amount"]["title"] == "Amount in cents"
+
+  def test_example_and_default_payloads_are_left_alone(self):
+    from robosystems.operations.operators.tool_access import without_titles
+
+    schema = {
+      "type": "object",
+      "examples": [{"properties": {"title": {"title": "Title"}}}],
+      "properties": {
+        "doc": {
+          "title": "Doc",
+          "default": {"properties": {"doc": {"title": "Doc"}}},
+          "const": {"title": "x"},
+        },
+        "default": {"title": "Default", "type": "boolean"},
+      },
+    }
+
+    out = without_titles(schema)
+    assert out["examples"] == [{"properties": {"title": {"title": "Title"}}}]
+    assert out["properties"]["doc"] == {
+      "default": {"properties": {"doc": {"title": "Doc"}}},
+      "const": {"title": "x"},
+    }
+    # A field named like a data key is still a schema.
+    assert out["properties"]["default"] == {"type": "boolean"}
+
+  def test_the_input_is_not_mutated(self):
+    from robosystems.operations.operators.tool_access import without_titles
+
+    schema = {"properties": {"name": {"title": "Name", "type": "string"}}}
+    without_titles(schema)
+    assert schema == {"properties": {"name": {"title": "Name", "type": "string"}}}
+
+  def test_the_registrar_s_union_labels_survive_on_a_real_tool(self):
+    """create-information-block tells the model to pick the anyOf option
+    whose title matches its block_type, so those titles must reach it."""
+    from robosystems.middleware.mcp.tools.registrar import build_tools_for_extension
+    from robosystems.operations.operators.tool_access import without_titles
+
+    client = MagicMock()
+    client.graph_id = "kg1"
+    tool = build_tools_for_extension("roboledger", client)["create-information-block"]
+    definition = tool.get_tool_definition()
+
+    def titles(node, found):
+      if isinstance(node, dict):
+        if isinstance(node.get("title"), str):
+          found.append(node["title"])
+        for value in node.values():
+          titles(value, found)
+      elif isinstance(node, list):
+        for value in node:
+          titles(value, found)
+      return found
+
+    before = [
+      t for t in titles(definition["inputSchema"], []) if t.startswith("payload when")
+    ]
+    after = [
+      t
+      for t in titles(without_titles(definition["inputSchema"]), [])
+      if t.startswith("payload when")
+    ]
+    assert before, "the registrar no longer labels the payload union"
+    assert after == before
+
+  @pytest.mark.asyncio
+  async def test_the_http_surface_serves_schemas_without_them(self):
+    access = HttpToolAccess("kg_test", read_only=False)
+    access._tools = MagicMock()
+    access._tools.get_tool_definitions_as_dict.return_value = [
+      {
+        "name": "create-agent",
+        "description": "d",
+        "inputSchema": {
+          "type": "object",
+          "properties": {"name": {"title": "Name", "type": "string"}},
+        },
+      }
+    ]
+
+    schemas = await access.get_tool_schemas(["create-agent"])
+
+    assert schemas[0]["inputSchema"] == {
+      "type": "object",
+      "properties": {"name": {"type": "string"}},
+    }

@@ -8,6 +8,50 @@ from typing import Any
 from robosystems.logger import logger
 from robosystems.security.operation_audit import AuditCaller
 
+# Under these keys a dict maps names to schemas; under the data keys the
+# values are payloads, not schemas.
+_NAME_MAPS = frozenset({"properties", "$defs", "definitions"})
+_DATA_KEYS = frozenset({"default", "enum", "const", "example", "examples"})
+
+
+def _repeats_its_name(name: str, schema: Any) -> bool:
+  title = schema.get("title") if isinstance(schema, dict) else None
+  if not isinstance(title, str):
+    return False
+
+  def letters(text: str) -> str:
+    return "".join(ch for ch in text.lower() if ch.isalnum())
+
+  return letters(title) == letters(name)
+
+
+def without_titles(node: Any, names: bool = False) -> Any:
+  """A JSON schema minus the titles that only repeat a name. Pydantic
+  writes one beside every field ("Period Start" on ``period_start``) and
+  every model; in an operator's cached prefix they are tokens that tell the
+  model nothing. A title that says anything else is kept: the registrar
+  labels each option of a payload union with one, and its description
+  points the model at them."""
+  if isinstance(node, dict):
+    if names:
+      return {
+        name: {k: v for k, v in cleaned.items() if k != "title"}
+        if _repeats_its_name(name, cleaned)
+        else cleaned
+        for name, cleaned in (
+          (name, without_titles(schema)) for name, schema in node.items()
+        )
+      }
+    return {
+      key: value
+      if key in _DATA_KEYS
+      else without_titles(value, names=key in _NAME_MAPS)
+      for key, value in node.items()
+    }
+  if isinstance(node, list):
+    return [without_titles(item) for item in node]
+  return node
+
 
 class _RemoteToolHandle:
   """Tool-shaped handle whose ``execute`` goes through ``call_tool``.
@@ -103,7 +147,7 @@ class HttpToolAccess:
       {
         "name": defn["name"],
         "description": defn["description"],
-        "inputSchema": defn["inputSchema"],
+        "inputSchema": without_titles(defn["inputSchema"]),
       }
       for defn in self._tools.get_tool_definitions_as_dict()
       if defn["name"] in wanted

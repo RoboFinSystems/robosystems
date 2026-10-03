@@ -22,6 +22,7 @@ from robosystems.operations.operators.operator_registry import get_operator
 from robosystems.operations.operators.progress import NoOpProgress
 from robosystems.operations.operators.tool_loop import (
   ToolLoopResult,
+  WriteRefusedError,
   run_tool_loop,
   write_record,
 )
@@ -107,6 +108,21 @@ class TestDeclaration:
   def test_analyst_writes_nothing(self):
     assert AnalystOperator.WRITE_TOOLS == ()
 
+  def test_it_reads_what_the_analyst_reads_and_no_dry_run(self):
+    # The previews take the locks of the writes they preview, so they stay
+    # behind the write classification and off both operators.
+    assert AuthorOperator.READ_ONLY_TOOLS == AnalystOperator.READ_ONLY_TOOLS
+    assert not [t for t in AuthorOperator.READ_ONLY_TOOLS if t.startswith("preview-")]
+
+  def test_each_ledger_bound_write_is_guarded(self):
+    # A classified line waits on its commit; a drafted entry on close-period.
+    assert {"update-event-block", "promote-obligations", "create-report"} <= set(
+      AuthorOperator.WRITE_TOOLS
+    )
+    assert {"update-event-block", "promote-obligations"} <= set(
+      AuthorOperator.WRITE_GUARDS
+    )
+
 
 class TestRun:
   async def test_advertises_allowed_writes_and_never_gated_ones(self):
@@ -133,6 +149,19 @@ class TestRun:
     assert "AUTHORING" in kwargs["system"]
     assert "`create-information-block`" in kwargs["system"]
     assert "never invent" in kwargs["system"]
+    # What it has no tool for, it sends to the place that does.
+    assert "say where it is done" in kwargs["system"]
+    assert "the Closing Book" in kwargs["system"]
+
+  async def test_prompt_states_the_inbox_rule_only_where_the_tool_is(self):
+    with_inbox = await _loop_kwargs(
+      AuthorOperator(), _tools(["read-graph-cypher", "update-event-block"])
+    )
+    assert "only classifies" in with_inbox["system"]
+    without = await _loop_kwargs(
+      AuthorOperator(), _tools(["read-graph-cypher", "create-agent"])
+    )
+    assert "only classifies" not in without["system"]
 
   async def test_prompt_says_so_when_the_graph_has_no_write_tools(self):
     kwargs = await _loop_kwargs(AuthorOperator(), _tools(["read-graph-cypher"]))
@@ -256,6 +285,331 @@ class TestLoopRecordsWrites:
     )
     assert result.hit_cap is True
     assert [w["id"] for w in result.writes] == ["b1"]
+
+
+def _event_tools(event: dict | None) -> MagicMock:
+  """A tool surface whose get-event-block answers with ``event``."""
+  tools = MagicMock()
+  tools.call_tool = AsyncMock(
+    return_value=event
+    if event is not None
+    else {"error": "not_found", "message": "Event Block not found"}
+  )
+  return tools
+
+
+BANK_LINE = {"id": "evt_1", "event_type": "bank_transaction", "status": "captured"}
+
+
+class TestWriteGuards:
+  async def test_a_refused_call_is_never_dispatched_or_recorded(self):
+    tools = _tools(["create-taxonomy-block"], {"create-taxonomy-block": {"id": "t1"}})
+    ai = MagicMock()
+    ai.create_message = AsyncMock(
+      side_effect=[
+        _turn(("create-taxonomy-block", {"taxonomy_type": "chart_of_accounts"})),
+        _turn(text="I can't do that here."),
+      ]
+    )
+
+    async def refuse(arguments, tool_access):
+      raise WriteRefusedError("not from the console")
+
+    result = await run_tool_loop(
+      _ctx(tools, ai),
+      system="s",
+      tool_names=["create-taxonomy-block"],
+      max_iterations=3,
+      max_tokens=100,
+      write_tools=frozenset({"create-taxonomy-block"}),
+      write_guards={"create-taxonomy-block": refuse},
+    )
+
+    tools.call_tool.assert_not_awaited()
+    assert result.writes == []
+    # The model is told why, as the tool's own error.
+    answered = ai.create_message.await_args_list[1].kwargs["messages"][-1].content
+    block = answered[0]["toolResult"]
+    assert block["status"] == "error"
+    assert "not from the console" in block["content"][0]["text"]
+
+  async def test_a_guard_that_cannot_decide_refuses(self):
+    tools = _tools(["update-agent"], {"update-agent": {"id": "agt_1"}})
+    ai = MagicMock()
+    ai.create_message = AsyncMock(
+      side_effect=[_turn(("update-agent", {"agent_id": "agt_1"})), _turn(text="No.")]
+    )
+
+    async def broken(arguments, tool_access):
+      raise RuntimeError("lookup failed")
+
+    result = await run_tool_loop(
+      _ctx(tools, ai),
+      system="s",
+      tool_names=["update-agent"],
+      max_iterations=3,
+      max_tokens=100,
+      write_tools=frozenset({"update-agent"}),
+      write_guards={"update-agent": broken},
+    )
+
+    tools.call_tool.assert_not_awaited()
+    assert result.writes == []
+    answered = ai.create_message.await_args_list[1].kwargs["messages"][-1].content
+    assert "could not be checked" in answered[0]["toolResult"]["content"][0]["text"]
+
+  async def test_a_guard_can_pin_an_argument_and_sees_the_tool_surface(self):
+    tools = _tools(["update-agent"], {"update-agent": {"id": "agt_1"}})
+    ai = MagicMock()
+    ai.create_message = AsyncMock(
+      side_effect=[_turn(("update-agent", {"agent_id": "agt_1"})), _turn(text="Done.")]
+    )
+    seen = []
+
+    async def pin(arguments, tool_access):
+      seen.append(tool_access)
+      return {**arguments, "pinned": True}
+
+    result = await run_tool_loop(
+      _ctx(tools, ai),
+      system="s",
+      tool_names=["update-agent"],
+      max_iterations=3,
+      max_tokens=100,
+      write_tools=frozenset({"update-agent"}),
+      write_guards={"update-agent": pin},
+    )
+
+    assert seen == [tools]
+    tools.call_tool.assert_awaited_once_with(
+      "update-agent", {"agent_id": "agt_1", "pinned": True}, return_raw=True
+    )
+    assert [w["id"] for w in result.writes] == ["agt_1"]
+
+  async def test_the_author_hands_its_guards_to_the_loop(self):
+    kwargs = await _loop_kwargs(AuthorOperator(), _tools(["read-graph-cypher"]))
+    assert kwargs["write_guards"] is AuthorOperator.WRITE_GUARDS
+    analyst = await _loop_kwargs(AnalystOperator(), _tools(["read-graph-cypher"]))
+    assert analyst["write_guards"] == {}
+
+  def test_every_guard_narrows_an_allowlisted_tool(self):
+    assert set(AuthorOperator.WRITE_GUARDS) <= set(AuthorOperator.WRITE_TOOLS)
+
+  async def test_a_chart_of_accounts_is_never_created_from_the_console(self):
+    # Creating one would demote the chart the books run on.
+    guard = AuthorOperator.WRITE_GUARDS["create-taxonomy-block"]
+    with pytest.raises(WriteRefusedError, match="primary chart"):
+      await guard(
+        {"name": "New chart", "taxonomy_type": "chart_of_accounts"}, MagicMock()
+      )
+
+  @pytest.mark.parametrize("taxonomy_type", ["custom_ontology", "reporting_extension"])
+  async def test_other_taxonomy_blocks_pass_unchanged(self, taxonomy_type):
+    guard = AuthorOperator.WRITE_GUARDS["create-taxonomy-block"]
+    arguments = {"name": "Metrics", "taxonomy_type": taxonomy_type}
+    assert await guard(arguments, MagicMock()) == arguments
+
+  @pytest.mark.parametrize("asked", [{}, {"dispatch_handlers": False}])
+  async def test_the_sweep_always_drafts_what_it_promotes(self, asked):
+    # Flip-only would strand the obligations and block the close.
+    guard = AuthorOperator.WRITE_GUARDS["promote-obligations"]
+    assert (await guard(asked, MagicMock()))["dispatch_handlers"] is True
+
+  async def test_the_author_cannot_commit_an_inbox_line_through_the_loop(self):
+    """The allowlisted tool, the author's own guards, the real loop: a commit
+    never reaches the tool surface."""
+    tools = _tools(
+      ["update-event-block", "get-event-block"],
+      {"update-event-block": {"id": "evt_1"}, "get-event-block": BANK_LINE},
+    )
+    ai = MagicMock()
+    ai.create_message = AsyncMock(
+      side_effect=[
+        _turn(
+          ("update-event-block", {"event_id": "evt_1", "transition_to": "committed"})
+        ),
+        _turn(text="Approving is yours to do in the Inbox."),
+      ]
+    )
+
+    result = await run_tool_loop(
+      _ctx(tools, ai),
+      system="s",
+      tool_names=["update-event-block", "get-event-block"],
+      max_iterations=3,
+      max_tokens=100,
+      write_tools=frozenset({"update-event-block"}),
+      write_guards=AuthorOperator.WRITE_GUARDS,
+    )
+
+    assert "update-event-block" not in [
+      c.args[0] for c in tools.call_tool.await_args_list
+    ]
+    assert result.writes == []
+
+
+class TestClassifyGuard:
+  guard = staticmethod(AuthorOperator.WRITE_GUARDS["update-event-block"])
+
+  async def test_a_classification_passes_and_is_stamped_as_the_ai(self):
+    tools = _event_tools(BANK_LINE)
+    out = await self.guard(
+      {
+        "event_id": "evt_1",
+        "transition_to": "classified",
+        "metadata_patch": {"classified_element_id": "el_1", "basis": "Stripe fee"},
+      },
+      tools,
+    )
+    assert out["metadata_patch"] == {
+      "classified_element_id": "el_1",
+      "basis": "Stripe fee",
+      "classified_by": "ai",
+    }
+    tools.call_tool.assert_awaited_once_with(
+      "get-event-block", {"id": "evt_1"}, return_raw=True
+    )
+
+  async def test_the_lookup_is_a_call_the_real_tool_accepts(self):
+    """The mock above answers any arguments, so hold the guard's lookup to
+    get-event-block's own input schema: with the wrong argument name the
+    tool fails, the guard refuses, and nothing is ever classified."""
+    from robosystems.middleware.mcp.tools.event_block_tools import GetEventBlockTool
+
+    schema = GetEventBlockTool(MagicMock()).get_tool_definition()["inputSchema"]
+    tools = _event_tools(BANK_LINE)
+    await self.guard(
+      {
+        "event_id": "evt_1",
+        "transition_to": "classified",
+        "metadata_patch": {"accept_suggestion": True},
+      },
+      tools,
+    )
+
+    name, sent = tools.call_tool.await_args.args[:2]
+    assert name == "get-event-block"
+    assert set(schema["required"]) <= set(sent) <= set(schema["properties"])
+    assert sent["id"] == "evt_1"
+
+  async def test_it_cannot_claim_a_person_classified_the_line(self):
+    out = await self.guard(
+      {
+        "event_id": "evt_1",
+        "transition_to": "classified",
+        "metadata_patch": {"accept_suggestion": True, "classified_by": "user"},
+      },
+      _event_tools(BANK_LINE),
+    )
+    assert out["metadata_patch"]["classified_by"] == "ai"
+
+  async def test_a_split_passes(self):
+    allocations = [
+      {"element_id": "el_1", "amount": 600},
+      {"element_id": "el_2", "amount": 400},
+    ]
+    out = await self.guard(
+      {
+        "event_id": "evt_1",
+        "transition_to": "classified",
+        "metadata_patch": {"classified_allocations": allocations},
+      },
+      _event_tools(BANK_LINE),
+    )
+    assert out["metadata_patch"]["classified_allocations"] == allocations
+
+  @pytest.mark.parametrize(
+    "event",
+    [
+      # A synced event left captured by a failed posting: classifying it
+      # would take it out of the sync's retry for good.
+      {"id": "evt_1", "event_type": "invoice_issued", "status": "captured"},
+      {"id": "evt_1", "event_type": "journal_entry_recorded", "status": "captured"},
+      # A bank line past the point the console may touch it.
+      {"id": "evt_1", "event_type": "bank_transaction", "status": "classified"},
+      {"id": "evt_1", "event_type": "bank_fee", "status": "committed"},
+      None,
+    ],
+  )
+  async def test_only_a_captured_bank_line_can_be_classified(self, event):
+    with pytest.raises(WriteRefusedError, match="captured bank-feed line"):
+      await self.guard(
+        {
+          "event_id": "evt_1",
+          "transition_to": "classified",
+          "metadata_patch": {"classified_element_id": "el_1"},
+        },
+        _event_tools(event),
+      )
+
+  @pytest.mark.parametrize(
+    "event_type", ["bank_transaction", "bank_fee", "external_transfer"]
+  )
+  async def test_every_bank_feed_type_qualifies(self, event_type):
+    out = await self.guard(
+      {
+        "event_id": "evt_1",
+        "transition_to": "classified",
+        "metadata_patch": {"accept_suggestion": True},
+      },
+      _event_tools({"id": "evt_1", "event_type": event_type, "status": "captured"}),
+    )
+    assert out["transition_to"] == "classified"
+
+  @pytest.mark.parametrize(
+    "transition", ["committed", "voided", "superseded", "pending", "fulfilled", None]
+  )
+  async def test_every_other_transition_is_refused_before_any_lookup(self, transition):
+    arguments = {"event_id": "evt_1", "metadata_patch": {"accept_suggestion": True}}
+    if transition is not None:
+      arguments["transition_to"] = transition
+    tools = _event_tools(BANK_LINE)
+    with pytest.raises(WriteRefusedError, match="only classifies"):
+      await self.guard(arguments, tools)
+    tools.call_tool.assert_not_awaited()
+
+  @pytest.mark.parametrize(
+    "extra",
+    [
+      {"description": "edited"},
+      {"effective_at": "2026-04-30T23:59:59Z"},
+      {"superseded_by_id": "evt_2"},
+    ],
+  )
+  async def test_a_field_correction_riding_along_is_refused(self, extra):
+    with pytest.raises(WriteRefusedError):
+      await self.guard(
+        {"event_id": "evt_1", "transition_to": "classified", **extra},
+        _event_tools(BANK_LINE),
+      )
+
+  async def test_metadata_outside_the_classification_is_refused(self):
+    with pytest.raises(WriteRefusedError):
+      await self.guard(
+        {
+          "event_id": "evt_1",
+          "transition_to": "classified",
+          "metadata_patch": {"classified_element_id": "el_1", "source_amount": 1},
+        },
+        _event_tools(BANK_LINE),
+      )
+
+  async def test_the_caller_arguments_are_not_mutated(self):
+    arguments = {
+      "event_id": "evt_1",
+      "transition_to": "classified",
+      "metadata_patch": {"accept_suggestion": True},
+    }
+    await self.guard(arguments, _event_tools(BANK_LINE))
+    assert arguments["metadata_patch"] == {"accept_suggestion": True}
+
+  def test_the_bank_feed_types_are_the_handler_s_own(self):
+    from robosystems.operations.event_block.python_handlers.bank_feed import (
+      BANK_EVENT_TYPES,
+      BANK_FEED_HANDLERS,
+    )
+
+    assert set(BANK_EVENT_TYPES) == set(BANK_FEED_HANDLERS)
 
 
 class TestWriteRecord:

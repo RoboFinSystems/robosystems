@@ -127,6 +127,13 @@ class TestRegisteredOperatorDeclarations:
       "write tool; adding one means this flag must go"
     )
 
+  def test_every_analyst_tool_is_classified_as_a_read(self) -> None:
+    from robosystems.middleware.mcp.tools.classification import is_mutating_tool
+    from robosystems.operations.operators.implementations.analyst import AnalystOperator
+
+    writes = [t for t in AnalystOperator.READ_ONLY_TOOLS if is_mutating_tool(t)]
+    assert not writes, f"a viewer can run the analyst; these are writes: {writes}"
+
   def test_mapping_operator_is_write_capable(self) -> None:
     from robosystems.operations.operators.implementations.mapping.operator import (
       MappingOperator,

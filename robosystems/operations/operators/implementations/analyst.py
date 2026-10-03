@@ -25,6 +25,7 @@ from robosystems.operations.operators.operator_registry import register_operator
 from robosystems.operations.operators.tool_loop import (
   DEFAULT_MAX_ERROR_RETRIES,
   ToolLoopResult,
+  WriteGuard,
   run_tool_loop,
 )
 
@@ -58,6 +59,9 @@ class AnalystOperator(Operator):
     "live-financial-statement",
     "financial-statement-analysis",
     "build-fact-grid",
+    # A report or filing read as its own sections
+    "disclosures",
+    "information-block",
     # Period workflow and freshness reads
     "get-fiscal-calendar",
     "get-period-close-status",
@@ -89,19 +93,30 @@ class AnalystOperator(Operator):
   OPERATOR_TYPE = "analyst"
   LOOP_DESCRIPTION = "Analyst tool loop"
   WRITE_TOOLS: tuple[str, ...] = ()
+  WRITE_GUARDS: dict[str, WriteGuard] = {}
 
   # Advertised in the system prompt as preferred over raw Cypher.
   CURATED_TOOL_HINTS: dict[str, str] = {
     "live-financial-statement": (
-      "current income statement / balance sheet / trial balance straight "
-      "from the live ledger — the right first call for expense, revenue, "
-      "and balance questions"
+      "current income statement / balance sheet / cash flow statement "
+      "straight from the live ledger — the right first call for expense, "
+      "revenue, and balance questions"
     ),
     "financial-statement-analysis": (
       "financial statement analysis over the reported (materialized) facts"
     ),
     "build-fact-grid": (
       "multidimensional pivots over the fact hypercube (by account, period, dimension)"
+    ),
+    "disclosures": (
+      "the map of a report's or filing's sections (notes, statements, cover "
+      "page) — the way in when the question is what a report or filing "
+      "discloses; takes the report identifier or a ticker"
+    ),
+    "information-block": (
+      "one section from that map read whole: rows, breakdowns, calculation "
+      "footing, text. The expensive call, so find the block with "
+      "`disclosures` first; one block per call"
     ),
     "get-fiscal-calendar": "fiscal periods, close status, and the close target",
     "get-period-close-status": "close readiness for a specific period",
@@ -209,6 +224,7 @@ class AnalystOperator(Operator):
       max_credits=self._get_max_credits(ctx),
       effort=limits.get("effort"),
       write_tools=frozenset(write_tools),
+      write_guards=self.WRITE_GUARDS,
     )
 
     await ctx.progress.report("Done", percent=100)
