@@ -241,8 +241,13 @@ Clients with no field for a custom header — claude.ai and Claude Desktop custo
    - `resolve-element` - Map a concept in plain words ("revenue", "operating lease liability") to the element qnames filers use for it, with fact counts
    - `disclosures` - The map of a filing's sections, one row per note or statement
    - `information-block` - One section read whole: its rows, breakdowns, footing checks and text
+   - `describe-filing` - How a filing is laid out: periods, statements, disclosures, and its Items with the offsets `read-text` pages from
+   - `search-text` - Words found inside one filing's whole text — the document as filed, from any processed year, or an 8-K earnings release with its exhibits
+   - `read-text` - One filing's text, a window at a time, from a `search-text` hit or an Item's offset
 
    `disclosures` and `information-block` run xbrlkit's `disclosures` and `information_block` functions over the filing's published holon. [`xbrlkit serve`](https://xbrlkit.com/mcp), the free local MCP server, loads that same holon for a ticker when one is published, so it reads one filing's sections the same way on your own machine. Questions across filers need the graph.
+
+   The three text tools read the filing's own document from the same public folder, so the lane adds nothing to OpenSearch. Two pipeline assets bring the documents the XBRL path does not: `sec_current_reports` captures 8-K earnings releases (items 2.02 / 7.01) with their EX-99 exhibits, chained nightly after the download, and `sec_filing_documents` fetches the primary document of filings processed before inline XBRL, as a one-time backfill. Both pull from EDGAR once and keep what they fetch; every job that pulls carries the `edgar` run tag, which keeps such pulls to one at a time.
 
    GraphQL reads are not part of this surface: the typed GraphQL tools serve a tenant graph's operational data, and a shared repository has none.
 

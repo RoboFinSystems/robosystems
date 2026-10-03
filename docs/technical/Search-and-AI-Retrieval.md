@@ -62,6 +62,10 @@ This keeps an Operator from pulling whole documents into context when a single p
 
 **Note:** Because document content is excluded from the search response body, a `snippet` falls back to the section label when there are no highlight fragments. Always call `get-document-section` to read the real text.
 
+### Which filing, or where in this one
+
+`search-documents` answers *which* filings say something, ranked across the corpus. Once you know the filing, `search-text` answers *where* in it, exhaustively, over the filing's whole text read from its public folder — the 10-K, 10-Q, 20-F or 40-F as filed, from any processed year, or an 8-K earnings release with its exhibits — so it finds what no indexed section carries: the cover page, a footnote to a table, an exhibit, a passage between Items. `read-text` pages the text from a hit's offset, and `describe-filing` maps the filing's Items with their offsets. Pass a hit's `accession_number` with the filer's ticker, or `form: "8-K"` with a ticker for the latest earnings release. The query is words matched in order (`|` between phrases, a trailing `*` for a stem), not a regular expression. Nothing in this lane goes through OpenSearch: the filing is read from the public data bucket and the built text cached.
+
 ## Worked Example: Ground an Operator on the PP&E Depreciation Policy
 
 This is the canonical thread: you upload a depreciation policy, then an Operator searches it, drills into the right section, and answers from the actual policy text.
@@ -167,6 +171,10 @@ AI Operators interact with the index through MCP tools. All of them require docu
 
 - `search-documents` — hybrid BM25 + KNN search. Inputs: `query` (required), plus optional `entity`, `form_type`, `section`, `element`, `fiscal_year`, `semantic` (default `false`), and `size` (default 10, max 50). Returns ranked hits with `document_id`s.
 - `get-document-section` — input `document_id` (required). Returns the full section text and metadata.
+
+**Filing-text tools** (no OpenSearch; the filing is read whole from the public data bucket):
+
+- `describe-filing`, `search-text`, `read-text` — one filing's layout, a word search inside it, and its text by offset. On `sec` a `ticker` picks the filing (with `fiscal_year` / `period_type`, an `accession`, or `form: "8-K"` for the latest earnings release); a tenant graph takes `report_id` and reads the report's text blocks. See [AI Operators & MCP](AI-Operators-and-MCP#the-three-retrieval-planes).
 
 **Document tools:**
 

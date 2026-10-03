@@ -101,6 +101,9 @@ The following tool names are the exact `name` strings for `tools/call`. Every to
 | `build-fact-grid` | Curated analytical (XBRL hypercube) | `FACT_GRID_ENABLED` |
 | `disclosures` | The map of a report's sections — one row per note or statement; with `topic`, one family's blocks | `roboledger` schema extension |
 | `information-block` | One section of a report read whole: rows, breakdowns by its own axes, calculation footing, text blocks | `roboledger` schema extension |
+| `describe-filing` | One filing's layout: periods, statements and disclosures by role, and its Items with the offsets `read-text` pages from | `roboledger` schema extension |
+| `search-text` | Words found inside one filing's whole text, in document order — on `sec` the filing's own document (any processed year, or an 8-K earnings release with its exhibits), on a tenant the report's text blocks | `roboledger` schema extension |
+| `read-text` | One filing's whole text, a window at a time, from an offset | `roboledger` schema extension |
 | `resolve-element` | Cross-plane bridge (concept in plain words → the element qnames filers use) | `roboledger` extension **and** a shared-repository manifest with `has_semantic_enrichment` — today `sec` only |
 | `get-example-queries` | Discovery helper | `roboledger` schema extension |
 
@@ -194,6 +197,8 @@ Two curated tools sit on top of this plane:
 
 Beside them, `disclosures` and `information-block` read one report section by section. They run xbrlkit over the report held whole — the published filing on `sec`, the ledger's own report on a tenant — so the graph is not in their path. On `sec`, raw Cypher has four rules that decide whether a number is right; see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules).
 
+`describe-filing`, `search-text` and `read-text` read the same filing as text. On `sec` that is the filing's own document from its public folder — any processed year, back to 2015, and an 8-K earnings release with its EX-99 exhibits; on a tenant it is the report's text blocks. A `ticker` picks the filing: the latest annual report, or `fiscal_year` / `period_type` for another, `accession` for one named, `form: "8-K"` for the latest earnings release. Neither the search index nor EDGAR is in the path. `search-text` matches words, never a regular expression, and answers *where in this filing*; `search-documents` (Plane C) answers *which filings*, across the corpus.
+
 Note the distinct curated companion `live-financial-statement`, which reads the **OLTP** books of a tenant graph (current period, before materialization). Do not conflate the two: `financial-statement-analysis` is analytical/historical, `live-financial-statement` is operational/current.
 
 ### Plane C — Unstructured (Hybrid Document Search)
@@ -201,7 +206,7 @@ Note the distinct curated companion `live-financial-statement`, which reads the 
 **Tools:** `search-documents`, `get-document-section`
 **Backs onto:** the document / SEC-filing index.
 
-This plane retrieves narrative context — disclosures, footnotes, policy documents. `search-documents` runs a BM25 keyword search by default; hybrid semantic ranking (BM25 + KNN vector similarity) is opt-in via `semantic: true`. Each hit returns a `document_id`; pass it to `get-document-section` for the full section text.
+This plane retrieves narrative context — disclosures, footnotes, policy documents. `search-documents` runs a BM25 keyword search by default; hybrid semantic ranking (BM25 + KNN vector similarity) is opt-in via `semantic: true`. Each hit returns a `document_id`; pass it to `get-document-section` for the full section text. Once a hit has named the filing, `search-text` (Plane B) reads inside that filing whole — the cover page, a footnote to a table, an exhibit — which no indexed section carries.
 
 For shared repositories, search resolves to the parent `graph_id` (`sec`, not a subgraph) — subgraphs are not a search boundary.
 
