@@ -30,6 +30,7 @@ throttled. Treat 5 req/s as the ceiling in practice, not the floor.
 | `edgar_client()` (`edgar.py`) | xbrlkit's `EdgarClient` on the platform's User-Agent: the ticker map, the submissions header and its paged history, EDGAR's throttle ridden out |
 | `load_filing()` (`arelle.py`) | xbrlkit's cache-first Arelle load on the platform's cache directory (`ARELLE_CACHE_DIR`, seeded from the schema bundle at image build) |
 | `SECDownloader` (`downloader.py`) | Bulk download of XBRL ZIPs to S3, rate-limited; discovery through xbrlkit's `EftsClient` |
+| `discover_current_reports()` (`current_reports.py`) | EFTS discovery of 8-Ks with the items each reports (xbrlkit's `EftsHit` drops them). A window past EFTS' 10,000-hit ceiling — reported as `relation: gte`, never as a count — is halved until each piece fits |
 
 **Processors** (`processors/`)
 
@@ -40,6 +41,7 @@ throttled. Treat 5 req/s as the ceiling in practice, not the floor.
 | `DuckDBStager` | S3 Parquet → DuckDB (stage 1) |
 | `LadybugMaterializer` | DuckDB → LadybugDB (stage 2) |
 | `SECMetadataLoader` | Filer and report metadata, cached |
+| `documents_in_zip()` (`current_reports.py`) | An 8-K's `-xbrl.zip` → the form and its EX-99 exhibits, each typed from the 8-K's own exhibit index, then the file's heading, then its name; plus the filing's manifest and the filer's releases list. Nothing here touches EDGAR or S3 |
 
 The two ingestion stages are decoupled on purpose — a failed LadybugDB
 materialization must not discard hours of DuckDB staging work — and
@@ -71,9 +73,13 @@ for oversized text), `classify.py`.
 | `iXBRLParser` (`xbrlkit.text`) | iXBRL disclosure sections (`ix:nonNumeric` TextBlock elements, continuation chains resolved) with XBRL element metadata for graph cross-reference; a long section comes back as parts |
 
 **MCP resolvers** (`mcp/`) — `report_resolver.py` resolves ticker plus form code
-to the latest relevant filing, backing the auto-resolve of
+to the latest relevant filing in the graph, backing the auto-resolve of
 `financial-statement-analysis`, `disclosures` and `information-block`;
-`element_resolver.py` backs `resolve-element`.
+`element_resolver.py` backs `resolve-element`. The filing-text tools
+(`describe-filing`, `search-text`, `read-text`) resolve from the public catalog
+and the filer's releases list instead (`operations/roboledger/views/filing_text.py`),
+so they reach any processed year and the captured 8-Ks, neither of which the
+graph holds.
 
 ## Enrichment (inline, per filing)
 
