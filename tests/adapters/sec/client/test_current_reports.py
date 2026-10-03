@@ -4,6 +4,7 @@ from datetime import date
 from urllib.parse import parse_qs
 
 import pytest
+import requests
 
 from robosystems.adapters.sec.client.current_reports import (
   discover_current_reports,
@@ -121,3 +122,44 @@ def test_filing_urls():
   assert filing_file_url("0000320193", "0000320193-17-000070", "a10-k.htm").endswith(
     "/320193/000032019317000070/a10-k.htm"
   )
+
+
+class _DroppingEfts(_FakeEfts):
+  """An EFTS whose connection is dropped on the first ``drops`` requests, as a
+  session left idle through a quarter's fetches finds on its next use."""
+
+  def __init__(self, filings, drops: int):
+    super().__init__(filings)
+    self.drops = drops
+
+  def _fetch_page(self, params: dict, offset: int = 0, size: int = 100) -> dict:
+    if self.drops:
+      self.drops -= 1
+      raise requests.ConnectionError("Connection reset by peer")
+    return super()._fetch_page(params, offset=offset, size=size)
+
+
+@pytest.mark.unit
+class TestDroppedConnection:
+  FILINGS = [("2025-10-01", "0000000001-25-000001", ["2.02"])]
+
+  @pytest.fixture(autouse=True)
+  def _no_waiting(self, monkeypatch):
+    from robosystems.adapters.sec.client import current_reports as module
+
+    self.waits: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", self.waits.append)
+
+  def test_a_dropped_connection_is_retried(self):
+    efts = _DroppingEfts(self.FILINGS, drops=2)
+    seen, hits = discover_current_reports(
+      efts, date(2025, 10, 1), date(2025, 12, 31), ["2.02"]
+    )
+    assert (seen, len(hits)) == (1, 1)
+    assert self.waits == [2.0, 4.0]
+
+  def test_a_connection_that_stays_down_is_raised(self):
+    efts = _DroppingEfts(self.FILINGS, drops=10)
+    with pytest.raises(requests.ConnectionError):
+      discover_current_reports(efts, date(2025, 10, 1), date(2025, 12, 31), ["2.02"])
+    assert self.waits == [2.0, 4.0, 8.0]
