@@ -376,11 +376,12 @@ def release_entry(
     )
     if document:
       entry["document"] = document
-    exhibits = {
-      str(r.get("exhibit") or r["name"]): r["name"]
-      for r in representations
-      if r.get("kind") == "exhibit" and r.get("name")
-    }
+    exhibits: dict[str, str] = {}
+    for r in representations:
+      if r.get("kind") == "exhibit" and r.get("name"):
+        # Two files under one number keep the first; a file with no number
+        # is keyed by its name, unique in the folder.
+        exhibits.setdefault(str(r.get("exhibit") or r["name"]), r["name"])
     if exhibits:
       entry["exhibits"] = exhibits
   return entry

@@ -256,9 +256,10 @@ def _report_ref(cik: str, entry: dict[str, Any]) -> FilingRef:
     "fiscal_period": entry.get("fiscal_period"),
   }
   if accession and len(filing_date) >= 4:
-    resolved["links"] = public_filing_links(
+    if links := public_filing_links(
       cik, accession, filing_date, entry.get("representations") or []
-    )
+    ):
+      resolved["links"] = links
   return FilingRef(
     report_id=entry.get("report_id"),
     accession=accession or None,
@@ -301,9 +302,10 @@ async def _release_ref(
       representations.append({"kind": "document", "name": entry["document"]})
     for exhibit, name in (entry.get("exhibits") or {}).items():
       representations.append({"kind": "exhibit", "name": name, "exhibit": exhibit})
-    resolved["links"] = public_filing_links(
+    if links := public_filing_links(
       cik, entry["accession"], filing_date, representations, has_holon=False
-    )
+    ):
+      resolved["links"] = links
   return FilingRef(
     accession=entry["accession"],
     cik=cik,
@@ -320,24 +322,30 @@ async def _graph_report(graph_id: str, report_id: str) -> FilingRef:
   if not rows:
     raise ReportNotFoundError(f"No report {report_id!r} on graph {graph_id}.")
   row = rows[0]
-  ref = FilingRef(
-    report_id=report_id,
-    accession=str(row.get("accession") or "") or None,
-    cik=str(row.get("cik") or "") or None,
-    filing_date=str(row.get("filing_date") or "")[:10] or None,
-  )
-  if not ref.in_folder:
+  accession = str(row.get("accession") or "")
+  cik = str(row.get("cik") or "")
+  filing_date = str(row.get("filing_date") or "")[:10]
+  if not (accession and cik and len(filing_date) >= 4):
     raise ReportNotPublishedError(
       f"Report {report_id!r} carries no accession, filer or filing date, so it "
       "has no published filing to read."
     )
-  assert ref.accession and ref.cik and ref.filing_date
-  ref.resolved = {
+  # Narrower than a catalog entry: the coordinates query carries no form or
+  # fiscal period, and a caller who named the report already knows them.
+  resolved: dict[str, Any] = {
     "report_id": report_id,
-    "accession": ref.accession,
-    "filing_date": ref.filing_date,
-    "links": public_filing_links(ref.cik, ref.accession, ref.filing_date),
+    "accession": accession,
+    "filing_date": filing_date,
   }
+  if links := public_filing_links(cik, accession, filing_date):
+    resolved["links"] = links
+  ref = FilingRef(
+    report_id=report_id,
+    accession=accession,
+    cik=cik,
+    filing_date=filing_date,
+    resolved=resolved,
+  )
   return ref
 
 

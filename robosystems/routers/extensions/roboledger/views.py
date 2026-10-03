@@ -336,14 +336,9 @@ async def financial_statement_analysis_op(
     ]
 
     resolved_info: ResolvedReportInfo | None = None
-    if resolved:
+    if info := resolved_report_info(resolved):
       resolved_info = ResolvedReportInfo(
-        report_id=resolved.get("identifier", ""),
-        form=resolved.get("form"),
-        filing_date=resolved.get("filing_date"),
-        fiscal_year=resolved.get("fiscal_year"),
-        fiscal_period=resolved.get("fiscal_period"),
-        links=(resolved_report_info(resolved) or {}).get("links"),
+        **{**info, "report_id": info["report_id"] or ""}
       )
 
     return FinancialStatementAnalysisResponse(

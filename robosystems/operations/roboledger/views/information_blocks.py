@@ -367,7 +367,7 @@ def resolved_report_info(resolved: dict[str, Any] | None) -> dict[str, Any] | No
   accession = str(resolved.get("accession") or "")
   cik = str(resolved.get("cik") or "")
   filing_date = str(resolved.get("filing_date") or "")
-  if accession and cik and len(filing_date) >= 4 and env.PUBLIC_DATA_BUCKET:
+  if accession and cik and len(filing_date) >= 4:
     # The Report's uri is the primary document's EDGAR URL. The processor
     # copies an inline document into the folder; a classic filing's arrives
     # only with the document backfill, which the graph does not record.
@@ -375,7 +375,8 @@ def resolved_report_info(resolved: dict[str, Any] | None) -> dict[str, Any] | No
     name = str(resolved.get("uri") or "").rsplit("/", 1)[-1]
     if resolved.get("is_inline_xbrl") and name.lower().endswith(_DOCUMENT_SUFFIXES):
       representations.append({"kind": "document", "name": name})
-    info["links"] = public_filing_links(cik, accession, filing_date, representations)
+    if links := public_filing_links(cik, accession, filing_date, representations):
+      info["links"] = links
   return info
 
 
@@ -393,10 +394,14 @@ def public_filing_links(
   ``exhibits`` (an 8-K's EX-99 files), the folder's ``manifest`` and the
   filing on ``edgar``. The holon and the Tavi sit at their fixed names unless
   ``representations`` names them; an 8-K has neither (``has_holon=False``).
+  Empty when no public bucket is configured: there is nowhere to link.
   """
   from robosystems.adapters.sec.client.edgar import edgar_filing_folder_url
 
-  year, bucket, cdn = filing_date[:4], env.PUBLIC_DATA_BUCKET, env.PUBLIC_DATA_CDN_URL
+  bucket, cdn = env.PUBLIC_DATA_BUCKET, env.PUBLIC_DATA_CDN_URL
+  if not bucket:
+    return {}
+  year = filing_date[:4]
 
   def url(name: str) -> str:
     return get_public_data_url(
@@ -413,7 +418,9 @@ def public_filing_links(
     if not name:
       continue
     if kind == "exhibit":
-      exhibits[str(rep.get("exhibit") or name)] = url(str(name))
+      # Two files under one exhibit number keep the first; a file with no
+      # number is keyed by its name, which is unique in the folder.
+      exhibits.setdefault(str(rep.get("exhibit") or name), url(str(name)))
     elif kind in ("holon", "tavi", "document"):
       names[str(kind)] = str(name)
   if "holon" in names:

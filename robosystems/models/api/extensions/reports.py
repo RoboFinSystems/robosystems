@@ -694,6 +694,26 @@ class FinancialStatementAnalysisRequest(BaseModel):
   limit: int = Field(1000, ge=1, le=1000)
 
 
+class FilingLinks(BaseModel):
+  """Where a filing on a shared repository is served."""
+
+  model_config = ConfigDict(extra="allow")
+
+  viewer: str | None = Field(
+    None,
+    description="The xbrlkit viewer over the published holon — the link to show the filing",
+  )
+  holon: str | None = None
+  tavi: str | None = None
+  as_filed: str | None = Field(None, description="The primary document as filed")
+  exhibits: dict[str, str] | None = Field(
+    None, description="An 8-K's exhibits by exhibit number (EX-99.1)"
+  )
+  manifest: str | None = None
+  folder: str | None = None
+  edgar: str | None = Field(None, description="The filing's folder on EDGAR")
+
+
 class ResolvedReportInfo(BaseModel):
   """Information about the auto-resolved report."""
 
@@ -702,10 +722,7 @@ class ResolvedReportInfo(BaseModel):
   filing_date: str | None = None
   fiscal_year: int | None = None
   fiscal_period: str | None = None
-  # Where the filing is served, on a shared repository: `viewer` (the xbrlkit
-  # viewer over the published holon), `holon`, `tavi`, `as_filed`, `exhibits`,
-  # `manifest`, `folder`, `edgar`.
-  links: dict[str, Any] | None = None
+  links: FilingLinks | None = None
 
 
 class AnalyticalStatementFactRow(BaseModel):

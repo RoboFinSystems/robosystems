@@ -16,6 +16,7 @@ Each source owns a key prefix in both shared buckets:
 
 from dataclasses import dataclass
 from enum import Enum
+from urllib.parse import quote
 
 
 class DataSourceType(Enum):
@@ -343,8 +344,6 @@ def get_viewer_link(viewer_url: str, url: str) -> str:
       >>> get_viewer_link("https://xbrlkit.com", "https://cdn/2025/c/a/holon.jsonld")
       'https://xbrlkit.com/?url=https%3A%2F%2Fcdn%2F2025%2Fc%2Fa%2Fholon.jsonld'
   """
-  from urllib.parse import quote
-
   return f"{viewer_url.rstrip('/')}/?url={quote(url, safe='')}"
 
 
