@@ -174,7 +174,7 @@ AI Operators interact with the index through MCP tools. All of them require docu
 
 **Filing-text tools** (no OpenSearch; the filing is read whole from the public data bucket):
 
-- `describe-filing`, `search-text`, `read-text` — one filing's layout, a word search inside it, and its text by offset. On `sec` a `ticker` picks the filing (with `fiscal_year` / `period_type`, an `accession`, or `form: "8-K"` for the latest earnings release); a tenant graph takes `report_id` and reads the report's text blocks. See [AI Operators & MCP](AI-Operators-and-MCP#the-three-retrieval-planes).
+- `describe-filing`, `search-text`, `read-text` — one filing's layout, a word search inside it, and its text by offset, on shared repositories only. A `ticker` picks the filing (with `fiscal_year` / `period_type`, an `accession`, or `form: "8-K"` for the latest earnings release). A ledger files no document; its sections read through `disclosures` and `information-block`. See [AI Operators & MCP](AI-Operators-and-MCP#the-three-retrieval-planes).
 
 **Document tools:**
 

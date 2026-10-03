@@ -101,9 +101,9 @@ The following tool names are the exact `name` strings for `tools/call`. Every to
 | `build-fact-grid` | Curated analytical (XBRL hypercube) | `FACT_GRID_ENABLED` |
 | `disclosures` | The map of a report's sections — one row per note or statement; with `topic`, one family's blocks | `roboledger` schema extension |
 | `information-block` | One section of a report read whole: rows, breakdowns by its own axes, calculation footing, text blocks | `roboledger` schema extension |
-| `describe-filing` | One filing's layout: periods, statements and disclosures by role, and its Items with the offsets `read-text` pages from | `roboledger` schema extension |
-| `search-text` | Words found inside one filing's whole text, in document order — on `sec` the filing's own document (any processed year, or an 8-K earnings release with its exhibits), on a tenant the report's text blocks | `roboledger` schema extension |
-| `read-text` | One filing's whole text, a window at a time, from an offset | `roboledger` schema extension |
+| `describe-filing` | One filing's layout: periods, statements and disclosures by role, and its Items with the offsets `read-text` pages from | shared repositories only (`sec`) |
+| `search-text` | Words found inside one filing's whole text, in document order — the filing's own document, from any processed year, or an 8-K earnings release with its exhibits | shared repositories only (`sec`) |
+| `read-text` | One filing's whole text, a window at a time, from an offset | shared repositories only (`sec`) |
 | `resolve-element` | Cross-plane bridge (concept in plain words → the element qnames filers use) | `roboledger` extension **and** a shared-repository manifest with `has_semantic_enrichment` — today `sec` only |
 | `get-example-queries` | Discovery helper | `roboledger` schema extension |
 
@@ -197,7 +197,7 @@ Two curated tools sit on top of this plane:
 
 Beside them, `disclosures` and `information-block` read one report section by section. They run xbrlkit over the report held whole — the published filing on `sec`, the ledger's own report on a tenant — so the graph is not in their path. On `sec`, raw Cypher has four rules that decide whether a number is right; see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules).
 
-`describe-filing`, `search-text` and `read-text` read the same filing as text. On `sec` that is the filing's own document from its public folder — any processed year, back to 2015, and an 8-K earnings release with its EX-99 exhibits; on a tenant it is the report's text blocks. A `ticker` picks the filing: the latest annual report, or `fiscal_year` / `period_type` for another, `accession` for one named, `form: "8-K"` for the latest earnings release. Neither the search index nor EDGAR is in the path. `search-text` matches words, never a regular expression, and answers *where in this filing*; `search-documents` (Plane C) answers *which filings*, across the corpus.
+`describe-filing`, `search-text` and `read-text` read the same filing as text: its own document from its public folder — any processed year, back to 2015, and an 8-K earnings release with its EX-99 exhibits. They register on shared repositories only; a ledger files no document, and its sections are the pair above. A `ticker` picks the filing: the latest annual report, or `fiscal_year` / `period_type` for another, `accession` for one named, `form: "8-K"` for the latest earnings release. Neither the search index nor EDGAR is in the path. `search-text` matches words, never a regular expression, and answers *where in this filing*; `search-documents` (Plane C) answers *which filings*, across the corpus.
 
 Note the distinct curated companion `live-financial-statement`, which reads the **OLTP** books of a tenant graph (current period, before materialization). Do not conflate the two: `financial-statement-analysis` is analytical/historical, `live-financial-statement` is operational/current.
 
