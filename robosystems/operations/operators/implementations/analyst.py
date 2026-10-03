@@ -79,6 +79,8 @@ class AnalystOperator(Operator):
     "agent-activity",
     "get-event-block",
     "list-event-blocks",
+    # What changed on a reconciling item, and what each treatment would post.
+    "preview-reconciling-item",
     "get-event-handler",
     "list-event-handlers",
     "get-document",
@@ -95,9 +97,9 @@ class AnalystOperator(Operator):
   # Advertised in the system prompt as preferred over raw Cypher.
   CURATED_TOOL_HINTS: dict[str, str] = {
     "live-financial-statement": (
-      "current income statement / balance sheet / trial balance straight "
-      "from the live ledger — the right first call for expense, revenue, "
-      "and balance questions"
+      "current income statement / balance sheet / cash flow statement "
+      "straight from the live ledger — the right first call for expense, "
+      "revenue, and balance questions"
     ),
     "financial-statement-analysis": (
       "financial statement analysis over the reported (materialized) facts"
