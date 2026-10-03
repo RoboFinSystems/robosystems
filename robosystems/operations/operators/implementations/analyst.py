@@ -59,6 +59,9 @@ class AnalystOperator(Operator):
     "live-financial-statement",
     "financial-statement-analysis",
     "build-fact-grid",
+    # A report or filing read as its own sections
+    "disclosures",
+    "information-block",
     # Period workflow and freshness reads
     "get-fiscal-calendar",
     "get-period-close-status",
@@ -106,6 +109,14 @@ class AnalystOperator(Operator):
     ),
     "build-fact-grid": (
       "multidimensional pivots over the fact hypercube (by account, period, dimension)"
+    ),
+    "disclosures": (
+      "the map of a report's or filing's sections (notes, statements, cover "
+      "page) — call it first, with the report identifier or ticker"
+    ),
+    "information-block": (
+      "one section from that map read whole: rows, breakdowns, calculation "
+      "footing, text. The expensive call; one block per call"
     ),
     "get-fiscal-calendar": "fiscal periods, close status, and the close target",
     "get-period-close-status": "close readiness for a specific period",
