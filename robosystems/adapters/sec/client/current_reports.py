@@ -15,16 +15,13 @@ from datetime import date, timedelta
 from xbrlkit.edgar import EftsClient
 from xbrlkit.edgar.efts import EFTS_MAX_PAGE_SIZE, EFTS_MAX_RESULTS
 
-from ..config import SEC_CONFIG
 from ..processors.current_reports import CURRENT_REPORT_FORM, CurrentReportHit
+from .edgar import edgar_filing_folder_url
 
 
 def filing_file_url(cik: str, accession: str, name: str) -> str:
   """A file in a filing's EDGAR folder."""
-  return (
-    f"{SEC_CONFIG['base_url']}/Archives/edgar/data/{int(cik)}/"
-    f"{accession.replace('-', '')}/{name}"
-  )
+  return edgar_filing_folder_url(cik, accession) + name
 
 
 def filing_zip_url(cik: str, accession: str) -> str:

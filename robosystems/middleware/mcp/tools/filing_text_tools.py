@@ -1,6 +1,6 @@
 """``describe-filing``, ``search-text`` and ``read-text``: xbrlkit's text tools
-over one filing read whole — its own document on SEC (a 10-K, a 10-Q, an 8-K
-with its exhibits), its tagged text blocks on a tenant.
+over one filing read whole as filed — a 10-K, a 10-Q, an 8-K with its
+exhibits. Shared repositories only: a ledger files no document.
 
 Read-only; neither the graph nor EDGAR is in the path. The names are the
 contract ``xbrlkit serve`` set.
@@ -41,10 +41,7 @@ _FILING_PROPERTIES: dict[str, Any] = {
   },
   "report_id": {
     "type": "string",
-    "description": (
-      "Specific report identifier. REQUIRED on tenant graphs; on SEC, a report "
-      "in the graph when no ticker is given."
-    ),
+    "description": "A report in the SEC graph, on its own (not beside a ticker).",
   },
   "fiscal_year": {
     "type": "integer",
@@ -112,12 +109,13 @@ class DescribeFilingTool(BaseTool):
 **PARAMETERS:**
 - `ticker` — on SEC, the filer: its latest annual report unless `fiscal_year` / `period_type` / `accession` / `form` say otherwise; any processed year reads
 - `form: "8-K"` — the latest earnings release; `accession` — one filing (a report, or an 8-K from `recent_releases`)
-- `report_id` — a tenant's report, or a report in the SEC graph on its own (not beside a ticker)
+- `report_id` — a report in the SEC graph, on its own (not beside a ticker)
 
 **RETURNS:**
-- `profile.text` — "primary document" when the filing's own document is read, "tagged text blocks" when it has none (a tenant report)
+- `profile.text` — "primary document" when the filing's own document is read, "tagged text blocks" when its folder holds none
 - `filing` (form, dates, `items` on an 8-K), `entity`, `counts`, `periods`, `statements`, `disclosures`, `axes`
 - `sections.items` — each Item's `id`, `label`, `offset`, `chars`; `sections.text_blocks` — the largest blocks
+- `resolved_report.links` on SEC — `viewer` opens the filing in the xbrlkit viewer (give the user that URL to show it), `holon`, `tavi`, `as_filed`, an 8-K's `exhibits`, `edgar`
 
 **RELATED TOOLS:**
 - `search-text` — find words inside this filing; `read-text` — page it from an offset
@@ -157,7 +155,7 @@ class SearchTextTool(BaseTool):
 
 **PARAMETERS:**
 - `query` (required) — words matched in order across any spacing, case-insensitive: `customer concentration`. Split phrases with `|` to match any of them; end a word with `*` for a stem (`terminat*`); a `*` on its own is ignored. Not a regular expression
-- `ticker` (+ `fiscal_year` / `period_type`, or `form: "8-K"`, or `accession`) / `report_id` — as for `describe-filing`
+- `ticker` (+ `fiscal_year` / `period_type`, or `form: "8-K"`, or `accession`), or `report_id` — as for `describe-filing`
 - `window` — characters of context around each match (default 300, max {SEARCH_MAX_WINDOW}); `max_hits` (default 10, max {SEARCH_MAX_HITS})
 
 **RETURNS:**
@@ -165,6 +163,7 @@ class SearchTextTool(BaseTool):
 - `sections` — where all matches fall when there are more than the hits shown
 - `terms` — on no match, how often each of your words occurs alone: search again with the wording the filing uses
 - `text` — "primary document", or "tagged text blocks" for a filing without its document
+- `resolved_report.links` on SEC — `viewer` opens the filing in the xbrlkit viewer (give the user that URL to show it), `as_filed`, an 8-K's `exhibits`, `edgar`
 
 **NOTES:**
 - Pass a hit's `offset` to `read-text` to read on from it before quoting
@@ -233,6 +232,7 @@ class ReadTextTool(BaseTool):
 
 **RETURNS:**
 - `text`, `offset`, `length`, `text_chars` (the whole text), `next_offset`, and the `section` the window starts in
+- `resolved_report.links` on SEC — `viewer`, `as_filed`, `edgar`, as for `search-text`
 """,
       "inputSchema": {
         "type": "object",

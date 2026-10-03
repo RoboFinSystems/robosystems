@@ -65,6 +65,12 @@ def edgar_client() -> EdgarClient:
   return client
 
 
+def edgar_filing_folder_url(cik: str, accession: str) -> str:
+  """A filing's folder on EDGAR: the CIK without its padding, the accession
+  without its dashes."""
+  return f"{SEC_BASE_URL}/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/"
+
+
 class IncompleteSubmissions(RuntimeError):
   """A filer's submissions history came back missing pages."""
 
@@ -96,4 +102,5 @@ __all__ = [
   "IncompleteSubmissions",
   "complete_submissions_strict",
   "edgar_client",
+  "edgar_filing_folder_url",
 ]

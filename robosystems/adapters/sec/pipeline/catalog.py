@@ -13,7 +13,6 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import quote
 
 import pandas as pd
 from dagster import AssetExecutionContext, BackfillPolicy, MaterializeResult, asset
@@ -28,6 +27,7 @@ from robosystems.config.storage.shared import (
   get_filing_artifact_key,
   get_filing_catalog_key,
   get_processed_key,
+  get_viewer_link,
 )
 from robosystems.logger import logger
 from robosystems.operations.aws.s3 import S3Client
@@ -186,7 +186,7 @@ def filing_folder(filing: dict[str, Any]) -> tuple[str, str, str] | None:
 
 
 def viewer_link(viewer_url: str, url: str) -> str:
-  return f"{viewer_url.rstrip('/')}/?url={quote(url, safe='')}"
+  return get_viewer_link(viewer_url, url)
 
 
 def renderable(representations: list[dict[str, Any]] | None) -> bool:

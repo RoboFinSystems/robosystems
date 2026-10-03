@@ -166,7 +166,9 @@ class TestCaptureCurrentReports:
     writer = _Writer()
     stats, fetch = self._run(writer, _zip())
     assert stats == Counter({"from_raw": 1, "published": 1, "exhibits": 1})
-    assert self.published == [HIT]
+    [(hit, representations)] = self.published
+    assert hit == HIT
+    assert [r["kind"] for r in representations] == ["document", "exhibit"]
     fetch.assert_not_called()
     folder = "2025/0000320193/0000320193-25-000077"
     assert set(writer.objects) == {
@@ -211,7 +213,7 @@ class TestCaptureCurrentReports:
     assert stats == Counter({"already_published": 1})
     fetch.assert_not_called()
     # Still listed: a list write that failed last run is repaired by this one.
-    assert self.published == [HIT]
+    assert self.published == [(HIT, None)]
 
 
 @pytest.mark.unit
@@ -336,7 +338,7 @@ def test_release_lists_fold_a_combined_filing_under_each_registrant(env):
     patch.object(module, "_read_object", return_value=None),
   ):
     stats = module._update_release_lists(
-      [combined], {"0000092122", "0001000000"}, MagicMock()
+      [(combined, None)], {"0000092122", "0001000000"}, MagicMock()
     )
   assert stats == Counter({"lists_written": 2})
   assert set(writer.objects) == {
@@ -361,7 +363,7 @@ def test_release_list_write_failure_is_counted(env):
     ),
     patch.object(module, "_read_object", return_value=None),
   ):
-    stats = module._update_release_lists([HIT], None, MagicMock())
+    stats = module._update_release_lists([(HIT, None)], None, MagicMock())
   assert stats == Counter({"lists_failed": 1})
 
 
@@ -383,7 +385,11 @@ def test_release_lists_merge_newest_first(env):
     ),
     patch.object(module, "_read_object", return_value=existing),
   ):
-    stats = module._update_release_lists([HIT], None, MagicMock())
+    representations = [
+      {"kind": "document", "name": "aapl-20251030.htm"},
+      {"kind": "exhibit", "name": "ex991.htm", "exhibit": "EX-99.1"},
+    ]
+    stats = module._update_release_lists([(HIT, representations)], None, MagicMock())
   assert stats == Counter({"lists_written": 1})
   listed = json.loads(writer.body("current-reports/0000320193.json"))
   assert [r["accession"] for r in listed["releases"]] == [
@@ -395,3 +401,19 @@ def test_release_lists_merge_newest_first(env):
   assert newest["folder"] == (
     "https://cdn.example.com/2025/0000320193/0000320193-25-000077/"
   )
+  assert newest["document"] == "aapl-20251030.htm"
+  assert newest["exhibits"] == {"EX-99.1": "ex991.htm"}
+
+
+@pytest.mark.unit
+def test_a_release_republished_without_its_files_keeps_their_names(env):
+  from robosystems.adapters.sec.processors.current_reports import merge_releases
+
+  first = merge_releases(
+    [],
+    [(HIT, [{"kind": "document", "name": "aapl-20251030.htm"}])],
+    "public",
+    "https://cdn.example.com",
+  )
+  again = merge_releases(first, [(HIT, None)], "public", "https://cdn.example.com")
+  assert again[0]["document"] == "aapl-20251030.htm"

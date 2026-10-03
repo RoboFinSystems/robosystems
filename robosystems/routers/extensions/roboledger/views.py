@@ -336,13 +336,9 @@ async def financial_statement_analysis_op(
     ]
 
     resolved_info: ResolvedReportInfo | None = None
-    if resolved:
+    if info := resolved_report_info(resolved):
       resolved_info = ResolvedReportInfo(
-        report_id=resolved.get("identifier", ""),
-        form=resolved.get("form"),
-        filing_date=resolved.get("filing_date"),
-        fiscal_year=resolved.get("fiscal_year"),
-        fiscal_period=resolved.get("fiscal_period"),
+        **{**info, "report_id": info["report_id"] or ""}
       )
 
     return FinancialStatementAnalysisResponse(
@@ -540,8 +536,8 @@ async def _resolve_filing(graph_id: str, body: FilingSelector) -> FilingRef:
     "its own document, from any processed year — and a `ticker` picks it: "
     "the latest annual report, narrowed by `fiscal_year` / `period_type`, or "
     "one `accession`, or with `form: 8-K` the latest earnings release and its "
-    "exhibits. Tenant graphs take `report_id` and read the report's text "
-    "blocks."
+    "exhibits. SEC only: a ledger files no document, and its sections read "
+    "through `disclosures` and `information-block`."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT, _READABLE_GRAPH],

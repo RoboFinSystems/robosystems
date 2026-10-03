@@ -271,7 +271,7 @@ class FinancialStatementAnalysisTool(BaseTool):
   label rather than the qname's local part) ordered by end_date DESC
 - `periods` — the period keys the facts span, newest first, and
   `periods_omitted` when older end dates were cut by the cap
-- resolved_report info when auto-resolution was used
+- resolved_report info when auto-resolution was used, with `links` on a shared repository: `viewer` opens the filing in the xbrlkit viewer — give the user that URL to show the filing — beside `holon`, `tavi`, `edgar`
 - Dimensional/segment breakdowns are filtered out (consolidated totals only)
 """,
       "inputSchema": {
@@ -430,13 +430,9 @@ class FinancialStatementAnalysisTool(BaseTool):
       )
 
     if resolved:
-      result["resolved_report"] = {
-        "report_id": resolved.get("identifier"),
-        "form": resolved.get("form"),
-        "filing_date": resolved.get("filing_date"),
-        "fiscal_year": resolved.get("fiscal_year"),
-        "fiscal_period": resolved.get("fiscal_period"),
-      }
+      from robosystems.operations.roboledger.views import resolved_report_info
+
+      result["resolved_report"] = resolved_report_info(resolved)
 
     if not facts:
       hint_target = ticker or report_id or "this filter"

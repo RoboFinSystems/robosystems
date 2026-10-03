@@ -90,7 +90,7 @@ class DisclosuresTool(BaseTool):
 **RETURNS:**
 - Without `topic`: `disclosures` — one row per family: `disclosure`, `blocks`, `levels` (note / policies / tables / details / statement / parenthetical / document), `facts`, `text_blocks`, and `category` when the family is not a note
 - With `topic`: `blocks` — each with `id` (what `information-block` takes), `level`, `name`, `facts`, `dimensional_facts`, `axes`, `has_calc`, `text_blocks`
-- `resolved_report` when the report was resolved from a ticker
+- `resolved_report` when the report was resolved from a ticker, with `links` on SEC: `viewer` opens the filing in the xbrlkit viewer — give the user that URL to show the filing — beside `holon`, `tavi`, `edgar`
 
 **NOTES:**
 - Families are read off the filer's own role titles, so the map is the filing's complete section index — statements and the cover page included
@@ -170,7 +170,7 @@ class InformationBlockTool(BaseTool):
 - `block` — id, role, name, disclosure, level; `siblings` (the rest of the family); `merged_roles` when a second drawer of the same section folded in
 - `columns` — the period keys shown; `rows` — depth, concept, label, `values` and/or `members`, `abstract` on headers; `members_omitted` / `periods_omitted` on a row a cut touched
 - `axes` (each with the members that carry facts and its default), `calculation` (`foots` / `checked` counts per total; `differences` only where |reported − computed| exceeds half a unit at the stated precision), `text`
-- `truncated` when `max_rows` cut the walk, with `next_offset` for the next page (a later page adds `ancestors` and leaves out axes, calculation and text); `resolved_report` when a ticker was resolved
+- `truncated` when `max_rows` cut the walk, with `next_offset` for the next page (a later page adds `ancestors` and leaves out axes, calculation and text); `resolved_report` when a ticker was resolved, with `links` on SEC (`viewer` opens the filing in the xbrlkit viewer — give the user that URL to show it)
 
 **NOTES:**
 - Budgeted, not counted: breakdowns and columns are kept most-reported / most-recent first up to about 16K characters of cells each; a small table is never cut, and a row is never left blank by a cut

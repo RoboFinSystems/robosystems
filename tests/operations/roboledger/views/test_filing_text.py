@@ -4,7 +4,7 @@ A filing is found and read from the public bucket alone: the filer's catalog
 or releases list names its folder, the folder holds its holon and documents.
 xbrlkit's text tools run unmocked over the text the view assembles; a fake
 bucket stands in for the CDN, and the graph appears only for a ``report_id``
-named without a ticker.
+named without a ticker. A tenant graph is refused: a ledger files no document.
 """
 
 from __future__ import annotations
@@ -163,7 +163,18 @@ def _filing(accession: str, filing_date: str, fiscal_year: int, kinds: list[str]
     "fiscal_year": fiscal_year,
     "fiscal_period": "FY",
     "report_id": f"rpt-{accession}",
-    "representations": [{"kind": k} for k in kinds],
+    # As the catalog writes them: each representation names its file.
+    "representations": [
+      {
+        "kind": k,
+        "name": {
+          "holon": "holon.jsonld",
+          "tavi": "tavi.json",
+          "document": "acme-10k.htm",
+        }[k],
+      }
+      for k in kinds
+    ],
   }
 
 
@@ -200,7 +211,11 @@ def cdn(monkeypatch: pytest.MonkeyPatch):
           "cik": CIK,
           "releases": [
             _release(NEWER_FD, "2025-03-01", ["7.01", "9.01"]),
-            _release(EIGHT_K, "2025-01-30", ["2.02", "9.01"]),
+            {
+              **_release(EIGHT_K, "2025-01-30", ["2.02", "9.01"]),
+              "document": "acme-8k.htm",
+              "exhibits": {"EX-99.1": "ex991.htm"},
+            },
           ],
         }
       ),
@@ -268,6 +283,18 @@ class TestResolution:
     ref = await resolve_filing("sec", ticker="acme")
     assert (ref.accession, ref.cik, ref.filing_date) == (ACCESSION, CIK, "2025-02-05")
     assert ref.resolved and ref.resolved["fiscal_year"] == 2024
+    links = ref.resolved["links"]
+    assert links["holon"].endswith(f"/{FOLDER}/holon.jsonld")
+    assert links["as_filed"].endswith(f"/{FOLDER}/acme-10k.htm")
+    assert links["viewer"].startswith(module.env.VIEWER_URL.rstrip("/") + "/?url=")
+    assert "holon.jsonld" in links["viewer"]
+    assert links["edgar"].endswith(f"/12345/{ACCESSION.replace('-', '')}/")
+
+  async def test_a_pre_inline_filing_links_what_its_folder_holds(self, cdn):
+    ref = await resolve_filing("sec", ticker="ACME", fiscal_year=2017)
+    assert ref.resolved
+    assert "as_filed" not in ref.resolved["links"]
+    assert ref.resolved["links"]["holon"].endswith(f"/{OLD_FOLDER}/holon.jsonld")
 
   async def test_any_processed_year(self, cdn):
     ref = await resolve_filing("sec", ticker="ACME", fiscal_year=2017)
@@ -281,6 +308,12 @@ class TestResolution:
     ref = await resolve_filing("sec", ticker="ACME", form="8-K")
     assert ref.accession == EIGHT_K and ref.form == "8-K"
     assert ref.resolved
+    links = ref.resolved["links"]
+    assert "viewer" not in links and "holon" not in links
+    assert links["as_filed"].endswith(f"/{EIGHT_K_FOLDER}/acme-8k.htm")
+    assert list(links["exhibits"]) == ["EX-99.1"]
+    assert links["exhibits"]["EX-99.1"].endswith(f"/{EIGHT_K_FOLDER}/ex991.htm")
+    assert links["edgar"].endswith(f"/12345/{EIGHT_K.replace('-', '')}/")
     recent = [r["accession"] for r in ref.resolved["recent_releases"]]
     assert recent == [NEWER_FD, EIGHT_K]
 
@@ -321,12 +354,13 @@ class TestResolution:
     ref = await resolve_filing("sec", ticker="brk.b")
     assert ref.accession == ACCESSION
 
-  async def test_accession_is_sec_only(self, monkeypatch):
+  async def test_a_tenant_graph_is_refused(self, monkeypatch):
+    # A ledger files no document; its sections are disclosures / information-block.
     monkeypatch.setattr(
       module, "is_shared_repository_or_subgraph", lambda graph_id: False
     )
-    with pytest.raises(ReportSelectorError):
-      await resolve_filing("kg1234567890abcdef", accession=ACCESSION)
+    with pytest.raises(ReportSelectorError, match="information-block"):
+      await resolve_filing("kg1234567890abcdef", report_id=REPORT_ID)
 
 
 @pytest.mark.asyncio
@@ -475,25 +509,9 @@ class TestReportText:
     assert len(cdn.reads) == reads
     [key] = redis.store
     assert key == f"ft:text:v{module.TEXT_CACHE_VERSION}:sec:{ACCESSION}"
-    assert redis.ttls[key] == module.TEXT_CACHE_TTL_SHARED_SECONDS
+    assert redis.ttls[key] == module.TEXT_CACHE_TTL_SECONDS
     cached = json.loads(zlib.decompress(redis.store[key]))
     assert set(cached) == {"filing", "entity", "text", "sections", "has_document"}
-
-  async def test_a_tenant_reads_its_report_not_the_bucket(
-    self, cdn, no_cache, monkeypatch
-  ):
-    monkeypatch.setattr(
-      module, "is_shared_repository_or_subgraph", lambda graph_id: False
-    )
-    model = _model(ACCESSION, date(2025, 2, 5), f"<p>{POLICY}</p>")
-    monkeypatch.setattr(
-      module, "load_report_model", AsyncMock(return_value=(model, True))
-    )
-    ref = await resolve_filing("kg1234567890abcdef", report_id=REPORT_ID)
-    out = await query_search_text("kg1234567890abcdef", ref, "volume rebates")
-    assert out["text"] == "tagged text blocks"
-    assert out["total"] == 1
-    assert cdn.reads == []
 
 
 @pytest.mark.asyncio

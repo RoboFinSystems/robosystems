@@ -7,8 +7,9 @@ releases list (``current-reports/{cik}.json``) for an 8-K — and read from its
 folder: the holon and the primary document of a 10-K / 10-Q / 20-F / 40-F,
 or an 8-K with its EX-99 exhibits. Any processed year reads, not only the
 graph's. A report whose folder holds no document reads as its tagged text
-blocks, as every tenant report does. Neither the search index nor EDGAR is
-in the path; the graph is asked only for a ``report_id`` named on its own.
+blocks. Neither the search index nor EDGAR is in the path; the graph is asked
+only for a ``report_id`` named on its own. Shared repositories only: a ledger
+files no document, and its sections are ``disclosures`` / ``information-block``.
 
 A caller's query is matched as words, not run as a regular expression: the
 pattern handed to xbrlkit is built here from escaped literals, so no input can
@@ -74,8 +75,7 @@ from .information_blocks import (
   _cache,
   _external_text_blocks,
   _inline_fragments,
-  load_report_model,
-  resolve_report,
+  public_filing_links,
 )
 from .information_blocks import _cache_key as model_cache_key
 from .information_blocks import _freeze as freeze_model
@@ -86,8 +86,8 @@ SEARCH_MAX_WINDOW = MAX_WINDOW
 READ_MAX_LENGTH = MAX_READ
 
 TEXT_CACHE_VERSION = "2"
-TEXT_CACHE_TTL_SHARED_SECONDS = 6 * 60 * 60
-TEXT_CACHE_TTL_TENANT_SECONDS = 5 * 60
+# A published filing does not change once processed.
+TEXT_CACHE_TTL_SECONDS = 6 * 60 * 60
 # The most filed text read whole for one filing — a document, or an 8-K's
 # documents together; a 10-K's HTML is a few MB. Checked against the sizes the
 # manifest records before anything is downloaded.
@@ -143,8 +143,7 @@ def query_pattern(query: str) -> str:
 @dataclass
 class FilingRef:
   """A filing the text tools can read: one public folder on the SEC
-  repository (``accession`` / ``cik`` / ``filing_date``), or a tenant's
-  report (``report_id`` alone)."""
+  repository (``accession`` / ``cik`` / ``filing_date``)."""
 
   report_id: str | None = None
   accession: str | None = None
@@ -163,7 +162,7 @@ class FilingRef:
 
   @property
   def key(self) -> str:
-    return (self.accession if self.in_folder else self.report_id) or ""
+    return self.accession or ""
 
 
 async def resolve_filing(
@@ -183,16 +182,16 @@ async def resolve_filing(
   earnings release, anything else the latest annual (or, with ``period_type``
   quarterly, any) report, narrowed by ``fiscal_year``. A ``report_id`` names
   a report in the graph on its own; with a ticker, accession or form beside
-  it the request is ambiguous and refused. A tenant graph takes ``report_id``.
+  it the request is ambiguous and refused. A tenant graph is refused: a
+  ledger files no document to read.
   """
   wants_8k = (form or "").strip().upper() == CURRENT_REPORT_FORM
   if not is_shared_repository_or_subgraph(graph_id):
-    if accession or wants_8k:
-      raise ReportSelectorError(
-        "accession and form select SEC filings; a tenant graph takes report_id."
-      )
-    rid, _resolved = await resolve_report(graph_id, report_id=report_id)
-    return FilingRef(report_id=rid)
+    raise ReportSelectorError(
+      "describe-filing, search-text and read-text read a filing as filed, which "
+      "only the SEC repository holds; a ledger's report reads through "
+      "disclosures and information-block."
+    )
 
   if accession:
     accession = accession.strip()
@@ -246,20 +245,28 @@ async def resolve_filing(
 
 
 def _report_ref(cik: str, entry: dict[str, Any]) -> FilingRef:
+  accession = str(entry.get("accession") or "")
+  filing_date = str(entry.get("filing_date") or "")
+  resolved: dict[str, Any] = {
+    "report_id": entry.get("report_id"),
+    "accession": accession,
+    "form": entry.get("form"),
+    "filing_date": entry.get("filing_date"),
+    "fiscal_year": entry.get("fiscal_year"),
+    "fiscal_period": entry.get("fiscal_period"),
+  }
+  if accession and len(filing_date) >= 4:
+    if links := public_filing_links(
+      cik, accession, filing_date, entry.get("representations") or []
+    ):
+      resolved["links"] = links
   return FilingRef(
     report_id=entry.get("report_id"),
-    accession=entry.get("accession"),
+    accession=accession or None,
     cik=cik,
     filing_date=entry.get("filing_date"),
     form=entry.get("form"),
-    resolved={
-      "report_id": entry.get("report_id"),
-      "accession": entry.get("accession"),
-      "form": entry.get("form"),
-      "filing_date": entry.get("filing_date"),
-      "fiscal_year": entry.get("fiscal_year"),
-      "fiscal_period": entry.get("fiscal_period"),
-    },
+    resolved=resolved,
   )
 
 
@@ -278,21 +285,33 @@ async def _release_ref(
   if entry is None:
     what = accession or "8-K earnings release"
     raise ReportNotFoundError(f"No {what} captured for {symbol}.")
+  filing_date = str(entry.get("filing_date") or "")
+  resolved: dict[str, Any] = {
+    "accession": entry["accession"],
+    "form": CURRENT_REPORT_FORM,
+    "filing_date": entry.get("filing_date"),
+    "items": entry.get("items"),
+    "recent_releases": [
+      {k: r.get(k) for k in ("accession", "filing_date", "items")}
+      for r in releases[:RECENT_RELEASES]
+    ],
+  }
+  if len(filing_date) >= 4:
+    representations: list[dict[str, Any]] = []
+    if entry.get("document"):
+      representations.append({"kind": "document", "name": entry["document"]})
+    for exhibit, name in (entry.get("exhibits") or {}).items():
+      representations.append({"kind": "exhibit", "name": name, "exhibit": exhibit})
+    if links := public_filing_links(
+      cik, entry["accession"], filing_date, representations, has_holon=False
+    ):
+      resolved["links"] = links
   return FilingRef(
     accession=entry["accession"],
     cik=cik,
     filing_date=entry.get("filing_date"),
     form=CURRENT_REPORT_FORM,
-    resolved={
-      "accession": entry["accession"],
-      "form": CURRENT_REPORT_FORM,
-      "filing_date": entry.get("filing_date"),
-      "items": entry.get("items"),
-      "recent_releases": [
-        {k: r.get(k) for k in ("accession", "filing_date", "items")}
-        for r in releases[:RECENT_RELEASES]
-      ],
-    },
+    resolved=resolved,
   )
 
 
@@ -303,17 +322,30 @@ async def _graph_report(graph_id: str, report_id: str) -> FilingRef:
   if not rows:
     raise ReportNotFoundError(f"No report {report_id!r} on graph {graph_id}.")
   row = rows[0]
-  ref = FilingRef(
-    report_id=report_id,
-    accession=str(row.get("accession") or "") or None,
-    cik=str(row.get("cik") or "") or None,
-    filing_date=str(row.get("filing_date") or "")[:10] or None,
-  )
-  if not ref.in_folder:
+  accession = str(row.get("accession") or "")
+  cik = str(row.get("cik") or "")
+  filing_date = str(row.get("filing_date") or "")[:10]
+  if not (accession and cik and len(filing_date) >= 4):
     raise ReportNotPublishedError(
       f"Report {report_id!r} carries no accession, filer or filing date, so it "
       "has no published filing to read."
     )
+  # Narrower than a catalog entry: the coordinates query carries no form or
+  # fiscal period, and a caller who named the report already knows them.
+  resolved: dict[str, Any] = {
+    "report_id": report_id,
+    "accession": accession,
+    "filing_date": filing_date,
+  }
+  if links := public_filing_links(cik, accession, filing_date):
+    resolved["links"] = links
+  ref = FilingRef(
+    report_id=report_id,
+    accession=accession,
+    cik=cik,
+    filing_date=filing_date,
+    resolved=resolved,
+  )
   return ref
 
 
@@ -489,16 +521,6 @@ async def _current_report_from_folder(
   )
 
 
-async def _tenant_report(graph_id: str, ref: FilingRef) -> LoadedFiling:
-  """A tenant's report: its text blocks (a ledger files no document)."""
-  assert ref.report_id
-  model, _cached = await load_report_model(graph_id, ref.report_id)
-  text, sections = await run_off_loop(build_text, model, None)
-  return LoadedFiling(
-    id=ref.key, source=graph_id, model=model, text=text, sections=sections
-  )
-
-
 # ── the text, cached ───────────────────────────────────────────────────────
 
 
@@ -567,15 +589,10 @@ async def _build_once(
   key: str, graph_id: str, ref: FilingRef, cache: Any
 ) -> LoadedFiling:
   async with _TEXT_SLOTS:
-    if ref.in_folder:
-      lf = await _report_from_folder(graph_id, S3Client(), ref)
-    else:
-      lf = await _tenant_report(graph_id, ref)
+    lf = await _report_from_folder(graph_id, S3Client(), ref)
   if cache is not None:
-    shared = is_shared_repository_or_subgraph(graph_id)
-    ttl = TEXT_CACHE_TTL_SHARED_SECONDS if shared else TEXT_CACHE_TTL_TENANT_SECONDS
     try:
-      await cache.set(key, await run_off_loop(_freeze, lf), ex=ttl)
+      await cache.set(key, await run_off_loop(_freeze, lf), ex=TEXT_CACHE_TTL_SECONDS)
     except Exception as exc:
       logger.warning(f"filing text cache write failed for {key}: {exc}")
   return lf
@@ -585,35 +602,31 @@ async def _with_full_model(
   graph_id: str, ref: FilingRef, lf: LoadedFiling
 ) -> LoadedFiling:
   """The filing with its whole model, for the read that counts facts and
-  networks. An 8-K has none beyond its identity; a tenant's comes from the
-  information-block cache; a published report's holon is read under the
-  build slot and kept in that same cache, under the key ``information-block``
-  uses for the report, so the two lanes share one copy."""
+  networks. An 8-K has none beyond its identity. A report's holon is read
+  under the build slot and kept in the information-block cache, under the key
+  that lane uses for the report, so the two share one copy."""
   if lf.model.facts or lf.model.filing.form == CURRENT_REPORT_FORM:
     return lf
-  if not ref.in_folder:
-    model, _cached = await load_report_model(graph_id, ref.key)
+  key = model_cache_key(graph_id, ref.report_id or ref.key)
+  cache = _cache()
+  blob = None
+  if cache is not None:
+    try:
+      blob = await cache.get(key)
+    except Exception as exc:
+      logger.warning(f"filing model cache read failed for {key}: {exc}")
+  if blob:
+    model = await run_off_loop(thaw_model, blob)
   else:
-    key = model_cache_key(graph_id, ref.report_id or ref.key)
-    cache = _cache()
-    blob = None
+    async with _TEXT_SLOTS:
+      s3 = S3Client()
+      model = await _holon_model(s3, ref, await _folder_manifest(s3, ref))
     if cache is not None:
       try:
-        blob = await cache.get(key)
+        frozen = await run_off_loop(freeze_model, model)
+        await cache.set(key, frozen, ex=MODEL_CACHE_TTL_SHARED_SECONDS)
       except Exception as exc:
-        logger.warning(f"filing model cache read failed for {key}: {exc}")
-    if blob:
-      model = await run_off_loop(thaw_model, blob)
-    else:
-      async with _TEXT_SLOTS:
-        s3 = S3Client()
-        model = await _holon_model(s3, ref, await _folder_manifest(s3, ref))
-      if cache is not None:
-        try:
-          frozen = await run_off_loop(freeze_model, model)
-          await cache.set(key, frozen, ex=MODEL_CACHE_TTL_SHARED_SECONDS)
-        except Exception as exc:
-          logger.warning(f"filing model cache write failed for {key}: {exc}")
+        logger.warning(f"filing model cache write failed for {key}: {exc}")
   return LoadedFiling(
     id=lf.id,
     source=lf.source,
