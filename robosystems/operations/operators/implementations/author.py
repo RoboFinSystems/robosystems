@@ -79,8 +79,9 @@ async def _classify_only(
     )
   # Any captured event accepts the transition, and a synced one moved to
   # classified is never retried by its sync, so the event itself is read.
+  # get-event-block names its argument `id`; update-event-block, `event_id`.
   event = await tools.call_tool(
-    "get-event-block", {"event_id": arguments.get("event_id")}, return_raw=True
+    "get-event-block", {"id": arguments.get("event_id")}, return_raw=True
   )
   if (
     not isinstance(event, dict)

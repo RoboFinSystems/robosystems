@@ -467,8 +467,30 @@ class TestClassifyGuard:
       "classified_by": "ai",
     }
     tools.call_tool.assert_awaited_once_with(
-      "get-event-block", {"event_id": "evt_1"}, return_raw=True
+      "get-event-block", {"id": "evt_1"}, return_raw=True
     )
+
+  async def test_the_lookup_is_a_call_the_real_tool_accepts(self):
+    """The mock above answers any arguments, so hold the guard's lookup to
+    get-event-block's own input schema: with the wrong argument name the
+    tool fails, the guard refuses, and nothing is ever classified."""
+    from robosystems.middleware.mcp.tools.event_block_tools import GetEventBlockTool
+
+    schema = GetEventBlockTool(MagicMock()).get_tool_definition()["inputSchema"]
+    tools = _event_tools(BANK_LINE)
+    await self.guard(
+      {
+        "event_id": "evt_1",
+        "transition_to": "classified",
+        "metadata_patch": {"accept_suggestion": True},
+      },
+      tools,
+    )
+
+    name, sent = tools.call_tool.await_args.args[:2]
+    assert name == "get-event-block"
+    assert set(schema["required"]) <= set(sent) <= set(schema["properties"])
+    assert sent["id"] == "evt_1"
 
   async def test_it_cannot_claim_a_person_classified_the_line(self):
     out = await self.guard(
