@@ -884,10 +884,10 @@ READ_TEXT_MAX_LENGTH = 8000
 
 
 class FilingSelector(ReportSelector):
-  """Which filing a text view reads. On the SEC repository a ticker opens the
-  filer's filings from any processed year: the latest annual report unless
-  fiscal_year, period_type, accession or form say otherwise. A tenant graph
-  takes report_id."""
+  """Which filing a text view reads, on the SEC repository: a ticker opens the
+  filer's filings from any processed year — the latest annual report unless
+  fiscal_year, period_type, accession or form say otherwise — or a report_id
+  names one on its own. A tenant graph is refused: a ledger files no document."""
 
   accession: str | None = Field(
     None,

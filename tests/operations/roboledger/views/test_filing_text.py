@@ -4,7 +4,7 @@ A filing is found and read from the public bucket alone: the filer's catalog
 or releases list names its folder, the folder holds its holon and documents.
 xbrlkit's text tools run unmocked over the text the view assembles; a fake
 bucket stands in for the CDN, and the graph appears only for a ``report_id``
-named without a ticker.
+named without a ticker. A tenant graph is refused: a ledger files no document.
 """
 
 from __future__ import annotations
@@ -354,12 +354,13 @@ class TestResolution:
     ref = await resolve_filing("sec", ticker="brk.b")
     assert ref.accession == ACCESSION
 
-  async def test_accession_is_sec_only(self, monkeypatch):
+  async def test_a_tenant_graph_is_refused(self, monkeypatch):
+    # A ledger files no document; its sections are disclosures / information-block.
     monkeypatch.setattr(
       module, "is_shared_repository_or_subgraph", lambda graph_id: False
     )
-    with pytest.raises(ReportSelectorError):
-      await resolve_filing("kg1234567890abcdef", accession=ACCESSION)
+    with pytest.raises(ReportSelectorError, match="information-block"):
+      await resolve_filing("kg1234567890abcdef", report_id=REPORT_ID)
 
 
 @pytest.mark.asyncio
@@ -508,25 +509,9 @@ class TestReportText:
     assert len(cdn.reads) == reads
     [key] = redis.store
     assert key == f"ft:text:v{module.TEXT_CACHE_VERSION}:sec:{ACCESSION}"
-    assert redis.ttls[key] == module.TEXT_CACHE_TTL_SHARED_SECONDS
+    assert redis.ttls[key] == module.TEXT_CACHE_TTL_SECONDS
     cached = json.loads(zlib.decompress(redis.store[key]))
     assert set(cached) == {"filing", "entity", "text", "sections", "has_document"}
-
-  async def test_a_tenant_reads_its_report_not_the_bucket(
-    self, cdn, no_cache, monkeypatch
-  ):
-    monkeypatch.setattr(
-      module, "is_shared_repository_or_subgraph", lambda graph_id: False
-    )
-    model = _model(ACCESSION, date(2025, 2, 5), f"<p>{POLICY}</p>")
-    monkeypatch.setattr(
-      module, "load_report_model", AsyncMock(return_value=(model, True))
-    )
-    ref = await resolve_filing("kg1234567890abcdef", report_id=REPORT_ID)
-    out = await query_search_text("kg1234567890abcdef", ref, "volume rebates")
-    assert out["text"] == "tagged text blocks"
-    assert out["total"] == 1
-    assert cdn.reads == []
 
 
 @pytest.mark.asyncio

@@ -213,12 +213,14 @@ class GraphMCPTools:
 
       self.disclosures_tool = DisclosuresTool(graph_client)
       self.information_block_tool = InformationBlockTool(graph_client)
-      # xbrlkit's text tools over the same filing's whole text.
-      from .filing_text_tools import DescribeFilingTool, ReadTextTool, SearchTextTool
+      # xbrlkit's text tools over the filing as filed. Shared repositories
+      # only: a ledger files no document, and its sections are the pair above.
+      if self._is_shared_repository():
+        from .filing_text_tools import DescribeFilingTool, ReadTextTool, SearchTextTool
 
-      self.describe_filing_tool = DescribeFilingTool(graph_client)
-      self.search_text_tool = SearchTextTool(graph_client)
-      self.read_text_tool = ReadTextTool(graph_client)
+        self.describe_filing_tool = DescribeFilingTool(graph_client)
+        self.search_text_tool = SearchTextTool(graph_client)
+        self.read_text_tool = ReadTextTool(graph_client)
       # OLTP-backed, so tenant graphs only.
       if not self._is_shared_repository():
         self.live_financial_statement_tool = LiveFinancialStatementTool(graph_client)
@@ -991,8 +993,9 @@ class GraphMCPTools:
         }[name]
         if tool is None:
           raise ValueError(
-            f"{name} tool is not available. "
-            "This graph does not have the roboledger schema extension."
+            f"{name} tool is not available. It reads a filing as filed, which "
+            "only a shared repository (SEC) holds; a ledger's report reads "
+            "through disclosures and information-block."
           )
         result = await tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)

@@ -90,7 +90,8 @@ class TestGetToolDefinitionHelpers:
     assert "live-financial-statement" in names
     assert "disclosures" in names
     assert "information-block" in names
-    assert {"describe-filing", "search-text", "read-text"} <= names
+    # A ledger files no document: the filing-text tools are SEC-only.
+    assert {"describe-filing", "search-text", "read-text"}.isdisjoint(names)
 
   def test_live_statement_tool_absent_on_shared_repo(self, mock_client):
     """Shared-repo graphs (SEC) must NOT get the OLTP live-statement tool

@@ -541,8 +541,8 @@ async def _resolve_filing(graph_id: str, body: FilingSelector) -> FilingRef:
     "its own document, from any processed year — and a `ticker` picks it: "
     "the latest annual report, narrowed by `fiscal_year` / `period_type`, or "
     "one `accession`, or with `form: 8-K` the latest earnings release and its "
-    "exhibits. Tenant graphs take `report_id` and read the report's text "
-    "blocks."
+    "exhibits. SEC only: a ledger files no document, and its sections read "
+    "through `disclosures` and `information-block`."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
