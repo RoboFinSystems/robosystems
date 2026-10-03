@@ -107,6 +107,11 @@ class GetFiscalCalendarTool:
   - `reconciling_items`: posted events whose source payload changed
     afterwards and that nobody has dispositioned — resolve each with
     resolve-reconciling-item (count + sample ride on the response)
+  - `unposted_source_events`: source events dated in the period were
+    never committed (inbox lines still captured or classified, or a
+    QuickBooks transaction whose automatic posting failed) and cannot
+    post into it once it closes — commit or void each (count + sample
+    ride on the response)
   - `unreconciled_accounts`: a reconciliation the close waits on is not
     reconciled for the period, or was never compared for it — run
     refresh-reconciliations (count + sample ride on the response)
