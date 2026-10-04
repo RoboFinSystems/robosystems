@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from xbrlkit.model import EntityIdentity, FilingMeta, XbrlModel
-from xbrlkit.serve import TextSection, build_text
+from xbrlkit.serve import TextSection, build_text, join_texts
 
 CURRENT_REPORT_FORM = "8-K"
 # Results of operations (the release itself) and Reg FD (where some filers
@@ -271,29 +271,12 @@ class CurrentReportText:
 
 def current_report_text(documents: list[FiledDocument]) -> CurrentReportText:
   """The filing read as one text: the 8-K, then each exhibit under its own
-  heading, every document a section with a known offset."""
-  parts: list[str] = []
-  sections: list[TextSection] = []
-  offset = 0
-  for document in documents:
-    body = document_text(document.data)
-    if not body:
-      continue
-    header = f"## {document.label}\n"
-    chunk = header + body + "\n\n"
-    sections.append(
-      TextSection(
-        id=document.section_id,
-        label=document.label,
-        kind="item",
-        chars=len(body),
-        offset=offset + len(header),
-        heading_chars=len(header),
-      )
-    )
-    parts.append(chunk)
-    offset += len(chunk)
-  return CurrentReportText("".join(parts), sections)
+  heading, every document a section with a known offset — xbrlkit's assembly,
+  so an 8-K reads the same here as loaded into xbrlkit."""
+  text, sections = join_texts(
+    [(d.section_id, d.label, document_text(d.data), []) for d in documents]
+  )
+  return CurrentReportText(text, sections)
 
 
 def current_report_manifest(
