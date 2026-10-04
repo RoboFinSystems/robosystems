@@ -86,7 +86,7 @@ SEARCH_MAX_HITS = MAX_HITS
 SEARCH_MAX_WINDOW = MAX_WINDOW
 READ_MAX_LENGTH = MAX_READ
 
-TEXT_CACHE_VERSION = "2"
+TEXT_CACHE_VERSION = "3"
 # A published filing does not change once processed.
 TEXT_CACHE_TTL_SECONDS = 6 * 60 * 60
 # The most filed text read whole for one filing — a document, or an 8-K's
