@@ -23,6 +23,7 @@ from robosystems.operations.roboledger.views.fact_query import (
   _is_ticker,
   _safe_str,
   query_fact_grid,
+  shared_only_selectors,
 )
 
 MOCK_GRAPH_ID = "kg_test123"
@@ -644,3 +645,36 @@ class TestProjectsDecimals:
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
     query = mock_repository.execute_query.call_args[0][0]
     assert "f.decimals as decimals" in query
+
+
+@pytest.mark.unit
+class TestSharedOnlySelectors:
+  """A ledger's graph has no canonical concepts and its reports no form or
+  fiscal period: a query by them matches nothing, which reads as "no data"."""
+
+  def test_a_shared_repository_takes_them_all(self):
+    assert (
+      shared_only_selectors(
+        "sec",
+        canonical_concepts=["revenue"],
+        form="10-K",
+        fiscal_year=2025,
+        fiscal_period="FY",
+      )
+      is None
+    )
+
+  def test_a_ledger_query_by_elements_is_fine(self):
+    assert shared_only_selectors(MOCK_GRAPH_ID) is None
+    assert shared_only_selectors(MOCK_GRAPH_ID, canonical_concepts=[], form="") is None
+
+  def test_one_selector_is_refused_by_name(self):
+    refusal = shared_only_selectors(MOCK_GRAPH_ID, canonical_concepts=["revenue"])
+    assert refusal is not None
+    assert refusal.startswith("canonical_concepts is only available")
+    assert "elements" in refusal
+
+  def test_several_are_named_together(self):
+    refusal = shared_only_selectors(MOCK_GRAPH_ID, form="10-K", fiscal_year=2025)
+    assert refusal is not None
+    assert refusal.startswith("form, fiscal_year are only available")

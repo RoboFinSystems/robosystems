@@ -895,7 +895,7 @@ class TestResolveReport:
     assert links["tavi"] == f"{folder}/tavi.json"
     assert links["as_filed"] == f"{folder}/acme-20241231.htm"
     assert links["manifest"] == f"{folder}/manifest.json"
-    assert links["folder"] == f"{folder}/"
+    assert "folder" not in links
     assert links["viewer"] == (
       "https://viewer.example.com/?url=https%3A%2F%2Fcdn.example.com%2F2025%2F"
       f"{CIK}%2F{ACCESSION}%2Fholon.jsonld"
@@ -932,3 +932,14 @@ def test_the_request_models_restate_xbrlkits_caps() -> None:
     == xbrlkit_serve.MAX_BLOCK_MEMBERS_CAP
     == module.MAX_BLOCK_MEMBERS
   )
+
+
+@pytest.mark.unit
+def test_a_missing_block_points_at_the_tool_that_lists_them():
+  # xbrlkit names its own `describe_filing`; hosted, the map is `disclosures`,
+  # and a ledger has no describe-filing tool at all.
+  from robosystems.operations.roboledger.views.information_blocks import _hosted_hint
+
+  assert _hosted_hint(
+    "No presentation network matches 'BS'; describe_filing lists them"
+  ) == ("No presentation network matches 'BS'; disclosures lists them")

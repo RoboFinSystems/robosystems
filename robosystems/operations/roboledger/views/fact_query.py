@@ -36,6 +36,43 @@ _SAFE_STR_RE = re.compile(r"[\w:\-]+")
 _TICKER_RE = re.compile(r"[A-Za-z][A-Za-z0-9.\-]{0,9}")
 
 
+def shared_only_selectors(
+  graph_id: str,
+  *,
+  canonical_concepts: list[str] | None = None,
+  form: str | None = None,
+  fiscal_year: int | None = None,
+  fiscal_period: str | None = None,
+) -> str | None:
+  """Why a query cannot run on this graph as asked, or None when it can.
+
+  Canonical concepts and a report's form and fiscal period are written by the
+  shared-repository pipeline; a ledger's graph carries none of them, so each
+  would match nothing and read as "no data". Refused by name instead.
+  """
+  if is_shared_repository_or_subgraph(graph_id):
+    return None
+  given = [
+    name
+    for name, value in (
+      ("canonical_concepts", canonical_concepts),
+      ("form", form),
+      ("fiscal_year", fiscal_year),
+      ("fiscal_period", fiscal_period),
+    )
+    if value not in (None, "", [])
+  ]
+  if not given:
+    return None
+  return (
+    f"{', '.join(given)} "
+    f"{'is' if len(given) == 1 else 'are'} only available on shared repositories "
+    "(e.g. SEC): a ledger's graph has no canonical concepts, forms or fiscal "
+    "periods. Select by elements (qnames such as 'rs-gaap:Assets') with periods "
+    "or period_type."
+  )
+
+
 def _safe_str(value: str) -> str | None:
   """``value`` if safe to interpolate into an inline node filter, else ``None``
   (caller falls back to a parameterized WHERE)."""

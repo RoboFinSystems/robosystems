@@ -709,8 +709,9 @@ class FilingLinks(BaseModel):
   exhibits: dict[str, str] | None = Field(
     None, description="An 8-K's exhibits by exhibit number (EX-99.1)"
   )
-  manifest: str | None = None
-  folder: str | None = None
+  manifest: str | None = Field(
+    None, description="Every file in the filing's public folder, with its URL"
+  )
   edgar: str | None = Field(None, description="The filing's folder on EDGAR")
 
 
@@ -904,7 +905,9 @@ class FilingSelector(ReportSelector):
   """Which filing a text view reads, on the SEC repository: a ticker opens the
   filer's filings from any processed year — the latest annual report unless
   fiscal_year, period_type, accession or form say otherwise — or a report_id
-  names one on its own. A tenant graph is refused: a ledger files no document."""
+  names one on its own. With form '8-K', fiscal_year is the calendar year the
+  release was filed, and a CIK in place of the ticker reaches a filer the
+  catalog does not list. A tenant graph is refused: a ledger files no document."""
 
   accession: str | None = Field(
     None,
@@ -915,7 +918,10 @@ class FilingSelector(ReportSelector):
   )
   form: str | None = Field(
     None,
-    description="SEC only, with ticker: '8-K' reads the latest earnings release",
+    description=(
+      "SEC only, with ticker: '8-K' reads the latest earnings release, or with "
+      "fiscal_year the latest filed in that calendar year"
+    ),
   )
 
 

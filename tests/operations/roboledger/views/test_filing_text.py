@@ -321,6 +321,32 @@ class TestResolution:
     ref = await resolve_filing("sec", ticker="ACME", accession=NEWER_FD)
     assert ref.accession == NEWER_FD and ref.form == "8-K"
 
+  async def test_a_year_reaches_a_release_older_than_the_listed_few(self, cdn):
+    earlier = "0000012345-24-000090"
+    listed = json.loads(cdn.objects[f"current-reports/{CIK}.json"])
+    listed["releases"].append(_release(earlier, "2024-10-28", ["2.02", "9.01"]))
+    cdn.objects[f"current-reports/{CIK}.json"] = json.dumps(listed)
+
+    ref = await resolve_filing("sec", ticker="ACME", form="8-K", fiscal_year=2024)
+    assert ref.accession == earlier
+    assert ref.resolved
+    assert [r["accession"] for r in ref.resolved["recent_releases"]] == [earlier]
+    # Without a year the latest earnings release is still the pick.
+    latest = await resolve_filing("sec", ticker="ACME", form="8-K")
+    assert latest.accession == EIGHT_K
+    with pytest.raises(ReportNotFoundError, match="filed in 2019"):
+      await resolve_filing("sec", ticker="ACME", form="8-K", fiscal_year=2019)
+
+  async def test_a_cik_reaches_a_filer_the_catalog_does_not_list(self, cdn):
+    del cdn.objects["companies/acme.json"]
+    ref = await resolve_filing("sec", ticker=CIK.lstrip("0"), form="8-K")
+    assert (ref.accession, ref.cik, ref.form) == (EIGHT_K, CIK, "8-K")
+    named = await resolve_filing("sec", ticker=CIK, accession=NEWER_FD)
+    assert named.accession == NEWER_FD
+    # Its annual and quarterly reports are listed by ticker only.
+    with pytest.raises(ReportSelectorError, match="8-K"):
+      await resolve_filing("sec", ticker=CIK)
+
   async def test_report_id_alone_reads_the_graphs_coordinates(self, cdn):
     ref = await resolve_filing("sec", report_id=REPORT_ID)
     assert (ref.report_id, ref.accession) == (REPORT_ID, ACCESSION)

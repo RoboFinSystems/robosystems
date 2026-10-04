@@ -36,7 +36,8 @@ _FILING_PROPERTIES: dict[str, Any] = {
     "description": (
       "Company ticker. On SEC it opens the filer's filings: the latest annual "
       "report by default, narrowed by fiscal_year / period_type, or the one "
-      "accession or form names (e.g. 'NVDA')."
+      "accession or form names (e.g. 'NVDA'). A CIK works in its place for "
+      "the 8-Ks of a filer with no ticker."
     ),
   },
   "report_id": {
@@ -45,7 +46,10 @@ _FILING_PROPERTIES: dict[str, Any] = {
   },
   "fiscal_year": {
     "type": "integer",
-    "description": "Narrow ticker resolution to this fiscal year focus (e.g. 2019).",
+    "description": (
+      "Narrow ticker resolution to this fiscal year focus (e.g. 2019). With "
+      "form '8-K' it is the calendar year the release was filed."
+    ),
   },
   "period_type": {
     "type": "string",
@@ -66,7 +70,8 @@ _FILING_PROPERTIES: dict[str, Any] = {
     "type": "string",
     "description": (
       "SEC only, with ticker: '8-K' reads the latest earnings release (Item "
-      "2.02) with its exhibits; `resolved_report.recent_releases` lists others."
+      "2.02) with its exhibits; `resolved_report.recent_releases` lists others, "
+      "and fiscal_year moves both to the releases filed in that year."
     ),
     "enum": ["8-K"],
   },
@@ -108,7 +113,7 @@ class DescribeFilingTool(BaseTool):
 
 **PARAMETERS:**
 - `ticker` — on SEC, the filer: its latest annual report unless `fiscal_year` / `period_type` / `accession` / `form` say otherwise; any processed year reads
-- `form: "8-K"` — the latest earnings release; `accession` — one filing (a report, or an 8-K from `recent_releases`)
+- `form: "8-K"` — the latest earnings release, or with `fiscal_year` the latest filed in that calendar year; `accession` — one filing (a report, or an 8-K from `recent_releases`)
 - `report_id` — a report in the SEC graph, on its own (not beside a ticker)
 
 **RETURNS:**

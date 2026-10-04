@@ -93,8 +93,9 @@ TEXT_CACHE_TTL_SECONDS = 6 * 60 * 60
 # manifest records before anything is downloaded.
 DOCUMENT_BUDGET_CHARS = 40_000_000
 # The releases an 8-K resolution lists beside the one it picked, so a caller
-# can name an older one by accession.
-RECENT_RELEASES = 8
+# can name an older one by accession; ``fiscal_year`` moves the list to the
+# releases filed in that year.
+RECENT_RELEASES = 12
 
 QUERY_MAX_CHARS = 500
 _QUERY_ALTERNATIVES = 10
@@ -179,8 +180,10 @@ async def resolve_filing(
 
   On SEC a ``ticker`` opens the filer's catalog: ``accession`` picks one
   filing from it (an 8-K's from its releases list), ``form="8-K"`` the latest
-  earnings release, anything else the latest annual (or, with ``period_type``
-  quarterly, any) report, narrowed by ``fiscal_year``. A ``report_id`` names
+  earnings release (``fiscal_year`` then means the calendar year it was
+  filed), anything else the latest annual (or, with ``period_type`` quarterly,
+  any) report, narrowed by ``fiscal_year``. A CIK in place of the ticker
+  reaches the 8-Ks of a filer the catalog does not list. A ``report_id`` names
   a report in the graph on its own; with a ticker, accession or form beside
   it the request is ambiguous and refused. A tenant graph is refused: a
   ledger files no document to read.
@@ -215,6 +218,16 @@ async def resolve_filing(
   if not TICKER_RE.match(symbol):
     raise ReportSelectorError(f"{ticker!r} is not a ticker symbol.")
   s3 = S3Client()
+  if symbol.isdigit():
+    # No ticker is all digits, so this is a CIK. The catalog is keyed by
+    # ticker; the releases lists are keyed by CIK and need no catalog.
+    if not (wants_8k or accession):
+      raise ReportSelectorError(
+        "A CIK finds a filer's 8-K earnings releases (form: 8-K, or an "
+        "accession); its annual and quarterly reports are listed by ticker."
+      )
+    cik = symbol.zfill(10)
+    return await _release_ref(s3, f"CIK {cik}", cik, accession, fiscal_year)
   catalog = await _read_json(s3, get_filing_catalog_key(symbol))
   if not catalog or not catalog.get("cik"):
     raise ReportNotFoundError(f"No filer {symbol} in the SEC catalog.")
@@ -226,7 +239,7 @@ async def resolve_filing(
     if entry is not None:
       return _report_ref(cik, entry)
   if accession or wants_8k:
-    return await _release_ref(s3, symbol, cik, accession)
+    return await _release_ref(s3, symbol, cik, accession, fiscal_year)
 
   forms = (
     QUARTERLY_FORMS if (period_type or "").lower() == "quarterly" else ANNUAL_FORMS
@@ -271,20 +284,26 @@ def _report_ref(cik: str, entry: dict[str, Any]) -> FilingRef:
 
 
 async def _release_ref(
-  s3: S3Client, symbol: str, cik: str, accession: str | None
+  s3: S3Client, symbol: str, cik: str, accession: str | None, year: int | None = None
 ) -> FilingRef:
   """An 8-K from the filer's releases list: the one named, else the latest
-  reporting Item 2.02, else the latest."""
+  reporting Item 2.02, else the latest — among those filed in ``year`` when
+  one is given, which is how a release older than the listed few is reached."""
   listed = await _read_json(s3, get_current_reports_list_key(cik))
   releases = (listed or {}).get("releases") or []
   if accession:
     entry = next((r for r in releases if r.get("accession") == accession), None)
   else:
+    if year is not None:
+      releases = [
+        r for r in releases if str(r.get("filing_date") or "")[:4] == str(year)
+      ]
     entry = next((r for r in releases if "2.02" in (r.get("items") or [])), None)
     entry = entry or (releases[0] if releases else None)
   if entry is None:
     what = accession or "8-K earnings release"
-    raise ReportNotFoundError(f"No {what} captured for {symbol}.")
+    when = f" filed in {year}" if year is not None and not accession else ""
+    raise ReportNotFoundError(f"No {what}{when} captured for {symbol}.")
   filing_date = str(entry.get("filing_date") or "")
   resolved: dict[str, Any] = {
     "accession": entry["accession"],

@@ -65,6 +65,27 @@ class TestBuildFactGridTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
+  async def test_a_ledger_refuses_selectors_only_a_shared_repository_has(
+    self, mock_graph_client
+  ):
+    """They would match nothing on a ledger's graph, and nothing reads as
+    "no data"; the query is refused before it runs."""
+    tool = BuildFactGridTool(mock_graph_client)
+
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+    ) as query:
+      result = await tool.execute(
+        {"canonical_concepts": ["revenue"], "fiscal_year": 2025}
+      )
+
+    assert result["error"] == "shared_repository_selector"
+    assert "canonical_concepts, fiscal_year" in result["message"]
+    query.assert_not_awaited()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
   async def test_shared_repo_requires_entity(self, mock_graph_client):
     """SEC hosts thousands of filers; an unscoped query returns an arbitrary
     slice of arbitrary companies."""

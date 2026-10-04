@@ -29,7 +29,6 @@ from robosystems.config.storage.shared import (
   FILING_ARTIFACT_MANIFEST,
   FILING_ARTIFACT_TAVI,
   get_filing_artifact_key,
-  get_filing_artifact_prefix,
   get_public_data_url,
   get_viewer_link,
 )
@@ -61,6 +60,13 @@ class BlockNotFoundError(ValueError):
 
 class ReportTooLargeError(ValueError):
   """The report exists, and is larger than this reader holds in memory."""
+
+
+def _hosted_hint(message: str) -> str:
+  """xbrlkit's errors name its own tools. Hosted, the map of a report's blocks
+  is ``disclosures``, on a ledger and on SEC alike; ``describe_filing`` is not
+  a tool a ledger has."""
+  return message.replace("describe_filing", "disclosures")
 
 
 # xbrlkit's own caps, restated for the request models that cannot import them.
@@ -391,8 +397,8 @@ def public_filing_links(
   """Where one filing is served: ``viewer`` (the xbrlkit viewer over the
   published holon — what to hand a person who wants to see the filing),
   ``holon`` and ``tavi``, ``as_filed`` when the document's name is known,
-  ``exhibits`` (an 8-K's EX-99 files), the folder's ``manifest`` and the
-  filing on ``edgar``. The holon and the Tavi sit at their fixed names unless
+  ``exhibits`` (an 8-K's EX-99 files), the ``manifest`` of the files in its
+  folder and the filing on ``edgar``. The holon and the Tavi sit at their fixed names unless
   ``representations`` names them; an 8-K has neither (``has_holon=False``).
   Empty when no public bucket is configured: there is nowhere to link.
   """
@@ -432,10 +438,9 @@ def public_filing_links(
     links["as_filed"] = url(names["document"])
   if exhibits:
     links["exhibits"] = exhibits
+  # No link to the folder itself: it is a key prefix, which opens nothing. The
+  # manifest lists what is in it.
   links["manifest"] = url(FILING_ARTIFACT_MANIFEST)
-  links["folder"] = get_public_data_url(
-    bucket, get_filing_artifact_prefix(year, cik, accession) + "/", cdn
-  )
   links["edgar"] = edgar_filing_folder_url(cik, accession)
   return links
 
@@ -456,7 +461,7 @@ async def query_disclosures(
     if await _inline_text(model, entries):
       out = xbrlkit_serve.disclosures(_loaded(graph_id, report_id, model), topic)
   except ToolError as exc:
-    raise BlockNotFoundError(str(exc)) from exc
+    raise BlockNotFoundError(_hosted_hint(str(exc))) from exc
   external = _external_text_blocks(model)
   if external:
     for block in out.get("blocks") or []:
@@ -500,7 +505,7 @@ async def query_information_block(
     if await _inline_text(model, out.get("text") or []):
       out = read()
   except ToolError as exc:
-    raise BlockNotFoundError(str(exc)) from exc
+    raise BlockNotFoundError(_hosted_hint(str(exc))) from exc
   external = _external_text_blocks(model)
   if external and out.get("text"):
     out["text"] = _hosted_text(out["text"], external)
