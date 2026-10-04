@@ -454,7 +454,7 @@ class TestFileReportLock:
       )
       with extensions_session(GRAPH) as filer:
         with pytest.raises(RowLockedError, match=self.REPORT_ID):
-          file_report(filer, self.REPORT_ID, "usr_op")
+          file_report(filer, self.REPORT_ID, "usr_op", graph_id=GRAPH)
 
     with extensions_session(GRAPH) as check:
       from robosystems.models.extensions.roboledger.report import Report

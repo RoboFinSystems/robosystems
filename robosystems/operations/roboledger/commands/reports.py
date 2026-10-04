@@ -121,7 +121,7 @@ class TaxonomyNotFoundError(LookupError):
 
 
 class BundleUploadError(RuntimeError):
-  """The publish-time bundle upload failed; the publish must not commit.
+  """The bundle upload failed; the publish or the filing must not commit.
 
   Routers translate this to HTTP 502.
   """
@@ -228,7 +228,7 @@ def _stamp_report_bundle(
   graph_id: str,
   report_def: Report,
 ) -> None:
-  """Build, upload and stamp the holon for a Report about to publish.
+  """Build, upload and stamp the holon for a Report about to publish or file.
 
   The holon is the report's anchor artifact: ``bundle_url`` points at it, and
   the Tavi and XBRL 2.1 are derived from the bundle on first download. Runs
@@ -250,9 +250,12 @@ def _stamp_report_bundle(
     metadata={"report-id": report_def.id, "graph-id": graph_id},
   )
   if not ok:
+    logger.error(
+      "Holon upload failed for report %s at s3://%s/%s", report_def.id, bucket, key
+    )
     raise BundleUploadError(
-      f"Failed to upload holon bundle for report {report_def.id} "
-      f"to s3://{bucket}/{key}; aborting publish."
+      f"Failed to upload holon bundle for report {report_def.id}; nothing was "
+      f"saved. Retry in a moment."
     )
   report_def.bundle_url = get_report_bundle_uri(
     bucket, graph_id, report_def.id, report_def.generation_count
@@ -547,15 +550,21 @@ class ReportNotFiledError(Exception):
   """Raised when an op requires a ``filed`` Report and got something else."""
 
 
-def file_report(session: Session, report_id: str, filed_by: str) -> ReportResponse:
+def file_report(
+  session: Session, report_id: str, filed_by: str, *, graph_id: str
+) -> ReportResponse:
   """Transition a Report to ``filed``, stamping ``filed_at`` / ``filed_by``.
 
   Allowed from ``draft`` or ``under_review``, and only once generation has
   finished (filing an in-progress or failed report would lock a partial
   snapshot).
 
+  A published report's bundle was stamped while it was a draft, so it is
+  stamped again here, as a new generation: the filed record's downloads then
+  carry its filing date.
+
   Raises ReportNotFoundError, NotAuthorizedError (not the author, or a
-  shared-in copy), InvalidFilingTransitionError.
+  shared-in copy), InvalidFilingTransitionError, BundleUploadError.
   """
   from datetime import UTC, datetime
 
@@ -593,6 +602,8 @@ def file_report(session: Session, report_id: str, filed_by: str) -> ReportRespon
   report_def.filing_status = "filed"
   report_def.filed_at = datetime.now(UTC)
   report_def.filed_by = filed_by
+  if report_def.generation_status == "published":
+    _stamp_report_bundle(session, graph_id, report_def)
   session.flush()
 
   structures = load_structures(session, report_def.taxonomy_id)
