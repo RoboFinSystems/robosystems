@@ -9,7 +9,10 @@ from robosystems.operations.roboledger.views.fact_grid_builder import (
   FactGridBuilder,
   summarize_by_element,
 )
-from robosystems.operations.roboledger.views.fact_query import query_fact_grid
+from robosystems.operations.roboledger.views.fact_query import (
+  query_fact_grid,
+  shared_only_selectors,
+)
 from robosystems.operations.roboledger.views.filing_text import (
   FilingRef,
   QueryError,
@@ -56,5 +59,6 @@ __all__ = [
   "resolve_filing",
   "resolve_report",
   "resolved_report_info",
+  "shared_only_selectors",
   "summarize_by_element",
 ]

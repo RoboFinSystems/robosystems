@@ -16,6 +16,7 @@ from robosystems.models.api.views.view_config import (
 from robosystems.operations.roboledger.views import (
   FactGridBuilder,
   query_fact_grid,
+  shared_only_selectors,
   summarize_by_element,
 )
 
@@ -58,6 +59,7 @@ class BuildFactGridTool:
 
 **NOTES:**
 On shared repositories (e.g. SEC) entity or entities is REQUIRED — those graphs host thousands of filers, so an unscoped query returns an arbitrary slice of arbitrary companies. On a tenant graph the URL already scopes to one entity, so the filter is optional there.
+On a tenant graph select by `elements` with `periods` or `period_type`: `canonical_concepts`, `form`, `fiscal_year` and `fiscal_period` exist only on shared repositories and are refused there rather than answered with nothing.
 For income statement items (revenue, net income), always specify period_type='annual' or 'quarterly' to avoid mixing duration types. Use canonical_concepts for cross-company comparisons where companies may use different XBRL tags for the same concept.
 """,
       "inputSchema": {
@@ -150,6 +152,15 @@ For income statement items (revenue, net income), always specify period_type='an
         "error": "missing_elements",
         "message": "Provide elements (qnames) and/or canonical_concepts",
       }
+
+    if refusal := shared_only_selectors(
+      self.client.graph_id,
+      canonical_concepts=canonical_concepts,
+      form=form,
+      fiscal_year=fiscal_year,
+      fiscal_period=fiscal_period,
+    ):
+      return {"error": "shared_repository_selector", "message": refusal}
 
     if not periods and not period_type and fiscal_year is None:
       return {

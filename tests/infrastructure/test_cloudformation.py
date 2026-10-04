@@ -296,11 +296,22 @@ class TestPublicDataBucketComesWithItsCdn:
   )
   def test_every_container_given_the_bucket_is_given_the_cdn(self, template):
     names = _ENV_NAME_RE.findall(template.read_text())
-    assert names.count("PUBLIC_DATA_CDN_URL") == names.count("PUBLIC_DATA_BUCKET")
+    buckets, cdns = (
+      names.count("PUBLIC_DATA_BUCKET"),
+      names.count("PUBLIC_DATA_CDN_URL"),
+    )
+    assert cdns == buckets, (
+      f"{template.name} gives PUBLIC_DATA_BUCKET to {buckets} container(s) "
+      f"and PUBLIC_DATA_CDN_URL to {cdns}"
+    )
 
   @pytest.mark.parametrize(
     "workflow", sorted(WORKFLOW_DIR.glob("deploy-*.yml")), ids=lambda p: p.stem
   )
   def test_every_deploy_passing_the_bucket_passes_the_cdn(self, workflow):
     keys = _PARAM_KEY_RE.findall(workflow.read_text())
-    assert keys.count("PublicDataCDNURL") == keys.count("PublicDataBucketArn")
+    buckets, cdns = keys.count("PublicDataBucketArn"), keys.count("PublicDataCDNURL")
+    assert cdns == buckets, (
+      f"{workflow.name} passes PublicDataBucketArn to {buckets} stack(s) "
+      f"and PublicDataCDNURL to {cdns}"
+    )

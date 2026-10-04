@@ -234,6 +234,49 @@ class TestBuildFactGridOperation:
     assert "elements" in exc_info.value.detail
 
   @pytest.mark.unit
+  async def test_a_ledger_refuses_selectors_only_a_shared_repository_has(self):
+    """Canonical concepts and fiscal context are not on a ledger's graph."""
+    body = _make_create_view_request(elements=[], canonical_concepts=["revenue"])
+    body.fiscal_year = 2025
+
+    with (
+      patch(f"{MODULE}.query_fact_grid", new_callable=AsyncMock) as mock_query,
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      await build_fact_grid_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert exc_info.value.status_code == 400
+    assert "canonical_concepts, fiscal_year are only available" in exc_info.value.detail
+    mock_query.assert_not_awaited()
+
+  @pytest.mark.unit
+  async def test_a_shared_repository_takes_canonical_concepts(self):
+    body = _make_create_view_request(
+      elements=[], canonical_concepts=["revenue"], entity="NVDA"
+    )
+
+    with patch(
+      f"{MODULE}.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=(_make_facts(), False),
+    ) as mock_query:
+      await build_fact_grid_op(
+        body=body,
+        graph_id="sec",
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert mock_query.call_args.kwargs["canonical_concepts"] == ["revenue"]
+
+  @pytest.mark.unit
   async def test_missing_period_scope_raises_400(self):
     """Body without periods, period_type, or fiscal_year is rejected."""
     body = _make_create_view_request(period_type=None)

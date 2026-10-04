@@ -76,7 +76,11 @@ def quarter_of(day: date) -> str:
 
 
 def discovery_window(
-  partition: str, since_days: int | None, today: date
+  partition: str,
+  since_days: int | None,
+  today: date,
+  *,
+  within_quarter: bool = False,
 ) -> tuple[date, date] | None:
   """The dates to discover in, or None when the window is empty (a future
   quarter, or a nightly run whose quarter ended before its look-back begins).
@@ -84,11 +88,15 @@ def discovery_window(
   A look-back reaches into the previous quarter when it has to: a nightly run
   on October 3 covers September 26 on, so a night missed at a quarter's end is
   caught up, and what it finds is kept under its own filing quarter.
+  ``within_quarter`` stops it at the quarter's first day, for a caller that
+  files everything it finds under the run's quarter.
   """
-  start, end = quarter_bounds(partition)
-  end = min(end, today)
+  first, end = quarter_bounds(partition)
+  start, end = first, min(end, today)
   if since_days is not None:
     start = today - timedelta(days=since_days)
+    if within_quarter:
+      start = max(start, first)
   return (start, end) if start <= end else None
 
 
@@ -151,6 +159,20 @@ def _read_manifest(s3: Any, bucket: str, key: str) -> dict[str, Any] | None:
 
   body = _read_object(s3, bucket, key)
   return json.loads(gunzip_if_gzipped(body)) if body else None
+
+
+def _published_files(
+  s3: Any, bucket: str, key: str
+) -> tuple[bool, list[dict[str, Any]] | None]:
+  """Whether a filing's manifest is in its public folder, and the files it
+  names (None when it is there but cannot be read)."""
+  try:
+    manifest = _read_manifest(s3, bucket, key)
+  except ValueError:
+    return True, None
+  if manifest is None:
+    return False, None
+  return True, manifest.get("representations") or None
 
 
 def _write_manifest(
@@ -253,7 +275,7 @@ async def _capture_current_reports(
   limiter = AsyncRateLimiter(rate=config.download_rate)
   semaphore = asyncio.Semaphore(config.download_concurrency)
   stats: Counter = Counter()
-  # (hit, its representations) — None for one published on an earlier run.
+  # (hit, its representations) — None when an earlier run's manifest is unreadable.
   published: list[tuple[Any, list[dict[str, Any]] | None]] = []
 
   async with aiohttp.ClientSession(headers=SEC_CONFIG["headers"]) as session:
@@ -263,12 +285,17 @@ async def _capture_current_reports(
       manifest_key = get_filing_artifact_key(
         year, hit.cik, hit.accession, FILING_ARTIFACT_MANIFEST
       )
-      if not config.republish and await asyncio.to_thread(
-        writer.object_exists, public_bucket, manifest_key
-      ):
-        stats["already_published"] += 1
-        published.append((hit, None))
-        return
+      if not config.republish:
+        # Read rather than checked for: the manifest names the filing's files,
+        # which its releases-list entry needs when the run that published it
+        # ended before the list was written.
+        there, files = await asyncio.to_thread(
+          _published_files, s3, public_bucket, manifest_key
+        )
+        if there:
+          stats["already_published"] += 1
+          published.append((hit, files))
+          return
 
       raw_key = get_current_report_raw_key(
         quarter_of(date.fromisoformat(hit.filing_date)), hit.cik, hit.accession

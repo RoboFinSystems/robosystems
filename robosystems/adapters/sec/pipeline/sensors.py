@@ -1,10 +1,15 @@
-"""SEC pipeline sensors and the nightly download schedule.
+"""SEC pipeline sensors and schedules.
 
 All start STOPPED; enable them in the Dagster UI. Nightly chain (every run
 tagged ``mode=incremental``): download → process (batched) → wake master →
 incremental DuckDB stage → full LadybugDB rebuild → lbug S3 → duckdb S3 →
 replica refresh + master sleep; text indexing and the filer catalog branch off
 staging, and the 8-K earnings releases off the download.
+
+Intraday (``mode=intraday``) stops short of the graph: download of the last
+days → process → filer catalog, so a filing is readable from its public folder
+the day it is filed, and the nightly chain stages and materializes it with the
+rest of the quarter. The 8-K capture has its own intraday schedule.
 ``sec_processing_sensor`` is the separate backfill driver.
 """
 
@@ -197,6 +202,17 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 
 # The nightly chain. Keep it stopped during backfills.
 
+NIGHTLY_MODE = "incremental"
+INTRADAY_MODE = "intraday"
+PIPELINE_MODES = (NIGHTLY_MODE, INTRADAY_MODE)
+
+# What the scheduled downloads fetch.
+SCHEDULED_FORM_TYPES = ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"]
+
+# An intraday pass discovers this far back: today and the day before, so a
+# filing accepted after the last pass of a day is still found the next morning.
+INTRADAY_LOOKBACK_DAYS = 2
+
 
 def _get_quarters_to_scan(now: datetime | None = None) -> list[str]:
   """The one quarter for the nightly download, keyed off Eastern time.
@@ -234,7 +250,7 @@ def sec_incremental_download_schedule(context):
           "sec_raw_filings": {
             "config": SECDownloadConfig(
               skip_existing=True,
-              form_types=["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
+              form_types=SCHEDULED_FORM_TYPES,
             ).model_dump(),
           },
         }
@@ -242,8 +258,52 @@ def sec_incremental_download_schedule(context):
       tags={
         "pipeline": "sec",
         "phase": "download",
-        "mode": "incremental",
+        "mode": NIGHTLY_MODE,
         "batch_id": batch_id or "",
+      },
+    )
+
+
+@schedule(
+  job=sec_download_job,
+  # After the pre-market filings, in the early afternoon, and after the 17:30
+  # ET cut-off for a same-day filing date. The nightly run takes what is later.
+  cron_schedule="45 9,13,17 * * 1-5",
+  default_status=DefaultScheduleStatus.STOPPED,
+  execution_timezone="America/New_York",
+)
+def sec_intraday_download_schedule(context):
+  """Same-day pickup of new filings: download → process → filer catalog.
+
+  Tagged ``mode=intraday``, which the chain sensor ends at the catalog: the
+  master is not woken and nothing is staged or materialized. The download
+  reads only its look-back, so it costs what the day filed, not the quarter.
+  """
+  from robosystems.adapters.sec.pipeline.configs import SECDownloadConfig
+
+  quarters = _get_quarters_to_scan(context.scheduled_execution_time)
+  batch_id = context.scheduled_execution_time.strftime("%Y%m%d-%H%M")
+
+  for partition_key in quarters:
+    yield RunRequest(
+      run_key=f"sec-intraday-{partition_key}-{batch_id}",
+      partition_key=partition_key,
+      run_config={
+        "ops": {
+          "sec_raw_filings": {
+            "config": SECDownloadConfig(
+              skip_existing=True,
+              form_types=SCHEDULED_FORM_TYPES,
+              since_days=INTRADAY_LOOKBACK_DAYS,
+            ).model_dump(),
+          },
+        }
+      },
+      tags={
+        "pipeline": "sec",
+        "phase": "download",
+        "mode": INTRADAY_MODE,
+        "batch_id": batch_id,
       },
     )
 
@@ -251,17 +311,22 @@ def sec_incremental_download_schedule(context):
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[sec_download_job, sec_process_job],
-  request_jobs=[sec_process_job, shared_master_wake_job],
+  request_jobs=[sec_process_job, shared_master_wake_job, sec_filing_catalog_job],
   default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
-  description="Chain: download → process (batched) → stage. Self-contained incremental pipeline.",
+  description=(
+    "Chain: download → process (batched) → stage on the nightly run, "
+    "→ filer catalog on an intraday one."
+  ),
 )
 def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
-  """Chain download → process batches → master wake.
+  """Chain download → process batches → master wake, or → the filer catalog.
 
   After a download, or a process batch that leaves files pending in its
-  partition, trigger the next batch. Once every partition is drained, wake the
-  shared master; sec_wake_to_stage_sensor takes it from there.
+  partition, trigger the next batch. Once every partition is drained, a
+  nightly chain wakes the shared master (sec_wake_to_stage_sensor takes it
+  from there) and an intraday chain ends at the catalog, leaving the graph
+  to the night.
   """
 
   from robosystems.database import session as SessionLocal
@@ -274,8 +339,9 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
   dagster_run = context.dagster_run
 
   run_tags = dagster_run.tags or {}
-  if run_tags.get("mode") != "incremental":
-    context.log.info("Skipping - not an incremental pipeline run")
+  mode = run_tags.get("mode")
+  if mode not in PIPELINE_MODES:
+    context.log.info("Skipping - not a nightly or intraday pipeline run")
     return
 
   partition_key = dagster_run.tags.get("dagster/partition")
@@ -318,12 +384,42 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
         f"Process batch completed for {partition_key}, "
         f"{pending_in_partition} files still pending, triggering next batch"
       )
+    elif mode == INTRADAY_MODE:
+      active_catalog_runs = context.instance.get_runs(
+        filters=RunsFilter(
+          job_name="sec_catalog",
+          statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+        ),
+        limit=1,
+      )
+      if active_catalog_runs:
+        context.log.info("Filer catalog already running, skipping")
+        return
+      context.log.info(
+        f"Intraday pass processed {partition_key}; listing it in the filer catalog"
+      )
+      yield RunRequest(
+        run_key=f"sec-catalog-intraday-{partition_key}-{dagster_run.run_id[:8]}",
+        job_name="sec_catalog",
+        partition_key=partition_key,
+        run_config={"ops": {"sec_filing_catalog": {"config": {"graph_id": "sec"}}}},
+        tags={
+          "pipeline": "sec",
+          "phase": "catalog",
+          "mode": INTRADAY_MODE,
+          "batch_id": batch_id or "",
+        },
+      )
+      return
     else:
       # Pending rows in other partitions hold the wake only while a process
       # run is draining them. Left by a failed or abandoned run, nothing would
       # ever drain them, and waiting on them stalls the nightly chain for good.
       # Assumes the backfill sensor is stopped: while it runs, a quarter it has
       # not yet picked up looks stranded here and may wake the master early.
+      # Only a run on another quarter can be draining them: an intraday run
+      # shares this one's quarter, and waiting on it would wait for a success
+      # that ends at the catalog.
       other_process_runs = [
         run
         for run in context.instance.get_runs(
@@ -333,6 +429,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
           ),
         )
         if run.run_id != dagster_run.run_id
+        and (run.tags or {}).get("dagster/partition") != partition_key
       ]
       if total_pending > 0 and other_process_runs:
         context.log.info(
@@ -370,12 +467,41 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
         tags={
           "pipeline": "sec",
           "phase": "master_wake",
-          "mode": "incremental",
+          "mode": NIGHTLY_MODE,
           "batch_id": batch_id or "",
           "quarter": partition_key,
         },
       )
       return
+  elif mode == INTRADAY_MODE:
+    # Most intraday passes find little or nothing. With nothing pending there
+    # is nothing to process and no reason to rewrite the catalog; failed files
+    # are left to the nightly chain's retry so a bad day does not spend their
+    # attempts.
+    session = None
+    pending = None
+    try:
+      session = SessionLocal()
+      pending = (
+        session.query(SourceFile)
+        .filter(
+          SourceFile.graph_id == "sec",
+          SourceFile.status == "pending",
+          SourceFile.partition_key.like(f"{partition_key}_%"),
+        )
+        .count()
+      )
+    except Exception as e:
+      context.log.error(f"Pending-file count failed, processing anyway: {e}")
+    finally:
+      if session:
+        session.close()
+    if pending == 0:
+      context.log.info(f"Intraday download found nothing new for {partition_key}")
+      return
+    context.log.info(
+      f"Intraday download completed for {partition_key}, triggering processing"
+    )
   else:
     context.log.info(f"Download completed for {partition_key}, triggering processing")
     # The nightly chain's retry: the backfill sensor that also requeues is
@@ -392,11 +518,15 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
       if session:
         session.close()
 
+  # A run of the other mode does not stand in for this chain's: its success
+  # would end at the wrong place (an intraday run never wakes the master). The
+  # `quarter` run-queue limit holds this one behind it, and by then it finds
+  # the quarter drained.
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
       job_name="sec_process",
       statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
-      tags={"dagster/partition": partition_key},
+      tags={"dagster/partition": partition_key, "mode": mode},
     ),
     limit=1,
   )
@@ -411,7 +541,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
     tags={
       "pipeline": "sec",
       "phase": "process",
-      "mode": "incremental",
+      "mode": mode,
       "quarter": partition_key,
       "batch_id": batch_id or "",
     },
@@ -419,8 +549,10 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
 
 
 # The nightly 8-K pass looks back a week, which covers a weekend and a missed
-# night; a zip already captured is not fetched again.
+# night; a zip already captured is not fetched again. An intraday pass needs
+# only today and the day before.
 CURRENT_REPORTS_NIGHTLY_LOOKBACK_DAYS = 7
+CURRENT_REPORTS_INTRADAY_LOOKBACK_DAYS = 2
 
 
 @run_status_sensor(
@@ -484,6 +616,55 @@ def sec_current_reports_sensor(context: RunStatusSensorContext):
       "phase": phase,
       "mode": "incremental",
       "batch_id": run_tags.get("batch_id", ""),
+    },
+  )
+
+
+@schedule(
+  job=sec_current_reports_job,
+  # EDGAR accepts filings from 06:00 to 22:00 ET on business days; the nightly
+  # chain takes the last hour.
+  cron_schedule="*/30 6-21 * * 1-5",
+  default_status=DefaultScheduleStatus.STOPPED,
+  execution_timezone="America/New_York",
+)
+def sec_current_reports_intraday_schedule(context):
+  """8-K earnings releases through the day, every half hour EDGAR is open.
+
+  A run reads only its look-back and fetches only what is not yet published,
+  so most cost a few EFTS pages. The ``edgar`` run-queue limit holds one
+  behind a download in flight; a tick that finds a capture still queued or
+  running is skipped rather than stacked behind it.
+  """
+  job_name = "sec_current_reports_capture"
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name=job_name,
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    yield SkipReason(f"{job_name} is still queued or running")
+    return
+
+  partition_key = _get_quarters_to_scan(context.scheduled_execution_time)[0]
+  batch_id = context.scheduled_execution_time.strftime("%Y%m%d-%H%M")
+  yield RunRequest(
+    run_key=f"sec-current-reports-intraday-{partition_key}-{batch_id}",
+    partition_key=partition_key,
+    run_config={
+      "ops": {
+        "sec_current_reports": {
+          "config": {"since_days": CURRENT_REPORTS_INTRADAY_LOOKBACK_DAYS}
+        }
+      }
+    },
+    tags={
+      "pipeline": "sec",
+      "phase": "current_reports",
+      "mode": INTRADAY_MODE,
+      "batch_id": batch_id,
     },
   )
 

@@ -53,6 +53,9 @@ class SECDownloadConfig(Config):
   tickers: list[str] = []  # empty = all companies
   ciks: list[str] = []
   max_filings: int = 0  # Max filings to download (0 = unlimited)
+  # Discover only the last N days of the quarter (the intraday pass); None
+  # reads the whole quarter, which also refreshes every filer in it.
+  since_days: int | None = None
   dry_run: bool = False  # discover only, don't download
 
   submissions_rate: float = 8.0  # requests per second

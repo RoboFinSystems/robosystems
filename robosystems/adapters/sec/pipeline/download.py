@@ -1,5 +1,7 @@
 """sec_raw_filings: EFTS discovery and download of SEC XBRL ZIPs to S3."""
 
+from datetime import date, datetime
+
 from dagster import (
   AssetExecutionContext,
   BackfillPolicy,
@@ -17,9 +19,17 @@ from .configs import (
   SECDownloadConfig,
   sec_quarter_partitions,
 )
+from .documents import discovery_window
 
 _MAX_429_RETRIES = 3
 _MAX_RETRY_AFTER = 300
+
+
+def _eastern_today() -> date:
+  """Today as EDGAR dates a filing."""
+  from robosystems.adapters.sec import EASTERN
+
+  return datetime.now(EASTERN).date()
 
 
 async def _get_with_429_retry(session, url: str, log) -> tuple[int, bytes]:
@@ -92,6 +102,19 @@ def sec_raw_filings(
 
   bucket = env.SHARED_RAW_BUCKET
 
+  # An intraday pass reads only its look-back, so it refreshes the filers that
+  # filed in it rather than every filer of the quarter. Filing dates are
+  # Eastern, and what is found is filed under the run's quarter.
+  window = None
+  if config.since_days is not None:
+    window = discovery_window(
+      partition_key, config.since_days, _eastern_today(), within_quarter=True
+    )
+    if window is None:
+      context.log.info(f"Nothing to discover: {partition_key} is outside the window")
+    else:
+      context.log.info(f"EFTS window: {window[0]}..{window[1]}")
+
   async def run_efts_download():
     import aiohttp
     from xbrlkit.edgar import EftsClient, EftsHit
@@ -137,16 +160,28 @@ def sec_raw_filings(
     if custom_forms:
       form_batches.append(custom_forms)
 
+    if config.since_days is not None and window is None:
+      form_batches = []
+
     hits = []
     for batch_idx, batch_forms in enumerate(form_batches):
       context.log.info(f"EFTS batch {batch_idx + 1}/{len(form_batches)}: {batch_forms}")
-      batch_hits = await asyncio.to_thread(
-        efts.query_by_quarter,
-        year,
-        quarter,
-        forms=batch_forms,
-        ciks=cik_filter,
-      )
+      if window is not None:
+        batch_hits = await asyncio.to_thread(
+          efts.query,
+          forms=batch_forms,
+          start_date=window[0].isoformat(),
+          end_date=window[1].isoformat(),
+          ciks=cik_filter,
+        )
+      else:
+        batch_hits = await asyncio.to_thread(
+          efts.query_by_quarter,
+          year,
+          quarter,
+          forms=batch_forms,
+          ciks=cik_filter,
+        )
       context.log.info(f"  Batch {batch_idx + 1} found {len(batch_hits)} filings")
       hits.extend(batch_hits)
 

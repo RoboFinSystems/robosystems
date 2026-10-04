@@ -75,9 +75,11 @@ from robosystems.adapters.sec.pipeline.s3_publish import (
   sec_lbug_s3_published,
 )
 from robosystems.adapters.sec.pipeline.sensors import (
+  sec_current_reports_intraday_schedule,
   sec_current_reports_sensor,
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
+  sec_intraday_download_schedule,
   sec_master_sleep_on_failure_sensor,
   sec_post_materialize_publish_sensor,
   sec_post_stage_index_sensor,
@@ -160,6 +162,8 @@ def get_dagster_components():
     ],
     "schedules": [
       sec_incremental_download_schedule,
+      sec_intraday_download_schedule,
+      sec_current_reports_intraday_schedule,
     ],
   }
 
@@ -185,6 +189,7 @@ __all__ = [
   "get_dagster_components",
   "sec_artifact_generation_job",
   "sec_current_reports",
+  "sec_current_reports_intraday_schedule",
   "sec_current_reports_job",
   "sec_current_reports_sensor",
   "sec_download_job",
@@ -209,6 +214,7 @@ __all__ = [
   "sec_incremental_download_schedule",
   "sec_incremental_pipeline_sensor",
   "sec_incremental_stage_job",
+  "sec_intraday_download_schedule",
   "sec_ixbrl_disclosures_indexed",
   "sec_ixbrl_index_job",
   "sec_knowledge_artifacts",

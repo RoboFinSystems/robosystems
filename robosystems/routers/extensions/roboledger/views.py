@@ -78,6 +78,7 @@ from robosystems.operations.roboledger.views import (
   resolve_filing,
   resolve_report,
   resolved_report_info,
+  shared_only_selectors,
   summarize_by_element,
 )
 
@@ -158,6 +159,14 @@ async def build_fact_grid_op(
       status_code=400,
       detail="Provide elements (qnames) and/or canonical_concepts",
     )
+  if refusal := shared_only_selectors(
+    graph_id,
+    canonical_concepts=body.canonical_concepts,
+    form=body.form,
+    fiscal_year=body.fiscal_year,
+    fiscal_period=body.fiscal_period,
+  ):
+    raise HTTPException(status_code=400, detail=refusal)
   if not body.periods and not body.period_type and body.fiscal_year is None:
     raise HTTPException(
       status_code=400,
@@ -506,9 +515,9 @@ async def information_block_op(
 
 
 # ── Filing text: describe, search, read ─────────────────────────────────────
-# xbrlkit's text tools over one filing read whole: on a shared repository its
-# own document from its public folder (an 8-K with its exhibits included), on
-# a tenant its text blocks. Neither the graph nor EDGAR is in the path.
+# xbrlkit's text tools over one filing read whole: its own document from its
+# public folder, an 8-K with its exhibits included. Shared repositories only
+# (a ledger files no document), and neither the graph nor EDGAR is in the path.
 
 
 async def _resolve_filing(graph_id: str, body: FilingSelector) -> FilingRef:
@@ -536,8 +545,9 @@ async def _resolve_filing(graph_id: str, body: FilingSelector) -> FilingRef:
     "its own document, from any processed year — and a `ticker` picks it: "
     "the latest annual report, narrowed by `fiscal_year` / `period_type`, or "
     "one `accession`, or with `form: 8-K` the latest earnings release and its "
-    "exhibits. SEC only: a ledger files no document, and its sections read "
-    "through `disclosures` and `information-block`."
+    "exhibits (`fiscal_year` is then the calendar year it was filed, and a "
+    "CIK may stand in for the ticker). SEC only: a ledger files no document, "
+    "and its sections read through `disclosures` and `information-block`."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT, _READABLE_GRAPH],

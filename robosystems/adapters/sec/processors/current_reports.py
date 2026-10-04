@@ -394,8 +394,8 @@ def merge_releases(
   cdn_url: str | None,
 ) -> list[dict[str, Any]]:
   """A filer's releases list with ``hits`` folded in, one entry per
-  accession, newest first. A hit without its representations (published on
-  an earlier run) keeps the file names its entry already carries."""
+  accession, newest first. A hit without its representations (its manifest
+  could not be read) keeps the file names its entry already carries."""
   merged = {entry["accession"]: entry for entry in existing if entry.get("accession")}
   for hit, representations in hits:
     entry = release_entry(hit, bucket, cdn_url, representations)
