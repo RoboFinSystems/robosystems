@@ -19,7 +19,7 @@ class _Builds:
     self.running = 0
     self.peak = 0
 
-  async def build(self, key, graph_id, report_id, cache):
+  async def build(self, key, graph_id, report_id, cache, coordinates=None):
     self.calls.append(report_id)
     self.running += 1
     self.peak = max(self.peak, self.running)

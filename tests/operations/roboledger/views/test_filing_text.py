@@ -584,6 +584,118 @@ class TestCurrentReport:
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.unit
+class TestReportsThroughTheCatalog:
+  """``disclosures`` / ``information-block`` find a ticker's report in the
+  public catalog and read its holon, so a filing processed today is readable
+  before the graph is rebuilt. The graph is asked only when the catalog
+  cannot say."""
+
+  @pytest.fixture
+  def graph(self, cdn, monkeypatch):
+    """The graph, which these tests expect to stay out of the path."""
+    monkeypatch.setattr(information_blocks, "S3Client", lambda: cdn)
+    monkeypatch.setattr(information_blocks, "_cache", lambda: None)
+    monkeypatch.setattr(
+      information_blocks, "is_shared_repository_or_subgraph", lambda graph_id: True
+    )
+    repository = AsyncMock(side_effect=AssertionError("the graph was read"))
+    monkeypatch.setattr(information_blocks, "get_graph_repository", repository)
+    resolver = AsyncMock(return_value=None)
+    monkeypatch.setattr("robosystems.adapters.sec.mcp.resolve_sec_report", resolver)
+    return resolver
+
+  async def test_a_ticker_resolves_and_reads_without_the_graph(self, cdn, graph):
+    report_id, resolved = await information_blocks.resolve_report("sec", ticker="acme")
+    assert report_id == f"rpt-{ACCESSION}"
+    assert resolved is not None
+    assert (resolved["form"], resolved["fiscal_year"]) == ("10-K", 2024)
+    coordinates = information_blocks.report_coordinates(resolved)
+    assert coordinates == (ACCESSION, CIK, "2025-02-05")
+
+    out = await information_blocks.query_disclosures(
+      "sec", report_id, coordinates=coordinates
+    )
+    assert out["report_id"] == report_id
+    assert f"{FOLDER}/holon.jsonld" in cdn.reads
+    graph.assert_not_awaited()
+    # The catalog names the folder's files, so the links include the document.
+    info = information_blocks.resolved_report_info(resolved)
+    assert info is not None
+    assert info["links"]["as_filed"].endswith(f"/{FOLDER}/acme-10k.htm")
+    assert "viewer" in info["links"]
+
+  async def test_a_fiscal_year_and_a_period_type_narrow_it(self, cdn, graph):
+    report_id, _resolved = await information_blocks.resolve_report(
+      "sec", ticker="ACME", fiscal_year=2017
+    )
+    assert report_id == f"rpt-{OLD}"
+    # A balance can come from either kind of report: "instant" reads as
+    # quarterly, as the graph resolver reads it.
+    report_id, _resolved = await information_blocks.resolve_report(
+      "sec", ticker="ACME", period_type="instant"
+    )
+    assert report_id == f"rpt-{ACCESSION}"
+    graph.assert_not_awaited()
+
+  async def test_a_filer_the_catalog_does_not_list_is_asked_of_the_graph(
+    self, cdn, graph
+  ):
+    graph.return_value = {"identifier": "rpt-from-graph", "form": "10-K"}
+    report_id, resolved = await information_blocks.resolve_report("sec", ticker="NOPE")
+    assert report_id == "rpt-from-graph"
+    assert resolved == graph.return_value
+    graph.assert_awaited_once()
+    assert information_blocks.report_coordinates(resolved) is None
+
+  async def test_a_catalog_that_cannot_be_read_is_not_an_error(self, cdn, graph):
+    graph.return_value = {"identifier": "rpt-from-graph", "form": "10-K"}
+
+    def down(bucket: str, key: str) -> str | None:
+      raise RuntimeError("storage is away")
+
+    cdn.download_string = down
+    report_id, _resolved = await information_blocks.resolve_report("sec", ticker="ACME")
+    assert report_id == "rpt-from-graph"
+
+  async def test_without_a_public_bucket_only_the_graph_is_asked(
+    self, cdn, graph, monkeypatch
+  ):
+    graph.return_value = {"identifier": "rpt-from-graph", "form": "10-K"}
+    monkeypatch.setattr(information_blocks.env, "PUBLIC_DATA_BUCKET", "")
+    report_id, _resolved = await information_blocks.resolve_report("sec", ticker="ACME")
+    assert report_id == "rpt-from-graph"
+    assert cdn.reads == []
+
+  async def test_a_report_named_by_id_still_asks_the_graph_where_it_is(
+    self, cdn, graph, monkeypatch
+  ):
+    repository = AsyncMock()
+    repository.execute_query = AsyncMock(
+      return_value=[{"accession": ACCESSION, "filing_date": "2025-02-05", "cik": CIK}]
+    )
+    monkeypatch.setattr(
+      information_blocks, "get_graph_repository", AsyncMock(return_value=repository)
+    )
+    report_id, resolved = await information_blocks.resolve_report(
+      "sec", report_id=REPORT_ID
+    )
+    assert (report_id, resolved) == (REPORT_ID, None)
+    out = await information_blocks.query_disclosures("sec", report_id)
+    assert out["report_id"] == REPORT_ID
+    repository.execute_query.assert_awaited_once()
+
+
+@pytest.mark.unit
+def test_report_coordinates_need_all_three():
+  assert information_blocks.report_coordinates(None) is None
+  assert information_blocks.report_coordinates({"accession": ACCESSION}) is None
+  assert information_blocks.report_coordinates(
+    {"accession": ACCESSION, "cik": CIK, "filing_date": "2025-02-05T00:00:00"}
+  ) == (ACCESSION, CIK, "2025-02-05")
+
+
 def test_request_caps_match_xbrlkit():
   assert SEARCH_TEXT_MAX_WINDOW == xbrlkit_tools.MAX_WINDOW
   assert SEARCH_TEXT_MAX_HITS == xbrlkit_tools.MAX_HITS

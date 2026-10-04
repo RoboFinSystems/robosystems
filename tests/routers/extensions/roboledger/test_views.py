@@ -786,7 +786,8 @@ class TestInformationBlockOperations:
     assert envelope.result["count"] == 1
     assert mock_resolve.call_args.kwargs["ticker"] == "ACME"
     assert mock_resolve.call_args.kwargs["fiscal_year"] == 2024
-    assert mock_query.call_args.kwargs == {"topic": None}
+    assert mock_query.call_args.kwargs["topic"] is None
+    assert "coordinates" in mock_query.call_args.kwargs
 
   @pytest.mark.unit
   async def test_information_block_wraps_the_block_in_the_envelope(self):
@@ -839,6 +840,7 @@ class TestInformationBlockOperations:
       "max_rows": 50,
       "max_members": None,
       "offset": 50,
+      "coordinates": None,
     }
 
   @pytest.mark.unit

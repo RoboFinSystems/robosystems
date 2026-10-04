@@ -76,6 +76,7 @@ from robosystems.operations.roboledger.views import (
   query_information_block,
   query_read_text,
   query_search_text,
+  report_coordinates,
   resolve_filing,
   resolve_report,
   resolved_report_info,
@@ -430,7 +431,12 @@ async def disclosures_op(
         fiscal_year=body.fiscal_year,
         period_type=body.period_type,
       )
-      result = await query_disclosures(graph_id, report_id, topic=body.topic)
+      result = await query_disclosures(
+        graph_id,
+        report_id,
+        topic=body.topic,
+        coordinates=report_coordinates(resolved),
+      )
     except ValueError as exc:
       raise _report_selector_errors(exc) from exc
     return DisclosuresResponse(**result, resolved_report=resolved_report_info(resolved))
@@ -502,6 +508,7 @@ async def information_block_op(
         max_rows=body.max_rows,
         max_members=body.max_members,
         offset=body.offset,
+        coordinates=report_coordinates(resolved),
       )
     except ValueError as exc:
       raise _report_selector_errors(exc) from exc
