@@ -86,6 +86,39 @@ def _hosted_hint(message: str) -> str:
   return message.replace("describe_filing", "disclosures")
 
 
+# xbrlkit's notes name its own tools; hosted, the same steps are these.
+_HOSTED_NOTE_PHRASES = (
+  (
+    "`id` is what information_block and statement take",
+    "`id` is the `block` `information-block` takes",
+  ),
+  ("call disclosures with a topic", "call `disclosures` with a `topic`"),
+  ("then information_block for the one", "then `information-block` for the one"),
+)
+# On a shared repository a text block is also in the filing's whole text; a
+# ledger's report has no text beyond its blocks.
+_READ_TEXT_PHRASE = "read one with read_text from its offset"
+_SHARED_READ_TEXT = (
+  "`search-text` finds one in the filing's whole text, `read-text` reads it"
+)
+_TENANT_READ_TEXT = "each previewed here"
+
+
+def _hosted_note(out: dict[str, Any], graph_id: str) -> dict[str, Any]:
+  note = out.get("note")
+  if not note:
+    return out
+  for theirs, ours in _HOSTED_NOTE_PHRASES:
+    note = note.replace(theirs, ours)
+  read = (
+    _SHARED_READ_TEXT
+    if is_shared_repository_or_subgraph(graph_id)
+    else _TENANT_READ_TEXT
+  )
+  out["note"] = note.replace(_READ_TEXT_PHRASE, read)
+  return out
+
+
 # xbrlkit's own caps, restated for the request models that cannot import them.
 MAX_BLOCK_ROWS = xbrlkit_serve.MAX_BLOCK_ROWS
 MAX_BLOCK_MEMBERS = xbrlkit_serve.MAX_BLOCK_MEMBERS_CAP
@@ -630,7 +663,7 @@ async def query_disclosures(
     for block in out.get("blocks") or []:
       if block.get("text_blocks"):
         block["text_blocks"] = _hosted_text(block["text_blocks"], external)
-  return _stamp(out, graph_id, report_id)
+  return _stamp(_hosted_note(out, graph_id), graph_id, report_id)
 
 
 async def query_information_block(
@@ -670,6 +703,7 @@ async def query_information_block(
       out = read()
   except ToolError as exc:
     raise BlockNotFoundError(_hosted_hint(str(exc))) from exc
+  out = _hosted_note(out, graph_id)
   external = _external_text_blocks(model)
   if external and out.get("text"):
     out["text"] = _hosted_text(out["text"], external)

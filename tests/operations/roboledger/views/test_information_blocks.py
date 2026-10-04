@@ -13,6 +13,7 @@ restate.
 
 from __future__ import annotations
 
+import re
 import zlib
 from datetime import date
 from typing import Any
@@ -85,6 +86,12 @@ USD_URI = "http://www.xbrl.org/2003/iso4217#USD"
 ACCESSION = "0000012345-25-000001"
 CIK = "0000012345"
 REPORT_ID = "rpt-acme"
+# The names xbrlkit's notes give its own tools, which this server spells with
+# hyphens or does not have.
+XBRLKIT_TOOL_NAMES = re.compile(
+  r"\b(information_block|read_text|search_text|describe_filing|fact_grid|"
+  r"resolve_element|statement take)\b"
+)
 HOLON_KEY = f"2025/{CIK}/{ACCESSION}/holon.jsonld"
 FRAGMENT_KEY = f"2025/{CIK}/{ACCESSION}/fact_abc.html"
 FRAGMENT = "<p>The company reports one segment, Widgets, and sells them everywhere.</p>"
@@ -587,6 +594,17 @@ class TestPublishedFiling:
     assert text["preview"].startswith("The company reports one segment")
     assert "external" not in text
 
+  async def test_notes_name_this_servers_tools(self, published, no_cache) -> None:
+    notes = [
+      (await query_disclosures("sec", REPORT_ID))["note"],
+      (await query_disclosures("sec", REPORT_ID, topic="segments"))["note"],
+      (await query_information_block("sec", REPORT_ID, "SegmentsDetails"))["note"],
+    ]
+    for note in notes:
+      assert not XBRLKIT_TOOL_NAMES.search(note), note
+    assert "`information-block` takes" in notes[1]
+    assert "`read-text`" in notes[2]
+
   async def test_the_balance_sheet_foots(self, published, no_cache) -> None:
     out = await query_information_block("sec", REPORT_ID, "BalanceSheet")
     assert [row["label"] for row in out["rows"]] == [
@@ -748,6 +766,14 @@ class TestTenantReport:
     assert assets["values"] == {"2025-12-31": 1500.0}
     [roll] = out["calculation"]
     assert (roll["foots"], roll["checked"]) == (1, 1)
+
+  async def test_notes_name_no_tool_a_ledger_lacks(self, tenant, no_cache) -> None:
+    fam = await query_disclosures("kg1234567890abcdef", REPORT_ID, topic="balance")
+    [block] = fam["blocks"]
+    out = await query_information_block("kg1234567890abcdef", REPORT_ID, block["id"])
+    for note in (fam["note"], out["note"]):
+      assert not XBRLKIT_TOOL_NAMES.search(note), note
+      assert "read-text" not in note
 
   async def test_a_report_the_ledger_does_not_hold_is_not_found(
     self, tenant, no_cache

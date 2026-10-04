@@ -36,6 +36,7 @@ def _hit(document_id: str, **overrides) -> SearchHit:
     "form_type": "10-K",
     "filing_date": "2025-02-05",
     "fiscal_year": 2024,
+    "accession_number": "0000066740-25-000006",
     "section_label": "Research, Development and Related Expenses",
     "section_id": "us-gaap:ResearchDevelopmentAndComputerSoftwareDisclosureTextBlock",
     "xbrl_elements": ["us-gaap:ResearchAndDevelopmentExpense"] * 20,
@@ -347,8 +348,15 @@ class TestCompactSearchResponse:
     assert result["form_type"] == "10-K"
     assert result["filing_date"] == "2025-02-05"
     assert result["fiscal_year"] == 2024
+    assert result["accession_number"] == "0000066740-25-000006"
     for hit in result["hits"]:
-      for field in ("entity_ticker", "entity_name", "form_type", "filing_date"):
+      for field in (
+        "entity_ticker",
+        "entity_name",
+        "form_type",
+        "filing_date",
+        "accession_number",
+      ):
         assert field not in hit
 
   def test_keeps_filing_fields_on_hits_that_span_filings(self):

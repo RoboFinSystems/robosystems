@@ -233,6 +233,7 @@ class TestSectionParts:
               "part_count": 6,
               "parent_document_id": "a1b2c3d4e5f60718",
               "next_document_id": "9e8d7c6b5a493827",
+              "accession_number": "0000320193-25-000079",
             },
             "highlight": {"content": ["...liquidity..."]},
           }
@@ -242,6 +243,8 @@ class TestSectionParts:
 
     hit = service.search_documents("sec", SearchRequest(query="liquidity")).hits[0]
 
+    # search-text opens the filing a hit came from by its accession.
+    assert hit.accession_number == "0000320193-25-000079"
     assert (hit.part, hit.part_count) == (2, 6)
     assert hit.parent_document_id == "a1b2c3d4e5f60718"
     assert hit.next_document_id == "9e8d7c6b5a493827"

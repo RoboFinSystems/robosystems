@@ -101,6 +101,11 @@ RECENT_RELEASES = 12
 EARNINGS_ITEM = "2.02"
 
 QUERY_MAX_CHARS = 500
+# What may follow a word that is still the word: a plural or a possessive.
+# Not after a letter or two, which it would turn into another word (A, as).
+# The curly apostrophe is the character itself, not an escape: xbrlkit reads
+# the pattern's words back for its `terms` hint.
+_WORD_ENDING = "(?:e?s|['\u2019]s)?"
 _QUERY_ALTERNATIVES = 10
 _QUERY_WORDS = 20
 
@@ -122,20 +127,24 @@ class QueryError(ValueError):
 
 def query_pattern(query: str) -> str:
   """The regular expression a query means: each ``|``-separated phrase
-  matched as its words in order across any whitespace, a trailing ``*`` a
-  stem (``terminat*``), a bare ``*`` ignored. Every word is escaped, so the
-  pattern is linear."""
+  matched as words in order across any whitespace, each from the start of a
+  word to its end or a plural / possessive ending (``tariff`` finds tariffs,
+  not antitariff), a trailing ``*`` a stem (``terminat*``), a bare ``*``
+  ignored. Every word is escaped, so the pattern is linear."""
   text = (query or "").strip()[:QUERY_MAX_CHARS]
   phrases: list[str] = []
   for phrase in text.split("|")[:_QUERY_ALTERNATIVES]:
-    words = phrase.split()[:_QUERY_WORDS]
+    words = [w for w in phrase.split()[:_QUERY_WORDS] if w != "*"]
     parts = [
-      re.escape(w[:-1]) + r"\w*" if w.endswith("*") and len(w) > 1 else re.escape(w)
+      re.escape(w[:-1]) + r"\w*"
+      if w.endswith("*") and len(w) > 1
+      else re.escape(w) + (_WORD_ENDING if len(w) > 2 else "")
       for w in words
-      if w != "*"
     ]
     if parts:
-      phrases.append(r"\s+".join(parts))
+      # Lookarounds rather than \b, so a word that starts or ends in a symbol
+      # ($4.81, (loss)) is bounded too.
+      phrases.append(r"(?<!\w)" + r"\s+".join(parts) + r"(?!\w)")
   if not phrases:
     raise QueryError("query is required: one or more words, phrases split by |")
   return "|".join(phrases)
@@ -186,7 +195,8 @@ async def resolve_filing(
   earnings release (``fiscal_year`` then means the calendar year it was
   filed), anything else the latest annual (or, with ``period_type`` quarterly,
   any) report, narrowed by ``fiscal_year``. A CIK in place of the ticker
-  reaches the 8-Ks of a filer the catalog does not list. A ``report_id`` names
+  reaches a filer the catalog lists under no ticker: its 8-Ks, and any one
+  filing by accession. A ``report_id`` names
   a report in the graph on its own; with a ticker, accession or form beside
   it the request is ambiguous and refused. A tenant graph is refused: a
   ledger files no document to read.
@@ -223,13 +233,17 @@ async def resolve_filing(
   s3 = S3Client()
   if symbol.isdigit():
     # No ticker is all digits, so this is a CIK. The catalog is keyed by
-    # ticker; the releases lists are keyed by CIK and need no catalog.
+    # ticker; the releases lists and the filing folders are keyed by CIK.
     if not (wants_8k or accession):
       raise ReportSelectorError(
-        "A CIK finds a filer's 8-K earnings releases (form: 8-K, or an "
-        "accession); its annual and quarterly reports are listed by ticker."
+        "A CIK finds a filer's 8-K earnings releases (form: 8-K), or any one "
+        "filing by its accession; its annual and quarterly reports are listed "
+        "by ticker."
       )
     cik = symbol.zfill(10)
+    if accession and not wants_8k:
+      if folder_ref := await _folder_report_ref(s3, cik, accession):
+        return folder_ref
     return await _release_ref(s3, f"CIK {cik}", cik, accession, fiscal_year)
   catalog = await _read_json(s3, get_filing_catalog_key(symbol))
   if not catalog or not catalog.get("cik"):
@@ -284,6 +298,34 @@ def _report_ref(cik: str, entry: dict[str, Any]) -> FilingRef:
     form=entry.get("form"),
     resolved=resolved,
   )
+
+
+async def _folder_report_ref(
+  s3: S3Client, cik: str, accession: str
+) -> FilingRef | None:
+  """A report named by CIK and accession, from its folder's manifest — how a
+  filer the catalog lists under no ticker is reached. The folder sits under
+  the year it was filed: the accession's own year, or the next for one filed
+  after hours on the last day of a year. An 8-K is left to its releases list."""
+  assigned = 2000 + int(accession[11:13])
+  for year in (assigned, assigned + 1):
+    manifest = await _read_json(
+      s3, get_filing_artifact_key(str(year), cik, accession, FILING_ARTIFACT_MANIFEST)
+    )
+    if not manifest:
+      continue
+    if (manifest.get("form") or "").upper() == CURRENT_REPORT_FORM:
+      return None
+    fiscal_year = str(manifest.get("fiscal_year") or "")
+    entry = {
+      **manifest,
+      "accession": accession,
+      "filing_date": manifest.get("filing_date") or str(year),
+      # The catalog's spelling: a manifest writes the year as a string.
+      "fiscal_year": int(fiscal_year) if fiscal_year.isdigit() else None,
+    }
+    return _report_ref(cik, entry)
+  return None
 
 
 _RELEASE_FOLDER_RE = re.compile(r"/\d{4}/(\d{10})/(\d{10}-\d{2}-\d{6})/?$")
