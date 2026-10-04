@@ -315,3 +315,31 @@ class TestPublicDataBucketComesWithItsCdn:
       f"{workflow.name} passes PublicDataBucketArn to {buckets} stack(s) "
       f"and PublicDataCDNURL to {cdns}"
     )
+
+
+def _container_templates_granted_the_user_bucket() -> list[Path]:
+  return sorted(
+    t
+    for t in CFN_DIR.glob("*.yaml")
+    if "ContainerDefinitions" in (text := t.read_text()) and "UserDataBucketArn" in text
+  )
+
+
+@pytest.mark.unit
+class TestUserDataBucketIsNamedWhereItIsGranted:
+  """Code reads the bucket's name from the container and falls back to the dev
+  bucket. A task role granted the bucket without the name writes nowhere: an
+  operator's create-report runs in the worker, and could not store its bundle."""
+
+  def test_templates_granted_the_bucket_are_discoverable(self):
+    stems = {t.stem for t in _container_templates_granted_the_user_bucket()}
+    assert {"api", "worker", "dagster"} <= stems
+
+  @pytest.mark.parametrize(
+    "template", _container_templates_granted_the_user_bucket(), ids=lambda p: p.stem
+  )
+  def test_every_template_granted_the_bucket_names_it(self, template):
+    assert re.search(r"-\s+Name:\s+USER_DATA_BUCKET\b", template.read_text()), (
+      f"{template.name} grants a task role the user-data bucket but gives no "
+      f"container USER_DATA_BUCKET"
+    )

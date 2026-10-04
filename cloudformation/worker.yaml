@@ -471,6 +471,10 @@ Resources:
               Value: !Select [5, !Split [":", !Ref PublicDataBucketArn]]
             - Name: PUBLIC_DATA_CDN_URL
               Value: !Ref PublicDataCDNURL
+            # Where a report's bundle is stored; an operator's create-report
+            # runs in this process.
+            - Name: USER_DATA_BUCKET
+              Value: !Select [5, !Split [":", !Ref UserDataBucketArn]]
             # Dagster event-log storage, so worker tasks can report runless
             # AssetMaterialization events; DagsterInstance.get() fails without it.
             - Name: DAGSTER_HOME
