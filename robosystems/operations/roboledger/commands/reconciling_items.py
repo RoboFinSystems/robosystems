@@ -321,8 +321,8 @@ def _restate_blockers(
 
   if _round_trip(accepted) is not None:
     blockers.append(
-      "this entry was published to QuickBooks and edited there — QuickBooks "
-      "already holds the change; catch up or acknowledge"
+      "this entry was written to QuickBooks and edited there, so QuickBooks "
+      "already holds the change — catch up, or acknowledge it as handled"
     )
   elif _catch_up_entry_ids(session, str(event.id)):
     blockers.append(
@@ -335,8 +335,8 @@ def _restate_blockers(
   # always posts) but reachable for a source that does not auto-commit.
   if str(event.status) == "fulfilled" and accepted.get("status") == "draft":
     blockers.append(
-      "the accepted payload would draft this event's entries while the event "
-      "is 'fulfilled' — resolve it as catch_up, or correct the payload's status"
+      "the source now reports this as a draft while the event here is "
+      "fulfilled and its entries posted — catch up instead"
     )
 
   # With no entry in the accepted payload the handler would rebuild the old
@@ -349,7 +349,7 @@ def _restate_blockers(
       )
     else:
       blockers.append(
-        "the accepted payload carries no entry to restate to — catch up posts "
+        "the source no longer carries an entry to restate to — catch up posts "
         "the difference"
       )
 
@@ -361,7 +361,7 @@ def _restate_blockers(
 
   not_posted = [str(e.id) for e in entries if str(e.status) != "posted"]
   if not_posted:
-    blockers.append(f"entries not in 'posted' status: {', '.join(not_posted)}")
+    blockers.append(f"some of its entries are not posted ({', '.join(not_posted)})")
 
   if entry_ids:
     reversed_ids = (
@@ -371,7 +371,8 @@ def _restate_blockers(
     )
     if reversed_ids:
       blockers.append(
-        f"entries already reversed: {', '.join(str(r) for r in reversed_ids)}"
+        "some of its entries were already reversed "
+        f"({', '.join(str(r) for r in reversed_ids)})"
       )
 
   transaction_ids = {str(e.transaction_id) for e in entries if e.transaction_id}
@@ -390,7 +391,8 @@ def _restate_blockers(
     )
     if foreign:
       blockers.append(
-        f"other entries share this event's transaction: {', '.join(str(f) for f in foreign)}"
+        "other entries share this event's transaction "
+        f"({', '.join(str(f) for f in foreign)})"
       )
 
   if entry_ids and _has_dimension_links(session, entry_ids, transaction_ids):
