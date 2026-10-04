@@ -1343,13 +1343,15 @@ class TestSecCurrentReportsIntradaySchedule:
 
     # A schedule context rebuilds its instance from a reference, which an
     # ephemeral instance does not have and a patched object would not survive.
+    # Entering the context closes that rebuilt instance; left open, it stays
+    # Dagster's current instance after the test and breaks later loads.
     with (
       DagsterInstance.local_temp() as instance,
       patch.object(DagsterInstance, "get_runs", return_value=active),
-    ):
-      context = build_schedule_context(
+      build_schedule_context(
         instance=instance, scheduled_execution_time=self.TICK
-      )
+      ) as context,
+    ):
       return list(sec_current_reports_intraday_schedule(context))
 
   @patch("robosystems.adapters.sec.pipeline.sensors._get_quarters_to_scan")
