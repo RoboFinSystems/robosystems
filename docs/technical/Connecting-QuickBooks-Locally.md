@@ -538,9 +538,11 @@ If you have an MCP client connected to the RoboSystems server (Claude Code, cust
 get-mapping-summary --mapping_id <mapping_struct_id>
 get-unmapped-elements
 
-# Pull specific facts out of the hypercube (needs a concept filter AND a
-# period filter; returns a flat fact list, not a pivot)
-build-fact-grid --canonical_concepts '["revenue"]' --period_type annual --fiscal_year 2025
+# Pull specific facts out of the hypercube (needs elements AND a period
+# filter; returns a flat fact list, not a pivot). A ledger's graph is queried
+# by element qname: canonical concepts and fiscal-year filters exist only on
+# shared repositories such as SEC.
+build-fact-grid --elements '["rs-gaap:Assets"]' --period_type instant
 
 # Ad-hoc graph query
 read-graph-cypher --cypher "MATCH (e:Entity) RETURN e.name, e.fiscal_year_end"

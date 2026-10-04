@@ -159,10 +159,10 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 ### Analytical View Operation — build-fact-grid
 
-A graph-backed analytical view that pivots over the XBRL hypercube. It hits the materialized LadybugDB graph rather than the OLTP database:
+A graph-backed analytical view that pivots over the XBRL hypercube. It hits the materialized LadybugDB graph rather than the OLTP database. This example compares two filers on the SEC shared repository:
 
 ```bash
-curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/build-fact-grid" \
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/build-fact-grid" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -176,6 +176,15 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 ```
 
 **Important:** `build-fact-grid` requires a scoping filter. You must supply `elements` and/or `canonical_concepts`, **and** at least one of `periods` / `period_type` / `fiscal_year`. Omitting both classes of filter returns HTTP 400.
+
+On your own ledger's graph, select by `elements` (qnames such as `rs-gaap:Assets`) with `periods` or `period_type`. Canonical concepts and the `form`, `fiscal_year` and `fiscal_period` filters are written by the shared-repository pipeline and are not on a ledger's graph:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/build-fact-grid" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"elements": ["rs-gaap:Assets"], "period_type": "instant"}'
+```
 
 ### RoboInvestor Command Write — Create a Security
 
