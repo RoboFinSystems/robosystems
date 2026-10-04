@@ -246,8 +246,9 @@ class TestXbrl:
       s3 = s3_cls.return_value
       s3.object_exists.return_value = False
       s3.upload_bytes.return_value = False
-      with pytest.raises(BundleSigningError, match="materialize"):
+      with pytest.raises(BundleSigningError, match="materialize") as excinfo:
         get_report_download_url(session, "kg1", "rpt_1", flavor="xbrl-2.1")
+      assert "s3://" not in str(excinfo.value)
 
 
 class TestHolonJsonLd:
@@ -316,8 +317,9 @@ class TestHolonJsonLd:
       s3 = s3_cls.return_value
       s3.object_exists.return_value = False
       s3.upload_string.return_value = False
-      with pytest.raises(BundleSigningError, match="materialize"):
+      with pytest.raises(BundleSigningError, match="materialize") as excinfo:
         get_report_download_url(session, "kg1", "rpt_1", flavor="holon-jsonld")
+      assert "s3://" not in str(excinfo.value)
 
 
 class TestTavi:
@@ -393,5 +395,6 @@ class TestTavi:
       s3 = s3_cls.return_value
       s3.object_exists.return_value = False
       s3.upload_bytes.return_value = False
-      with pytest.raises(BundleSigningError, match="materialize"):
+      with pytest.raises(BundleSigningError, match="materialize") as excinfo:
         get_report_download_url(session, "kg1", "rpt_1", flavor="tavi")
+      assert "s3://" not in str(excinfo.value)

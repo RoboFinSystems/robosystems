@@ -178,8 +178,11 @@ def test_publish_aborts_when_the_holon_cannot_be_stored() -> None:
     patch(f"{_CMD}.S3Client", return_value=s3),
     patch(f"{_CMD}.build_report_bundle"),
     patch(f"{_CMD}.serialize_to_holon_jsonld", return_value="{holon}"),
-    pytest.raises(BundleUploadError, match="holon"),
+    pytest.raises(BundleUploadError, match="holon") as excinfo,
   ):
     _stamp_report_bundle(MagicMock(), "kg1", report)  # type: ignore[arg-type]
 
   assert report.bundle_url is None
+  # The caller is told what failed, not where it is kept.
+  assert "s3://" not in str(excinfo.value)
+  assert "report-bundles" not in str(excinfo.value)

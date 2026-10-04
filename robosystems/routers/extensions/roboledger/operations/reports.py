@@ -279,10 +279,15 @@ async def file_report_op(
   def _runner():
     with extensions_session(graph_id) as session:
       try:
-        return cmd_file_report(session, body.report_id, filed_by=str(user.id))
+        return cmd_file_report(
+          session, body.report_id, filed_by=str(user.id), graph_id=graph_id
+        )
       except RowLockedError as e:
         # Another lifecycle write holds the report. Retryable.
         raise HTTPException(status_code=409, detail=str(e))
+      except BundleUploadError as e:
+        # The filed bundle could not be stored; nothing was filed. Retryable.
+        raise HTTPException(status_code=502, detail=str(e))
       except ReportNotFoundError:
         raise HTTPException(
           status_code=404, detail=f"Report '{body.report_id}' not found."

@@ -75,7 +75,7 @@ def test_file_report_transitions_draft_to_filed() -> None:
   session.get.return_value = _make_report_def(filing_status="draft")
 
   with _patch_response_helpers():
-    result = file_report(session, "rpt_01", filed_by="user_01")
+    result = file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
 
   assert result.filing_status == "filed"
   assert result.filed_by == "user_01"
@@ -86,12 +86,76 @@ def test_file_report_transitions_draft_to_filed() -> None:
   assert session.flush.call_count == 2
 
 
+def test_filing_a_published_report_stamps_its_bundle_again() -> None:
+  """The bundle was stamped while the report was a draft; the filed record's
+  downloads carry a filing date only if it is rebuilt once the date exists."""
+  report = _make_report_def(filing_status="draft")
+  report.generation_status = "published"
+  session = MagicMock()
+  session.get.return_value = report
+  seen: dict[str, object] = {}
+
+  def _stamp(_session, graph_id, report_def):
+    seen.update(
+      graph_id=graph_id,
+      filing_status=report_def.filing_status,
+      filed_at=report_def.filed_at,
+    )
+
+  with (
+    _patch_response_helpers(),
+    patch(
+      "robosystems.operations.roboledger.commands.reports._stamp_report_bundle",
+      side_effect=_stamp,
+    ),
+  ):
+    file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
+
+  assert seen["graph_id"] == "kg1"
+  assert seen["filing_status"] == "filed"
+  assert seen["filed_at"] is not None
+
+
+def test_filing_leaves_a_report_with_no_bundle_alone() -> None:
+  session = MagicMock()
+  session.get.return_value = _make_report_def(filing_status="draft")
+
+  with (
+    _patch_response_helpers(),
+    patch(
+      "robosystems.operations.roboledger.commands.reports._stamp_report_bundle"
+    ) as stamp,
+  ):
+    file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
+
+  stamp.assert_not_called()
+
+
+def test_filing_fails_when_the_bundle_cannot_be_stored() -> None:
+  from robosystems.operations.roboledger.commands.reports import BundleUploadError
+
+  report = _make_report_def(filing_status="draft")
+  report.generation_status = "published"
+  session = MagicMock()
+  session.get.return_value = report
+
+  with (
+    _patch_response_helpers(),
+    patch(
+      "robosystems.operations.roboledger.commands.reports._stamp_report_bundle",
+      side_effect=BundleUploadError("no storage"),
+    ),
+    pytest.raises(BundleUploadError),
+  ):
+    file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
+
+
 def test_file_report_transitions_under_review_to_filed() -> None:
   session = MagicMock()
   session.get.return_value = _make_report_def(filing_status="under_review")
 
   with _patch_response_helpers():
-    result = file_report(session, "rpt_01", filed_by="user_01")
+    result = file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
 
   assert result.filing_status == "filed"
 
@@ -105,7 +169,7 @@ def test_file_report_rejects_already_filed() -> None:
   )
 
   with pytest.raises(InvalidFilingTransitionError) as exc:
-    file_report(session, "rpt_01", filed_by="user_01")
+    file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
 
   assert "filed" in str(exc.value)
 
@@ -115,7 +179,7 @@ def test_file_report_rejects_archived() -> None:
   session.get.return_value = _make_report_def(filing_status="archived")
 
   with pytest.raises(InvalidFilingTransitionError):
-    file_report(session, "rpt_01", filed_by="user_01")
+    file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
 
 
 def test_file_report_blocks_when_generation_status_pending() -> None:
@@ -132,7 +196,7 @@ def test_file_report_blocks_when_generation_status_pending() -> None:
   session.get.return_value = report
 
   with pytest.raises(InvalidFilingTransitionError) as exc:
-    file_report(session, "rpt_01", filed_by="user_01")
+    file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
 
   assert "generating" in str(exc.value)
 
@@ -144,7 +208,7 @@ def test_file_report_blocks_when_generation_status_failed() -> None:
   session.get.return_value = report
 
   with pytest.raises(InvalidFilingTransitionError) as exc:
-    file_report(session, "rpt_01", filed_by="user_01")
+    file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
 
   assert "failed" in str(exc.value)
 
@@ -154,7 +218,7 @@ def test_file_report_raises_when_report_missing() -> None:
   session.get.return_value = None
 
   with pytest.raises(ReportNotFoundError):
-    file_report(session, "rpt_missing", filed_by="user_01")
+    file_report(session, "rpt_missing", filed_by="user_01", graph_id="kg1")
 
 
 # ── transition_filing_status ──────────────────────────────────────────────
@@ -236,7 +300,7 @@ def test_file_report_requires_the_author() -> None:
   session = MagicMock()
   session.get.return_value = report
   with pytest.raises(NotAuthorizedError):
-    file_report(session, "rpt_01", filed_by="user_other")
+    file_report(session, "rpt_01", filed_by="user_other", graph_id="kg1")
   assert report.filing_status == "draft"
 
 
@@ -248,7 +312,7 @@ def test_file_report_refuses_a_shared_in_copy() -> None:
   session = MagicMock()
   session.get.return_value = report
   with pytest.raises(NotAuthorizedError):
-    file_report(session, "rpt_01", filed_by="user_01")
+    file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
 
 
 def test_transition_requires_the_author() -> None:

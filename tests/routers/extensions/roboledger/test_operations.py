@@ -1419,6 +1419,38 @@ class TestFileReportOp:
     assert exc.value.status_code == 422
     assert "archived" in exc.value.detail
 
+  @pytest.mark.asyncio
+  async def test_502_when_the_filed_bundle_cannot_be_stored(self) -> None:
+    """Filing stamps the bundle again; a storage fault there must read as a
+    retryable 502, and the command is given the graph it stamps into."""
+    from robosystems.operations.roboledger.commands.reports import BundleUploadError
+
+    body = FileReportRequest(report_id="rpt_01")
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.reports.cmd_file_report",
+        side_effect=BundleUploadError(
+          "Failed to upload holon bundle for report rpt_01"
+        ),
+      ) as cmd,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.reports.extensions_session"
+      ) as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await file_report_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 502
+    assert cmd.call_args.kwargs["graph_id"] == GRAPH_ID
+
 
 class TestTransitionFilingStatusOp:
   @pytest.mark.asyncio

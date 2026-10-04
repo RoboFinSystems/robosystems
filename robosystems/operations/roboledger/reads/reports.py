@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 from robosystems.config import env
 from robosystems.config.storage.graph import get_report_bundle_key
+from robosystems.logger import logger
 from robosystems.models.api.extensions.reports import (
   FactRowResponse,
   LiveFinancialStatementResponse,
@@ -325,9 +326,9 @@ def get_report_download_url(
 ) -> ReportBundleDownloadResponse | None:
   """Resolve a presigned URL for a published Report's serialization bundle.
 
-  The API never streams bytes. The holon is stamped at publish; the Tavi
-  and XBRL 2.1 are materialized on first download and cached under a
-  ``generation_count``-versioned key, which never goes stale. (A generation
+  The API never streams bytes. The holon is stamped at publish and again at
+  filing; the Tavi and XBRL 2.1 are materialized on first download and cached
+  under a ``generation_count``-versioned key, which never goes stale. (A generation
   stamped before the holon became the anchor materializes it the same way.)
 
   Returns ``None`` when ``report_id`` doesn't resolve. Raises
@@ -446,9 +447,11 @@ def _materialize_and_presign_xbrl(
       metadata={"report-id": report_id, "graph-id": graph_id},
     )
     if not uploaded:
+      logger.error(
+        "XBRL bundle upload failed for report %s at s3://%s/%s", report_id, bucket, key
+      )
       raise BundleSigningError(
-        f"Failed to materialize XBRL bundle for report '{report_id}' "
-        f"to s3://{bucket}/{key}."
+        f"Failed to materialize XBRL bundle for report '{report_id}'."
       )
 
   download_url = s3.generate_presigned_url(
@@ -509,9 +512,11 @@ def _materialize_and_presign_holon(
       metadata={"report-id": report_id, "graph-id": graph_id},
     )
     if not uploaded:
+      logger.error(
+        "Holon upload failed for report %s at s3://%s/%s", report_id, bucket, key
+      )
       raise BundleSigningError(
-        f"Failed to materialize holon bundle for report '{report_id}' "
-        f"to s3://{bucket}/{key}."
+        f"Failed to materialize holon bundle for report '{report_id}'."
       )
 
   download_url = s3.generate_presigned_url(
@@ -568,9 +573,11 @@ def _materialize_and_presign_tavi(
       metadata={"report-id": report_id, "graph-id": graph_id},
     )
     if not uploaded:
+      logger.error(
+        "Tavi upload failed for report %s at s3://%s/%s", report_id, bucket, key
+      )
       raise BundleSigningError(
-        f"Failed to materialize Tavi model for report '{report_id}' "
-        f"to s3://{bucket}/{key}."
+        f"Failed to materialize Tavi model for report '{report_id}'."
       )
 
   download_url = s3.generate_presigned_url(
