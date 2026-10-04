@@ -96,7 +96,7 @@ class CreateViewRequest(BaseModel):
   )
   canonical_concepts: list[str] = Field(
     default_factory=list,
-    description="Canonical concept names (e.g., 'revenue', 'net_income'). Matches all mapped qnames.",
+    description="Canonical concept names (e.g., 'revenue', 'net_income'). Matches all mapped qnames. Shared repositories only.",
   )
   periods: list[str] = Field(
     default_factory=list,
@@ -112,15 +112,15 @@ class CreateViewRequest(BaseModel):
   )
   form: str | None = Field(
     None,
-    description="Filter by SEC filing form type (e.g., '10-K', '10-Q')",
+    description="Filter by SEC filing form type (e.g., '10-K', '10-Q'). Shared repositories only.",
   )
   fiscal_year: int | None = Field(
     None,
-    description="Filter by fiscal year (e.g., 2024)",
+    description="Filter by fiscal year (e.g., 2024). Shared repositories only.",
   )
   fiscal_period: str | None = Field(
     None,
-    description="Filter by fiscal period (e.g., 'FY', 'Q1', 'Q2', 'Q3')",
+    description="Filter by fiscal period (e.g., 'FY', 'Q1', 'Q2', 'Q3'). Shared repositories only.",
   )
   period_type: str | None = Field(
     None,

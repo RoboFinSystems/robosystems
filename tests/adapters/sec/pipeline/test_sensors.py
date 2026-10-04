@@ -289,9 +289,10 @@ class TestSecIncrementalPipelineSensor:
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
-    # Another partition's process run is still draining them.
+    # Another partition's nightly process run is still draining them.
     in_flight = MagicMock()
     in_flight.run_id = "run-proc-q4-draining"
+    in_flight.tags = {"mode": "incremental", "dagster/partition": "2024-Q4"}
     context = _build_run_status_context(
       sensor_name="sec_incremental_pipeline_sensor",
       job_name="sec_process",
@@ -1125,6 +1126,32 @@ class TestSecCurrentReportsSensor:
     assert self._run("sec_download", active=[MagicMock()]) == []
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_an_intraday_capture_in_the_queue_does_not_displace_it(self, mock_env):
+    # The intraday capture reads two days back; this is the pass that covers
+    # a weekend or a missed night, so it is still asked for.
+    mock_env.ENVIRONMENT = "prod"
+    from dagster import DagsterInstance
+
+    def get_runs(filters=None, **kwargs):
+      wants_nightly = (filters.tags or {}).get("mode") == "incremental"
+      return [] if wants_nightly else [MagicMock()]
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_current_reports_sensor",
+        job_name="sec_download",
+        run_id="run-abcdef12",
+        tags=self.TAGS,
+        instance=instance,
+        get_runs_return=[],
+      )
+      instance.get_runs = get_runs
+      [request] = list(sec_current_reports_sensor(context))
+    assert request.run_config["ops"]["sec_current_reports"]["config"] == {
+      "since_days": CURRENT_REPORTS_NIGHTLY_LOOKBACK_DAYS
+    }
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_in_dev(self, mock_env):
     mock_env.ENVIRONMENT = "dev"
     assert self._run("sec_download") == []
@@ -1247,19 +1274,21 @@ class TestIntradayChain:
     assert request.job_name == "sec_process"
     assert request.tags["mode"] == "incremental"
 
+  @pytest.mark.parametrize("intraday_quarter", ["2026-Q4", "2026-Q3"])
   @patch("robosystems.database.session")
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
-  def test_an_intraday_run_on_the_same_quarter_does_not_hold_the_wake(
-    self, mock_env, session
+  def test_an_intraday_run_never_holds_the_nightly_wake(
+    self, mock_env, session, intraday_quarter
   ):
-    # Files pending on another quarter hold the nightly wake only while a run
-    # on that quarter drains them. An intraday run shares the nightly quarter;
-    # waiting on it would wait for a success that ends at the catalog.
+    # Files pending on another quarter hold the nightly wake only while a
+    # nightly run drains them. An intraday run's success ends at the catalog,
+    # on the nightly quarter or (across a quarter's end) on the one where the
+    # files are pending; waiting on it would wait for a wake that never comes.
     mock_env.ENVIRONMENT = "prod"
     _pending(session, rows=[("2026-Q3_0000000001_0000000001-26-000001",)])
     intraday = MagicMock()
     intraday.run_id = "run-intraday-live"
-    intraday.tags = {"dagster/partition": "2026-Q4", "mode": "intraday"}
+    intraday.tags = {"dagster/partition": intraday_quarter, "mode": "intraday"}
 
     def get_runs(filters=None, **kwargs):
       return [intraday] if filters.job_name == "sec_process" else []
@@ -1345,9 +1374,11 @@ class TestSecCurrentReportsIntradaySchedule:
     [skipped] = self._tick(active=[MagicMock()])
     assert isinstance(skipped, SkipReason)
 
-  def test_covers_edgar_hours_on_weekdays_and_ships_stopped(self):
+  def test_stops_before_the_nightly_hour_and_ships_stopped(self):
+    # From 21:00 the nightly download and its week-long capture have the
+    # `edgar` slot; a tick then would queue in front of that capture.
     schedule = sec_current_reports_intraday_schedule
-    assert schedule.cron_schedule == "*/30 6-21 * * 1-5"
+    assert schedule.cron_schedule == "*/30 6-20 * * 1-5"
     assert schedule.execution_timezone == "America/New_York"
     assert schedule.default_status == DefaultScheduleStatus.STOPPED
     assert schedule.job_name == "sec_current_reports_capture"

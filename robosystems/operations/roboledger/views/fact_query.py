@@ -36,6 +36,19 @@ _SAFE_STR_RE = re.compile(r"[\w:\-]+")
 _TICKER_RE = re.compile(r"[A-Za-z][A-Za-z0-9.\-]{0,9}")
 
 
+def is_ledger_graph(graph_id: str) -> bool:
+  """A tenant's own graph: neither a shared repository nor a subgraph."""
+  return not is_shared_repository_or_subgraph(graph_id) and not is_subgraph(graph_id)
+
+
+def period_scope_hint(graph_id: str) -> str:
+  """What a query must be scoped by, naming only what the graph can answer."""
+  scopes = "periods or period_type"
+  if not is_ledger_graph(graph_id):
+    scopes = "periods, period_type, or fiscal_year"
+  return f"Provide {scopes} to scope the query"
+
+
 def shared_only_selectors(
   graph_id: str,
   *,
@@ -48,9 +61,11 @@ def shared_only_selectors(
 
   Canonical concepts and a report's form and fiscal period are written by the
   shared-repository pipeline; a ledger's graph carries none of them, so each
-  would match nothing and read as "no data". Refused by name instead.
+  would match nothing and read as "no data". Refused by name instead. A
+  subgraph is left alone, as :func:`query_fact_grid` leaves it: what it holds
+  is whatever was written to it.
   """
-  if is_shared_repository_or_subgraph(graph_id):
+  if not is_ledger_graph(graph_id):
     return None
   given = [
     name
@@ -279,7 +294,7 @@ async def query_fact_grid(
   # Predicates on the nodes around the fact: its element, period and report.
   dimension_where = [*element_where]
 
-  tenant = not is_shared_repository_or_subgraph(graph_id) and not is_subgraph(graph_id)
+  tenant = is_ledger_graph(graph_id)
   if tenant and await run_off_loop(_has_ledger_schema, graph_id):
     fact_where.append(_NOT_A_SCHEDULE_FACT)
 

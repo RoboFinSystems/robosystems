@@ -22,6 +22,7 @@ from robosystems.operations.roboledger.views.fact_query import (
   _deduplicate_fact_rows,
   _is_ticker,
   _safe_str,
+  period_scope_hint,
   query_fact_grid,
   shared_only_selectors,
 )
@@ -673,6 +674,17 @@ class TestSharedOnlySelectors:
     assert refusal is not None
     assert refusal.startswith("canonical_concepts is only available")
     assert "elements" in refusal
+
+  def test_a_subgraph_is_left_alone(self):
+    # What a subgraph holds is whatever was written to it, as query_fact_grid
+    # itself assumes; only a ledger's own graph is known to lack these.
+    assert shared_only_selectors("kg1234567890abcdef_dev", fiscal_year=2025) is None
+
+  def test_the_scope_hint_names_only_what_the_graph_answers(self):
+    assert period_scope_hint(MOCK_GRAPH_ID) == (
+      "Provide periods or period_type to scope the query"
+    )
+    assert "fiscal_year" in period_scope_hint("sec")
 
   def test_several_are_named_together(self):
     refusal = shared_only_selectors(MOCK_GRAPH_ID, form="10-K", fiscal_year=2025)

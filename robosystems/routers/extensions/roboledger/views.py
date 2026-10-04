@@ -68,6 +68,7 @@ from robosystems.operations.roboledger.views import (
   ReportTooLargeError,
   deduplicate_facts,
   filing_info,
+  period_scope_hint,
   query_describe_filing,
   query_disclosures,
   query_fact_grid,
@@ -128,7 +129,7 @@ _READABLE_GRAPH = Depends(_require_readable_graph)
   response_model=OperationEnvelope[ViewResponse],
   operation_id="buildFactGrid",
   summary="Build Fact Grid",
-  description="Queries LadybugDB `Fact` nodes by element qnames or canonical concepts, with filters for periods, entities, form, and fiscal context. Returns deduplicated facts plus the aspects they span — arranging them into a table is the consumer's job, since collapsing cells safely requires the full aspect signature. Works on both roboledger tenant graphs (post-materialization) and the SEC shared repository.",
+  description="Queries LadybugDB `Fact` nodes by element qnames, with filters for periods and entities. Returns deduplicated facts plus the aspects they span — arranging them into a table is the consumer's job, since collapsing cells safely requires the full aspect signature. Works on both roboledger tenant graphs (post-materialization) and the SEC shared repository. Canonical concepts and the form and fiscal-period filters exist on shared repositories only: a ledger's graph carries none of them, and a query by them there is refused rather than answered with nothing.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -168,10 +169,7 @@ async def build_fact_grid_op(
   ):
     raise HTTPException(status_code=400, detail=refusal)
   if not body.periods and not body.period_type and body.fiscal_year is None:
-    raise HTTPException(
-      status_code=400,
-      detail="Provide periods, period_type, or fiscal_year to scope the query",
-    )
+    raise HTTPException(status_code=400, detail=period_scope_hint(graph_id))
 
   # Only on shared repos, where an entity-less query returns an arbitrary
   # slice across thousands of filers. A tenant graph is already scoped to its

@@ -10,6 +10,7 @@ from robosystems.operations.roboledger.views.fact_grid_builder import (
   summarize_by_element,
 )
 from robosystems.operations.roboledger.views.fact_query import (
+  period_scope_hint,
   query_fact_grid,
   shared_only_selectors,
 )
@@ -49,6 +50,7 @@ __all__ = [
   "ReportTooLargeError",
   "deduplicate_facts",
   "filing_info",
+  "period_scope_hint",
   "query_describe_filing",
   "query_disclosures",
   "query_fact_grid",

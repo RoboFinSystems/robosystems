@@ -347,6 +347,31 @@ class TestResolution:
     with pytest.raises(ReportSelectorError, match="8-K"):
       await resolve_filing("sec", ticker=CIK)
 
+  async def test_a_combined_release_is_read_where_it_was_published(self, cdn, no_cache):
+    # A combined 8-K is published once, under its first registrant, and listed
+    # under every registrant. Asked for through a co-registrant, it is read
+    # from the folder its entry names, not from one built on the asking CIK.
+    subsidiary = "0000099999"
+    cdn.objects[f"current-reports/{subsidiary}.json"] = json.dumps(
+      {
+        "cik": subsidiary,
+        "releases": [
+          {
+            **_release(EIGHT_K, "2025-01-30", ["2.02", "9.01"]),
+            "folder": f"{CDN}/{EIGHT_K_FOLDER}/",
+            "document": "acme-8k.htm",
+            "exhibits": {"EX-99.1": "ex991.htm"},
+          }
+        ],
+      }
+    )
+    ref = await resolve_filing("sec", ticker=subsidiary, form="8-K")
+    assert ref.cik == CIK
+    assert ref.resolved
+    assert ref.resolved["links"]["as_filed"].endswith(f"/{EIGHT_K_FOLDER}/acme-8k.htm")
+    described = await query_describe_filing("sec", ref)
+    assert described["profile"]["text"] == "primary document"
+
   async def test_report_id_alone_reads_the_graphs_coordinates(self, cdn):
     ref = await resolve_filing("sec", report_id=REPORT_ID)
     assert (ref.report_id, ref.accession) == (REPORT_ID, ACCESSION)

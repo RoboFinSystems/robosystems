@@ -153,7 +153,7 @@ def test_corpus_ciks_from_submissions():
 
 @pytest.mark.unit
 class TestCaptureCurrentReports:
-  def _run(self, writer, raw_zip, fetched=(200, b""), published=(False, None)):
+  def _run(self, writer, raw_zip, fetched=(200, b""), published=None):
     fetch = MagicMock()
 
     async def _fetch(session, url, log):
@@ -228,7 +228,7 @@ class TestCaptureCurrentReports:
       {"kind": "exhibit", "name": "ex991.htm", "exhibit": "EX-99.1"},
     ]
     writer = _Writer()
-    stats, fetch = self._run(writer, _zip(), published=(True, files))
+    stats, fetch = self._run(writer, _zip(), published=files)
     assert stats == Counter({"already_published": 1})
     fetch.assert_not_called()
     assert writer.objects == {}
@@ -281,18 +281,33 @@ class TestPublishedFiles:
       return {"Body": io.BytesIO(self.body)}
 
   def test_no_manifest_means_not_published(self):
-    assert module._published_files(self._S3(), "public", "k") == (False, None)
+    assert module._published_files(self._S3(), "public", "k") is None
 
   def test_a_manifest_names_the_files(self):
     files = [{"kind": "document", "name": "a.htm"}]
     body = json.dumps({"representations": files}).encode()
-    assert module._published_files(self._S3(body), "public", "k") == (True, files)
+    assert module._published_files(self._S3(body), "public", "k") == files
 
-  def test_an_unreadable_manifest_is_still_published(self):
-    assert module._published_files(self._S3(b"not json"), "public", "k") == (
-      True,
-      None,
-    )
+  @pytest.mark.parametrize(
+    "body",
+    [
+      b"not json",
+      b"\x1f\x8b\x08 a gzip header and nothing after it",
+      b"[1, 2]",
+      json.dumps({"representations": []}).encode(),
+      json.dumps({"errors": ["ex991.htm: upload failed"]}).encode(),
+    ],
+    ids=["bad json", "corrupt gzip", "not an object", "names nothing", "no files"],
+  )
+  def test_a_manifest_that_cannot_be_used_is_published_again(self, body):
+    # Left in place it would be skipped by every later run; published again
+    # (the zip is read back from raw) it is repaired.
+    assert module._published_files(self._S3(body), "public", "k") is None
+
+  def test_a_storage_error_is_not_a_failed_filing(self):
+    s3 = self._S3(b"{}")
+    s3.get_object = MagicMock(side_effect=RuntimeError("throttled"))
+    assert module._published_files(s3, "public", "k") is None
 
 
 @pytest.mark.unit
@@ -471,6 +486,22 @@ def test_release_lists_merge_newest_first(env):
     stats = module._update_release_lists([(HIT, representations)], None, MagicMock())
   assert stats == Counter({"lists_written": 1})
   listed = json.loads(writer.body("current-reports/0000320193.json"))
+
+  # A second pass over the same filing changes nothing and writes nothing.
+  again = _Writer()
+  with (
+    patch("robosystems.operations.aws.s3.S3Client", return_value=again),
+    patch(
+      "robosystems.adapters.sec.pipeline.text_index._get_s3_client", return_value=s3
+    ),
+    patch.object(module, "_read_object", return_value=json.dumps(listed).encode()),
+  ):
+    unchanged = module._update_release_lists(
+      [(HIT, representations)], None, MagicMock()
+    )
+  assert unchanged == Counter({"lists_unchanged": 1})
+  assert again.objects == {}
+
   assert [r["accession"] for r in listed["releases"]] == [
     HIT.accession,
     older["accession"],

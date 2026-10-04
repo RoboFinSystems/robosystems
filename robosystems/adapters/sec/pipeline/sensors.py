@@ -209,8 +209,10 @@ PIPELINE_MODES = (NIGHTLY_MODE, INTRADAY_MODE)
 # What the scheduled downloads fetch.
 SCHEDULED_FORM_TYPES = ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"]
 
-# An intraday pass discovers this far back: today and the day before, so a
-# filing accepted after the last pass of a day is still found the next morning.
+# An intraday pass discovers today and this many days before it, within the
+# quarter. That finds a filing dated after the previous day's last pass; what a
+# weekend or a quarter's first day puts out of reach is the nightly run's,
+# which reads the whole quarter.
 INTRADAY_LOOKBACK_DAYS = 2
 
 
@@ -277,7 +279,8 @@ def sec_intraday_download_schedule(context):
 
   Tagged ``mode=intraday``, which the chain sensor ends at the catalog: the
   master is not woken and nothing is staged or materialized. The download
-  reads only its look-back, so it costs what the day filed, not the quarter.
+  reads only its look-back, so it refreshes the filers of those days rather
+  than every filer of the quarter.
   """
   from robosystems.adapters.sec.pipeline.configs import SECDownloadConfig
 
@@ -417,9 +420,10 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
       # ever drain them, and waiting on them stalls the nightly chain for good.
       # Assumes the backfill sensor is stopped: while it runs, a quarter it has
       # not yet picked up looks stranded here and may wake the master early.
-      # Only a run on another quarter can be draining them: an intraday run
-      # shares this one's quarter, and waiting on it would wait for a success
-      # that ends at the catalog.
+      # Only another nightly run is worth waiting on: its success comes back
+      # through this branch and wakes the master. An intraday run's success
+      # ends at the catalog whichever quarter it is on, so waiting on one
+      # would wait for a wake that never comes.
       other_process_runs = [
         run
         for run in context.instance.get_runs(
@@ -429,7 +433,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
           ),
         )
         if run.run_id != dagster_run.run_id
-        and (run.tags or {}).get("dagster/partition") != partition_key
+        and (run.tags or {}).get("mode") == NIGHTLY_MODE
       ]
       if total_pending > 0 and other_process_runs:
         context.log.info(
@@ -487,7 +491,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
         .filter(
           SourceFile.graph_id == "sec",
           SourceFile.status == "pending",
-          SourceFile.partition_key.like(f"{partition_key}_%"),
+          SourceFile.partition_key.startswith(f"{partition_key}_", autoescape=True),
         )
         .count()
       )
@@ -549,8 +553,8 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
 
 
 # The nightly 8-K pass looks back a week, which covers a weekend and a missed
-# night; a zip already captured is not fetched again. An intraday pass needs
-# only today and the day before.
+# night; a zip already captured is not fetched again. An intraday pass reads
+# today and the two days before.
 CURRENT_REPORTS_NIGHTLY_LOOKBACK_DAYS = 7
 CURRENT_REPORTS_INTRADAY_LOOKBACK_DAYS = 2
 
@@ -595,10 +599,14 @@ def sec_current_reports_sensor(context: RunStatusSensorContext):
     }
   }
 
+  # An intraday capture in the queue does not stand in for this one: it reads
+  # two days back, and this is the pass that covers a weekend or a missed
+  # night. The `edgar` run-queue limit runs them one after the other.
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
       job_name=job_name,
       statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+      tags={"mode": NIGHTLY_MODE},
     ),
     limit=1,
   )
@@ -622,19 +630,22 @@ def sec_current_reports_sensor(context: RunStatusSensorContext):
 
 @schedule(
   job=sec_current_reports_job,
-  # EDGAR accepts filings from 06:00 to 22:00 ET on business days; the nightly
-  # chain takes the last hour.
-  cron_schedule="*/30 6-21 * * 1-5",
+  # EDGAR accepts filings from 06:00 to 22:00 ET on business days. The last
+  # tick is 20:30: from 21:00 the nightly download holds the `edgar` slot and
+  # its own week-long capture follows it.
+  cron_schedule="*/30 6-20 * * 1-5",
   default_status=DefaultScheduleStatus.STOPPED,
   execution_timezone="America/New_York",
 )
 def sec_current_reports_intraday_schedule(context):
-  """8-K earnings releases through the day, every half hour EDGAR is open.
+  """8-K earnings releases through the day, every half hour until the
+  nightly chain takes over.
 
-  A run reads only its look-back and fetches only what is not yet published,
-  so most cost a few EFTS pages. The ``edgar`` run-queue limit holds one
-  behind a download in flight; a tick that finds a capture still queued or
-  running is skipped rather than stacked behind it.
+  A run pages the 8-Ks of its look-back and reads the manifest of each one it
+  wants, then fetches and lists only what is new: most ticks fetch nothing
+  from EDGAR but those pages. The ``edgar`` run-queue limit holds one behind a
+  download in flight; a tick that finds a capture still queued or running is
+  skipped rather than stacked behind it.
   """
   job_name = "sec_current_reports_capture"
   active_runs = context.instance.get_runs(

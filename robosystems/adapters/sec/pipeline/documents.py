@@ -161,18 +161,17 @@ def _read_manifest(s3: Any, bucket: str, key: str) -> dict[str, Any] | None:
   return json.loads(gunzip_if_gzipped(body)) if body else None
 
 
-def _published_files(
-  s3: Any, bucket: str, key: str
-) -> tuple[bool, list[dict[str, Any]] | None]:
-  """Whether a filing's manifest is in its public folder, and the files it
-  names (None when it is there but cannot be read)."""
+def _published_files(s3: Any, bucket: str, key: str) -> list[dict[str, Any]] | None:
+  """The files a published filing's manifest names, or None when the filing
+  is not published: no manifest, one that cannot be read, or one that names
+  nothing. The caller publishes those again, which is what repairs them — a
+  broken manifest left in place would be skipped by every later run."""
   try:
     manifest = _read_manifest(s3, bucket, key)
-  except ValueError:
-    return True, None
-  if manifest is None:
-    return False, None
-  return True, manifest.get("representations") or None
+  except Exception:
+    return None
+  files = manifest.get("representations") if isinstance(manifest, dict) else None
+  return files if isinstance(files, list) and files else None
 
 
 def _write_manifest(
@@ -275,7 +274,7 @@ async def _capture_current_reports(
   limiter = AsyncRateLimiter(rate=config.download_rate)
   semaphore = asyncio.Semaphore(config.download_concurrency)
   stats: Counter = Counter()
-  # (hit, its representations) — None when an earlier run's manifest is unreadable.
+  # (hit, the files its manifest names)
   published: list[tuple[Any, list[dict[str, Any]] | None]] = []
 
   async with aiohttp.ClientSession(headers=SEC_CONFIG["headers"]) as session:
@@ -289,10 +288,10 @@ async def _capture_current_reports(
         # Read rather than checked for: the manifest names the filing's files,
         # which its releases-list entry needs when the run that published it
         # ended before the list was written.
-        there, files = await asyncio.to_thread(
+        files = await asyncio.to_thread(
           _published_files, s3, public_bucket, manifest_key
         )
-        if there:
+        if files is not None:
           stats["already_published"] += 1
           published.append((hit, files))
           return
@@ -386,9 +385,10 @@ def _update_release_lists(
   """Merge the published 8-Ks into each registrant's releases list, newest
   first — a combined filing under every registrant the corpus holds.
 
-  Whole-file rewrites, one per filer. Runs that pull are serialized by the
-  ``edgar`` run-queue limit and :func:`refuse_concurrent_edgar_pull`, so no
-  two write the same list at once.
+  Whole-file rewrites, one per filer whose list changes: an intraday run
+  finds mostly filings it has already listed, and leaves those lists alone.
+  Runs that pull are serialized by the ``edgar`` run-queue limit and
+  :func:`refuse_concurrent_edgar_pull`, so no two write the same list at once.
   """
   from robosystems.adapters.sec.processors.artifacts import (
     JSON_MEDIA_TYPE,
@@ -409,13 +409,15 @@ def _update_release_lists(
     for cik in hit.registrants(corpus):
       by_cik.setdefault(cik, []).append((hit, representations))
 
-  def one(cik: str) -> bool:
+  def one(cik: str) -> str:
     key = get_current_reports_list_key(cik)
     body = _read_object(s3, bucket, key)
     existing = json.loads(gunzip_if_gzipped(body)).get("releases", []) if body else []
     releases = merge_releases(existing, by_cik[cik], bucket, cdn_url)
+    if releases == existing:
+      return "lists_unchanged"
     document = {"cik": cik, "releases": releases}
-    return put_public_artifact(
+    written = put_public_artifact(
       writer,
       bucket,
       key,
@@ -423,11 +425,12 @@ def _update_release_lists(
       JSON_MEDIA_TYPE,
       cache_control=MANIFEST_CACHE_CONTROL,
     )
+    return "lists_written" if written else "lists_failed"
 
   stats: Counter = Counter()
   with ThreadPoolExecutor(max_workers=LIST_WORKERS) as pool:
-    for ok in pool.map(one, sorted(by_cik)):
-      stats["lists_written" if ok else "lists_failed"] += 1
+    for outcome in pool.map(one, sorted(by_cik)):
+      stats[outcome] += 1
   if stats["lists_failed"]:
     log.warning(f"{stats['lists_failed']} releases lists failed to write")
   return stats

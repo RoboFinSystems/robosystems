@@ -164,9 +164,13 @@ its folder, as `information-block` does.
   its name) go to the filing's public folder with a `manifest.json`, and the
   filer's releases list `current-reports/{cik}.json` gains the filing — how an
   8-K is found, since it is in neither the graph nor the catalog. A zip
-  already in raw is read from there, so a re-run costs only the EFTS pages,
-  and a filing already published is listed from its manifest, so a run that
-  ended before its lists were written is repaired by the next.
+  already in raw is read from there, so a re-run fetches nothing from EDGAR
+  but the EFTS pages. A filing already published is listed from its manifest,
+  so a run that ended before its lists were written is repaired by the next;
+  a manifest that cannot be read, or names no files, is published again; and a
+  list that would not change is not rewritten. A combined 8-K is published
+  once, under its first registrant, and listed under every registrant the
+  corpus holds: each entry's `folder` says where the files are.
 - **`sec_filing_documents`** — the primary document of a filing processed
   before inline XBRL. Its zip held the instance only, so its folder has the
   holon and the Tavi but not the document; the manifest names it, one request
@@ -229,14 +233,14 @@ filing. Both are tagged `mode=intraday` and neither wakes the master.
 
 ```
 09:45, 13:45, 17:45 ET — sec_intraday_download_schedule
-  → download (the last 2 days of the quarter, not the quarter)
+  → download (today and the two days before, within the quarter)
 
 sec_incremental_pipeline_sensor
   → process, only when the download found something new
   → filer catalog, once the partition has drained   (no wake, no stage)
 
-every 30 min, 06:00–21:30 ET — sec_current_reports_intraday_schedule
-  → 8-K earnings releases, the last 2 days
+every 30 min, 06:00–20:30 ET — sec_current_reports_intraday_schedule
+  → 8-K earnings releases, today and the two days before
 ```
 
 - **Same day:** a new 10-K / 10-Q's holon and document are published by the
@@ -256,10 +260,23 @@ every 30 min, 06:00–21:30 ET — sec_current_reports_intraday_schedule
   behind it.
 - **Cost.** The look-back (`since_days` on the download) is what keeps a pass
   cheap: a whole-quarter download refreshes the submissions of every filer in
-  the quarter, thousands of EDGAR requests late in a quarter. A pass that finds
-  nothing new stops after the download. The `edgar` run-queue limit serializes
-  both schedules with each other and with the nightly download, and an 8-K tick
+  the quarter, thousands of EDGAR requests late in a quarter, where a pass
+  refreshes the filers of three dates. A pass that finds nothing new stops
+  after the download. An 8-K tick pages the 8-Ks of its three dates, lists the
+  corpus, and reads the manifest of each release it wants; it fetches and
+  lists only what is new. The `edgar` run-queue limit serializes both
+  schedules with each other and with the nightly download, and an 8-K tick
   that finds a capture still queued or running is skipped.
+- **What the look-back does not reach.** A filing dated on a Friday after the
+  last pass, or on a quarter's last day, is outside Monday's or the new
+  quarter's window: those are the nightly run's, which reads the whole quarter.
+  The 8-K schedule stops at 20:30 so the nightly chain's week-long capture is
+  not queued behind it, and that capture is asked for even with an intraday one
+  in the queue.
+- **A listing pass can be late.** If the catalog is already running when a
+  pass finishes processing, that pass is not listed until the next one that
+  finds something, or the night. One more run each way for the failure alarm
+  to see: an intraday run that fails is healed by the next, but it alarms.
 
 **All sensors and schedules start STOPPED.** Enable them in the Dagster UI
 when you want the automated chain; nothing runs on its own after a fresh deploy.
@@ -267,8 +284,8 @@ when you want the automated chain; nothing runs on its own after a fresh deploy.
 | Sensor / schedule | Triggers | Role |
 |-------------------|----------|------|
 | `sec_incremental_download_schedule` | `sec_download_job` | 9pm ET weekdays, the whole quarter |
-| `sec_intraday_download_schedule` | `sec_download_job` | 09:45, 13:45, 17:45 ET weekdays, the last 2 days |
-| `sec_current_reports_intraday_schedule` | `sec_current_reports_job` | every 30 min, 06:00–21:30 ET weekdays |
+| `sec_intraday_download_schedule` | `sec_download_job` | 09:45, 13:45, 17:45 ET weekdays, a three-date look-back |
+| `sec_current_reports_intraday_schedule` | `sec_current_reports_job` | every 30 min, 06:00–20:30 ET weekdays, a three-date look-back |
 | `sec_incremental_pipeline_sensor` | `sec_process_job`, `shared_master_wake_job`, `sec_filing_catalog_job` | download → process (batched loop) → wake the shared master once drained (nightly), or → the filer catalog (intraday) |
 | `sec_wake_to_stage_sensor` | `sec_incremental_stage_job` | master awake → stage the tagged quarter |
 | `sec_stage_to_materialize_sensor` | `sec_materialize_job` | stage → full graph rebuild |
