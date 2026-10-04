@@ -136,6 +136,9 @@ class _FakeBucket:
     self.reads.append(key)
     return self.objects.get(key)
 
+  # The read that raises on a storage fault; here nothing faults.
+  read_string = download_string
+
 
 class _FakeRedis:
   def __init__(self) -> None:
@@ -581,6 +584,201 @@ class TestCurrentReport:
     assert out["filing"]["form"] == "8-K"
     assert out["filing"]["items"]
     assert [i["label"] for i in out["sections"]["items"]] == ["Form 8-K", "EX-99.1"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.unit
+class TestReportsThroughTheCatalog:
+  """``disclosures`` / ``information-block`` find a ticker's report in the
+  public catalog and read its holon, so a filing processed today is readable
+  before the graph is rebuilt. The graph is asked only when the catalog
+  cannot say."""
+
+  GRAPH_ROW = {"identifier": "rpt-from-graph", "form": "10-K"}
+
+  @pytest.fixture
+  def graph(self, cdn, monkeypatch):
+    """The graph's ticker resolver. The graph itself fails if it is read."""
+    monkeypatch.setattr(information_blocks, "S3Client", lambda: cdn)
+    monkeypatch.setattr(information_blocks, "_cache", lambda: None)
+    monkeypatch.setattr(
+      information_blocks, "is_shared_repository_or_subgraph", lambda graph_id: True
+    )
+    repository = AsyncMock(side_effect=AssertionError("the graph was read"))
+    monkeypatch.setattr(information_blocks, "get_graph_repository", repository)
+    resolver = AsyncMock(return_value=dict(self.GRAPH_ROW))
+    monkeypatch.setattr("robosystems.adapters.sec.mcp.resolve_sec_report", resolver)
+    return resolver
+
+  def _list(self, cdn, *filings):
+    """Put filings at the head of the fixture filer's catalog, newest first."""
+    catalog = json.loads(cdn.objects["companies/acme.json"])
+    catalog["filings"] = [*filings, *catalog["filings"]]
+    cdn.objects["companies/acme.json"] = json.dumps(catalog)
+
+  async def test_a_ticker_resolves_and_reads_without_the_graph(self, cdn, graph):
+    report_id, resolved = await information_blocks.resolve_report("sec", ticker="acme")
+    assert report_id == f"rpt-{ACCESSION}"
+    assert resolved is not None
+    assert (resolved["form"], resolved["fiscal_year"]) == ("10-K", 2024)
+    coordinates = information_blocks.report_coordinates(resolved)
+    assert coordinates == (ACCESSION, CIK, "2025-02-05")
+
+    out = await information_blocks.query_disclosures(
+      "sec", report_id, coordinates=coordinates
+    )
+    assert out["report_id"] == report_id
+    assert f"{FOLDER}/holon.jsonld" in cdn.reads
+    graph.assert_not_awaited()
+    # The catalog names the folder's files, so the links include the document.
+    info = information_blocks.resolved_report_info(resolved)
+    assert info is not None
+    assert info["links"]["as_filed"].endswith(f"/{FOLDER}/acme-10k.htm")
+    assert "viewer" in info["links"]
+
+  async def test_a_fiscal_year_narrows_it(self, cdn, graph):
+    report_id, _resolved = await information_blocks.resolve_report(
+      "sec", ticker="ACME", fiscal_year=2017
+    )
+    assert report_id == f"rpt-{OLD}"
+    graph.assert_not_awaited()
+
+  @pytest.mark.parametrize(
+    ("period_type", "form"),
+    [
+      (None, "10-K"),
+      ("annual", "10-K"),
+      ("quarterly", "10-Q"),
+      ("Quarterly", "10-Q"),
+      # A balance can come from either kind of report, as the graph resolver
+      # reads it.
+      ("instant", "10-Q"),
+    ],
+  )
+  async def test_the_period_type_picks_the_forms(self, cdn, graph, period_type, form):
+    quarterly = "0000012345-25-000040"
+    self._list(
+      cdn,
+      {
+        **_filing(quarterly, "2025-05-06", 2025, ["tavi", "holon", "document"]),
+        "form": "10-Q",
+      },
+    )
+    _report_id, resolved = await information_blocks.resolve_report(
+      "sec", ticker="ACME", period_type=period_type
+    )
+    assert resolved is not None and resolved["form"] == form
+    graph.assert_not_awaited()
+
+  async def test_a_newest_filing_without_its_holon_is_left_to_the_graph(
+    self, cdn, graph
+  ):
+    # Skipping it would pass the year before off as the latest. The graph
+    # names the newest, and the read then says it is not published.
+    self._list(cdn, _filing("0000012345-26-000001", "2026-02-04", 2025, ["tavi"]))
+    report_id, _resolved = await information_blocks.resolve_report("sec", ticker="ACME")
+    assert report_id == "rpt-from-graph"
+    graph.assert_awaited_once()
+
+  async def test_a_filer_the_catalog_does_not_list_is_asked_of_the_graph(
+    self, cdn, graph
+  ):
+    report_id, resolved = await information_blocks.resolve_report(
+      "sec", ticker="NOPE", period_type="Quarterly"
+    )
+    assert (report_id, resolved) == ("rpt-from-graph", self.GRAPH_ROW)
+    # Both resolvers are given the period type in one spelling.
+    assert graph.call_args.kwargs["period_type"] == "quarterly"
+    assert information_blocks.report_coordinates(resolved) is None
+
+  async def test_a_catalog_that_cannot_be_read_is_an_error_not_a_fallback(
+    self, cdn, graph
+  ):
+    # Falling back would answer with one filing on this call and another on
+    # the next, and nothing would say which was right.
+    from robosystems.adapters.sec.mcp.report_resolver import SECReportResolutionError
+
+    def down(bucket: str, key: str) -> str | None:
+      raise RuntimeError("storage is away")
+
+    cdn.read_string = down
+    with pytest.raises(SECReportResolutionError, match="catalog lookup failed"):
+      await information_blocks.resolve_report("sec", ticker="ACME")
+    graph.assert_not_awaited()
+
+  @pytest.mark.parametrize("graph_id", ["sec_historical", "otherrepo"])
+  async def test_the_catalog_answers_only_for_the_graph_it_describes(
+    self, cdn, graph, graph_id
+  ):
+    report_id, _resolved = await information_blocks.resolve_report(
+      graph_id, ticker="ACME"
+    )
+    assert report_id == "rpt-from-graph"
+    assert graph.call_args.args == (graph_id,)
+    assert cdn.reads == []
+
+  async def test_without_a_public_bucket_only_the_graph_is_asked(
+    self, cdn, graph, monkeypatch
+  ):
+    monkeypatch.setattr(information_blocks.env, "PUBLIC_DATA_BUCKET", "")
+    report_id, _resolved = await information_blocks.resolve_report("sec", ticker="ACME")
+    assert report_id == "rpt-from-graph"
+    assert cdn.reads == []
+
+  async def test_a_holon_that_cannot_be_read_is_not_called_unpublished(
+    self, cdn, graph
+  ):
+    report_id, resolved = await information_blocks.resolve_report("sec", ticker="ACME")
+
+    def down(bucket: str, key: str) -> str | None:
+      raise RuntimeError("storage is away")
+
+    cdn.read_string = down
+    with pytest.raises(information_blocks.PublicStorageError, match="try again"):
+      await information_blocks.query_disclosures(
+        "sec", report_id, coordinates=information_blocks.report_coordinates(resolved)
+      )
+
+  async def test_a_report_named_by_id_still_asks_the_graph_where_it_is(
+    self, cdn, graph, monkeypatch
+  ):
+    repository = AsyncMock()
+    repository.execute_query = AsyncMock(
+      return_value=[{"accession": ACCESSION, "filing_date": "2025-02-05", "cik": CIK}]
+    )
+    monkeypatch.setattr(
+      information_blocks, "get_graph_repository", AsyncMock(return_value=repository)
+    )
+    report_id, resolved = await information_blocks.resolve_report(
+      "sec", report_id=REPORT_ID
+    )
+    assert (report_id, resolved) == (REPORT_ID, None)
+    out = await information_blocks.query_disclosures("sec", report_id)
+    assert out["report_id"] == REPORT_ID
+    repository.execute_query.assert_awaited_once()
+
+  async def test_an_id_the_graph_does_not_hold_says_how_to_reach_the_report(
+    self, cdn, graph, monkeypatch
+  ):
+    # A report the catalog resolved (filed today, or older than the graph's
+    # years) is not on the graph; its id alone cannot find it.
+    repository = AsyncMock()
+    repository.execute_query = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+      information_blocks, "get_graph_repository", AsyncMock(return_value=repository)
+    )
+    with pytest.raises(ReportNotFoundError, match="giving the ticker again"):
+      await information_blocks.query_disclosures("sec", f"rpt-{OLD}")
+
+
+@pytest.mark.unit
+def test_report_coordinates_need_all_three():
+  assert information_blocks.report_coordinates(None) is None
+  assert information_blocks.report_coordinates({"accession": ACCESSION}) is None
+  assert information_blocks.report_coordinates(
+    {"accession": ACCESSION, "cik": CIK, "filing_date": "2025-02-05T00:00:00"}
+  ) == (ACCESSION, CIK, "2025-02-05")
 
 
 @pytest.mark.unit

@@ -127,6 +127,35 @@ def filers(entities: pd.DataFrame) -> dict[str, dict[str, Any]]:
   return out
 
 
+def one_filer_per_ticker(
+  listed: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]],
+) -> tuple[dict[str, tuple[dict[str, Any], list[dict[str, Any]]]], set[str]]:
+  """The listing with one filer per ticker, and the CIKs that hold a ticker
+  another filer also carries.
+
+  A ticker names its current holder. Two filers can carry the same one — a
+  symbol reassigned after a delisting, a successor registrant — and the
+  catalog has one file per ticker, so whichever was written last answered for
+  both. The filer that filed last holds the ticker; the other is left out,
+  its filings still in their own folders.
+  """
+  by_ticker: dict[str, list[str]] = {}
+  for cik, (filer, _filings) in listed.items():
+    if filer["ticker"]:
+      by_ticker.setdefault(filer["ticker"].upper(), []).append(cik)
+  kept = dict(listed)
+  contested: set[str] = set()
+  for ciks in by_ticker.values():
+    if len(ciks) < 2:
+      continue
+    holder = max(ciks, key=lambda c: (listed[c][1][0]["filing_date"] or "", c))
+    contested.add(holder)
+    for cik in ciks:
+      if cik != holder:
+        del kept[cik]
+  return kept, contested
+
+
 def filings_by_cik(
   reports: pd.DataFrame,
   relationships: pd.DataFrame,
@@ -517,12 +546,24 @@ def sec_filing_catalog(
     if filings:
       listed[cik] = (filer, filings)
 
+  listed, contested = one_filer_per_ticker(listed)
+
   if config.full_rebuild:
     touched = set(listed)
   else:
     in_run = entities[entities["partition"].isin(run_partitions)]
     touched = {c for c in (_text(v) for v in in_run["cik"]) if c} & set(listed)
-  context.log.info(f"{len(listed)} filers listed; rewriting {len(touched)}")
+    # A contested ticker's file is rewritten on every run: the other filer may
+    # have written it last, and its holder may not file in this partition.
+    touched |= contested
+  context.log.info(
+    f"{len(listed)} filers listed; rewriting {len(touched)}"
+    + (
+      f" ({len(contested)} hold a ticker another filer also carries)"
+      if contested
+      else ""
+    )
+  )
 
   # Renderability for the filers this run does not rewrite (see the helper).
   prior = {} if config.full_rebuild else read_prior_renderable(s3, public_bucket)

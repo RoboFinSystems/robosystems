@@ -292,6 +292,21 @@ class S3Client:
       logger.error(f"Unexpected error downloading from S3: {e}")
       return None
 
+  def read_string(self, bucket: str, key: str) -> str | None:
+    """An S3 object as a UTF-8 string, or None when it does not exist.
+
+    Unlike :meth:`download_string`, a read that fails raises. A caller that
+    takes "unavailable" for "absent" answers from whatever it falls back to,
+    and a storage fault comes back as a confident wrong answer.
+    """
+    try:
+      response = self.s3_client.get_object(Bucket=bucket, Key=key)
+    except ClientError as e:
+      if e.response.get("Error", {}).get("Code", "") in ("NoSuchKey", "404"):
+        return None
+      raise
+    return gunzip_if_gzipped(response["Body"].read()).decode("utf-8")
+
   def delete_object(self, bucket: str, key: str) -> bool:
     """Delete an S3 object. Denials are logged at CRITICAL for the audit trail."""
     try:

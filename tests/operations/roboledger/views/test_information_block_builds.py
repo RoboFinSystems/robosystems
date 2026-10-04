@@ -19,7 +19,7 @@ class _Builds:
     self.running = 0
     self.peak = 0
 
-  async def build(self, key, graph_id, report_id, cache):
+  async def build(self, key, graph_id, report_id, cache, coordinates=None):
     self.calls.append(report_id)
     self.running += 1
     self.peak = max(self.peak, self.running)
@@ -73,3 +73,33 @@ async def test_a_caller_that_leaves_does_not_cancel_the_shared_build():
     model, _ = await second
   assert model == "model:rpt_x"
   assert builds.calls == ["rpt_x"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_caller_that_knows_the_folder_does_not_inherit_a_graph_miss():
+  """A report named by id alone is looked up on the graph, which may not hold
+  it. A caller that resolved the same report through the catalog joins that
+  build; when it fails to find the report, the caller builds from its folder."""
+  calls: list[object] = []
+
+  async def build(key, graph_id, report_id, cache, coordinates=None):
+    calls.append(coordinates)
+    await asyncio.sleep(0.05)
+    if coordinates is None:
+      raise ib.ReportNotFoundError(f"No report {report_id!r} on graph {graph_id}.")
+    return f"model:{report_id}"
+
+  where = ("0000012345-26-000001", "0000012345", "2026-10-02")
+  with (
+    patch(f"{MODULE}._cache", return_value=None),
+    patch(f"{MODULE}._build_and_cache", new=build),
+  ):
+    by_id = asyncio.create_task(ib.load_report_model("sec", "rpt_today"))
+    await asyncio.sleep(0.01)
+    by_ticker = asyncio.create_task(ib.load_report_model("sec", "rpt_today", where))
+    model, _cached = await by_ticker
+    with pytest.raises(ib.ReportNotFoundError):
+      await by_id
+  assert model == "model:rpt_today"
+  assert calls == [None, where]

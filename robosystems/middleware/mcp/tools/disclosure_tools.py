@@ -17,6 +17,7 @@ from robosystems.operations.roboledger.views import (
   ReportTooLargeError,
   query_disclosures,
   query_information_block,
+  report_coordinates,
   resolve_report,
   resolved_report_info,
 )
@@ -131,7 +132,10 @@ class DisclosuresTool(BaseTool):
         period_type=_clean(arguments.get("period_type")),
       )
       result = await query_disclosures(
-        graph_id, report_id, topic=_clean(arguments.get("topic"))
+        graph_id,
+        report_id,
+        topic=_clean(arguments.get("topic")),
+        coordinates=report_coordinates(resolved),
       )
     except (
       ReportSelectorError,
@@ -265,6 +269,7 @@ class InformationBlockTool(BaseTool):
         max_rows=max_rows,
         max_members=max_members,
         offset=offset or None,
+        coordinates=report_coordinates(resolved),
       )
     except (
       ReportSelectorError,

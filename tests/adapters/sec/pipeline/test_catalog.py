@@ -12,6 +12,7 @@ from robosystems.adapters.sec.pipeline.catalog import (
   filers,
   filings_by_cik,
   index_row,
+  one_filer_per_ticker,
   read_corpus,
   read_manifests,
   read_prior_renderable,
@@ -216,6 +217,54 @@ class TestFold:
   def test_empty_inputs_fold_to_nothing(self):
     assert filers(_entities()) == {}
     assert filings_by_cik(_reports(), _links(), _entities(), ["10-K"]) == {}
+
+
+@pytest.mark.unit
+class TestOneFilerPerTicker:
+  """The catalog has one file per ticker; two filers can carry the same one."""
+
+  @staticmethod
+  def _filer(cik: str, ticker: str | None, latest: str):
+    return ({"cik": cik, "ticker": ticker}, [{"filing_date": latest}])
+
+  def test_the_filer_that_filed_last_holds_the_ticker(self):
+    # A symbol reassigned after a delisting: the delisted filer's file used to
+    # answer for the ticker whenever it happened to be written last.
+    listed = {
+      "0001807192": self._filer("0001807192", "CD", "2023-04-28"),
+      "0001527762": self._filer("0001527762", "CD", "2026-08-14"),
+      "0000012345": self._filer("0000012345", "ACME", "2026-02-05"),
+    }
+    kept, contested = one_filer_per_ticker(listed)
+    assert set(kept) == {"0001527762", "0000012345"}
+    assert contested == {"0001527762"}
+    assert set(listed) == {"0001807192", "0001527762", "0000012345"}
+
+  def test_the_ticker_is_matched_whatever_its_case(self):
+    listed = {
+      "0000000001": self._filer("0000000001", "brk.b", "2025-01-01"),
+      "0000000002": self._filer("0000000002", "BRK.B", "2026-01-01"),
+    }
+    kept, contested = one_filer_per_ticker(listed)
+    assert set(kept) == contested == {"0000000002"}
+
+  def test_a_tie_goes_to_the_same_filer_every_run(self):
+    listed = {
+      "0000000001": self._filer("0000000001", "X", "2026-01-01"),
+      "0000000002": self._filer("0000000002", "X", "2026-01-01"),
+    }
+    assert one_filer_per_ticker(listed)[1] == {"0000000002"}
+    assert one_filer_per_ticker(dict(reversed(listed.items())))[1] == {"0000000002"}
+
+  def test_filers_without_a_ticker_or_alone_on_one_are_left_alone(self):
+    listed = {
+      "0000000001": self._filer("0000000001", None, "2026-01-01"),
+      "0000000002": self._filer("0000000002", None, "2026-01-02"),
+      "0000000003": self._filer("0000000003", "ACME", "2026-01-03"),
+    }
+    kept, contested = one_filer_per_ticker(listed)
+    assert kept == listed
+    assert contested == set()
 
 
 @pytest.mark.unit

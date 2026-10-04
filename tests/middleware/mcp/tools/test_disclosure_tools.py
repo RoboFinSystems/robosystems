@@ -68,7 +68,13 @@ class TestDefinitions:
 class TestDisclosuresExecute:
   @pytest.mark.unit
   async def test_resolves_the_report_and_stamps_it(self):
-    resolved = {"identifier": "rpt_abc", "form": "10-K"}
+    resolved = {
+      "identifier": "rpt_abc",
+      "form": "10-K",
+      "accession": "0000012345-25-000001",
+      "cik": "0000012345",
+      "filing_date": "2025-02-05",
+    }
     with (
       patch(
         f"{MODULE}.resolve_report", new=AsyncMock(return_value=("rpt_abc", resolved))
@@ -90,7 +96,12 @@ class TestDisclosuresExecute:
       "period_type": None,
     }
     assert query.call_args.args == ("sec", "rpt_abc")
-    assert query.call_args.kwargs == {"topic": "leases"}
+    # The folder the resolver found rides along, so the read does not ask the
+    # graph for it (and reaches a filing the graph does not hold yet).
+    assert query.call_args.kwargs == {
+      "topic": "leases",
+      "coordinates": ("0000012345-25-000001", "0000012345", "2025-02-05"),
+    }
     assert out["count"] == 3
     assert out["resolved_report"]["form"] == "10-K"
 
@@ -160,6 +171,8 @@ class TestInformationBlockExecute:
       "max_rows": MAX_BLOCK_ROWS,
       "max_members": 1,
       "offset": 400,
+      # Named by id alone: the read looks the folder up on the graph.
+      "coordinates": None,
     }
     assert "resolved_report" not in out
     assert MAX_BLOCK_MEMBERS >= 1

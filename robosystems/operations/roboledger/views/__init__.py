@@ -35,6 +35,7 @@ from robosystems.operations.roboledger.views.information_blocks import (
   ReportTooLargeError,
   query_disclosures,
   query_information_block,
+  report_coordinates,
   resolve_report,
   resolved_report_info,
 )
@@ -58,6 +59,7 @@ __all__ = [
   "query_information_block",
   "query_read_text",
   "query_search_text",
+  "report_coordinates",
   "resolve_filing",
   "resolve_report",
   "resolved_report_info",

@@ -480,7 +480,8 @@ def _bundle() -> StatementBundle:
 
 
 class _FakeBucket:
-  """``S3Client`` as the view uses it: ``download_string(bucket, key)``."""
+  """``S3Client`` as the view uses it: ``download_string(bucket, key)``, and
+  ``read_string`` where a storage fault must not read as a missing file."""
 
   def __init__(self, objects: dict[str, str]) -> None:
     self.objects = objects
@@ -489,6 +490,8 @@ class _FakeBucket:
   def download_string(self, bucket: str, key: str) -> str | None:
     self.reads.append(key)
     return self.objects.get(key)
+
+  read_string = download_string
 
 
 class _FakeRedis:
@@ -820,6 +823,11 @@ class TestCache:
 @pytest.mark.asyncio
 @pytest.mark.unit
 class TestResolveReport:
+  @pytest.fixture(autouse=True)
+  def _no_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    # These are the graph path; the catalog lookup has its own tests.
+    monkeypatch.setattr(module.env, "PUBLIC_DATA_BUCKET", "")
+
   async def test_a_report_id_is_taken_as_given(self) -> None:
     assert await resolve_report("kg1234567890abcdef", report_id="rpt_1") == (
       "rpt_1",

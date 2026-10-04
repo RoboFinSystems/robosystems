@@ -6,11 +6,17 @@ published holon in the public bucket (a filing processed before artifacts
 existed answers *not published yet*, never a whole-report graph walk); on a
 tenant it is the live report bundle built from the extensions database. The
 model is cached per report in Valkey (``MCP_CACHE``).
+
+Nor is it in the lookup, for a ticker: the public catalog says which report a
+ticker means and where its folder is, so a filing processed today is readable
+before the night's rebuild. The graph is asked when the catalog cannot say,
+and for a report named by id alone.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import zlib
 from concurrent.futures import ThreadPoolExecutor
@@ -29,6 +35,7 @@ from robosystems.config.storage.shared import (
   FILING_ARTIFACT_MANIFEST,
   FILING_ARTIFACT_TAVI,
   get_filing_artifact_key,
+  get_filing_catalog_key,
   get_public_data_url,
   get_viewer_link,
 )
@@ -60,6 +67,16 @@ class BlockNotFoundError(ValueError):
 
 class ReportTooLargeError(ValueError):
   """The report exists, and is larger than this reader holds in memory."""
+
+
+class PublicStorageError(RuntimeError):
+  """The public bucket could not be read. Not a ``ValueError``: nothing about
+  the request is wrong, and "the file is not there" would be a wrong answer."""
+
+
+# The repository the public catalog describes. A subgraph of it, or another
+# shared repository, holds a different set of reports and answers for itself.
+CATALOG_GRAPH_ID = "sec"
 
 
 def _hosted_hint(message: str) -> str:
@@ -131,7 +148,27 @@ def _cache_key(graph_id: str, report_id: str) -> str:
   return f"ib:model:v{MODEL_CACHE_VERSION}:{graph_id}:{report_id}"
 
 
-async def load_report_model(graph_id: str, report_id: str) -> tuple[XbrlModel, bool]:
+# Where a published filing's folder is: (accession, cik, filing_date).
+Coordinates = tuple[str, str, str]
+
+
+def report_coordinates(resolved: dict[str, Any] | None) -> Coordinates | None:
+  """The folder of the filing a ticker resolved to, when the resolver said:
+  the catalog and the graph both do. Known, it spares the graph a lookup —
+  and it is the only way to a filing the graph does not hold yet."""
+  if not resolved:
+    return None
+  accession = str(resolved.get("accession") or "")
+  cik = str(resolved.get("cik") or "")
+  filing_date = str(resolved.get("filing_date") or "")[:10]
+  if accession and cik and len(filing_date) >= 4:
+    return accession, cik, filing_date
+  return None
+
+
+async def load_report_model(
+  graph_id: str, report_id: str, coordinates: Coordinates | None = None
+) -> tuple[XbrlModel, bool]:
   """The report as xbrlkit's model, and whether the cache served it."""
   key = _cache_key(graph_id, report_id)
   cache = _cache()
@@ -145,17 +182,33 @@ async def load_report_model(graph_id: str, report_id: str) -> tuple[XbrlModel, b
       return await run_off_loop(_thaw, blob), True
 
   build = _builds_in_flight.get(key)
+  joined = build is not None
   if build is None:
-    build = asyncio.create_task(_build_once(key, graph_id, report_id, cache))
+    build = asyncio.create_task(
+      _build_once(key, graph_id, report_id, cache, coordinates)
+    )
     _builds_in_flight[key] = build
     build.add_done_callback(lambda done, k=key: _build_finished(k, done))
-  # Shielded: a caller that goes away does not cancel the build others await.
-  return await asyncio.shield(build), False
+  try:
+    # Shielded: a caller that goes away does not cancel the build others await.
+    return await asyncio.shield(build), False
+  except ReportNotFoundError:
+    if not joined or coordinates is None:
+      raise
+    # The build this caller joined was started without the folder and looked
+    # for the report on the graph. This caller was told where it is.
+    return await _build_once(key, graph_id, report_id, cache, coordinates), False
 
 
-async def _build_once(key: str, graph_id: str, report_id: str, cache: Any) -> XbrlModel:
+async def _build_once(
+  key: str,
+  graph_id: str,
+  report_id: str,
+  cache: Any,
+  coordinates: Coordinates | None = None,
+) -> XbrlModel:
   async with _BUILD_SLOTS:
-    return await _build_and_cache(key, graph_id, report_id, cache)
+    return await _build_and_cache(key, graph_id, report_id, cache, coordinates)
 
 
 def _build_finished(key: str, done: asyncio.Task[XbrlModel]) -> None:
@@ -166,12 +219,16 @@ def _build_finished(key: str, done: asyncio.Task[XbrlModel]) -> None:
 
 
 async def _build_and_cache(
-  key: str, graph_id: str, report_id: str, cache: Any
+  key: str,
+  graph_id: str,
+  report_id: str,
+  cache: Any,
+  coordinates: Coordinates | None = None,
 ) -> XbrlModel:
   started = time.perf_counter()
   shared = is_shared_repository_or_subgraph(graph_id)
   if shared:
-    model = await _published_model(graph_id, report_id)
+    model = await _published_model(graph_id, report_id, coordinates)
   else:
     model = await run_off_loop(_tenant_model, graph_id, report_id)
   logger.info(
@@ -199,26 +256,43 @@ def _thaw(blob: bytes) -> XbrlModel:
   return XbrlModel.model_validate_json(zlib.decompress(blob))
 
 
-async def _published_model(graph_id: str, report_id: str) -> XbrlModel:
+async def _published_model(
+  graph_id: str, report_id: str, coordinates: Coordinates | None = None
+) -> XbrlModel:
   """A shared repository's report from its published holon. Text blocks stay
   pointers to their fragments (read per response by ``_inline_text``), so the
-  cached model stays the size of the holon."""
-  repository = await get_graph_repository(graph_id, operation_type="read")
-  rows = await repository.execute_query(COORDINATES_QUERY, {"report": report_id})
-  if not rows:
-    raise ReportNotFoundError(f"No report {report_id!r} on graph {graph_id}.")
-  row = rows[0]
-  accession = str(row.get("accession") or "")
-  filing_date = str(row.get("filing_date") or "")
-  cik = str(row.get("cik") or "")
-  if not (accession and cik and len(filing_date) >= 4):
-    raise ReportNotPublishedError(
-      f"Report {report_id!r} carries no accession, filer or filing date, so it "
-      "has no published filing to read."
-    )
+  cached model stays the size of the holon.
+
+  The folder comes from ``coordinates`` when the resolver gave them; a report
+  named by id alone is looked up on the graph."""
+  if coordinates is None:
+    repository = await get_graph_repository(graph_id, operation_type="read")
+    rows = await repository.execute_query(COORDINATES_QUERY, {"report": report_id})
+    if not rows:
+      raise ReportNotFoundError(
+        f"No report {report_id!r} on graph {graph_id}. A report found through a "
+        "ticker is read by giving the ticker again (with its fiscal_year), which "
+        "does not need the graph."
+      )
+    row = rows[0]
+    accession = str(row.get("accession") or "")
+    filing_date = str(row.get("filing_date") or "")
+    cik = str(row.get("cik") or "")
+    if not (accession and cik and len(filing_date) >= 4):
+      raise ReportNotPublishedError(
+        f"Report {report_id!r} carries no accession, filer or filing date, so it "
+        "has no published filing to read."
+      )
+  else:
+    accession, cik, filing_date = coordinates
   s3 = S3Client()
   key = get_filing_artifact_key(filing_date[:4], cik, accession, FILING_ARTIFACT_HOLON)
-  text = await run_off_loop(s3.download_string, env.PUBLIC_DATA_BUCKET, key)
+  try:
+    text = await run_off_loop(s3.read_string, env.PUBLIC_DATA_BUCKET, key)
+  except Exception as exc:
+    raise PublicStorageError(
+      f"The published filing for {accession} could not be read; try again."
+    ) from exc
   if text is None:
     raise ReportNotPublishedError(
       f"{accession} was processed before its filing artifacts existed; it is "
@@ -325,10 +399,17 @@ async def resolve_report(
 ) -> tuple[str, dict[str, Any] | None]:
   """Which report the request means, and how it was resolved.
 
-  The same contract as ``financial-statement-analysis``: a ``report_id`` is
+  The selectors ``financial-statement-analysis`` takes: a ``report_id`` is
   taken as given; on a shared repository a ``ticker`` resolves the latest
   filing of the form ``period_type`` selects (annual by default), narrowed by
   ``fiscal_year``; a tenant graph needs the ``report_id``.
+
+  On the SEC repository a ticker is looked up in the public catalog first and
+  on the graph only when the catalog cannot say. These views read the
+  published filing, which the catalog lists as soon as it is processed; the
+  graph learns of it at the night's rebuild, and holds fewer years. So for a
+  few hours, and for those years, this resolves a report that
+  ``financial-statement-analysis`` (which reads the graph) does not.
   """
   shared = is_shared_repository_or_subgraph(graph_id)
   if not shared and is_subgraph(graph_id):
@@ -347,15 +428,89 @@ async def resolve_report(
   from robosystems.adapters.sec.mcp import resolve_sec_report
 
   symbol = ticker.strip().upper()
-  resolved = await resolve_sec_report(
-    graph_id, ticker=symbol, period_type=period_type, fiscal_year=fiscal_year
-  )
+  period = (period_type or "").strip().lower() or None
+  resolved = await _catalog_report(graph_id, symbol, fiscal_year, period)
+  if resolved is None:
+    resolved = await resolve_sec_report(
+      graph_id, ticker=symbol, period_type=period, fiscal_year=fiscal_year
+    )
   if not resolved or not resolved.get("identifier"):
     scope = f" in fiscal year {fiscal_year}" if fiscal_year is not None else ""
     raise ReportNotFoundError(
       f"No {period_type or 'annual'} filing found for {symbol}{scope}."
     )
   return str(resolved["identifier"]), resolved
+
+
+async def _catalog_report(
+  graph_id: str, symbol: str, fiscal_year: int | None, period_type: str | None
+) -> dict[str, Any] | None:
+  """The filer's latest report by the public catalog, in the shape the graph
+  resolver answers in, or None when the catalog cannot say and the graph
+  should: another graph than the one the catalog describes, no catalog for
+  the filer, nothing it lists that fits, or a newest fit that is not readable
+  (the graph then names it and the read says it is not published — never an
+  older filing passed off as the latest).
+
+  A catalog that cannot be read raises: falling back then would answer with
+  one filing on this call and another on the next.
+  """
+  from robosystems.adapters.sec.mcp.report_resolver import (
+    ANNUAL_FORMS,
+    QUARTERLY_FORMS,
+    SECReportResolutionError,
+  )
+  from robosystems.operations.roboledger.views.filing_text import (
+    TICKER_RE,
+    _report_ref,
+  )
+
+  if graph_id != CATALOG_GRAPH_ID or not env.PUBLIC_DATA_BUCKET:
+    return None
+  if not TICKER_RE.match(symbol) or symbol.isdigit():
+    return None
+  try:
+    text = await run_off_loop(
+      S3Client().read_string, env.PUBLIC_DATA_BUCKET, get_filing_catalog_key(symbol)
+    )
+    catalog = json.loads(text) if text else None
+  except Exception as exc:
+    logger.warning(f"SEC catalog read failed for {symbol}: {exc}")
+    raise SECReportResolutionError(
+      f"Could not resolve an SEC filing for {symbol}: the catalog lookup failed."
+    ) from exc
+  if not isinstance(catalog, dict) or not catalog.get("cik"):
+    return None
+
+  # The graph resolver reads "instant" as quarterly too: a balance can come
+  # from either kind of report.
+  forms = QUARTERLY_FORMS if period_type in ("quarterly", "instant") else ANNUAL_FORMS
+  newest = next(
+    (
+      entry
+      for entry in catalog.get("filings") or []
+      if entry.get("form") in forms
+      and (fiscal_year is None or entry.get("fiscal_year") == fiscal_year)
+    ),
+    None,
+  )
+  if newest is None:
+    return None
+  ref = _report_ref(str(catalog["cik"]), newest)
+  has_holon = any(r.get("kind") == "holon" for r in newest.get("representations") or [])
+  if not (has_holon and ref.report_id and ref.accession and ref.filing_date):
+    return None
+  listed = ref.resolved or {}
+  return {
+    "identifier": ref.report_id,
+    "form": ref.form,
+    "filing_date": ref.filing_date,
+    "fiscal_year": listed.get("fiscal_year"),
+    "fiscal_period": listed.get("fiscal_period"),
+    "accession": ref.accession,
+    "cik": ref.cik,
+    "links": listed.get("links"),
+  }
 
 
 def resolved_report_info(resolved: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -370,6 +525,10 @@ def resolved_report_info(resolved: dict[str, Any] | None) -> dict[str, Any] | No
     "fiscal_year": resolved.get("fiscal_year"),
     "fiscal_period": resolved.get("fiscal_period"),
   }
+  if resolved.get("links"):
+    # From the catalog, which names the files the folder holds.
+    info["links"] = resolved["links"]
+    return info
   accession = str(resolved.get("accession") or "")
   cik = str(resolved.get("cik") or "")
   filing_date = str(resolved.get("filing_date") or "")
@@ -446,10 +605,14 @@ def public_filing_links(
 
 
 async def query_disclosures(
-  graph_id: str, report_id: str, *, topic: str | None = None
+  graph_id: str,
+  report_id: str,
+  *,
+  topic: str | None = None,
+  coordinates: Coordinates | None = None,
 ) -> dict[str, Any]:
   """The map: one row per disclosure family, or one family's blocks."""
-  model, _cached = await load_report_model(graph_id, report_id)
+  model, _cached = await load_report_model(graph_id, report_id, coordinates)
   try:
     out = xbrlkit_serve.disclosures(_loaded(graph_id, report_id, model), topic)
     # A family's blocks carry each text block's length, which is the text's.
@@ -480,10 +643,11 @@ async def query_information_block(
   max_rows: int | None = None,
   max_members: int | None = None,
   offset: int | None = None,
+  coordinates: Coordinates | None = None,
 ) -> dict[str, Any]:
   """The block: one section read whole, or — past ``max_rows`` — one page of
   it, continued from the ``next_offset`` a truncated page returns."""
-  model, _cached = await load_report_model(graph_id, report_id)
+  model, _cached = await load_report_model(graph_id, report_id, coordinates)
   kwargs: dict[str, Any] = {}
   if max_rows is not None:
     kwargs["max_rows"] = max_rows
