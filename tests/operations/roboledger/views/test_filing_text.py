@@ -10,6 +10,7 @@ named without a ticker. A tenant graph is refused: a ledger files no document.
 from __future__ import annotations
 
 import json
+import re
 import zlib
 from datetime import date
 from typing import Any
@@ -584,6 +585,75 @@ class TestCurrentReport:
     assert out["filing"]["form"] == "8-K"
     assert out["filing"]["items"]
     assert [i["label"] for i in out["sections"]["items"]] == ["Form 8-K", "EX-99.1"]
+
+
+# xbrlkit's tools, by the names its own hints use. None is a tool of this
+# server, so none may reach a caller in what describe says to do next.
+XBRLKIT_TOOL = re.compile(
+  r"\b(describe_filing|read_document|read_text|search_text|fact_grid|"
+  r"resolve_element|information_block|load_filing|list_filings|run_cypher)\b"
+  r"|`(documents|statement|calculation|records)`|[Cc]all documents"
+)
+
+
+def _strings(value: Any):
+  if isinstance(value, str):
+    yield value
+  elif isinstance(value, dict):
+    for inner in value.values():
+      yield from _strings(inner)
+  elif isinstance(value, list):
+    for inner in value:
+      yield from _strings(inner)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+class TestDescribeNamesThisServersTools:
+  async def test_a_report_points_at_the_tools_served_here(self, cdn, no_cache):
+    ref = await resolve_filing("sec", ticker="ACME")
+    out = await query_describe_filing("sec", ref)
+    assert not [text for text in _strings(out) if XBRLKIT_TOOL.search(text)]
+    assert "`disclosures`" in out["next"][0]
+    assert "`information-block`" in out["next"][0]
+    assert "`information-block`" in out["networks_note"]
+    assert out["periods_note"].startswith(
+      f"{len(out['periods'])} of {out['counts']['periods']} periods"
+    )
+    assert "`search-text` and `read-text`" in out["sections"]["note"]
+
+  async def test_a_release_is_read_from_its_exhibit_offset(self, cdn, no_cache):
+    ref = await resolve_filing("sec", ticker="ACME", form="8-K")
+    out = await query_describe_filing("sec", ref)
+    assert not [text for text in _strings(out) if XBRLKIT_TOOL.search(text)]
+    note = out["filing"]["items_note"]
+    assert note.startswith("Item 2.02")
+    assert "`sections.items`" in note and "`read-text`" in note
+    assert out["next"][0].startswith("`read-text` from the EX-99.1 `offset`")
+    # An 8-K has no periods or networks to explain.
+    assert "periods_note" not in out and "networks_note" not in out
+
+  async def test_an_8k_without_exhibit_text_says_so(self, cdn, no_cache):
+    folder = f"2025/{CIK}/{NEWER_FD}"
+    cdn.objects[f"{folder}/manifest.json"] = _manifest(
+      "8-K",
+      [{"kind": "document", "name": "acme-fd.htm"}],
+      items=["7.01", "9.01"],
+      report_date="2025-03-01",
+      primary_document="acme-fd.htm",
+      entity={"cik": CIK, "name": "Acme Corp", "ticker": "ACME"},
+    )
+    cdn.objects[f"{folder}/acme-fd.htm"] = (
+      "<html><body><p>FORM 8-K</p><p>Item 7.01 Regulation FD Disclosure. Acme "
+      "posted an investor presentation.</p></body></html>"
+    )
+    ref = await resolve_filing("sec", ticker="ACME", accession=NEWER_FD)
+    out = await query_describe_filing("sec", ref)
+    assert not [text for text in _strings(out) if XBRLKIT_TOOL.search(text)]
+    note = out["filing"]["items_note"]
+    assert not note.startswith("Item 2.02")
+    assert "`resolved_report.links.edgar`" in note
+    assert out["next"] == [module._PAGE_THE_TEXT]
 
 
 @pytest.mark.unit

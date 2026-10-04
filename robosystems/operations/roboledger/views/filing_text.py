@@ -47,6 +47,7 @@ from xbrlkit.serve.tools import (
 from robosystems.adapters.sec.mcp.report_resolver import ANNUAL_FORMS, QUARTERLY_FORMS
 from robosystems.adapters.sec.processors.current_reports import (
   CURRENT_REPORT_FORM,
+  FORM_SECTION_ID,
   FiledDocument,
   current_report_text,
 )
@@ -96,6 +97,8 @@ DOCUMENT_BUDGET_CHARS = 40_000_000
 # can name an older one by accession; ``fiscal_year`` moves the list to the
 # releases filed in that year.
 RECENT_RELEASES = 12
+# Results of Operations: the item that makes an 8-K an earnings release.
+EARNINGS_ITEM = "2.02"
 
 QUERY_MAX_CHARS = 500
 _QUERY_ALTERNATIVES = 10
@@ -311,7 +314,7 @@ async def _release_ref(
       releases = [
         r for r in releases if str(r.get("filing_date") or "")[:4] == str(year)
       ]
-    entry = next((r for r in releases if "2.02" in (r.get("items") or [])), None)
+    entry = next((r for r in releases if EARNINGS_ITEM in (r.get("items") or [])), None)
     entry = entry or (releases[0] if releases else None)
   if entry is None:
     what = accession or "8-K earnings release"
@@ -682,10 +685,90 @@ def _stamp(out: dict[str, Any], graph_id: str, ref: FilingRef) -> dict[str, Any]
   return {**stamp, **out}
 
 
+_PAGE_THE_TEXT = (
+  "`search-text` for anything in the text, `read-text` to page it from an offset"
+)
+
+
+def _hosted_guidance(out: dict[str, Any]) -> dict[str, Any]:
+  """xbrlkit's describe says what to call next in its own tools' names, and
+  sends an 8-K's reader to exhibits it lists apart. Here the tools are this
+  server's, and an 8-K's exhibits are sections of the same text."""
+  filing = out.get("filing") or {}
+  sections = out.get("sections") or {}
+  if "note" in sections:
+    sections["note"] = (
+      "offsets index into the plain text that `search-text` and `read-text` read"
+    )
+
+  if (out.get("profile") or {}).get("xbrl"):
+    periods = out.get("periods") or []
+    total = (out.get("counts") or {}).get("periods", len(periods))
+    out["periods_note"] = (
+      f"{len(periods)} of {total} periods, the most reported; `key` is how "
+      "`information-block` names a period in `columns` and takes one in "
+      "`periods` (start..end for a flow, one date for a balance)."
+    )
+    out["networks_note"] = (
+      "`information-block` reads one of these whole: its `id` is the `block`; "
+      "`disclosures` groups them into families"
+    )
+    out["next"] = [
+      "`disclosures` for the map of this report's statements and notes, then "
+      "`information-block` for one read whole",
+      "`financial-statement-analysis` for a primary statement as flat rows",
+      "`resolve-element` to turn a phrase into the concepts reported; "
+      "`build-fact-grid` for their values across periods and filers",
+      _PAGE_THE_TEXT,
+    ]
+    return out
+
+  out.pop("periods_note", None)
+  out.pop("networks_note", None)
+  out["next"] = [_PAGE_THE_TEXT]
+  codes = [item.get("item") for item in filing.get("items") or []]
+  if not codes:
+    return out
+
+  exhibits = [
+    section.get("label")
+    for section in sections.get("items") or []
+    if section.get("id") != FORM_SECTION_ID
+  ]
+  if EARNINGS_ITEM in codes:
+    what = (
+      "Item 2.02 — this is an earnings release. The results are in the release "
+      "(usually EX-99.1), with what no XBRL holds: non-GAAP measures, segment "
+      "detail and guidance, weeks before the 10-Q that restates part of it."
+    )
+  else:
+    what = (
+      "An 8-K's own text is its cover page and items; the substance is "
+      "normally an exhibit (a release, a presentation, a script)."
+    )
+  if exhibits:
+    filing["items_note"] = (
+      f"{what} The exhibits are part of this text, each under `sections.items` "
+      "with its `offset`: `read-text` from one, or `search-text` across the "
+      "8-K and all of them."
+    )
+    out["next"] = [
+      f"`read-text` from the {exhibits[0]} `offset` in `sections.items` — the "
+      "exhibits are part of this text",
+      "`search-text` for a figure or a phrase across the 8-K and its exhibits",
+    ]
+  else:
+    filing["items_note"] = (
+      f"{what} No exhibit text was captured with this one, so this text is the "
+      "8-K alone; `resolved_report.links.edgar` lists everything filed with it."
+    )
+  return out
+
+
 async def query_describe_filing(graph_id: str, ref: FilingRef) -> dict[str, Any]:
   lf = await _with_full_model(graph_id, ref, await load_filing_text(graph_id, ref))
   out = await run_off_loop(describe_filing, lf)
-  return _stamp(out, graph_id, ref)
+  return _stamp(_hosted_guidance(out), graph_id, ref)
 
 
 async def query_search_text(
