@@ -285,7 +285,7 @@ class TestAIClientCreateMessage:
 
   @pytest.mark.unit
   async def test_create_message_basic(self):
-    """Default model (Sonnet 5): text in, text out, tokens and stop reason
+    """Default model (Sonnet 5.5): text in, text out, tokens and stop reason
     parsed from the Converse envelope."""
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
@@ -302,13 +302,13 @@ class TestAIClientCreateMessage:
     )
 
     assert result.content == "Financial analysis complete."
-    assert result.model == "us.anthropic.claude-sonnet-5"
+    assert result.model == "us.anthropic.claude-sonnet-5-5"
     assert result.input_tokens == 150
     assert result.output_tokens == 75
     assert result.stop_reason == "end_turn"
 
     request = mock_bedrock.converse.call_args.kwargs
-    assert request["modelId"] == "us.anthropic.claude-sonnet-5"
+    assert request["modelId"] == "us.anthropic.claude-sonnet-5-5"
     assert request["messages"] == [
       {"role": "user", "content": [{"text": "Analyze revenue trends"}]}
     ]
@@ -745,7 +745,7 @@ class TestAIClientErrors:
     )
     with pytest.raises(AIProviderError) as exc:
       await client.create_message(messages=[AIMessage(role="user", content="hi")])
-    assert "us.anthropic.claude-sonnet-5" in str(exc.value)
+    assert "us.anthropic.claude-sonnet-5-5" in str(exc.value)
     assert "AccessDeniedException" in str(exc.value)
     assert "You don't have access" in str(exc.value)
 
