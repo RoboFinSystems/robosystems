@@ -748,6 +748,8 @@ class TestInformationBlockOperations:
     "filing_date": "2025-02-05",
     "fiscal_year": 2024,
     "fiscal_period": "FY",
+    "accession": "0000012345-25-000001",
+    "cik": "0000012345",
   }
 
   @pytest.mark.unit
@@ -786,8 +788,10 @@ class TestInformationBlockOperations:
     assert envelope.result["count"] == 1
     assert mock_resolve.call_args.kwargs["ticker"] == "ACME"
     assert mock_resolve.call_args.kwargs["fiscal_year"] == 2024
-    assert mock_query.call_args.kwargs["topic"] is None
-    assert "coordinates" in mock_query.call_args.kwargs
+    assert mock_query.call_args.kwargs == {
+      "topic": None,
+      "coordinates": ("0000012345-25-000001", "0000012345", "2025-02-05"),
+    }
 
   @pytest.mark.unit
   async def test_information_block_wraps_the_block_in_the_envelope(self):

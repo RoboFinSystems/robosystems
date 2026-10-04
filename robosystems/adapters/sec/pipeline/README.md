@@ -139,8 +139,17 @@ per filer and `companies/index.json` for the corpus, on the public CDN.
 Files are regenerated whole — every filer with a filing in the run's
 partitions, all of them on `full_rebuild`, the index always — so overlapping
 runs cannot corrupt one. Also writes `robots.txt` when it is missing.
-Chained off staging by `sec_post_stage_index_sensor`, beside the text index;
-the job is `sec_catalog` (a job may not share its asset's name).
+Chained off staging by `sec_post_stage_index_sensor`, beside the text index,
+and off processing by an intraday pass; the job is `sec_catalog` (a job may
+not share its asset's name).
+
+A ticker names one filer. Two can carry the same symbol (one reassigned after
+a delisting, a successor registrant); the filer that filed last holds it and
+the other is left out of the catalog, its filings still in their folders. A
+contested ticker's file is rewritten on every run. The catalog is also how
+the tools that read a filing whole find a ticker's report (`describe-filing`,
+`search-text`, `read-text`, `disclosures`, `information-block`), so a wrong
+file here is a wrong company there.
 
 ```bash
 uv run dagster asset materialize -m robosystems.dagster \

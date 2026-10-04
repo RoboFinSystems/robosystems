@@ -16,6 +16,7 @@ and for a report named by id alone.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import zlib
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +35,7 @@ from robosystems.config.storage.shared import (
   FILING_ARTIFACT_MANIFEST,
   FILING_ARTIFACT_TAVI,
   get_filing_artifact_key,
+  get_filing_catalog_key,
   get_public_data_url,
   get_viewer_link,
 )
@@ -65,6 +67,16 @@ class BlockNotFoundError(ValueError):
 
 class ReportTooLargeError(ValueError):
   """The report exists, and is larger than this reader holds in memory."""
+
+
+class PublicStorageError(RuntimeError):
+  """The public bucket could not be read. Not a ``ValueError``: nothing about
+  the request is wrong, and "the file is not there" would be a wrong answer."""
+
+
+# The repository the public catalog describes. A subgraph of it, or another
+# shared repository, holds a different set of reports and answers for itself.
+CATALOG_GRAPH_ID = "sec"
 
 
 def _hosted_hint(message: str) -> str:
@@ -170,14 +182,22 @@ async def load_report_model(
       return await run_off_loop(_thaw, blob), True
 
   build = _builds_in_flight.get(key)
+  joined = build is not None
   if build is None:
     build = asyncio.create_task(
       _build_once(key, graph_id, report_id, cache, coordinates)
     )
     _builds_in_flight[key] = build
     build.add_done_callback(lambda done, k=key: _build_finished(k, done))
-  # Shielded: a caller that goes away does not cancel the build others await.
-  return await asyncio.shield(build), False
+  try:
+    # Shielded: a caller that goes away does not cancel the build others await.
+    return await asyncio.shield(build), False
+  except ReportNotFoundError:
+    if not joined or coordinates is None:
+      raise
+    # The build this caller joined was started without the folder and looked
+    # for the report on the graph. This caller was told where it is.
+    return await _build_once(key, graph_id, report_id, cache, coordinates), False
 
 
 async def _build_once(
@@ -249,7 +269,11 @@ async def _published_model(
     repository = await get_graph_repository(graph_id, operation_type="read")
     rows = await repository.execute_query(COORDINATES_QUERY, {"report": report_id})
     if not rows:
-      raise ReportNotFoundError(f"No report {report_id!r} on graph {graph_id}.")
+      raise ReportNotFoundError(
+        f"No report {report_id!r} on graph {graph_id}. A report found through a "
+        "ticker is read by giving the ticker again (with its fiscal_year), which "
+        "does not need the graph."
+      )
     row = rows[0]
     accession = str(row.get("accession") or "")
     filing_date = str(row.get("filing_date") or "")
@@ -263,7 +287,12 @@ async def _published_model(
     accession, cik, filing_date = coordinates
   s3 = S3Client()
   key = get_filing_artifact_key(filing_date[:4], cik, accession, FILING_ARTIFACT_HOLON)
-  text = await run_off_loop(s3.download_string, env.PUBLIC_DATA_BUCKET, key)
+  try:
+    text = await run_off_loop(s3.read_string, env.PUBLIC_DATA_BUCKET, key)
+  except Exception as exc:
+    raise PublicStorageError(
+      f"The published filing for {accession} could not be read; try again."
+    ) from exc
   if text is None:
     raise ReportNotPublishedError(
       f"{accession} was processed before its filing artifacts existed; it is "
@@ -370,15 +399,17 @@ async def resolve_report(
 ) -> tuple[str, dict[str, Any] | None]:
   """Which report the request means, and how it was resolved.
 
-  The same contract as ``financial-statement-analysis``: a ``report_id`` is
+  The selectors ``financial-statement-analysis`` takes: a ``report_id`` is
   taken as given; on a shared repository a ``ticker`` resolves the latest
   filing of the form ``period_type`` selects (annual by default), narrowed by
   ``fiscal_year``; a tenant graph needs the ``report_id``.
 
-  A ticker is looked up in the public catalog first and on the graph only when
-  the catalog cannot say. These views read the published filing, which the
-  catalog lists as soon as it is processed; the graph learns of it at the
-  night's rebuild.
+  On the SEC repository a ticker is looked up in the public catalog first and
+  on the graph only when the catalog cannot say. These views read the
+  published filing, which the catalog lists as soon as it is processed; the
+  graph learns of it at the night's rebuild, and holds fewer years. So for a
+  few hours, and for those years, this resolves a report that
+  ``financial-statement-analysis`` (which reads the graph) does not.
   """
   shared = is_shared_repository_or_subgraph(graph_id)
   if not shared and is_subgraph(graph_id):
@@ -397,10 +428,11 @@ async def resolve_report(
   from robosystems.adapters.sec.mcp import resolve_sec_report
 
   symbol = ticker.strip().upper()
-  resolved = await _catalog_report(graph_id, symbol, fiscal_year, period_type)
+  period = (period_type or "").strip().lower() or None
+  resolved = await _catalog_report(graph_id, symbol, fiscal_year, period)
   if resolved is None:
     resolved = await resolve_sec_report(
-      graph_id, ticker=symbol, period_type=period_type, fiscal_year=fiscal_year
+      graph_id, ticker=symbol, period_type=period, fiscal_year=fiscal_year
     )
   if not resolved or not resolved.get("identifier"):
     scope = f" in fiscal year {fiscal_year}" if fiscal_year is not None else ""
@@ -413,32 +445,62 @@ async def resolve_report(
 async def _catalog_report(
   graph_id: str, symbol: str, fiscal_year: int | None, period_type: str | None
 ) -> dict[str, Any] | None:
-  """The filer's latest published report by the public catalog, in the shape
-  the graph resolver answers in, or None when the catalog cannot say: no
-  catalog for the filer, no report it lists that fits, or one it lists without
-  the id and folder a read needs. The caller then asks the graph."""
-  from robosystems.operations.roboledger.views.filing_text import resolve_filing
+  """The filer's latest report by the public catalog, in the shape the graph
+  resolver answers in, or None when the catalog cannot say and the graph
+  should: another graph than the one the catalog describes, no catalog for
+  the filer, nothing it lists that fits, or a newest fit that is not readable
+  (the graph then names it and the read says it is not published — never an
+  older filing passed off as the latest).
 
-  if not env.PUBLIC_DATA_BUCKET:
+  A catalog that cannot be read raises: falling back then would answer with
+  one filing on this call and another on the next.
+  """
+  from robosystems.adapters.sec.mcp.report_resolver import (
+    ANNUAL_FORMS,
+    QUARTERLY_FORMS,
+    SECReportResolutionError,
+  )
+  from robosystems.operations.roboledger.views.filing_text import (
+    TICKER_RE,
+    _report_ref,
+  )
+
+  if graph_id != CATALOG_GRAPH_ID or not env.PUBLIC_DATA_BUCKET:
     return None
+  if not TICKER_RE.match(symbol) or symbol.isdigit():
+    return None
+  try:
+    text = await run_off_loop(
+      S3Client().read_string, env.PUBLIC_DATA_BUCKET, get_filing_catalog_key(symbol)
+    )
+    catalog = json.loads(text) if text else None
+  except Exception as exc:
+    logger.warning(f"SEC catalog read failed for {symbol}: {exc}")
+    raise SECReportResolutionError(
+      f"Could not resolve an SEC filing for {symbol}: the catalog lookup failed."
+    ) from exc
+  if not isinstance(catalog, dict) or not catalog.get("cik"):
+    return None
+
   # The graph resolver reads "instant" as quarterly too: a balance can come
   # from either kind of report.
-  quarterly = (period_type or "").lower() in ("quarterly", "instant")
-  try:
-    ref = await resolve_filing(
-      graph_id,
-      ticker=symbol,
-      fiscal_year=fiscal_year,
-      period_type="quarterly" if quarterly else None,
-    )
-  except (ReportSelectorError, ReportNotFoundError):
+  forms = QUARTERLY_FORMS if period_type in ("quarterly", "instant") else ANNUAL_FORMS
+  newest = next(
+    (
+      entry
+      for entry in catalog.get("filings") or []
+      if entry.get("form") in forms
+      and (fiscal_year is None or entry.get("fiscal_year") == fiscal_year)
+    ),
+    None,
+  )
+  if newest is None:
     return None
-  except Exception as exc:
-    logger.warning(f"Catalog lookup failed for {symbol}; asking the graph: {exc}")
+  ref = _report_ref(str(catalog["cik"]), newest)
+  has_holon = any(r.get("kind") == "holon" for r in newest.get("representations") or [])
+  if not (has_holon and ref.report_id and ref.accession and ref.filing_date):
     return None
   listed = ref.resolved or {}
-  if not (ref.report_id and ref.accession and ref.cik and ref.filing_date):
-    return None
   return {
     "identifier": ref.report_id,
     "form": ref.form,

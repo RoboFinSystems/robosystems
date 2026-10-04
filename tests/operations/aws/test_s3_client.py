@@ -463,6 +463,45 @@ class TestS3ClientDownloadFile:
 
 
 @pytest.mark.unit
+class TestS3ClientReadString:
+  """``read_string``: only a missing object is None; a failed read raises."""
+
+  def _client(self, **get_object):
+    with (
+      patch("robosystems.operations.aws.s3.boto3.client"),
+      patch("robosystems.operations.aws.s3.env") as mock_env,
+    ):
+      mock_env.AWS_DEFAULT_REGION = "us-east-1"
+      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.ENVIRONMENT = "dev"
+      mock_env.AWS_S3_ACCESS_KEY_ID = ""
+      mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
+      client = S3Client()
+    client.s3_client = MagicMock()
+    client.s3_client.get_object.configure_mock(**get_object)
+    return client
+
+  def test_reads_and_decodes_a_gzipped_object(self):
+    body = MagicMock()
+    body.read.return_value = gzip.compress(b'{"ticker": "ACME"}')
+    client = self._client(return_value={"Body": body})
+    assert client.read_string("bucket", "companies/acme.json") == '{"ticker": "ACME"}'
+
+  def test_a_missing_object_is_none(self):
+    client = self._client(side_effect=_make_client_error("NoSuchKey"))
+    assert client.read_string("bucket", "companies/nope.json") is None
+
+  @pytest.mark.parametrize("code", ["AccessDenied", "SlowDown", "InternalError"])
+  def test_a_read_that_fails_raises(self, code):
+    # download_string answers None here too, which a caller cannot tell from
+    # "not there".
+    client = self._client(side_effect=_make_client_error(code))
+    with pytest.raises(ClientError):
+      client.read_string("bucket", "companies/acme.json")
+    assert client.download_string("bucket", "companies/acme.json") is None
+
+
+@pytest.mark.unit
 class TestS3ClientDownloadString:
   """Tests for S3Client.download_string with UTF-8 decoding."""
 
