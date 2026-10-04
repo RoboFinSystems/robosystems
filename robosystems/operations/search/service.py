@@ -186,6 +186,7 @@ class SearchService:
           filing_date=source.get("filing_date"),
           fiscal_year=source.get("fiscal_year") or None,
           form_type=source.get("form_type"),
+          accession_number=source.get("accession_number"),
           snippet=snippet,
           content_length=source.get("content_length", 0),
           content_url=source.get("content_url"),

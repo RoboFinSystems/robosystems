@@ -266,14 +266,43 @@ def cdn(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.unit
 class TestQueryPattern:
+  @staticmethod
+  def _found(query: str, text: str) -> list[str]:
+    rx = re.compile(query_pattern(query), re.IGNORECASE)
+    return [m.group(0) for m in rx.finditer(text)]
+
   def test_words_across_any_spacing(self):
-    assert query_pattern("customer concentration") == r"customer\s+concentration"
+    assert self._found(
+      "customer concentration", "no customer\n  concentration of credit"
+    ) == ["customer\n  concentration"]
 
   def test_alternatives_and_stems(self):
-    assert query_pattern("terminat* | going concern") == r"terminat\w*|going\s+concern"
+    found = self._found(
+      "terminat* | going concern", "terminated; a going concern; termination"
+    )
+    assert found == ["terminated", "going concern", "termination"]
 
   def test_regex_syntax_is_literal(self):
-    assert query_pattern("(a+)+$") == r"\(a\+\)\+\$"
+    assert self._found("(a+)+$", "(a+)+$ aaaa") == ["(a+)+$"]
+
+  def test_words_match_whole(self):
+    text = "the foregoing ongoing customer and customer as Customer A going"
+    assert self._found("going | customer A", text) == ["Customer A", "going"]
+
+  def test_a_word_finds_its_plural_and_possessive(self):
+    text = "tariffs, the tariff\u2019s reach, taxes, antitariff, tariffing"
+    assert self._found("tariff | tax", text) == ["tariffs", "tariff\u2019s", "taxes"]
+
+  def test_stem_matches_word_starts_only(self):
+    assert self._found("tariff*", "tariffs non-tariff antitariff") == [
+      "tariffs",
+      "tariff",
+    ]
+
+  def test_the_pattern_names_only_the_query_words(self):
+    # xbrlkit reads a missed pattern's words back as its `terms` hint.
+    words = set(re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", query_pattern("going concern")))
+    assert words == {"going", "concern"}
 
   def test_nothing_to_match(self):
     with pytest.raises(QueryError):
@@ -347,9 +376,42 @@ class TestResolution:
     assert (ref.accession, ref.cik, ref.form) == (EIGHT_K, CIK, "8-K")
     named = await resolve_filing("sec", ticker=CIK, accession=NEWER_FD)
     assert named.accession == NEWER_FD
-    # Its annual and quarterly reports are listed by ticker only.
+    # Its annual and quarterly reports are listed by ticker; a CIK alone
+    # picks none of them.
     with pytest.raises(ReportSelectorError, match="8-K"):
       await resolve_filing("sec", ticker=CIK)
+
+  async def test_a_cik_and_accession_open_a_report_from_its_folder(self, cdn):
+    # A filer the catalog lists under no ticker: its search hits name it by
+    # CIK, and the accession finds the folder without a catalog entry.
+    del cdn.objects["companies/acme.json"]
+    cdn.objects[f"{FOLDER}/manifest.json"] = _manifest(
+      "10-K",
+      [{"kind": "holon", "name": "holon.jsonld"}],
+      accession=ACCESSION,
+      filing_date="2025-02-05",
+      fiscal_year="2024",
+      fiscal_period="FY",
+      report_id=REPORT_ID,
+    )
+    ref = await resolve_filing("sec", ticker=CIK, accession=ACCESSION)
+    assert (ref.accession, ref.cik, ref.filing_date, ref.form) == (
+      ACCESSION,
+      CIK,
+      "2025-02-05",
+      "10-K",
+    )
+    assert ref.report_id == REPORT_ID
+    assert ref.resolved and ref.resolved["fiscal_year"] == 2024
+    assert ref.resolved["links"]["holon"].endswith(f"/{FOLDER}/holon.jsonld")
+    # An 8-K's folder is left to its releases list.
+    eight_k = await resolve_filing("sec", ticker=CIK, accession=EIGHT_K)
+    assert eight_k.form == "8-K" and eight_k.resolved
+    assert "recent_releases" in eight_k.resolved
+
+  async def test_a_cik_and_unknown_accession_is_not_found(self, cdn):
+    with pytest.raises(ReportNotFoundError, match="captured for CIK"):
+      await resolve_filing("sec", ticker=CIK, accession="0000012345-25-000999")
 
   async def test_a_combined_release_is_read_where_it_was_published(self, cdn, no_cache):
     # A combined 8-K is published once, under its first registrant, and listed

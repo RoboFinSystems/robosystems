@@ -89,6 +89,7 @@ class SearchHit(BaseModel):
   filing_date: str | None = None
   fiscal_year: int | None = None
   form_type: str | None = None
+  accession_number: str | None = None
   xbrl_elements: list[str] | None = None
   snippet: str
   content_length: int = 0

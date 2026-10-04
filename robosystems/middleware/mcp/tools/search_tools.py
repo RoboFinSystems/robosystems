@@ -31,6 +31,7 @@ HOISTED_HIT_FIELDS = (
   "form_type",
   "filing_date",
   "fiscal_year",
+  "accession_number",
 )
 
 # The element qnames of every fact in a section were 44% of the measured
@@ -138,7 +139,8 @@ class SearchDocumentsTool(_SearchToolMixin):
 - get-document-section / get-document — read what a hit points at
 - search-text — once you know the filing, search INSIDE its whole text (cover
   page, footnotes, anything between the indexed sections); pass a hit's
-  accession_number as `accession` with its ticker
+  accession_number as `accession` with its entity_ticker (a CIK for a filer
+  with no ticker)
 - read-graph-cypher — structured data (numbers, relationships), not prose
 - list-documents — browses by metadata; does not search content
 - resolve-element — takes a qname from get-document-section's xbrl_elements on
@@ -149,8 +151,8 @@ class SearchDocumentsTool(_SearchToolMixin):
   section_id, snippet, content_length and content_url (element_qname for an
   iXBRL disclosure)
 - Filing fields every hit shares (entity_ticker, entity_name, form_type,
-  filing_date, fiscal_year) appear once at the result root; when the hits span
-  filings they stay on each hit
+  filing_date, fiscal_year, accession_number) appear once at the result root;
+  when the hits span filings they stay on each hit
 - The same section from a filer's successive filings comes back once, as its
   best-ranked (then newest) filing; `also_in_filings` counts the other filings
   folded into it. With `entity` set nothing is folded, so pass a ticker or CIK
