@@ -26,7 +26,7 @@ Open a report in **Reports → View Reports**. The statements, and any notes att
 
 **Ask about this report** answers questions from the report inside the app. It runs on RoboLedger's own AI, so it uses credits. Asking your assistant about the same report through your own connection doesn't.
 
-If the ledger changed after you created a report, because of a late entry or a restated month, ask your assistant to regenerate it. The report is rebuilt from the ledger as it stands now.
+If the ledger changed after you created a report, because of a late entry or a restated month, regenerate it: ask your assistant, or open the report and choose **Regenerate** from its menu (⋮). The report is rebuilt from the ledger as it stands now. Copies you've already shared don't change.
 
 ## Download it
 
@@ -35,9 +35,19 @@ Open a report in **Reports → View Reports** to download it as:
 - an **XBRL 2.1 package**, the standard behind public company filings
 - a **Tavi** (JSON) or **holon** (JSON-LD) file, which open in the free viewer at [xbrlkit.com](https://xbrlkit.com)
 
+## File it
+
+When the statements are final, file the report. Filing happens in the app, not through your assistant: open the report and choose **File report** from its menu (⋮).
+
+A filed report is a record. It can't be regenerated or deleted, only archived, so wait to file if the books for the period may still change. To replace one, archive it and create a new report for the period.
+
+Before you file, the same menu marks a draft as under review, and returns it to draft.
+
 ## Share it
 
 Sharing happens in the app, not through your assistant. Open a report, choose **Share**, and pick a publish list. A publish list is a set of graphs you send reports to, such as your investor's RoboInvestor graph or your advisor's RoboLedger graph. Manage lists under **Reports → Publish Lists**, and add a recipient by their graph ID. The recipient can copy it from their graph's **Dashboard** at [robosystems.ai](https://robosystems.ai). What the investor sees is in the [RoboInvestor docs](https://roboinvestor.ai/docs/reports-you-receive).
+
+A report shared before it's filed arrives marked as a draft or under review. File it first to send final statements. If you already shared it, share it again after filing.
 
 **The recipient gets the statement, never the ledger.** A shared report copies the report, its statements and their facts, and the report files. Your transactions, customers, vendors and journal entries stay in your graph.
 

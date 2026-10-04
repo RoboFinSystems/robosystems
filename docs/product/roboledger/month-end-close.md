@@ -39,7 +39,7 @@ ChatGPT asks you to allow the close before it runs. Then the receipt: five entri
 1. **Your assistant checks where you stand.** It reads the last closed month, whether your QuickBooks sync is current, and anything blocking the next close. Months close in order, one at a time, and a month can't close until it's over.
 2. **It clears the blockers with you.**
    - *The sync is behind.* Your assistant runs a fresh sync and waits for it.
-   - *Transactions changed in QuickBooks after they synced.* These are normal. Your assistant shows you each one, and you choose to restate the month it belongs to, post the difference in an open month, or mark it as already handled. See [When QuickBooks changes after a sync](changes-after-sync.md).
+   - *Transactions changed in QuickBooks after they synced.* These are normal. Your assistant shows you each one, and you choose to restate the month it belongs to, post the difference in an open month, or mark it as already handled. You can also settle them yourself under **Changed transactions** in the Closing Book. See [When QuickBooks changes after a sync](changes-after-sync.md).
    - *A schedule ends this month.* If an asset was sold or a policy cancelled, end its schedule before the month's entries are drafted.
    - *A schedule's entry for the month isn't drafted yet.* Your assistant drafts it.
 3. **It drafts the month's entries.** Every active schedule gets its entry for the month, plus any one-off adjustment you ask for.

@@ -11,7 +11,7 @@ RoboLedger doesn't quietly overwrite its records when that happens, because the 
 
 ## How a change shows up
 
-After a sync, your AI assistant tells you how many transactions changed at the source. They also show up as a blocker when you ask what's in the way of a close, and on the period close view in **Ledger → Closing Book**. A close won't run over changes nobody has looked at.
+After a sync, your AI assistant tells you how many transactions changed at the source. They also show up as a blocker when you ask what's in the way of a close, and on the period close view in **Ledger → Closing Book**, where each one is listed under **Changed transactions**. A close won't run over changes nobody has looked at.
 
 For each one, your assistant can show you what RoboLedger posted, what QuickBooks says now, and the difference for each account.
 
@@ -26,6 +26,12 @@ A regular sync looks back 60 days. If someone edited something older than that, 
 **Mark it as handled.** You already booked the difference yourself. Nothing posts. Your assistant records a note saying why, and which entry covered it.
 
 Settling a change is what makes it stick. Until you do, the flag comes back on every sync.
+
+## Settle it in the app
+
+You can settle a change yourself, without your assistant. Open **Ledger → Closing Book → Changed transactions** and choose **Review** on a transaction. You see what RoboLedger posted, what QuickBooks says now, and the difference for each account. Pick restate, catch up or mark as handled, then **Settle**.
+
+A choice that can't apply is unavailable and says why, for example a restate when the month is closed. A catch-up is drafted in the earliest open month and posts when that month closes. Marking a change as handled needs a note.
 
 ## Which one to choose
 
