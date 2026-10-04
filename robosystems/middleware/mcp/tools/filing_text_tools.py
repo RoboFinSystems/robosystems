@@ -159,7 +159,7 @@ class SearchTextTool(BaseTool):
 - `search-documents` finds WHICH filings discuss something, across the corpus, ranked; `search-text` finds WHERE in one filing, exhaustively. Find the filing first, then search inside it
 
 **PARAMETERS:**
-- `query` (required) — whole words matched in order across any spacing, case-insensitive: `customer concentration`; a word also finds its plural and possessive (`tariff` finds tariffs). Split phrases with `|` to match any of them; end a word with `*` for a stem (`terminat*`); a `*` on its own is ignored. Not a regular expression
+- `query` (required) — whole words matched in order across any spacing, case-insensitive: `customer concentration`; a word also finds its -s / -es plural and possessive (`tariff` finds tariffs); any other ending needs a stem (`compan*` for companies). Split phrases with `|` to match any of them; end a word with `*` for a stem (`terminat*`); a `*` on its own is ignored. Not a regular expression
 - `ticker` (+ `fiscal_year` / `period_type`, or `form: "8-K"`, or `accession`), or `report_id` — as for `describe-filing`
 - `window` — characters of context around each match (default 300, max {SEARCH_MAX_WINDOW}); `max_hits` (default 10, max {SEARCH_MAX_HITS})
 
