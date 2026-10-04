@@ -552,7 +552,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       ManagedPolicyName: !Sub ${ServiceTag}FrontendRoleBoundary
-      Description: Permissions ceiling for the App Runner and ECS roles created by the frontend stacks
+      # Replacement-only, and the fixed name makes a replacement fail: leave as is.
+      Description: Permissions ceiling for the App Runner roles created by the frontend stacks
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
