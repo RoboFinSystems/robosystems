@@ -538,19 +538,21 @@ Resources:
   # FRONTEND ROLE - Limited permissions for frontend app deployments
   # =============================================================================
   # Ceiling for the IAM roles the frontend stacks create — the App Runner
-  # access and instance roles. The app templates set PermissionsBoundary on
-  # those roles to this policy (ARN exported below); the frontend deploy role
-  # may then create roles and attach policies only inside it, so a compromised
-  # frontend workflow cannot mint a privileged role within the name prefix it
-  # owns. The document is the union of what those roles legitimately hold:
-  # pull the app image, read the app's own secret, publish contact-form mail.
+  # access and instance roles, and the ECS Express execution and task roles.
+  # The app templates set PermissionsBoundary on those roles to this policy
+  # (ARN exported below); the frontend deploy role may then create roles and
+  # attach policies only inside it, so a compromised frontend workflow cannot
+  # mint a privileged role within the name prefix it owns. The document is the
+  # union of what those roles legitimately hold: pull the app image, read the
+  # app's own secret, publish contact-form mail, write container logs. The ECS
+  # infrastructure role is bounded by its AWS managed policy instead.
   FrontendRoleBoundary:
     Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
       ManagedPolicyName: !Sub ${ServiceTag}FrontendRoleBoundary
-      Description: Permissions ceiling for the App Runner roles created by the frontend stacks
+      Description: Permissions ceiling for the App Runner and ECS roles created by the frontend stacks
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -590,6 +592,14 @@ Resources:
               - !Sub arn:aws:sns:*:${AWS::AccountId}:robosystems-app-*
               - !Sub arn:aws:sns:*:${AWS::AccountId}:roboledger-app-*
               - !Sub arn:aws:sns:*:${AWS::AccountId}:roboinvestor-app-*
+          # ECS Express names the service's log group itself, so the
+          # execution role's log writes cannot be pinned to a name.
+          - Sid: WriteContainerLogs
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: "*"
 
   GitHubActionsFrontendRole:
     Type: AWS::IAM::Role
@@ -833,9 +843,28 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-ecs-execution
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-ecs-execution
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-ecs-execution
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-ecs-task
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-ecs-task
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-ecs-task
                 Condition:
                   StringEquals:
                     "iam:PermissionsBoundary": !Ref FrontendRoleBoundary
+              # The ECS infrastructure role's ceiling is its own AWS managed
+              # policy, so AWS's revisions to it flow through unchanged.
+              - Sid: IAMRoleBoundaryEcsInfrastructure
+                Effect: Allow
+                Action:
+                  - iam:PutRolePermissionsBoundary
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-ecs-infrastructure
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-ecs-infrastructure
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-ecs-infrastructure
+                Condition:
+                  StringEquals:
+                    "iam:PermissionsBoundary": arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRoleforExpressGatewayServices
               - Sid: IAMServiceLinkedRole
                 Effect: Allow
                 Action:
