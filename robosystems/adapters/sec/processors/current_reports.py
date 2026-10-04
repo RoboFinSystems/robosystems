@@ -24,6 +24,8 @@ CURRENT_REPORT_FORM = "8-K"
 # Results of operations (the release itself) and Reg FD (where some filers
 # put it instead).
 DEFAULT_ITEMS = ("2.02", "7.01")
+# The section an 8-K's own document reads as; every other section is an exhibit.
+FORM_SECTION_ID = "form_8k"
 # An exhibit is kept unless it names itself as something other than EX-99:
 # the release and the slides are 99.x, a credit agreement is 10.x.
 RELEASE_EXHIBIT = "99"
@@ -136,7 +138,7 @@ class FiledDocument:
   @property
   def section_id(self) -> str:
     if self.kind == "document":
-      return "form_8k"
+      return FORM_SECTION_ID
     if self.exhibit:
       return self.exhibit.lower().replace("-", "_").replace(".", "_")
     stem = re.sub(r"[^a-z0-9]+", "_", self.name.lower().rsplit(".", 1)[0])
