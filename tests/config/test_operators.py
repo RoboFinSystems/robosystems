@@ -49,6 +49,16 @@ class TestModelRegistry:
       assert spec.additional_request_fields == {"thinking": {"type": "disabled"}}
       assert spec.cache_points is True
 
+  def test_sonnet_5_5_runs_adaptive_thinking_and_takes_effort(self):
+    """It 400s on disabled thinking at every effort level (2026-10-04)."""
+    spec = OperatorConfig.MODEL_REGISTRY[OperatorModel.SONNET_5_5]
+    assert spec.model_id == "us.anthropic.claude-sonnet-5-5"
+    assert spec.pricing_key == "anthropic_claude_5_sonnet"
+    assert spec.accepts_sampling_params is False
+    assert spec.cache_points is True
+    assert spec.additional_request_fields == {"thinking": {"type": "adaptive"}}
+    assert spec.supports_effort is True
+
   def test_opus_5_5_runs_adaptive_thinking_and_takes_effort(self):
     """It 400s on disabled thinking at every effort level (2026-09-27)."""
     spec = OperatorConfig.MODEL_REGISTRY[OperatorModel.OPUS_5_5]
@@ -65,7 +75,7 @@ class TestModelRegistry:
       for model, spec in OperatorConfig.MODEL_REGISTRY.items()
       if spec.supports_effort
     }
-    assert takes_effort == {OperatorModel.OPUS_5_5}
+    assert takes_effort == {OperatorModel.SONNET_5_5, OperatorModel.OPUS_5_5}
 
   def test_execution_modes_map_to_effort(self):
     efforts = {
@@ -193,12 +203,12 @@ class TestProfiles:
   def test_profile_values(self):
     assert {p.value for p in ModelProfile} == {"economy", "balanced", "quality"}
 
-  def test_balanced_is_the_default_and_runs_sonnet_5(self):
+  def test_balanced_is_the_default_and_runs_sonnet_5_5(self):
     assert OperatorConfig.DEFAULT_MODEL_CONFIG.default_profile == ModelProfile.BALANCED
     assert (
-      OperatorConfig.PROFILE_MODELS[ModelProfile.BALANCED] == OperatorModel.SONNET_5
+      OperatorConfig.PROFILE_MODELS[ModelProfile.BALANCED] == OperatorModel.SONNET_5_5
     )
-    assert OperatorConfig.get_bedrock_model_id() == "us.anthropic.claude-sonnet-5"
+    assert OperatorConfig.get_bedrock_model_id() == "us.anthropic.claude-sonnet-5-5"
 
   def test_quality_and_economy_targets(self):
     assert OperatorConfig.PROFILE_MODELS[ModelProfile.QUALITY] == OperatorModel.OPUS_5_5
@@ -212,7 +222,7 @@ class TestResolveModel:
 
   def test_default(self):
     spec = OperatorConfig.resolve_model()
-    assert spec.model_id == "us.anthropic.claude-sonnet-5"
+    assert spec.model_id == "us.anthropic.claude-sonnet-5-5"
 
   def test_explicit_enum(self):
     assert (
@@ -260,7 +270,7 @@ class TestResolveModel:
 
   def test_unknown_operator_type_falls_through_to_default(self):
     assert OperatorConfig.get_bedrock_model_id(operator_type="analyst") == (
-      "us.anthropic.claude-sonnet-5"
+      "us.anthropic.claude-sonnet-5-5"
     )
 
 
@@ -408,7 +418,7 @@ class TestGetAllConfig:
     config = OperatorConfig.get_all_config()
     models = config["models"]
     assert models["default"] == "balanced"
-    assert models["default_model_id"] == "us.anthropic.claude-sonnet-5"
+    assert models["default_model_id"] == "us.anthropic.claude-sonnet-5-5"
     assert "fallback" in models
     assert "region" in models
     assert set(models["available_models"]) == {

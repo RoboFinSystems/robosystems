@@ -42,6 +42,7 @@ class ModelProvider(Enum):
 class OperatorModel(Enum):
   """Registered models, by short name. The wire id lives in the registry."""
 
+  SONNET_5_5 = "claude-sonnet-5-5"
   SONNET_5 = "claude-sonnet-5"
   SONNET_4_6 = "claude-sonnet-4-6"
   SONNET_4_5 = "claude-sonnet-4-5-20250929"
@@ -93,8 +94,9 @@ class ModelSpec:
 # whenever tool choice forces a tool.)
 _CLAUDE_5_REQUEST_FIELDS: dict[str, Any] = {"thinking": {"type": "disabled"}}
 
-# Opus 5.5 rejects disabled thinking at every effort level (verified over
-# Converse 2026-09-27); effort is its only depth control.
+# Opus 5.5 and Sonnet 5.5 reject disabled thinking at every effort level
+# (verified over Converse 2026-09-27 and 2026-10-04); effort is their only
+# depth control.
 _ADAPTIVE_THINKING_REQUEST_FIELDS: dict[str, Any] = {"thinking": {"type": "adaptive"}}
 
 
@@ -102,6 +104,15 @@ _ADAPTIVE_THINKING_REQUEST_FIELDS: dict[str, Any] = {"thinking": {"type": "adapt
 # `-v1:0`); the 4.x rows keep the versioned form. Both are correct — do not
 # "fix" one to match the other.
 _BEDROCK_MODELS: dict[OperatorModel, ModelSpec] = {
+  # Same list price as Sonnet 5, so it bills under the same key.
+  OperatorModel.SONNET_5_5: ModelSpec(
+    model_id="us.anthropic.claude-sonnet-5-5",
+    pricing_key="anthropic_claude_5_sonnet",
+    cache_points=True,
+    accepts_sampling_params=False,
+    additional_request_fields=_ADAPTIVE_THINKING_REQUEST_FIELDS,
+    supports_effort=True,
+  ),
   OperatorModel.SONNET_5: ModelSpec(
     model_id="us.anthropic.claude-sonnet-5",
     pricing_key="anthropic_claude_5_sonnet",
@@ -154,7 +165,7 @@ _BEDROCK_MODELS: dict[OperatorModel, ModelSpec] = {
 # Profile → model, platform-wide.
 _PLATFORM_PROFILE_MODELS: dict[ModelProfile, OperatorModel] = {
   ModelProfile.ECONOMY: OperatorModel.GPT_5_6_LUNA,
-  ModelProfile.BALANCED: OperatorModel.SONNET_5,
+  ModelProfile.BALANCED: OperatorModel.SONNET_5_5,
   ModelProfile.QUALITY: OperatorModel.OPUS_5_5,
 }
 

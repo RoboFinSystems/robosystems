@@ -144,7 +144,7 @@ AIBillingConfig.TOKEN_PRICING["anthropic_claude_4_sonnet"]
 ```python
 from robosystems.config import OperatorModel, ModelProfile, OperatorConfig, OperatorExecutionMode
 
-OperatorConfig.resolve_model()                                 # default profile (balanced → Sonnet 5)
+OperatorConfig.resolve_model()                                 # default profile (balanced → Sonnet 5.5)
 OperatorConfig.resolve_model(ModelProfile.ECONOMY)             # a profile
 OperatorConfig.resolve_model(OperatorModel.OPUS_5)              # a pinned model
 OperatorConfig.resolve_model(operator_type="analyst")          # honors OPERATOR_MODEL_OVERRIDES
