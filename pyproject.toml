@@ -68,7 +68,7 @@ dependencies = [
     "pandas>=2.3.0,<3.0",  # hold: 3.0 changes concat dtype inference (SEC safe_concat test fails, #1632); migrate deliberately
     "pyarrow>=24.0.0,<25",  # hold: 25 is a fresh major feeding the duckdb/ladybug arrow seams; bump deliberately, paired with icebug 13
     "rdflib>=7.0.0,<8.0",
-    "xbrlkit>=0.20.8,<0.21.0",
+    "xbrlkit>=0.20.9,<0.21.0",
     # External API Integrations
     "intuit-oauth>=1.2.0,<2.0",
     "python-quickbooks>=0.9.0,<1.0",
