@@ -283,6 +283,19 @@ def _report_ref(cik: str, entry: dict[str, Any]) -> FilingRef:
   )
 
 
+_RELEASE_FOLDER_RE = re.compile(r"/\d{4}/(\d{10})/(\d{10}-\d{2}-\d{6})/?$")
+
+
+def _folder_cik(entry: dict[str, Any], listed_under: str) -> str:
+  """The CIK a release's files sit under. A combined 8-K is published once,
+  under its first registrant, and listed under every registrant: the entry's
+  own folder says where it is, not the list it was found in."""
+  match = _RELEASE_FOLDER_RE.search(str(entry.get("folder") or ""))
+  if match and match.group(2) == entry.get("accession"):
+    return match.group(1)
+  return listed_under
+
+
 async def _release_ref(
   s3: S3Client, symbol: str, cik: str, accession: str | None, year: int | None = None
 ) -> FilingRef:
@@ -305,6 +318,7 @@ async def _release_ref(
     when = f" filed in {year}" if year is not None and not accession else ""
     raise ReportNotFoundError(f"No {what}{when} captured for {symbol}.")
   filing_date = str(entry.get("filing_date") or "")
+  filed_under = _folder_cik(entry, cik)
   resolved: dict[str, Any] = {
     "accession": entry["accession"],
     "form": CURRENT_REPORT_FORM,
@@ -322,12 +336,12 @@ async def _release_ref(
     for exhibit, name in (entry.get("exhibits") or {}).items():
       representations.append({"kind": "exhibit", "name": name, "exhibit": exhibit})
     if links := public_filing_links(
-      cik, entry["accession"], filing_date, representations, has_holon=False
+      filed_under, entry["accession"], filing_date, representations, has_holon=False
     ):
       resolved["links"] = links
   return FilingRef(
     accession=entry["accession"],
-    cik=cik,
+    cik=filed_under,
     filing_date=entry.get("filing_date"),
     form=CURRENT_REPORT_FORM,
     resolved=resolved,

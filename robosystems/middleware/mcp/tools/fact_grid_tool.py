@@ -15,6 +15,7 @@ from robosystems.models.api.views.view_config import (
 )
 from robosystems.operations.roboledger.views import (
   FactGridBuilder,
+  period_scope_hint,
   query_fact_grid,
   shared_only_selectors,
   summarize_by_element,
@@ -165,7 +166,7 @@ For income statement items (revenue, net income), always specify period_type='an
     if not periods and not period_type and fiscal_year is None:
       return {
         "error": "missing_period_filter",
-        "message": "Provide periods, period_type, or fiscal_year to scope the query",
+        "message": period_scope_hint(self.client.graph_id),
       }
 
     # As on REST: an entity-less query on a shared repo returns an arbitrary
