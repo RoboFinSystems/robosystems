@@ -39,13 +39,13 @@ The people and companies you do business with: customers, vendors and employees.
 
 ![Live statements showing a balance sheet with current and prior columns](images/statements.png)
 
-**Closing Book** is where the month-end close lives. The period close view shows the last closed month, the month you're working towards, what's blocking it, and each schedule's entry for the month. Beneath it are your account mapping, your schedules and the trial balance. See [Close the month with your AI assistant](month-end-close.md) and [Schedules for recurring entries](schedules.md).
+**Closing Book** is where the month-end close lives. The period close view shows the last closed month, the month you're working towards, what's blocking it, and each schedule's entry for the month. Beneath it are your account mapping, your schedules, the transactions that changed in QuickBooks after a sync, and the trial balance. See [Close the month with your AI assistant](month-end-close.md), [Schedules for recurring entries](schedules.md) and [When QuickBooks changes after a sync](changes-after-sync.md).
 
 ![The Closing Book period close view, showing the last closed month, a blocker, and four schedule entries pending for August](images/closing-book.png)
 
 ## Reports
 
-- **View Reports** lists the reports you've created. Open one to read its statements and notes, download it, or share it.
+- **View Reports** lists the reports you've created. Open one to read its statements and notes, download it, share it, regenerate it, or file it once it's final.
 - **Create Report** builds a report for a period: this month or last, this quarter or last, monthly year to date, a full year by month, year over year, or dates you choose.
 - **Publish Lists** are the sets of graphs you send reports to.
 - **Blocked Senders** are graphs you don't accept reports from.
