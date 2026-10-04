@@ -164,7 +164,9 @@ its folder, as `information-block` does.
   its name) go to the filing's public folder with a `manifest.json`, and the
   filer's releases list `current-reports/{cik}.json` gains the filing — how an
   8-K is found, since it is in neither the graph nor the catalog. A zip
-  already in raw is read from there, so a re-run costs only the EFTS pages.
+  already in raw is read from there, so a re-run costs only the EFTS pages,
+  and a filing already published is listed from its manifest, so a run that
+  ended before its lists were written is repaired by the next.
 - **`sec_filing_documents`** — the primary document of a filing processed
   before inline XBRL. Its zip held the instance only, so its folder has the
   holon and the Tavi but not the document; the manifest names it, one request
@@ -219,13 +221,55 @@ The download's quarter travels down the chain as the `quarter` run tag, so
 stage, index and catalog all work on the quarter that was downloaded, even when
 a run finishes after midnight on a quarter's last day.
 
-**All sensors start STOPPED.** Enable them in the Dagster UI when you want the
-automated chain; nothing runs on its own after a fresh deploy.
+## Intraday
+
+The graph is rebuilt once a night. What is read from a filing's public folder
+does not need the graph, so two schedules bring it forward to the day of
+filing. Both are tagged `mode=intraday` and neither wakes the master.
+
+```
+09:45, 13:45, 17:45 ET — sec_intraday_download_schedule
+  → download (the last 2 days of the quarter, not the quarter)
+
+sec_incremental_pipeline_sensor
+  → process, only when the download found something new
+  → filer catalog, once the partition has drained   (no wake, no stage)
+
+every 30 min, 06:00–21:30 ET — sec_current_reports_intraday_schedule
+  → 8-K earnings releases, the last 2 days
+```
+
+- **Same day:** a new 10-K / 10-Q's holon and document are published by the
+  process stage and listed by the catalog, so `describe-filing`, `search-text`,
+  `read-text`, the viewer and the filer pages have it; an 8-K is readable
+  within the half hour, plus whatever lag EFTS adds.
+- **Next morning:** the graph (`financial-statement-analysis`,
+  `build-fact-grid`, Cypher), `disclosures` / `information-block` (they look
+  the report up in the graph), and document search (indexing stays on the
+  nightly chain). For those hours a filing is known to the text tools and not
+  to the numbers tools.
+- **The night is unchanged.** The nightly download reads the whole quarter and
+  the nightly stage re-reads the whole quarter, so everything an intraday pass
+  processed is staged and materialized with the rest. A nightly download that
+  finds an intraday process run still going asks for its own: an intraday run
+  ends at the catalog, and the `quarter` run-queue limit holds the nightly one
+  behind it.
+- **Cost.** The look-back (`since_days` on the download) is what keeps a pass
+  cheap: a whole-quarter download refreshes the submissions of every filer in
+  the quarter, thousands of EDGAR requests late in a quarter. A pass that finds
+  nothing new stops after the download. The `edgar` run-queue limit serializes
+  both schedules with each other and with the nightly download, and an 8-K tick
+  that finds a capture still queued or running is skipped.
+
+**All sensors and schedules start STOPPED.** Enable them in the Dagster UI
+when you want the automated chain; nothing runs on its own after a fresh deploy.
 
 | Sensor / schedule | Triggers | Role |
 |-------------------|----------|------|
-| `sec_incremental_download_schedule` | `sec_download_job` | 9pm EST weekdays |
-| `sec_incremental_pipeline_sensor` | `sec_process_job`, `shared_master_wake_job` | download → process (batched loop) → wake the shared master once drained |
+| `sec_incremental_download_schedule` | `sec_download_job` | 9pm ET weekdays, the whole quarter |
+| `sec_intraday_download_schedule` | `sec_download_job` | 09:45, 13:45, 17:45 ET weekdays, the last 2 days |
+| `sec_current_reports_intraday_schedule` | `sec_current_reports_job` | every 30 min, 06:00–21:30 ET weekdays |
+| `sec_incremental_pipeline_sensor` | `sec_process_job`, `shared_master_wake_job`, `sec_filing_catalog_job` | download → process (batched loop) → wake the shared master once drained (nightly), or → the filer catalog (intraday) |
 | `sec_wake_to_stage_sensor` | `sec_incremental_stage_job` | master awake → stage the tagged quarter |
 | `sec_stage_to_materialize_sensor` | `sec_materialize_job` | stage → full graph rebuild |
 | `sec_post_stage_index_sensor` | `sec_narratives_index_job`, `sec_ixbrl_index_job` | stage → OpenSearch indexing |
@@ -255,7 +299,7 @@ All in `configs.py`:
 
 | Config | Asset | Key options |
 |--------|-------|-------------|
-| `SECDownloadConfig` | `sec_raw_filings` | `form_types`, `tickers`, `dry_run` |
+| `SECDownloadConfig` | `sec_raw_filings` | `form_types`, `tickers`, `since_days`, `dry_run` |
 | `SECProcessConfig` | `sec_processed_filings` | `batch_size`, `continue_on_error`, `form_types` |
 | `SECStageConfig` | `sec_duckdb_staged` | `reset_staging`, `year`, `start_year`/`end_year` |
 | `SECIncrementalStageConfig` | `sec_duckdb_incremental_staged` | `year`, `quarter` |

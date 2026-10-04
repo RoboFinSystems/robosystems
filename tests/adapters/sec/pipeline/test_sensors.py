@@ -14,16 +14,22 @@ from zoneinfo import ZoneInfo
 import pytest
 from dagster import (
   DagsterRunStatus,
+  DefaultScheduleStatus,
   RunRequest,
+  SkipReason,
   build_schedule_context,
 )
 
 from robosystems.adapters.sec.pipeline.sensors import (
+  CURRENT_REPORTS_INTRADAY_LOOKBACK_DAYS,
   CURRENT_REPORTS_NIGHTLY_LOOKBACK_DAYS,
+  INTRADAY_LOOKBACK_DAYS,
   _get_quarters_to_scan,
+  sec_current_reports_intraday_schedule,
   sec_current_reports_sensor,
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
+  sec_intraday_download_schedule,
   sec_master_sleep_on_failure_sensor,
   sec_post_materialize_publish_sensor,
   sec_post_stage_index_sensor,
@@ -1036,6 +1042,7 @@ class TestSensorRequestJobsDeclared:
     names = {j.name for j in sec_incremental_pipeline_sensor.jobs}
     assert "shared_master_wake" in names  # drained-queue branch yields this
     assert "sec_process" in names
+    assert "sec_catalog" in names  # where an intraday pass ends
 
   def test_wake_to_stage_declares_stage(self):
     assert "sec_incremental_stage" in {j.name for j in sec_wake_to_stage_sensor.jobs}
@@ -1121,3 +1128,226 @@ class TestSecCurrentReportsSensor:
   def test_skips_in_dev(self, mock_env):
     mock_env.ENVIRONMENT = "dev"
     assert self._run("sec_download") == []
+
+
+def _pending(session_factory, *, rows=None, count=None, raises=None):
+  """The SourceFile query the chain sensor runs: ``all()`` after a process
+  batch, ``count()`` after an intraday download."""
+  if raises is not None:
+    session_factory.side_effect = raises
+    return
+  query = MagicMock()
+  query.filter.return_value = query
+  query.all.return_value = rows or []
+  query.count.return_value = count
+  session = MagicMock()
+  session.query.return_value = query
+  session_factory.return_value = session
+
+
+@pytest.mark.unit
+class TestIntradayChain:
+  """mode=intraday: download → process → filer catalog, and never the master."""
+
+  TAGS = {"mode": "intraday", "dagster/partition": "2026-Q4", "batch_id": "b-0930"}
+
+  def _run(self, job_name, get_runs=None, tags=None):
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_incremental_pipeline_sensor",
+        job_name=job_name,
+        run_id="run-intra001",
+        tags=self.TAGS if tags is None else tags,
+        instance=instance,
+        get_runs_return=[],
+      )
+      if get_runs is not None:
+        instance.get_runs = get_runs
+      return list(sec_incremental_pipeline_sensor(context))
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_a_download_with_new_files_processes_them(self, mock_env, session):
+    mock_env.ENVIRONMENT = "prod"
+    _pending(session, count=3)
+    [request] = self._run("sec_download")
+    assert request.job_name == "sec_process"
+    assert request.partition_key == "2026-Q4"
+    assert request.tags["mode"] == "intraday"
+    assert request.tags["quarter"] == "2026-Q4"
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_a_download_with_nothing_new_ends_the_pass(self, mock_env, session):
+    mock_env.ENVIRONMENT = "prod"
+    _pending(session, count=0)
+    assert self._run("sec_download") == []
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_an_unreadable_queue_is_processed_rather_than_dropped(
+    self, mock_env, session
+  ):
+    mock_env.ENVIRONMENT = "prod"
+    _pending(session, raises=RuntimeError("database is away"))
+    [request] = self._run("sec_download")
+    assert request.job_name == "sec_process"
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_a_drained_pass_ends_at_the_catalog_not_the_master(self, mock_env, session):
+    mock_env.ENVIRONMENT = "prod"
+    _pending(session, rows=[])
+    [request] = self._run("sec_process")
+    assert request.job_name == "sec_catalog"
+    assert request.partition_key == "2026-Q4"
+    assert request.tags["mode"] == "intraday"
+    assert request.run_config == {
+      "ops": {"sec_filing_catalog": {"config": {"graph_id": "sec"}}}
+    }
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_files_still_pending_get_another_batch(self, mock_env, session):
+    mock_env.ENVIRONMENT = "prod"
+    _pending(session, rows=[("2026-Q4_0000000001_0000000001-26-000001",)])
+    [request] = self._run("sec_process")
+    assert request.job_name == "sec_process"
+    assert request.tags["mode"] == "intraday"
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_a_catalog_already_running_is_not_doubled(self, mock_env, session):
+    mock_env.ENVIRONMENT = "prod"
+    _pending(session, rows=[])
+    assert self._run("sec_process", get_runs=lambda **kwargs: [MagicMock()]) == []
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_an_intraday_process_does_not_stand_in_for_the_nightly_one(
+    self, mock_env, session
+  ):
+    # Its success would end at the catalog, and the night's staging would
+    # never start. The nightly download asks for its own run, which the
+    # `quarter` run-queue limit holds behind the intraday one.
+    mock_env.ENVIRONMENT = "prod"
+    _pending(session, count=0)
+
+    def get_runs(filters=None, **kwargs):
+      mode = (getattr(filters, "tags", None) or {}).get("mode")
+      return [MagicMock()] if mode == "intraday" else []
+
+    [request] = self._run(
+      "sec_download",
+      get_runs=get_runs,
+      tags={"mode": "incremental", "dagster/partition": "2026-Q4", "batch_id": "n"},
+    )
+    assert request.job_name == "sec_process"
+    assert request.tags["mode"] == "incremental"
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_an_intraday_run_on_the_same_quarter_does_not_hold_the_wake(
+    self, mock_env, session
+  ):
+    # Files pending on another quarter hold the nightly wake only while a run
+    # on that quarter drains them. An intraday run shares the nightly quarter;
+    # waiting on it would wait for a success that ends at the catalog.
+    mock_env.ENVIRONMENT = "prod"
+    _pending(session, rows=[("2026-Q3_0000000001_0000000001-26-000001",)])
+    intraday = MagicMock()
+    intraday.run_id = "run-intraday-live"
+    intraday.tags = {"dagster/partition": "2026-Q4", "mode": "intraday"}
+
+    def get_runs(filters=None, **kwargs):
+      return [intraday] if filters.job_name == "sec_process" else []
+
+    [request] = self._run(
+      "sec_process",
+      get_runs=get_runs,
+      tags={"mode": "incremental", "dagster/partition": "2026-Q4", "batch_id": "n"},
+    )
+    assert request.job_name == "shared_master_wake"
+
+
+@pytest.mark.unit
+class TestSecIntradayDownloadSchedule:
+  TICK = datetime(2026, 10, 5, 13, 45, tzinfo=ZoneInfo("America/New_York"))
+
+  @patch("robosystems.adapters.sec.pipeline.sensors._get_quarters_to_scan")
+  def test_asks_for_the_look_back_only(self, mock_quarters):
+    mock_quarters.return_value = ["2026-Q4"]
+    context = build_schedule_context(scheduled_execution_time=self.TICK)
+    [request] = list(sec_intraday_download_schedule(context))
+    assert request.partition_key == "2026-Q4"
+    assert request.tags["mode"] == "intraday"
+    assert request.run_key == "sec-intraday-2026-Q4-20261005-1345"
+    config = request.run_config["ops"]["sec_raw_filings"]["config"]
+    assert config["since_days"] == INTRADAY_LOOKBACK_DAYS
+    assert config["skip_existing"] is True
+
+  def test_runs_three_times_a_weekday_and_ships_stopped(self):
+    schedule = sec_intraday_download_schedule
+    assert schedule.cron_schedule == "45 9,13,17 * * 1-5"
+    assert schedule.execution_timezone == "America/New_York"
+    assert schedule.default_status == DefaultScheduleStatus.STOPPED
+
+  @patch("robosystems.adapters.sec.pipeline.sensors._get_quarters_to_scan")
+  def test_the_nightly_download_still_reads_the_whole_quarter(self, mock_quarters):
+    mock_quarters.return_value = ["2026-Q4"]
+    context = build_schedule_context(
+      scheduled_execution_time=datetime(2026, 10, 5, 21, 0, tzinfo=UTC)
+    )
+    [request] = list(sec_incremental_download_schedule(context))
+    config = request.run_config["ops"]["sec_raw_filings"]["config"]
+    assert config["since_days"] is None
+
+
+@pytest.mark.unit
+class TestSecCurrentReportsIntradaySchedule:
+  TICK = datetime(2026, 10, 5, 16, 30, tzinfo=ZoneInfo("America/New_York"))
+
+  def _tick(self, active):
+    from dagster import DagsterInstance
+
+    # A schedule context rebuilds its instance from a reference, which an
+    # ephemeral instance does not have and a patched object would not survive.
+    with (
+      DagsterInstance.local_temp() as instance,
+      patch.object(DagsterInstance, "get_runs", return_value=active),
+    ):
+      context = build_schedule_context(
+        instance=instance, scheduled_execution_time=self.TICK
+      )
+      return list(sec_current_reports_intraday_schedule(context))
+
+  @patch("robosystems.adapters.sec.pipeline.sensors._get_quarters_to_scan")
+  def test_asks_for_a_short_look_back(self, mock_quarters):
+    mock_quarters.return_value = ["2026-Q4"]
+    [request] = self._tick(active=[])
+    assert isinstance(request, RunRequest)
+    assert request.partition_key == "2026-Q4"
+    assert request.tags["mode"] == "intraday"
+    assert request.run_key == "sec-current-reports-intraday-2026-Q4-20261005-1630"
+    assert request.run_config == {
+      "ops": {
+        "sec_current_reports": {
+          "config": {"since_days": CURRENT_REPORTS_INTRADAY_LOOKBACK_DAYS}
+        }
+      }
+    }
+
+  @patch("robosystems.adapters.sec.pipeline.sensors._get_quarters_to_scan")
+  def test_a_tick_behind_a_capture_in_flight_is_skipped(self, mock_quarters):
+    mock_quarters.return_value = ["2026-Q4"]
+    [skipped] = self._tick(active=[MagicMock()])
+    assert isinstance(skipped, SkipReason)
+
+  def test_covers_edgar_hours_on_weekdays_and_ships_stopped(self):
+    schedule = sec_current_reports_intraday_schedule
+    assert schedule.cron_schedule == "*/30 6-21 * * 1-5"
+    assert schedule.execution_timezone == "America/New_York"
+    assert schedule.default_status == DefaultScheduleStatus.STOPPED
+    assert schedule.job_name == "sec_current_reports_capture"

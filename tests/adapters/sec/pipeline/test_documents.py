@@ -115,6 +115,21 @@ class TestWindows:
     assert discovery_window("2026-Q1", None, date(2025, 11, 5)) is None
     assert discovery_window("2025-Q3", 7, date(2025, 11, 5)) is None
 
+  def test_a_look_back_kept_inside_its_quarter(self):
+    # The XBRL download files what it finds under the run's quarter, so its
+    # look-back stops at the quarter's first day.
+    assert discovery_window("2025-Q4", 2, date(2025, 10, 1), within_quarter=True) == (
+      date(2025, 10, 1),
+      date(2025, 10, 1),
+    )
+    assert discovery_window("2025-Q4", 2, date(2025, 11, 5), within_quarter=True) == (
+      date(2025, 11, 3),
+      date(2025, 11, 5),
+    )
+    assert (
+      discovery_window("2025-Q3", 2, date(2025, 11, 5), within_quarter=True) is None
+    )
+
   def test_quarter_of(self):
     assert quarter_of(date(2025, 9, 30)) == "2025-Q3"
     assert quarter_of(date(2025, 10, 1)) == "2025-Q4"
@@ -138,7 +153,7 @@ def test_corpus_ciks_from_submissions():
 
 @pytest.mark.unit
 class TestCaptureCurrentReports:
-  def _run(self, writer, raw_zip, fetched=(200, b"")):
+  def _run(self, writer, raw_zip, fetched=(200, b""), published=(False, None)):
     fetch = MagicMock()
 
     async def _fetch(session, url, log):
@@ -148,6 +163,7 @@ class TestCaptureCurrentReports:
     with (
       patch("robosystems.operations.aws.s3.S3Client", return_value=writer),
       patch.object(module, "_read_object", return_value=raw_zip),
+      patch.object(module, "_published_files", return_value=published),
       patch.object(module, "_fetch", _fetch),
       patch(
         "robosystems.adapters.sec.pipeline.text_index._get_s3_client",
@@ -207,13 +223,76 @@ class TestCaptureCurrentReports:
     assert self.published == []
 
   def test_already_published_is_left_alone(self, env):
-    manifest = "2025/0000320193/0000320193-25-000077/manifest.json"
-    writer = _Writer(existing={manifest})
-    stats, fetch = self._run(writer, _zip())
+    files = [
+      {"kind": "document", "name": "aapl-20251030.htm"},
+      {"kind": "exhibit", "name": "ex991.htm", "exhibit": "EX-99.1"},
+    ]
+    writer = _Writer()
+    stats, fetch = self._run(writer, _zip(), published=(True, files))
     assert stats == Counter({"already_published": 1})
     fetch.assert_not_called()
-    # Still listed: a list write that failed last run is repaired by this one.
-    assert self.published == [(HIT, None)]
+    assert writer.objects == {}
+    # Still listed, with the files its manifest names: a run that published
+    # the filing and ended before the list was written is repaired by this one.
+    assert self.published == [(HIT, files)]
+
+  def test_republish_does_not_ask_what_is_there(self, env):
+    writer = _Writer()
+    fetch = MagicMock()
+
+    async def _fetch(session, url, log):
+      fetch(url)
+      return 200, b""
+
+    with (
+      patch("robosystems.operations.aws.s3.S3Client", return_value=writer),
+      patch.object(module, "_read_object", return_value=_zip()),
+      patch.object(module, "_published_files") as published_files,
+      patch.object(module, "_fetch", _fetch),
+      patch(
+        "robosystems.adapters.sec.pipeline.text_index._get_s3_client",
+        return_value=MagicMock(),
+      ),
+    ):
+      stats, _published = asyncio.run(
+        module._capture_current_reports(
+          [HIT], "2025-Q4", SECCurrentReportsConfig(republish=True), MagicMock()
+        )
+      )
+    published_files.assert_not_called()
+    assert stats["published"] == 1
+
+
+@pytest.mark.unit
+class TestPublishedFiles:
+  """What a filing's manifest says is already in its public folder."""
+
+  class _S3:
+    class exceptions:
+      class NoSuchKey(Exception):
+        pass
+
+    def __init__(self, body=None):
+      self.body = body
+
+    def get_object(self, Bucket, Key):
+      if self.body is None:
+        raise self.exceptions.NoSuchKey()
+      return {"Body": io.BytesIO(self.body)}
+
+  def test_no_manifest_means_not_published(self):
+    assert module._published_files(self._S3(), "public", "k") == (False, None)
+
+  def test_a_manifest_names_the_files(self):
+    files = [{"kind": "document", "name": "a.htm"}]
+    body = json.dumps({"representations": files}).encode()
+    assert module._published_files(self._S3(body), "public", "k") == (True, files)
+
+  def test_an_unreadable_manifest_is_still_published(self):
+    assert module._published_files(self._S3(b"not json"), "public", "k") == (
+      True,
+      None,
+    )
 
 
 @pytest.mark.unit
