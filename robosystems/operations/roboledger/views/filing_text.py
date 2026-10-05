@@ -24,6 +24,7 @@ import re
 import zlib
 from dataclasses import asdict, dataclass
 from datetime import date
+from functools import partial
 from typing import Any
 
 from xbrlkit.deserialize import HolonError, from_holon_report
@@ -69,6 +70,7 @@ from .information_blocks import (
   COORDINATES_QUERY,
   HOLON_BUDGET_CHARS,
   MODEL_CACHE_TTL_SHARED_SECONDS,
+  PublicStorageError,
   ReportNotFoundError,
   ReportNotPublishedError,
   ReportSelectorError,
@@ -435,13 +437,25 @@ def filing_info(ref: FilingRef) -> dict[str, Any] | None:
 # ── reading the folder ─────────────────────────────────────────────────────
 
 
+async def _read_public(s3: S3Client, key: str) -> str | None:
+  """None when the object is absent. A read that fails raises: a text built
+  around it would be cached as the filing's whole text."""
+  try:
+    return await run_off_loop(s3.read_string, env.PUBLIC_DATA_BUCKET, key)
+  except Exception as exc:
+    logger.warning(f"public filing read failed for {key}: {exc}")
+    raise PublicStorageError(
+      "The published filing could not be read; try again."
+    ) from exc
+
+
 async def _read_json(s3: S3Client, key: str) -> dict[str, Any] | None:
-  text = await run_off_loop(s3.download_string, env.PUBLIC_DATA_BUCKET, key)
+  text = await _read_public(s3, key)
   return json.loads(text) if text else None
 
 
 async def _read_text(s3: S3Client, key: str, what: str) -> str | None:
-  text = await run_off_loop(s3.download_string, env.PUBLIC_DATA_BUCKET, key)
+  text = await _read_public(s3, key)
   if text is not None and len(text) > DOCUMENT_BUDGET_CHARS:
     raise ReportTooLargeError(_too_large(what))
   return text
@@ -499,10 +513,8 @@ async def _holon_model(
   name = str((rep or {}).get("name") or FILING_ARTIFACT_HOLON)
   if rep and int(rep.get("bytes") or 0) > HOLON_BUDGET_CHARS:
     raise ReportTooLargeError(_too_large(ref.accession))
-  text = await run_off_loop(
-    s3.download_string,
-    env.PUBLIC_DATA_BUCKET,
-    get_filing_artifact_key(ref.year, ref.cik, ref.accession, name),
+  text = await _read_public(
+    s3, get_filing_artifact_key(ref.year, ref.cik, ref.accession, name)
   )
   if text is None:
     raise ReportNotPublishedError(f"{ref.accession} has no published holon.")
@@ -538,7 +550,9 @@ async def _report_from_folder(
       what,
     )
   if html is None or not manifest.get("is_inline_xbrl"):
-    await run_off_loop(_inline_fragments, s3, model, _external_text_blocks(model))
+    await run_off_loop(
+      partial(_inline_fragments, strict=True), s3, model, _external_text_blocks(model)
+    )
   text, sections = await run_off_loop(build_text, model, html)
   return LoadedFiling(
     id=ref.key,
