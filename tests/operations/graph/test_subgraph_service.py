@@ -97,8 +97,44 @@ class TestSubgraphService:
     assert result["status"] == "created"
     assert result["instance_id"] == "local-lbug-writer"
     # The tier-limit check lists subgraphs first; the create itself goes to
-    # the local writer.
+    # the local writer, at GRAPH_API_URL's host.
     assert get_client.call_args.args == ("graph-api",)
+
+  @pytest.mark.asyncio
+  async def test_create_from_the_host_uses_the_host_graph_api(
+    self, service, mock_allocation_manager, mock_lbug_client, db_session
+  ):
+    """Run on the host, GRAPH_API_URL is localhost, not the compose name."""
+    from robosystems.config.graph_tier import GraphTier
+    from robosystems.models.core.graph import Graph
+
+    parent_id = "kg5f2e5e0da65d45d69698"
+    if not db_session.query(Graph).filter(Graph.graph_id == parent_id).first():
+      db_session.add(
+        Graph(
+          graph_id=parent_id,
+          graph_name="Parent Graph",
+          graph_type="generic",
+          graph_tier=GraphTier.LADYBUG_LARGE.value,
+        )
+      )
+      db_session.commit()
+
+    with (
+      patch(
+        "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance",
+        return_value=mock_lbug_client,
+      ) as get_client,
+      patch("robosystems.operations.graph.subgraph_service.env") as mock_env,
+    ):
+      mock_env.is_development.return_value = True
+      mock_env.GRAPH_API_URL = "http://localhost:8001"
+
+      await service.create_subgraph_database(
+        parent_graph_id=parent_id, subgraph_name="analysis", schema_extensions=None
+      )
+
+    assert get_client.call_args.args == ("localhost",)
 
   @pytest.mark.asyncio
   async def test_create_subgraph_success(

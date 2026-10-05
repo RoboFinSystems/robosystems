@@ -131,9 +131,11 @@ class SubgraphService:
           instance_id: str
           private_ip: str
 
+        from urllib.parse import urlparse
+
         parent_location = LocalGraphLocation(
           instance_id="local-lbug-writer",
-          private_ip="graph-api",
+          private_ip=urlparse(env.GRAPH_API_URL).hostname or "graph-api",
         )
         logger.info(
           f"Using local graph instance: {parent_location.instance_id} at {parent_location.private_ip}"
