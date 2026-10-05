@@ -599,7 +599,6 @@ async def test_timed_out_write_is_not_resubmitted(
       graph_type=parent.graph_type,
       base_schema=parent.base_schema,
       graph_tier=parent.graph_tier,
-      graph_instance_id=parent.graph_instance_id,
       parent_graph_id=parent.graph_id,
       subgraph_index=1,
       subgraph_name="dev",

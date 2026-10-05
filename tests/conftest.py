@@ -547,7 +547,6 @@ def sample_graph(test_db, test_org):
     base_schema="base",
     schema_extensions=["roboledger"],
     graph_tier=GraphTier.LADYBUG_STANDARD,
-    graph_instance_id="test-instance",
     graph_metadata={
       "purpose": "testing",
       "fixture": True,

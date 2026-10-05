@@ -338,7 +338,6 @@ class GraphCreationService:
         schema_extensions=config.schema_extensions
         if not config.has_custom_schema
         else [],
-        graph_instance_id=location.instance_id,
         graph_tier=config.graph_tier,
         graph_metadata={
           "created_by": config.user_id,

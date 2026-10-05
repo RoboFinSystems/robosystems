@@ -451,7 +451,6 @@ class UserRepository(Model):
       if isinstance(graph_tier, str):
         graph_tier = GraphTier(graph_tier)  # type: ignore[misc]
       return {
-        "instance_id": self.graph.graph_instance_id,
         "cluster_region": self.graph.graph_cluster_region,
         "instance_tier": graph_tier,
         "repository_name": self.repository_name,
@@ -459,7 +458,6 @@ class UserRepository(Model):
       }
 
     return {
-      "instance_id": "ladybug-shared-prod",
       "cluster_region": None,
       "instance_tier": GraphTier.LADYBUG_SHARED,
       "repository_name": self.repository_name,

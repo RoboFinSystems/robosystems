@@ -651,7 +651,6 @@ class TestUserRepository:
       data_source_url="https://www.sec.gov/cgi-bin/browse-edgar",
       sync_frequency="daily",
       graph_tier=GraphTier.LADYBUG_SHARED,
-      graph_instance_id="ladybug-shared-prod",
     )
 
     # Create UserRepository that references the Graph
@@ -666,7 +665,8 @@ class TestUserRepository:
     # Get connection info - should pull from Graph relationship
     info = access.get_graph_connection_info()
 
-    assert info["instance_id"] == "ladybug-shared-prod"
+    # Which instance hosts the graph lives in the graph registry, not here.
+    assert "instance_id" not in info
     assert info["instance_tier"] == GraphTier.LADYBUG_SHARED
     assert info["repository_name"] == "sec"
     assert info["repository_type"] == "sec"
