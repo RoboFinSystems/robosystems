@@ -169,6 +169,11 @@ def bucket(monkeypatch: pytest.MonkeyPatch):
   if not str(s3.s3_client.meta.endpoint_url).startswith("http://localhost"):
     pytest.skip("needs LocalStack")
   name = env.PUBLIC_DATA_BUCKET
+  # CI's LocalStack starts with no buckets; the local stack's already has it.
+  try:
+    s3.s3_client.create_bucket(Bucket=name)
+  except s3.s3_client.exceptions.BucketAlreadyOwnedByYou:
+    pass
   filer = _Filer(
     ticker="ZZ" + "".join(random.choices(string.ascii_uppercase, k=6)),
     cik="000" + "".join(random.choices(string.digits, k=7)),
