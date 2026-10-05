@@ -115,7 +115,7 @@ These secrets are **not required** for deployment but enhance workflow functiona
 | Secret | Purpose | Required For |
 |--------|---------|--------------|
 | `ACTIONS_TOKEN` | GitHub PAT with `repo` scope | Push to protected branches, create tags/releases, PRs that auto-trigger CI |
-| `ANTHROPIC_API_KEY` | Claude API key | AI-generated release notes (`tag-release.yml`); without it the changelog falls back to a plain commit list |
+| `ANTHROPIC_API_KEY` | Claude API key | AI-generated release notes (`tag-release.yml`); unused when curated notes exist at `.github/release-notes/v<version>.md`, and without it the changelog falls back to a plain commit summary |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token | The `@claude` PR/issue assistant workflow (`claude.yml`) |
 
 **ACTIONS_TOKEN details:**

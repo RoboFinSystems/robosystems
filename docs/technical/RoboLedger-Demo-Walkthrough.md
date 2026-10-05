@@ -11,14 +11,15 @@ The synthetic demo needs no QuickBooks account, Intuit Developer setup, or ngrok
 
 ## On the hosted platform
 
-The showcase scenarios load into a graph on the hosted platform as well: every step but the reset is an ordinary API call. Provision a fresh RoboLedger graph there first — the runner never creates one off-local — and save the account's API key where the run looks for it, a per-host file so a remote graph id can never leak into a local run:
+Both the Cascade demo and the showcase scenarios load into a graph on the hosted platform as well: every step but the reset is an ordinary API call. Provision a fresh RoboLedger graph there first — neither demo creates a user or a graph off-local, so the graph id is required — and save the account's API key where the run looks for it, a per-host file so a remote graph id can never leak into a local run:
 
 ```bash
 echo "{\"api_key\": \"$ROBOSYSTEMS_API_KEY\"}" > .local/config.api-robosystems-ai.json
+DEMO_API_URL=https://api.robosystems.ai just demo-roboledger <graph_id>
 DEMO_API_URL=https://api.robosystems.ai just demo-coffee-roaster <graph_id>
 ```
 
-The reset is a direct database delete and never runs off-local, so use a graph with nothing in it: re-running over demo data duplicates it rather than replacing it. The Cascade demo, `just demo-roboledger`, is run against your own stack.
+The reset is a direct database delete and never runs off-local, so use a graph with nothing in it — one graph per demo: re-running over demo data duplicates it rather than replacing it. `--skeleton` is local-only, since it exists to create an empty graph.
 
 The rest of this page runs against your own stack.
 
@@ -443,7 +444,7 @@ just demo-roboledger
 just reset-local
 ```
 
-`just demo-roboledger` always runs the demo's `_reset.py` first to clear prior events, transactions, line items, mappings, schedules, documents, fiscal calendar, and reports from the tenant, then re-loads the full data set. Useful for getting back to a known-good state after experimenting with the close workflow or breaking something with manual entries.
+On your own stack, `just demo-roboledger` always runs the demo's `_reset.py` first to clear prior events, transactions, line items, mappings, schedules, documents, fiscal calendar, and reports from the tenant, then re-loads the full data set. Useful for getting back to a known-good state after experimenting with the close workflow or breaking something with manual entries.
 
 `reset-local` is heavier — drops the entire local stack's data including all users, graphs, and credentials. Use when you want a fresh slate.
 
