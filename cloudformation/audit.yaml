@@ -192,13 +192,15 @@ Resources:
 
   # Forward only audit records from the API log group. The pattern OR-matches the
   # two audit streams: SecurityAuditLogger's "SECURITY_AUDIT:" messages and the
-  # operation-audit records (structured "audit": key). Operational INFO stays put.
+  # operation-audit records (structured "audit": key), plus the shared-repository
+  # "SHARED_QUERY_COST:" lines, which attribute load past the log group's 7 days.
+  # Operational INFO stays put.
   AuditSubscriptionFilter:
     Type: AWS::Logs::SubscriptionFilter
     Properties:
       LogGroupName: !Sub /robosystems/${Environment}/api
       FilterName: !Sub robosystems-audit-${Environment}
-      FilterPattern: '?SECURITY_AUDIT ?"\"audit\":"'
+      FilterPattern: '?SECURITY_AUDIT ?"\"audit\":" ?SHARED_QUERY_COST'
       DestinationArn: !GetAtt AuditFirehose.Arn
       RoleArn: !GetAtt SubscriptionFilterRole.Arn
 
