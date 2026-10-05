@@ -528,6 +528,11 @@ class InstanceMonitor:
           ExpressionAttributeValues={":ts": now_iso},
         )
         result.updated_count += 1
+      except ClientError as e:
+        # A concurrent sweep stamped it first: the row is marked either way.
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+          logger.error(f"Failed to set {marker} on graph {graph_id}: {e}")
+          result.errors += 1
       except Exception as e:
         logger.error(f"Failed to set {marker} on graph {graph_id}: {e}")
         result.errors += 1

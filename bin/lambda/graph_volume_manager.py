@@ -394,6 +394,24 @@ def report_shared_master_volume_created(instance_id: str, az: str, tier: str) ->
   )
 
 
+def _clear_migration_flags(graph_id: str) -> None:
+  """Drop the migration flags the old instance's termination hook set; this
+  re-point is that migration done. A tier upgrade sets the same flags with
+  status migrating and clears them itself, so its row is left alone — the
+  condition checks that in the same write, not from an earlier read."""
+  try:
+    graph_table.update_item(
+      Key={"graph_id": graph_id},
+      UpdateExpression="REMOVE migration_required, migration_source",
+      ConditionExpression="attribute_exists(migration_required) AND #s <> :migrating",
+      ExpressionAttributeNames={"#s": "status"},
+      ExpressionAttributeValues={":migrating": "migrating"},
+    )
+  except ClientError as e:
+    if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+      logger.warning(f"Could not clear migration flags on {graph_id}: {e}")
+
+
 def update_graph_registry_for_instance(
   instance_id: str, databases: list[str], private_ip: str | None = None
 ) -> dict[str, int]:
@@ -451,17 +469,12 @@ def update_graph_registry_for_instance(
         update_expr += ", private_ip = :ip"
         expr_values[":ip"] = private_ip
 
-      # The termination hook flags every graph on the old instance for
-      # migration; this re-point is that migration done. A tier upgrade sets
-      # the same flags with status migrating and clears them itself.
-      if response["Item"].get("status") != "migrating":
-        update_expr += " REMOVE migration_required, migration_source"
-
       graph_table.update_item(
         Key={"graph_id": db_id},
         UpdateExpression=update_expr,
         ExpressionAttributeValues=expr_values,
       )
+      _clear_migration_flags(db_id)
 
       logger.info(
         f"Updated graph registry for {db_id}: instance={instance_id}, ip={private_ip}"

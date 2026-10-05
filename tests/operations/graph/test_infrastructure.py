@@ -511,6 +511,31 @@ class TestCleanupStaleGraphs:
     assert metric["MetricData"][0]["Value"] == 1
 
   @pytest.mark.unit
+  def test_a_stamp_a_concurrent_sweep_set_first_is_not_an_error(self, monitor):
+    from botocore.exceptions import ClientError
+
+    graph_table, _ = self._route(
+      monitor,
+      [
+        {
+          "graph_id": "kg_moved",
+          "status": "active",
+          "instance_id": "i-1234567890abcdef0",
+          "private_ip": "10.0.1.5",
+        }
+      ],
+      [{"instance_id": "i-1234567890abcdef0", "private_ip": "10.0.2.9"}],
+    )
+    graph_table.update_item.side_effect = ClientError(
+      {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.ip_mismatch_count == 1
+    assert result.errors == 0
+
+  @pytest.mark.unit
   def test_a_row_whose_address_agrees_is_not_counted(self, monitor):
     graph_table, _ = self._route(
       monitor,
