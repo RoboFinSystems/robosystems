@@ -1,6 +1,6 @@
 """The records a reconciliation is trusted on, against real Postgres: who may
-write a sign-off or a recorded balance, who counts as its preparer, and what a
-policy change leaves behind.
+write a sign-off or a recorded balance, who counts as its preparer, what a
+policy change leaves behind, and which rule's result is its status.
 """
 
 from __future__ import annotations
@@ -21,10 +21,20 @@ from robosystems.models.api.extensions.reconciliations import (
   SetReconciliationPolicyRequest,
   SignOffReconciliationRequest,
 )
+from robosystems.models.api.extensions.schedules import (
+  CreateScheduleRequest,
+  EntryTemplateRequest,
+  ScheduleMetadataRequest,
+)
+from robosystems.models.api.extensions.taxonomies import (
+  CreateMappingAssociationOperation,
+)
+from robosystems.models.api.information_block import EvaluateRulesRequest
 from robosystems.models.api.taxonomy_block import DeleteTaxonomyBlockRequest
 from robosystems.models.extensions import Taxonomy
 from robosystems.models.extensions.entity import Entity
 from robosystems.models.extensions.roboledger import Event, FactSet
+from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.operations.event_block.commands import (
   create_event_block_in_session,
   update_event_block,
@@ -33,6 +43,12 @@ from robosystems.operations.event_block.reserved import (
   RESERVED_EVENT_TYPES,
   ReservedEventTypeError,
 )
+from robosystems.operations.information_block.rules.commands import (
+  cmd_evaluate_rules,
+)
+from robosystems.operations.information_block.rules.engine import (
+  evaluate_rules_for_structure,
+)
 from robosystems.operations.roboledger.commands.reconciliations import (
   SeparateReviewerError,
   record_statement_balance,
@@ -40,6 +56,12 @@ from robosystems.operations.roboledger.commands.reconciliations import (
   set_reconciliation_policy,
   sign_off_reconciliation,
 )
+from robosystems.operations.roboledger.commands.schedules import create_schedule
+from robosystems.operations.roboledger.commands.taxonomies import (
+  MappingStructureNotFoundError,
+  create_mapping_association,
+)
+from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
 from robosystems.operations.roboledger.reads.reconciliations import (
   list_reconciliations,
 )
@@ -308,3 +330,97 @@ def test_a_policy_change_leaves_a_record_of_who_changed_what(loan):
       "materiality": {"from": 0.0, "to": 25.0},
     },
   }
+
+
+def _schedule_with_a_passing_rule(session) -> str:
+  prepaid = classified_account(session, "Prepaid", "asset")
+  expense = classified_account(session, "Insurance", "expense")
+  return create_schedule(
+    session,
+    CreateScheduleRequest(
+      name="Insurance",
+      element_ids=[expense, prepaid],
+      period_start=date(2026, 1, 1),
+      period_end=date(2026, 12, 31),
+      monthly_amount=10_000,
+      entry_template=EntryTemplateRequest(
+        debit_element_id=expense, credit_element_id=prepaid
+      ),
+      schedule_metadata=ScheduleMetadataRequest(original_amount=120_000),
+    ),
+    created_by="usr",
+  ).structure_id
+
+
+def _stamp_another_structures_rules(session, rec):
+  schedule_id = _schedule_with_a_passing_rule(session)
+  session.commit()
+  with pytest.raises(ValueError, match="does not belong to structure"):
+    cmd_evaluate_rules(
+      session,
+      EvaluateRulesRequest(structure_id=schedule_id, fact_set_id=rec.fact_set_id),
+      "usr_writer",
+    )
+  session.rollback()
+
+
+def _arc_a_foreign_element_onto_the_block(session, rec):
+  account = classified_account(session, "Suspense", "asset")
+  session.commit()
+  with pytest.raises(MappingStructureNotFoundError):
+    create_mapping_association(
+      session,
+      CreateMappingAssociationOperation(
+        mapping_id=rec.structure_id,
+        from_element_id=account,
+        to_element_id=account,
+        association_type="mapping",
+      ),
+      "usr_writer",
+    )
+  session.rollback()
+
+
+def _a_pass_from_another_rule_lands_on_the_set(session, rec):
+  schedule_id = _schedule_with_a_passing_rule(session)
+  session.flush()
+  for result in evaluate_rules_for_structure(session, schedule_id):
+    result.fact_set_id = rec.fact_set_id
+    result.status = "pass"
+  session.commit()
+
+
+@pytest.mark.parametrize(
+  "door",
+  [
+    _stamp_another_structures_rules,
+    _arc_a_foreign_element_onto_the_block,
+    _a_pass_from_another_rule_lands_on_the_set,
+  ],
+  ids=["evaluate-rules", "mapping-arc", "foreign-result"],
+)
+def test_only_the_blocks_own_rule_decides_its_status(loan, door):
+  session, structure_id = loan
+  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  record_statement_balance(
+    session,
+    RecordStatementBalanceRequest(
+      element_id=_standing(session, structure_id).element_id,
+      as_of=date(2026, 8, 31),
+      balance=4_000.00,
+    ),
+    graph_id=GRAPH_ID,
+    created_by="usr",
+  )
+  session.commit()
+  _policy(session, structure_id, required_for_close=True)
+  rec = _standing(session, structure_id)
+  assert rec.status == "unreconciled"
+
+  door(session, rec)
+
+  assert _standing(session, structure_id).status == "unreconciled"
+  gate = FiscalCalendarService().closeable_gate(
+    session, GRAPH_ID, "2026-08", today=date(2026, 10, 1)
+  )
+  assert "unreconciled_accounts" in gate.blockers

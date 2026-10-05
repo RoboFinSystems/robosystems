@@ -38,6 +38,7 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_not_library_origin,
 )
 from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
+from robosystems.operations.taxonomy_block.coa_mappings import COA_MAPPING_BLOCK_TYPE
 from robosystems.operations.taxonomy_block.immutability import (
   assert_history_undisturbed,
 )
@@ -153,7 +154,10 @@ def create_mapping_association(
   ``side``), `MappingTargetIsRollupError`, or `MappingAssociationExistsError`.
   """
   structure = session.execute(
-    select(Structure).where(Structure.id == body.mapping_id)
+    select(Structure).where(
+      Structure.id == body.mapping_id,
+      Structure.block_type == COA_MAPPING_BLOCK_TYPE,
+    )
   ).scalar_one_or_none()
   if structure is None:
     raise MappingStructureNotFoundError(body.mapping_id)
@@ -243,9 +247,12 @@ def delete_mapping_association(
   month.
   """
   assoc = session.execute(
-    select(Association).where(
+    select(Association)
+    .join(Structure, Structure.id == Association.structure_id)
+    .where(
       Association.id == body.association_id,
       Association.structure_id == body.mapping_id,
+      Structure.block_type == COA_MAPPING_BLOCK_TYPE,
     )
   ).scalar_one_or_none()
   if assoc is None:

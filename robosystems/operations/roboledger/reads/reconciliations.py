@@ -15,7 +15,12 @@ from robosystems.models.api.extensions.reconciliations import (
   ReconciliationSummary,
 )
 from robosystems.models.api.information_block import ReconciliationMechanics
-from robosystems.models.extensions import Element, Structure, VerificationResult
+from robosystems.models.extensions import (
+  Element,
+  Rule,
+  Structure,
+  VerificationResult,
+)
 from robosystems.models.extensions.roboledger import Event, Fact, FactSet
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.operations.information_block.reconciliation import (
@@ -186,9 +191,17 @@ def list_reconciliations(session: Session, period: str) -> ReconciliationListRes
       .where(Fact.fact_set_id.in_(fact_set_ids))
     ):
       values[(str(fact_set_id), str(qname).removeprefix(_QNAME_PREFIX))] = value
+    # Only the block's own rule decides its status: a result another rule
+    # stamped on this set says nothing about whether the ledger ties.
     for result in session.execute(
       select(VerificationResult)
-      .where(VerificationResult.fact_set_id.in_(fact_set_ids))
+      .join(Rule, Rule.id == VerificationResult.rule_id)
+      .join(FactSet, FactSet.id == VerificationResult.fact_set_id)
+      .where(
+        VerificationResult.fact_set_id.in_(fact_set_ids),
+        Rule.target_structure_id == FactSet.structure_id,
+        Rule.rule_pattern == "EqualTo",
+      )
       .order_by(VerificationResult.evaluated_at.desc())
     ).scalars():
       results.setdefault(str(result.fact_set_id), result)
