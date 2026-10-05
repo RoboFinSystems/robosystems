@@ -151,7 +151,6 @@ def _undrafted_schedule_balances(session: Session, as_of: date) -> dict[str, int
         SELECT value, period_start, period_end
         FROM facts
         WHERE structure_id = s.id
-          AND element_id = s.metadata->'entry_template'->>'debit_element_id'
           AND period_type = 'duration'
           AND fact_scope = 'in_scope'
           AND period_start = (ev.metadata->>'period_start')::date
