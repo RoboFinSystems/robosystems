@@ -4,7 +4,7 @@ This page is for integrators querying the hosted `sec` graph — the shared repo
 
 **Quick Start:** Before writing Cypher, try the ready-made views: `financial-statement-analysis` returns a company's statement by ticker, and `build-fact-grid` pivots facts across companies and periods. Both already apply the rules on this page. When you do write Cypher, filter `Fact {has_dimensions: false}`, match `Element.canonical_concept`, pin the `Period` shape, and `RETURN DISTINCT` from an `Entity` anchor.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`, and load filings with [SEC XBRL Pipeline](SEC-XBRL-Pipeline). See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
 ## Table of Contents
 
@@ -13,6 +13,7 @@ This page is for integrators querying the hosted `sec` graph — the shared repo
 - [The Four Rules](#the-four-rules)
 - [Worked Queries](#worked-queries)
 - [Other Limits](#other-limits)
+- [Self-hosted deployments](#self-hosted-deployments)
 
 ## Before You Write Cypher
 
@@ -24,7 +25,7 @@ export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
 
 ### Ready-Made Views
 
-Four operations answer the common questions without Cypher. Each is an MCP tool of the same name on the `sec` connector, and a REST operation at `POST https://api.robosystems.ai/extensions/roboledger/sec/operations/{name}` that returns an `OperationEnvelope`:
+Seven operations answer the common questions without Cypher. Each is an MCP tool of the same name on the `sec` connector, and a REST operation at `POST https://api.robosystems.ai/extensions/roboledger/sec/operations/{name}` that returns an `OperationEnvelope`:
 
 | Operation | Answers | Reads |
 | --- | --- | --- |
@@ -32,6 +33,9 @@ Four operations answer the common questions without Cypher. Each is an MCP tool 
 | **`build-fact-grid`** | Chosen concepts across companies, periods and dimensions, deduplicated | The graph |
 | **`disclosures`** | The map of a filing's sections: one row per note or statement | The filing held whole |
 | **`information-block`** | One section read whole: its rows, breakdowns by its own axes, calculation footing, and text | The filing held whole |
+| **`describe-filing`** | How one filing is laid out: periods, statements and disclosures by role, and its Items with their character offsets | The filing's text |
+| **`search-text`** | Every place one filing's whole text says something, in document order, with the section each match falls in | The filing's text |
+| **`read-text`** | One window of a filing's whole text from an offset, with `next_offset` while more follows | The filing's text |
 
 ```bash
 # A company's latest annual income statement
@@ -45,9 +49,32 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/bu
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"canonical_concepts": ["revenue"], "entities": ["NVDA", "AMD"], "form": "10-K", "period_type": "annual"}'
+
+# Where the latest 10-K mentions export controls, cover page and exhibits included
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/search-text" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "NVDA", "query": "export control*"}'
 ```
 
-`statement_type` takes `income_statement`, `balance_sheet`, `cash_flow_statement` or `equity_statement`. The full request and response schemas are in the [API reference](https://robosystems.ai/docs/api) (operations `financialStatementAnalysis`, `buildFactGrid`, `disclosures`, `informationBlock`).
+`statement_type` takes `income_statement`, `balance_sheet`, `cash_flow_statement` or `equity_statement`.
+
+The three text views read the filing's own document from its public folder, not the graph: any processed 10-K, 10-Q, 20-F or 40-F back to 2015, or, with `form: "8-K"`, the latest earnings release and its exhibits. A `ticker` picks the latest annual report unless `fiscal_year`, `period_type` or `accession` say otherwise. The `search-text` query is words matched in order (`|` between alternative phrases, a trailing `*` for a stem), not a regular expression. The full request and response schemas are in the [extensions reference](https://robosystems.ai/docs/extensions) (operations `financialStatementAnalysis`, `buildFactGrid`, `disclosures`, `informationBlock`, `describeFiling`, `searchText`, `readText`).
+
+### Where a Filing Is Served
+
+Every view that resolves a filing on `sec` — `financial-statement-analysis`, `disclosures`, `information-block` and the three text views — returns `resolved_report` with the filing it picked (`report_id`, `form`, `filing_date`, `fiscal_year`, `fiscal_period`) and `links`, public CDN URLs that need no key:
+
+| Link | What it opens |
+| --- | --- |
+| `viewer` | The filing in the xbrlkit viewer, over its published holon — the URL to hand a person who wants to see the filing |
+| `holon` / `tavi` | The published report as holon (JSON-LD) and as Tavi |
+| `as_filed` | The primary document as filed |
+| `exhibits` | An 8-K's exhibits, by exhibit number (`EX-99.1`) |
+| `manifest` | Every file in the filing's public folder, with its URL |
+| `edgar` | The filing's folder on EDGAR |
+
+A link is present only when the folder holds the file: an 8-K has no holon, so no `viewer`.
 
 ### Concept Lookup
 
@@ -78,7 +105,7 @@ The graph holds each filing as XBRL facts linked to the aspects that give them m
 | --- | --- | --- |
 | **`Entity`** | A filer | `ticker`, `cik`, `name`, `sic`, `sic_description`, `fiscal_year_end`, `state_of_incorporation` |
 | **`Report`** | One filing | `form` (`10-K`, `10-Q`, `20-F`, `40-F`), `filing_date`, `report_date` (period end), `accession_number`, `fiscal_year_focus`, `fiscal_period_focus` (`FY`, `Q1`–`Q3`), `fiscal_year_end_month` |
-| **`Fact`** | One reported value | `numeric_value`, `value`, `fact_type` (`Numeric` / `Nonnumeric`), `decimals`, `has_dimensions`, `dimension_count` |
+| **`Fact`** | One reported value | `numeric_value`, `value`, `fact_type` (`Numeric` / `Nonnumeric`), `value_type` (`inline` / `external`), `content_type`, `decimals`, `has_dimensions`, `dimension_count` |
 | **`Element`** | The concept a fact reports | `qname` (e.g. `us-gaap:Revenues`), `name`, `period_type`, `balance`, `canonical_concept`, `canonical_confidence`, `is_numeric`, `is_textblock` |
 | **`Period`** | When a fact applies | `period_type` (`instant` / `duration` / `forever`), `start_date`, `end_date`, `duration_type`, `calendar_year`, `calendar_quarter`, `calendar_period_key` |
 | **`Unit`** | Unit of measure | `measure` (e.g. `iso4217:USD`, `shares`) |
@@ -94,6 +121,8 @@ The graph holds each filing as XBRL facts linked to the aspects that give them m
 | **`Classification`** | The pattern an arrangement forms (e.g. a roll-up) | `category`, `type` |
 
 **Reference nodes** — taxonomy metadata: **`Label`** (human-readable element labels), **`Reference`** (authoritative literature references), and **`Taxonomy`**.
+
+A large value — a text block — is moved out to the CDN: its `value_type` is `external`, `value` holds the URL, and `content_type` is its MIME type. Read it with `information-block` or the text views rather than from `value`.
 
 A `Period` places a fact on the calendar, not on the filer's fiscal calendar: `calendar_year` and `calendar_quarter` are for matching across companies. A company's own fiscal year and period are on its `Report` (`fiscal_year_focus`, `fiscal_period_focus`).
 
@@ -382,10 +411,14 @@ A filer usually breaks one figure down along several axes (segment, geography, p
 
 ## Other Limits
 
-- **Text is not a Cypher question.** String matching (`CONTAINS`, `STARTS WITH`, `ENDS WITH`, `=~`) on `Fact.value` or `Fact.uri` is refused on `sec`. Search filing text with `search-documents` (MCP); read one disclosure whole with `disclosures`, then `information-block`.
+- **Text is not a Cypher question.** String matching (`CONTAINS`, `STARTS WITH`, `ENDS WITH`, `=~`) on `Fact.value` or `Fact.uri` is refused on `sec`. Search filing text with `search-documents` (MCP) to find which filings say something, or `search-text` to find where one filing says it; read one disclosure whole with `disclosures`, then `information-block`.
 - **Read-only.** `sec` and its subgraphs refuse every write, and the staging-table SQL endpoint returns 403 for shared repositories. Query the graph with Cypher.
-- **Scope.** The repository holds 10-K, 10-Q, 20-F and 40-F XBRL filings filed since January 2024, updated daily. For one filing on your own machine, with no account, [xbrlkit](https://xbrlkit.com) reads it with the same schema.
+- **Scope.** The graph holds 10-K, 10-Q, 20-F and 40-F XBRL filings filed since January 2024, rebuilt nightly. The text views reach further back — any processed annual or quarterly report since 2015 — and pick up a filing the day it is filed; see [Shared Repositories](Shared-Repositories#freshness). For one filing on your own machine, with no account, [xbrlkit](https://xbrlkit.com) reads it with the same schema.
 - **Rate limits** follow your subscription plan; see [Shared Repositories](Shared-Repositories).
+
+## Self-hosted deployments
+
+On a stack you run, load the filings you want with [SEC XBRL Pipeline](SEC-XBRL-Pipeline) (`just sec-load NVDA 2025`) and query them through the same `sec` graph id; the rules on this page apply unchanged.
 
 ## Related Documentation
 

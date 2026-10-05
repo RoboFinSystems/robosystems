@@ -1,6 +1,6 @@
 # Taxonomy & Frameworks
 
-RoboSystems treats accounting vocabulary as data, not code: concepts, hierarchies, calculation arcs, and rules are queryable, versionable rows seeded from JSON-LD packages. This page explains the substrate — the `fac`, `cm`, and `rs-gaap` frameworks, the canonical ontology, the Element and Association atoms, and traits — and shows you how to contribute your own vocabulary through the Taxonomy Block write path.
+RoboSystems treats accounting vocabulary as data: concepts, hierarchies, calculation arcs, and rules are versioned rows seeded from JSON-LD packages. This page explains the substrate — the `fac`, `cm`, and `rs-gaap` frameworks, the canonical ontology, the Element and Association atoms, and traits — and shows you how to contribute your own vocabulary through the Taxonomy Block write path.
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
@@ -69,7 +69,7 @@ The Element is the atom of the taxonomy. One row in the `elements` table can rep
 - an abstract grouping that has no value of its own (`element_type="abstract"`)
 - a dimension axis or member (`element_type="axis"` / `"member"`)
 
-Key element columns include `qname`, `name`, `balance_type` (`debit | credit`), `period_type` (`duration | instant`), `element_type`, `is_monetary`, `code` (the CoA code), and `source`. The `source` column captures provenance — values are `fac`, `cm`, `rs-gaap`, `rs-metric`, `rs-driver`, `us-gaap`, `ifrs`, `quickbooks`, `xero`, `plaid`, `native`, `import`, `system`, and `linked`. Tenant-authored elements are always written with `source="native"`. Two are worth calling out: `system` is reserved for the internal FK-anchor rows the taxonomy seed creates, and `linked` marks a concept that arrived with a report shared from another graph — the sender's reporting extension has to exist locally for their facts to mean anything, but their accounts are not the recipient's chart of accounts. Neither appears in the Chart of Accounts.
+Key element columns include `qname`, `name`, `balance_type` (`debit | credit`), `period_type` (`duration | instant`), `element_type`, `is_monetary`, `code` (the CoA code), and `source`. The `source` column captures provenance — values are `fac`, `cm`, `rs-gaap`, `rs-metric`, `rs-driver`, `disclosures`, `checklist`, `styles`, `us-gaap`, `ifrs`, `quickbooks`, `xero`, `plaid`, `native`, `import`, `system`, and `linked`. Tenant-authored elements are always written with `source="native"`. Two are worth calling out: `system` is reserved for the internal FK-anchor rows the taxonomy seed creates, and `linked` marks a concept that arrived with a report shared from another graph — the sender's reporting extension has to exist locally for their facts to mean anything, but their accounts are not the recipient's chart of accounts. Neither appears in the Chart of Accounts.
 
 **Associations are the structure.** Hierarchy and semantics are not stored on the Element; they live in `Association` rows, each typed by an `association_type` that mirrors an XBRL linkbase:
 
@@ -104,6 +104,7 @@ frameworks/
 ├── ontology/v1/   → context.jsonld, ontology.ttl, shapes.ttl
 ├── fac/           → v1.json + packages/{fac-traits, fac, fac-presentation, fac-calculations}
 ├── cm/            → v1.json + packages/cm
+├── chart-templates/ → saas/, services/, product/ (chart-of-accounts stencils; never seeded)
 └── rs-gaap/       → v1.json + tenant-exclude/ + bridges/ + packages/{rs-gaap, rs-gaap-traits,
                       rs-gaap-hierarchy, rs-gaap-presentation, rs-gaap-calculations,
                       rs-gaap-type-subtype, rs-gaap-references, rs-gaap-labels, rs-gaap-disclosures,
@@ -135,15 +136,18 @@ A Taxonomy Block envelope carries everything needed to stand up a piece of vocab
 
 ### Block Types
 
-The `taxonomy_type` field selects the block type. Three are writable from the public surface:
+The `taxonomy_type` field selects the block type. Four are writable from the public surface:
 
 | `taxonomy_type` | Use when | Discipline |
 | --- | --- | --- |
 | **`chart_of_accounts`** | You are defining a company's ledger accounts | Declarative; every element requires a `trait`; stock concepts forced to `instant` |
 | **`reporting_extension`** | You are layering native concepts onto a library reporting standard | Requires `parent_taxonomy_id`; references resolve local-first then library-fallback |
 | **`custom_ontology`** | You need a free-form vocabulary with no accounting discipline | No trait requirement; every reference must resolve within the envelope |
+| **`schedule`** | You want a named container to group Schedule information blocks under | Name and description only; any atoms in the envelope are ignored. Create only: update and delete return `501` |
 
-The remaining types (`reporting_standard`, `schedule`) are seeded by an admin-only library creator. Attempting `update-taxonomy-block` on a `reporting_standard` returns `501`.
+A `schedule` taxonomy is a grouping container, not a working schedule: the schedule itself, with its monthly facts and closing entries, is created with `create-information-block` (see [Information Blocks](Information-Blocks#authoring-an-information-block)) and can name the container as its `taxonomy_id`. The remaining type, `reporting_standard`, is seeded by an admin-only library creator; create, update, and delete on one return `501`.
+
+Authoring `reporting_extension` and `custom_ontology` blocks can be switched off per deployment with `TAXONOMY_AUTHORING_ENABLED`; where it is off, create and update of those two types return `403` (delete stays open). `chart_of_accounts` and `schedule` are never gated.
 
 ### The Operations
 
@@ -155,6 +159,7 @@ POST /extensions/roboledger/{graph_id}/operations/{op_name}
 
 | `op_name` | Purpose |
 | --- | --- |
+| `initialize-chart-of-accounts` | Create the graph's chart of accounts from a shipped template, with its mapping, in one step |
 | `create-taxonomy-block` | Create a taxonomy block (taxonomy + structures + elements + associations + rules) atomically |
 | `update-taxonomy-block` | Incrementally mutate an existing block via typed delta lists |
 | `delete-taxonomy-block` | Delete a block (with a thin confirmation) |
@@ -164,6 +169,8 @@ POST /extensions/roboledger/{graph_id}/operations/{op_name}
 | `auto-map-elements` | Run the MappingOperator asynchronously over a mapping structure |
 | `change-reporting-style` | Switch the reporting entity's Reporting Style after validating the target Style composes completely in the tenant schema |
 | `bind-text-block` | Bind a platform Document (or one of its sections) to a disclosure element as a Nonnumeric text-block fact |
+
+**Starting from a template.** A graph with no chart of accounts can take a shipped one: `initialize-chart-of-accounts` with `template` set to `saas` (subscription software), `services` (professional services, no inventory), or `product` (inventory and cost of goods sold). It creates the chart, its `coa_mapping` structure, and the template's mapping arcs into `rs-gaap` in one transaction, mapping the equity rows by the entity's legal form (`entity_type`: `corporation`, `llc`, or `partnership`, defaulting to the graph's primary entity). It is one-time: once a chart exists it returns `409`, and a QuickBooks-synced graph never needs it because its chart arrives with the sync. The `chartTemplates` GraphQL field lists the templates with their names and account counts. Customize the result afterwards with `update-taxonomy-block`.
 
 `auto-map-elements` is a worker-backed operation that returns `202` with a `pending` envelope, then streams progress over SSE. It auto-approves mappings with confidence at or above `0.90`, flags those between `0.70` and `0.89` for review, and skips anything below `0.70`.
 
@@ -175,7 +182,7 @@ The request and response schemas (`CreateTaxonomyBlockRequest`, `TaxonomyBlockEl
 
 ## Worked Example
 
-This walkthrough authors a custom ontology, then reads it back. The examples need an API key and a tenant graph (see [Quick Start](Quick-Start)); they read the key from `$ROBOSYSTEMS_API_KEY` and the graph id from `$GRAPH_ID`.
+This walkthrough authors a custom ontology, then reads it back. The examples need an API key and a tenant graph (see [Quick Start](Quick-Start)); they read the key from `$ROBOSYSTEMS_API_KEY` and the graph id from `$GRAPH_ID`. Steps 1 and 3 author the two types a deployment can switch off; a `403` there is that switch (see [Extension and Ontology Authoring Can Be Off](#extension-and-ontology-authoring-can-be-off)).
 
 ### Step 1: Create a Custom Ontology
 
@@ -236,11 +243,21 @@ A chart of accounts auto-links to the graph entity as its primary chart of accou
 
 ### Step 3: Layer a Reporting Extension
 
-A `reporting_extension` adds native concepts onto a library reporting standard. It requires `parent_taxonomy_id` (the id of an `rs-gaap` reporting standard taxonomy), and `parent_ref` may point at a library element qname — references resolve local-first, then fall back to the parent library taxonomy:
+A `reporting_extension` adds native concepts onto a library reporting standard. It requires `parent_taxonomy_id` (the id of an `rs-gaap` reporting standard taxonomy), and `parent_ref` may point at a library element qname — references resolve local-first, then fall back to the parent library taxonomy. Look the parent id up on the graph, and take the row whose `taxonomyType` is `reporting_standard`:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ libraryTaxonomies(standard: \"rs-gaap\") { id name version taxonomyType } }"}'
+```
+
+Then create the extension:
 
 ```bash
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-taxonomy-block" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Acme rs-gaap Extension",
@@ -293,7 +310,7 @@ The two scopes differ in what the same fields see, not in which fields exist: `l
 
 ## Mapping
 
-A tenant's chart of accounts reaches the statements through `mapping` associations: one arc from each chart-of-accounts element to an `rs-gaap` leaf concept, held in a `coa_mapping` Structure. Mapping arcs are written one at a time with `create-mapping-association` or in bulk by the AI MappingOperator, not through a Taxonomy Block. Candidate targets are limited to concepts that render under the entity's active Reporting Style, which is also the working set the tenant library keeps (see [The JSON-LD Package Library](#the-json-ld-package-library)). The mapping model, coverage vs. renderability, auto-map and its confidence thresholds, and the lock that protects closed months are on [Chart of Accounts Mapping](Chart-of-Accounts-Mapping).
+A tenant's chart of accounts reaches the statements through `mapping` associations: one arc from each chart-of-accounts element to an `rs-gaap` leaf concept, held in a `coa_mapping` Structure. Each `coa_mapping` Structure is anchored to its own `mapping` taxonomy, whose source is the chart and whose target is one framework; the chart owns its mapping taxonomies, so the chart's Taxonomy Block is the chart plus every mapping sourced from it, created, read, edited, and deleted together. A chart holds at most one mapping per framework. Mapping arcs are written one at a time with `create-mapping-association` or in bulk by the AI MappingOperator, not through a Taxonomy Block. Candidate targets are limited to concepts that render under the entity's active Reporting Style, which is also the working set the tenant library keeps (see [The JSON-LD Package Library](#the-json-ld-package-library)). The mapping model, coverage vs. renderability, auto-map and its confidence thresholds, and the lock that protects closed months are on [Chart of Accounts Mapping](Chart-of-Accounts-Mapping).
 
 ## Common Pitfalls
 
@@ -311,7 +328,15 @@ A `reporting_extension` requires `parent_taxonomy_id`, and the parent must be a 
 
 ### Reporting Standards Are Read-Only Here
 
-`reporting_standard` blocks are seeded by the admin-only library creator. Calling `update-taxonomy-block` on one returns `501`.
+`reporting_standard` blocks are seeded by the admin-only library creator. Creating, updating, or deleting one returns `501`.
+
+### Extension and Ontology Authoring Can Be Off
+
+A `403` from `create-taxonomy-block` or `update-taxonomy-block` on a `reporting_extension` or `custom_ontology`, naming `TAXONOMY_AUTHORING_ENABLED`, means that deployment has switched those two types off. Charts of accounts and schedule containers still work, and delete is never gated.
+
+### A `schedule` Taxonomy Is Not a Schedule
+
+`create-taxonomy-block` with `taxonomy_type: "schedule"` makes an empty grouping container, and a structure with `block_type: "schedule"` inside some other taxonomy is a bare row with none of the schedule machinery. A working schedule, with monthly facts, obligations, and closing entries, comes from `create-information-block` with `block_type: "schedule"`.
 
 ### Library Rows Stay Immutable
 
@@ -336,6 +361,10 @@ just reset-local
 ```
 
 Validate the edit before you pay for a reseed. `just framework-validate` checks the `rs-gaap` framework's structure, package integrity, and chart-of-accounts coverage; `--summary` gives the terse form and `--coverage-only` just the coverage report.
+
+### Taxonomy Authoring Flag
+
+`TAXONOMY_AUTHORING_ENABLED` gates create and update of `reporting_extension` and `custom_ontology` blocks. It defaults on in development and off when `ENVIRONMENT` is `prod` or `staging`, so a production-style deployment that wants these types sets it to `true` explicitly. Flags are read at import, so restart the API after changing it.
 
 ## Related Documentation
 

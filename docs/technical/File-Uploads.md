@@ -1,6 +1,6 @@
 # File Uploads
 
-This guide shows you how to load bulk node and relationship data into a **custom (generic) graph**. You upload parquet, CSV, or JSON files, stage them, and ingest them into your graph — all without your file bytes ever passing through the API server.
+File uploads load bulk node and relationship data into a **custom (generic) graph**: parquet, CSV or JSON files go straight to S3, are staged, then ingested. Your file bytes never pass through the API server.
 
 The write path is a set of **content operations** at `POST /v1/graphs/{graph_id}/operations/{op_name}` — `create-file-upload`, `ingest-file`, and `delete-file`. Each returns an `OperationEnvelope` and accepts an `Idempotency-Key`. Reads stay on the files router at `GET /v1/graphs/{graph_id}/files`.
 
@@ -66,7 +66,7 @@ Every file lives across three layers, each with its own independent status. The 
 | **DuckDB** | Staging tables — queryable immediately after upload | Mutable |
 | **LadybugDB** | The graph — a materialized view of staged data | Immutable view |
 
-**Staging is the source of truth.** Because the graph is a materialized view of the DuckDB staging tables, it can always be rebuilt from staged data. That makes `materialize` (rebuild) a safe, repeatable operation.
+**The uploaded files are the source of truth; staging and the graph are derived from them.** The staging tables are rebuilt from every uploaded file, and the graph is a materialized view of the staging tables, so the graph can always be rebuilt from what you uploaded. That makes `materialize` (rebuild) a safe, repeatable operation.
 
 **Tables auto-create on first upload.** You do not pre-declare tables. When you request an upload URL with a `table_name`, the table is created if it does not exist, and the table type (node vs relationship) is inferred from the name. You can review staging tables at any time with `GET /v1/graphs/{graph_id}/tables`.
 
@@ -77,7 +77,7 @@ Before starting, ensure you have:
 - A RoboSystems account and an API key (see [Quick Start](Quick-Start))
 - A custom graph and its `graph_id` (see [Custom Graph Schema](Custom-Graph-Schema))
 
-All `curl` examples below read the API key from `$ROBOSYSTEMS_API_KEY` and target `https://api.robosystems.ai`. Substitute your own `graph_id` (the examples use `kg1a2b3c4d`).
+All `curl` examples below read the API key from `$ROBOSYSTEMS_API_KEY` and target `https://api.robosystems.ai`. Substitute your own `graph_id` (the examples use `kg1a2b3c4d5e6f7a8b`).
 
 ## Quick Start
 
@@ -107,7 +107,7 @@ All three write calls are operations, which means two things hold for every one 
 `POST /v1/graphs/{graph_id}/operations/create-file-upload` returns a presigned S3 URL and a `file_id`. It auto-creates the staging table named in `table_name` if it does not already exist.
 
 ```bash
-curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/operations/create-file-upload" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/create-file-upload" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -128,7 +128,7 @@ The response is an `OperationEnvelope`; the presign payload sits inside `result`
     "upload_url": "https://...",
     "expires_in": 3600,
     "file_id": "<uuid>",
-    "s3_key": "user-staging/<user_id>/kg1a2b3c4d/Person/<file_id>/Person.parquet"
+    "s3_key": "user-staging/<user_id>/kg1a2b3c4d5e6f7a8b/Person/<file_id>/Person.parquet"
   },
   "at": "2026-08-09T18:04:11.921Z",
   "createdBy": "user_01K2...",
@@ -139,6 +139,8 @@ The response is an `OperationEnvelope`; the presign payload sits inside `result`
 Envelope keys are camelCase on the wire, and the payload you want is one level down — extract it with `jq -r .result.upload_url` and `jq -r .result.file_id`.
 
 **Note:** `table_name` is required for this operation. The presigned URL expires in 3600 seconds (1 hour) — re-request it if it lapses.
+
+**Declaring the size.** `file_size_bytes` is optional. When you send it, a file over the size limit is refused here with **413** instead of after the upload, and the size is signed into the presigned URL — the `PUT` in step 2 must then send exactly that many bytes, or S3 rejects it. Without it, the size is checked by `ingest-file` after the upload.
 
 ### Step 2: Upload the Bytes to S3
 
@@ -157,13 +159,13 @@ curl -X PUT "<upload_url from step 1>" \
 `POST /v1/graphs/{graph_id}/operations/ingest-file` tells the platform the bytes are in S3. It validates the object exists (via a `head_object`), counts rows, and triggers DuckDB staging. Set `ingest_to_graph: true` to also push the staged data into the graph in the same call. There is no status field — naming the `file_id` is what marks it uploaded.
 
 ```bash
-curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/operations/ingest-file" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/ingest-file" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "file_id": "<file_id>", "ingest_to_graph": true }'
 ```
 
-The staging details come back inside `result`. When background work is dispatched — a large file staged through Dagster, or the graph-ingest chain — the envelope carries `status: "pending"` and the `result` picks up an `operation_id` and a `monitor_url`:
+Before staging, `ingest-file` measures the object in S3: its size, its row count against the tier's per-file row cap, and — for parquet — its column names (see [Supported Formats and Limits](#supported-formats-and-limits)). The staging details come back inside `result`. When background work is dispatched — a large file staged through Dagster, or the graph-ingest chain — the envelope carries `status: "pending"` and the `result` picks up an `operation_id` and a `monitor_url`:
 
 ```json
 {
@@ -192,7 +194,7 @@ The top-level `operationId` on a pending envelope is what you pass to `/v1/opera
 Once the data is in the graph, query it. Reads run through `POST /v1/graphs/{graph_id}/query/cypher`, or through any MCP-compatible AI tool using the `read-graph-cypher` tool (run `get-graph-schema` first). See [Querying the Analytical Graph](Querying-the-Analytical-Graph) for both paths.
 
 ```bash
-curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/query/cypher" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/query/cypher" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "query": "MATCH (p:Person) RETURN count(p) AS people" }'
@@ -212,7 +214,7 @@ There are two ingestion modes. They differ only in *when* staged data reaches th
 For batch loads, stage all your files first, then rebuild the graph from staging in a single operation:
 
 ```bash
-curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/operations/materialize" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/materialize" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
@@ -238,8 +240,10 @@ Key constraints:
 - **Maximum file size:** 100 MB per file.
 - **Presigned URL expiry:** 3600 seconds (1 hour).
 - **Size-based routing is automatic and invisible.** Files under 50 MB take a synchronous "direct staging" fast path; files 50 MB and larger go through an async Dagster job. Either way you may receive an `operation_id` for SSE monitoring.
+- **Rows per file:** capped by tier, at the tier's `max_single_table_rows` — `GET /v1/graphs/{graph_id}/limits` reports it. A file over the cap is refused by `ingest-file` with **413**, since it could never materialize.
 - **Filename safety:** `file_name` is 1–255 characters and cannot contain `..`, `/`, or `\`.
 - **Table name pattern:** `table_name` must match `^[A-Za-z_][A-Za-z0-9_]*$`.
+- **Column names** become staging identifiers, so they follow the same rule: a letter or underscore first, then letters, digits and underscores, up to 128 characters. A parquet file with any other column name is refused by `ingest-file` with **400** (it reads the names from the file footer); for CSV and JSON the staging step refuses it.
 
 ## Inspecting and Managing Files
 
@@ -248,14 +252,14 @@ Files are managed independently of tables. You can list them, inspect per-layer 
 **List all files in a graph** (optional `table_name` and `status` query filters):
 
 ```bash
-curl "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/files" \
+curl "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/files" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
 **Get one file with its per-layer pipeline status.** The response includes a `layers` object with `s3`, `duckdb`, and `graph` entries — each carries its own `status`, `timestamp`, `row_count`, and `size_bytes`, so you can see exactly how far a file has progressed:
 
 ```bash
-curl "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/files/<file_id>" \
+curl "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/files/<file_id>" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
@@ -265,13 +269,13 @@ A file's upload status is one of `pending`, `uploaded`, or `failed`. Nothing set
 
 ```bash
 # Remove S3 object + DB record only (DuckDB rows excluded from queries, not physically removed)
-curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/operations/delete-file" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/delete-file" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "file_id": "<file_id>" }'
 
 # Full cascade: also removes DuckDB rows and marks the graph stale
-curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d/operations/delete-file" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/delete-file" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "file_id": "<file_id>", "cascade": true }'
@@ -335,6 +339,9 @@ For the full request and response schemas (`FileUploadRequest`, `IngestFileOp`, 
 - **`table_name` is required** in the `create-file-upload` body. Omitting it returns a 400.
 - **Extension must match content type.** A `.csv` uploaded with `application/x-parquet` returns a 400.
 - **Filename safety.** `..`, `/`, and `\` are rejected; the name is capped at 255 characters.
+- **`ingest_to_graph: true` takes the graph's materialize lock.** While another materialization of the graph is running, `ingest-file` returns **409** and leaves the upload untouched — retry once it finishes, or stage with `ingest_to_graph: false` and `materialize` later.
+- **A declared `file_size_bytes` is binding.** The presigned URL is signed for exactly that length, so a `PUT` of any other size fails at S3.
+- **Files over the tier's row cap are rejected (HTTP 413)** at `ingest-file`.
 - **You must `PUT` to S3 before calling `ingest-file`.** It runs a `head_object`; if the object is not in S3, it returns 404 ("File not found in S3"). An empty file (size 0 or less) returns 400 ("File is empty").
 - **Storage tier limit.** `ingest-file` gates on the **measured instance footprint**, not on the sum of staged bytes — the check is scoped to the parent graph, so a subgraph is measured against its parent's box, and blue/green `-wip`/`-prev` build artifacts are excluded so an in-flight rebuild does not reject an upload the durable footprint can absorb. Over the limit returns HTTP 413; usage that cannot be verified returns HTTP 503 with a `Retry-After: 30` header.
 - **Presigned URLs expire in 1 hour.** Re-request the URL if it lapses before you upload.

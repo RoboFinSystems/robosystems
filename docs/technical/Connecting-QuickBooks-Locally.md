@@ -1,6 +1,6 @@
 # Connecting QuickBooks Locally
 
-This tutorial connects a QuickBooks Online company to a **self-hosted** RoboSystems stack: registering an Intuit app, exposing an OAuth callback, configuring the environment, completing the OAuth handshake, and seeing what the sync pipeline does on your machine. On robosystems.ai none of this is needed, because connecting QuickBooks is a button in the app.
+This tutorial connects a QuickBooks Online company to a **self-hosted** RoboSystems stack, from registering an Intuit app to watching the first sync run. It covers the Intuit app, the OAuth callback and tunnel, the environment, the OAuth handshake, and what the sync pipeline does on your machine. On robosystems.ai none of this is needed, because connecting QuickBooks is a button in the app.
 
 What happens *after* a connection exists is the same on either deployment and is documented once, for the hosted API:
 
@@ -69,7 +69,7 @@ This page covers steps 1 and 2 and the setup in front of them. Steps 3 and 4 beh
    ```
 
 2. **Complete the base local setup first** so `just start` works — see [Local Development](Local-Development) / [Bootstrap Guide](Bootstrap-Guide) (Docker, `uv`, `just`, the generated `.env`, migrations).
-3. **Install the frontend deps**: `cd roboledger-app && npm install` (Node 22+; `.nvmrc` pins the exact version). Run the frontend with `npm run dev` on the host for the OAuth step (see the Private-Network-Access note in [Troubleshooting](#troubleshooting)).
+3. **Install the frontend deps**: `cd roboledger-app && npm install` (Node 24+; `.nvmrc` pins the exact version). Run the frontend with `npm run dev` on the host for the OAuth step (see the Private-Network-Access note in [Troubleshooting](#troubleshooting)).
 
 ### Intuit Developer account (both paths)
 
@@ -135,7 +135,7 @@ cd ../roboledger-app && npm run dev                # frontend (terminal 2)
 #    pick "Sample Company" → Connect.
 ```
 
-The sandbox company comes pre-populated with synthetic QB data. After connect, trigger a sync and you'll have ~100 transactions to explore.
+The sandbox company comes pre-populated with synthetic QB data. Connecting starts the first sync on its own, a full-history pull, and when it finishes you'll have ~100 transactions to explore.
 
 ### Path B — Real QB (~15 min setup, after one-time Intuit production approval)
 
@@ -457,7 +457,7 @@ Flatteners normalize the nested Intuit objects into flat dicts and write parquet
 **Step 2: `qb_transform`** runs `dbt build` against the parquet files using DuckDB as the local engine. The dbt project has:
 
 - Staging models (`stg_qb_*`) that cast types and normalize column names
-- Marts (`accounts`, `transactions`, `entries`, `line_items`, `agents`, etc.) that join the staging tables into the canonical event shape
+- Marts (`elements`, `transactions`, `entries`, `line_items`, `agents`, `dimensions`) that join the staging tables into the canonical event shape
 - Data tests including `assert_accounting_equation` (every transaction balances), `assert_debits_equal_credits` (trial balance check), `assert_unique_identifiers` (no dupes)
 
 If any data test fails, the entire transform fails — surfacing data-quality issues early rather than letting them silently corrupt the OLTP load.
@@ -472,6 +472,7 @@ If any data test fails, the entire transform fails — surfacing data-quality is
 - Records `last_sync` and `last_sync_result` on the connection
 - Triggers `_bootstrap_fiscal_calendar_if_needed` (so the close workflow works on a fresh sync)
 - Triggers `_trigger_auto_map_if_needed` (enqueues the MappingOperator when the mapping has no associations yet)
+- Refreshes the next period's reconciliations on a ledger that already reconciles its accounts (best-effort; see [Period Close](Period-Close#reconciliations))
 - Marks the graph stale so the materializer knows there's new data
 
 After `qb_load` returns, the **stale graph sensor** (a Dagster sensor running every 60 seconds) picks up the stale flag, submits an `extensions_materialize_job`, and the materializer projects the OLTP data into LadybugDB:
@@ -531,7 +532,7 @@ just lbug-query $GRAPH_ID "
 
 ### From the MCP
 
-If you have an MCP client connected to the RoboSystems server (Claude Code, custom agents, etc.):
+If you have an MCP client connected to the RoboSystems server (Claude, ChatGPT, or any MCP client):
 
 ```bash
 # Inspect mapping state
@@ -598,7 +599,7 @@ The rewrites are a standard Next feature and webpack proxies them deterministica
 Open the Dagster UI at [localhost:8002](http://localhost:8002), find the failed run, drill into the `qb_transform` step's stdout. Common causes:
 
 - **`assert_accounting_equation` test failed** — line items reference an account the extract didn't pull. The most common cause is inactive accounts in QB that the API doesn't return by default; the adapter handles this with `WHERE Active IN (true, false)`, so if you see this on a fresh stack, you may be on a stale image — `just rebuild`.
-- **New unseen transaction types** — drop counters in `qb_load` surface as `unbalanced_entries` and `empty_transactions`. Inspect parquet under `/tmp/qb_pipeline/<graph_id>/extract/` to see what came through.
+- **New unseen transaction types** — drop counters in `qb_load` surface in the connection's `last_sync_result.counts` as `dropped_unbalanced_entries` and `dropped_empty_transactions`. Inspect parquet under `/tmp/qb_pipeline/<graph_id>/extract/` to see what came through.
 - **Trait coverage gap** — some staging columns expected by the model aren't in the raw extract. Update `flatten_company_info` and the dbt staging model in tandem.
 
 ### Statements come out empty or unbalanced after a sync

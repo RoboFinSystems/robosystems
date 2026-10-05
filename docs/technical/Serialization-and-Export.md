@@ -1,8 +1,8 @@
 # Serialization & Export
 
-A published RoboLedger report can be downloaded as a file in three formats: the Tavi compiled model, the dataset-form holon, and an XBRL 2.1 package. This page covers what each format contains, what each leaves out, how to download one, and how someone without an account can read it.
+A published RoboLedger report downloads as a file in three formats: the holon (JSON-LD), the Tavi compiled model, and an XBRL 2.1 package. This page covers what each format contains, what each leaves out, how to download one, and how someone without an account can read it.
 
-**Quick Start:** Publish a report with `create-report`, then query the `reportDownloadUrl` GraphQL field for a short-lived link to the file.
+**Quick Start:** Publish a report with `create-report`, then query the `reportDownloadUrl` GraphQL field for a short-lived link to the file. With no `format`, the link is to the holon.
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
@@ -13,6 +13,7 @@ A published RoboLedger report can be downloaded as a file in three formats: the 
 - [What a Report Bundle Carries](#what-a-report-bundle-carries)
 - [When a Bundle Is Made](#when-a-bundle-is-made)
 - [Downloading a Bundle](#downloading-a-bundle)
+- [Downloading from Code](#downloading-from-code)
 - [What's Inside Each Format](#whats-inside-each-format)
 - [Reading an Export Without the Platform](#reading-an-export-without-the-platform)
 - [Validation](#validation)
@@ -28,9 +29,9 @@ A published report is not a rendered document. It is a structured object: the re
 
 | Format | `format` value | What it is for |
 | --- | --- | --- |
-| **Tavi** | `TAVI` | The report's anchor file, stored at publish: a compact compiled model in XBRL International's Project Tavi form, the same form the SEC pipeline publishes for each filing; opens in xbrlkit |
-| **Holon JSON-LD** | `HOLON_JSONLD` | The same content as JSON-LD in dataset form, as named graphs; opens in xbrlkit |
-| **XBRL 2.1** | `XBRL_2_1` | A standard filing package for regulators and XBRL tooling |
+| **Holon JSON-LD** | `HOLON_JSONLD` | The report's anchor file, stored at publish, and the default download: JSON-LD in dataset form, as named graphs, and the one format that carries the whole report; opens in xbrlkit |
+| **Tavi** | `TAVI` | A compact compiled model in XBRL International's Project Tavi form, the form the SEC pipeline also publishes beside each filing; opens in xbrlkit |
+| **XBRL 2.1** | `XBRL_2_1` | A standard XBRL 2.1 package for regulators and XBRL tooling |
 
 ## Prerequisites
 
@@ -56,11 +57,11 @@ Every format is built from the same contents:
 
 ## When a Bundle Is Made
 
-The Tavi file is built and stored as part of publishing. `create-report` and `regenerate-report` write it inside the publish itself: if the file cannot be stored, the publish fails, so there is no published report without its file.
+The holon is built and stored as part of publishing. `create-report` and `regenerate-report` write it inside the publish itself: if the file cannot be stored, the publish fails, so there is no published report without its file.
 
-Each publish is a **generation**. The first publish is generation 1, and each `regenerate-report` rebuilds the report from the current ledger and writes the next one. A generation never changes once written, and earlier generations are kept. `reportDownloadUrl` returns the current generation and tells you its number.
+Each publish writes a **generation**. The first publish is generation 1, and each `regenerate-report` rebuilds the report from the current ledger and writes the next one. `file-report` also stamps a new generation, so the filed record's downloads carry its filing date. A generation never changes once written, and earlier generations are kept. `reportDownloadUrl` returns the current generation and tells you its number.
 
-The Tavi file exists from the moment of publish. The holon and XBRL files are built from the same generation the first time someone asks for them, then kept, so later downloads of that generation are immediate. Because a generation is immutable, a cached file can never be stale.
+The holon exists from the moment of publish. The Tavi and XBRL files are built from the same generation the first time someone asks for them, then kept, so later downloads of that generation are immediate. Because a generation is immutable, a cached file can never be stale.
 
 ```bash
 export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
@@ -95,7 +96,7 @@ POST /extensions/{graph_id}/graphql
 | Argument | Default | Notes |
 | --- | --- | --- |
 | `reportId` | | Required; the report's id |
-| `format` | `TAVI` | `TAVI`, `HOLON_JSONLD`, or `XBRL_2_1` |
+| `format` | `HOLON_JSONLD` | `HOLON_JSONLD`, `TAVI`, or `XBRL_2_1` |
 | `expiresIn` | `300` | Lifetime of the link in seconds, 60 to 3600 |
 
 Every format answers with the same envelope: a short-lived signed link that the client follows to fetch the file. The API never streams the bytes itself.
@@ -104,35 +105,63 @@ Every format answers with the same envelope: a short-lived signed link that the 
 curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"query":"{ reportDownloadUrl(reportId: \"'"$REPORT_ID"'\", format: TAVI) { downloadUrl expiresAt contentType format generationCount omittedContent } }"}'
+  -d '{"query":"{ reportDownloadUrl(reportId: \"'"$REPORT_ID"'\") { downloadUrl expiresAt contentType format generationCount omittedContent } }"}'
 ```
 
 ```json
 {
   "downloadUrl": "https://…",
   "expiresAt": "2026-06-11T19:05:00Z",
-  "contentType": "application/json",
-  "format": "tavi",
+  "contentType": "application/ld+json",
+  "format": "holon-jsonld",
   "generationCount": 1,
-  "omittedContent": ["ib_envelopes", "definition_links", "framework_pins", "filing_lifecycle"]
+  "omittedContent": []
 }
 ```
 
 ```bash
-curl -L "<downloadUrl>" -o report.tavi.json
+curl -L "<downloadUrl>" -o report.holon.jsonld
 ```
 
-Swap the `format` for `HOLON_JSONLD` (`-o report.holon.jsonld`) or `XBRL_2_1` (`-o report.zip`); the query and the envelope are the same.
+Pass `format: TAVI` (`-o report.tavi.json`) or `format: XBRL_2_1` (`-o report.zip`) for the other two; the query and the envelope are the same.
 
-| Format | `contentType` |
-| --- | --- |
-| `TAVI` | `application/json` |
-| `HOLON_JSONLD` | `application/ld+json` |
-| `XBRL_2_1` | `application/zip` |
+| Format | `format` in the response | `contentType` |
+| --- | --- | --- |
+| `HOLON_JSONLD` | `holon-jsonld` | `application/ld+json` |
+| `TAVI` | `tavi` | `application/json` |
+| `XBRL_2_1` | `xbrl-2.1` | `application/zip` |
 
-`omittedContent` names report content the chosen format leaves out: `disclosure_notes` for XBRL 2.1, and the platform-specific items listed under [Tavi](#tavi) for Tavi. It is empty for the holon, which carries everything. The field returns `null` for a `reportId` that does not resolve. Error codes are listed under [Troubleshooting](#troubleshooting).
+`omittedContent` names report content the chosen format leaves out. It is empty for the holon, which carries everything. The Tavi omits four items, `ib_envelopes`, `definition_links`, `framework_pins` and `filing_lifecycle` (see [Tavi](#tavi)); XBRL 2.1 omits `disclosure_notes`. The field returns `null` for a `reportId` that does not resolve. Error codes are listed under [Troubleshooting](#troubleshooting).
+
+## Downloading from Code
+
+**From an AI client.** On a graph's MCP connection, the `get-report-bundle` tool returns the same short-lived link, with the same `format` choices (`holon-jsonld` by default, `tavi`, `xbrl-2.1`). It is meant for a reader on the same machine that loads a file by URL, such as `xbrlkit serve`. The link carries its own credential, so pass it straight to the tool that fetches it rather than into a message. The RoboLedger connector address (`/v1/mcp/roboledger`) does not offer this tool; see [AI Operators & MCP](AI-Operators-and-MCP).
+
+**From Python.** The [Python SDK](https://github.com/RoboFinSystems/robosystems-python-client) resolves the link and follows it in one call:
+
+```python
+import os
+from robosystems_client import RoboSystemsClientConfig, RoboSystemsClients
+
+clients = RoboSystemsClients(
+  RoboSystemsClientConfig(
+    base_url="https://api.robosystems.ai",
+    headers={"X-API-Key": os.environ["ROBOSYSTEMS_API_KEY"]},
+  )
+)
+bundle = clients.ledger.download_report_bundle(
+  os.environ["GRAPH_ID"], os.environ["REPORT_ID"], to="report.holon.jsonld"
+)
+print(bundle.filename, bundle.generation_count, len(bundle.content))
+```
+
+`format` defaults to `"holon-jsonld"`; pass `format="tavi"` or `format="xbrl-2.1"` for the others. `to` is optional: without it the bytes come back on `bundle.content`. A report with no stored bundle raises a `GraphQLError` carrying `REPORT_BUNDLE_NOT_AVAILABLE`.
 
 ## What's Inside Each Format
+
+### Holon JSON-LD
+
+The report as JSON-LD in **dataset form**: named graphs for the report's scene, boundary, and projection. It is the file stored at publish, and the one format that keeps every platform-specific item: the Information Block envelopes, definition arcs, framework pins, and filing lifecycle that the Tavi leaves out, and the disclosure notes that XBRL 2.1 leaves out.
 
 ### Tavi
 
@@ -169,11 +198,7 @@ Platform content that Tavi has no built-in slot for rides as **model-defined pro
 
 Four items still have no place in the file: the Information Block envelopes, the definition arcs, the framework pins, and the filing lifecycle. `omittedContent` lists them (`ib_envelopes`, `definition_links`, `framework_pins`, `filing_lifecycle`), and the holon carries all of them.
 
-The format follows XBRL International's working draft, PWD-2026-09-01, and will track it as the draft moves.
-
-### Holon JSON-LD
-
-The same content as JSON-LD in **dataset form**: named graphs for the report's scene, boundary, and projection. It is derived from the same assembled report as the Tavi, not assembled separately, and it is the one format that keeps every platform-specific item.
+The Tavi is built from the same generation as the holon on its first download. The format follows XBRL International's working draft, PWD-2026-09-01, and will track it as the draft moves.
 
 ### XBRL 2.1
 
@@ -188,24 +213,24 @@ A zip of standard XBRL 2.1 files. Two are always present; the linkbases appear o
 | `report-def.xml` | When non-empty | Definition linkbase |
 | `report-lab.xml` | When non-empty | Label linkbase |
 
-The package carries the statements only. Tenant-authored disclosure notes render in the app and ride the Tavi and holon formats, and the download names them in `omittedContent` as `disclosure_notes`.
+The package carries the statements only. Tenant-authored disclosure notes render in the app and ride the holon and Tavi formats, and the download names them in `omittedContent` as `disclosure_notes`. Like the Tavi, the package is built on its first download.
 
 ### What each format keeps
 
 XBRL 2.1 has no standard place for the platform-specific content, so the package leaves it out; only the disclosure notes are named in its `omittedContent`.
 
-| Content | Tavi | Holon | XBRL 2.1 |
+| Content | Holon | Tavi | XBRL 2.1 |
 | --- | --- | --- | --- |
 | Statement facts and networks | Yes | Yes | Yes |
 | Disclosure notes | Yes | Yes | No |
-| Information Block envelopes | No | Yes | No |
-| Definition arcs | No | Yes | Yes, when present |
+| Information Block envelopes | Yes | No | No |
+| Definition arcs | Yes | No | Yes, when present |
 | Reporting Style, FactSets | Yes | Yes | No |
-| Framework pins, filing lifecycle | No | Yes | No |
+| Framework pins, filing lifecycle | Yes | No | No |
 
 ## Reading an Export Without the Platform
 
-Someone who receives a report file needs no RoboSystems account and no graph. The holon and Tavi formats open in [xbrlkit](https://xbrlkit.com), the open-source XBRL toolkit RoboSystems publishes under the MIT license:
+Someone who receives a report file needs no RoboSystems account and no graph. The holon and Tavi formats open in [xbrlkit](https://xbrlkit.com), the open-source XBRL toolkit RoboSystems publishes under the MIT license. xbrlkit reads the one report it is given; questions across reports, periods held in other reports, or other entities need the graph.
 
 - **In a browser:** [xbrlkit.com/file](https://xbrlkit.com/file) renders the statements, notes, and facts of a `.holon.jsonld` or `.tavi.json` file. The file stays on the reader's machine.
 - **In an AI client:** `xbrlkit serve` is a local MCP server. Ask the client to load the file by path or URL, then ask about it. Setup for each client is at [xbrlkit.com/mcp](https://xbrlkit.com/mcp).
@@ -218,7 +243,7 @@ The holon also reads with any JSON-LD or RDF library, and the XBRL package with 
 
 ## Validation
 
-The claim made about the output is that the XBRL package is valid XBRL 2.1. The Tavi and the holon are checked by reading them back: xbrlkit loads either into the same in-memory model the tools run on.
+The claim made about the output is that the XBRL package is valid XBRL 2.1. The holon and the Tavi are checked by reading them back: xbrlkit loads either into the same in-memory model the tools run on.
 
 **Checking a download yourself.** The repository includes a small harness that runs Arelle over a downloaded package; it needs a checkout of the repository but no running stack:
 
@@ -231,6 +256,8 @@ uv run python -m examples._common.validate --zip report.zip --label fy2025
 
 A report's content is the ledger's facts, mapped through the chart of accounts to framework concepts. To change it, change those: post or correct events ([Event-Driven Ledger](Event-Driven-Ledger)), adjust the mapping ([Chart of Accounts Mapping](Chart-of-Accounts-Mapping)), then run `regenerate-report`. That writes a new generation, and the next download returns it.
 
+A filed report is fixed. `regenerate-report` on a report whose filing status is `filed` or `archived` is refused with `422`; to replace a filed report, archive it and create a new report for the period.
+
 ```bash
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/regenerate-report" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
@@ -242,7 +269,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 ### `REPORT_BUNDLE_NOT_AVAILABLE`
 
-The report has no stored bundle: it was published before exports existed, or was never published. There is no automatic backfill.
+The report has no stored bundle: it was never published, or its generation did not finish. There is no automatic backfill.
 
 **Solution:** Run `regenerate-report` to write a current generation.
 
@@ -258,23 +285,23 @@ The link could not be signed, or a format could not be built. Retry; if it persi
 
 `format` is a GraphQL enum, so an unknown name fails validation before the request runs.
 
-**Solution:** Use `TAVI`, `HOLON_JSONLD`, or `XBRL_2_1`. The flat `JSONLD` format was retired in favor of the Tavi.
+**Solution:** Use `HOLON_JSONLD`, `TAVI`, or `XBRL_2_1`. The flat `JSONLD` format was retired.
 
 ### The First Download of a Format Is Slow
 
-The first request for the holon or XBRL file of a generation builds it. Later requests for that generation return immediately. A `regenerate-report` starts a new generation, so the first download after it builds again.
+The first request for the Tavi or XBRL file of a generation builds it. Later requests for that generation return immediately. A `regenerate-report` or `file-report` starts a new generation, so the first download after it builds again. The holon needs no build: it is stored at publish.
 
 ### Publish Fails on Bundle Upload
 
-The Tavi file is stored as part of the publish; if it cannot be stored, the publish fails rather than leave a report without its file.
+The holon is stored as part of the publish; if it cannot be stored, the publish fails with `502` rather than leave a report without its file. `file-report` stamps a generation the same way and fails the same way, and nothing is filed.
 
-**Solution:** Re-run the publish. On a self-hosted deployment, check the object-storage configuration first.
+**Solution:** Re-run the publish or the filing. On a self-hosted deployment, check the object-storage configuration first.
 
 ## Self-hosted deployments
 
 ### Demos
 
-The RoboLedger demos exercise the full publish-to-download path: each downloads its report's Tavi, holon and XBRL package through the published SDK and runs Arelle over the package.
+The RoboLedger demos exercise the full publish-to-download path: each downloads its report's holon, Tavi and XBRL package through the published SDK and runs Arelle over the package.
 
 ```bash
 just demo-roboledger

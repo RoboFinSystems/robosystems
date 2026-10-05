@@ -1,8 +1,8 @@
 # Event Block Reference
 
-The reference for the Event Block: request and response fields, the enum vocabularies, the status transitions, the handler registry and template grammar, the ledger records a handler writes, and the graph edges they materialize to. For the concepts, read [Event-Driven Ledger](Event-Driven-Ledger) first; for a worked integration, [Build a Ledger Integration](Build-a-Ledger-Integration).
+The reference for the Event Block: its fields, vocabularies, transitions and handlers, the ledger records a handler writes, and the graph edges they become. For the concepts, read [Event-Driven Ledger](Event-Driven-Ledger) first; for a worked integration, [Build a Ledger Integration](Build-a-Ledger-Integration).
 
-All operations are `POST /extensions/roboledger/{graph_id}/operations/{name}`, return an `OperationEnvelope` whose `result` carries the payload below, and accept an `Idempotency-Key` header. See [Operations Contract](Operations-Contract). Exact types are in the live spec at [robosystems.ai/docs/api](https://robosystems.ai/docs/api).
+All operations are `POST /extensions/roboledger/{graph_id}/operations/{name}`, return an `OperationEnvelope` whose `result` carries the payload below, and accept an `Idempotency-Key` header. See [Operations Contract](Operations-Contract). Exact types are in the live reference at [robosystems.ai/docs/extensions](https://robosystems.ai/docs/extensions).
 
 ## Table of Contents
 
@@ -42,7 +42,7 @@ All operations are `POST /extensions/roboledger/{graph_id}/operations/{name}`, r
 | `amount` | no | null | Signed integer cents, from the graph owner's point of view |
 | `currency` | no | `USD` | ISO 4217 |
 | `description` | no | null | Free text |
-| `metadata` | no | `{}` | Free object; validated by the handler when one fires |
+| `metadata` | no | `{}` | Free object; validated by the handler when one fires. System-maintained keys are refused (see [update-event-block](#update-event-block)). |
 | `dimension_ids` | no | `[]` | Dimensions to tag the event with |
 | `obligated_by_event_id` | no | null | The event this one was obligated by |
 | `discharges_event_id` | no | null | The event this one settles |
@@ -93,7 +93,7 @@ Support events record value-chain and audit-trail steps and have no ledger effec
 - **Retractions are guarded.** `voided` and `superseded` are refused, whatever the current status, once any of the event's entries or transactions have posted, or the event has published to QuickBooks. Reverse the posted entry instead.
 - **`superseded` needs `superseded_by_id`**, naming an existing event other than itself. Both sides of the chain are set together.
 - **`captured` or `classified` → `committed`** fires the event's Python handler unless the event already has an entry linked to it.
-- **`captured` → `classified`** gives the handler a chance to refuse a classification it could not post.
+- **`captured` → `classified`** gives the handler a chance to refuse a classification it could not post. The [bank-feed handlers](#bank-feed-handlers) use it; other types accept the move and are checked at commit.
 - Scheduled obligations (`schedule_entry_due`) are created `pending` and moved to `classified` by the promotion sweep (`promote-obligations`, or its background sensor) when their month matures.
 
 ## update-event-block
@@ -110,6 +110,8 @@ Support events record value-chain and audit-trail steps and have no ledger effec
 | `obligated_by_event_id`, `discharges_event_id` | Late-bind the duality links, for example marking a payment as settling an invoice after the fact |
 
 The metadata patch is applied before the handler runs, so a commit sees the final shape. A handler error rolls back the whole update, status change included. Returns the updated envelope.
+
+Some metadata keys are written only by the platform, by write-back and the sync, and a create's `metadata` or an update's `metadata_patch` that sets one is refused with `422`: `qb_external_id`, `qb_entry_ids`, `qb_round_trip_baseline`, `qb_sync_confirmed_at`, `qb_sync_token`, `routed_via`, `last_outbound_error`, `reconciles_event_id`, `round_trip_duplicate_of`, `drift_payload`, `drift_detected_at`, `reconciliation_history`, and any key starting `dispatch_`.
 
 ## preview-event-block
 
@@ -133,9 +135,9 @@ Publishes an event to its connection's system of record. Request: `event_id`, an
 | --- | --- |
 | No connection on the event | Returned unchanged; nothing is written externally |
 | `write_policy: native` | Returned unchanged; RoboLedger is the system of record |
-| `write_policy: qb_authoritative` | The entry is written to QuickBooks. On success the event moves to `fulfilled`, its QuickBooks id is stored on `metadata.qb_external_id`, and its draft entries and transactions post. On rejection the event moves to `pending`, the rejection is stored on `metadata.last_outbound_error`, and the drafts stay draft for a retry. |
+| `write_policy: qb_authoritative` | Each unpublished draft entry is written to QuickBooks as its own journal entry, with the entry id as the request id, and recorded in `metadata.qb_entry_ids` (entry id → QuickBooks id). Each entry that lands posts. Once no draft is left, the event moves to `fulfilled` and its transactions post. On rejection, the entries sent before it stay posted, the rejection is stored on `metadata.last_outbound_error`, the event moves to `pending`, and the rest stay draft for a retry, which sends only the entries not yet in `qb_entry_ids`. |
 
-Response: `event_id`, `status`, `qb_external_id`, `qb_error` (`{code, message, qb_response_at}` on rejection). An event already `fulfilled` or already carrying a QuickBooks id is returned as-is; a `voided` or `superseded` event is refused. Write policies are covered in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy).
+Response: `event_id`, `status`, `qb_external_id` (the first entry this call published), `qb_entry_ids` (every entry of the event now in QuickBooks), and `qb_error` (`{code, message, qb_response_at}` on rejection). An event already `fulfilled` is returned as-is. A `voided` or `superseded` event, or one with no drafted ledger entries (commit it first), is refused with `409`. A `401` means QuickBooks refused the credentials and the connection needs a fresh consent; a `503` means Intuit was unreachable, and the call can be retried. Write policies are covered in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy).
 
 ## Validation and Idempotency
 
@@ -189,6 +191,22 @@ Source transaction types that book the same way share the journal-entry handler:
 - **Nested**, several entries from one event: `entries[]`, each with `posting_date`, `memo`, `line_items[]` (at least two; a line may name `element_external_id` instead of `element_id`, resolved through the source connection), `type`, and optional `external_id`. `status` applies to all of them. This is the shape an importer uses when one source transaction produces several journals.
 
 `publish_to_source` (true or false) overrides whether the entry is published back to the source system; left unset it follows the event's `source`.
+
+### Bank-feed handlers
+
+Four more Python handlers post a line from a bank feed: `bank_transaction`, `bank_fee`, `external_transfer`, and `internal_transfer`. The Mercury and Plaid bank-feed connections create these events. Both connections are off by default and are enabled on a deployment with `CONNECTION_MERCURY_ENABLED` and `CONNECTION_PLAID_ENABLED`.
+
+A feed captures each posted bank line as one event, with the bank account's chart element on `resource_element_id` and, where it can, a suggestion in `metadata.suggested_element_id` and `suggested_account_name`. Nothing posts until the line is classified. These metadata keys choose the other side of the entry:
+
+| Key | Meaning |
+| --- | --- |
+| `classified_element_id` | The one account the whole line books to |
+| `classified_allocations` | A split: `[{element_id, amount}]`, positive cents that sum to the line's absolute amount. Wins over `classified_element_id`. |
+| `accept_suggestion` | `true` takes `suggested_element_id`. Refused when the line carries no suggested element, as with a name-only suggestion. |
+| `from_element_id`, `to_element_id` | `internal_transfer` only: the two bank legs. `to_element_id` defaults to `resource_element_id`. The feed sets both when it knows both accounts. |
+| `classified_by`, `basis` | Who chose, and why. Recorded, not interpreted. |
+
+`captured` → `classified` checks the choice and refuses one that could not post, with the reason: no account chosen, a split that does not sum to the line, or the line classified to the bank account it moved through. On commit the handler writes a draft journal entry: money in is debit bank and credit the chosen account, money out the reverse. An unclassified line falls back to the graph's DSL handlers and is refused when none matches. A bank line is always pinned to the local lane (`publish_to_source: false`), so it never writes back to QuickBooks. When the bank later changes a posted line, the event becomes a reconciling item and a restate posts the bank's new amount and date; a line the bank removed is refused and reverses through `catch_up`. The handlers land `classified`.
 
 ### DSL handlers
 
@@ -288,6 +306,9 @@ MCP: `list-event-blocks`, `get-event-block`, and the write tools `create-event-b
 | Unbalanced entry | Fewer than two line items, a line with both or neither side set, or Σ debits ≠ Σ credits |
 | Invalid transition | The move is not in the transition table, or `superseded` came without `superseded_by_id` |
 | Effects already landed | A void or supersede of an event whose entries have posted or that has published to QuickBooks |
+| System-maintained key | `metadata` or `metadata_patch` sets a key only the platform writes |
+| Bank line not classified | A bank-feed event moved to `classified` with no account chosen, or committed with none chosen and no DSL handler matching it |
+| Not publishable | `execute-event-block` on a voided or superseded event, or one with no drafted ledger entries |
 | Closed period | The write would put a ledger row in, or remove one from, a closed period; reopen it first |
 | Amount off by 100× | `amount` and line amounts are integer cents |
 
@@ -301,7 +322,7 @@ MCP: `list-event-blocks`, `get-event-block`, and the write tools `create-event-b
 - **[Operations Contract](Operations-Contract)** - The envelope, idempotency, and error format
 
 **Codebase Documentation:**
-- **[API Reference](https://robosystems.ai/docs/api)** - Request and response schemas
+- **[API Reference](https://robosystems.ai/docs/extensions)** - Request and response schemas
 - **[Extensions Models](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/extensions/README.md)** - The RoboLedger OLTP models
 
 ## Support

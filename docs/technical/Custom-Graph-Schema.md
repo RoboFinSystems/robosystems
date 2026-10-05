@@ -1,6 +1,22 @@
 # Custom Graph Schema - Complete Guide
 
-This guide walks you through creating custom graph databases with RoboSystems using the **`schema.json` template**. Learn how to design, implement, and query your own graph structures for any domain.
+A custom graph carries your own node and relationship types, declared in a `schema.json`; this page covers the schema format and a runnable demo.
+
+## On the hosted platform
+
+A custom graph is created like any other, with `POST /v1/graphs`, by passing the schema as `custom_schema` in place of `initial_entity` ([Creating a Graph](Graphs-and-Multi-Tenancy#creating-a-graph) covers the role and payment-method requirements):
+
+```bash
+curl -X POST "https://api.robosystems.ai/v1/graphs" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Idempotency-Key: $(date +%s)" \
+  -H "Content-Type: application/json" \
+  -d "{\"metadata\": {\"graph_name\": \"my_graph\"}, \"custom_schema\": $(cat schema.json)}"
+```
+
+Creation is asynchronous: the `202` carries an `OperationEnvelope`, and the new graph id arrives with the operation's result. Data then goes in through the file pipeline — `create-file-upload`, the upload itself, `ingest-file`, and `materialize` — described on [File Uploads](File-Uploads), and is read with Cypher.
+
+The rest of this page runs the custom graph demo on your own stack: it scripts those same calls end to end.
 
 ## Overview
 
@@ -9,7 +25,7 @@ The Custom Graph Schema demo demonstrates how to create graph databases with cus
 - **Custom Data Models**: Define any graph structure for your domain
 - **Flexible Schema Design**: Nodes and relationships tailored to your needs
 - **Reusable Templates**: `schema.json` as a copy-and-customize starting point
-- **Type-Safe Schemas**: Validated property types and required fields
+- **Type-Safe Schemas**: Property types validated when the graph is created
 - **Graph-Native Queries**: Leverage Cypher for powerful data analysis
 - **AI-Powered Analysis**: Query demo graph data using natural language through any MCP-compatible AI tool
 
@@ -119,20 +135,32 @@ This is the **official RoboSystems template** for creating custom graph schemas.
 
 ### Property Types
 
-Supported data types in your schema:
+The demo uses `STRING`, `INT64`, and `DOUBLE`. The parser accepts every LadybugDB type, and an unknown type fails the schema before the graph is created:
 
-- `STRING` - Text values
-- `INT64` - 64-bit integers
-- `DOUBLE` - Floating point numbers
-- `BOOLEAN` - True/false values
-- `DATE` - Date values (as STRING in ISO format)
+| Category | Types |
+| --- | --- |
+| Strings | `STRING` |
+| Integers | `INT8`, `INT16`, `INT32`, `INT64`, `INT128`, `UINT8`, `UINT16`, `UINT32`, `UINT64` |
+| Floating point | `FLOAT`, `DOUBLE` |
+| Temporal | `DATE`, `TIMESTAMP`, `INTERVAL` |
+| Other scalars | `BOOLEAN`, `UUID`, `BLOB` |
+| Composite | `LIST`, `MAP`, `STRUCT`, `UNION` (and fixed-size arrays such as `FLOAT[384]`) |
+| Graph | `NODE`, `REL` |
+
+The list lives in `CustomSchemaParser.VALID_TYPES`; see the [schemas README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/schemas/README.md#property-types).
 
 ### Schema Attributes
 
-- `is_primary_key: true` - Unique identifier for the node
-- `is_required: true` - Field must have a value
+- `is_primary_key: true` — the node's key. Every node needs at least one; it becomes the table's `PRIMARY KEY`.
+- `nullable: false` — marks a field required in the parsed schema. It adds no `NOT NULL` constraint to the table, so keep the field populated in your data.
 
-The API's schema model also accepts an optional top-level `extends` field, which inherits base schema properties (identifier, timestamps). The demo's `schema.json` doesn't use it — its keys are exactly `name`, `version`, `description`, `nodes`, `relationships`, and `metadata`.
+`is_required`, which `schema.json` and some API examples carry, is **not read** by the parser: a property without `nullable` is nullable. Use `nullable: false` when you mean required.
+
+Node and relationship names are checked against a short reserved list (`SystemConfig`, `SchemaVersion`, `AuditLog`, `Permission`, `Role`, `Session`, `Lock`, `Migration`, `SystemUser`, and the `SYSTEM_*` relationships).
+
+### `extends: "base"`
+
+The schema also takes an optional top-level `extends`. Leave it out and the graph holds exactly the types you declare. Set `"extends": "base"` and the graph is created with the **whole platform base ontology** alongside yours — `Entity`, `Period`, `Unit`, `Element`, `Label`, `Reference`, `Taxonomy`, `Dimension`, `Structure`, `Association`, `Trait`, `Classification`, `Agent`, `Event` and their relationships — and any of your nodes or relationships whose name collides with a base one is **dropped**, with only a server-side warning. It does not add properties to your own nodes. The demo's `schema.json` doesn't use it — its keys are exactly `name`, `version`, `description`, `nodes`, `relationships`, and `metadata`.
 
 ## Step-by-Step Walkthrough
 
@@ -403,7 +431,7 @@ LIMIT 40
 
 ### All Available Presets
 
-1. **summary** - Node and relationship counts
+1. **summary** - Node counts by label
 2. **people** - People with employment info
 3. **companies** - Companies with team sizes
 4. **projects** - Projects with sponsors and team members
@@ -481,7 +509,7 @@ For Cursor / VS Code (`mcp.json`):
 
 Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`. Clients without HTTP transport support can use the legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client).
 
-Clients with no field for a custom header — claude.ai and Claude Desktop custom connectors among them — sign in instead: add `https://api.robosystems.ai/v1/mcp`, and choose the graph on the consent screen. The `?token=` carriage that once allowed a key in the URL was retired when OAuth landed, and a credential in the query string is now rejected. See [AI Operators & MCP](AI-Operators-and-MCP).
+A key never travels in the URL: a credential in the query string is rejected. The hosted sign-in (OAuth) path — add `https://api.robosystems.ai/v1/mcp` and choose the graph on the consent screen, as claude.ai and Claude Desktop custom connectors do (Customize → Connectors) — is on [AI Operators & MCP](AI-Operators-and-MCP).
 
 4. Restart your MCP-compatible AI tool
 
@@ -489,14 +517,12 @@ Clients with no field for a custom header — claude.ai and Claude Desktop custo
 
    **Schema and DDL:**
    - `get-graph-schema` - View available node and relationship types
-   - `get-graphql-schema` - The typed GraphQL schema served for this graph
    - `add-node-table` - Add a new node type — on a subgraph only (see [Changing the Schema After Creation](#changing-the-schema-after-creation))
    - `add-relationship-table` - Add a new relationship type — on a subgraph only
 
    **Querying:**
    - `read-graph-cypher` - Run Cypher reads
    - `write-graph-cypher` - Run Cypher writes — on a subgraph only; a parent graph answers `subgraph_required`
-   - `query-graphql` - Typed GraphQL reads
    - `get-graph-info` - Inspect graph topology and node/relationship counts
 
    **Subgraphs and lifecycle:**
@@ -509,6 +535,8 @@ Clients with no field for a custom header — claude.ai and Claude Desktop custo
    **Documents** — the surface Step 6 exercises:
    - `search-documents`, `get-document-section`, `get-document`, `list-documents`
    - `create-document`, `update-document`, `delete-document`
+
+   The list also carries `get-graphql-schema` and `query-graphql`, but they are no use here: they serve the RoboLedger and RoboInvestor read schema, and a custom graph has no operational data behind it. Your tables are read with Cypher.
 
    Note that `get-example-queries` is **not** served on a custom graph — it's gated on the RoboLedger extension, because the examples it returns are written against that schema. Use `get-graph-schema` instead; on a custom graph it is the tool an agent orients with.
 
@@ -551,13 +579,12 @@ Edit `my_custom_schema.json` and define your nodes:
   "name": "my_custom_graph",
   "version": "1.0.0",
   "description": "My custom domain graph",
-  "extends": "base",
   "nodes": [
     {
       "name": "Product",
       "properties": [
         {"name": "identifier", "type": "STRING", "is_primary_key": true},
-        {"name": "name", "type": "STRING", "is_required": true},
+        {"name": "name", "type": "STRING", "nullable": false},
         {"name": "price", "type": "DOUBLE"},
         {"name": "category", "type": "STRING"},
         {"name": "in_stock", "type": "BOOLEAN"}
@@ -567,7 +594,7 @@ Edit `my_custom_schema.json` and define your nodes:
       "name": "Customer",
       "properties": [
         {"name": "identifier", "type": "STRING", "is_primary_key": true},
-        {"name": "name", "type": "STRING", "is_required": true},
+        {"name": "name", "type": "STRING", "nullable": false},
         {"name": "email", "type": "STRING"},
         {"name": "signup_date", "type": "STRING"}
       ]
@@ -576,7 +603,7 @@ Edit `my_custom_schema.json` and define your nodes:
       "name": "Order",
       "properties": [
         {"name": "identifier", "type": "STRING", "is_primary_key": true},
-        {"name": "order_date", "type": "STRING", "is_required": true},
+        {"name": "order_date", "type": "STRING", "nullable": false},
         {"name": "total_amount", "type": "DOUBLE"},
         {"name": "status", "type": "STRING"}
       ]
@@ -649,9 +676,24 @@ for i in range(100):
 # Save to Parquet
 df = pd.DataFrame(products_data)
 df.to_parquet("data/nodes/Product.parquet")
+
+# Relationships: `from` and `to` hold the endpoint nodes' primary keys,
+# then the relationship's own properties
+pd.DataFrame([
+  {"from": customer_id, "to": order_id, "order_number": "SO-1001"},
+]).to_parquet("data/relationships/CUSTOMER_PLACED_ORDER.parquet")
 ```
 
-### Step 6: Run Your Custom Pipeline
+One file per table, named for it: node files in `data/nodes/<NodeName>.parquet`, relationship files in `data/relationships/<RELATIONSHIP_NAME>.parquet`. A relationship file needs `from` and `to` columns — staging reads those two names to tell a relationship table from a node table — holding the primary-key values of the source and target nodes. Remove the demo's own files from both folders first: the upload step sends every parquet file it finds there.
+
+### Step 6: Point the Ingest and Query Scripts at Your Tables
+
+Two scripts still name the demo's tables:
+
+- **`upload_ingest.py`** — `EXPECTED_NODE_TABLES` and `EXPECTED_REL_TABLES` near the top list `Company`, `Project`, `Person` and the three demo relationships. The script refuses to run when a listed file is missing, and its post-ingest checks count every listed table. Replace both lists with your node and relationship names.
+- **`query_graph.py`** — the presets in `PRESET_QUERIES` are Cypher over `Person`, `Company`, and `Project`, so against your graph they fail or return nothing. Replace them with your own, or run ad-hoc queries with `--query` or the interactive prompt.
+
+### Step 7: Run Your Custom Pipeline
 
 ```bash
 uv run examples/custom_graph_demo/create_graph.py
@@ -697,7 +739,7 @@ uv run examples/custom_graph_demo/query_graph.py --all
 ```json
 {
   "properties": [
-    {"name": "name", "type": "STRING", "is_required": true}
+    {"name": "name", "type": "STRING", "nullable": false}
   ]
 }
 ```
@@ -716,7 +758,7 @@ uv run examples/custom_graph_demo/query_graph.py --all
   "name": "PERSON_WORKS_ON_PROJECT",
   "properties": [
     {"name": "hours_per_week", "type": "INT64"},
-    {"name": "role", "type": "STRING"}
+    {"name": "contribution", "type": "STRING"}
   ]
 }
 ```
@@ -797,7 +839,7 @@ LIMIT 10
 
 A graph's schema is fixed when the graph is created. The query surface blocks schema DDL (`CREATE`/`DROP`/`ALTER TABLE`) on every graph, and on a main graph Cypher is read-only: data enters through the staging pipeline (upload → ingest → materialize) against the tables declared in `schema.json`. To change a main graph's node or relationship types, edit the schema and create a new graph.
 
-Subgraphs are the place to extend a schema live. On a subgraph, the MCP tools `add-node-table` and `add-relationship-table` add new types, and `write-graph-cypher` writes to them; on a parent graph all three answer `subgraph_required`. Create one with `POST /v1/graphs/{graph_id}/operations/create-subgraph` — `subgraph_type: "static"` starts from the parent's schema, `"knowledge"` from the Concept / Observation / Session schema that Step 7 uses, and `"empty"` from nothing. Anything written this way lives in the subgraph only. See [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy#subgraphs).
+Subgraphs are the place to extend a schema live. On a subgraph, the MCP tools `add-node-table` and `add-relationship-table` add new types, and `write-graph-cypher` writes to them; on a parent graph all three answer `subgraph_required`. Create one with `POST /v1/graphs/{graph_id}/operations/create-subgraph` — `subgraph_type: "static"` starts from the platform base schema plus the parent's schema extensions — **not** a custom graph's own tables, so add those with `add-node-table` / `add-relationship-table` if you need them there — `"knowledge"` from the Concept / Observation / Session schema that Step 7 uses, and `"empty"` from nothing. Anything written this way lives in the subgraph only. See [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy#subgraphs).
 
 ## Troubleshooting
 

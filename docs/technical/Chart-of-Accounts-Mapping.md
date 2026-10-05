@@ -4,6 +4,8 @@ Mapping ties each account in a tenant's chart of accounts to an `rs-gaap` report
 
 The product doc *Map your chart of accounts* at roboledger.ai describes the review workflow for end users. This page covers the model and the operations underneath.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -19,7 +21,7 @@ The product doc *Map your chart of accounts* at roboledger.ai describes the revi
 
 ## Overview
 
-A chart of accounts arrives in the graph in one of three ways: a QuickBooks sync, the `initialize-chart-of-accounts` operation (a shipped template for native books), or tenant authoring through a Taxonomy Block. However it arrives, each account is an `Element` row with a classification trait (asset, liability, equity, revenue, expense, gain or loss). The reporting vocabulary is the tenant's copy of `rs-gaap`. A mapping is a set of `mapping` associations from the first to the second, held in a `coa_mapping` Structure. Most graphs have exactly one.
+A chart of accounts arrives in the graph in one of three ways: a QuickBooks sync, the `initialize-chart-of-accounts` operation (a shipped template for native books), or tenant authoring through a Taxonomy Block. However it arrives, each account is an `Element` row with a classification trait (asset, liability, equity, revenue, expense, gain or loss). The reporting vocabulary is the tenant's copy of `rs-gaap`. A mapping is a set of `mapping` associations from the first to the second, held in a `coa_mapping` Structure. Each mapping sits in its own `mapping` taxonomy, sourced from the chart and targeting one framework, and a chart holds one mapping per framework: a second mapping into the same framework is refused with `422`. A `coa_mapping` structure in a Taxonomy Block names its framework with `target_framework`, which defaults to the book framework, `rs-gaap`. The book mapping is the one statements read, and `list-mapping-structures` lists it first with each mapping's `framework`.
 
 | Surface | Mapping reads | Mapping writes |
 | --- | --- | --- |
@@ -34,7 +36,7 @@ export GRAPH_ID=kg...
 
 ## The Mapping Model
 
-**One arc per account, to a leaf.** A mapping association points from a chart-of-accounts element to one `rs-gaap` concept. The target must be a **leaf** of the calculation DAG: a concept whose value comes from facts, not from summing children. Statement-level subtotals such as `rs-gaap:Assets`, `rs-gaap:LiabilitiesCurrent` and gross profit are computed by the renderer from the leaves beneath them. An account mapped straight to a subtotal would place a leaf fact on a rollup and be counted twice. The suggester never offers subtotals, and the auto-mapper never writes one. See [Reporting and Rendering](Reporting-and-Rendering#the-calc-dag-model) for the calc DAG.
+**One arc per account, to a leaf.** A mapping association points from a chart-of-accounts element to one `rs-gaap` concept. The target must be a **leaf** of the calculation DAG: a concept whose value comes from facts, not from summing children. Statement-level subtotals such as `rs-gaap:Assets`, `rs-gaap:LiabilitiesCurrent` and gross profit are computed by the renderer from the leaves beneath them. An account mapped straight to a subtotal would place a leaf fact on a rollup and be counted twice. The suggester never offers subtotals, the auto-mapper never writes one, and the write path refuses one with `422`. See [Reporting and Rendering](Reporting-and-Rendering#the-calc-dag-model) for the calc DAG.
 
 **Many accounts to one concept.** The standard Reporting Style aggregates to filing grade. Every bank account lands in one cash line, and many expense accounts land in selling, general and administrative expense. That is intended. Detail below the statement face belongs in supporting Information Blocks, not in extra statement lines.
 
@@ -55,10 +57,10 @@ A chart can be 100% covered and still produce a thin income statement or an unba
 curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"query": "{ mappingCoverage(mappingId: \"'$MAPPING_ID'\") { totalCoaElements mappedCount unmappedCount coveragePercent highConfidence mediumConfidence lowConfidence unreachableCount unreachable { coaCode coaName targetQname } } }"}'
+  -d '{"query": "{ mappingCoverage(mappingId: \"'$MAPPING_ID'\") { totalCoaElements mappedCount unmappedCount coveragePercent highConfidence mediumConfidence lowConfidence manualConfidence unreachableCount unreachable { coaCode coaName targetQname } } }"}'
 ```
 
-`{ mappings { structures { id name } } }` returns the mapping structure id. The MCP `get-mapping-summary` returns the same numbers and adds a `manual` bucket for arcs written without a confidence score.
+`{ mappings { structures { id name } } }` returns the mapping structure id. `manualConfidence` counts arcs written without a confidence score. The MCP `get-mapping-summary` returns the same numbers, with that count as its `manual` bucket.
 
 An unreachable arc isn't always a mistake. A gross/contra pair (equipment at cost and its accumulated depreciation) mapped at a grain the Style presents net is a correct mapping that has no line of its own. `unreachable_count` makes such cases visible so you can decide which ones they are. The [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough#the-mapping-view) shows a tenant at 27 of 27 mapped with 3 unreachable.
 
@@ -134,7 +136,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   }'
 ```
 
-`from_element_id` is the chart-of-accounts element and `to_element_id` the `rs-gaap` concept's element id (from the candidates). `confidence` and `suggested_by` are recorded for audit. The renderer ignores them. A duplicate `(from, to, type)` returns `409`, and an unknown element on either side returns `400`.
+`from_element_id` is the chart-of-accounts element and `to_element_id` the `rs-gaap` concept's element id (from the candidates). `confidence` and `suggested_by` are recorded for audit. The renderer ignores them. A duplicate `(from, to, type)` returns `409`, an unknown element on either side returns `400`, and a target that is a statement subtotal returns `422` with a message pointing at the leaf concepts beneath it.
 
 ### Correct a wrong arc
 
@@ -191,7 +193,7 @@ Check `unreachableCount` as well as `coveragePercent`. An unreachable arc is a b
 
 ### Never map to a subtotal
 
-A mapping to a calc-DAG parent double-counts. The candidate surfaces exclude subtotals, so pick targets from them instead of typing qnames.
+A mapping to a calc-DAG parent would double-count, so the write is refused with `422`. The candidate surfaces exclude subtotals, so pick targets from them instead of typing qnames.
 
 ### "Other" concepts render, but tell you little
 

@@ -1,6 +1,6 @@
 # Windows Setup (WSL2)
 
-RoboSystems is developed and tested on macOS and Linux. On Windows, the supported path is **WSL2 with the repository stored inside the Linux filesystem** — which makes your environment the Linux environment we already test, rather than a third platform.
+Run the RoboSystems stack on Windows through WSL2, with the repository stored inside the Linux filesystem rather than on a Windows drive. RoboSystems is developed and tested on macOS and Linux, and **WSL2 with the repository in the Linux filesystem** is the supported Windows path — it makes your environment the Linux environment we already test, rather than a third platform.
 
 **Quick Start:** Run `wsl --install` in an admin PowerShell, enable Docker Desktop's WSL integration, clone the repo to `~/` **inside** the distro (never `/mnt/c`), install `uv`, `just`, and `jq`, then follow the normal [Local Development](Local-Development) guide.
 
@@ -86,9 +86,10 @@ cd robosystems
 
 | Symptom on `/mnt/c` | Cause |
 | --- | --- |
-| PostgreSQL container exits at startup, complaining about data directory permissions | `initdb` cannot `chmod` the `./data/postgres/data` bind mount through the Windows filesystem driver |
-| LadybugDB or DuckDB errors on file locks, or corrupt staging databases | Both engines rely on POSIX file locking, which is unreliable across the 9p/drvfs boundary |
+| LadybugDB or DuckDB errors on file locks, or corrupt staging databases | Both engines keep their files in `./data` bind mounts and rely on POSIX file locking, which is unreliable across the 9p/drvfs boundary |
 | Docker builds and test runs are several times slower | Every file read crosses the Windows/Linux filesystem boundary |
+
+PostgreSQL, Valkey, OpenSearch, and LocalStack keep their data in named Docker volumes rather than under the repository, so the checkout's location does not affect them.
 
 To browse the repo from Windows Explorer afterwards, run `explorer.exe .` from the repo directory, or enter `\\wsl$` in the Explorer address bar.
 
@@ -136,7 +137,7 @@ See [Local Development](Local-Development) for the full walkthrough.
 
 **`bind: An attempt was made to access a socket in a way forbidden by its access permissions`**
 
-Windows' NAT driver reserves port ranges dynamically, and it sometimes claims ports the stack needs (8000, 8001, 8002, 5432, 9200). Check the reservations from an admin PowerShell:
+Windows' NAT driver reserves port ranges dynamically, and it sometimes claims ports the stack needs (8000, 8001, 8002, 5432, 6379, 4566, 9200). Check the reservations from an admin PowerShell:
 
 ```powershell
 netsh interface ipv4 show excludedportrange protocol=tcp
@@ -171,8 +172,7 @@ Known remaining friction:
 
 | Area | What happens |
 | --- | --- |
-| **Docker build mode** (`just rebuild`, `just reset-local`) | Two Arelle cache bundles are tracked as symlinks. Without Developer Mode and `git config core.symlinks true`, Git checks them out as small text files and the build fails while extracting them. Image mode — plain `just start`, which pulls published images — is unaffected. |
-| **PostgreSQL data directory** | If the repo is on an NTFS path, `initdb` cannot set permissions on the `./data/postgres/data` bind mount and the container will not start. |
+| **Docker build mode** (`just rebuild`, `just reset-local`) | The Arelle cache bundle the build extracts (`arelle-schemas-latest.tar.gz`) is tracked as a symlink. Without Developer Mode and `git config core.symlinks true`, Git checks it out as a small text file and the build fails while extracting it. Image mode — plain `just start`, which pulls published images — is unaffected. |
 | **`just test-dbt`** | Defaults its temp directory to `` `mktemp -d` ``, producing a Git Bash path that the Windows Python interpreter cannot resolve. |
 | **Ports** | Subject to the same WinNAT exclusions described in Troubleshooting above. |
 

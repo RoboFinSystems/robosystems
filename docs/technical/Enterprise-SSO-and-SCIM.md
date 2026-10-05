@@ -169,7 +169,7 @@ Run this end to end before the deployment carries real users. It's also the evid
 | Unassign the user in the IdP | `PATCH active:false` arrives within seconds; their live session dies on the next request |
 | That user attempts to log in again | Refused |
 
-The last two rows are the control that matters: deactivation is the offboarding kill switch. It bumps the user's session version **and** revokes their API keys, so it terminates both the browser session and any programmatic credential the user held.
+The last two rows are the control that matters: deactivation is the offboarding kill switch. It bumps the user's session version **and** revokes their API keys and OAuth tokens, so it terminates the browser session, any programmatic credential, and any MCP client connection the user held.
 
 ## How the Login Flow Works
 

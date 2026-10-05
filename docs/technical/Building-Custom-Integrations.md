@@ -1,6 +1,6 @@
 # Building Custom Integrations
 
-The supported way to connect your own data sources to RoboSystems is to build an **integration**: a small program in its own repository that speaks to the platform exclusively through the public API with an API key. It never runs inside the platform — so it survives every platform release, works identically against the managed cloud or a self-hosted deployment, holds its own source credentials, and runs anywhere: a GitHub Actions schedule, a cron job, a container.
+An **integration** is the supported way to connect your own data sources to RoboSystems: a small program in its own repository that calls the public API. It speaks to the platform only through that API, with an API key, and never runs inside the platform — so it survives every platform release, works identically against the managed cloud or a self-hosted deployment, holds its own source credentials, and runs anywhere: a GitHub Actions schedule, a cron job, a container.
 
 This page is the hub for integrators: pick a lane, follow its guide, and use the reference pages for the contract every call shares.
 

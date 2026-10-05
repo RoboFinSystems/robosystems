@@ -46,10 +46,10 @@ curl https://api.robosystems.ai/v1/status
 
 ## Step 2: Create an API Key
 
-In the app, open **Settings** and find **API keys**. Choose **Create**, name the key, and pick its scope:
+In the app, open **Settings** and find **API keys**. Choose **Create API key**, name the key, and pick its **Scope**:
 
-- **All graphs** — the key can reach every graph your account can.
-- **One graph** — the key works only on that graph. Prefer this for a script or integration that needs a single graph.
+- **Account-wide (all graphs)** — the key can reach every graph your account can, plus account-level routes such as `/v1/user` and `/v1/graphs`.
+- One graph, picked by its name and id — the key works only on that graph and its subgraphs. Prefer this for a script or integration that needs one graph, and for an AI client that connects to a graph's MCP address with a key rather than OAuth. A graph-scoped key is refused on account-level routes, so the `/v1/user` and `/v1/graphs` calls below need an account-wide key.
 
 The key is a string beginning with `rfs`, and it is **shown once**. Copy it into your terminal's environment:
 
@@ -76,7 +76,7 @@ curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
 }
 ```
 
-Without a valid key the API answers `401` with `{"detail": "Authentication required"}`. For rotation, key scopes, and the `X-API-Key` vs JWT boundary, see [Authentication and API Keys](Authentication-and-API-Keys).
+Without a key the API answers `401` with `{"detail": "Authentication required"}`, and with a key it does not accept, `401` with `{"detail": "Invalid API key"}`. For rotation, key scopes, and the `X-API-Key` vs JWT boundary, see [Authentication and API Keys](Authentication-and-API-Keys).
 
 ## Step 3: Get a Graph
 
@@ -123,7 +123,7 @@ export GRAPH_ID=kg1a2b3c4d5e...
 
 ## Step 4: Your First Query
 
-With a `graph_id` in hand, run authenticated Cypher at `POST /v1/graphs/{graph_id}/query/cypher`. The body is a `CypherStatementRequest`: a required `query` string plus an optional `parameters` object (use `$param` placeholders in the query for safe parameter binding) and an optional `timeout` in seconds (1–300, default 60). Its sibling, `POST /v1/graphs/{graph_id}/query/sql`, runs read-only SQL over the same graph's columnar (DuckDB) tables — a relational lens on the same data.
+With a `graph_id` in hand, run authenticated Cypher at `POST /v1/graphs/{graph_id}/query/cypher`. The body is a `CypherStatementRequest`: a required `query` string plus an optional `parameters` object (use `$param` placeholders in the query for safe parameter binding) and an optional `timeout` in seconds (1–300, default 60). Its sibling, `POST /v1/graphs/{graph_id}/query/sql`, runs SQL over the same graph's columnar (DuckDB) tables — a relational lens on the same data. It takes `SELECT` statements only, stops a query at 30 seconds, returns at most 10,000 rows, and is not available on shared repositories such as `sec`.
 
 Count nodes by label in your graph:
 
@@ -168,7 +168,7 @@ In Claude Code:
 claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
 ```
 
-The app's **MCP** page builds a ready-made connector for your graph, and [AI Operators and MCP](AI-Operators-and-MCP) covers every client — Claude, ChatGPT, Cursor, VS Code — along with the API-key URL for clients that cannot run OAuth.
+The app's **MCP** page builds a ready-made connector for your graph, and [AI Operators and MCP](AI-Operators-and-MCP) covers every client — Claude, ChatGPT, Cursor, VS Code — along with the per-graph address, `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`, for clients that cannot run OAuth: they send an API key in the `X-API-Key` header, never in the URL, and a key scoped to that one graph is the one to give them.
 
 ## Load Your Data
 
@@ -184,7 +184,7 @@ An empty graph becomes useful once data flows into it. Pick the route that match
 
 ### `401 Unauthorized`
 
-**Solution:** Confirm you are sending the `X-API-Key` header (not `Authorization: Bearer`) and that `$ROBOSYSTEMS_API_KEY` is set in this terminal. A key revoked in **Settings → API keys** no longer works.
+**Solution:** Confirm you are sending the `X-API-Key` header (not `Authorization: Bearer`) and that `$ROBOSYSTEMS_API_KEY` is set in this terminal. A key revoked in **Settings → API keys** no longer works, and a key scoped to one graph answers `401` on account-level routes such as `/v1/user`.
 
 ```bash
 curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" https://api.robosystems.ai/v1/user

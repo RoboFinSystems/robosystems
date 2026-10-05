@@ -1,6 +1,6 @@
 # Self-Hosted AI Models
 
-The platform's AI does not depend on any one model vendor. On a stack you run, both AI lanes can be pointed at open-weight models: the MCP clients that call your tools bring their own model, and the server-side operators can run on any server that implements the OpenAI Chat Completions API with tool calling.
+The server-side AI operators can run on an open-weight model through any OpenAI-compatible server, so the platform's AI does not depend on one vendor. On a stack you run, both AI lanes can be pointed at open-weight models: the MCP clients that call your tools bring their own model, and the server-side operators can run on any server that implements the OpenAI Chat Completions API with tool calling.
 
 > **This is for a deployment you run** — locally, in your own AWS account, or a dedicated deployment that asks for it. Hosted RoboSystems runs the operators on Claude through AWS Bedrock; `OPENAI_COMPAT_ENABLED` is off there and there is no model selector in the app.
 
@@ -11,7 +11,7 @@ The platform's AI does not depend on any one model vendor. On a stack you run, b
 | **MCP clients** | The client does | Wherever the client runs. Any MCP client — including one driving an open-weight model — connects to your stack's MCP routes and calls the same tool surface. See [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients). |
 | **Operators** | Your deployment does | Your stack calls the model. By default that is Claude through Bedrock; this page covers pointing it somewhere else. |
 
-Operators are the server-side AI: the chat assistant that answers questions by composing graph reads, and the chart-of-accounts mapping operator. Everything else the platform does — ingestion, reporting, close, search — runs without a model at all.
+Operators are the server-side AI: the chat assistant that answers questions by composing graph reads, the author operator behind the console's `/do` that makes a requested change through a narrow set of writes, and the chart-of-accounts mapping operator. The author operator always runs on the `quality` tier, so map that tier to move it. Everything else the platform does — ingestion, reporting, close, search — runs without a model at all.
 
 ## Configuring the Operators
 
@@ -71,7 +71,7 @@ The client is plain HTTP; it does not use the OpenAI SDK, and no vendor SDK is a
 
 ## Which Models Work
 
-We ran the chat assistant against a demo ledger with twelve questions whose answers were computed independently from the graph, served through NVIDIA's API catalog, with Claude Sonnet 5 on Bedrock as the control:
+In September 2026 we ran the chat assistant against a demo ledger with twelve questions whose answers were computed independently from the graph, served through NVIDIA's API catalog, with Claude Sonnet 5 on Bedrock — the `balanced` tier's model at the time; it is Claude Sonnet 5.5 now — as the control:
 
 | Model | Correct | Note |
 | --- | --- | --- |
@@ -81,7 +81,7 @@ We ran the chat assistant against a demo ledger with twelve questions whose answ
 | gpt-oss-20b | 10 / 12 | Missed a multi-step aggregation, and counted a cash account as an expense |
 | Claude Sonnet 5 (control, Bedrock) | 12 / 12 | |
 
-What to take from it: **frontier-size open weights, served from a GPU server or a hosted endpoint, are the tested configuration.** A model small enough to fit comfortably on a single workstation GPU got multi-step questions wrong, which on a ledger is the failure that matters — a fluent answer with a wrong number. Other endpoints serving the same models should behave the same way, but we have run this set only through the catalog above. The chart-of-accounts mapping operator has not been tested on open weights.
+What to take from it: **frontier-size open weights, served from a GPU server or a hosted endpoint, are the tested configuration.** A model small enough to fit comfortably on a single workstation GPU got multi-step questions wrong, which on a ledger is the failure that matters — a fluent answer with a wrong number. Other endpoints serving the same models should behave the same way, but we have run this set only through the catalog above. The author and chart-of-accounts mapping operators have not been tested on open weights.
 
 ## Before You Point It at Real Books
 

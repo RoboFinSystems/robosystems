@@ -26,7 +26,7 @@ The model has one rule worth memorizing: **credits meter AI, and nothing else.**
 
 ### What Consumes Credits
 
-Only operations that call an external AI model consume credits. In production, that means AI Operators calling a model through AWS Bedrock (Claude Sonnet 5 by default) — the analyst operator (which answers questions from a graph's read-only tools), the author operator (which makes changes a request asks for, on Claude Opus 5.5), the chart-of-accounts mapping operator, and any other operator-driven workflow. Each call is metered on the tokens it actually uses once it completes, then debited from the graph's credit pool.
+Only operations that call an external AI model consume credits. In production, that means AI Operators calling a model through AWS Bedrock — by default on the `balanced` model profile, Claude Sonnet 5.5 today — the analyst operator (which answers questions from a graph's read-only tools), the author operator (which makes changes a request asks for, on the `quality` profile, Claude Opus 5.5 today), the chart-of-accounts mapping operator, and any other operator-driven workflow. Each call is metered on the tokens it actually uses once it completes, then debited from the graph's credit pool.
 
 ### What Is Free
 
@@ -60,8 +60,12 @@ Each graph has a credit pool that receives a fresh allocation every month based 
 
 The three customer tiers are **Standard** (`ladybug-standard`), **Large** (`ladybug-large`) and
 **XLarge** (`ladybug-xlarge`). Their prices, monthly credit allocations and instance sizes are
-deliberately **not restated here** — they are served live from the configuration that provisions the
-infrastructure, so a copy on this page could only ever be a copy that goes stale:
+deliberately **not restated here** — they are served live from configuration, so a copy on this page
+could only ever be a copy that goes stale. Prices and monthly credits come from
+[`robosystems/config/billing/core.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/billing/core.py);
+instance sizes and limits from
+[`.github/configs/graph.yml`](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml),
+the file that provisions the infrastructure. Read them live from:
 
 - **`GET /v1/offering`** — `monthly_price_per_graph`, `monthly_credits_per_graph`, `infrastructure`,
   and the per-tier limits, all computed from the authoritative config
@@ -82,7 +86,7 @@ export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
 ```
 
 ```bash
-curl -X GET "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e/credits" \
+curl -X GET "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/credits" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json"
 ```
@@ -91,7 +95,7 @@ The response is a credit summary for the graph:
 
 ```json
 {
-  "graph_id": "kg1a2b3c4d5e",
+  "graph_id": "kg1a2b3c4d5e6f7a8b",
   "graph_tier": "ladybug-standard",
   "current_balance": 7620.0,
   "monthly_allocation": 8000.0,
@@ -111,7 +115,7 @@ The response is a credit summary for the graph:
 To see the individual credit movements behind the balance, request the transaction history. It supports filtering by type and date range:
 
 ```bash
-curl -X GET "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e/credits/transactions?transaction_type=consumption&start_date=2026-06-01&limit=50" \
+curl -X GET "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/credits/transactions?transaction_type=consumption&start_date=2026-06-01&limit=50" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
@@ -132,7 +136,7 @@ Each credit transaction has a type drawn from a fixed set:
 For a combined view of credits alongside storage, performance, and event metrics, use the analytics endpoint:
 
 ```bash
-curl -X GET "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e/usage" \
+curl -X GET "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/usage" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
@@ -215,6 +219,8 @@ The read scoping on the last two is deliberate rather than incidental: billing i
 
 Checkout is asynchronous. After the user returns from Stripe, the status endpoint progresses `pending_payment → provisioning → active`; once it reads `active` the `resource_id` is populated, and for a graph an `operation_id` tracks provisioning over SSE.
 
+**Buying under contract instead of by card.** The managed platform can also be bought on paper: the public MSA with a one-page Order Form. A Dedicated Deployment — the platform in an AWS account dedicated to your organization — is bought under the MSA and an Order Form, or as an AWS Marketplace private offer billed on your AWS invoice. See [robosystems.ai/enterprise](https://robosystems.ai/enterprise).
+
 **Cancellation lives with the resource, not here.** The billing-level cancel route is reserved for future subscriptions that are not tied to a resource — it deliberately rejects the two kinds that exist today and names the canonical path instead:
 
 - **A graph** — `POST /v1/graphs/{graph_id}/operations/delete-graph`. This tears down **immediately** by default; pass `at_period_end: true` to keep the graph usable through the current billing period. The caller must be both an org owner (billing authority) and an admin on the graph (operational authority).
@@ -235,16 +241,19 @@ robosystems.ai runs with billing on. A self-hosted deployment controls this with
 For operators of a self-hosted deployment, the admin CLI exposes credit-pool inspection and management. It runs against a deployment you operate, not robosystems.ai. The first argument is that deployment's environment (`dev`, `staging`, or `prod`):
 
 ```bash
-just admin dev credits list          # List graph credit pools
-just admin dev credits get <graph_id>  # Detail for one graph
-just admin dev credits bonus         # Grant bonus credits
-just admin dev credits analytics     # Tier-level analytics
-just admin dev credits health        # Credit system health
+just admin dev credits list                       # List graph credit pools
+just admin dev credits get <graph_id>             # Detail for one graph
+just admin dev credits bonus <graph_id> --amount 500 --description "Pilot"   # Grant bonus credits
+just admin dev credits reset <graph_id> --reason "Support"                   # Refill to the monthly allocation
+just admin dev credits analytics                  # Tier-level analytics
+just admin dev credits health                     # Credit system health
 
-just admin dev credits repos list    # Shared-repository credit pools
-just admin dev credits repos get
-just admin dev credits repos bonus
+just admin dev credits repos list                 # Shared-repository credit pools
+just admin dev credits repos get <user_repository_id>
+just admin dev credits repos bonus <user_repository_id> --amount 500 --description "Pilot"
 ```
+
+`credits reset` asks for confirmation, then forfeits the pool's remaining balance (recorded as an `expiration` transaction) and refills it to the monthly allocation. The scheduled monthly reset still runs when the month turns.
 
 ## Related Documentation
 

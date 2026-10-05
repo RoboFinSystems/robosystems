@@ -1,8 +1,8 @@
 # Information Block Reference
 
-The reference for the Information Block: every envelope field, the mechanics each block type carries, which operations each type supports, the rule vocabulary and what evaluates today, and the view projections. For the concepts behind it, read [Information Blocks](Information-Blocks) first.
+The field-level reference for Information Blocks: the envelope, each block type's mechanics and operations, the rule patterns, and the view projections. It covers every envelope field, which operations each type supports, and which rules evaluate today. For the concepts behind it, read [Information Blocks](Information-Blocks) first.
 
-Names below are the REST and MCP spelling (snake_case). GraphQL serves the same fields in camelCase (`block_type` → `blockType`, `fact_set` → `factSet`). The live OpenAPI spec at [robosystems.ai/docs/api](https://robosystems.ai/docs/api) is the source of truth for exact types.
+Names below are the REST and MCP spelling (snake_case). GraphQL serves the same fields in camelCase (`block_type` → `blockType`, `fact_set` → `factSet`). The live reference at [robosystems.ai/docs/extensions](https://robosystems.ai/docs/extensions) is the source of truth for exact types.
 
 ## Table of Contents
 
@@ -84,7 +84,7 @@ Names below are the REST and MCP spelling (snake_case). GraphQL serves the same 
 | `schedule` | Schedule creation; one set spanning the schedule's window |
 | `disclosure` | Narrative facts bound to a disclosure note with `bind-text-block` |
 | `metric` | `compute-metrics` and `assert-metrics`, one set per metric structure and period end |
-| `custom` | A forecast scenario's own authored assertions |
+| `custom` | A forecast scenario's own authored assertions, and a reconciliation's comparison for each period end |
 
 `report_id` points at the owning Report when the set belongs to a package. `scenario_id` is null for actuals and holds a forecast block's id for that scenario's sets.
 
@@ -99,6 +99,7 @@ Names below are the REST and MCP spelling (snake_case). GraphQL serves the same 
 | `document` | `document_id`, `section_id`, `content_hash`, `asserted_by` | Text bound from a platform document |
 | `forecast` | `scenario_structure_id`, `base_period`, `month_index`, `drivers` | Computed by a forecast scenario |
 | `filed` | `source`, `accession`, `filing_date`, `filer_cik`, `form` | Taken from a regulatory filing |
+| `observed` | `source`, `method`, `as_of`, `observed_at`, `connection_id`, `basis` | Balances read from a source outside the ledger for a reconciliation: the synced accounting system, the tenant's schedules, or a recorded statement. `observed_at` says when, since a later reading of the same date can differ. |
 
 ## Information Model Vocabulary
 
@@ -128,10 +129,11 @@ One registry maps each `block_type` to its construction mode, default arrangemen
 | `comprehensive_income` | Statement of Comprehensive Income | Reporting | compositional | `statement_renderer` | `roll_up` / `whole_part` | 501 | same |
 | `regulatory_disclosure` | Disclosure | Reporting | compositional | `statement_renderer` | `roll_up` | 501 | Structure via `create-taxonomy-block`; facts via `create-report` (text blocks via `bind-text-block`) |
 | `metric` | Metric | Reporting | derivative | `metric` | `arithmetic` | 501 | Structure via `create-taxonomy-block`; facts via `compute-metrics` or `assert-metrics` |
+| `reconciliation` | Reconciliation | Close | derivative | `reconciliation` | `adjustment` | 501 | `refresh-reconciliations` (or `record-statement-balance` for a statement); policy via `set-reconciliation-policy` |
 
 A 501 carries a message naming the right path. An unknown `block_type` is a 422.
 
-The statement Structures are seeded from the taxonomy library and cannot be deleted per tenant; to remove their facts, delete the originating Report. On the library graph, only the statement types are listed; schedules, rollforwards, forecasts, disclosures, and metrics exist only on tenant graphs.
+The statement Structures are seeded from the taxonomy library and cannot be deleted per tenant; to remove their facts, delete the originating Report. On the library graph, only the statement types are listed; schedules, rollforwards, forecasts, disclosures, metrics, and reconciliations exist only on tenant graphs.
 
 ## Per-Type Mechanics
 
@@ -145,7 +147,7 @@ A closing-entry generator: one fact per element per month across a window, and a
 | --- | --- | --- |
 | `name` | yes | Schedule name |
 | `element_ids` | yes | Chart-of-accounts element ids the schedule touches, usually the debit and credit ids of the template |
-| `period_start`, `period_end` | yes | The window; one period per month |
+| `period_start`, `period_end` | yes | The window; one period per month, at most 600 months |
 | `monthly_amount` | yes | Amount per month, **integer cents**. Ignored when `periodic_amounts` is set. |
 | `entry_template` | yes | See below |
 | `schedule_metadata` | no | See below |
@@ -160,11 +162,12 @@ A closing-entry generator: one fact per element per month across a window, and a
 | Field | Meaning |
 | --- | --- |
 | `method` | `straight_line` (default) spreads `monthly_amount` evenly, the last period absorbing rounding. `custom` uses `periodic_amounts`. Any other value is a label only. |
-| `original_amount` | Cost basis, integer cents. When set, the platform adds a `SumEquals` rule proving the periodic amounts total this basis. |
-| `residual_value` | Salvage value, integer cents |
+| `original_amount` | Cost basis, integer cents. When set, the platform adds a `SumEquals` rule proving the periodic amounts total this basis less `residual_value`. |
+| `residual_value` | Salvage value, integer cents. The schedule expenses `original_amount` less this, so net book value ends at it. Requires `original_amount`, and must be less than it. |
 | `useful_life_months` | Useful life |
 | `asset_element_id` | Balance-sheet asset for a net-book-value cross-reference |
-| `periodic_amounts` | Explicit per-month amounts in integer cents, for uneven curves (effective-interest amortization, day-count accrual, variable lease payments). Length must equal the number of months in the window, every entry must be non-negative, and the sum must equal `original_amount` exactly. The resulting FactSet's provenance is `asserted`. |
+| `booked_on` | The date the cost went on the books, when that is before the first period: a policy paid in December that starts amortizing in January. From this date to the first period the schedule carries its full cost, so the schedule reconciliation does not report that balance as unscheduled. Omit it when the cost is booked in the first period. |
+| `periodic_amounts` | Explicit per-month amounts in integer cents, for uneven curves (effective-interest amortization, day-count accrual, variable lease payments). Length must equal the number of months in the window, every entry must be non-negative, and the sum must equal `original_amount` less `residual_value` exactly. The resulting FactSet's provenance is `asserted`. |
 
 `ScheduleMechanics` on the envelope: `kind: "closing_entry_generator"`, `entry_template`, `schedule_metadata`, and `periods_with_entries` (months that already have a closing entry, computed at read time).
 
@@ -202,6 +205,25 @@ A standing per-period series: ratios, covenant tests, KPIs. The structure (eleme
 
 `MetricMechanics` (`kind: "metric"`, `source_block_ids`, `derivation_type`, `expression`, `unit`) is declared for a block-level derivation expression that is not evaluated yet; the computation runs through the `Derive` rules. See [Forecasting and Metrics](Forecasting-and-Metrics).
 
+### Reconciliation
+
+Ties the ledger to a balance outside it. Each period end carries one comparison: what the ledger holds, what the independent source says, and what is left unexplained. The close maintains these blocks; you do not author them, so create, update, and delete all return 501. `refresh-reconciliations` creates the blocks a ledger needs and records each period's comparison, `record-statement-balance` records a statement's ending balance for an account, and `set-reconciliation-policy` changes how much the close cares.
+
+`ReconciliationMechanics`:
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | `"reconciliation"` |
+| `scope` | `ledger` (the whole ledger against one source) or `account` (one account against an independent balance) |
+| `method` | Where the independent side comes from: `source_ledger` (the synced accounting system's own trial balance), `schedule_register` (what an account's schedules say it carries), or `statement` (a recorded statement balance) |
+| `element_id` | The account reconciled; null for a ledger-scope block |
+| `required_for_close` | Whether the period's close waits on it (default true) |
+| `materiality` | A difference up to this amount still counts as reconciled; zero means the sides agree to the cent |
+| `review_required` | Whether the close also waits for a sign-off |
+| `separate_reviewer` | Whether the sign-off must come from someone other than the person who ran the comparison |
+
+Each period's comparison is its own FactSet (`factset_type: "custom"`, provenance `observed`). A ledger-scope block presents `rs-rec:UnreconciledDifference`, `rs-rec:AccountsCompared` and `rs-rec:AccountsDifferent`; an account-scope block presents `rs-rec:LedgerBalance`, `rs-rec:IndependentBalance` and `rs-rec:UnreconciledDifference`. One `EqualTo` rule, `$UnreconciledDifference = 0` with the materiality as its tolerance, decides whether the block reconciles for a period. The live read returns the whole series, one rendering column per period end, and ignores `scenarioId`. How reconciliations hold the close, sign-off, and staleness are covered in [Period Close § Reconciliations](Period-Close#reconciliations).
+
 ## Rule Patterns
 
 A rule has either a `rule_pattern` (arithmetic over fact values) or a `rule_check_kind` (a structural check over the model), never both.
@@ -231,7 +253,7 @@ A rule whose variables have no bound fact reports `skipped` rather than failing.
 
 | View | Source | Status |
 | --- | --- | --- |
-| Rendering | `view.rendering` | Server-computed for the statement family, disclosures, metrics, and forecast blocks. Null for schedules and rollforwards, whose facts a client groups by period. |
+| Rendering | `view.rendering` | Server-computed for the statement family, disclosures, metrics, forecast blocks, and reconciliations (one column per period end). Null for schedules and rollforwards, whose facts a client groups by period. |
 | Chart | `view.chart` | Server-computed for metric blocks: panels grouped by format family, each with series keyed by element id. Values join the rendering rows by element id. |
 | Facts | `facts` | Client-side projection of the envelope |
 | Elements | `elements` (with `facts`) | Client-side projection of the envelope |
@@ -254,9 +276,9 @@ MCP: `get-information-block` (`id`, `scenario_id`, `series`, `series_history`, `
 ## Gotchas
 
 - **Cents in, dollars out.** Request amounts (`monthly_amount`, `original_amount`, `residual_value`, `periodic_amounts`) are integer cents. Fact `value`s on the envelope are in the unit, so a `monthly_amount` of `83333` reads back as `833.33`.
-- **Statements are rendered, not created.** `create-information-block` with a statement, disclosure, or metric type returns 501. Author a `schedule`, `rollforward`, or `forecast`; produce statements with `create-report`.
+- **Statements are rendered, not created.** `create-information-block` with a statement, disclosure, metric, or reconciliation type returns 501. Author a `schedule`, `rollforward`, or `forecast`; produce statements with `create-report`.
 - **Element ids, not qnames.** Schedule templates take chart-of-accounts element ids. A qname such as `us-gaap:Depreciation` does not resolve there.
-- **`periodic_amounts` is strict.** One entry per month in the window, none negative, summing exactly to `original_amount`; anything else is rejected at create.
+- **`periodic_amounts` is strict.** One entry per month in the window, none negative, summing exactly to `original_amount` less `residual_value`; anything else is rejected at create.
 - **The graph is the URL.** `informationBlock` and `informationBlocks` take no `graphId` argument.
 - **`fact_set: null` and `facts: []` are normal** for a statement Structure no report or close has instantiated yet.
 - **`verification_summary` is null until the rules run.** Call `evaluate-rules`, or close the period.
@@ -273,7 +295,7 @@ MCP: `get-information-block` (`id`, `scenario_id`, `series`, `series_history`, `
 - **[Taxonomy and Frameworks](Taxonomy-and-Frameworks)** - Taxonomy blocks, which author disclosure and metric structures
 
 **Codebase Documentation:**
-- **[API reference](https://robosystems.ai/docs/api)** - Full request and response schemas
+- **[API reference](https://robosystems.ai/docs/extensions)** - Full request and response schemas
 - **[API Models](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/api/README.md)** - The Pydantic models behind the envelope
 
 ## Support

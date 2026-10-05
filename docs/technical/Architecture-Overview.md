@@ -1,22 +1,23 @@
 # Architecture Overview
 
-RoboSystems is an AI-native financial intelligence platform for accounting, financial reporting, and investment management. This page covers the architecture that carries it: the knowledge graph at the center, the operational and analytical planes either side of it, and the AWS infrastructure a fork deploys into its own account.
+How RoboSystems is built: the knowledge graph at the center, the operational and analytical planes around it, and the AWS infrastructure a fork deploys. RoboSystems is an AI-native financial intelligence platform for accounting, financial reporting, and investment management, and this page maps the services, code, storage, and infrastructure that carry it.
 
 ## Documentation Map
 
-The main areas of this wiki, with a representative page or two from each (the sidebar lists every page):
+The wiki's sections, as the sidebar groups them, with a representative page or two from each:
 
-- **Getting Started & Platform** — orientation against the hosted platform ([Quick Start](Quick-Start), [Core Concepts](Core-Concepts), [Security & Compliance](Security-and-Compliance)).
-- **Operations Layer** — the core platform API and graph management ([Graph Operations](Graph-Operations), [Querying the Analytical Graph](Querying-the-Analytical-Graph), [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules), [AI Operators & MCP](AI-Operators-and-MCP)).
-- **Extensions Layer** — RoboLedger and RoboInvestor ([Extensions Surface Overview](Extensions-Surface-Overview), [GraphQL Reads](GraphQL-Reads), [RoboLedger Operations](RoboLedger-Operations)).
-- **Content & Contribution Fabric** — the semantic content model ([Information Blocks](Information-Blocks), [Taxonomy & Frameworks](Taxonomy-and-Frameworks), [Event-Driven Ledger](Event-Driven-Ledger), [Reporting & Rendering](Reporting-and-Rendering)).
-- **Documents & Search** — unstructured content and retrieval ([Search & AI Retrieval](Search-and-AI-Retrieval), [Document Management](Document-Management)).
-- **Self-Hosting & Development** — running the platform yourself ([Local Development](Local-Development), [Windows Setup (WSL2)](Windows-Setup-with-WSL2), [Bootstrap Guide](Bootstrap-Guide)).
+- **Start Here** — orientation against the hosted platform ([Quick Start](Quick-Start), [Core Concepts](Core-Concepts)).
+- **Build on the API** — the contracts and the core graph surface ([Operations Contract](Operations-Contract), [Graph Operations](Graph-Operations), [Querying the Analytical Graph](Querying-the-Analytical-Graph)).
+- **Connect AI, Documents & Search** — the MCP server, the operators, and retrieval ([AI Operators & MCP](AI-Operators-and-MCP), [Search & AI Retrieval](Search-and-AI-Retrieval)).
+- **Shared Repositories (SEC)** — the public datasets ([Shared Repositories](Shared-Repositories), [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)).
+- **RoboLedger & RoboInvestor** — the extensions ([Extensions Surface Overview](Extensions-Surface-Overview), [GraphQL Reads](GraphQL-Reads), [RoboLedger Operations](RoboLedger-Operations)).
+- **Concepts in Depth** — the financial-content model ([Information Blocks](Information-Blocks), [Event-Driven Ledger](Event-Driven-Ledger), [Reporting & Rendering](Reporting-and-Rendering)).
+- **Run It Yourself** — running and deploying your own stack ([Local Development](Local-Development), [Bootstrap Guide](Bootstrap-Guide), [Security & Compliance](Security-and-Compliance)).
 - **Demos** — hands-on walkthroughs on a local stack ([RoboLedger Demos](RoboLedger-Demo-Walkthrough), [SEC XBRL Pipeline](SEC-XBRL-Pipeline), [Custom Graph Schema](Custom-Graph-Schema)).
 
 ### Three Retrieval Planes
 
-AI Operators — and any MCP client — read three distinct data planes, each with a query tool and a schema tool:
+AI Operators — and any MCP client — read three distinct data planes, each with a query tool and a companion: a schema tool on the two structured planes (`get-graphql-schema`, `get-graph-schema`), and a drill-down fetch (`get-document-section`) on the unstructured one:
 
 | Plane | Store | Query tool | Documented in |
 | --- | --- | --- | --- |
@@ -96,7 +97,7 @@ RoboLedger and RoboInvestor are product extensions served under a unified `/exte
 
 - **GraphQL Reads**: `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL endpoint. The schema is composed dynamically: `InformationBlockQuery`, `TaxonomyBlockQuery`, and `LibraryQuery` are always-on regardless of product flags — they are cross-domain, and their visibility follows the session `search_path` derived from the URL's `graph_id`. `LedgerQuery` and `InvestorQuery` are gated by `ROBOLEDGER_ENABLED` / `ROBOINVESTOR_ENABLED`. A ledger-only deployment exposes ledger fields plus the always-on roots but not investor fields — introspection never reveals disabled domains. Types auto-derive from Pydantic response models; adding a field on the backend exposes it on the wire with zero GraphQL-layer boilerplate.
 - **Named Command Operations**: `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{op_name}` — ledger commands (`close-period`, `share-report`, `create-mapping-association`, `create-information-block`, `evaluate-rules`, etc.) and roboinvestor commands. Writes are explicit command operations rather than resource CRUD, matching the multi-step domain operations they actually perform. Every response is wrapped in an `OperationEnvelope` with a ULID `operationId` and supports `Idempotency-Key` headers for safe retries. Long-running commands return `status: "pending"` with HTTP 202 and stream progress through `/v1/operations/{operationId}/stream`.
-- **Analytical View Operations**: `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed analytical operations that query LadybugDB rather than the extensions OLTP database. Share the same envelope contract as command operations but are read-only and routed to the materialized graph. `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube schema) and `financial-statement-analysis` read the graph; the pair `disclosures` (the map of a report's sections) and `information-block` (one section read whole) run xbrlkit over the report held whole rather than the graph. This is the seam for any analytical operation that needs columnar/graph query power beyond what a Postgres read can provide. Gated independently from the OLTP domains so deployments without the corresponding roboledger/roboinvestor tenants can still use them.
+- **Analytical View Operations**: `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed analytical operations that query LadybugDB rather than the extensions OLTP database. Share the same envelope contract as command operations but are read-only and routed to the materialized graph. `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube schema) and `financial-statement-analysis` read the graph; the pair `disclosures` (the map of a report's sections) and `information-block` (one section read whole) run xbrlkit over the report held whole rather than the graph; and `describe-filing`, `search-text` and `read-text` read one SEC filing's text whole from its public folder (shared repositories only). This is the seam for any analytical operation that needs columnar/graph query power beyond what a Postgres read can provide. Gated independently from the OLTP domains so deployments without the corresponding roboledger/roboinvestor tenants can still use them.
 
 Feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSIONS_GRAPHQL_ENABLED`, `FACT_GRID_ENABLED`) gate each surface at schema-construction time, not request time — disabled domains are simply absent from the schema rather than throwing runtime errors.
 
@@ -166,7 +167,7 @@ Unified operator architecture for autonomous financial operations:
 - **Three-Layer Design**: Operator (domain logic), OperatorContext (services), Adapters (execution lifecycle)
 - **Stateless Operators**: Declare capabilities via `OperatorSpec`, receive services via `OperatorContext` — no graph_id or user in constructor
 - **Automatic Credit Tracking**: `TrackedAIClient` wraps every Bedrock call with token counting and credit consumption
-- **Dual Execution**: API adapter (sync/SSE) and worker adapter (Valkey queue + SSE progress)
+- **Worker Execution**: every run executes on the background worker (Valkey queue + SSE progress); the request answers `202` with the operation's links, or with `?mode=sync` waits up to 50 seconds and answers `200` with the result
 - **Protocol-Based Services**: `ToolAccess`, `ProgressReporter`, `CreditConsumer` — swap implementations per context
 - **MCP Tool Integration**: Operators access graph queries, taxonomy operations, and document search via MCP tools
 
@@ -197,7 +198,7 @@ The surface is gated by `SEMANTIC_MEMORY_ENABLED` (the master switch over REST, 
 
 **Location**: `/robosystems/worker/`
 
-Always-on ECS service for long-running operator tasks and background operations:
+Always-on ECS service that runs every operator task, period close, and other background operations:
 
 - **Valkey Queue**: BRPOP consumer loop on DB 6 with graceful shutdown
 - **Task Registry**: `@register_task` decorator for handler discovery
@@ -221,23 +222,36 @@ Dagster is the orchestration system for scheduled tasks, event-driven triggers, 
 dagster/
 ├── definitions.py         # Collector: platform + adapter pipelines
 ├── reporting.py           # AssetMaterialization reporting from outside Dagster jobs
-├── resources/             # Shared Dagster resources (DB, S3, Graph)
+├── resources/             # Shared Dagster resources (database, graph, storage)
 ├── assets/
 │   ├── graphs.py          # User graph operation assets
-│   └── shared_repositories/  # S3 publish + replica refresh (all shared repos)
-├── jobs/                  # Platform jobs (billing, infrastructure, graph lifecycle,
-│                          # migration, backups, extensions, shared repositories)
+│   └── shared_repositories/  # All shared repos:
+│       ├── publish.py         # S3 (replica boot) + R2 (subscriber download) publish
+│       ├── replicas.py        # Rolling replica-fleet refresh after a publish
+│       ├── master.py          # Wake / sleep the shared master around a run
+│       ├── master_parking.py  # The parking logic itself (boto3 + registry)
+│       └── huggingface.py     # Copy the R2 snapshot to the public dataset
+├── jobs/                  # Platform jobs (billing, invoice billing, infrastructure,
+│                          # graph lifecycle, migration, backups, extensions,
+│                          # documents, notifications, storage reclaim, audit
+│                          # retention, shared repositories)
 └── sensors/
     ├── graph_lifecycle.py               # Expired subscriptions → suspend/deprovision
     ├── invoice_billing.py               # Invoice-billed subscription renewals
     ├── materialization.py               # Stale graphs → rematerialization jobs
+    ├── run_failure.py                   # Failed run → CloudWatch RunFailure metric
     ├── scheduled_obligation_promoter.py # Period-boundary obligation promotion
     ├── usage_monitor.py                 # Storage usage against tier limits
     └── worker_reaper.py                 # Reap stale worker inflight tasks
 
-adapters/sec/pipeline/     # SEC pipeline (assets, jobs, sensors, schedule)
-adapters/custom_*/pipeline/ # Self-hosted-fork adapter namespace
+adapters/sec/pipeline/         # SEC pipeline (assets, jobs, sensors, schedules)
+adapters/quickbooks/pipeline/  # QuickBooks extract → dbt transform → load
+adapters/mercury/pipeline/     # Mercury bank feed (off unless CONNECTION_MERCURY_ENABLED)
+adapters/plaid/pipeline/       # Plaid bank feed (off unless CONNECTION_PLAID_ENABLED)
+adapters/custom_*/pipeline/    # Self-hosted-fork adapter namespace
 ```
+
+Each adapter's pipeline is collected only when its flag is on (`SEC_PIPELINE_ENABLED`, and the `CONNECTION_*_ENABLED` flags for the connection adapters).
 
 **What Dagster Handles:**
 
@@ -246,17 +260,17 @@ adapters/custom_*/pipeline/ # Self-hosted-fork adapter namespace
 | **Billing** | Credit allocation, storage billing, usage collection |
 | **Infrastructure** | Auth cleanup, health checks, instance monitoring |
 | **Graph Operations** | Database creation, backups, materialization |
-| **Data Pipelines** | Adapter pipelines (SEC XBRL: download, process, stage, materialize) |
+| **Data Pipelines** | Adapter pipelines (SEC XBRL: download, process, stage, materialize, publish; QuickBooks sync; bank feeds when enabled) |
 | **Event Triggers** | Graph lifecycle transitions, stale-graph rematerialization, repository sync, adapter sensors |
 
 **Key Features:**
 - **Pipeline Orchestration**: Scheduled and event-driven data pipelines
 - **Asset Dependencies**: Declarative data lineage with automatic orchestration
-- **Year Partitioning**: Process historical data by year
-- **Observability**: Built-in UI at `localhost:8002` for monitoring
+- **Quarter Partitioning**: The SEC pipeline processes filings by calendar quarter
+- **Observability**: Dagster's web UI for runs, step logs, and asset lineage
 - **Scheduling**: Cron-based schedules for billing, cleanup, and pipelines
 - **Sensors**: Event-driven job triggers (e.g., expired subscription → suspend, then deprovision; stale graph → rematerialize)
-- **Local Development**: `just sec-load NVDA 2025` triggers pipeline via Docker CLI
+- **Local Development**: on a local stack, `just sec-load` drives the SEC pipeline's Dagster jobs inside the local containers (see [Local Development](Local-Development#sec-filings))
 
 **Infrastructure (AWS):**
 - **ECS Fargate**: Daemon, Webserver, and Run Workers - all serverless
@@ -315,9 +329,9 @@ The client factory layer provides intelligent routing between application code a
 
 - **Engine-Agnostic**: Talks HTTP to the Graph API, never to the engine directly
 - **Automatic Discovery**: Finds database instances via DynamoDB registry
-- **Redis Caching**: Caches instance locations to reduce lookups
+- **Valkey Caching**: Caches instance locations to reduce lookups
 - **Circuit Breakers**: Prevents cascading failures with automatic recovery
-- **Connection Reuse**: HTTP/2 connection pooling for efficiency
+- **Connection Reuse**: HTTP/1.1 keep-alive connection pooling (httpx)
 - **Retry Logic**: Exponential backoff with jitter for transient errors
 
 **See**: [Client Factory Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/client/README.md) in codebase
@@ -446,7 +460,7 @@ Business workflow orchestration and service layer. Two categories of code live h
 - **Search Service**: OpenSearch-backed full-text and semantic document search
 - **Memory Service**: Transport-independent semantic memory kernel over the per-graph LanceDB store
 - **Materialization**: OLTP → OLAP rebuild of a graph from the extensions database
-- **Connection Service**: Provider-agnostic connection management (QuickBooks, SEC) with encrypted credential storage
+- **Connection Service**: Provider-agnostic connection management with encrypted credential storage. Providers register behind their flags: `quickbooks` and `external` (an outside integration claiming a source namespace) on by default; `mercury` and `plaid` bank feeds off by default (`CONNECTION_MERCURY_ENABLED`, `CONNECTION_PLAID_ENABLED`)
 
 **Extension domain kernels** (`operations/roboledger/`, `operations/roboinvestor/`, `operations/information_block/`):
 
@@ -455,17 +469,25 @@ Each product extension keeps its business logic in a CQRS-style subtree with rea
 ```
 operations/roboledger/
 ├── reads/       # Pure functions: session + args → Pydantic response
-│   └── accounts.py, entity.py, fiscal_calendar.py, reports.py, ...
+│   └── accounts.py, closing_book.py, entity.py, fiscal_calendar.py,
+│       journal_entries.py, reconciliations.py, reports.py, trial_balance.py, ...
 ├── commands/    # Pure functions: session + request → Pydantic response
-│   └── fiscal_calendar.py, reports.py, schedules.py, taxonomies.py, ...
-├── fiscal_calendar/  # Kept-in-place domain services (PeriodCloseService, ...)
-├── reports/          # fact_grid, guard_rails
-├── schedules/        # ScheduleService
-└── views/            # Graph-backed analytical queries (fact-grid)
+│   └── fiscal_calendar.py, journal_entries.py, reconciliations.py,
+│       reconciling_items.py, reports.py, schedules.py, taxonomies.py, ...
+├── fiscal_calendar/   # Domain services: fiscal calendar, period close, QB write-back
+├── reconciliations/   # Ledger vs. independent balance: engine, resolvers,
+│                      # balance observations, reconciliation blocks
+├── reports/           # fact_grid, calc_dag, guard_rails, statement sets
+├── schedules/         # ScheduleService
+├── tasks/             # Worker task for period close
+├── views/             # Analytical views: fact grid and statement analysis
+│                      # (graph), information blocks (xbrlkit), filing text
+├── entry_status.py    # Which entry statuses count as in the books
+└── fact_set.py        # The one construction path for FactSet rows
 
 operations/roboinvestor/
-├── reads/       # portfolios, securities, positions, holdings
-└── commands/    # portfolios, securities, positions
+├── reads/       # portfolios, portfolio_block, securities, positions, holdings
+└── commands/    # portfolio_block (portfolios and positions as one envelope), securities
 
 operations/information_block/  # Cross-domain; not nested under roboledger
 ├── types.py        # BlockTypeRegistryEntry — the code-owned per-block-type descriptor
@@ -477,7 +499,7 @@ operations/information_block/  # Cross-domain; not nested under roboledger
 │
 │                   # ── Block-type handlers ──
 ├── statement.py    # balance_sheet / income_statement / cash_flow_statement /
-│                   # equity_statement — four types, one envelope builder
+│                   # equity_statement / comprehensive_income — one envelope builder
 ├── disclosure.py   # regulatory_disclosure notes (compositional mode)
 ├── text_block.py   # Narrative text-block disclosures bound from a Document
 ├── schedule.py     # Schedule handler (declarative construction mode)
@@ -485,7 +507,7 @@ operations/information_block/  # Cross-domain; not nested under roboledger
 ├── metric.py       # Metric handler (derivative mode) — standing metric time series
 ├── metrics.py      # compute-metrics / assert-metrics write paths
 ├── chart.py        # Chart View projection over a rendering
-├── classify.py     # Association classifier — reserved import path, not implemented
+├── reconciliation.py # Reconciliation envelope — one column per period's comparison
 │
 │                   # ── FP&A forecasting arm ──
 ├── forecast.py               # Authored scenario container: levers, line assertions, growth
@@ -499,7 +521,7 @@ The **forecasting arm** (`forecast*.py`) is the FP&A operating-plan engine: a sc
 **Single source of truth.** `reads/*.py` and `commands/*.py` are the only place domain logic lives. Three different transports call into them:
 
 - **GraphQL resolvers** (`graphql/resolvers/*`) delegate reads to `operations/{domain}/reads/*`
-- **Named command operation routers** (`routers/extensions/{domain}/operations.py`) delegate writes to `operations/{domain}/commands/*`
+- **Named command operation routers** (`routers/extensions/roboledger/operations/`, a package split by area, and `routers/extensions/roboinvestor/operations.py`) delegate writes to `operations/{domain}/commands/*`
 - **MCP tools** (`middleware/mcp/tools/*`) call the same ops-layer modules directly
 
 This invariant is load-bearing: if a caller hits the GraphQL endpoint, a named operation, or an MCP tool, the same function runs and the same business rules are enforced. Adding logic anywhere else — routers, resolvers, MCP handlers — is a mistake.
@@ -524,32 +546,48 @@ adapters/
 ├── base.py                 # SharedRepositoryManifest dataclass
 ├── sec/                    # SEC EDGAR adapter (active, self-contained)
 │   ├── manifest.py         # SEC_MANIFEST (plans, rates, endpoints, credits)
-│   ├── client/             # EDGAR API, EFTS, Arelle, Downloader
+│   ├── enrichment.py       # Canonical-concept matching for elements and structures
+│   ├── client/             # EDGAR (xbrlkit's EdgarClient), downloader, 8-K
+│   │                       # discovery over EFTS, xbrlkit's Arelle loader
+│   ├── arelle/bundles/     # Taxonomy cache bundle extracted at image build
 │   ├── processors/         # XBRL processing, ingestion, metadata
-│   │   ├── metadata.py     # SECMetadataLoader
-│   │   ├── xbrl_graph.py   # XBRLGraphProcessor
+│   │   ├── xbrl_graph.py   # XBRLGraphProcessor — one filing to graph parquet on xbrlkit
 │   │   ├── processing.py   # Single filing processing
+│   │   ├── metadata.py     # SECMetadataLoader
+│   │   ├── classify.py     # Association classification (RollUp, RollForward, ...)
+│   │   ├── textblock.py    # Text-block externalization to the CDN
+│   │   ├── current_reports.py # Which 8-Ks to keep, and which of their files
 │   │   ├── consolidation.py # Parquet consolidation
-│   │   └── ingestion/      # DuckDB/LadybugDB ingestion
+│   │   └── ingestion/      # DuckDB staging + LadybugDB materialization
+│   ├── knowledge/          # Statement classification + knowledge artifacts
+│   ├── taxonomy/           # Canonical financial concepts for enrichment
+│   ├── mcp/                # Element and report resolvers for the SEC views
 │   └── pipeline/           # Dagster orchestration (self-contained)
 │       ├── __init__.py     # get_dagster_components() discovery
-│       ├── configs.py      # Run configurations
+│       ├── configs.py      # Run configurations + quarter partitions
 │       ├── download.py     # sec_raw_filings asset
 │       ├── process.py      # sec_processed_filings asset
 │       ├── stage.py        # DuckDB staging assets
 │       ├── materialize.py  # LadybugDB materialization assets
 │       ├── artifact.py     # Precomputed Parquet artifacts from DuckDB staging
+│       ├── catalog.py      # Per-filer catalog on the public CDN
+│       ├── documents.py    # 8-K earnings releases + pre-iXBRL primary documents
+│       ├── text_index.py   # OpenSearch text indexing (narrative sections, iXBRL disclosures)
 │       ├── s3_publish.py   # Publish the .lbug repository database to S3
 │       ├── duckdb_s3_publish.py # Publish the .duckdb staging database to S3
 │       ├── r2_publish.py   # Publish the .lbug database to Cloudflare R2
-│       ├── text_index.py   # OpenSearch text indexing (textblocks, narratives, iXBRL)
-│       ├── entity_sync/    # Per-CIK sync of filings into a user's own graph
+│       ├── hf_publish.py   # Copy the R2 snapshot to Hugging Face (manual only)
+│       ├── dataset_card.py # Snapshot statistics + the dataset README
 │       ├── jobs.py         # Job definitions
-│       └── sensors.py      # Sensors + schedule
+│       └── sensors.py      # Sensors + schedules
 ├── quickbooks/             # QuickBooks adapter
 │   ├── client/             # QB OAuth client
-│   ├── dbt/                # dbt transforms (JSON → graph-shaped Parquet)
-│   └── pipeline/           # Dagster extract/transform/load assets
+│   ├── dbt/                # dbt-duckdb transforms over the extracted Parquet
+│   ├── pipeline/           # Dagster extract → transform → load (to extensions PostgreSQL)
+│   └── reports.py          # Parsers for QB reports read outside the sync
+├── bank_feed/              # What every bank feed shares: capture into the inbox
+├── mercury/                # Mercury bank feed (client + pipeline; flag-gated, off by default)
+└── plaid/                  # Plaid bank feed (client + pipeline; flag-gated, off by default)
 ```
 
 **Adapter Pattern:**
@@ -563,11 +601,11 @@ Each adapter is self-contained with:
 The manifest registry (`config/shared_repositories.py`) lazy-loads all manifests and provides the query API used by billing, middleware, and operations. Adding a new shared repository requires only a manifest file and one line in the registry. `dagster/definitions.py` collects adapter pipelines via `get_dagster_components()`.
 
 **SEC Adapter Details:**
-- **SECClient**: SEC EDGAR API with rate limiting and retry logic
-- **XBRLGraphProcessor**: Transforms XBRL to DataFrames using Arelle
+- **EDGAR client**: xbrlkit's `EdgarClient`, bound to the platform's User-Agent, rate limits, and retry policy
+- **XBRLGraphProcessor**: Loads, parses, and projects one filing on xbrlkit (Arelle underneath), then adds text-block externalization, semantic enrichment, and association classification
 - **XBRLDuckDBGraphProcessor**: Orchestrates S3 → DuckDB → LadybugDB flow
 - Creates nodes: Entity, Report, Fact, Element, Period, Unit, Taxonomy
-- Outputs year-partitioned Parquet files to S3
+- Outputs quarter-partitioned Parquet files to S3
 
 **Extending with custom sources:**
 
@@ -579,6 +617,7 @@ For **self-hosted forks**, the adapter directory remains a merge boundary — in
 adapters/
 ├── sec/                 # ← Upstream (don't modify)
 ├── quickbooks/          # ← Upstream (don't modify)
+├── bank_feed/, mercury/, plaid/  # ← Upstream (don't modify)
 └── custom_*/            # ← Self-hosted-fork namespace (upstream never touches)
     └── custom_erp/
 ```
@@ -694,7 +733,7 @@ The same directory tree also hosts the dormant IVF-PQ index builder described un
 - **BM25 Keyword Search**: Standard analyzer for natural language queries over document text
 - **Semantic Search**: `knn_vector` field (384-dim HNSW, cosine similarity) for embedding-based retrieval
 - **Multi-Tenant Isolation**: Every query filters by `graph_id` at the client level
-- **Source Types**: SEC content (`xbrl_textblock`, `narrative_section`, `ixbrl_disclosure`), user-uploaded documents (`uploaded_doc`), and synced connection documents (`connection_doc`). Semantic memory is *not* here — it lives in LanceDB on the graph instance.
+- **Source Types**: SEC content (`narrative_section` for a filing's Item sections, `ixbrl_disclosure` for its iXBRL text-block disclosures) and user documents (`uploaded_doc`). Semantic memory is *not* here — it lives in LanceDB on the graph instance.
 - **Externalized Content**: Full text stored in S3/CDN; OpenSearch holds metadata, snippets, and embeddings
 - **Feature-Flag Gated**: `SEMANTIC_SEARCH_ENABLED` (on by default) gates the search service entirely — there is no separate text or embedding toggle, and embedding generation during indexing is unconditional
 
@@ -787,12 +826,12 @@ s3://robosystems-user-{env}/
 - **Lambda**: Infrastructure management (instance monitoring, secret rotation, volume lifecycle)
 
 **Database & Cache**:
-- **RDS PostgreSQL**: Primary database (auto-scaling storage, optional Aurora upgrade)
+- **RDS PostgreSQL**: Primary database (auto-scaling storage, optional Multi-AZ)
 - **ElastiCache**: Valkey/Redis cache
 - **DynamoDB**: Service registries (on-demand pricing)
 
 **Search & Analytics**:
-- **OpenSearch Service**: Unstructured content search with keyword and semantic capabilities (single-node, VPC-private, feature-flag gated)
+- **OpenSearch Service**: Unstructured content search with keyword and semantic capabilities (single-node by default — the template's `InstanceCount` parameter adds data nodes for a Multi-AZ domain; VPC-private, feature-flag gated)
 
 **Storage**:
 - **S3**: Data lake and file storage
@@ -947,7 +986,7 @@ RoboSystems has multiple Next.js frontend applications that interface with the F
                     │                           │
          ┌──────────┴──────────┐    ┌──────────┴──────────┐
          │   Static Assets     │    │   Dynamic Content   │
-         │   (S3 Bucket)       │    │   (App Runner)      │
+         │   (S3 Bucket)       │    │ (App Runner / ECS)  │
          │   /_next/static/*   │    │   /* (default)      │
          │   /images/*         │    │   /api/*            │
          └─────────────────────┘    └─────────────────────┘
@@ -961,15 +1000,16 @@ RoboSystems has multiple Next.js frontend applications that interface with the F
 
 ### Infrastructure
 
-**AWS App Runner**:
-- Serverless container hosting with automatic scaling
+**AWS App Runner or Amazon ECS Express Mode**:
+- Serverless container hosting with automatic scaling, chosen per deployment by the `app_compute` input (`APP_COMPUTE` variables)
+- `apprunner` is the default; an AWS account that has never used App Runner, which is closed to new customers, deploys with `ecs-express` instead
 - No load balancer management required
 - Health checks via `/api/utilities/health`
 
 **CloudFront Distribution**:
 - Global edge caching for static assets
 - SSL/TLS termination with ACM certificates
-- Origin routing: S3 for static files, App Runner for dynamic content
+- Origin routing: S3 for static files, the app service for dynamic content
 - www-to-apex redirect via CloudFront Function
 
 **S3 Static Assets**:
@@ -993,9 +1033,9 @@ Frontend applications communicate with the RoboSystems API via:
 ### Deployment
 
 Frontends deploy via GitHub Actions:
-- **Trigger**: Deploy from `main` branch
+- **Trigger**: Manual workflow dispatch (`prod.yml` / `staging.yml`)
 - **Build**: Docker image → ECR
-- **Deploy**: CloudFormation → App Runner + CloudFront
+- **Deploy**: CloudFormation → App Runner or ECS Express Mode, plus CloudFront
 - **Auth**: GitHub OIDC (no stored AWS credentials)
 
 See individual app repositories for specific deployment workflows.
@@ -1007,10 +1047,13 @@ See individual app repositories for specific deployment workflows.
 **Purpose**: Public company financial data
 
 - XBRL filing downloads via Dagster pipeline (quarterly partitions)
-- Arelle-based XBRL parsing with fastembed enrichment
-- Nightly automated incremental pipeline (download → process → stage → materialize → publish → replica refresh)
+- XBRL parsing on xbrlkit (Arelle underneath) with fastembed enrichment
+- Nightly incremental chain on weekdays (download → process → wake the parked shared master → stage → materialize → publish → replica refresh); the master sleeps again once everything is published
+- Same-day pickups through the day that refresh the per-filer catalog only, without waking the master or touching the graph
+- 8-K earnings releases and their exhibits captured every half hour during EDGAR's business hours, kept with each filing's documents and read whole through the filing-text views
+- Schedules ship stopped; a deployment turns them on in the Dagster UI
 - Curated canonical-concept resolution mapping natural language to XBRL element names via the `resolve-element` MCP tool
-- OpenSearch text and semantic indexing of filing narratives, text blocks, and iXBRL disclosures
+- OpenSearch text and semantic indexing of filing narrative sections and iXBRL text-block disclosures
 - Rate-limited API access with backoff
 
 ### QuickBooks API
@@ -1018,20 +1061,19 @@ See individual app repositories for specific deployment workflows.
 **Purpose**: Accounting data synchronization
 
 - OAuth 2.0 authentication with token management
-- Full dbt transformation pipeline (JSON → graph-shaped Parquet)
-- Dagster extract/transform/load assets
+- Dagster pipeline: extract from the QuickBooks API to Parquet → dbt-duckdb transform → load into the extensions PostgreSQL database, which then materializes into the graph (Pattern C in the [Pipeline Guide](Pipeline-Guide))
 - Full rebuild and incremental sync modes
 
 ### AI Models (via AWS Bedrock)
 
 **Purpose**: AI-powered financial operations
 
-- AWS Bedrock (the Converse API) for model access: Claude Sonnet 5 by default, with Claude Opus 5.5 and OpenAI GPT-5.6 Luna configured as the other profiles
+- AWS Bedrock (the Converse API) for model access: Claude Sonnet 5.5 by default (the balanced profile), with Claude Opus 5.5 (quality) and OpenAI GPT-5.6 Luna (economy) as the other profiles; the `author` operator runs on the quality profile
 - Self-hosted stacks can point operators at any OpenAI-compatible server instead (see [Self-Hosted AI Models](Self-Hosted-AI-Models))
 - Unified operator system: stateless operators with automatic credit tracking per call
-- Two registered operators: `analyst` (`AnalystOperator`, answers a question from the graph's read-only tools) and `mapping` (`MappingOperator`, autonomous CoA→rs-gaap taxonomy mapping)
+- Three registered operators: `analyst` (`AnalystOperator`, answers a question from the graph's read-only tools), `author` (`AuthorOperator`, makes a requested change through writes that are reversible or wait on a person's step — metric and forecast blocks, counterparties, memories, draft reports, inbox classifications), and `mapping` (`MappingOperator`, autonomous CoA→rs-gaap taxonomy mapping)
 - MCP tools provide operators with graph queries, taxonomy operations, SEC structure discovery, and document search
-- Dual execution: API (sync/SSE) for interactive queries, background worker for long-running tasks
+- Every operator run executes on the background worker, with progress over SSE; `?mode=sync` waits up to 50 seconds for the answer
 
 ## Key Design Principles
 

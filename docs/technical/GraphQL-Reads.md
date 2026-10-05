@@ -1,6 +1,6 @@
 # GraphQL Reads
 
-This guide shows you how to run ad-hoc, strongly-typed reads against the operational (OLTP) extensions data of a graph using GraphQL. Every read goes through a single endpoint — `POST /extensions/{graph_id}/graphql` — that is scoped to one graph by its URL. It covers the endpoint and its auth model, how the schema is composed per deployment, worked `curl` queries against `fiscalCalendar` and `entity`, schema discovery through introspection, and the `get-graphql-schema` / `query-graphql` MCP tools that give an AI agent the same surface.
+GraphQL gives you ad-hoc, strongly-typed reads over a graph's operational (OLTP) extensions data: ledger, investor and taxonomy records as they stand now. Every read goes through a single endpoint — `POST /extensions/{graph_id}/graphql` — that is scoped to one graph by its URL. This page covers the endpoint and its auth model, how the schema is composed per deployment, worked `curl` queries against `fiscalCalendar` and `entity`, schema discovery through introspection, and the `get-graphql-schema` / `query-graphql` MCP tools that give an AI agent the same surface.
 
 **Quick Start:** With an API key and a `graph_id` in hand, `curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql"` with `-H "X-API-Key: $ROBOSYSTEMS_API_KEY"` and `-d '{"query": "{ entity { id name } }"}'` returns the parent entity for that graph.
 
@@ -76,7 +76,7 @@ POST /extensions/{graph_id}/graphql
 - The in-browser **GraphiQL** explorer (a GET on the same URL) is development-only and is not mounted on `api.robosystems.ai`. Introspection over POST works on the hosted API, with or without credentials — see [Discovering the Schema](#discovering-the-schema).
 - The endpoint is mounted only on deployments where `ROBOLEDGER_ENABLED` or `ROBOINVESTOR_ENABLED` is set, and a deployment can disable it entirely with `EXTENSIONS_GRAPHQL_ENABLED=false`. On robosystems.ai it is enabled.
 
-This page shows usage examples. Every query the schema serves is documented field by field at [robosystems.ai/docs/extensions/graphql](https://robosystems.ai/docs/extensions/graphql); the endpoint's own request and response contract is in the API reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api). How the surface is built is in the codebase ([graphql/README.md](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)).
+This page shows usage examples. Every query the schema serves is documented field by field at [robosystems.ai/docs/extensions/graphql](https://robosystems.ai/docs/extensions/graphql); the endpoint's own request and response contract is in the extensions API reference at [robosystems.ai/docs/extensions](https://robosystems.ai/docs/extensions). How the surface is built is in the codebase ([graphql/README.md](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)).
 
 ## Authentication
 
@@ -94,7 +94,7 @@ Rules and behaviors:
 - Create the key in the app under **Settings → API keys**; it is shown once, and can be scoped to all your graphs or to one graph. Send it in the header — never put it in the URL.
 - `Authorization: Bearer` (JWT) is a frontend concern only — don't use it for backend `curl` testing.
 - **Introspection works without credentials; data does not.** You can fetch the schema (an introspection query over POST) without an API key. A query for real data with no valid credentials returns HTTP 200 with a GraphQL error whose `extensions.code` is `UNAUTHENTICATED` — not a transport-level 401. Invalid or expired credentials *do* produce an HTTP 401.
-- Access is checked per graph before any resolver runs. A valid key that lacks access to the requested `graph_id` returns a `FORBIDDEN` error.
+- Access is checked per graph before any resolver runs. A valid key that lacks access to the requested `graph_id` is refused with HTTP 403 before the query executes, so there is no GraphQL error body to branch on.
 
 ## Schema-per-Flag Composition
 
@@ -159,7 +159,7 @@ A response looks like this:
 }
 ```
 
-The wire field names are the camelCase form of the underlying Pydantic fields: `closed_through` becomes `closedThrough`, `close_target` becomes `closeTarget`, `gap_periods` becomes `gapPeriods`, and so on. Querying the snake_case names fails. The full `fiscalCalendar` shape carries more than the five fields above — `fiscalYearStartMonth`, `catchUpSequence`, blocker-detail fields like `pendingObligationCount` and `earliestPendingPeriod`, `lastCloseAt`, `lastSyncAt`, and a `periods` list — discover them through introspection.
+The wire field names are the camelCase form of the underlying Pydantic fields: `closed_through` becomes `closedThrough`, `close_target` becomes `closeTarget`, `gap_periods` becomes `gapPeriods`, and so on. Querying the snake_case names fails. The full `fiscalCalendar` shape carries more than the five fields above — `fiscalYearStartMonth`, `catchUpSequence`, a count and a sample for each blocker that has detail (`pendingObligationCount`, `strandedObligationCount`, `reconcilingItemCount`, `unpostedSourceEventCount`, `unreconciledAccountCount`, each with its `…Sample`), `earliestPendingPeriod`, `syncStaleDays`, `lastCloseAt`, `lastSyncAt`, and a `periods` list — discover them through introspection. What each blocker means is on [Period Close](Period-Close#blockers).
 
 ### Parent entity
 
@@ -212,7 +212,8 @@ This page does not repeat that list. What follows is the orientation the generat
 
 | You want to know | Start with |
 | --- | --- |
-| What is blocking the month-end close | `fiscalCalendar` — `closedThrough`, `blockers`, `reconcilingItemCount`, `syncStaleDays` in one read |
+| What is blocking the month-end close | `fiscalCalendar` — `closedThrough`, `blockers`, the per-blocker counts (`reconcilingItemCount`, `unpostedSourceEventCount`, `unreconciledAccountCount`, …) and `syncStaleDays` in one read |
+| Whether the books tie to their independent sources for a month | `reconciliations(period: "YYYY-MM")` — each reconciliation's `status`, `unreconciledDifference`, balances and sign-off. See [Period Close](Period-Close#reconciliations) |
 | Which schedules are drafted, posted or pending for a period | `periodCloseStatus`, then `periodDrafts` for the entries themselves |
 | Who owes us, and how concentrated it is | `agents(agentType: "customer")` with `openReceivable` on each — names and balances together. `openReceivablesByAgent` gives the same balances keyed by id only |
 | What a counterparty has done | `agent`, then the event and transaction history behind the balance |
@@ -226,7 +227,7 @@ This page does not repeat that list. What follows is the orientation the generat
 
 **Balances are in minor currency units.** `openBalanceCents` is cents. Convert once, on the way in.
 
-`reportDownloadUrl(reportId, format, expiresIn)` is worth calling out on its own: it is the **only** way to download a published report's serialization bundle. A download is a read of stored state, so it lives here rather than as a REST resource. Every format resolves to a short-lived presigned S3 URL — the Tavi model is stamped at publish time; the holon and XBRL are materialized and cached on first request — and the resolver returns that URL, never the bytes. `expiresIn` is bounded between 60 and 3600 seconds; out of range returns `INVALID_EXPIRES_IN`. A report with no published bundle raises `REPORT_BUNDLE_NOT_AVAILABLE`; an unknown id returns `null`.
+`reportDownloadUrl(reportId, format, expiresIn)` is worth calling out on its own: it is how a client downloads a published report's serialization bundle. (The MCP tool `get-report-bundle` returns the same link to an AI agent.) A download is a read of stored state, so it lives here rather than as a REST resource. `format` is `HOLON_JSONLD` (the default), `TAVI` or `XBRL_2_1`. Every format resolves to a short-lived presigned S3 URL — the holon is stamped at publish time; Tavi and XBRL 2.1 are built and cached on first request — and the resolver returns that URL, never the bytes. The holon is the one format that carries the whole report, and the result's `omittedContent` names what the chosen format leaves out: Tavi has no place for four kinds of content, and XBRL 2.1 omits the disclosure notes. `expiresIn` is bounded between 60 and 3600 seconds; out of range returns `INVALID_EXPIRES_IN`. A report with no published bundle raises `REPORT_BUNDLE_NOT_AVAILABLE`; an unknown id returns `null`.
 
 On an investor-enabled deployment the investor query root adds `portfolios`, `securities`, `security`, `positions`, `position`, `holdings` and `portfolioBlock`. On any deployment, the taxonomy library reads (`library*`, `searchLibraryElements`) are always present — browse them with the `library` graph id.
 
@@ -276,16 +277,22 @@ Note the easy-to-confuse pairing: `get-graphql-schema` returns the **GraphQL SDL
 
 ## Error Surface
 
-GraphQL data errors return HTTP 200 with a typed code in `extensions.code`, so clients branch on the code rather than the HTTP status. (Invalid or expired credentials are the exception — those produce a transport-level HTTP 401.)
+GraphQL data errors return HTTP 200 with a typed code in `extensions.code`, so clients branch on the code rather than the HTTP status.
 
 | Code | Meaning |
 | --- | --- |
-| `UNAUTHENTICATED` | No valid credentials |
-| `FORBIDDEN` | Valid credentials, but no access to this graph |
+| `UNAUTHENTICATED` | No credentials were sent (introspection still works) |
 | `INVALID_PAGINATION` | `limit` or `offset` out of range (`limit` 1–1000, `offset` ≥ 0) |
+| `EXTENSION_NOT_PROVISIONED` | Graph isn't provisioned for the extension you queried |
 | `LEDGER_NOT_INITIALIZED` | Graph has no ledger schema yet — connect a data source or run a sync first |
 | `INVESTOR_NOT_INITIALIZED` | Same, for the investor surface |
-| `EXTENSION_NOT_PROVISIONED` | Graph isn't provisioned for the extension you queried |
+| `INVALID_PERIOD` | A `period` argument isn't a valid `YYYY-MM` month (`reconciliations`) |
+| `INVALID_ARGUMENT` | An argument failed a resolver's own check, such as a library tree's `maxDepth` outside 1–10 |
+| `INVALID_EXPIRES_IN` | `reportDownloadUrl`'s `expiresIn` is outside 60–3600 seconds |
+| `REPORT_BUNDLE_NOT_AVAILABLE` | The report exists but has no published bundle yet |
+| `REPORT_BUNDLE_SIGNING_FAILED` | The bundle couldn't be built or its link signed, a server-side fault rather than a missing bundle |
+
+Three failures never reach the GraphQL layer, so they carry no `extensions.code`: invalid or expired credentials are HTTP 401, and a graph you have no access to, or a subgraph id, is HTTP 403.
 
 ## Troubleshooting
 
@@ -359,7 +366,7 @@ For real synced data on your own stack, see [Connecting QuickBooks Locally](Conn
 - **[GraphQL Surface](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, Pydantic auto-derivation, resolver patterns
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business logic kernel the resolvers delegate to
 - **[GraphQL reference](https://robosystems.ai/docs/extensions/graphql)** - Every query field, with its arguments, return type and an example call, generated from the live schema
-- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
+- **[Extensions API reference](https://robosystems.ai/docs/extensions)** - The extensions surface, generated from the live OpenAPI spec
 
 ## Support
 

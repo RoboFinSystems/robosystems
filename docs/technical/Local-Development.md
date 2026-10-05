@@ -11,7 +11,7 @@ Every API guide in this wiki is written against the hosted platform at `https://
 | | Hosted ([robosystems.ai](https://robosystems.ai)) | Local stack |
 | --- | --- | --- |
 | **API base URL** | `https://api.robosystems.ai` | `http://localhost:8000` |
-| **API reference** | [robosystems.ai/docs/api](https://robosystems.ai/docs/api) — a page per operation | Same pages; `http://localhost:8000/docs` redirects to them |
+| **API reference** | [robosystems.ai/docs/api](https://robosystems.ai/docs/api) — a page per operation | `http://localhost:8000/docs` redirects to `/docs/api` on the local robosystems-app (`ROBOSYSTEMS_URL`, `http://localhost:3000`), which renders your stack's own spec while the app runs |
 | **Try a call in the browser** | [api.robosystems.ai](https://api.robosystems.ai) — Swagger UI | `http://localhost:8000/` — Swagger UI, against your own stack |
 | **Account and API key** | Sign up, then **Settings → API keys** | `just demo-user` writes both to `.local/config.json` |
 | **Graphs** | **Create Graph** in the app (needs a payment method) | `just demo-*` recipes provision and populate them |
@@ -89,7 +89,7 @@ curl http://localhost:8000/v1/status
 }
 ```
 
-**Important:** `GET /v1/status` is the only health check. `GET /health`, `GET /v1/health`, and the root `/` do **not** return health JSON — the root path serves the Swagger UI, where you can run a call against your own stack. The live OpenAPI spec is at `http://localhost:8000/openapi.json`, and `/docs` redirects to the rendered reference at [robosystems.ai/docs/api](https://robosystems.ai/docs/api).
+**Important:** `GET /v1/status` is the only health check. `GET /health`, `GET /v1/health`, and the root `/` do **not** return health JSON — the root path serves the Swagger UI, where you can run a call against your own stack. The live OpenAPI spec is at `http://localhost:8000/openapi.json`, and `/docs` redirects to `ROBOSYSTEMS_URL/docs/api` — the local robosystems-app at `http://localhost:3000/docs/api`, which answers once you run the app (see [Web Apps](#web-apps)).
 
 ## Step 2: Create a Demo User and API Key
 
@@ -114,7 +114,7 @@ Useful flags:
 
 ```bash
 just demo-user --force          # Force a brand-new user and key
-just demo-user --name "QA User" --email qa@example.com
+just demo-user --name QA --email qa@example.com
 just demo-user --json           # Machine-readable output
 ```
 
@@ -281,6 +281,8 @@ just sec-reset                # Start over
 
 The RoboSystems, RoboLedger, and RoboInvestor web apps are open source too, each in its own repository ([robosystems-app](https://github.com/RoboFinSystems/robosystems-app), [roboledger-app](https://github.com/RoboFinSystems/roboledger-app), [roboinvestor-app](https://github.com/RoboFinSystems/roboinvestor-app)). Clone one next to this repository, copy its `.env.example` to `.env` (it already points at `http://localhost:8000`), and run `npm install` then `npm run dev`. They serve on `http://localhost:3000`, `http://localhost:3001`, and `http://localhost:3002`. Sign in with the demo user's email and password, which `just demo-user` prints and saves in `.local/config.json`.
 
+**Run the web apps in Docker.** To skip the Node toolchain, `just clone-apps` clones all three repositories next to this one, and `just start apps build` builds their images and starts them on the same three ports, pointed at your local API. In this profile the landing page at `/` shows a maintenance screen; sign in at `/login`.
+
 To connect a real QuickBooks company to a local stack, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
 
 ## AI Models
@@ -382,7 +384,7 @@ curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" http://localhost:8000/v1/user
 - **[Windows Setup (WSL2)](Windows-Setup-with-WSL2)** - Run this guide on Windows
 - **[Self-Hosted AI Models](Self-Hosted-AI-Models)** - Run the operators on an open-weight model instead of Bedrock
 - **[Custom Graph Schema](Custom-Graph-Schema)** - The full version of the graph provisioned in Step 5
-- **[RoboLedger Demos](RoboLedger-Demo-Walkthrough)** - Synthetic-data and Seattle Method XBRL demos
+- **[RoboLedger Demos](RoboLedger-Demo-Walkthrough)** - The synthetic Cascade demo and the Driftline and Cadence showcase scenarios
 - **[Architecture Overview](Architecture-Overview)** - Platform API vs Graph API, the two-database split, and the components behind `just start`
 - **[Bootstrap Guide](Bootstrap-Guide)** - Deploy the platform into your own AWS account
 

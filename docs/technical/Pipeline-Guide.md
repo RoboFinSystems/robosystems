@@ -1,6 +1,6 @@
 # Pipeline Guide
 
-RoboSystems uses [Dagster](https://dagster.io) for all data orchestration. Data flows from external sources through adapters, staging (DuckDB), and into the knowledge graph (LadybugDB).
+RoboSystems uses [Dagster](https://dagster.io) to orchestrate every pipeline that feeds the knowledge graph: SEC XBRL filings, connector syncs, and ledger writes. Data flows from external sources through adapters and DuckDB staging into the knowledge graph (LadybugDB); connector data reaches the graph by way of the extensions PostgreSQL database.
 
 **Related documentation:**
 - [Architecture Overview](Architecture-Overview) - System architecture
@@ -13,12 +13,16 @@ RoboSystems uses [Dagster](https://dagster.io) for all data orchestration. Data 
 
 ## Current Pipelines
 
-| Pipeline   | Status           |
-| ---------- | ---------------- |
-| SEC        | Production-ready |
-| QuickBooks | Production-ready |
+| Pipeline   | Status           | Flag                            | Pattern                                   |
+| ---------- | ---------------- | ------------------------------- | ----------------------------------------- |
+| SEC        | Production-ready | `SEC_PIPELINE_ENABLED`          | [A](#pattern-a-arelle-based-sec)          |
+| QuickBooks | Production-ready | `CONNECTION_QUICKBOOKS_ENABLED` | [B](#pattern-b-dbt-based-quickbooks), then C |
+| Mercury    | Off by default   | `CONNECTION_MERCURY_ENABLED`    | [Bank feed](#bank-feeds-mercury-plaid), then C |
+| Plaid      | Off by default   | `CONNECTION_PLAID_ENABLED`      | [Bank feed](#bank-feeds-mercury-plaid), then C |
 
-A third connector is live but is not a pipeline in this sense: **`external`** ("External Integration") registers a source namespace on a graph for an integration the platform does not run. It is registration and telemetry rather than execution config — the integration itself runs outside the platform, holds its own source credentials, and writes through the public API. That is the connector side of the [integration lane](#adding-custom-data-sources) below; the implementation is `operations/providers/external_provider.py`.
+`dagster/definitions.py` loads a pipeline's assets and jobs only when its flag is on. The code defaults are on for SEC and QuickBooks and off for the two bank feeds; a fresh deployment seeded by `just setup-aws` starts with all four off (see [Bootstrap Guide → Turn on what you need](Bootstrap-Guide#turn-on-what-you-need)).
+
+One more connector is live but is not a pipeline in this sense: **`external`** ("External Integration") registers a source namespace on a graph for an integration the platform does not run. It is registration and telemetry rather than execution config — the integration itself runs outside the platform, holds its own source credentials, and writes through the public API. That is the connector side of the [integration lane](#adding-custom-data-sources) below; the implementation is `operations/providers/external_provider.py`.
 
 The authoritative, live list of connectors is served rather than documented: `GET /v1/graphs/{graph_id}/connections/options` returns each provider with its configuration and supported features.
 
@@ -26,7 +30,7 @@ The authoritative, live list of connectors is served rather than documented: `GE
 
 ## Three Pipeline Patterns
 
-RoboSystems uses three distinct patterns based on data source characteristics. Patterns A and B ingest from external systems the platform doesn't own; Pattern C materializes the platform's own OLTP writes into the graph for analytical queries.
+RoboSystems uses three distinct patterns based on data source characteristics. Pattern A writes an external source (SEC) straight into the graph. Pattern B and the bank feeds land external data in the extensions PostgreSQL database, beside the platform's own OLTP writes; Pattern C materializes that database into the graph for analytical queries.
 
 ### Pattern A: Arelle-Based (SEC)
 
@@ -39,16 +43,29 @@ XBRL Files → Arelle Processing → Parquet → DuckDB Staging → LadybugDB
 - **Why**: Arelle extracts XBRL semantics (concepts, contexts, facts) directly into graph-compatible structures
 - **No dbt needed**: Output is already graph-shaped
 
-### Pattern B: dbt-Based (QuickBooks, Custom)
+### Pattern B: dbt-Based (QuickBooks)
 
 ```
-API JSON → S3 Raw → dbt transforms → S3 Processed → DuckDB Staging → LadybugDB
-          (chunks)  (JSON → Parquet)  (graph-shaped)
+QB API → Parquet → dbt-duckdb → Extensions PostgreSQL → (Pattern C) → LadybugDB
+        (extract)  (transform)  (load: the graph's schema)
 ```
 
-- **Used for**: API-based in-core adapters (QuickBooks, and a self-hosted fork's `custom_*` adapters). A custom source on a platform-operated deployment is an integration instead — see [Adding Custom Data Sources](#adding-custom-data-sources)
-- **Why**: Raw JSON needs transformation into graph-compatible node/relationship Parquet
+- **Used for**: QuickBooks, and the model for a self-hosted fork's API-based `custom_*` adapters. A custom source on a platform-operated deployment is an integration instead — see [Adding Custom Data Sources](#adding-custom-data-sources)
+- **Assets** (job `qb_sync`): `qb_extract` pulls the QuickBooks API into raw Parquet in a per-graph work directory; `qb_transform` runs the dbt project (`adapters/quickbooks/dbt/`) over it with dbt-duckdb, producing the ledger's OLTP tables in a DuckDB file; `qb_load` upserts those rows into the graph's schema in the extensions database (`operations/extensions/loader.py`) and marks the graph stale
+- **Why**: QuickBooks data becomes ledger rows — events, entries, agents — in the same PostgreSQL schema the ledger's own writes use, so reads, close and reconciliations see one book. The graph is a projection of that schema, rebuilt by Pattern C
+- **Trigger**: On demand — a sync request (`POST /v1/graphs/{graph_id}/connections/{connection_id}/sync`). There is no schedule
 - **dbt provides**: SQL-based transforms, testing, documentation
+
+### Bank feeds (Mercury, Plaid)
+
+```
+Bank API → capture into the Inbox (extensions PostgreSQL) → (Pattern C) → LadybugDB
+```
+
+- **Off by default**: each feed is behind its own flag (`CONNECTION_MERCURY_ENABLED`, `CONNECTION_PLAID_ENABLED`) and needs its provider credentials in the deployment's secret
+- **One asset each**: `mercury_feed` (job `mercury_sync`) and `plaid_feed` (job `plaid_sync`) pull the feed, link or create a chart account per bank account, and capture each posted transaction as an event in the ledger's Inbox with a suggested account. No dbt and no DuckDB; the shared contract lives in `adapters/bank_feed/`
+- **Nothing posts on capture**: a captured line reaches the books only once it is classified and committed. The sync marks the graph stale, and Pattern C carries the change into the graph
+- **Trigger**: On demand, the same sync request as QuickBooks
 
 ### Pattern C: OLTP-Based (Extensions Materialization)
 
@@ -57,68 +74,38 @@ Extensions PostgreSQL → postgres_scanner → DuckDB Staging → LadybugDB
 (schema-per-graph)      (direct scan)      (graph-shaped)
 ```
 
-- **Used for**: RoboLedger and RoboInvestor writes — schedules, closing entries, reports, portfolio positions, anything a user or AI writes through the `/extensions/*/operations/*` command surface
-- **Why**: The platform owns this data — it's not derived from an external system, it's transactional state that needs to round-trip into the graph so analytical queries can see it alongside SEC/QuickBooks data
-- **Trigger**: Event-driven rather than scheduled. Writes to the extensions database fire a `mark_graph_stale` signal; a blue/green sensor picks it up and rebuilds the affected graph slice
-- **No Parquet intermediate**: DuckDB's `postgres_scanner` extension reads directly from the extensions schema via `CREATE TABLE ... AS SELECT * FROM postgres_scan(...)`, skipping the S3 round-trip that Patterns A and B need
-- **Not an adapter**: Unlike SEC and QuickBooks, there's no `adapters/extensions/` directory — this pipeline is platform-internal. See [RoboLedger Operations](RoboLedger-Operations) and `operations/roboledger/views/` for details
+- **Used for**: Everything in the extensions database — RoboLedger and RoboInvestor writes (schedules, closing entries, reports, portfolio positions, anything a user or AI writes through the `/extensions/*/operations/*` command surface), plus the rows QuickBooks and the bank feeds load there
+- **Why**: The extensions database is the system of record for a company graph; the graph is its analytical projection, so queries can see ledger data alongside SEC data
+- **Trigger**: Event-driven rather than scheduled. Each write calls `mark_graph_stale`; the stale-graph sensor (`dagster/sensors/materialization.py`) batches bursts of writes — it waits for them to settle, a few minutes at most — and submits one materialization. `POST /v1/graphs/{graph_id}/operations/materialize` runs one on demand
+- **Blue-green**: an existing graph is rebuilt whole into a fresh copy and swapped in, so readers never see a half-built graph; a graph's first build goes in place
+- **No Parquet intermediate**: DuckDB's `postgres_scanner` reads the extensions schema directly — each staging table is a `CREATE TABLE ... AS SELECT ... FROM postgres_scan(...)` shaped to the graph schema — skipping the S3 round-trip Pattern A needs
+- **Not an adapter**: there's no `adapters/extensions/` directory — this pipeline is platform-internal. The materializer is `operations/extensions/materialize.py`, beside `loader.py` (the connector load) and `staleness.py`; see also [RoboLedger Operations](RoboLedger-Operations)
 
 ---
 
 ## Adapter Structure
 
-Each adapter is self-contained: client, processors, and pipeline (Dagster orchestration) all live together. `dagster/definitions.py` collects adapter pipelines via the `get_dagster_components()` discovery pattern.
+Each adapter is self-contained: client, processors, and pipeline (Dagster orchestration) all live together. `dagster/definitions.py` collects adapter pipelines via the `get_dagster_components()` discovery pattern, each behind its flag.
 
 ```
 robosystems/adapters/
-├── base.py                     # SharedRepositoryManifest dataclass
-├── sec/                        # SEC EDGAR adapter (self-contained)
-│   ├── manifest.py             # SEC_MANIFEST (plans, rates, endpoints, credits)
-│   ├── client/                 # EDGAR API, EFTS, Arelle, Downloader
-│   ├── processors/             # XBRL processing, metadata, ingestion
-│   │   ├── metadata.py         # SECMetadataLoader with caching
-│   │   ├── xbrl_graph.py       # XBRLGraphProcessor
-│   │   ├── processing.py       # Single filing processing
-│   │   ├── consolidation.py    # Parquet consolidation
-│   │   └── ingestion/          # DuckDB/LadybugDB ingestion
-│   └── pipeline/               # Dagster orchestration
-│       ├── __init__.py         # get_dagster_components() discovery
-│       ├── configs.py          # Run configurations
-│       ├── download.py         # sec_raw_filings asset
-│       ├── process.py          # sec_processed_filings asset
-│       ├── stage.py            # DuckDB staging assets
-│       ├── materialize.py      # LadybugDB materialization
-│       ├── artifact.py         # Precomputed Parquet knowledge artifacts
-│       ├── text_index.py       # OpenSearch text indexing (textblocks, narratives, iXBRL)
-│       ├── s3_publish.py       # Publish .lbug to S3 for replicas
-│       ├── duckdb_s3_publish.py # Publish .duckdb staging DBs to S3
-│       ├── r2_publish.py       # Publish .lbug to Cloudflare R2 (zero-egress downloads)
-│       ├── entity_sync/        # Entity metadata sync assets
-│       ├── jobs.py             # Job definitions
-│       └── sensors.py          # Sensors + schedule
-└── quickbooks/                 # QuickBooks adapter
-    ├── client/                 # QB OAuth client
-    ├── dbt/                    # dbt transforms (JSON → graph-shaped Parquet)
-    └── pipeline/               # Dagster extract/transform/load assets
+├── base.py          # SharedRepositoryManifest dataclass
+├── sec/             # SEC EDGAR: manifest, clients, processors, pipeline/
+├── quickbooks/      # QuickBooks: OAuth client, dbt/ project, pipeline/ (extract → transform → load)
+├── bank_feed/       # Shared bank-feed contract: account linking, capture, sync bookkeeping
+├── mercury/         # Mercury bank feed: client/, pipeline/
+└── plaid/           # Plaid bank feed: client/, pipeline/
 
-robosystems/dagster/            # Platform orchestration (collector)
-├── definitions.py              # Collects platform + adapter pipelines
-├── reporting.py                # Report asset materializations from outside Dagster jobs
-├── resources/                  # Shared Dagster resources (DB, S3, Graph)
-├── assets/
-│   ├── graphs.py               # User graph operation assets
-│   └── shared_repositories/    # S3 publish + replica refresh
-├── jobs/                       # Platform jobs (billing, infrastructure, graph, backups)
-└── sensors/
-    ├── graph_lifecycle.py      # Provisioning, expiry, suspension, deprovisioning
-    ├── materialization.py      # Stale-graph rebuild
-    ├── invoice_billing.py      # Subscription renewal + invoicing
-    ├── scheduled_obligation_promoter.py
-    ├── usage_monitor.py
-    └── worker_reaper.py
+robosystems/dagster/ # Platform orchestration (collector)
+├── definitions.py   # Collects platform + adapter pipelines
+├── reporting.py     # Report asset materializations from outside Dagster jobs
+├── resources/       # Shared Dagster resources (DB, S3, Graph)
+├── assets/          # Graph operation assets, shared-repository publish + replica refresh
+├── jobs/            # Platform jobs and their schedules
+└── sensors/         # Platform sensors (graph lifecycle, stale-graph rebuild, billing, …)
 ```
 
-The platform side carries far more than the SEC publish-and-refresh chain this page traces: scheduled billing, instance health, registry and storage cleanup, the nightly fleet backup (`0 3 * * *`, fanned out one run per customer graph), and the sensors above. [`dagster/README.md`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/dagster/README.md) carries the full job and sensor inventory with each one's cron or trigger; treat it, not this page, as the list.
+The trees inside each package change often, so they are documented beside the code: the [Adapters README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/README.md) for each adapter, the [SEC pipeline README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/sec/pipeline/README.md) for the SEC assets, and [`dagster/README.md`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/dagster/README.md) for the platform side. The platform side carries far more than the SEC publish-and-refresh chain this page traces: scheduled billing, instance health, registry and storage cleanup, the nightly fleet backup (`0 3 * * *`, fanned out one run per customer graph), and the sensors. `dagster/README.md` carries the full job and sensor inventory with each one's cron or trigger; treat it, not this page, as the list.
 
 ---
 
@@ -142,8 +129,9 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 │  └── Single source of truth for shared repositories          │
 ├──────────────────────────────────────────────────────────────┤
 │  SHARED REPLICAS (graph-ladybug-replicas.yaml)               │
-│  ├── ASG: Min=2, Max=10, TargetTracking on CPU               │
-│  ├── S3 download: Pull .lbug + .duckdb from S3 on boot      │
+│  ├── ASG: sized by SHARED_REPLICAS_* variables; target       │
+│  │     tracking on CPU and memory                            │
+│  ├── S3 download: Pull .lbug + .duckdb from S3 on boot       │
 │  ├── Read-only; sized below the master (no DuckDB staging)   │
 │  └── ALB on port 8001, health check /health                  │
 └──────────────────────────────────────────────────────────────┘
@@ -151,7 +139,7 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 
 **Key insight**: Dagster orchestrates (lightweight), Graph API computes (heavy). This keeps Dagster simple and reuses existing graph infrastructure.
 
-Instance types are deliberately omitted above — they live in
+Instance types and replica counts are deliberately omitted above. Replica counts come from the `SHARED_REPLICAS_*` GitHub variables (`SHARED_REPLICAS_MIN_INSTANCES_*`, `SHARED_REPLICAS_MAX_INSTANCES_*`, `SHARED_REPLICAS_DESIRED_CAPACITY_*`); instance types live in
 [`.github/configs/graph.yml`](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml),
 which the GHA deployment layer provisions from directly. The diagram carries the shape; the config
 carries the sizes, and it has been resized more than once.
@@ -211,7 +199,7 @@ For **self-hosted forks only**, the `custom_*/` namespace remains available as a
 
 1. Create `adapters/custom_myservice/` with `client/`, `processors/`, and `pipeline/`
 2. Implement `pipeline/__init__.py` with `get_dagster_components()` returning `{"assets": [...], "jobs": [...], "sensors": [...], "schedules": [...]}`
-3. Import and collect in `dagster/definitions.py` (see the `# === FORK` comment)
+3. Import and collect in `dagster/definitions.py` (see the `# FORK:` comment)
 
 See the [Adapters README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/README.md) for details.
 
@@ -219,31 +207,32 @@ See the [Adapters README](https://github.com/RoboFinSystems/robosystems/blob/mai
 
 ## Unified Ingestion Pattern
 
-All pipelines use DuckDB staging regardless of source. Patterns A and B enter staging from S3 Parquet; Pattern C enters staging via `postgres_scanner` reading the extensions database directly.
+All pipelines use DuckDB staging regardless of source. Parquet in S3 — the SEC pipeline, and files uploaded to a graph through the [staging path](Custom-Graph-Schema) — enters staging through `httpfs`; the extensions database (Pattern C, which carries QuickBooks, the bank feeds and every ledger write) enters through `postgres_scanner`.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │              UNIFIED INGESTION (ALL PIPELINES)                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  Pattern A/B: Parquet in S3  ──┐                                │
-│  Pattern C:   Extensions DB  ──┤                                │
-│                                │                                │
-│                                ▼                                │
-│  1. GraphFile.create()                                          │
-│     Register file/scan in PostgreSQL (provenance tracking)      │
+│  Parquet in S3 (SEC, file uploads)  ──┐                         │
+│  Extensions PostgreSQL (Pattern C)  ──┤                         │
+│                                       ▼                         │
+│  1. Stage: source → DuckDB staging table (queryable for debug)  │
+│     Parquet:    client.create_table(s3_files=[...]); an         │
+│                 uploaded file is registered first (GraphFile)   │
+│     Pattern C:  CREATE TABLE ... AS SELECT ...                  │
+│                   FROM postgres_scan(...)                       │
 │           │                                                     │
 │           ▼                                                     │
-│  2. client.create_table(s3_files=[...])  or postgres_scan(...)  │
-│     Load source → DuckDB staging table (queryable for debug)    │
+│  2. client.materialize_table(...)                               │
+│     DuckDB → LadybugDB                                          │
+│     Uploads:    incremental by file_id                          │
+│     Pattern C:  the whole projection, blue-green                │
 │           │                                                     │
 │           ▼                                                     │
-│  3. client.materialize_table(file_ids=[...])                    │
-│     DuckDB → LadybugDB (incremental by file_id)                 │
-│           │                                                     │
-│           ▼                                                     │
-│  4. GraphFile.mark_graph_ingested()                             │
-│     Track completion in PostgreSQL                              │
+│  3. Record completion                                           │
+│     Uploads:    GraphFile.mark_graph_ingested()                 │
+│     Pattern C:  clear the graph's stale flag                    │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -252,7 +241,7 @@ All pipelines use DuckDB staging regardless of source. Patterns A and B enter st
 
 - Validation layer before graph ingestion
 - Handles S3 Parquet natively (httpfs extension) and PostgreSQL natively (postgres_scanner extension)
-- Same pattern for SEC, QuickBooks, custom adapters, and platform-owned OLTP
+- Same pattern for SEC, uploaded files, and everything in the extensions database (QuickBooks, bank feeds, ledger writes)
 - Scale proof: If it handles SEC (1TB+), it handles any company's data
 
 **Graph API endpoints:**
@@ -265,13 +254,13 @@ All pipelines use DuckDB staging regardless of source. Patterns A and B enter st
 
 ## Company Graphs vs Shared Repositories
 
-| Aspect        | Shared Repos (SEC)       | Company Graphs (QuickBooks) |
-| ------------- | ------------------------ | --------------------------- |
-| Write pattern | Nightly incremental + rebuild | Incremental daily      |
+| Aspect        | Shared Repos (SEC)       | Company Graphs (ledger, QuickBooks, bank feeds) |
+| ------------- | ------------------------ | ----------------------------------------------- |
+| Write pattern | Nightly incremental + rebuild | On-demand connector syncs and ledger writes into PostgreSQL; the graph is rebuilt blue-green, batched by the stale-graph sensor |
 | Read pattern  | High volume, cacheable   | Low volume, fresh           |
 | Scaling       | Horizontal (replicas)    | Vertical (bigger instance)  |
 | Data size     | 1TB+                     | 1-100GB                     |
-| DuckDB role   | Transport (full rebuild) | Staging (incremental)       |
+| DuckDB role   | Transport (full rebuild) | Staging (`postgres_scan` of the graph's schema) |
 
 ---
 
@@ -318,7 +307,8 @@ All pipelines use DuckDB staging regardless of source. Patterns A and B enter st
 | **Dagster for all orchestration** | One system (eliminated Celery), one UI for pipelines + billing + infrastructure |
 | **Fargate-only Dagster**          | Dagster orchestrates, Graph API computes; no EC2 capacity provider complexity   |
 | **DuckDB-only staging**           | Standardized validation layer for all pipelines                                 |
-| **Three pipeline patterns**       | Arelle for XBRL semantics (SEC), dbt for API JSON transforms (QuickBooks), postgres_scanner for OLTP materialization |
+| **Three pipeline patterns**       | Arelle for XBRL semantics (SEC); dbt-duckdb to turn API JSON into ledger rows in PostgreSQL (QuickBooks); postgres_scanner to materialize the extensions database — ledger writes, QuickBooks, bank feeds — into the graph |
+| **PostgreSQL before the graph**   | Connector data lands where the ledger's own writes live, so one book serves reads, close and reconciliations; the graph is a rebuildable projection of it |
 | **Custom sources are integrations** | A custom source lives in its own repository and writes through the public API; the in-core adapter registry is platform-maintained, so every deployment runs an unmodified core and upgrades cleanly |
 | **S3 publish for replicas**       | Dagster publishes to S3, triggers rolling refresh; replicas download on boot    |
 

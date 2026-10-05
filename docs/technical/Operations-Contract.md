@@ -1,6 +1,8 @@
 # Operations Contract
 
-Every write in RoboSystems is a named operation, and every operation shares one contract: the same URL shape, the same response envelope, the same retry key, and the same progress stream. This page is the one home for that contract. The pages for each surface — [Graph Operations](Graph-Operations), [RoboLedger Operations](RoboLedger-Operations), [RoboInvestor Operations](RoboInvestor-Operations) — cover what each operation does and link back here for how they all behave.
+Graph and extension writes in RoboSystems are named operations sharing one contract: one URL shape, response envelope, retry key, and progress stream. This page is the one home for that contract. The pages for each surface — [Graph Operations](Graph-Operations), [RoboLedger Operations](RoboLedger-Operations), [RoboInvestor Operations](RoboInvestor-Operations) — cover what each operation does and link back here for how they all behave. A few writes sit outside it as plain REST calls: account-level ones such as API keys, organization members, and billing, and graph-level ones such as membership grants and connection management.
+
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
 ## Table of Contents
 
@@ -123,14 +125,14 @@ Every operation accepts an optional `Idempotency-Key` header. Without one, a ret
 | --- | --- |
 | First request with this key | The operation runs; its envelope is stored under the key |
 | Same key, identical body, after the first finished | The stored envelope, with `idempotentReplay: true`. The operation does not run again |
-| Same key, identical body, while the first is still running | **409 Conflict** — the first request is in progress; retry after it completes to receive its result |
+| Same key, identical body, while the first is still running | **409 Conflict** — the first request is in progress; retry after it completes to receive its result. The key is held this way for at most **5 minutes**: if the first request has neither finished nor failed by then, a retry with the key runs the operation again |
 | Same key, **different** body | **409 Conflict** — the key is bound to the first body it saw. Use a fresh key for a different request |
 | First request failed (an HTTP error) | Nothing is stored; a retry with the same key runs the operation again |
 | First request returned `pending` and the background work later failed or was cancelled | The stored envelope is evicted, so a retry with the same key dispatches again rather than replaying `pending` |
 
 The details that matter when you design retries:
 
-- **Window.** A stored envelope is kept for **24 hours**.
+- **Window.** A stored envelope is kept for **24 hours**. Before there is an envelope to store, the key is reserved for the first request for up to 5 minutes, a window sized to outlast the slowest synchronous operation (async operations answer at hand-off).
 - **Scope.** A key is scoped to the calling user, the graph, and the operation name. The same key string used by two users, on two graphs, or for two operations never collides.
 - **Body identity.** The comparison is over the parsed JSON body, so key order and whitespace do not matter; any change of value does.
 - **What a replay returns.** The original envelope, including its original `operationId`, `at`, and `result`, with `idempotentReplay` set to `true`. For an async operation the replay is the original `pending` envelope — follow its `operationId` for the outcome.
@@ -150,14 +152,16 @@ A good key names the intent of the request — a source record id plus a version
 
 ## Following an Async Operation
 
-A pending envelope's `operationId` works with two endpoints, both under `/v1`:
+A pending envelope's `operationId` works with these endpoints, all under `/v1`:
 
 ```text
-GET /v1/operations/{operation_id}/stream    # Server-Sent Events (text/event-stream)
-GET /v1/operations/{operation_id}/status    # point-in-time JSON snapshot
+GET    /v1/operations/{operation_id}/stream    # Server-Sent Events (text/event-stream)
+GET    /v1/operations/{operation_id}/status    # point-in-time JSON snapshot
+DELETE /v1/operations/{operation_id}           # cancel a pending, running, or paused operation
+POST   /v1/operations/{operation_id}/resume    # answer an operation paused for input
 ```
 
-Both are authenticated with `X-API-Key`, answer only for operations you started, and consume no credits. The stream endpoint allows a small number of concurrent connections per user (the limit is in its description in the [API reference](https://robosystems.ai/docs/api)); close streams you are done with.
+All are authenticated with `X-API-Key`, answer only for operations you started, and consume no credits. They carry no graph id, so they take an account-wide key: a graph-scoped key is refused here with 401 (see [Choosing a Key Scope](Authentication-and-API-Keys#choosing-a-key-scope)). The stream endpoint allows a small number of concurrent connections per user (the limit is in its description in the [API reference](https://robosystems.ai/docs/api)); close streams you are done with.
 
 ### The stream
 
@@ -196,7 +200,7 @@ The operation events:
 | `operation_awaiting_input` | Paused at a checkpoint for a decision; ends the stream until resumed | — |
 | `operation_resumed` | A paused operation was resumed | — |
 
-The stream also emits framing events: `connected` when it opens, `keepalive` during quiet periods, `stream_end` after a terminal event, and `error` if the stream itself cannot serve the operation (unknown id, not yours). A stream opened on an operation that has already finished replays its whole history and then ends.
+The stream also emits framing events: `connected` when it opens, `keepalive` during quiet periods, `stream_end` after a terminal event, and `error` if it cannot carry on once open (for example, too many concurrent streams). An unknown or expired operation id answers HTTP **404**, and someone else's operation **403**, before any stream opens. A stream opened on an operation that has already finished replays its whole history and then ends.
 
 **Reconnecting.** Events are stored with their sequence numbers for a limited time, so a dropped connection loses nothing. Reconnect with `from_sequence` set to one more than the last `sequence_number` you saw; the stream replays everything from that number (inclusive) before going live:
 
@@ -232,7 +236,18 @@ curl -s "https://api.robosystems.ai/v1/operations/op_01K5Q52D4F6H8J0K2M4N6P8R0S/
 
 `operation_type` names the background task that ran the work, which is not always the operation's own name.
 
-`status` is one of `pending`, `running`, `awaiting_input`, `completed`, `failed`, or `cancelled`. A completed operation carries `result`; a failed one carries `error`. While the operation is `pending` the snapshot also reports `queue_position` and `queue_depth`, and while it can still be stopped `_links` includes `cancel` — `DELETE /v1/operations/{operation_id}` cancels a pending or running operation.
+`status` is one of `pending`, `running`, `awaiting_input`, `completed`, `failed`, or `cancelled`. A completed operation carries `result`; a failed one carries `error`. While the operation is `pending` the snapshot also reports `queue_position` and `queue_depth`, and while it can still be stopped `_links` includes `cancel` — `DELETE /v1/operations/{operation_id}` cancels a pending, running, or paused operation.
+
+**Resuming a paused operation.** An operation in `awaiting_input` has stopped at a checkpoint for a decision. Its snapshot carries `input_request` (`prompt`, `details`, `requested_at`) and a `resume` link. Answer with the decision in the shape the prompt describes:
+
+```bash
+curl -s -X POST "https://api.robosystems.ai/v1/operations/op_01K5Q52D4F6H8J0K2M4N6P8R0S/resume" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"approved": true}}'
+```
+
+The response is **202**: the operation keeps its id and goes back on the worker queue, so reconnect to its stream to follow it. Resuming an operation that is not waiting for input answers **409**.
 
 Once an operation's records expire, both endpoints answer **404**. Read the outcome while it is fresh, and treat the resource the operation produced (the backup, the materialized graph) as the durable record.
 
@@ -242,7 +257,7 @@ Once an operation's records expire, both endpoints answer **404**. Read the outc
 - Branch on `status` in the envelope: `completed` → read `result`; `pending` → follow `operationId`.
 - Treat a 409 whose `detail` says the key is in progress as "wait and retry the same request", and one that says the key was reused with a different body as a bug in your key choice.
 - On a non-2xx response, log the `request_id` from the body (also sent as the `X-Request-ID` header) — see [Errors and Rate Limits](Errors-and-Rate-Limits#quoting-a-request-id).
-- For async work, prefer the stream; fall back to polling `/status` with a delay; stop at a terminal state.
+- For async work, prefer the stream; fall back to polling `/status` with a delay; stop at a terminal state. Follow operations with an account-wide key.
 
 ## Self-hosted deployments
 

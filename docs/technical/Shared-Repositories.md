@@ -101,7 +101,7 @@ Database operations (query, MCP, search) are **free** — they draw down rate-li
 
 ## The SEC shared repository
 
-SEC EDGAR is the one shared repository available today — public-company filings and XBRL financial data, synced daily, with semantic enrichment for natural-language element resolution. Its plans are read-only and differ on throughput and backup-download allowance:
+SEC EDGAR is the one shared repository available today — public-company filings and XBRL financial data, updated through each business day ([Freshness](#freshness)), with semantic enrichment for natural-language element resolution. Its plans are read-only and differ on throughput and backup-download allowance:
 
 | Plan | `plan_name` | Access |
 | --- | --- | --- |
@@ -111,6 +111,13 @@ SEC EDGAR is the one shared repository available today — public-company filing
 Prices, monthly AI credit allocations and download allowances are served live and unauthenticated at **`GET /v1/offering`**, and shown on the [pricing page](https://robosystems.ai/pricing). Rate limits apply per category — queries, MCP calls, searches, and AI agent calls each have their own per-minute / per-hour / per-day budgets.
 
 The repository id is `sec`. For the data model and the rules a query must follow to return the right number, see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules); for loading filings into a local stack, the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) demo.
+
+### Freshness
+
+The repository moves on two clocks, on business days:
+
+- **The day a filing is filed.** Three passes through the day bring new XBRL filings into the filer catalog and their public folders, so the text views (`describe-filing`, `search-text`, `read-text`), `disclosures`, `information-block` and the viewer reach a filing the day it is filed. 8-K earnings releases from filers in the corpus are captured with their exhibits every 30 minutes through the filing day.
+- **The next morning.** The nightly run rebuilds the graph and the document search index with the day's filings, so Cypher, `build-fact-grid`, `financial-statement-analysis`, `resolve-element` and `search-documents` have them the following morning.
 
 ### Downloading a snapshot
 
@@ -143,9 +150,11 @@ zstd -d sec.lbug.zst   # -> sec.lbug ; add --rm to delete the .zst afterwards
 
 Plain `zstd -d` is enough — no `--long` flag — and the decompressed file is roughly 2× the download, so leave disk headroom. The result is a LadybugDB database you can query directly; see [Graph Operations](Graph-Operations#downloading-and-unpacking-a-backup) for the full download-and-unpack walkthrough.
 
+The same graph file is also published as a public dataset on Hugging Face, [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs), under CC BY 4.0 and with no subscription. That copy is published by hand, not on every pipeline run, so it is a point-in-time snapshot — its dataset card gives the date and the filings it runs through — and lags the hosted graph. It is the graph alone: the filing-text views, the viewer and document search are not in it.
+
 ## Self-hosted deployments
 
-There is no free hosted SEC tier; self-hosting is the free path. On a stack you run, load the filings you want with `just sec-load` and query them through the same `sec` graph id — see [Local Development](Local-Development#sec-filings).
+There is no free hosted SEC tier; self-hosting is the free path. On a stack you run, load the filings you want with `just sec-load`, or the whole corpus from the Hugging Face snapshot with `just sec-dump`, and query them through the same `sec` graph id — see [Local Development](Local-Development#sec-filings).
 
 ## Related Documentation
 

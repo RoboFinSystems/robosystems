@@ -1,6 +1,6 @@
 # Core Concepts
 
-RoboSystems is a financial intelligence platform for accounting, financial reporting, and investment management, built on a multi-tenant knowledge graph — and a handful of recurring terms run through every endpoint, SDK call, and README. This page is an orientation glossary: short, plain-language definitions that build on one another, each linking to its deep-dive page. Read it once to get your bearings, then follow the links when you need detail.
+A glossary of the terms that run through RoboSystems: `graph_id`, tiers, subgraphs, Elements, block envelopes, operators, and the two graph stores. RoboSystems is a financial intelligence platform for accounting, financial reporting, and investment management, built on a multi-tenant knowledge graph, and these terms recur in every endpoint, SDK call, and README. The definitions are short and plain, build on one another, and each links to its deep-dive page. Read it once to get your bearings, then follow the links when you need detail.
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
@@ -90,7 +90,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/query/cyph
 
 The Information Block is the platform's load-bearing primitive: a typed, queryable, exchangeable unit of accounting information. It bundles *atoms* (Elements, associations, facts) with *molecular wiring* (classification, rules, mechanics, presentation) into one self-describing object.
 
-What the frontend calls a "Balance Sheet" or a "Depreciation Schedule" the backend, API, and AI Operators all speak of as an `InformationBlock` discriminated by a `block_type`. The registered block types are `schedule`, `rollforward`, `forecast`, `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`, `regulatory_disclosure`, and `metric`. The governing rule is: **what crosses a system boundary is a molecule, never a bare atom.** You exchange a whole, self-describing block, not a loose Element or fact.
+What the frontend calls a "Balance Sheet" or a "Depreciation Schedule" the backend, API, and AI Operators all speak of as an `InformationBlock` discriminated by a `block_type`. The registered block types are `schedule`, `rollforward`, `forecast`, `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`, `regulatory_disclosure`, `metric`, and `reconciliation` — the last ties a ledger balance to an independent source each period (see [Period Close](Period-Close#reconciliations)). The governing rule is: **what crosses a system boundary is a molecule, never a bare atom.** You exchange a whole, self-describing block, not a loose Element or fact.
 
 Information Blocks are read through the GraphQL surface. Note that `graph_id` comes from the URL, not from a query argument:
 
@@ -119,7 +119,7 @@ The principle is the same as for Information Blocks: vocabulary changes go throu
 Two distinct concepts share the word "agent," and the platform keeps them separate on purpose.
 
 - **REA Agent** — an economic counterparty in a business event: a customer, vendor, or employee. This is the canonical ontology term, drawn from the Resources-Events-Agents accounting model. An REA Agent is data: a party an event happened *with*. It is distinct from the reporting `Entity`, which is the graph owner.
-- **Operator** — the AI executor layer (model- and MCP-driven). Two are registered: `analyst` (`AnalystOperator`, which answers a question from the graph's read-only tools) and `mapping` (`MappingOperator`, autonomous chart-of-accounts mapping). Operators live at `POST /v1/graphs/{graph_id}/operator` and execute work; the former name `cypher` still resolves to `analyst`.
+- **Operator** — the AI executor layer (model- and MCP-driven). Three are registered: `analyst` (`AnalystOperator`, which answers a question from the graph's read-only tools), `author` (`AuthorOperator`, which makes the change a request asks for — metric and forecast blocks, counterparties, memories, draft reports, inbox classifications — through writes that are reversible or wait on a person's step, and needs the graph write role), and `mapping` (`MappingOperator`, autonomous chart-of-accounts mapping). Operators live at `POST /v1/graphs/{graph_id}/operator` and execute work; the former name `cypher` still resolves to `analyst`.
 
 The rename resolved an "agent operates on agent" naming collision: an AI Operator can act on REA Agent data. Marketing copy may still say "AI agent," but in the API and codebase the executor is always an **Operator**.
 
@@ -166,13 +166,13 @@ The same operational/analytical/unstructured split is exposed to AI clients thro
 | --- | --- | --- | --- |
 | **Operational** (typed OLTP reads) | `query-graphql` | `get-graphql-schema` (schema) | Extensions GraphQL surface |
 | **Analytical** (read-only Cypher) | `read-graph-cypher` | `get-graph-schema` (schema) | LadybugDB OLAP graph |
-| **Unstructured** (document/filing search) | `search-documents` | `get-document-section` (drill-down) | Document / SEC-filing index |
+| **Unstructured** (document/filing search) | `search-documents` | `get-document-section` (drill-down) | Document / SEC-filing index; on `sec`, also one filing's text read whole (`describe-filing`, `search-text`, `read-text`) |
 
 An Operator — or any MCP client — composes across the planes: pull a policy from the unstructured plane, a live balance from the operational plane, and a reporting fact from the analytical plane, then reason over all three.
 
 A few rules worth knowing up front:
 
-- `read-graph-cypher` is read-only; write clauses (`CREATE`, `SET`, `DELETE`, `MERGE`, `DROP`) and `CALL db.` / `CALL apoc.` procedures are blocked. Run `get-graph-schema` first.
+- `read-graph-cypher` is read-only. It refuses writes (`CREATE`, `MERGE`, `SET`, `DELETE`), schema DDL, bulk loads (`COPY`, `LOAD`), administrative statements (`EXPORT`, `INSTALL`, `ATTACH`), and any `CALL` outside a short list of read-only procedures such as `show_tables` and `table_info`; shared repositories add read limits of their own. Run `get-graph-schema` first.
 - `query-graphql` rejects mutations and subscriptions and takes `graph_id` from context, not as an argument. Run `get-graphql-schema` first.
 - `search-documents` returns a `document_id` per hit; pass it to `get-document-section` for the full section text. Semantic (KNN) ranking is opt-in via `semantic=true` (the default is keyword BM25).
 

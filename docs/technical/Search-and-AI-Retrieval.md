@@ -1,6 +1,6 @@
 # Search & AI Retrieval
 
-This guide shows you how to give an AI Operator the institutional-knowledge layer over your entity graph: upload unstructured content (policies, procedures, notes — plus SEC filing narratives on shared repositories), index it with hybrid keyword + semantic search, and let an Operator ground its answers on the right document.
+Search gives an AI Operator hybrid keyword and semantic search over your own documents and SEC filing narratives, plus a memory store of its own. It is the institutional-knowledge layer over your entity graph: upload unstructured content (policies, procedures, notes), index it, and let an Operator ground its answers on the right document.
 
 **Quick Start:** Upload a policy document into a writable graph with the `index-document` operation, then search it with `POST /v1/graphs/{graph_id}/search` (or the `search-documents` MCP tool) to see it surface.
 
@@ -14,7 +14,7 @@ The retrieval workflow has three stages:
 
 1. **Upload** unstructured content into a graph (your own documents) or read from a shared repository (SEC filing narratives).
 2. **Index** the content into OpenSearch as searchable sections, each carrying a local vector embedding for semantic matching.
-3. **Query** the index through two MCP tools — `search-documents` returns ranked snippets, `get-document-section` returns the full section text — so an Operator finds and reads exactly the policy it needs.
+3. **Query** the index through two MCP tools — `search-documents` returns ranked snippets, `get-document-section` returns the section's text, a window at a time — so an Operator finds and reads exactly the policy it needs.
 
 There are three corpora available:
 
@@ -56,7 +56,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/search" \
 Retrieval is deliberately split across two tools so an Operator reads only what it needs:
 
 1. **`search-documents`** runs the query and returns a ranked list of *snippets* — small, scannable highlights with the matching `document_id`, score, and metadata. This is cheap and keeps token usage low.
-2. **`get-document-section`** takes a `document_id` from a hit and returns the *full* section text. The Operator calls this only for the section it actually wants to read.
+2. **`get-document-section`** takes a `document_id` from a hit and returns that section's text — over MCP a window at a time, over REST the whole part. The Operator calls this only for the section it actually wants to read.
 
 This keeps an Operator from pulling whole documents into context when a single paragraph answers the question. The snippet tells it *which* section is relevant; the section fetch gives it the words.
 
@@ -150,7 +150,7 @@ The Operator will:
                       "semantic": true }
      -> top hit document_id: "udoc_doc_abc123def456_1", section_label: "Useful Lives"
 2. get-document-section { "document_id": "udoc_doc_abc123def456_1" }
-     -> full section text: "Machinery & equipment: 7 years"
+     -> the section text: "Machinery & equipment: 7 years"
 3. Answers, grounded in the actual policy: "7 years, straight-line."
 ```
 
@@ -169,8 +169,8 @@ AI Operators interact with the index through MCP tools. All of them require docu
 
 **Search tools:**
 
-- `search-documents` — hybrid BM25 + KNN search. Inputs: `query` (required), plus optional `entity`, `form_type`, `section`, `element`, `fiscal_year`, `semantic` (default `false`), and `size` (default 10, max 50). Returns ranked hits with `document_id`s.
-- `get-document-section` — input `document_id` (required). Returns the full section text and metadata.
+- `search-documents` — hybrid BM25 + KNN search. Inputs: `query` (required), plus optional `entity`, `form_type`, `section`, `element`, `fiscal_year`, `semantic` (default `false`), `size` (default 10, max 50), and `snippet_chars` (an approximate snippet budget per hit: default 400, 80–1,500 — raise it when snippets are too short to choose between hits). Returns ranked hits with `document_id`s; see [Response Shapes](#response-shapes) for what the tool keeps and folds.
+- `get-document-section` — input `document_id` (required), plus `offset` (default 0) and `length` (default 4,000 characters, max 8,000). Returns one window of the section: `content`, `content_length` (the whole part) and `offset`, with `next_offset` when more follows — call again with it rather than answering from a partial read. A long section is stored in parts of about 25,000 characters: the result is one part (`part` of `part_count`, sharing a `parent_document_id`) and carries `next_document_id` for the next part.
 
 **Filing-text tools** (no OpenSearch; the filing is read whole from the public data bucket):
 
@@ -186,7 +186,7 @@ AI Operators interact with the index through MCP tools. All of them require docu
 
 **Note:** The document tools register only on your own graphs, not on shared repositories. The write tools (`create-document`, `update-document`, `delete-document`) additionally require a writable graph. The search tools (`search-documents`, `get-document-section`) work against both your graphs and shared repositories like `sec`.
 
-For SEC narrative hits, the `search-documents` results include the XBRL elements referenced in that disclosure (`xbrl_elements`). An Operator can hand one to `resolve-element` to look up the XBRL element, then run `read-graph-cypher` to pull the structured values — pivoting from narrative to numbers.
+For an iXBRL disclosure, `get-document-section` returns the XBRL elements tagged in that section (`xbrl_elements`); the MCP `search-documents` hits leave them out to stay small. An Operator can hand one to `resolve-element` to look up the XBRL element, then run `read-graph-cypher` to pull the structured values — pivoting from narrative to numbers.
 
 For Operator setup and the broader MCP tool surface, see [AI Operators and MCP](AI-Operators-and-MCP).
 
@@ -221,14 +221,17 @@ The full request/response schema for every endpoint is published in the live Ope
 | --- | --- | --- |
 | `query` | string (required) | The search text, 1–500 characters |
 | `semantic` | bool (default `false`) | `false` = BM25 keyword only; `true` = hybrid BM25 + KNN semantic ranking |
-| `entity` | string | Restrict to a company (e.g. ticker `NVDA`) |
+| `entity` | string | Restrict to a filer. Only a CIK selects exactly one; a ticker or name is a loose word match (`ON` also matches filers with "On" in their names) |
 | `form_type` | string | SEC form type (e.g. `10-K`, `10-Q`) |
 | `section` | string | Filing section (e.g. `item_1a` for risk factors) |
 | `element` | string | An XBRL element associated with the section |
 | `fiscal_year` | int | Restrict to a fiscal year |
 | `size` | int (1–50, default 10) | Number of hits to return |
+| `snippet_chars` | int (80–1,500) | Approximate snippet budget per hit. The MCP tool defaults to 400; REST defaults to three highlight fragments of about 200 characters |
 
-The REST endpoint additionally accepts `source_type`, `date_from`, `date_to` (`YYYY-MM-DD`), and `offset` for pagination. **These four are not exposed by the `search-documents` MCP tool** — they are REST-only. The `size` cap is 50 on both surfaces.
+The REST endpoint additionally accepts `source_type`, `date_from`, `date_to` (`YYYY-MM-DD`), `offset` for pagination, and `group`. **These five are not exposed by the `search-documents` MCP tool** — they are REST-only. The `size` cap is 50 on both surfaces.
+
+`group` folds the same section from a filer's successive filings into its best-ranked (then newest) hit, with `also_in_filings` counting the others; it is ignored when `entity` is set, where a filer's filing history is the point, and a grouped page is drawn from the first 100 hits. REST defaults it to `false`; the MCP tool always groups.
 
 ## What Gets Indexed
 
@@ -250,7 +253,7 @@ Those five are the whole set. `memory` is **not** among them — semantic memori
 - YAML frontmatter (`title`, `tags`, `folder`) fills any field you didn't set on the request; an explicit request value always wins over frontmatter.
 - Sections under 20 words are merged into a neighbor; the maximum is 50,000 characters per section, and 500,000 characters per document.
 
-**The iXBRL bridge:** SEC disclosure hits include the XBRL elements referenced in that disclosure. This lets an Operator move from the narrative ("goodwill impairment discussion") to the structured fact (`us-gaap:Goodwill`) by handing the element to `resolve-element`, then querying values with `read-graph-cypher`. For how the SEC corpus is built, see [SEC XBRL Pipeline](SEC-XBRL-Pipeline).
+**The iXBRL bridge:** an SEC disclosure section carries the XBRL elements tagged in it (`xbrl_elements` on the section read, and on REST search hits). This lets an Operator move from the narrative ("goodwill impairment discussion") to the structured fact (`us-gaap:Goodwill`) by handing the element to `resolve-element`, then querying values with `read-graph-cypher`. For how the SEC corpus is built, see [SEC XBRL Pipeline](SEC-XBRL-Pipeline).
 
 ## How Search Works
 
@@ -258,7 +261,7 @@ Those five are the whole set. `memory` is **not** among them — semantic memori
 
 **Local embeddings, no credits.** Embeddings are produced in-image by a small open model (`BAAI/bge-small-en-v1.5`, 384 dimensions). There are no external API calls and **no AI credits are consumed** for indexing or semantic search.
 
-**Tenant isolation.** Every search and document operation is filtered by `graph_id`. Your uploaded documents are scoped to their graph and never surface in another graph's results. Searches against the `sec` repository resolve subgraph IDs (such as `sec_historical`) back to the parent `sec` index — subgraphs are a storage split, not a search boundary.
+**Tenant isolation.** Every search and document operation is filtered by `graph_id`. Your uploaded documents are scoped to their graph and never surface in another graph's results. The MCP search tools resolve a shared repository's subgraph to the parent repository's index — subgraphs are a storage split, not a search boundary.
 
 ## Semantic Memory: The Second Retrieval Plane
 
@@ -288,7 +291,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/memory/recall" \
 
 `recall` returns the **same `SearchResponse` shape as document search** — the same `SearchHit` objects, so an Operator can rank memory hits and document hits with one set of field names. What it does *not* mean is that memories live in the search index: `recall` reads LanceDB, `POST /search` reads OpenSearch, and the two never see each other's records. The `source_type: "memory"` you see on a recall hit is stamped on at read time, not stored in an index.
 
-**Different flags gate it.** A deployment controls memory with `SEMANTIC_MEMORY_ENABLED`, with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on the four MCP tools — **not** with `SEMANTIC_SEARCH_ENABLED`. A deployment can run document search with memory off, or memory with document search off. (The `/search` router mounts if *either* flag is on, since it hosts `recall` as well.)
+**Different flags gate it.** A deployment controls memory with `SEMANTIC_MEMORY_ENABLED`, with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on the four MCP tools — **not** with `SEMANTIC_SEARCH_ENABLED`. A deployment can run document search with memory off, or memory with document search off. The memory reads, `recall` included, live under `/memory` and mount with `SEMANTIC_MEMORY_ENABLED`.
 
 **Scope rules.** Memory is blocked on shared repositories. `remember` and `update-memory` are additionally blocked on subgraphs — a subgraph exists to be cheap to create and throw away, so memories belong on the parent graph — while `forget` stays open so existing memories remain removable.
 
@@ -297,13 +300,19 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/memory/recall" \
 A `search-documents` hit (`SearchHit`) includes the fields you need to rank and drill in:
 
 - `document_id` — pass this to `get-document-section`
-- `score` — relevance score
-- `section_label`, `section_id`, `parent_document_id`
-- `snippet` — highlighted match text (falls back to the section label)
-- `source_type`, `document_title`, `tags`, `folder`
-- SEC-specific: `entity_ticker`, `entity_name`, `form_type`, `fiscal_year`, `filing_date`, `element_qname`, `xbrl_elements`
+- `score`, `source_type`
+- `section_label`, `section_id`, and, for a section stored in parts, `parent_document_id`, `part` / `part_count` and `next_document_id`
+- `snippet` — an excerpt around the match (falling back to the section label), not the passage; read the section before quoting a figure from it
+- `content_length`, and `content_url` for the CDN-hosted clean text when available
+- `document_title`, `tags`, `folder` — your own documents
+- SEC-specific: `entity_ticker`, `entity_name`, `form_type`, `fiscal_year`, `filing_date`, `accession_number`, `element_qname`, `xbrl_elements`
+- `also_in_filings` — on a grouped search, how many other filings of the same section were folded into this hit
 
-A `get-document-section` response (`DocumentSection`) adds the full `content` string plus context such as `graph_id`, `entity_cik`, `fiscal_period`, and `accession_number`. A `content_url` is included when available.
+Around the hits, the response carries `query`, `graph_id` and `total` — the matching documents before any grouping, as OpenSearch counts them (it stops counting at 10,000), not the number of distinct results a grouped search can page through.
+
+The MCP tool trims what the model reads: it drops null fields and `xbrl_elements`, and a filing field that every hit shares (`entity_ticker`, `entity_name`, `form_type`, `filing_date`, `fiscal_year`, `accession_number`) moves once to the result root; when the hits span filings it stays on each hit.
+
+A `get-document-section` response (`DocumentSection`) adds the `content` string plus context such as `graph_id`, `entity_cik`, `fiscal_period`, `accession_number`, `xbrl_elements` and `content_url`. Over MCP, `content` is one window, with `offset`, and `next_offset` while more of the part follows.
 
 The authoritative, machine-readable definition of every field lives in the OpenAPI spec — see [API reference](https://robosystems.ai/docs/api).
 
@@ -346,7 +355,7 @@ Document content is excluded from the search response body, so when there are no
 
 ## Self-hosted deployments
 
-**Flags and OpenSearch.** `SEMANTIC_SEARCH_ENABLED` gates the documents router and all seven search/document MCP tools (`search-documents`, `get-document-section`, `create-document`, `update-document`, `delete-document`, `get-document`, `list-documents`) at once. The search router itself mounts when either `SEMANTIC_SEARCH_ENABLED` **or** `SEMANTIC_MEMORY_ENABLED` is on, because it hosts memory `recall` too. OpenSearch must be reachable at `OPENSEARCH_URL` (default `http://localhost:9200`).
+**Flags and OpenSearch.** `SEMANTIC_SEARCH_ENABLED` gates document search, the documents router and all seven search/document MCP tools (`search-documents`, `get-document-section`, `create-document`, `update-document`, `delete-document`, `get-document`, `list-documents`) at once. Memory, `POST /memory/recall` included, mounts with `SEMANTIC_MEMORY_ENABLED` instead. OpenSearch must be reachable at `OPENSEARCH_URL` (default `http://localhost:9200`).
 
 If search returns 503, confirm the routes are mounted with `curl -s http://localhost:8000/openapi.json | jq '.paths | keys | map(select(test("/search")))'` and that OpenSearch answers with `curl http://localhost:9200`. `grep SEMANTIC_SEARCH_ENABLED .env.local` is not a useful check — the flag defaults to `true` and ships commented out, so no output means the default applies, not that the feature is off. Set `SEMANTIC_SEARCH_ENABLED=true`, ensure OpenSearch is reachable, then `just restart`.
 

@@ -36,6 +36,10 @@ Two SDKs are generated from the OpenAPI specification:
 
 Source: [robosystems-python-client](https://github.com/RoboFinSystems/robosystems-python-client) and [robosystems-typescript-client](https://github.com/RoboFinSystems/robosystems-typescript-client).
 
+The current major for both is **2** — 2.0.0 shipped on 2026-09-20 — and the integration template pins `robosystems-client>=2,<3`.
+
+Beside the OpenAPI-generated operations, both SDKs carry a typed GraphQL client for the extensions reads, generated from the per-graph GraphQL schema rather than from OpenAPI. You reach it through the facade clients (`LedgerClient`, `InvestorClient`, and the rest), which return typed results rather than raw JSON.
+
 The SDKs are regenerated as the API changes, so an operation can reach the API shortly before it reaches a released SDK. Until then it is callable through the SDK's authenticated HTTP client directly (the [integration template](https://github.com/RoboFinSystems/robosystems-integration-template)'s `raw_operation` is an example).
 
 ## The Two-Tier SDK Contract
@@ -49,17 +53,17 @@ The stable tier is what integrations are built on. Breaking any of it costs the 
 - **Python** (`robosystems_client`): the facade clients (`robosystems_client.clients`), the root exports, the error classes, the auth configuration, and every symbol the [integration template](https://github.com/RoboFinSystems/robosystems-integration-template) imports — `AuthenticatedClient`, `types.UNSET`, the six emit operations `create_file_upload`, `ingest_file`, `materialize`, `create_event_block`, `assert_metrics`, `create_taxonomy_block`, and their request models (`FileUploadRequest`, `IngestFileOp`, `MaterializeOp`, `CreateEventBlockRequest`, `AssertMetricsRequest`, `CreateTaxonomyBlockRequest`).
 - **TypeScript** (`@robosystems/client`): the facade clients and their subpath exports (`/clients`, `/ledger`, `/investor`, `/library`, `/query`, `/operations`, `/client`), the React hooks, the error classes, the auth configuration, and the types those signatures expose through `/types`.
 
-The integration template's emitters define the Python stable set: the way an operation joins the stable tier is by being used there. The template's `src/integration/emit/*.py` is the authoritative list.
+The integration template's emitters define the Python stable set: the way an operation joins the stable tier is by being used there. The template's `src/integration/emit/*.py` is the authoritative list of operations, and `src/integration/client.py` is where it imports `AuthenticatedClient`.
 
 ### Generated tier — tracks the API, moves on a minor release
 
 Everything else the OpenAPI specification produces — the rest of `robosystems_client.api.*` and `robosystems_client.models.*` in Python, and the `/sdk` export in TypeScript — tracks the API surface. Operations there can be added, renamed, or removed on a **minor** release, and every removal is named in that release's notes.
 
-One detail matters for the generated tier: in the Python SDK, an operation's module path comes from its tag in the OpenAPI specification (for example `robosystems_client.api.robo_ledger_ledger_events.create_event_block`). A generated function can therefore move between modules when the API regroups its operations. Import from the stable set where you can.
+One detail matters for the generated tier: in the Python SDK, an operation's module path comes from its tag in the OpenAPI specification (for example `robosystems_client.api.robo_ledger_ledger_events.create_event_block`). A generated function can therefore move between modules when the API regroups its operations. A regroup that moves only generated-tier operations rides a minor release; one that moves a stable-tier operation — any of the six emit operations — is a major, which is what 2.0.0 was. Import from the stable set where you can.
 
 ## Pinning
 
-- **Building on the stable tier** (the facades, or the integration template's emit path): pin to the current major — for example `robosystems-client>=N,<N+1` in Python or `^N` in npm, where `N` is the major you tested against. The integration template's `pyproject.toml` shows the pin it uses.
+- **Building on the stable tier** (the facades, or the integration template's emit path): pin to the current major — `robosystems-client>=2,<3` in Python or `^2` in npm today, or in general `>=N,<N+1` / `^N` for the major you tested against. The integration template's `pyproject.toml` shows the pin it uses.
 - **Depending on a generated-tier operation outside the stable set**: pin a minor range (`>=N.M,<N.M+1`, or `~N.M` in npm) and read the release notes before widening it. If you want that operation frozen, ask for it to be promoted into the stable set by opening an issue on the client repository.
 
 ## Where Release Notes Live

@@ -130,10 +130,12 @@ A tier determines the instance size, storage budget, subgraph capacity, backup l
 **Instance type, RAM, vCPU, max subgraphs, storage limit, API rate multiplier and backup retention
 are served, not documented here.** Call **`GET /v1/graphs/tiers`** for the per-tier limits as the
 platform enforces them, **`GET /v1/offering`** for the same set alongside public pricing, or see
-**[robosystems.ai/pricing](https://robosystems.ai/pricing)**. All are computed from
+**[robosystems.ai/pricing](https://robosystems.ai/pricing)**. The limits are computed from
 [`.github/configs/graph.yml`](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)
 — the same file the GHA deployment layer uses to provision the instances and the application imports
-at runtime. A number in that response is a number the platform is actually enforcing.
+at runtime — and the prices and monthly credit allocations from
+[`robosystems/config/billing/core.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/billing/core.py).
+A number in that response is a number the platform is actually enforcing.
 
 Notes:
 
@@ -156,7 +158,7 @@ There are two flavors of graph:
 
 The fastest path to a working graph is the app: choose **Create Graph** on the Home page or in the graph selector at robosystems.ai. A RoboLedger graph can also come from roboledger.ai when you connect QuickBooks.
 
-Creating a graph starts a subscription on the organization's payment method, and only organization owners and admins can create one. Over the API, a caller without that role gets `403 graph_creation_requires_admin`, and an organization with no payment method gets `402 payment_required`.
+Creating a graph starts a subscription on the organization's payment method, and only organization owners and admins can create one. Over the API, a caller without that role gets `403 graph_creation_requires_admin`, an organization already holding as many graphs as its limit allows gets `403 graph_limit_reached`, and an organization with no payment method gets `402 payment_required`.
 
 ### Create an Entity Graph
 
@@ -260,7 +262,7 @@ And three that are about the platform rather than one graph: `GET /v1/graphs/tie
 
 ## Subgraphs
 
-A **subgraph** is an isolated child database that lives on the same instance as its parent. Subgraphs are useful for separating environments (dev / staging / prod), for holding agent scratch space and semantic memory, or for forking a copy of a parent's data.
+A **subgraph** is an isolated child database that lives on the same instance as its parent. Subgraphs are useful for separating environments (dev / staging / prod), for holding agent scratch space and structured working data, or for forking a copy of a parent's data. They do not hold semantic memory — that store lives on the parent graph (see below).
 
 ### What a Subgraph Shares (and Doesn't)
 
@@ -272,6 +274,7 @@ A **subgraph** is an isolated child database that lives on the same instance as 
 | **Instance / RAM / storage** | Shared with the parent (same EC2 instance) |
 | **LadybugDB database** | Its own, and **writable** — unlike the parent's |
 | **Extensions OLTP schema** | **None.** A subgraph is not an extensions tenant (see below) |
+| **Semantic memory** | **None of its own.** `remember` and `update-memory` are refused; memory lives on the parent |
 
 ### A Subgraph Is Not an Extensions Tenant
 
@@ -279,11 +282,12 @@ This is the single most important thing to know about subgraphs, and the relatio
 
 > **The main graph is read-only over Cypher and has an extensions surface. A subgraph is writable over Cypher and has none.**
 
-A subgraph is a **modality container** — a live, writable graph database for scratch work, knowledge, and agent memory. It is not a second copy of the product. Concretely:
+A subgraph is a **modality container** — a live, writable graph database for scratch work and knowledge kept as nodes. It is not a second copy of the product. Concretely:
 
 - **`POST /extensions/{parent}_{name}/graphql` returns `403`.** The request is refused outright rather than quietly resolved to the parent, so a query cannot silently read the wrong tenant's books. The check runs after authentication, so the denial stays attributable to a user.
 - **No extensions session can open against it.** The schema-name validator accepts `kg` plus hex only, and a subgraph ID contains an underscore — the exclusion is structural, not a rule someone has to remember to apply.
-- **Its MCP tool list is trimmed to an allowlist.** A subgraph inherits its parent's `schema_extensions` column (the subgraph service copies it), so without a cut it would advertise the parent's entire RoboLedger tool surface. Instead it advertises a short set: schema DDL, Cypher in both directions, per-graph memory, and navigation back out. Trimming happens over the assembled list rather than at each registration site, so a newly added OLTP tool is excluded by default.
+- **Its MCP tool list is trimmed to an allowlist.** A subgraph inherits its parent's `schema_extensions` column (the subgraph service copies it), so without a cut it would advertise the parent's entire RoboLedger tool surface. Instead it advertises a short set: schema DDL, Cypher in both directions, and navigation back out. Trimming happens over the assembled list rather than at each registration site, so a newly added OLTP tool is excluded by default.
+- **It has no semantic memory store of its own.** `remember` and `update-memory` are refused on a subgraph (`403` over REST, and absent from its MCP tool list) — store memories on the parent graph, or keep the data in the subgraph as nodes. `recall` and `forget` stay available, so anything stored on a subgraph earlier can still be read and removed.
 
 The inherited `schema_extensions` column is therefore best read as vestigial on a subgraph: it is copied for bookkeeping, and every surface that would act on it declines to.
 
@@ -311,11 +315,12 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/operations
   }'
 ```
 
-The resulting subgraph ID is `kg1234567890abcdef_dev`. Three further optional fields shape what you get:
+The resulting subgraph ID is `kg1234567890abcdef_dev`. Two further optional fields shape what you get:
 
-- **`subgraph_type`** — `static` (the default: the parent's base schema plus its extensions), `knowledge` (a knowledge-only schema), or `empty` (a bare database with no schema at all).
-- **`schema_extensions`** — override the extensions the subgraph gets; it inherits the parent's by default.
+- **`subgraph_type`** — `static` (the default: the parent's base schema plus the parent's extensions), `knowledge` (a knowledge-only schema), or `empty` (a bare database with no schema at all).
 - **`metadata`** — a free-form object stored with the subgraph, for your own labelling.
+
+The schema, extensions included, follows `subgraph_type` alone. The request model also carries a `schema_extensions` field, but create-subgraph does not read it, so do not rely on it to choose a subgraph's extensions.
 
 ### List Subgraphs
 
@@ -354,7 +359,7 @@ So how does data reach a main graph? It depends on what kind of graph it is — 
 - **Entity graphs (RoboLedger / RoboInvestor)** — write through the extensions command surface, `POST /extensions/{domain}/{graph_id}/operations/{op_name}`. Those writes land in the extensions PostgreSQL tenant schema, mark the graph stale, and are swept into the graph by the next materialization. The graph catches up; you never write to it directly.
 - **Custom graphs** — write through the staging and materialization pipeline: upload a file, ingest it to a staging table, materialize. See [Custom Graph Schema](Custom-Graph-Schema) and [File Uploads](File-Uploads).
 
-Regardless of tier, three classes of statement are refused on the query endpoint entirely: bulk operations (`COPY`, `LOAD`, `IMPORT`), administrative operations (`EXPORT`, `INSTALL`, `ATTACH`), and schema DDL (`CREATE`/`DROP`/`ALTER TABLE`). Graph schemas are immutable after creation so they stay consistent with their staging tables.
+Regardless of tier, three classes of statement are refused on the query endpoint entirely: bulk operations (`COPY`, `LOAD`, `IMPORT`), administrative operations (`EXPORT`, `INSTALL`, `ATTACH`), and schema DDL (`CREATE`/`DROP`/`ALTER TABLE`). A main graph's schema is fixed at creation so it stays consistent with its staging tables; a subgraph's schema is extended through the MCP tools `add-node-table` and `add-relationship-table`, not through the query endpoint.
 
 ### Querying with MCP
 
@@ -373,7 +378,7 @@ The tool set is not fixed — it is assembled from the graph's schema extensions
 
 `read-graph-cypher` is read-only: `CREATE`, `SET`, `DELETE`, `MERGE`, and `DROP`, along with `CALL db.` and `CALL apoc.`, are blocked — writes go through `write-graph-cypher`, which (like `add-node-table` and `add-relationship-table`) acts only on a subgraph and answers `subgraph_required` on a parent graph. `get-example-queries`, which returns sample queries tailored to a graph's schema, is contributed by the **RoboLedger extension** and is absent on a plain graph. Extension graphs add substantially more on top of this base. See [Custom Graph Schema](Custom-Graph-Schema) for a worked MCP example and [AI Operators and MCP](AI-Operators-and-MCP) for the full surface.
 
-**Connecting MCP to a subgraph gives you a deliberately smaller list.** Because a subgraph is not an extensions tenant, its tool list is trimmed to what is genuinely meaningful there: schema DDL, Cypher in both directions, per-graph memory, `get-graph-info`, and `list-subgraphs`. Tools that would need an OLTP schema or a materialization relationship are withheld rather than allowed to fail — the platform-lifecycle ones are the reason the cut exists, because they would otherwise fail *quietly by succeeding*, returning a confident sync status about a relationship the subgraph does not have.
+**Connecting MCP to a subgraph gives you a deliberately smaller list.** Because a subgraph is not an extensions tenant, its tool list is trimmed to what is genuinely meaningful there: schema DDL, Cypher in both directions, `get-example-queries` where the parent's extensions contribute it, `recall` and `forget` for anything stored there earlier, `get-graph-info`, and `list-subgraphs`. Tools that would need an OLTP schema or a materialization relationship are withheld rather than allowed to fail — the platform-lifecycle ones are the reason the cut exists, because they would otherwise fail *quietly by succeeding*, returning a confident sync status about a relationship the subgraph does not have.
 
 ## Crossing the Tenant Boundary
 
@@ -438,7 +443,7 @@ Names must be alphanumeric, 1–20 characters, with no hyphens or underscores.
 
 The main graph is read-only over Cypher because it is a projection, not a source of truth.
 
-**Solution:** Pick the write path that matches your graph. For an **entity graph**, write through `POST /extensions/{domain}/{graph_id}/operations/{op_name}` and let materialization carry it into the graph. For a **custom graph**, load through the staging and materialization pipeline. For scratch or agent-memory work, write to a **subgraph**, which supports full Cypher writes. See [Where Writes Go](#where-writes-go).
+**Solution:** Pick the write path that matches your graph. For an **entity graph**, write through `POST /extensions/{domain}/{graph_id}/operations/{op_name}` and let materialization carry it into the graph. For a **custom graph**, load through the staging and materialization pipeline. For scratch work, write to a **subgraph**, which supports full Cypher writes; semantic memory goes on the parent graph. See [Where Writes Go](#where-writes-go).
 
 ### Cypher Write Rejected on a Subgraph
 

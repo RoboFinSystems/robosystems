@@ -1,10 +1,12 @@
 # Build a Ledger Integration
 
-This tutorial posts business events from an external system into a RoboLedger graph, end to end: register the integration as a source, find the accounts to post to, check an event before sending it, capture it, approve it into the ledger, and read the result back. It is lane 1 of the three integration lanes — see [Building Custom Integrations](Building-Custom-Integrations#the-three-lanes).
+A ledger integration posts business events from an external system into a RoboLedger graph, and this tutorial builds one end to end. It registers the integration as a source, finds the accounts to post to, checks an event before sending it, captures it, approves it into the ledger, and reads the result back. It is lane 1 of the three integration lanes — see [Building Custom Integrations](Building-Custom-Integrations#the-three-lanes).
 
 The running example is **Driftline**, a fictional invoicing app used by a fictional design studio, **Harbor & Pine Studio**. Each invoice Driftline issues becomes a sales event in the studio's books: debit Accounts Receivable, credit Revenue.
 
 Every step is shown twice: as `curl`, and as Python using the [`robosystems-integration-template`](https://github.com/RoboFinSystems/robosystems-integration-template), whose emitters wrap the [`robosystems-client`](https://pypi.org/project/robosystems-client/) SDK.
+
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
 ## Table of Contents
 
@@ -181,7 +183,7 @@ The fields that matter:
 | `amount` | Integer **cents**, signed from the studio's point of view: inflows positive, outflows negative |
 | `metadata` | The handler's input. For the journal-entry handler: `posting_date`, `memo`, and at least two `line_items`, each naming one `element_id` and exactly one of `debit_amount` / `credit_amount` in cents. Debits must equal credits |
 
-Optional fields include `agent_id` (the counterparty, once you have created one), `effective_at` (an accounting date different from `occurred_at`), and `dimension_ids`. The full model is `CreateEventBlockRequest` in the [API reference](https://robosystems.ai/docs/api).
+Optional fields include `agent_id` (the counterparty, once you have created one), `effective_at` (an accounting date different from `occurred_at`), and `dimension_ids`. The full model is `CreateEventBlockRequest` in the [API reference](https://robosystems.ai/docs/extensions).
 
 ## Step 4: Preview It
 

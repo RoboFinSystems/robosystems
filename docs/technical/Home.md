@@ -72,7 +72,7 @@ The financial-content model underneath the products. Each concept page has a ref
 - **[Event Block Reference](Event-Block-Reference)** - Fields, vocabularies, transitions, handlers, errors
 - **[Taxonomy & Frameworks](Taxonomy-and-Frameworks)** - The rs-gaap and fac frameworks, the library, and the Taxonomy Block
 - **[Reporting & Rendering](Reporting-and-Rendering)** - The calc-DAG, what the renderer derives, reporting styles, views
-- **[Serialization & Export](Serialization-and-Export)** - Tavi, holon and XBRL exports, and reading them without the platform
+- **[Serialization & Export](Serialization-and-Export)** - Holon, Tavi and XBRL exports, and reading them without the platform
 
 ## Run It Yourself
 
@@ -91,7 +91,7 @@ Running, deploying, and operating your own stack.
 
 Hands-on walkthroughs against a local stack.
 
-- **[RoboLedger Demos](RoboLedger-Demo-Walkthrough)** - Synthetic-data and Seattle Method XBRL demos
+- **[RoboLedger Demos](RoboLedger-Demo-Walkthrough)** - The synthetic Cascade demo and the Driftline and Cadence showcase scenarios
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query real SEC financial filings
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Design, build, and query a custom graph
 

@@ -1,6 +1,6 @@
 # Document Management
 
-This guide shows you how to manage the institutional-knowledge document store that lives over each user graph — an entity graph or a custom graph alike — uploading policies, procedures, and notes as markdown, and feeding them into the search and retrieval layer your AI agents read from. Documents live in PostgreSQL as the source of truth and are projected into OpenSearch as a sectioned, searchable index.
+Every graph you own carries a document store for policies, procedures and notes, written as markdown and indexed for search. This page covers managing it over each user graph — an entity graph or a custom graph alike — and feeding it into the search and retrieval layer your AI Operators read from. Documents live in PostgreSQL as the source of truth and are projected into OpenSearch as a sectioned, searchable index.
 
 **Quick Start:** Create a markdown document with `POST /v1/graphs/{graph_id}/operations/index-document` (or the `create-document` MCP tool), and it is automatically split into sections and indexed for search. Creation, update, and deletion are **content operations**; the REST surface at `/v1/graphs/{graph_id}/documents` is read-only (list and get).
 
@@ -227,9 +227,9 @@ The same document operations are exposed as MCP tools for agent-driven workflows
 | `get-document` | Fetch one document |
 | `list-documents` | List documents in the active graph |
 | `search-documents` | Search the document index (returns a `document_id` per hit) |
-| `get-document-section` | Fetch a full section by the id returned from search |
+| `get-document-section` | Read a section by the id returned from search, a window at a time |
 
-`search-documents` returns a `document_id` per hit; pass it to `get-document-section` for the full section text. Semantic (KNN) search is opt-in; the default mode is BM25 full-text. The MCP retrieval tools are documented alongside the rest of the search surface in [Search and AI Retrieval](Search-and-AI-Retrieval).
+`search-documents` returns a `document_id` per hit; pass it to `get-document-section` to read the section. Semantic (KNN) search is opt-in; the default mode is BM25 full-text. The MCP retrieval tools are documented alongside the rest of the search surface in [Search and AI Retrieval](Search-and-AI-Retrieval).
 
 ## Semantic Memory Is a Separate Surface
 

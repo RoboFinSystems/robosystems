@@ -1,6 +1,6 @@
 # Bootstrap Guide
 
-This guide walks you through bootstrapping a fresh fork of RoboSystems.
+Bootstrap a fork of RoboSystems into your own AWS account: GitHub OIDC roles, secrets and feature flags, the first deploy, releases, and the frontend apps.
 
 ## Table of Contents
 
@@ -10,9 +10,12 @@ This guide walks you through bootstrapping a fresh fork of RoboSystems.
 - [Bootstrap](#bootstrap)
 - [SSM Parameters & Secrets Manager](#ssm-parameters--secrets-manager)
 - [Deploy](#deploy)
+- [Turn On What You Need](#turn-on-what-you-need)
+- [CI/CD and Releases](#cicd-and-releases)
 - [Multi-Repository Setup](#multi-repository-setup)
 - [API Access Modes](#api-access-modes)
 - [Frontend App Deployment](#frontend-app-deployment)
+- [SES Email Identity](#ses-email-identity)
 - [Troubleshooting](#troubleshooting)
 - [Quick Reference](#quick-reference)
 
@@ -84,11 +87,13 @@ just bootstrap robosystems-sso eu-west-1    # Custom profile AND region
 
 Bootstrap handles everything:
 1. Deploys OIDC federation CloudFormation stack
-2. Sets GitHub variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`)
+2. Sets GitHub variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`) here, and the same three on the frontend app repos and the Marketplace repo (see [Multi-Repository Setup](#multi-repository-setup))
 3. Prompts for the CloudWatch alert email (`AWS_SNS_ALERT_EMAIL`)
 4. Creates ECR repository for Docker images
 5. Creates `.envrc` for automatic profile/region selection
 6. Prompts to run `setup-aws` (application secrets) and `setup-gha` (deployment variables)
+
+**Re-running is safe.** The OIDC stack is applied through a change set you review before anything changes, and a stack that already matches the template is left alone. Step 6 runs on the first bootstrap only, because `setup-gha` re-asserts every repository variable and would reset a live account's sizing and toggles; to include it in a re-run, pass the flag to the script directly: `bin/setup/bootstrap.sh --with-app-config`. After editing `cloudformation/bootstrap-oidc.yaml`, `just bootstrap-oidc` re-applies the roles and identity variables and touches nothing else.
 
 **The alert email is required.** Bootstrap auto-detects it from your SSO user where it can, but exits with an error if you leave it blank — CloudWatch alarms need a destination before you deploy. AWS sends a confirmation email you must accept to activate the subscription.
 
@@ -98,6 +103,7 @@ Bootstrap handles everything:
 - OIDC Identity Provider for GitHub Actions
 - IAM Role: `RoboSystemsGitHubActionsRole` (backend deployments)
 - IAM Role: `RoboSystemsGitHubActionsFrontendRole` (frontend app deployments)
+- IAM Role: `RoboSystemsGitHubActionsMarketplaceRole` (the AWS Marketplace signup portal)
 - IAM Role: `RoboSystemsAppSuperAdminRole` (application admin via SSO)
 - ECR Repository with lifecycle policy
 - SES email identity for your domain (DKIM verified, production access requested)
@@ -153,6 +159,8 @@ While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, 
 - During bootstrap (prompted) - the recommended path since you opt-in to each step
 - Standalone via `just setup-gha` if you skipped during bootstrap
 
+**On a live account, review first.** `setup-gha` re-asserts every repository variable it manages to the value in `bin/setup/gha.sh`, so a re-run resets sizing and toggles you have changed since. Edit the script, or set individual variables with `gh variable set`, rather than re-running it blind.
+
 **Note:** Workflows have sensible defaults. You can skip this during bootstrap for basic deployments and run it later when you need custom infrastructure sizing, staging environment, or production features (WAF, Multi-AZ, etc.).
 
 For the security and compliance toggles (WAF, CloudTrail, the detective baseline, audit retention), see [Security & Compliance](Security-and-Compliance). The Security Baseline needs a `just bootstrap` re-run before its first enable so the deploy role picks up the required IAM grants.
@@ -184,6 +192,12 @@ robosystems/{env}                      # Single JSON secret per environment
   ├── INTUIT_CLIENT_SECRET
   ├── INTUIT_ENVIRONMENT               # "production" or "sandbox"
   ├── INTUIT_REDIRECT_URI
+  ├── MERCURY_CLIENT_ID                # Mercury bank feed (optional)
+  ├── MERCURY_CLIENT_SECRET
+  ├── MERCURY_ENVIRONMENT              # "production" or "sandbox"
+  ├── PLAID_CLIENT_ID                  # Plaid bank feed (optional)
+  ├── PLAID_SECRET
+  ├── PLAID_ENVIRONMENT                # "production" or "sandbox"
   ├── SEC_GOV_USER_AGENT               # SEC EDGAR API identification
   ├── OPENFIGI_API_KEY                 # OpenFIGI security resolution
   ├── STRIPE_SECRET_KEY                # Stripe billing
@@ -206,7 +220,9 @@ robosystems/{env}
   └── ENTERPRISE_ORG_ID                # The single org this deployment's SSO/SCIM surface serves
 ```
 
-They are absent rather than placeheld on purpose: boot validation refuses to start with `SSO_OIDC_ENABLED=true` and an unconfigured connection, and a placeholder string would satisfy that check with garbage instead of failing loudly. The full enablement sequence is in [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM).
+The bank-feed keys are seeded as placeholders and matter only if you turn a feed on: Mercury and Plaid are off by default behind `CONNECTION_MERCURY_ENABLED` and `CONNECTION_PLAID_ENABLED`.
+
+The SSO keys are absent rather than placeheld on purpose: boot validation refuses to start with `SSO_OIDC_ENABLED=true` and an unconfigured connection, and a placeholder string would satisfy that check with garbage instead of failing loudly. The full enablement sequence is in [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM).
 
 **Managing secrets:**
 ```bash
@@ -273,7 +289,7 @@ just ssm-set prod tuning/cache/BALANCE_TTL 600
 
 **Override priority:** Environment Variable > SSM Parameter > Default Value
 
-Tuning parameters can be adjusted at runtime without redeployment. Changes take effect within the application's cache TTL (typically 5 minutes).
+**Feature flags are read once, at process start.** After `just ssm-set` on a `features/` parameter, restart the services that read it — the **Service Refresh** workflow (`service-refresh.yml`) restarts the API, Dagster and worker services without a deploy, and any deploy restarts them too. Tuning parameters are different: they can be adjusted at runtime without a restart, and changes take effect within the application's cache TTL (typically 5 minutes).
 
 ## Deploy
 
@@ -290,15 +306,56 @@ just tunnel prod all    # Connect to all services
 # Dagster at http://127.0.0.1:18002
 ```
 
+## Turn On What You Need
+
+A fresh environment comes up with its product surfaces off. `just setup-aws` seeds these flags `false` (most default to `true` in code), so each is an explicit opt-in:
+
+| Flag | Turns on |
+|------|----------|
+| `ROBOLEDGER_ENABLED` | RoboLedger operations and its GraphQL fields |
+| `ROBOINVESTOR_ENABLED` | RoboInvestor operations and its GraphQL fields |
+| `EXTENSIONS_GRAPHQL_ENABLED` | The GraphQL read endpoint (`/extensions/{graph_id}/graphql`) |
+| `FACT_GRID_ENABLED` | The analytical view operations (fact grid, statement analysis, disclosures, filing text) |
+| `CONNECTIONS_ENABLED` | Data connections, with one flag per provider: `CONNECTION_QUICKBOOKS_ENABLED`, and the bank feeds `CONNECTION_MERCURY_ENABLED` / `CONNECTION_PLAID_ENABLED` |
+| `SEC_PIPELINE_ENABLED` | The SEC ingestion pipeline in Dagster |
+| `USER_REGISTRATION_ENABLED` | Self-service sign-up — seeded `false` on prod, `true` on staging |
+
+```bash
+just ssm-set prod features/ROBOLEDGER_ENABLED true
+just ssm-set prod features/EXTENSIONS_GRAPHQL_ENABLED true
+```
+
+Flags are read when a process starts, so restart the services afterwards — run the **Service Refresh** workflow, or deploy. `just ssm-list prod features` shows the full set, including the identity and billing flags covered elsewhere on this page.
+
+## CI/CD and Releases
+
+**Pull requests** run `test-ci.yml` (the test suite and code-quality checks via `test.yml`), also on every push to `main`. Jobs run on GitHub-hosted runners unless the `RUNNER_LABELS` variable names self-hosted ones; pull requests from forks always use GitHub-hosted runners.
+
+**Releases** are cut from `main`:
+
+```bash
+just create-release patch            # or minor / major; deploys to staging by default
+just create-release minor all        # staging, then prod
+```
+
+This dispatches `create-release.yml`, which bumps the version on `main`, cuts a `release/<version>` branch, and calls `tag-release.yml` to tag `v<version>` and publish the GitHub release. The release body is a Claude-generated changelog of the changes since the last tag; for a milestone, commit hand-written notes to `.github/release-notes/v<version>.md` before dispatching and they replace it. The deploy target (`staging`, `prod`, `all` or `none`) then dispatches `staging.yml` and/or `prod.yml` at the tag.
+
+**Deploys** are always a manual dispatch of `staging.yml` or `prod.yml`. `just deploy <env> [ref]` dispatches one for the current branch or tag, or the ref you name. **Service Refresh** (`service-refresh.yml`) restarts running services without deploying.
+
+**Docs**: `publish-docs.yml` publishes the product docs (`docs/product/`) and the wiki to a docs bucket. It runs only when the `DOCS_BUCKET` and `DOCS_BASE_URL` variables are set, so a fork that doesn't publish docs can ignore it.
+
 ## Multi-Repository Setup
 
-The OIDC stack creates three roles:
+The OIDC stack creates four roles:
 
 | Role | Repositories / Users | Permissions |
 |------|----------------------|-------------|
 | `RoboSystemsGitHubActionsRole` | `robosystems` | Full infrastructure |
 | `RoboSystemsGitHubActionsFrontendRole` | `robosystems-app`, `roboledger-app`, `roboinvestor-app`, `xbrlkit-viewer` | Limited frontend |
+| `RoboSystemsGitHubActionsMarketplaceRole` | `robosystems-marketplace` | The AWS Marketplace signup portal's own stacks only |
 | `RoboSystemsAppSuperAdminRole` | SSO users (via IAM Identity Center) | Application admin only (no infra) |
+
+The Marketplace role is created with the stack whether or not you use it. Bootstrap pushes its identity variables only when the Marketplace repository exists and your `gh` account can reach it, and skips it with a warning otherwise.
 
 The frontend repos hold no AWS access of their own. `just bootstrap` in the
 backend sets each one's `AWS_ROLE_ARN`, `AWS_ACCOUNT_ID` and `AWS_REGION`
@@ -362,9 +419,17 @@ just deploy prod
 
 ## Frontend App Deployment
 
-Frontend apps (robosystems-app, roboledger-app, roboinvestor-app) are 99% client-side Next.js applications deployed on **AWS App Runner behind CloudFront**.
+Frontend apps (robosystems-app, roboledger-app, roboinvestor-app) are 99% client-side Next.js applications deployed on **AWS App Runner behind CloudFront** by default.
 
-**Note:** Unlike the API, frontend apps don't have an `internal` mode - App Runner is always internet-facing. Use the API's internal mode if you need VPC-only access for microservice/extension use cases.
+**New AWS accounts: use ECS Express.** App Runner is closed to new customers, so an account that has never used it cannot create the service. Set the compute route before the first deploy, in each app repo:
+
+```bash
+gh variable set APP_COMPUTE --body ecs-express    # or APP_COMPUTE_PROD / APP_COMPUTE_STAGING
+```
+
+Unset, `APP_COMPUTE` means `apprunner`. Either route sits behind CloudFront, and the `CPU_*` / `MEMORY_*` variables stay in App Runner form for both.
+
+**Note:** Unlike the API, frontend apps don't have an `internal` mode - the app service is always internet-facing. Use the API's internal mode if you need VPC-only access for microservice/extension use cases.
 
 ### Access Modes
 
@@ -464,6 +529,11 @@ echo 'export AWS_REGION=us-east-1' >> .envrc && direnv allow
 # Bootstrap
 just bootstrap                    # Default profile/region
 just bootstrap my-sso eu-west-1   # Custom profile AND region
+just bootstrap-oidc               # Re-apply the OIDC roles + identity variables only
+bin/setup/bootstrap.sh --with-app-config   # Re-run, including secrets + GitHub variables
+
+# Release
+just create-release patch         # Version bump, release branch, tag; deploys staging
 
 # Deploy
 just deploy prod                  # Production (~20-30 min initial)
@@ -483,7 +553,7 @@ just ssm-set prod tuning/cache/BALANCE_TTL 600
 
 # Optional / Re-run individually
 just setup-aws                    # Secrets, feature flags, tuning params
-just setup-gha                    # Full GitHub variable control
+just setup-gha                    # Full GitHub variable control (re-asserts every variable)
 just setup-bedrock                # Local AI/Bedrock development
 just bootstrap-ecr-lifecycle      # Re-apply the ECR image lifecycle policy
 

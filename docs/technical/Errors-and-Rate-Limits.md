@@ -2,6 +2,8 @@
 
 Every RoboSystems endpoint reports failure the same way: a non-2xx status and a small JSON body with a `detail` and a `request_id`. This page covers that body, what each status code means for an integrator and what to do about it, the rate-limit headers and 429 response, and the response an AI operation returns when a graph runs out of credits.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [The Error Body](#the-error-body)
@@ -27,7 +29,7 @@ An error response carries two keys:
 }
 ```
 
-- **`detail`** is usually a human-readable string. Some errors carry an object instead, with a machine-readable `code` and fields specific to the failure (see [Typed Error Codes](#typed-error-codes)). Always read it as `body["detail"]` and check its type.
+- **`detail`** is usually a human-readable string. Some errors carry an object instead, in one of two shapes, each with a machine-readable `code` (see [Typed Error Codes](#typed-error-codes)). Always read it as `body["detail"]` and check its type.
 - **`request_id`** identifies this request in the platform's logs. The same value is sent as the `X-Request-ID` response header on every response, success or failure.
 
 **Request validation (422)** adds a `code`. When a body or parameter fails schema validation — a missing required field, a wrong type, a value outside its allowed pattern — the response is:
@@ -42,13 +44,13 @@ An error response carries two keys:
 
 `detail` joins every failing field as `field.path: message`, separated by `; `. A 422 without `code: "VALIDATION_ERROR"` is a business-rule refusal from the operation itself (a closed period, an unbalanced entry, an invalid status transition) — the request was well-formed, and `detail` says what to change.
 
-**Unexpected server errors (500)** never leak internals. The body is always:
+**Unexpected server errors (500).** An exception no handler anticipated answers with a generic body:
 
 ```json
 { "detail": "Internal server error", "request_id": "…" }
 ```
 
-The `request_id` is how that error is found — see [Quoting a Request ID](#quoting-a-request-id).
+A route that catches its own failure may instead return a short message of its own, such as `"Failed to cancel operation"`, still with the `request_id`. Either way, the `request_id` is how that error is found — see [Quoting a Request ID](#quoting-a-request-id).
 
 The SCIM provisioning surface (`/scim/v2`) is the one exception to this shape: it answers in the RFC 7644 error format that identity providers expect. See [Enterprise SSO and SCIM](Enterprise-SSO-and-SCIM).
 
@@ -57,9 +59,9 @@ The SCIM provisioning surface (`/scim/v2`) is the one exception to this shape: i
 | Status | Meaning | What to do |
 | --- | --- | --- |
 | **400** | The request is well-formed but not acceptable as asked — a required pairing missing, a confirmation that doesn't match, an option the resource doesn't support | Fix the request per `detail`. Do not retry unchanged |
-| **401** | No valid credential — the `X-API-Key` header is missing, malformed, revoked, or expired | Check the header name and the key. Do not retry until fixed |
+| **401** | No valid credential — the `X-API-Key` header is missing, malformed, revoked, or expired, or a graph-scoped key was sent to a route without a graph id | Check the header name, the key, and its scope. Do not retry until fixed |
 | **402** | Payment is required for this action — no payment method on the organization, or the graph has no credits for an AI operation | See [Insufficient Credits](#insufficient-credits). Not retryable until an owner acts |
-| **403** | Authenticated, but not allowed — no access to this graph, a role too low for a write, a key scoped to a different graph, a feature not provisioned on this graph, or a write to a read-only shared repository | Check the graph id, the key's scope, and your role. A graph that does not exist also answers 403, so a typo in `graph_id` looks like this |
+| **403** | Not allowed — no access to this graph, a role too low for a write, a key scoped to a different graph, a feature not provisioned on this graph, or a write to a read-only shared repository. On a REST or MCP route with a `graph_id`, an API key that fails validation also answers 403, not 401 | Check the key is live, then the graph id, the key's scope, and your role. A graph that does not exist also answers 403, so a typo in `graph_id` looks like this |
 | **404** | The named resource doesn't exist in this graph — an event, a period, an operation whose records have expired | Check the id. For extension operations, a 404 can also mean the graph's RoboLedger or RoboInvestor data has not been initialized |
 | **409** | Conflict with current state. Three kinds: an `Idempotency-Key` in use or reused with a different body; a duplicate (an event with the same `source` + `external_id`, a connection that already exists); a row locked by another writer, such as a running sync ("Retry in a moment") | Read `detail`. Retry the lock case after a short delay; treat a duplicate as already done; fix the key for a key conflict |
 | **413** | The work is too large for the graph's tier, e.g. a materialization over its limits | Reduce the input or change tier |
@@ -76,7 +78,24 @@ Two patterns cover most integration code:
 
 ## Typed Error Codes
 
-Where a client needs to branch programmatically, `detail` is an object with a `code`:
+Where a client needs to branch programmatically, `detail` is an object with a `code`. Two object shapes occur.
+
+**The platform error object** — `detail` nests a message of its own, the code, and a timestamp:
+
+```json
+{
+  "detail": {
+    "detail": "API key not found or access denied",
+    "code": "NOT_FOUND",
+    "timestamp": "2026-10-05T14:05:11.204871+00:00"
+  },
+  "request_id": "…"
+}
+```
+
+Its `code` is one of a small fixed set: `NOT_FOUND`, `ALREADY_EXISTS`, `INVALID_INPUT`, `UNAUTHORIZED`, `INVALID_CREDENTIALS`, `FORBIDDEN`, `PROVIDER_ERROR`, `EXTERNAL_SERVICE_ERROR`, `OPERATION_FAILED`, `INTERNAL_ERROR`. Read the human-readable text at `detail.detail`.
+
+**Operation-specific objects** — a `code`, a `message`, and fields particular to the failure:
 
 ```json
 {
@@ -96,10 +115,11 @@ The codes an integrator is most likely to meet:
 | --- | --- | --- |
 | `VALIDATION_ERROR` | Any endpoint, 422 | Schema validation failed (top-level `code`, string `detail`) |
 | `INSUFFICIENT_CREDITS` | AI Operator endpoints, 402 | The graph's credit pool cannot cover the call |
-| `OPERATOR_FAILED`, `OPERATOR_CANCELLED` | AI Operator endpoints | The operator run failed or was cancelled |
-| `WRITE_BACK_FAILED`, `STATEMENT_STAMP_FAILED` | `close-period`, 422 | The close could not complete a publishing step; `detail` explains which |
+| `WRITE_BACK_FAILED`, `STATEMENT_STAMP_FAILED` | `close-period`, 422 | The close could not complete a publishing step; `detail.message` explains which |
 
-`close-period` also returns its blocking conditions as structured detail so a client can show what stands in the way of a close. Most other refusals are plain strings — branch on the status code first, then on `detail.code` when `detail` is an object.
+`close-period` also returns its blocking conditions as structured detail (`message` plus `blockers`) so a client can show what stands in the way of a close. Most other refusals are plain strings — branch on the status code first, then on `detail.code` when `detail` is an object.
+
+`OPERATOR_FAILED` and `OPERATOR_CANCELLED` are not error responses. When an AI Operator call waits for its run and the run fails or is cancelled, the call still answers **200**, and the code arrives in the body's `error_details` — the request succeeded; the run did not.
 
 ## GraphQL Errors
 
@@ -114,7 +134,20 @@ GraphQL at `/extensions/{graph_id}/graphql` follows GraphQL conventions rather t
 }
 ```
 
-Branch on `extensions.code` (`UNAUTHENTICATED`, `FORBIDDEN`, `INVALID_PAGINATION`, `LEDGER_NOT_INITIALIZED`, `INVESTOR_NOT_INITIALIZED`), not on `message`. An HTTP 401 or 403 from the GraphQL endpoint means the request was refused before any query ran. See [GraphQL Reads](GraphQL-Reads).
+Branch on `extensions.code`, not on `message`:
+
+| Code | Meaning |
+| --- | --- |
+| `UNAUTHENTICATED` | The query asked for data without a credential (anonymous requests may only introspect) |
+| `EXTENSION_NOT_PROVISIONED` | The graph does not have the extension the field belongs to |
+| `LEDGER_NOT_INITIALIZED`, `INVESTOR_NOT_INITIALIZED` | The graph's RoboLedger or RoboInvestor data has not been set up yet |
+| `INVALID_PAGINATION` | `limit` or `offset` out of range |
+| `INVALID_ARGUMENT`, `INVALID_PERIOD` | An argument failed a resolver-level check |
+| `INVALID_EXPIRES_IN`, `REPORT_BUNDLE_NOT_AVAILABLE`, `REPORT_BUNDLE_SIGNING_FAILED` | A report download link could not be issued |
+| `STATEMENT_TIMEOUT` | The read exceeded the per-statement time limit; narrow it |
+| `INTERNAL_ERROR` | An unexpected failure; the error's `extensions.requestId` is the value to quote |
+
+Access is not a GraphQL error code. An HTTP 401 (bad credential) or 403 (no access to the graph, or a subgraph id in the URL) from the GraphQL endpoint means the request was refused before any query ran. See [GraphQL Reads](GraphQL-Reads).
 
 ## Quoting a Request ID
 
@@ -142,7 +175,7 @@ Rate limits protect shared infrastructure from bursts. They are separate from cr
 
 **Where the numbers are.** The limits are configuration, served live rather than restated here:
 
-- `GET /v1/graphs/{graph_id}/limits` — the graph's `rate_limits` block (what the limiter enforces for its tier), alongside its storage, backup, and credit limits.
+- `GET /v1/graphs/{graph_id}/limits` — the graph's `rate_limits` block, alongside its storage, backup, and credit limits. That block reports one category, Cypher queries, for the graph's tier: `requests_per_minute` is the enforced budget, and `requests_per_hour` and `burst_capacity` restate it rather than add separate ceilings. Every other category's budget is in the `X-RateLimit-Limit` header of its own responses.
 - `GET /v1/offering` and `GET /v1/graphs/tiers` — each tier's `api_rate_multiplier`, and for shared repositories each plan's `rate_limits`.
 
 **Headers on a successful response.** Rate-limited endpoints report where you stand:

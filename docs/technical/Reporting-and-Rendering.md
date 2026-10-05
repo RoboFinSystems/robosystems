@@ -86,7 +86,7 @@ An Information Block carries facts plus the structure around them. A **View** is
 
 | View | What it shows | Where it comes from |
 | --- | --- | --- |
-| **Rendering** | Ordered statement rows with subtotals, depth, and one value per period | `view.rendering`, computed on the server (it needs the calc walk). Filled for the statement family, disclosures, metrics, and forecast blocks. |
+| **Rendering** | Ordered statement rows with subtotals, depth, and one value per period | `view.rendering`, computed on the server (it needs the calc walk). Filled for the statement family, disclosures, metrics, forecast blocks, and reconciliations (one column per period end). |
 | **Chart** | Panel and series configuration over the rendering's rows and periods | `view.chart`, computed on the server for metric blocks |
 | **Facts** | The raw fact list: element, period, unit, value | The envelope's `facts` |
 | **Elements** | The accounts and concepts the block is built from | The envelope's `elements` |
@@ -140,7 +140,7 @@ This is why a statement is a view, not a stored artifact: the Report holds facts
 
 ## How to Request a Rendered Report
 
-There are several addressable surfaces, depending on whether you want a saved Report, a live ad-hoc statement, or a slice of facts. All authenticated `curl` examples target `https://api.robosystems.ai` and send your API key from `$ROBOSYSTEMS_API_KEY` in the `X-API-Key` header; to get an account, a key, and a graph, see [Quick Start](Quick-Start). Replace `$GRAPH_ID` with your tenant graph id, or use `sec` for the shared SEC repository.
+There are several addressable surfaces, depending on whether you want a saved Report, a live ad-hoc statement, or a slice of facts. All authenticated `curl` examples target `https://api.robosystems.ai` and send your API key from `$ROBOSYSTEMS_API_KEY` in the `X-API-Key` header; to get an account, a key, and a graph, see [Quick Start](Quick-Start). Replace `$GRAPH_ID` with your tenant graph id. The read surfaces `build-fact-grid` and `financial-statement-analysis` also take `sec`, the shared SEC repository; `create-report` and `live-financial-statement` need a tenant graph with a RoboLedger ledger, so `sec` is not valid there.
 
 Full request/response schemas live in the [live OpenAPI spec](https://robosystems.ai/docs/api) — this page shows usage, not the full endpoint surface.
 
@@ -187,7 +187,7 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
 
 ### Render a Live Ad-Hoc Statement
 
-`live-financial-statement` renders straight off the OLTP ledger with no saved Report. It is **tenant-only** — rejected on shared-repository graphs like `sec`. Supported `statement_type` values are `income_statement`, `balance_sheet`, `cash_flow_statement`, and `equity_statement`.
+`live-financial-statement` renders straight off the OLTP ledger with no saved Report. It is **tenant-only** — rejected on shared-repository graphs like `sec`. Supported `statement_type` values are `income_statement`, `balance_sheet`, `cash_flow_statement`, and `equity_statement`. The MCP tool of the same name takes the first three and refuses `equity_statement`, because the live path renders equity balances rather than a rollforward; read the equity section of the balance sheet instead.
 
 ```bash
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/live-financial-statement" \
@@ -200,7 +200,7 @@ The cash-flow path on this surface needs at least two periods so the indirect-me
 
 ### From an MCP Client
 
-The same operations are exposed as MCP tools — `build-fact-grid`, `financial-statement-analysis`, and `live-financial-statement`. On a shared SEC repository graph, `financial-statement-analysis` takes a `ticker` and `statement_type` to pull a company's statement straight from the graph hypercube. They delegate to the same operations layer as the REST surface, so an AI assistant gets identical numbers. See the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) guide for MCP client setup.
+The same operations are exposed as MCP tools — `build-fact-grid`, `financial-statement-analysis`, and `live-financial-statement`. On a shared SEC repository graph, `financial-statement-analysis` takes a `ticker` and `statement_type` to pull a company's statement straight from the graph hypercube. They delegate to the same operations layer as the REST surface, so an AI assistant gets identical numbers. Connecting Claude, ChatGPT, or any MCP client is covered in [AI Operators & MCP](AI-Operators-and-MCP).
 
 ## The BlockView Frontend
 
@@ -215,7 +215,7 @@ If a rendered number is wrong, the fix is almost never in the renderer. It is in
 - **[Information Blocks](Information-Blocks)** - The data envelope, block types, FactSets, and the View projections at the data layer
 - **[Information Block Reference](Information-Block-Reference)** - Envelope fields and view projection status
 - **[RoboLedger Operations](RoboLedger-Operations)** - The command writes (`create-report`, `regenerate-report`, period close) that produce the facts this page renders
-- **[Serialization & Export](Serialization-and-Export)** - Exporting and distributing rendered reports (iXBRL, package sharing)
+- **[Serialization & Export](Serialization-and-Export)** - Downloading a published report as the holon, Tavi, or XBRL 2.1 (there is no iXBRL output)
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query the SEC graph that `build-fact-grid` and `financial-statement-analysis` run against
 - **[Architecture Overview](Architecture-Overview)** - How the reporting layer fits the broader platform
 

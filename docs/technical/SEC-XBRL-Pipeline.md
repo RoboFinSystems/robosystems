@@ -1,6 +1,12 @@
 # Getting Started with the SEC XBRL Pipeline
 
-This guide shows you how to load SEC financial data locally and query it using the RoboSystems platform.
+The SEC XBRL pipeline turns EDGAR filings into the `sec` graph: the hosted repository you subscribe to, or a copy you load and query on your own stack.
+
+## On the hosted platform
+
+Using SEC data needs none of this page. Subscribe to the SEC repository from **Repositories** in the app at robosystems.ai, then connect Claude, ChatGPT, or any MCP client to `https://api.robosystems.ai/v1/graphs/sec/mcp` — or skip the address and add RoboSystems SEC from Claude's connector directory or the ChatGPT plugin directory. Plans and access are on [Shared Repositories](Shared-Repositories); clients, sign-in, and the tool list are on [AI Operators & MCP](AI-Operators-and-MCP). How current the hosted graph is: [How fresh is the hosted sec graph](#how-fresh-is-the-hosted-sec-graph).
+
+The rest of this page runs the pipeline on your own stack, where loading filings is free.
 
 **Quick Start:** Run `just demo-sec` to automatically set up everything and see your data in action within minutes!
 
@@ -17,11 +23,7 @@ The SEC local pipeline allows you to:
 
 ## Prerequisites
 
-Before starting, ensure you have:
-
-- Docker running locally
-- RoboSystems development environment set up
-- Services started with `just start`
+A running local stack (`just start`) — setup, the demo user, and the local-only tools are on [Local Development](Local-Development).
 
 ## Quick Start
 
@@ -75,15 +77,16 @@ The SEC plans are `starter` and `advanced`. The repository-prefixed spellings `s
 
 ### The full corpus, prebuilt: `just sec-dump`
 
-`just demo-sec` builds a graph for one ticker and year from EDGAR. If you want the **entire corpus** — every XBRL filing since January 2024, ~8,400 filers and 77 million facts — the same file that backs the hosted `sec` graph is published monthly as one LadybugDB file on Hugging Face: [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs).
+`just demo-sec` builds a graph for one ticker and year from EDGAR. If you want the **entire corpus** — every XBRL filing since January 2024 — a snapshot of the file that backs the hosted `sec` graph is published periodically as one LadybugDB file on Hugging Face: [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs). A snapshot is a point in time; the hosted graph keeps moving after it (see [How fresh is the hosted sec graph](#how-fresh-is-the-hosted-sec-graph)).
 
 ```bash
-just sec-dump                # ~35 GiB download → data/lbug-dbs/sec.lbug (~128 GiB); restarts graph-api if it is running
+just sec-dump                # download → data/lbug-dbs/sec.lbug; restarts graph-api if it is running
 just sec-dump --force        # replace an existing sec.lbug (for example one built by demo-sec)
+just sec-dump --keep-archive # keep the downloaded .zst after decompression
 just sec-dump-no-restart     # same, without the graph-api restart
 ```
 
-It downloads `sec.lbug.zst` (resumable), verifies the archive's checksum and recorded size while decompressing, lands `sec.lbug` in the directory the stack mounts, removes a stale `.wal`, deletes the archive, and warns if the engine that wrote the dump differs from the `ladybug` version this checkout pins. Budget ~165 GiB free during decompression, and real time — it is 128 GiB on disk.
+It downloads `sec.lbug.zst` (resumable), verifies the archive's checksum and recorded size while decompressing, lands `sec.lbug` in the directory the stack mounts, removes a stale `.wal`, deletes the archive unless you pass `--keep-archive`, and warns if the engine that wrote the dump differs from the `ladybug` version this checkout pins. The download is tens of GiB and the file well over 100 GiB on disk; the dataset card carries the current sizes, and the script reads them at run time and checks free space before each step. Budget real time, too.
 
 Then subscribe and query exactly as elsewhere in this guide — `just demo-sec-subscribe` grants access without loading anything — or read the file directly, no services needed:
 
@@ -108,6 +111,17 @@ just sec-health
 # Detailed health check with statistics
 just sec-health v
 ```
+
+`just sec-load` runs one ticker end to end: download, process, stage into DuckDB, materialize the graph, then index the filings' narrative sections and iXBRL disclosures into OpenSearch, quarter by quarter, so the document-search presets below have something to find.
+
+For more than one company, `just sec-pipeline` takes the top N filers by market cap. It stops after the graph and does not index text, so run `just sec-index` per quarter afterwards:
+
+```bash
+just sec-pipeline 10 2025    # download → process → stage → materialize, top 10 filers
+just sec-index 2025-Q1       # index one quarter's narratives and iXBRL disclosures into OpenSearch
+```
+
+The phases also run one at a time — `sec-download`, `sec-process`, `sec-stage`, `sec-materialize-graph` — which is how you resume after a failure without starting over: staging is kept, so a failed materialize reruns with `just sec-materialize-graph`.
 
 The health check shows:
 
@@ -173,18 +187,7 @@ In interactive mode (the prompt is `sec>`), you can:
 
 ## Authentication Setup
 
-The `just demo-sec` command automatically creates user credentials for you. Your API key is saved in `.local/config.json`.
-
-**Important:** The API key (starting with `rfs`) is your authentication credential, not to be confused with the JWT Token and Authorization Header.
-
-**Additional Users (Optional):**
-
-If you need to create additional users with SEC repository access:
-
-```bash
-# Create test user with SEC repository access
-just demo-user --repositories sec
-```
+`just demo-sec` creates the demo user and saves its API key (it starts with `rfs`, and travels in `X-API-Key`) to `.local/config.json`. For another user with SEC access, run `just demo-user --repositories sec`; the demo user itself is covered on [Local Development](Local-Development#step-2-create-a-demo-user-and-api-key).
 
 ## Accessing the Data
 
@@ -229,7 +232,7 @@ For Cursor / VS Code (`mcp.json`):
 
 Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/sec/mcp`. Clients without HTTP transport support can use the legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client).
 
-Clients with no field for a custom header — claude.ai and Claude Desktop custom connectors among them — sign in instead: add `https://api.robosystems.ai/v1/mcp`, and choose the graph on the consent screen. The `?token=` carriage that once allowed a key in the URL was retired when OAuth landed, and a credential in the query string is now rejected. See [AI Operators & MCP](AI-Operators-and-MCP).
+A key never travels in the URL: a credential in the query string is rejected. The hosted sign-in (OAuth) path, used by claude.ai and Claude Desktop custom connectors (Customize → Connectors) and by the directory listings, is on [AI Operators & MCP](AI-Operators-and-MCP).
 
 4. Restart your MCP-compatible AI tool
 
@@ -247,7 +250,7 @@ Clients with no field for a custom header — claude.ai and Claude Desktop custo
 
    `disclosures` and `information-block` run xbrlkit's `disclosures` and `information_block` functions over the filing's published holon. [`xbrlkit serve`](https://xbrlkit.com/mcp), the free local MCP server, loads that same holon for a ticker when one is published, so it reads one filing's sections the same way on your own machine. Questions across filers need the graph.
 
-   The three text tools read the filing's own document from the same public folder, so the lane adds nothing to OpenSearch. Two pipeline assets bring the documents the XBRL path does not: `sec_current_reports` captures 8-K earnings releases (items 2.02 / 7.01) with their EX-99 exhibits, chained nightly after the download, and `sec_filing_documents` fetches the primary document of filings processed before inline XBRL, as a one-time backfill. Both pull from EDGAR once and keep what they fetch; every job that pulls carries the `edgar` run tag, which keeps such pulls to one at a time.
+   The three text tools read the filing's own document from the same public folder, so the lane adds nothing to OpenSearch. Two pipeline assets bring the documents the XBRL path does not: `sec_current_reports` captures 8-K earnings releases (items 2.02 / 7.01) with their EX-99 exhibits — chained nightly after the download, and on its own intraday schedule (see [How fresh is the hosted sec graph](#how-fresh-is-the-hosted-sec-graph)) — and `sec_filing_documents` fetches the primary document of filings processed before inline XBRL, as a one-time backfill. Both pull from EDGAR once and keep what they fetch; every job that pulls carries the `edgar` run tag, which keeps such pulls to one at a time.
 
    GraphQL reads are not part of this surface: the typed GraphQL tools serve a tenant graph's operational data, and a shared repository has none.
 
@@ -476,6 +479,12 @@ You can open the DuckDB staging database directly in any SQL IDE that supports D
 **Database Location:**
 - **Path**: `./data/staging/sec.duckdb` (from RoboSystems root directory)
 
+**Without the API:** `just duckdb-query` reads that file directly, as `just lbug-query` does the graph:
+
+```bash
+just duckdb-query sec "SELECT COUNT(*) FROM Fact"
+```
+
 **Using DuckDB CLI:**
 
 ```bash
@@ -539,6 +548,20 @@ LIMIT 10;
 The graph you load is the same model the hosted `sec` repository serves. Each filing is a `Report` of an `Entity`; each reported number is a `Fact` linked to its `Element` (the concept, with a normalized `canonical_concept`), its `Period`, its `Unit`, and any `Dimension` qualifiers. A filing's statements and notes are `Structure` nodes (with `canonical_type` on the primary statements), each holding a `FactSet` of the facts it presents, and `Association` nodes carry the parent–child arcs within a structure.
 
 The complete node and relationship reference, the traversal patterns, the enriched properties, and the four rules every number-reading query should follow are on **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)**.
+
+## How fresh is the hosted sec graph
+
+The hosted `sec` repository moves on three schedules, all on business days, Eastern time:
+
+| Run | When | What it updates |
+|---|---|---|
+| 8-K capture | Every 30 minutes, 06:00–20:30 | 8-K earnings releases (items 2.02 / 7.01) with their EX-99 exhibits, readable through the filing-text tools |
+| Intraday XBRL | 09:45, 13:45, 17:45 | Downloads and processes the day's filings and refreshes the filer catalog. It stops short of the graph |
+| Nightly | 21:00 | Download → process → stage → full graph rebuild → replicas refreshed; text indexing and the filer catalog branch off it, and the 8-K capture runs after it |
+
+So the tools that read one filing from its published folder — `describe-filing`, `search-text`, `read-text`, `disclosures`, `information-block` — find a filing the day it is filed, because they look the ticker up in the catalog first. Everything that reads the graph or the search index — Cypher, `financial-statement-analysis`, `build-fact-grid`, `search-documents` — sees it after that night's rebuild.
+
+On a stack of your own, every SEC schedule and sensor ships stopped; turn on the ones you want in the Dagster UI.
 
 ## Common Tasks
 
@@ -604,15 +627,7 @@ just graph-query sec "MATCH (e:Entity {ticker: 'NVDA'})-[:ENTITY_HAS_REPORT]->(r
 
 ### Service Not Running
 
-If you get connection errors:
-
-```bash
-# Check services are running
-docker ps
-
-# Restart if needed
-just restart
-```
+Connection errors are a stack problem, not a pipeline one — see [Local Development](Local-Development#troubleshooting).
 
 ### Database Empty
 

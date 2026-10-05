@@ -95,18 +95,19 @@ There are two ways in, and they meet at the draft.
 
 **Capture, classify, commit.** A plain create (`apply_handlers` defaults to `false`) lands the event at `captured` and writes no ledger rows. It sits in the inbox until someone decides how to book it:
 
-1. **Classify.** `update-event-block` with `transition_to: "classified"` records the choice, supplied in `metadata_patch` in the same call. Nothing posts yet. A handler that validates classifications checks the choice here and refuses one it could not post, with the reason, rather than failing later at commit.
-2. **Commit.** `update-event-block` with `transition_to: "committed"` fires the handler against the final metadata and writes the event's entry, normally as a draft. If the handler already wrote the event's entry when it was created, committing does not write a second one. A handler error rolls the whole update back, so an event never sits at `committed` with no entry behind it.
+1. **Classify.** `update-event-block` with `transition_to: "classified"` records the choice, supplied in `metadata_patch` in the same call. Nothing posts yet. A handler that validates classifications checks the choice here and refuses one it could not post, with the reason, rather than failing later at commit. Today the bank-feed handlers are the ones that do (see [Event Block Reference § Bank-feed handlers](Event-Block-Reference#bank-feed-handlers)). For every other type the choice is checked at commit.
+2. **Commit.** `update-event-block` with `transition_to: "committed"` fires the event's Python handler against the final metadata and writes the event's entry, normally as a draft. If the handler already wrote the event's entry when it was created, committing does not write a second one. A handler error rolls the whole update back, so a Python-handled event never sits at `committed` with no entry behind it. Commit fires Python handlers only: an event type covered only by a DSL handler commits with no entry, so book those with `apply_handlers: true` at create.
 
 ```bash
-# Classify: record the accounts, no GL yet
+# Classify: record the entry's date, memo and accounts, no GL yet
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/update-event-block" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"event_id": "evt_…", "transition_to": "classified",
-       "metadata_patch": {"line_items": [
-         {"element_id": "<office_supplies_id>", "debit_amount": 12500},
-         {"element_id": "<accounts_payable_id>", "credit_amount": 12500}]}}'
+       "metadata_patch": {"posting_date": "2026-05-31", "memo": "May office supplies",
+         "line_items": [
+           {"element_id": "<office_supplies_id>", "debit_amount": 12500},
+           {"element_id": "<accounts_payable_id>", "credit_amount": 12500}]}}'
 
 # Commit: fire the handler and write the draft entry
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/update-event-block" \
@@ -131,7 +132,7 @@ Two operations move events forward without a new create:
 
 A handler is the part that knows the accounting. It takes an event and produces one or more balanced entries. Handlers come from two layers, checked in order:
 
-- **Python handlers**, a fixed registry defined by the platform, for workflows with real logic: recording and reversing journal entries, receiving payments and paying bills (which also link the settlement to the invoice or bill it discharges), disposing of assets, and the schedule handlers that create a schedule's obligations and draft each month's entry. Several event types share a handler: `invoice_issued`, `bill_received`, and the other source transaction types all book through the journal-entry handler, because their entry has the same shape and only the label and category differ. A Python handler wins when both layers match.
+- **Python handlers**, a fixed registry defined by the platform, for workflows with real logic: recording and reversing journal entries, receiving payments and paying bills (which also link the settlement to the invoice or bill it discharges), disposing of assets, the schedule handlers that create a schedule's obligations and draft each month's entry, and the bank-feed handlers that post a classified bank line. Several event types share a handler: `invoice_issued`, `bill_received`, and the other source transaction types all book through the journal-entry handler, because their entry has the same shape and only the label and category differ. A Python handler wins when both layers match.
 - **DSL handlers**, rows in the graph's `event_handlers` table. Each maps an `event_type` (optionally narrowed by source, agent type, resource type, or a metadata expression) to a JSON template of debit and credit legs, with `{{ event.amount }}`-style interpolation. They let a tenant add a posting pattern without code; register one with `create-event-handler`.
 
 An event with `apply_handlers: true` whose type matches no handler is an error, not a silent capture. `preview-event-block` takes the same body as a create and returns the planned entries and a `would_succeed` flag without writing anything.
@@ -198,7 +199,7 @@ Building a full integration (capturing from a source system, idempotent retries,
 - **[Information Blocks](Information-Blocks)** - How the facts events produce are packaged for reporting
 
 **Codebase Documentation:**
-- **[API Reference](https://robosystems.ai/docs/api)** - Request and response schemas for every operation
+- **[API Reference](https://robosystems.ai/docs/extensions)** - Request and response schemas for every operation
 - **[Extensions Models](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/extensions/README.md)** - The RoboLedger OLTP models
 
 ## Support

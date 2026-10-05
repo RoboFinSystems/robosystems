@@ -1,6 +1,6 @@
 # Authentication & API Keys
 
-This guide shows you how to authenticate against the RoboSystems API from scripts, `curl`, MCP clients, and SDKs. The one rule to internalize up front: backend and programmatic access uses the `X-API-Key` header, JWT/Bearer tokens are a frontend concern, and OAuth 2.1 is how MCP clients sign in (covered on [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients)).
+API keys, browser sessions, and MCP OAuth: how each authenticates to the RoboSystems API, and how roles and graph membership decide what it reaches. The one rule to internalize up front: backend and programmatic access uses the `X-API-Key` header, JWT/Bearer tokens are a frontend concern, and OAuth 2.1 is how MCP clients sign in (covered on [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients)).
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
 
@@ -12,7 +12,7 @@ RoboSystems has three doors into the same building. All resolve to the same `Use
 | --- | --- | --- | --- | --- |
 | **API key** | Scripts, `curl`, MCP clients, SDKs, CI | `X-API-Key` | **Settings → API keys** at robosystems.ai; or `POST /v1/user/api-keys` | Long-lived; you revoke or expire it explicitly |
 | **JWT / Bearer** | The browser frontends (robosystems-app, roboledger-app, roboinvestor-app) | `Authorization: Bearer …` | `POST /v1/auth/login` issues a token | Short-lived, auto-refreshed by the frontend session layer |
-| **OAuth 2.1 bearer** | MCP clients that run a consent flow — claude.ai, Claude Code, ChatGPT, Cursor, VS Code, the Docker MCP Toolkit | `Authorization: Bearer rfso…` (opaque; accepted by the MCP routes only) | The client discovers the authorization server from `https://api.robosystems.ai/v1/mcp`, you sign in, and the consent screen picks the graph — see [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients) | 1-hour access token, 90-day refresh token rotated on use; scoped to the one graph chosen at consent; revoke with `POST /v1/oauth/revoke` |
+| **OAuth 2.1 bearer** | MCP clients that run a consent flow — claude.ai, Claude Code, ChatGPT, Cursor, VS Code, the Docker MCP Toolkit | `Authorization: Bearer rfso…` (opaque; accepted by the MCP routes only) | The client discovers the authorization server from `https://api.robosystems.ai/v1/mcp`, you sign in, and the consent screen picks the graph — see [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients) | 1-hour access token, 90-day refresh token rotated on use; scoped to the one graph chosen at consent; revoke with `POST /v1/oauth/revoke` or from [Connected Apps](#connected-apps) |
 
 For everything in this guide — `curl`, MCP, SDK smoke tests — use the API key. You never need to call `login` for backend testing, and OAuth is the browser-driven sign-in an MCP client runs for you.
 
@@ -26,6 +26,7 @@ Those three are the *credentials*. How a person proves who they are to get a JWT
 - [The X-API-Key Path](#the-x-api-key-path)
 - [Worked Examples](#worked-examples)
 - [API Key Lifecycle](#api-key-lifecycle)
+- [Connected Apps](#connected-apps)
 - [Graph-Scoped Access](#graph-scoped-access)
 - [Organizations and Roles](#organizations-and-roles)
 - [Graph Membership](#graph-membership)
@@ -43,7 +44,7 @@ Those three are the *credentials*. How a person proves who they are to get a JWT
 
 Authentication in RoboSystems is credential-in-header, validated by a FastAPI dependency before any handler runs. Anonymous access is limited to the health probe (`GET /v1/status`), the public offering (`GET /v1/offering`), and the pre-login auth flow — registration, login, password reset, email verification, invitation preview, the password policy, the auth-provider posture, and the CAPTCHA config. Everything else requires a valid credential. A request carries either an `X-API-Key` header (programmatic) or an `Authorization: Bearer` header (frontend session); both resolve to the same authenticated `User`.
 
-Access is layered. A valid credential authenticates *you*; access to a specific `graph_id` is checked separately by the graph-scoped dependency. That distinction drives the most important status-code rule on the platform: **401 means "no/invalid credential," 403 means "valid user, no access to that graph."** Keep them straight and most auth debugging resolves itself.
+Access is layered. A valid credential authenticates *you*; access to a specific `graph_id` is checked separately by the graph-scoped dependency. That distinction drives the most important status-code rule on the platform: **401 means "no/invalid credential," 403 means "valid user, no access to that graph."** Keep them straight and most auth debugging resolves itself. One exception to know: on a route with a `graph_id` in its URL, an API key that fails validation answers **403**, because the key and the graph are checked in one step (see [Graph-Scoped Access](#graph-scoped-access)).
 
 The full endpoint surface — request/response schemas, every field, every status code — lives in the live [API reference](https://robosystems.ai/docs/api). This page covers the concepts and the day-to-day tasks; it does not re-tabulate the endpoint surface.
 
@@ -55,7 +56,7 @@ The full endpoint surface — request/response schemas, every field, every statu
 
 ## Getting an API Key
 
-In the app at robosystems.ai, open **Settings → API keys** and choose **Create**. A key can be scoped to all your graphs or to one graph. The key starts with `rfs` and is shown once — copy it before you leave the page. Keys can also be created over the API; see [API Key Lifecycle](#api-key-lifecycle).
+In the app at robosystems.ai, open **Settings → API keys** and choose **Create**. A key can be scoped to all your graphs or to one graph — see [Choosing a Key Scope](#choosing-a-key-scope). The key starts with `rfs` and is shown once — copy it before you leave the page. Keys can also be created over the API; see [API Key Lifecycle](#api-key-lifecycle).
 
 The examples on this page read the key and a graph id from the environment:
 
@@ -106,7 +107,7 @@ curl -X GET "https://api.robosystems.ai/v1/user" \
   -H "Content-Type: application/json"
 ```
 
-A 200 with your user record confirms the key is valid. A 401 means the key is missing, malformed, expired, or revoked.
+A 200 with your user record confirms the key is valid. A 401 means the key is missing, malformed, expired, or revoked — or that it is graph-scoped, which `/v1/user` does not accept (see [Choosing a Key Scope](#choosing-a-key-scope)).
 
 ### List Your Graphs
 
@@ -148,6 +149,16 @@ A RoboSystems API key is a short literal prefix followed by 64 hex characters. T
 | **Graph-scoped** | `rfsc` | 68 characters | One graph (and its subgraphs) |
 
 The prefix difference exists for human and incident legibility only — **the authoritative scope check is the key row's `graph_id`, never the spelling of the prefix.** Keys are stored **hashed** (bcrypt) — never in plaintext. The server cannot show you the raw key after it is created; it only ever exposes the 8-character `prefix` (the key's first eight characters, e.g. `rfs9ce10` or `rfsc9ce1`) used to identify the key in lists.
+
+### Choosing a Key Scope
+
+A graph-scoped key is accepted only on routes that carry its graph's id in the URL: the graph's endpoints under `/v1/graphs/{graph_id}/...`, the extensions operations and GraphQL under `/extensions/...`, and the graph's MCP address. Every other route refuses it with 401 — among them `GET /v1/user`, `GET /v1/graphs`, key and connected-app management, and the `/v1/operations/{operation_id}/...` endpoints. So a graph-scoped key can start an operation that hands off to the background, but it cannot follow that operation's stream or status, cancel it, or resume it.
+
+| You are building | Scope | Why |
+| --- | --- | --- |
+| An MCP connector, or a tool that works in one graph through synchronous operations and reads | Graph-scoped (`rfsc`) | Reaches one graph and its subgraphs, nothing else |
+| A job that starts async operations (backups, materialization, AI Operator runs) and waits for them | Account-wide (`rfs`) | Following an operation goes through `/v1/operations/{operation_id}/...`, which carries no graph id |
+| Anything that lists graphs, reads `/v1/user`, manages keys, or works across several graphs | Account-wide (`rfs`) | Those routes carry no graph id |
 
 ### Create a Key
 
@@ -211,7 +222,23 @@ curl -X DELETE "https://api.robosystems.ai/v1/user/api-keys/uak_..." \
   -H "Content-Type: application/json"
 ```
 
-Revocation deactivates the key and invalidates its cached lookup. The effect is immediate but cache-bounded — the API-key validation cache has a short TTL, so a revoked key stops working within that window rather than on the next millisecond. Plan key rotation accordingly: create the replacement, cut traffic over, then revoke the old key.
+Revocation deactivates the key and drops its cached validation in the same call, so the key stops working immediately. If that cannot be confirmed, the call answers **503** rather than reporting success — retry it, and the retry re-applies the revocation. For rotation: create the replacement, cut traffic over, then revoke the old key.
+
+## Connected Apps
+
+Each MCP client you authorize over OAuth holds a **grant**: one client, one graph, chosen on the consent screen. Review and revoke them in the app at **User Settings → Connected apps** on robosystems.ai, or over the API:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /v1/user/oauth/grants` | Your active grants — client name, the graph each reaches, scopes, when you consented, and last use |
+| `DELETE /v1/user/oauth/grants/{grant_id}` | Revoke a grant and every access and refresh token minted from it |
+
+```bash
+curl "https://api.robosystems.ai/v1/user/oauth/grants" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
+```
+
+A revoked client's next request fails with 401, and it has to run the consent flow again to reconnect. Revoked grants leave the list — they cannot be reinstated — and revoking one twice succeeds and changes nothing.
 
 ## Graph-Scoped Access
 
@@ -221,10 +248,10 @@ The practical consequence is the status-code split:
 
 | Status | Meaning | Typical fix |
 | --- | --- | --- |
-| **401** | No credential, or the credential is invalid/expired/revoked | Check the `X-API-Key` header; confirm the key still exists and is active |
-| **403** | Valid user, but no access to that `graph_id` | Confirm the graph belongs to (or is shared with) your user; check the graph id is correct |
+| **401** | No credential, or an invalid/expired/revoked browser session | Check the `X-API-Key` header is present and no stale `Authorization` header rides along |
+| **403** | No access to that `graph_id` — or an API key that failed validation | Confirm the key still exists and is active, then that the graph belongs to (or is shared with) your user and the id is correct |
 
-This applies uniformly across the REST graph endpoints (`/v1/graphs/{graph_id}/...`), the extensions command and view operations (`/extensions/{domain}/{graph_id}/operations/...`), and the GraphQL endpoint (`/extensions/{graph_id}/graphql`). The same key, validated against per-graph access. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy) for the multi-tenant model and how graph access is granted.
+The same key is validated against per-graph access across the REST graph endpoints (`/v1/graphs/{graph_id}/...`), the extensions command and view operations (`/extensions/{domain}/{graph_id}/operations/...`), and a graph's MCP address. On those routes the key and the graph are checked in one step, so a revoked, expired, or mistyped key answers **403** with `Invalid API key or access denied to graph`, exactly as a graph you cannot reach does. The GraphQL endpoint (`/extensions/{graph_id}/graphql`) separates the two: a bad key is **401**, no access to the graph is **403**. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy) for the multi-tenant model and how graph access is granted.
 
 ## Organizations and Roles
 
@@ -252,6 +279,8 @@ The org surface lives under `/v1/orgs`:
 | `GET /v1/orgs/{org_id}/limits` | Account-level limits, including the graph cap |
 | `GET /v1/orgs/{org_id}/usage` | Usage aggregated across every graph in the org (`days` controls the lookback, default 30) |
 
+Removing a member also removes their explicit [graph memberships](#graph-membership) on the org's graphs and cancels the repository subscriptions the org was paying for on their behalf. Admins and owners cannot remove themselves, and an org's last owner cannot be removed. **If the org was the person's last, removal deactivates the account**: their sessions end and their API keys and OAuth tokens are revoked. A platform administrator can reactivate it; nothing old resumes, so the person signs in and creates keys again.
+
 ### The invitation flow
 
 Adding someone to an org is an invitation, not a direct write — there is no endpoint that attaches an existing account to an org you administer. An admin or owner invites an **email address that has no account yet**, and the invited person becomes a member by registering through the emailed link:
@@ -276,6 +305,8 @@ Org roles decide who can administer the account; **graph membership decides who 
 | `DELETE /v1/graphs/{graph_id}/members/{user_id}` | Revoke an explicit grant |
 
 Graph roles are their own three-level ladder, distinct from org roles: **`viewer`** (read-only), **`member`** (read/write), and **`admin`** (full control, including managing other members).
+
+A grant, role change, or revocation clears the affected user's cached access, so it normally applies on their next request. A browser session's per-graph access decision is cached for at most ten minutes, which bounds how long an old decision can outlive a change.
 
 Four rules govern the surface, and each one is a distinct error if you trip it:
 
@@ -348,7 +379,7 @@ The reset flow is anonymous end to end, because by definition the user cannot au
 
 An authenticated user changes their own password with `PUT /v1/user/password`, supplying `current_password`, `new_password`, and `confirm_password`. The current password is re-verified; the endpoint is unavailable to SSO-only accounts.
 
-**A password change invalidates every JWT that user holds, but leaves their API keys working.** Changing the password bumps the user's `session_version`, and any token minted before the bump stops authenticating — so every open browser session is signed out, including the one that made the change. API keys are a separate credential family and are untouched: a script or CI job running on `X-API-Key` keeps working straight through a password change. The same applies to a password *reset*, which invalidates sessions the same way.
+**A password change invalidates every JWT that user holds and revokes their OAuth tokens, but leaves their API keys working.** Changing the password bumps the user's `session_version`, and any token minted before the bump stops authenticating — so every open browser session is signed out, including the one that made the change, and every MCP client connected over OAuth has to sign in again. API keys are a separate credential family and are untouched: a script or CI job running on `X-API-Key` keeps working straight through a password change. The same applies to a password *reset*, which invalidates sessions the same way.
 
 The practical consequence: **rotating a password is not a way to cut off programmatic access.** If a key may be compromised, revoke the key (`DELETE /v1/user/api-keys/{id}`) — changing the password will not do it for you.
 
@@ -369,7 +400,7 @@ curl https://api.robosystems.ai/v1/auth/providers
   "password_auth": true,
   "oidc": { "enabled": false, "provider_label": null },
   "registration": true,
-  "passkeys": false
+  "passkeys": true
 }
 ```
 
@@ -465,6 +496,7 @@ The credential is missing, malformed, expired, or revoked. Check, in order:
 - The `X-API-Key` header is present and spelled correctly.
 - You are sending a live key: `$ROBOSYSTEMS_API_KEY` expands to an `rfs...` value, not an empty string.
 - The key has not been revoked or expired (list your keys; confirm `is_active` is true and `expires_at` is in the future).
+- The route accepts the key's scope: a graph-scoped (`rfsc`) key is refused on any route without a graph id in its URL, including `/v1/operations/{operation_id}/...` (see [Choosing a Key Scope](#choosing-a-key-scope)).
 - No stale `Authorization: Bearer` header is also being sent (see the next item).
 
 ### 401 Even Though the API Key Is Correct
@@ -475,9 +507,9 @@ Bearer-wins precedence is biting you. If the request carries an `Authorization: 
 
 ### 403 Forbidden (Not 401)
 
-You are authenticated, but your user does not have access to the `graph_id` in the URL. This is an authorization failure, not a credential failure.
+Your user does not have access to the `graph_id` in the URL — or, on a REST or MCP route with a graph id, your API key itself failed validation, which answers 403 there rather than 401.
 
-**Solution:** Confirm the graph id is correct and that the graph belongs to (or is shared with) your user. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
+**Solution:** First confirm the key is live (`GET /v1/user` with an account-wide key, or list your keys and check `is_active` and `expires_at`). Then confirm the graph id is correct and that the graph belongs to (or is shared with) your user. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
 
 ### "I Lost My API Key"
 
@@ -497,7 +529,7 @@ The graph-scoped GraphQL endpoint takes `graph_id` from the URL path, not as a q
 
 ### Every Browser Session Signed Out After a Password Change
 
-Expected. Changing or resetting a password bumps the user's `session_version`, which invalidates every JWT issued before that moment — including the session that made the change. Log in again to get a fresh token. API keys are unaffected and keep working. See [Changing a known password](#changing-a-known-password).
+Expected. Changing or resetting a password bumps the user's `session_version`, which invalidates every JWT issued before that moment — including the session that made the change — and revokes the user's OAuth tokens, so MCP clients connected over OAuth must sign in again too. Log in again to get a fresh token. API keys are unaffected and keep working. See [Changing a known password](#changing-a-known-password).
 
 ### Health Check Hits the Wrong Path
 

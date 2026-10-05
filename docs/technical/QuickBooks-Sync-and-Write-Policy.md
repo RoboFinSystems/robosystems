@@ -4,6 +4,8 @@ This page covers how a connected QuickBooks Online company moves data into a Rob
 
 The product docs at roboledger.ai describe this for end users (*Nothing writes to QuickBooks until you post* and *When QuickBooks changes after a sync*). This page covers the contracts underneath: the operations, their payloads, and why they behave the way they do.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -12,6 +14,7 @@ The product docs at roboledger.ai describe this for end users (*Nothing writes t
 - [Write Policy](#write-policy)
 - [The Write-Back Outbox](#the-write-back-outbox)
 - [Reconciling Items](#reconciling-items)
+- [Round Trips](#round-trips)
 - [Disconnect vs. Sever](#disconnect-vs-sever)
 - [Gotchas and Pitfalls](#gotchas-and-pitfalls)
 - [Self-hosted deployments](#self-hosted-deployments)
@@ -59,7 +62,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/connections/$CONN_I
   -d '{"since_date": "2026-04-01"}'
 ```
 
-The same call is the `sync-connection` MCP tool, which takes `connection_id`, `full_rebuild` and `since_date`.
+The same call is the `sync-connection` MCP tool, which takes `full_rebuild` and `since_date`. Its `connection_id` is optional: omitted, the tool uses the graph's one sync connection, narrowed by `provider` (for example `quickbooks`) when given, and it returns the candidates when the graph has several.
 
 ### The initial sync
 
@@ -112,7 +115,7 @@ A failed run records `last_sync_result` without advancing `last_sync`. The disti
 
 ## What a Sync Loads
 
-A sync extracts accounts (active and inactive, since historical lines can reference retired accounts), the journal-entry stream, customers, vendors and employees, the per-type transaction headers (invoices, bills, payments, purchases, sales receipts), and company info. The pipeline normalizes them into RoboLedger's shape:
+A sync extracts accounts (active and inactive, since historical lines can reference retired accounts), the journal-entry stream, customers, vendors and employees, the per-type transaction headers (invoices, bills, payments, bill payments, purchases, sales receipts), and company info. The pipeline normalizes them into RoboLedger's shape:
 
 - **Accounts** become chart-of-accounts `Element` rows.
 - **Customers, vendors and employees** become `Agent` rows.
@@ -124,6 +127,8 @@ Re-syncing is idempotent. Events are upserted by `(source, external_id)`, and a 
 **What `full_rebuild` wipes.** A full rebuild first deletes the connection's `captured` and `classified` events together with their draft GL rows, then reloads. Posted history survives: `committed`, `fulfilled` and `voided` events are never wiped. Your mapping associations also survive, because account elements are upserted in place and keep their ids. A full rebuild that would delete rows inside a closed month is refused. The sync then fails and nothing changes.
 
 Every successful sync marks the graph stale. That schedules a rematerialization of the analytical graph, so fact grids and Cypher reads catch up. Operations that read the ledger directly, such as `live-financial-statement`, see the new data as soon as the sync finishes.
+
+On a ledger that already reconciles its accounts, a successful sync also refreshes the reconciliations of the next period to close, so the close gate reads a current comparison without anyone running the refresh. A ledger with no reconciliations is left alone, because the first refresh is someone's decision. The refresh is best-effort: if it fails, the period keeps its last comparison and the sync still succeeds. See [Period Close](Period-Close#reconciliations).
 
 ## Write Policy
 
@@ -158,7 +163,7 @@ On a `qb_authoritative` graph, the drafts RoboLedger holds for a month are the o
 A draft entry in the month being closed publishes when **both** of these hold:
 
 1. **The graph has a write-back connection.** A non-deleted QuickBooks connection with a write-back policy exists. If several exist, the newest wins.
-2. **The draft's event publishes.** The event is not `voided` or `superseded`, it has not already been written (no `metadata.qb_external_id`), and either:
+2. **The draft's event publishes.** The event is not `voided` or `superseded`, the entry has not already been written (its id is not in the event's `metadata.qb_entry_ids`), and either:
    - its `metadata.publish_to_source` is `true`, or
    - `publish_to_source` is unset and its `source` is `schedule` or `manual`.
 
@@ -196,7 +201,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   }'
 ```
 
-You can also patch the flag onto an existing event with `update-event-block` and `"metadata_patch": {"publish_to_source": false}`. The flag must be a JSON boolean. A string such as `"false"` is rejected.
+You can also patch the flag onto an existing event with `update-event-block` and `"metadata_patch": {"publish_to_source": false}`. Send a JSON boolean. The journal-entry handler rejects a string such as `"false"`, but only when it runs: at a create with `apply_handlers: true`, or at the commit that writes the entry. A patch onto an event whose entry is already drafted is stored as sent, and a string there is not read as `false`.
 
 ### Previewing the split
 
@@ -213,7 +218,7 @@ The MCP equivalent is `list-period-drafts`.
 
 ### What happens at close
 
-`close-period` publishes eligible drafts to QuickBooks **before** it changes anything else. Each draft is sent with its event id as the QuickBooks request id. The returned QuickBooks transaction id is stored on the event as `metadata.qb_external_id`, and the draft is promoted to `posted`. Everything the publish step didn't send is posted locally in one bulk transition. The close receipt reports the two lanes separately: `entries_published_to_qb`, `entries_posted_locally`, and their total `entries_posted`. On a `native` graph the first is always zero. The full close sequence is on [Period Close](Period-Close#what-a-close-does).
+`close-period` publishes eligible drafts to QuickBooks **before** it changes anything else. Each draft entry is sent as its own QuickBooks journal entry, with the entry id as the QuickBooks request id, so a repeat inside QuickBooks' deduplication window is not booked twice. The returned QuickBooks id is recorded per entry on the event, in `metadata.qb_entry_ids` (entry id → QuickBooks id), and the draft is promoted to `posted`. Only the entries dated in the month being closed are sent. An event whose entries span months stays open until the close of each later month publishes its remaining entries, and it moves to `fulfilled` once none is left. Everything the publish step didn't send is posted locally in one bulk transition. The close receipt reports the two lanes separately: `entries_published_to_qb`, `entries_posted_locally`, and their total `entries_posted`. On a `native` graph the first is always zero. The full close sequence is on [Period Close](Period-Close#what-a-close-does).
 
 ### Rejections and retry
 
@@ -237,7 +242,7 @@ The publish step tries every eligible draft and collects every failure instead o
 }
 ```
 
-The drafts that did reach QuickBooks keep their `qb_external_id`. Those markers are committed before the failure is raised, on purpose. A QuickBooks journal entry is an external write that has already happened. If the marker were rolled back, the retried close would publish the same entry again as a duplicate. So retrying is safe: fix the rejected entries (usually an account mapping, an unbalanced line, or a period already closed in QuickBooks), then call `close-period` again. The retry sends only what hasn't been sent.
+The drafts that did reach QuickBooks keep their entries in `qb_entry_ids`. Those markers are committed before the failure is raised, on purpose. A QuickBooks journal entry is an external write that has already happened. If the marker were rolled back, the retried close would publish the same entry again as a duplicate. So retrying is safe: fix the rejected entries (usually an account mapping, an unbalanced line, or a period already closed in QuickBooks), then call `close-period` again. The retry sends only the entries not yet recorded in `qb_entry_ids`.
 
 ### Publishing one entry on its own
 
@@ -247,10 +252,14 @@ The drafts that did reach QuickBooks keep their `qb_external_id`. Those markers 
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/execute-event-block" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"event_id": "evt_01J..."}'
+  -d '{"event_id": "evt_01J...", "connection_id": "'$CONN_ID'"}'
 ```
 
-On a write-back connection it writes the entry to QuickBooks, records `qb_external_id`, moves the event to `fulfilled` (or back to `pending` if QuickBooks rejects it), and posts the draft. A `native` event, or one carrying `publish_to_source: false`, passes through with no external write. A `401` means QuickBooks refused the credentials. The connection is flagged for re-authorization and needs a fresh OAuth consent.
+`connection_id` names the QuickBooks connection to write through. Omit it only when the event's own `metadata.connection_id` names one. With neither, the call is treated as native and writes nothing.
+
+On a write-back connection it sends each of the event's unpublished draft entries to QuickBooks as its own journal entry, records them in `qb_entry_ids`, posts them, and moves the event to `fulfilled`. If QuickBooks rejects an entry, the entries sent before it are kept and posted, the rejection is stored on `metadata.last_outbound_error`, and the event moves to `pending`. The response reports `qb_entry_ids` (every entry of the event now in QuickBooks) and, on a rejection, `qb_error`. A `native` event, or one carrying `publish_to_source: false`, passes through with no external write.
+
+Errors: `409` for an event with no drafted ledger entries (commit it first) or one that is `voided` or `superseded`, and `422` when its period is closed. A `401` means QuickBooks refused the credentials. The connection is flagged for re-authorization and needs a fresh OAuth consent. A `503` means Intuit was unreachable or busy. The connection is fine, and the call can be retried.
 
 ## Reconciling Items
 
@@ -305,6 +314,8 @@ The default is `restate` when every period the event touches is open and nothing
 
 ### Resolving one
 
+Pass the `drift_detected_at` from the preview you decided on as `expected_drift_detected_at`. If the item has been flagged again since, with a newer payload nobody has seen, the resolution is refused with `409` and the item must be previewed again.
+
 ```bash
 # Catch up in the open month, drafted for review at close
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/resolve-reconciling-item" \
@@ -312,6 +323,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   -H "Content-Type: application/json" \
   -d '{
     "event_id": "evt_01J...",
+    "expected_drift_detected_at": "2026-09-02T14:05:11Z",
     "disposition": "catch_up",
     "posting_date": "2026-09-30",
     "status": "draft",
@@ -334,7 +346,15 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 Resolving an item sets the event's payload to the accepted one. The next sync then sees no difference and does not raise the flag again. The response echoes the `delta`. It includes a `catch_up` block (event, entry and posting date) when a catch-up entry was written, and a `regenerated` block (transaction and entry ids) for a restate.
 
-Errors: `404` for an unknown event, `409` when the event isn't a reconciling item (or another writer holds it), and `422` for a blocked restate, a closed target period, an unmapped account, or an unbalanced result.
+Errors: `404` for an unknown event, `409` when the event isn't a reconciling item, another writer holds it, or it was re-flagged after the preview, and `422` for a blocked restate, a closed target period, an unmapped account, or an unbalanced result.
+
+## Round Trips
+
+An entry RoboLedger wrote back comes round again on the next sync, and the loader matches it to the event that published it instead of capturing a copy (`cross_source_matched`). The match also watches for edits made to that entry in QuickBooks:
+
+- **Edited in QuickBooks.** When the round-tripped entry's accounts or amounts no longer match what was published, the originating RoboLedger event is flagged as a reconciling item, and you settle it like any other (see [Reconciling Items](#reconciling-items)). A change to the date alone is not compared.
+- **Reverted in QuickBooks.** If the entry is changed back before anyone resolves the item, the next sync clears the flag.
+- **A copy that landed anyway.** If QuickBooks' copy of a published entry was captured before the match could recognize it (a sync overlapping the close's publish, for example), the copy books the entry twice. An unposted copy is voided. A posted copy is flagged as a reconciling item to reverse: its catch-up disposition reverses it, and the close gate holds its period until then.
 
 ## Disconnect vs. Sever
 
@@ -372,7 +392,11 @@ Don't flip a catch-up entry's `publish_to_source` to `true`. QuickBooks already 
 
 ### A failed write-back is not a failed publish of everything
 
-After a `WRITE_BACK_FAILED` close, some drafts may already be in QuickBooks with `qb_external_id` set. Don't delete and redraft them to "start clean". Fix only the rejected entries and retry the close.
+After a `WRITE_BACK_FAILED` close, some entries may already be in QuickBooks, recorded in their event's `qb_entry_ids`. Don't delete and redraft them to "start clean". Fix only the rejected entries and retry the close.
+
+### Multi-currency companies are not supported
+
+The sync loads amounts in USD only. A sync that finds a transaction in another currency fails rather than coerce it, and records the failure on the connection's `last_sync_result`.
 
 ### `hybrid` can't be set
 

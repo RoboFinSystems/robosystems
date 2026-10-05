@@ -1,10 +1,24 @@
 # Querying the Analytical Graph
 
-This guide shows you how to query the analytical graph — the OLAP plane of RoboSystems, backed by the LadybugDB columnar graph database — using ad-hoc Cypher, SQL over the DuckDB staging tables, and the MCP tools that wrap both for AI agents.
+Query the analytical graph — the LadybugDB projection of a graph's data — with Cypher, with SQL over its DuckDB staging tables, or through MCP tools. It is the OLAP plane of RoboSystems, and the MCP tools wrap the same queries for AI agents.
 
 **Quick Start:** Post `{"query": "MATCH (e:Entity) RETURN e.name LIMIT 10"}` to `https://api.robosystems.ai/v1/graphs/sec/query/cypher` with your API key in `X-API-Key` to run your first Cypher query against the SEC analytical graph.
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [The Public Query Endpoint](#the-public-query-endpoint)
+- [Querying the Staging Tables](#querying-the-staging-tables)
+- [From an AI Agent — MCP Tools](#from-an-ai-agent--mcp-tools)
+- [Read Patterns and Example Cypher](#read-patterns-and-example-cypher)
+- [Gotchas and Limits](#gotchas-and-limits)
+- [Self-hosted deployments](#self-hosted-deployments)
+- [Related Documentation](#related-documentation)
+- [Support](#support)
 
 ## Overview
 
@@ -13,7 +27,7 @@ RoboSystems exposes two distinct query planes, and it is worth being explicit ab
 - **Analytical / OLAP** — Cypher (and supporting SQL) over the LadybugDB graph. This is where you traverse relationships and aggregate across an entire dataset. **This page covers the analytical plane.**
 - **Operational / OLTP** — typed GraphQL reads over the extensions PostgreSQL database (live transactional state). That plane is covered in [GraphQL Reads](GraphQL-Reads).
 
-The analytical graph is a materialized projection. Data flows `S3 → DuckDB staging → LadybugDB`, and a sensor-driven blue/green rebuild keeps the graph in sync with its source. Because it is a projection, the analytical graph can lag the operational source by the length of a rebuild cycle.
+The analytical graph is a materialized projection. Data flows into DuckDB staging tables — from the extensions PostgreSQL database on an entity graph, from uploaded files in S3 on a custom graph — and is materialized from there into LadybugDB; a sensor-driven blue/green rebuild keeps the graph in sync with its source. Because it is a projection, the analytical graph can lag the operational source by the length of a rebuild cycle.
 
 There are three windows onto the same analytical data:
 
@@ -22,7 +36,7 @@ There are three windows onto the same analytical data:
 3. **MCP tools** — `read-graph-cypher` and `get-graph-schema`, the agent-facing wrappers over the first window.
 
 ```text
-S3 (Parquet)
+Extensions PostgreSQL (entity graph)  ·  S3 uploads (custom graph)
    │
    ▼
 DuckDB staging tables  ──  SQL  ──▶  POST /v1/graphs/{g}/query/sql
@@ -106,14 +120,24 @@ The model forbids extra fields. **Always parameterize** with `$name` placeholder
 
 Read-only is not a property of this endpoint — it is a property of the platform. Every statement, whichever transport carried it, runs through a single **`StatementKernel`** (`middleware/graph/statement_kernel.py`): a transport-independent authorization gauntlet shared by `/query/cypher`, `/query/sql`, the MCP `read-graph-cypher` tool, and the Operator path, delegating keyword analysis to `security/cypher_analyzer.py`. One implementation means those surfaces cannot drift apart from one another.
 
-The kernel is read-only for main graphs. Attempting a `CREATE`, `MERGE`, `SET`, `DELETE`, or other mutation against a main graph returns **HTTP 403**, with a message steering you to the staging pipeline — data enters a main graph only through `S3 → DuckDB → materialize`. See [Graph Operations](Graph-Operations) for the write/materialize path.
+The kernel is read-only for main graphs. Attempting a `CREATE`, `MERGE`, `SET`, `DELETE`, or other mutation against a main graph returns **HTTP 403**. Data reaches a main graph only by materialization, and where it comes from depends on the graph: an **entity graph** (RoboLedger, RoboInvestor) is written through the extensions command surface and materialized from the extensions database — file uploads are refused on it — while a **custom graph** loads files through the staging pipeline in [File Uploads](File-Uploads). See [Graph Operations](Graph-Operations#materialize) for `materialize`, and [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy#where-writes-go) for the full write map.
 
 Subgraphs are the exception and do allow writes, subject to two carve-outs:
 
 - **Shared repositories and their subgraphs never accept writes.** The exception is for *user* subgraphs only; a write against `sec` — or against any `sec` subgraph — is refused unconditionally.
 - **Writing to a user subgraph requires the `member` or `admin` role.** A viewer gets 403: read-only access stays read-only on subgraphs too.
 
-Schema DDL and bulk operations are blocked everywhere: `COPY`/`LOAD`/`IMPORT` return 400; `EXPORT`/`INSTALL`/`ATTACH` and `CREATE`/`DROP`/`ALTER TABLE` return 403. The graph schema is immutable after graph creation.
+Schema DDL and bulk operations are blocked everywhere: `COPY`/`LOAD`/`IMPORT` return 400; `EXPORT`/`INSTALL`/`ATTACH` and `CREATE`/`DROP`/`ALTER TABLE` return 403. A main graph's schema is fixed at creation; a subgraph's is extended through the MCP tools `add-node-table` and `add-relationship-table`, not through this endpoint.
+
+`CALL` is held to an allowlist. A call to any procedure outside the read-only set below counts as a write — so it is refused on a main graph and a shared repository with 403 — and a procedure that runs a statement passed as a string (`CALL GQL(...)`) is refused on every graph. Neo4j-style introspection such as `CALL db.labels()` or `CALL db.schema()` is not on the list; use `show_tables` and `table_info`, or the schema endpoints below.
+
+| Read-only procedure | Returns |
+| --- | --- |
+| `CALL show_tables() RETURN *` | Every node and relationship table |
+| `CALL table_info('Entity') RETURN *` | One table's properties and types |
+| `show_indexes`, `show_functions` | Indexes and available functions |
+| `query_fts_index`, `query_vector_index` | Full-text and vector index lookups |
+| `db_version`, `current_setting`, `show_connection`, `show_warnings` | Engine version, settings, connection and warnings |
 
 ### Response Modes and Queueing
 
@@ -134,10 +158,10 @@ The same graph-centric data is also addressable relationally, through the graph'
 
 ### SQL Over Staging
 
-`POST /v1/graphs/{graph_id}/query/sql` runs read-only SQL over the columnar tables. Parameters here are a **positional array** with `?` placeholders — a different convention from the Cypher endpoint's named `$param` — and `$1`/`$2`-style numbered placeholders bind against the same array:
+`POST /v1/graphs/{graph_id}/query/sql` runs read-only SQL over the columnar tables. `parameters` takes either form: a **list** for positional placeholders (`?`, or numbered `$1`/`$2`), or an **object** for named `$param_name` placeholders, as on the Cypher endpoint. One statement cannot mix the two.
 
 ```bash
-curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5/query/sql" \
+curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/query/sql" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -188,7 +212,7 @@ The public `POST /v1/graphs/{graph_id}/query/sql` endpoint returns **HTTP 403** 
 
 The same analytical surface is exposed to AI agents through Model Context Protocol tools. Two of them cover the analytical plane:
 
-- **`read-graph-cypher`** — runs read-only Cypher. The same write keywords blocked at the query endpoint (`CREATE`, `SET`, `DELETE`, `REMOVE`, `MERGE`, `DROP`, `DETACH DELETE`, plus `CALL db.` and `CALL apoc.`) are rejected here. Input is `{ query: string, parameters?: object }`.
+- **`read-graph-cypher`** — runs read-only Cypher. The same write keywords blocked at the query endpoint (`CREATE`, `SET`, `DELETE`, `REMOVE`, `MERGE`, `DROP`, `DETACH DELETE`, plus any `CALL` outside the [read-only procedures](#read-only-on-main-graphs)) are rejected here. Input is `{ query: string, parameters?: object }`.
 - **`get-graph-schema`** — returns the full graph schema (node types with their properties and data types, plus relationships). No input arguments; the result is cached briefly.
 
 These map directly onto the surfaces above: `read-graph-cypher` is the query endpoint, and `get-graph-schema` is schema discovery. Database reads through MCP — Cypher, schema, and staging — **consume no credits**; only AI/LLM calls cost credits.
@@ -345,13 +369,14 @@ More worked queries — a statement for a ticker's latest 10-K, a metric across 
 ## Gotchas and Limits
 
 - **SEC numbers have four rules.** Consolidated facts (`has_dimensions: false`), `Element.canonical_concept` over one qname, a pinned `Period` shape, and `RETURN DISTINCT` anchored on the `Entity`. A query that skips one returns a plausible wrong number rather than an error — see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules).
-- **Two parameter conventions.** Cypher uses named `$param` with a `parameters` object; staging SQL uses positional `?` (or `$1`, `$2`) with a `parameters` array. They are not interchangeable.
-- **Write attempts return 403 on main graphs.** Data enters via the staging pipeline. Only *user* subgraphs accept writes through the query path — and only for callers with the `member` or `admin` role. Shared repositories and their subgraphs never do.
+- **Two parameter conventions.** Cypher takes named `$param` with a `parameters` object. Staging SQL takes either a `parameters` list for positional `?` (or `$1`, `$2`), or an object for named `$param` — never both in one statement.
+- **Write attempts return 403 on main graphs.** Data enters by materialization — from the extensions database on an entity graph, from staged uploads on a custom graph. Only *user* subgraphs accept writes through the query path — and only for callers with the `member` or `admin` role. Shared repositories and their subgraphs never do.
 - **Shared-repo staging SQL is blocked on the public API.** `POST /v1/graphs/{shared}/query/sql` returns 403 for shared repositories and their subgraphs — query the graph with Cypher instead.
 - **Cypher query length is capped at 50,000 characters** and `timeout` is 1–300 seconds (default 60).
 - **Queries are scoped to one graph.** There are no cross-database or cross-graph queries; each request targets a single `graph_id`.
 - **Ingestion is sequential and single-writer.** Each database allows one writer at a time and a limited number of concurrent connections, so favor read-only traversals when querying live graphs.
-- **`CALL db.*` introspection is auto-translated** to the LadybugDB equivalent, but prefer `get-graph-schema` for reliable schema discovery.
+- **`CALL db.*` introspection is refused on main graphs and shared repositories.** Only the [read-only procedures](#read-only-on-main-graphs) pass; use `CALL show_tables() RETURN *`, `CALL table_info('Label') RETURN *`, or `get-graph-schema`.
+- **On `sec`, text is not a Cypher question.** String matching (`CONTAINS`, `STARTS WITH`, `ENDS WITH`, `=~`) on `Fact.value` or `Fact.uri` is refused with 400 — see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules#other-limits) for the tools that search filing text instead.
 
 ## Self-hosted deployments
 

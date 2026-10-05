@@ -4,6 +4,8 @@ RoboLedger plans and measures in the same shape it reports in. A **forecast** is
 
 The product doc *Plan and forecast with your AI assistant* at roboledger.ai describes scenarios for end users. This page covers the block shape, the operations and their payloads, and how the engine walks a scenario.
 
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -211,7 +213,7 @@ It seeds any missing months of the fiscal calendar back to `start_period`, as al
 - **Never posts.** A month holding draft entries is reported `skipped_drafts` and left alone.
 - **Stops on failure.** A month whose re-close fails is reported `failed` and the chunk halts, because continuing would leave a hole in the series. Untried months stay in `remaining_periods`.
 
-Each month's outcome is in `processed[]` (`stamped`, `skipped_drafts` or `failed`, with detail). Preconditions return `422` with a `code`: `nothing_closed` (close one month first), `no_ledger_data`, or `start_after_boundary`. The same override flags as `close-period` (`allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`) apply to each re-close.
+Each month's outcome is in `processed[]` (`stamped`, `skipped_drafts` or `failed`, with detail). Preconditions return `422` with a `code`: `nothing_closed` (close one month first), `no_ledger_data`, or `start_after_boundary`. The same five override flags as `close-period` (`allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`, `allow_unposted_source_events`, `allow_unreconciled_accounts`) apply to each re-close. On a ledger with a reconciliation the close waits on, `allow_unreconciled_accounts` is needed for any month closed before that reconciliation existed, because it was never compared for that month. See [Period Close](Period-Close#reconciliations).
 
 ## Metrics
 

@@ -1,6 +1,6 @@
 # RoboInvestor Operations
 
-This guide shows you how to drive the RoboInvestor command surface through the RoboSystems API — creating securities, building portfolio blocks with positions, updating and disposing positions, and reading the data back. It also explains the cross-graph issuer-linking concept that connects an investor's holdings to the companies that issue them.
+RoboInvestor's API is six command operations for securities and portfolio blocks, plus GraphQL reads of portfolios, positions and holdings. This page walks through creating securities, building portfolio blocks with positions, updating and disposing positions, and reading the data back. It also explains the cross-graph issuer-linking concept that connects an investor's holdings to the companies that issue them.
 
 RoboInvestor is focused on private-company portfolio management. This page documents what the command surface exposes: six write operations plus a GraphQL read surface. It is an API-first walkthrough — every step is a `curl` against a graph you provision yourself.
 
@@ -40,7 +40,7 @@ The surface is intentionally small. Portfolios and positions are written through
 ## Prerequisites
 
 - A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start).
-- RoboInvestor enabled on the deployment. The `ROBOINVESTOR_ENABLED` flag gates both the RoboInvestor operations and the GraphQL investor fields; on robosystems.ai it is on. On a deployment where it is off, the REST operations return HTTP 404 "Investor module not initialized." and the GraphQL fields raise `INVESTOR_NOT_INITIALIZED`.
+- RoboInvestor enabled on the deployment. The `ROBOINVESTOR_ENABLED` flag gates both the RoboInvestor operations and the GraphQL investor fields; on robosystems.ai it is on. On a deployment where it is off, the operation routes aren't mounted, so a call is a plain HTTP 404, and the investor fields are absent from the GraphQL schema.
 - A graph provisioned with the `roboinvestor` schema extension. The operations and the GraphQL investor fields only appear on graphs that carry this extension. In the app, **Create Graph** lets you select it among the graph's schema extensions.
 
 ## The Two Write Surfaces
@@ -78,7 +78,7 @@ export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
 export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 ```
 
-The graph must carry the `roboinvestor` extension; see [Prerequisites](#prerequisites). Pointing `GRAPH_ID` at a RoboLedger graph makes every command on this page fail with `EXTENSION_NOT_PROVISIONED`.
+The graph must carry the `roboinvestor` extension; see [Prerequisites](#prerequisites). Pointing `GRAPH_ID` at a RoboLedger graph makes every command on this page fail with HTTP 403 ("roboinvestor is not provisioned for this graph"), and every investor GraphQL field with `EXTENSION_NOT_PROVISIONED`.
 
 The minimal end-to-end path is: create a security, create a portfolio block that references it, then read it back via GraphQL. The walkthrough below does exactly that.
 
@@ -234,7 +234,7 @@ For agent-driven reads, the same GraphQL surface is reachable through the MCP `q
 
 ## Operations Reference
 
-The full request and response schemas are published in the live OpenAPI spec — see [API reference](https://robosystems.ai/docs/api) rather than re-tabulating every field here. The six operations are:
+The full request and response schemas are published in the live OpenAPI spec — see the [RoboInvestor API reference](https://robosystems.ai/docs/extensions/roboinvestor) rather than re-tabulating every field here. The six operations are:
 
 | Operation | Request model | Result in envelope |
 | --- | --- | --- |
@@ -257,11 +257,18 @@ Common error responses:
 | Position id belongs to a different portfolio | 409 | `PositionPortfolioMismatchError` |
 | Second active position for same (portfolio, security) | 409 | `DuplicateActivePositionError` |
 | Delete portfolio with active positions, no confirmation | 409 | `ActivePositionsRequireConfirmationError` |
-| RoboInvestor module not initialized (REST) | 404 | "Investor module not initialized." |
-| RoboInvestor module not initialized (GraphQL) | — | `INVESTOR_NOT_INITIALIZED` |
-| Graph is not provisioned with the `roboinvestor` extension (GraphQL) | — | `EXTENSION_NOT_PROVISIONED` |
 
-The last two are easy to confuse. `INVESTOR_NOT_INITIALIZED` means the domain is available but this graph has no investor data yet; `EXTENSION_NOT_PROVISIONED` means the graph never carried the `roboinvestor` extension at all — the usual cause is pointing `GRAPH_ID` at a RoboLedger graph.
+### Errors by layer
+
+Three conditions say the investor surface isn't there for a graph, and each layer reports them differently:
+
+| Condition | REST operations | GraphQL investor fields |
+| --- | --- | --- |
+| `ROBOINVESTOR_ENABLED` is off on the deployment | HTTP 404 `Not Found`: the routes aren't mounted | Absent from the schema, so querying one is a validation error (`Cannot query field …`) |
+| The graph doesn't carry the `roboinvestor` extension (a RoboLedger graph, say) | HTTP 403 "roboinvestor is not provisioned for this graph" | `EXTENSION_NOT_PROVISIONED` |
+| The graph carries the extension but its extensions schema hasn't been created | HTTP 404 "Investor module not initialized." | `INVESTOR_NOT_INITIALIZED` |
+
+Subgraph ids and shared repositories such as `sec` are refused by the REST operations with HTTP 403 as well. The usual cause of `EXTENSION_NOT_PROVISIONED` is pointing `GRAPH_ID` at a RoboLedger graph.
 
 ## Gotchas
 
@@ -321,7 +328,7 @@ GRAPH_ID=$(jq -r '.graphs.roboinvestor_demo.graph_id' .local/config.json)
 
 **API Reference:**
 
-- **[API reference](https://robosystems.ai/docs/api)** - Full request and response schemas for all six operations.
+- **[RoboInvestor API reference](https://robosystems.ai/docs/extensions/roboinvestor)** - Full request and response schemas for all six operations.
 
 ## Support
 

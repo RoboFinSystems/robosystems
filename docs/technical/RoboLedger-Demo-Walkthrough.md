@@ -1,16 +1,30 @@
 # RoboLedger Demos
 
-RoboLedger ships a suite of self-contained demos that exercise the full accounting stack — ingest, mapping, period close, reporting, and XBRL export — entirely against the local stack, with no live QuickBooks connection. They come in two flavors:
+The RoboLedger demos load synthetic books into a graph and exercise ingest, mapping, period close, reporting, and XBRL export, with no QuickBooks connection. They come in two flavors:
 
-- **Synthetic data** (`just demo-roboledger`) — a fully-populated tenant generated from synthetic books: 16 months for a consulting firm, a filed annual report, a mapped Chart of Accounts, schedules, and one period queued for the AI-driven close. The fastest way to see RoboLedger end-to-end (~60 seconds), and the canonical surface for prospect demos, frontend evaluation, and regression testing. **This page walks through it in detail.**
+- **Synthetic data** (`just demo-roboledger`) — a fully-populated tenant generated from synthetic books: 16 months for a consulting firm, a filed annual report, a mapped Chart of Accounts, schedules, and one period queued for the AI-driven close. The fastest way to see RoboLedger end-to-end (a few minutes), and the canonical surface for prospect demos, frontend evaluation, and regression testing. **This page walks through it in detail.**
 - **Showcase scenarios** (`just demo-coffee-roaster`, `just demo-saas-startup`) — the same scenario engine pointed at two businesses with a story: Driftline Coffee (profitable but cash-poor) and Cadence Labs (burning cash on a deferred-revenue runway). Use these when the *shape of the numbers* is the point. See [Showcase Scenarios](#showcase-scenarios) below.
 
 Connecting a *real* QuickBooks company (sandbox or production) is a live OAuth connection rather than a demo — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
 
 The synthetic demo needs no QuickBooks account, Intuit Developer setup, or ngrok tunnel. It emulates data arriving the same way a real QB sync produces it — same typed event vocabulary, same OLTP shape, same materialized graph — without the OAuth and external-API requirements.
 
+## On the hosted platform
+
+The showcase scenarios load into a graph on the hosted platform as well: every step but the reset is an ordinary API call. Provision a fresh RoboLedger graph there first — the runner never creates one off-local — and save the account's API key where the run looks for it, a per-host file so a remote graph id can never leak into a local run:
+
+```bash
+echo "{\"api_key\": \"$ROBOSYSTEMS_API_KEY\"}" > .local/config.api-robosystems-ai.json
+DEMO_API_URL=https://api.robosystems.ai just demo-coffee-roaster <graph_id>
+```
+
+The reset is a direct database delete and never runs off-local, so use a graph with nothing in it: re-running over demo data duplicates it rather than replacing it. The Cascade demo, `just demo-roboledger`, is run against your own stack.
+
+The rest of this page runs against your own stack.
+
 ## Table of Contents
 
+- [On the hosted platform](#on-the-hosted-platform)
 - [Overview](#overview)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
@@ -31,7 +45,7 @@ The synthetic demo needs no QuickBooks account, Intuit Developer setup, or ngrok
 
 ## Overview
 
-When `just demo-roboledger` finishes (~60 seconds), the tenant has:
+When `just demo-roboledger` finishes (a few minutes), the tenant has:
 
 - A new entity (or one provisioned into an existing graph) modeling **Cascade Advisory Group LLC**, a 3–5 person boutique consulting firm
 - **16 months** of business data on a rolling window ending at the current month, so the demo always covers "recent history" regardless of when you run it
@@ -75,18 +89,26 @@ just start
 cd ../roboledger-app
 npm run dev
 
-# Run the demo. ~60 seconds.
+# Run the demo. A few minutes.
 cd ../robosystems
 just demo-roboledger
 ```
 
-Output includes the API key + user credentials and the graph id of the new tenant — copy them or read them from `.local/config.json`. The last line prints the exact MCP prompt to use for the AI close on the queued period.
+Output includes the API key + user credentials and the graph id of the new tenant — copy them or read them from `.local/config.json`. It ends with the period queued for close, the filed report's id, and nine numbered prompts to try from your MCP client, written for that period: orient on the fiscal calendar, find the close procedures, draft the closing entries, an optional one-off disposal, then review the drafts, close the period, and read the balance sheet.
 
 To load the demo into an existing graph (e.g. on a user / graph you've already provisioned):
 
 ```bash
 just demo-roboledger <graph_id>
 ```
+
+To give the entity another legal form — which picks the equity-form Reporting Style the statements render with — pass `--entity-type` (with `=`):
+
+```bash
+just demo-roboledger --entity-type=llc   # corporation (default) | partnership | llc
+```
+
+Each form gets its own slot in `.local/config.json`, so it builds a separate graph rather than overwriting the corporation one.
 
 To validate the data without writing anything:
 
@@ -188,7 +210,7 @@ The fiscal calendar is initialized so the prior month's prior month is `closed_t
 
 The natural way to drive the close is via the AI workflow. With Claude, ChatGPT or any MCP client connected to the local RoboSystems MCP server:
 
-1. Paste the prompt from `examples/roboledger_demo/prompt.md` (or copy the close-month-specific prompt the setup script prints at the end)
+1. Paste the prompt from `examples/roboledger_demo/prompt.md` (or work through the numbered prompts the setup script prints at the end)
 2. Ask: *"Close the books for the most recent completed month."*
 
 Two checklists are in play, and it's worth keeping them apart.
@@ -212,8 +234,12 @@ Two checklists are in play, and it's worth keeping them apart.
 4. `promote-obligations` (`dispatch_handlers=true`) — drafts every matured schedule's closing entry in one sweep. **This is how schedule drafts come into being; there is no `create-closing-entry` tool.** Manual one-offs go through `create-event-block` with `event_type='journal_entry_recorded'`.
 5. `list-period-drafts` — review every draft with DR/CR detail and the `all_balanced` check
 6. Summarize to the user and get explicit approval
-7. `close-period` — atomic: posts the drafts, runs the balance-sheet equation check, stamps the period's statement FactSets, advances `closed_through`
+7. `close-period` — atomic: posts the drafts, runs the balance-sheet equation check, stamps the period's statement FactSets, advances `closed_through`. The close runs on the worker, so a heavy month can outlast the call: a response of `status: "in_progress"` with an `operation_id` means it is running, and is never a reason to call again — poll `get-period-close-status` until `period_status` reads closed and `close_receipt` fills in
 8. Post-close verification — read the receipt back: `entries_posted`, `statements_stamped`, `rule_summary`, `statement_rule_summary`
+
+The playbook also covers the steps a clean demo skips — reconciling items from a sync, unmapped accounts, schedules that end early.
+
+**Account reconciliations.** The demo sets none up, so its close is not gated on them. To try them, ask for a refresh of the reconciliations for the target period (`refresh-reconciliations`): it compares each asset account a schedule carries a balance on with its schedules, and gives each its own reconciliation. One that ties on that first comparison starts out required for close, so from then on the close is blocked with `unreconciled_accounts` until it reconciles for the period (and is signed off, where its policy asks for review); `set-reconciliation-policy` changes that per reconciliation. Two other blockers can appear on a real ledger: `reconciling_items` and `unposted_source_events`.
 
 Note what is *not* in it: `evaluate-rules` is not a close step. The close runs the rules itself and hands the tallies back on its own response (see [The Rule Engine](#the-rule-engine)).
 
@@ -236,12 +262,12 @@ To see them, walk the blocks:
 curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"query":"{ informationBlocks { name blockType rules { rulePattern ruleSeverity ruleOrigin } } }"}' \
+  -d '{"query":"{ informationBlocks(limit: 1000) { name blockType rules { rulePattern ruleSeverity ruleOrigin } } }"}' \
   | jq '[.data.informationBlocks[].rules[]] | group_by(.rulePattern)
         | map({pattern: .[0].rulePattern, count: length})'
 ```
 
-On a freshly loaded demo tenant that returns roughly 134 rules: ~88 `RollUp`, ~30 `Derive`, ~10 `EqualTo`, and the 6 schedule `SumEquals` proofs. The exact numbers move with the seeded rs-gaap library, which is why the query above is the answer rather than a table on this page.
+`informationBlocks` returns 50 blocks unless you pass `limit` (up to 1000), which is why the query sets one. On a freshly loaded demo tenant it returns roughly 134 rules: ~88 `RollUp`, ~30 `Derive`, ~10 `EqualTo`, and the 6 schedule `SumEquals` proofs. The exact numbers move with the seeded rs-gaap library, which is why the query above is the answer rather than a table on this page.
 
 The pattern vocabulary is broader than what the demo happens to exercise — `Adjustment`, `CoExists`, `Derive`, `EqualTo`, `Exists`, `GreaterThan`, `GreaterThanOrEqualToZero`, `LessThan`, `RollForward`, `RollUp`, `SumEquals`, `Variance`. Of those, `EqualTo` / `RollForward`, `RollUp`, `Exists`, `CoExists`, and `SumEquals` have evaluators today; the rest return `skipped` rather than failing.
 
@@ -349,7 +375,7 @@ Once the demo is loaded, walk through these screens in roboledger-app at `http:/
 | **Agents** | The 17 parties: customers, vendors, employees, IRS |
 | **Ledger → Chart of Accounts** | 27 accounts, each with its rs-gaap mapping displayed inline |
 | **Ledger → Inbox** | Empty for the demo (events auto-commit for QB-style sources; demo events do the same) |
-| **Ledger → Transactions** | The full posted event log — invoices, payments, bills, payroll JEs |
+| **Ledger → Journal** | Every journal entry — invoices, payments, bills, payroll JEs — with the source transactions as a secondary view |
 | **Ledger → Trial Balance** | Debits and credits by account; balances to the cent |
 | **Ledger → Statements** | Live statements rendered from the current ledger, without waiting on a report |
 | **Ledger → Closing Book** | The fiscal calendar view + the one queued period ready to close + blocker payload (in_scope schedule facts) |
@@ -359,7 +385,7 @@ Once the demo is loaded, walk through these screens in roboledger-app at `http:/
 | **Explorer** | Ad-hoc traversal of the materialized graph |
 | **Plan** | The FP&A surface — forecast blocks and scenarios over the same ledger |
 | **Library** | The taxonomy library behind the mappings |
-| **Console** | Direct query access from inside the app |
+| **Console** | The bar at the bottom of every page: ask about the books, or start with `/do` to have it make a change |
 | **Search** | Full-text search across the graph, including the 4 policy documents |
 
 The **Closing Book** screen is the most product-distinctive surface — it drives the AI-assisted close workflow and surfaces all the period's outstanding items in one place.
@@ -444,7 +470,7 @@ Common customizations:
 
 | Aspect | Synthetic Demo | QuickBooks Local |
 |---|---|---|
-| Setup time | One command (~60 sec) | 5–15 minutes (Intuit + ngrok config) |
+| Setup time | One command (a few minutes) | 5–15 minutes (Intuit + ngrok config) |
 | External dependencies | None | Intuit Developer + ngrok + QBO subscription |
 | Data shape | Designed for the product — clean, 100% mappable, balanced | Real-world messy — partial mapping coverage, edge-case transaction types |
 | Use for | Product evaluation, regression testing, agent demos, learning the feature set | Real-data smoke testing, your own books, adapter debugging |
@@ -465,7 +491,7 @@ just demo-coffee-roaster
 just demo-saas-startup
 ```
 
-Both take the same flags as `just demo-roboledger`: an optional `[graph_id]` to load into an existing graph, `--ai` to map the Chart of Accounts with the MappingOperator instead of the hardcoded table, and `--dry-run` to validate without writing.
+Both take the same flags as `just demo-roboledger`: an optional `[graph_id]` to load into an existing graph, `--ai` to map the Chart of Accounts with the MappingOperator instead of the hardcoded table, and `--dry-run` to validate without writing. Either also loads into a graph on the hosted platform — see [On the hosted platform](#on-the-hosted-platform).
 
 There is also a RoboInvestor demo — Meridian Ventures Fund I, including the cross-graph report share between a fund and an issuer:
 
