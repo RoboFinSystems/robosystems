@@ -19,7 +19,9 @@ def upgrade() -> None:
   # No schema change: the model stopped mapping the column. Clear the stale
   # instance ids it still holds; nothing reads them, and DynamoDB is where
   # a graph's instance lives. The column is dropped in the next release.
-  op.execute("UPDATE graphs SET graph_instance_id = NULL")
+  op.execute(
+    "UPDATE graphs SET graph_instance_id = NULL WHERE graph_instance_id IS NOT NULL"
+  )
 
 
 def downgrade() -> None:
