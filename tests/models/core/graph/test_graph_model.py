@@ -80,7 +80,6 @@ class TestGraphModel:
     assert graph.base_schema is None
     # Default values are not set until the object is added to session
     assert graph.schema_extensions is None or graph.schema_extensions == []
-    assert graph.graph_instance_id is None or graph.graph_instance_id == "default"
     assert (
       graph.graph_tier is None or graph.graph_tier == GraphTier.LADYBUG_STANDARD.value
     )
@@ -227,7 +226,6 @@ class TestGraphModel:
       session=db_session,
       base_schema="base",
       schema_extensions=["roboledger", "roboinvestor"],
-      graph_instance_id="cluster1",
       graph_cluster_region="us-east-1",
       graph_tier=GraphTier.LADYBUG_LARGE,
       graph_metadata={"test": "metadata"},
@@ -238,7 +236,6 @@ class TestGraphModel:
     assert graph.graph_type == "entity"
     assert graph.base_schema == "base"
     assert graph.schema_extensions == ["roboledger", "roboinvestor"]
-    assert graph.graph_instance_id == "cluster1"
     assert graph.graph_cluster_region == "us-east-1"
     assert graph.graph_tier == GraphTier.LADYBUG_LARGE.value
     assert graph.graph_metadata == {"test": "metadata"}
@@ -1122,7 +1119,6 @@ class TestMarkFreshCompareAndClear:
       session=db_session,
       base_schema="base",
       schema_extensions=["roboledger"],
-      graph_instance_id="cluster1",
       graph_cluster_region="us-east-1",
       graph_tier=GraphTier.LADYBUG_STANDARD,
     )
@@ -1205,7 +1201,6 @@ class TestStaleSince:
       session=db_session,
       base_schema="base",
       schema_extensions=["roboledger"],
-      graph_instance_id="cluster1",
       graph_cluster_region="us-east-1",
       graph_tier=GraphTier.LADYBUG_STANDARD,
     )

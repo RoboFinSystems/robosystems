@@ -51,7 +51,6 @@ class Graph(Model):
   __table_args__ = (
     Index("idx_graphs_org", "org_id"),
     Index("idx_graphs_type", "graph_type"),
-    Index("idx_graphs_instance", "graph_instance_id"),
     Index("idx_graphs_schema_extensions", "schema_extensions", postgresql_using="gin"),
     Index("idx_graphs_tier", "graph_tier"),
     Index("idx_graphs_parent", "parent_graph_id"),
@@ -91,8 +90,12 @@ class Graph(Model):
     JSONB, nullable=False, default=list
   )  # ["roboledger", "roboinvestor"] for entity graphs
 
-  # Infrastructure metadata
-  graph_instance_id = Column(String, nullable=False, default="default", index=True)
+  # Infrastructure metadata. Which instance hosts the graph is not kept here:
+  # it changes on every writer roll, and the DynamoDB graph registry, which
+  # routing reads, is the one place it lives.
+  # Unused and nullable; dropped in the release after the one that stopped
+  # writing it, once no running container maps it.
+  graph_instance_id = Column(String, nullable=True)
   graph_cluster_region = Column(String, nullable=True)
 
   graph_tier = Column(
@@ -231,7 +234,6 @@ class Graph(Model):
     session: Session,
     base_schema: str | None = None,
     schema_extensions: list[str] | None = None,
-    graph_instance_id: str = "default",
     graph_cluster_region: str | None = None,
     graph_tier: GraphTier = GraphTier.LADYBUG_STANDARD,
     graph_metadata: dict[str, Any] | None = None,
@@ -268,7 +270,6 @@ class Graph(Model):
       graph_type=graph_type,
       base_schema=base_schema,
       schema_extensions=schema_extensions or [],
-      graph_instance_id=graph_instance_id,
       graph_cluster_region=graph_cluster_region,
       graph_tier=graph_tier.value if isinstance(graph_tier, GraphTier) else graph_tier,
       graph_metadata=graph_metadata,
@@ -459,7 +460,6 @@ class Graph(Model):
     data_source_url: str | None = None,
     sync_frequency: str | None = None,
     graph_tier: GraphTier = GraphTier.LADYBUG_SHARED,
-    graph_instance_id: str = "ladybug-shared-prod",
   ) -> "Graph":
     """Find or create a repository graph entry.
 
@@ -479,7 +479,6 @@ class Graph(Model):
       base_schema=base_schema or "base",
       schema_extensions=schema_extensions,
       graph_tier=graph_tier,
-      graph_instance_id=graph_instance_id,
       commit=False,
     )
 

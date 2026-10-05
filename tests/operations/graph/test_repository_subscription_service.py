@@ -94,7 +94,6 @@ class TestEnsureRepositoryGraphExists:
         return_value={
           "name": "SEC Financial Data",
           "graph_tier": "ladybug-shared",
-          "graph_instance_id": "shared-sec",
           "data_source_type": "sec",
           "data_source_url": "https://efts.sec.gov/LATEST/",
           "sync_frequency": "daily",

@@ -87,7 +87,6 @@ class RepositorySubscriptionService:
       graph_name=config["name"],
       graph_type="repository",
       graph_tier=config["graph_tier"],
-      graph_instance_id=config["graph_instance_id"],
       graph_cluster_region="us-east-1",
       is_repository=True,
       repository_type=repository_type.value,

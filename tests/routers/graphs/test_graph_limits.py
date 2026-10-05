@@ -237,7 +237,6 @@ class TestGraphLimitsEndpoint:
       base_schema="base",
       schema_extensions=[],
       graph_tier=tier,
-      graph_instance_id="test-instance",
     )
     GraphUser.create(
       user_id=test_user.id,

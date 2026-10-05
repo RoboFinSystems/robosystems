@@ -103,7 +103,6 @@ class SubgraphService:
     )
 
     try:
-      from robosystems.config import env
       from robosystems.database import SessionFactory
       from robosystems.models.core.graph import Graph
 
@@ -121,12 +120,10 @@ class SubgraphService:
           "The parent graph must exist before creating subgraphs."
         )
 
-      # Local dev graphs are not registered in DynamoDB, so their location is
-      # synthesised rather than looked up.
-      if (
-        parent_graph_record.graph_instance_id
-        and parent_graph_record.graph_instance_id.startswith("local-")
-      ):
+      # Local dev has the one writer behind GRAPH_API_URL, so its location is
+      # synthesised rather than looked up. The environment decides, as in
+      # delete.
+      if env.is_development() and bool(env.GRAPH_API_URL):
         from dataclasses import dataclass
 
         @dataclass
@@ -134,9 +131,11 @@ class SubgraphService:
           instance_id: str
           private_ip: str
 
+        from urllib.parse import urlparse
+
         parent_location = LocalGraphLocation(
-          instance_id=parent_graph_record.graph_instance_id,
-          private_ip="graph-api" if env.ENVIRONMENT == "dev" else "localhost",
+          instance_id="local-lbug-writer",
+          private_ip=urlparse(env.GRAPH_API_URL).hostname or "graph-api",
         )
         logger.info(
           f"Using local graph instance: {parent_location.instance_id} at {parent_location.private_ip}"
@@ -320,7 +319,6 @@ class SubgraphService:
         graph_type=parent_graph.graph_type,
         base_schema=parent_graph.base_schema,
         schema_extensions=parent_graph.schema_extensions or [],
-        graph_instance_id=parent_graph.graph_instance_id,
         graph_cluster_region=parent_graph.graph_cluster_region,
         graph_tier=parent_graph.graph_tier,
         parent_graph_id=parent_graph.graph_id,

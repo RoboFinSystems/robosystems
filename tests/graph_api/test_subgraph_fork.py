@@ -90,7 +90,6 @@ async def test_create_subgraph_with_fork():
     graph_type="ladybug",
     base_schema="entity",
     schema_extensions=["roboledger"],
-    graph_instance_id="i-12345",
     graph_cluster_region="us-east-1",
     org_id="org123",
   )

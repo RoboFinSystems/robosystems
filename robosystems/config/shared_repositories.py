@@ -278,5 +278,4 @@ def get_repository_metadata(repo_id: str) -> dict | None:
     "sync_frequency": manifest.sync_frequency,
     "status": manifest.status,
     "graph_tier": manifest.graph_tier,
-    "graph_instance_id": manifest.graph_instance_id,
   }

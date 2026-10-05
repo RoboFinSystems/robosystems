@@ -113,7 +113,6 @@ class SharedRepositoryService:
           data_source_url=manifest.data_source_url,
           sync_frequency=manifest.sync_frequency,
           graph_tier=GraphTier.LADYBUG_SHARED,
-          graph_instance_id=instance_id,
         )
         logger.info(f"Graph metadata created/verified: {repository_graph.graph_id}")
 
@@ -355,7 +354,6 @@ async def ensure_shared_subgraph_exists(
         graph_type=parent_graph.graph_type,
         base_schema=parent_graph.base_schema,
         schema_extensions=parent_graph.schema_extensions or [],
-        graph_instance_id=parent_graph.graph_instance_id,
         graph_cluster_region=parent_graph.graph_cluster_region,
         graph_tier=parent_graph.graph_tier,
         parent_graph_id=parent_repository_name,
