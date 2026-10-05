@@ -424,7 +424,6 @@ def _recognized_by_schedule(session: Session, as_of: date) -> dict[str, _Recogni
         JOIN structures s ON s.id = f.structure_id
         WHERE s.block_type = 'schedule'
           AND f.period_type = 'duration'
-          AND f.element_id = s.metadata->'entry_template'->>'debit_element_id'
         ORDER BY f.structure_id, f.period_start, f.period_end, f.id
       ) per_period
       GROUP BY structure_id

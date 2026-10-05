@@ -967,7 +967,7 @@ class ScheduleService:
         LEFT JOIN facts f ON f.structure_id = s.id
           AND f.period_start >= :period_start
           AND f.period_end <= :period_end
-          AND f.element_id = (s.metadata->'entry_template'->>'debit_element_id')
+          AND f.period_type = 'duration'
           AND f.fact_scope = 'in_scope'
         LEFT JOIN best_entry be ON be.source_structure_id = s.id
         LEFT JOIN reversal r ON r.reversal_of = be.entry_id
@@ -1126,11 +1126,13 @@ class ScheduleService:
         f"(status: {existing_row.status}). Use the reopen flow to modify it."
       )
 
+    # By period, not by the template's debit account: the facts keep the
+    # account they were built on, and a template edit is prospective.
     fact_row = session.execute(
       text("""
         SELECT value FROM facts
         WHERE structure_id = :structure_id
-          AND element_id = :element_id
+          AND period_type = 'duration'
           AND period_start >= :period_start
           AND period_end <= :period_end
           AND fact_scope = 'in_scope'
@@ -1138,7 +1140,6 @@ class ScheduleService:
       """),
       {
         "structure_id": structure_id,
-        "element_id": debit_element_id,
         "period_start": period_start,
         "period_end": period_end,
       },
@@ -1156,7 +1157,7 @@ class ScheduleService:
         )
       return ClosingEntryResult(
         outcome="skipped",
-        reason=f"No in-scope fact for element '{debit_element_id}' in this period.",
+        reason="No in-scope fact for this period.",
       )
 
     # Before the staleness check: an unchanged draft on a retired account
