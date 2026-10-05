@@ -794,51 +794,20 @@ Resources:
                   - sns:ListTagsForResource
                 Resource: "*"
 
-              # IAM role management — mutations pinned to the compute roles the
-              # frontend stacks create, so a compromised frontend workflow cannot
-              # touch backend/deploy/SSO roles. Reads stay broad. A NEW privileged
-              # role inside the prefix is what FrontendRoleBoundary prevents.
-              # TODO: once every app template sets PermissionsBoundary, add the
-              # iam:PermissionsBoundary condition here.
+              # IAM role management, pinned to the compute roles the frontend
+              # stacks create so a compromised frontend workflow cannot touch
+              # backend/deploy/SSO roles. Every write that can grant a role
+              # permissions requires the role to carry its boundary (the key is
+              # checked against the boundary already on the role), so no role
+              # inside the prefix can exceed FrontendRoleBoundary. The boundary
+              # can be set only to that policy and is never removable
+              # (DeleteRolePermissionsBoundary is not granted).
               - Sid: IAMRoleManagement
                 Effect: Allow
                 Action:
                   - iam:CreateRole
-                  - iam:DeleteRole
-                  - iam:UpdateRole
-                  - iam:TagRole
-                  - iam:UntagRole
-                  - iam:AttachRolePolicy
-                  - iam:DetachRolePolicy
                   - iam:PutRolePolicy
-                  - iam:DeleteRolePolicy
-                  - iam:PassRole
-                # No iam:PassedToService condition: App Runner leaves it unset.
-                # Names per the app templates: `<app>-<env>-apprunner-*` and
-                # `-ecs-*`; roboledger/roboinvestor drop the `-app` segment.
-                Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-ecs-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-ecs-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-ecs-*
-              - Sid: IAMReadOnly
-                Effect: Allow
-                Action:
-                  - iam:GetRole
-                  - iam:GetRolePolicy
-                  - iam:ListRoleTags
-                  - iam:ListRolePolicies
-                  - iam:ListAttachedRolePolicies
-                Resource: "*"
-              # Setting the boundary is allowed only to this one policy, so the
-              # frontend role can install the ceiling but never swap it for a
-              # looser one. Removing it (DeleteRolePermissionsBoundary) is not
-              # granted at all.
-              - Sid: IAMRoleBoundary
-                Effect: Allow
-                Action:
+                  - iam:AttachRolePolicy
                   - iam:PutRolePermissionsBoundary
                 Resource:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
@@ -855,9 +824,12 @@ Resources:
                     "iam:PermissionsBoundary": !Ref FrontendRoleBoundary
               # The ECS infrastructure role's ceiling is its own AWS managed
               # policy, so AWS's revisions to it flow through unchanged.
-              - Sid: IAMRoleBoundaryEcsInfrastructure
+              - Sid: IAMRoleManagementEcsInfrastructure
                 Effect: Allow
                 Action:
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                  - iam:AttachRolePolicy
                   - iam:PutRolePermissionsBoundary
                 Resource:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-ecs-infrastructure
@@ -866,6 +838,46 @@ Resources:
                 Condition:
                   StringEquals:
                     "iam:PermissionsBoundary": arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRoleforExpressGatewayServices
+              # Removing or relabelling cannot widen a role, so these stay
+              # ungated and stack deletes still work on any role in the prefix.
+              - Sid: IAMRoleCleanup
+                Effect: Allow
+                Action:
+                  - iam:DeleteRole
+                  - iam:UpdateRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:DetachRolePolicy
+                  - iam:DeleteRolePolicy
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-ecs-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-ecs-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-ecs-*
+              # No iam:PassedToService condition: App Runner leaves it unset. A
+              # role that carries its boundary is harmless to pass.
+              - Sid: IAMPassRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-ecs-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-ecs-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-ecs-*
+              - Sid: IAMReadOnly
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListRoleTags
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource: "*"
               - Sid: IAMServiceLinkedRole
                 Effect: Allow
                 Action:
