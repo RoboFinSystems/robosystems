@@ -40,7 +40,7 @@ The service listens only inside the VPC — there is no public route to port 800
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/health` | Load-balancer probe. Returns 503 while a replica is warming or a version migration is running |
+| GET | `/health` | Load-balancer probe. Returns 503 while a replica is warming, a version migration is running, or a replica has been out of memory headroom for five minutes |
 | GET | `/info` | Node identity, type, database list, capacity |
 | GET | `/metrics` | System, database, query, and ingestion metrics |
 

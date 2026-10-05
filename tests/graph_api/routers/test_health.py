@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from robosystems.graph_api.app import create_app
 from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.graph_api.routers.health import MEMORY_LATCH_SECONDS
 
 
 class TestHealthRouter:
@@ -157,3 +158,61 @@ class TestHealthRouter:
     assert isinstance(data["status"], str)
     assert isinstance(data["uptime_seconds"], (int, float))
     assert isinstance(data["database_count"], int)
+
+
+class TestReplicaMemoryLatch:
+  """A replica that has refused every query for lack of memory headroom
+  fails its health check, so the load balancer replaces it."""
+
+  @pytest.fixture
+  def client(self):
+    app = create_app()
+    service = MagicMock()
+    service.get_uptime.return_value = 3600
+    service.db_manager.list_databases.return_value = ["sec"]
+    app.dependency_overrides[get_ladybug_service] = lambda: service
+    return TestClient(app)
+
+  @pytest.fixture
+  def starved_for(self, monkeypatch):
+    def _set(seconds: float, role: str | None = "replica"):
+      if role is None:
+        monkeypatch.delenv("LBUG_ROLE", raising=False)
+      else:
+        monkeypatch.setenv("LBUG_ROLE", role)
+      monkeypatch.setattr("robosystems.graph_api.routers.health._replica_ready", True)
+      controller = MagicMock()
+      controller.memory_starved_seconds.return_value = seconds
+      monkeypatch.setattr(
+        "robosystems.graph_api.routers.health.get_admission_controller",
+        lambda: controller,
+      )
+
+    return _set
+
+  def test_a_latched_replica_is_unhealthy(self, client, starved_for):
+    starved_for(MEMORY_LATCH_SECONDS)
+
+    response = client.get("/health")
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["status"] == "memory_latched"
+
+  def test_a_short_spike_does_not_cost_a_replica(self, client, starved_for):
+    """A replacement takes many minutes to load; a spike is not worth one."""
+    starved_for(MEMORY_LATCH_SECONDS - 1)
+
+    response = client.get("/health")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["status"] == "healthy"
+
+  @pytest.mark.parametrize("role", ["writer", None])
+  def test_only_a_replica_is_judged(self, client, starved_for, role):
+    """A writer holds tenant data on its volume; failing its health check
+    would have the group replace it."""
+    starved_for(MEMORY_LATCH_SECONDS * 10, role=role)
+
+    response = client.get("/health")
+
+    assert response.status_code == status.HTTP_200_OK

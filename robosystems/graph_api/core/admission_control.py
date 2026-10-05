@@ -74,6 +74,7 @@ class LadybugAdmissionController:
     self._cached_available_mb = float("inf")
     self._cached_cgroup_available_mb: float | None = None
     self._cached_cpu = 0.0
+    self._memory_starved_since: float | None = None
 
     # The query route runs on the threadpool: every read-modify-write of the
     # counters holds this lock, or lost updates drift the count upward until
@@ -140,6 +141,18 @@ class LadybugAdmissionController:
         self._cached_available_mb = 0.0
         self._cached_cgroup_available_mb = 0.0
         self._cached_cpu = 80.0
+      if self._cached_available_mb >= self.min_available_mb:
+        self._memory_starved_since = None
+      elif self._memory_starved_since is None:
+        self._memory_starved_since = now
+
+  def memory_starved_seconds(self) -> float:
+    """How long memory headroom has read under the floor without a break,
+    which is how long every request has been refused. 0.0 when it has room."""
+    self._update_resource_cache()
+    if self._memory_starved_since is None:
+      return 0.0
+    return time.time() - self._memory_starved_since
 
   def check_admission(
     self, database_name: str, operation_type: str = "query"
