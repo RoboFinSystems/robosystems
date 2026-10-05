@@ -702,6 +702,24 @@ def test_a_reflag_after_the_preview_is_refused(session, disposition):
   assert event.payload_drift is True
 
 
+def test_a_resolution_without_a_stamp_still_resolves(session):
+  """The stamp is optional for callers that predate it; they keep the check
+  for a re-flag landing inside their own request."""
+  _elements, event, _accepted = _setup(session)
+
+  resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(
+      event_id=str(event.id), disposition="acknowledge", note="handled"
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+  session.refresh(event)
+  assert event.payload_drift is False
+
+
 def test_a_z_suffixed_stamp_does_not_read_as_a_reflag(session):
   """The guard compares the stored string, not a round-trip of it.
 
