@@ -1,6 +1,6 @@
 """Tests for database management router endpoints."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import status
@@ -35,6 +35,7 @@ def _lock_patches(acquired: bool):
   lock.acquire = AsyncMock(return_value=acquired)
   lock.release = AsyncMock()
   lock.acquired = acquired
+  lock.last_backend_error = None
   stack = ExitStack()
   stack.enter_context(
     patch(
@@ -447,6 +448,8 @@ class TestTransientDeleteLockGuard:
     lock.acquire = AsyncMock(return_value=acquire_result)
     lock.release = AsyncMock()
     lock.acquired = acquire_result
+    lock.last_backend_error = None
+    lock_cls.adopt = AsyncMock(return_value=lock)
     return lock_cls
 
   def test_wip_delete_refused_while_build_holds_lock(self, client):
@@ -482,7 +485,7 @@ class TestTransientDeleteLockGuard:
     )
     lock_cls.return_value.release.assert_awaited_once()
 
-  def test_lock_token_passthrough_skips_acquisition(self, client):
+  def test_lock_token_passthrough_adopts_instead_of_acquiring(self, client):
     """The materialize flow deletes its own WIP while holding the lock —
     its token must let the delete through without a second acquire."""
     lock_cls = self._lock_mock(acquire_result=False)
@@ -500,7 +503,59 @@ class TestTransientDeleteLockGuard:
 
     assert response.status_code == status.HTTP_200_OK
     lock_cls.assert_not_called()
+    assert lock_cls.adopt.await_args.args[1:] == ("kg1a2b3c4d5-wip", "tok-123")
     self._service(client).db_manager.delete_database.assert_called_once()
+    # The holder releases, not the delete.
+    lock_cls.return_value.release.assert_not_awaited()
+
+  def test_a_token_that_is_not_the_holders_is_refused(self, client):
+    """A header is not a lock: a token that does not match the stored one
+    gets a 409, never an unlocked delete."""
+    lock_cls = self._lock_mock(acquire_result=True)
+    lock_cls.adopt = AsyncMock(return_value=None)
+    with (
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        lock_cls,
+      ),
+      patch("robosystems.config.valkey_registry.create_async_redis_client"),
+    ):
+      response = client.delete(
+        "/databases/kg1a2b3c4d5",
+        headers={"X-Materialization-Lock-Token": "not-the-holders"},
+      )
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+    lock_cls.assert_not_called()
+    self._service(client).db_manager.delete_database.assert_not_called()
+
+  def test_lock_backend_error_is_a_503_not_a_conflict(self, client):
+    lock_cls = self._lock_mock(acquire_result=False)
+    lock_cls.return_value.last_backend_error = "Connection refused"
+    with (
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        lock_cls,
+      ),
+      patch("robosystems.config.valkey_registry.create_async_redis_client"),
+    ):
+      response = client.delete("/databases/kg1a2b3c4d5")
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.headers["Retry-After"] == "30"
+    self._service(client).db_manager.delete_database.assert_not_called()
+
+  def test_unreachable_lock_service_refuses_the_delete(self, client):
+    """No lock service, no delete: an unlocked delete could sweep a live
+    build's WIP, and the caller can retry."""
+    with patch(
+      "robosystems.config.valkey_registry.create_async_redis_client",
+      side_effect=ConnectionError("no valkey"),
+    ):
+      response = client.delete("/databases/kg1a2b3c4d5")
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    self._service(client).db_manager.delete_database.assert_not_called()
 
   def test_base_name_delete_refused_while_build_holds_lock(self, client):
     """A base-name delete sweeps the graph's -wip/-prev, so it takes the same
@@ -537,3 +592,83 @@ class TestTransientDeleteLockGuard:
     )
     lock_cls.return_value.acquire.assert_awaited_once()
     lock_cls.return_value.release.assert_awaited_once()
+
+
+class TestSwapLock:
+  """The swap runs under the per-graph lock and never proceeds unlocked."""
+
+  @pytest.fixture
+  def client(self):
+    app = create_app()
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
+
+    mock_service = MagicMock()
+    mock_service.read_only = False
+    mock_service.db_manager.swap_database.return_value = {
+      "status": "success",
+      "graph_id": "kg1a2b3c4d5",
+      "message": "swapped",
+    }
+    app.dependency_overrides[get_ladybug_service] = lambda: mock_service
+    self.service = mock_service
+    return TestClient(app)
+
+  @staticmethod
+  def _lock_cls(acquired: bool = True, adopted: bool = True) -> MagicMock:
+    lock_cls = MagicMock()
+    lock = lock_cls.return_value
+    lock.acquire = AsyncMock(return_value=acquired)
+    lock.release = AsyncMock()
+    lock.last_backend_error = None
+    lock_cls.adopt = AsyncMock(return_value=lock if adopted else None)
+    return lock_cls
+
+  def _swap(self, client, lock_cls, token: str | None = None):
+    headers = {"X-Materialization-Lock-Token": token} if token else {}
+    with (
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        lock_cls,
+      ),
+      patch("robosystems.config.valkey_registry.create_async_redis_client"),
+    ):
+      return client.post("/databases/kg1a2b3c4d5/swap", headers=headers)
+
+  def test_the_holders_token_swaps_without_reacquiring(self, client):
+    lock_cls = self._lock_cls()
+    response = self._swap(client, lock_cls, token="tok-held")
+
+    assert response.status_code == status.HTTP_200_OK
+    lock_cls.assert_not_called()
+    self.service.db_manager.swap_database.assert_called_once_with("kg1a2b3c4d5")
+    lock_cls.return_value.release.assert_not_awaited()
+
+  def test_a_token_that_is_not_the_holders_is_refused(self, client):
+    response = self._swap(client, self._lock_cls(adopted=False), token="forged")
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+    self.service.db_manager.swap_database.assert_not_called()
+
+  def test_without_a_token_the_swap_takes_and_releases_the_lock(self, client):
+    lock_cls = self._lock_cls()
+    response = self._swap(client, lock_cls)
+
+    assert response.status_code == status.HTTP_200_OK
+    lock_cls.return_value.acquire.assert_awaited_once()
+    lock_cls.return_value.release.assert_awaited_once()
+
+  def test_a_held_lock_is_a_409(self, client):
+    response = self._swap(client, self._lock_cls(acquired=False))
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+    self.service.db_manager.swap_database.assert_not_called()
+
+  def test_unreachable_lock_service_refuses_the_swap(self, client):
+    with patch(
+      "robosystems.config.valkey_registry.create_async_redis_client",
+      side_effect=ConnectionError("no valkey"),
+    ):
+      response = client.post("/databases/kg1a2b3c4d5/swap")
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    self.service.db_manager.swap_database.assert_not_called()

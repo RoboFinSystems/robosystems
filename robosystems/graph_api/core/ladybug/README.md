@@ -186,13 +186,20 @@ materializations of the same graph cannot interleave.
   lock, so a materialization writing to WIP blocks a swap of the same graph.
   Different graphs never contend.
 - **1-hour TTL**, as a safety net for a process that dies holding it.
-- **5-second acquire timeout** — a second materialization fails fast rather than
-  queueing behind one that may run for an hour.
+- **Fails fast on contention.** A submit tries once and answers 409; a sensor
+  run waits at most 5 seconds. Neither queues behind a build that may run for
+  an hour.
 - **Compare-and-delete release via Lua**, so a slow holder cannot delete a lock
   that has since expired and been re-acquired by someone else.
-- **Token passthrough**: a caller that already holds the lock sends it in the
-  `X-Materialization-Lock-Token` header, and the swap verifies against that
-  token instead of acquiring its own.
+- **One lock per operation, across every trigger.** The API takes it when a
+  materialize is submitted, the stale-graph sensor's runs take it themselves,
+  and every downstream step adopts the holder's token instead of acquiring
+  again. Swap and delete accept it in the `X-Materialization-Lock-Token`
+  header; `MaterializationLock.adopt` honours a token only if it is the stored
+  one (renewing the TTL as it does), so a header is never a way past the lock.
+- **Fails closed.** Swap and delete return 409 when the lock is held or the
+  token is not the holder's, and 503 when Valkey cannot be reached. Neither
+  ever proceeds unlocked.
 
 ## Errors
 
