@@ -120,7 +120,7 @@ def test_viewer_cannot_create_connection(tenants, client: Client) -> None:
   w = client.post(
     f"/v1/graphs/{tenants.graph_a}/connections",
     principal=viewer,
-    json={"provider": "sec", "sec_config": {"cik": "0000320193"}},
+    json={"provider": "external", "external_config": {"source_name": "isoprobe"}},
   )
   assert w.status_code in (401, 403), (
     f"VIEWER CREATED A CONNECTION (escalation): {w.status_code}"
