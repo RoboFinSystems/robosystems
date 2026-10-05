@@ -396,6 +396,31 @@ class TestQbTransformFailure:
     record_failed.assert_called_once()
     release_lock.assert_called_once()
 
+  def test_transform_interrupted_run_releases_lock(self, tmp_path):
+    """Stopping a run raises a BaseException, which qb_load's finally covers;
+    the earlier stages must not keep the lock to its TTL either."""
+    from dagster._core.errors import DagsterExecutionInterruptedError
+
+    from robosystems.adapters.quickbooks.pipeline.transform import qb_transform
+
+    config = _make_config()
+
+    with (
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.transform._run_qb_transform",
+        side_effect=DagsterExecutionInterruptedError(),
+      ),
+      patch("robosystems.adapters.quickbooks.pipeline.load._record_failed_sync_result"),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._release_sync_lock"
+      ) as release_lock,
+    ):
+      context = build_asset_context()
+      with pytest.raises(DagsterExecutionInterruptedError):
+        qb_transform(context, config)
+
+    release_lock.assert_called_once()
+
   def test_transform_error_message_includes_exit_code(self, tmp_path):
     """Test that the RuntimeError message includes the exit code."""
     from robosystems.adapters.quickbooks.pipeline.transform import qb_transform

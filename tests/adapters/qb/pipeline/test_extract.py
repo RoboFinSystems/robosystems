@@ -483,6 +483,31 @@ class TestQbExtractErrors:
     assert isinstance(record_failed.call_args.args[2], ValueError)
     release_lock.assert_called_once()
 
+  def test_extract_interrupted_run_releases_lock(self, tmp_path):
+    """Stopping a run raises a BaseException, which qb_load's finally covers;
+    the earlier stages must not keep the lock to its TTL either."""
+    from dagster._core.errors import DagsterExecutionInterruptedError
+
+    from robosystems.adapters.quickbooks.pipeline.extract import qb_extract
+
+    config = _make_config()
+
+    with (
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.extract._run_qb_extract",
+        side_effect=DagsterExecutionInterruptedError(),
+      ),
+      patch("robosystems.adapters.quickbooks.pipeline.load._record_failed_sync_result"),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._release_sync_lock"
+      ) as release_lock,
+    ):
+      context = build_asset_context()
+      with pytest.raises(DagsterExecutionInterruptedError):
+        qb_extract(context, config)
+
+    release_lock.assert_called_once()
+
   def test_extract_raises_when_no_realm_id(self, tmp_path):
     """Test ValueError when realm_id is empty."""
     from robosystems.adapters.quickbooks.pipeline.extract import qb_extract

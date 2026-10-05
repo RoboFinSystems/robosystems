@@ -118,7 +118,8 @@ def qb_extract(
 ) -> MaterializeResult:
   try:
     return _run_qb_extract(context, config)
-  except Exception as exc:
+  except BaseException as exc:
+    # BaseException: a stopped run raises DagsterExecutionInterruptedError.
     end_failed_sync(context, config, exc)
     raise
 
