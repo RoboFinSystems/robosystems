@@ -81,9 +81,14 @@ async def reclaim_instance_storage(
         # A transient artifact shares its base database's name — preserve the
         # base's DuckDB staging and vector index (deleting only lbug + WAL).
         # An orphan is a whole estate: take its staging and vectors with it.
-        await client.delete_database(
+        outcome = await client.delete_database(
           target_id, preserve_duckdb=entry["type"] == TYPE_TRANSIENT
         )
+        failed = outcome.get("failed") if isinstance(outcome, dict) else None
+        if failed:
+          skipped.append({**entry, "reason": "; ".join(failed)})
+          logger.warning(f"Could not fully reclaim {target_id} on {graph_id}: {failed}")
+          continue
         reclaimed.append(entry)
         logger.info(
           f"Reclaimed {entry['type']} storage {target_id} "

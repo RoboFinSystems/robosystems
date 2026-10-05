@@ -98,6 +98,22 @@ class TestReclaimTargeting:
     assert result["bytes_freed"] == result["reclaimed"][0]["bytes"]
 
   @pytest.mark.asyncio
+  async def test_side_store_left_behind_is_skipped_not_reclaimed(self):
+    """A delete that answers but names a side store it could not remove has
+    not freed that storage, so it is not counted."""
+    client = _client()
+    client.delete_database.side_effect = [
+      {"status": "success", "failed": []},
+      {"status": "success", "failed": ["lance: permission denied"]},
+    ]
+
+    result = await _run(client, _db_with_subgraphs(f"{GRAPH_ID}_dev"))
+
+    assert len(result["reclaimed"]) == 1
+    assert result["skipped"][0]["reason"] == "lance: permission denied"
+    assert result["bytes_freed"] == result["reclaimed"][0]["bytes"]
+
+  @pytest.mark.asyncio
   async def test_registry_failure_never_deletes_orphans(self):
     """No registry confirmation, no orphan deletion — the sweep fails safe.
 

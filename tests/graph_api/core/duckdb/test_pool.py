@@ -410,6 +410,24 @@ class TestDuckDBConnectionPoolForceCleanup:
     assert not db_path.exists()
     assert not wal_path.exists()
 
+  def test_force_cleanup_raises_when_the_file_cannot_be_deleted(self):
+    """The graph delete reads a raise as a side store left on the volume;
+    a swallowed failure read as success and freed the slot."""
+    from unittest.mock import patch
+
+    pool = _make_pool(self.temp_dir)
+    from robosystems.utils.path_validation import get_duckdb_staging_path
+
+    db_path = get_duckdb_staging_path("testdb", base_path=str(self.temp_dir))
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.touch()
+
+    with (
+      patch("pathlib.Path.unlink", side_effect=PermissionError("read-only")),
+      pytest.raises(PermissionError),
+    ):
+      pool.force_database_cleanup("testdb")
+
   def test_force_cleanup_nonexistent(self):
     """Should handle cleanup of nonexistent database."""
     pool = _make_pool(self.temp_dir)
