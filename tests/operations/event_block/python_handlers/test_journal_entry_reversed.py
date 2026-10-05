@@ -254,3 +254,34 @@ class TestPreviewAgreesWithExecution:
 
     assert preview.would_succeed is False
     assert any("already has a reversing entry" in e for e in preview.validation_errors)
+
+  def test_preview_refuses_when_the_original_sits_in_a_closed_month(self) -> None:
+    # The command fences the original's month as well as the reversal's
+    # (`reverse_journal_entry`), because marking the original `reversed`
+    # changes a row in that month. A reversal dated into an open month
+    # must not pass the preview while the command refuses it.
+    from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
+
+    def gate(_session, *dates):
+      for d in dates:
+        if d is not None and d <= date(2026, 2, 28):
+          raise ClosedPeriodError("2026-02", d)
+
+    original = MagicMock()
+    original.id = "je_original"
+    original.status = "posted"
+    original.posting_date = date(2026, 2, 15)
+
+    session = MagicMock()
+    session.get.return_value = original
+    session.execute.return_value.scalar_one_or_none.return_value = None
+
+    metadata = _make_metadata(posting_date=date(2026, 4, 1))
+    with patch(
+      "robosystems.operations.event_block.python_handlers.journal_entry_reversed.assert_period_not_closed",
+      side_effect=gate,
+    ):
+      preview = dispatch_preview(session, _make_body(), metadata)
+
+    assert preview.would_succeed is False
+    assert any("2026-02" in e for e in preview.validation_errors)
