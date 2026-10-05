@@ -1382,6 +1382,7 @@ class ExtensionsMaterializer:
           # A no-op if the lock lapsed under us (extend already cleared it).
           if not lock_token:
             await lock.release()
+          await lock.aclose()
 
     except GraphWritesPausedError as e:
       logger.warning(f"Ledger materialization for {graph_id} deferred: {e}")
@@ -1435,6 +1436,7 @@ class ExtensionsMaterializer:
     acquired = await lock.acquire(timeout_seconds=_LOCK_ACQUIRE_TIMEOUT_SECONDS)
     if acquired:
       return lock
+    await lock.aclose()
 
     if lock.last_backend_error:
       raise MaterializationLockError(
@@ -1462,13 +1464,21 @@ class ExtensionsMaterializer:
       )
 
       redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
-      lock = await MaterializationLock.adopt(redis_client, graph_id, token)
     except Exception as e:
       raise MaterializationLockError(
         f"Materialization lock service unavailable for {graph_id} "
         f"({e.__class__.__name__}: {e}); retry later"
       ) from e
+    try:
+      lock = await MaterializationLock.adopt(redis_client, graph_id, token)
+    except Exception as e:
+      await redis_client.aclose()
+      raise MaterializationLockError(
+        f"Materialization lock service unavailable for {graph_id} "
+        f"({e.__class__.__name__}: {e}); retry later"
+      ) from e
     if lock is None:
+      await redis_client.aclose()
       raise MaterializationLockError(
         f"Materialization lock for {graph_id} is no longer held by this run "
         "(it lapsed or another run took it); retry later"

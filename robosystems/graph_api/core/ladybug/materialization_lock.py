@@ -177,6 +177,13 @@ class MaterializationLock:
       self._acquired = False
       return False
 
+  async def aclose(self) -> None:
+    """Close the Valkey client this lock was built on. Never raises."""
+    try:
+      await self.redis.aclose()
+    except Exception as e:
+      logger.debug(f"Closing the materialization lock client failed: {e}")
+
   async def __aenter__(self) -> "MaterializationLock":
     if not await self.acquire():
       raise RuntimeError(f"Could not acquire materialization lock: {self.lock_key}")
@@ -244,11 +251,8 @@ def extend_token(
 ) -> bool:
   """Refresh ``graph_id``'s lock TTL for a holder in another process.
 
-  False when the token is no longer the holder's or the backend failed.
+  False when the token is no longer the holder's. Backend errors are raised,
+  as in ``MaterializationLock.extend``: a blip is not a lost lock.
   """
   key = lock_key_for(graph_id)
-  try:
-    return redis_client.eval(_EXTEND_SCRIPT, 1, key, token, str(ttl_seconds)) == 1
-  except Exception as e:
-    logger.warning(f"Materialization lock extend failed for {key}: {e}")
-    return False
+  return redis_client.eval(_EXTEND_SCRIPT, 1, key, token, str(ttl_seconds)) == 1

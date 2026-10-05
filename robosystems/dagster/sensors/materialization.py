@@ -76,7 +76,8 @@ def _graphs_being_written(
         DagsterRunStatus.STARTING,
         DagsterRunStatus.STARTED,
         DagsterRunStatus.CANCELING,
-      ]
+      ],
+      tags={"materialize_db": graph_ids},
     )
   )
   busy.update(

@@ -1229,24 +1229,29 @@ class TestStaleSince:
     graph.mark_stale(db_session, "connector_sync")
     assert graph.graph_stale_since is not None
 
-  def test_a_write_during_the_build_moves_it_to_the_builds_start(
+  def test_a_write_during_the_build_restarts_it_from_the_builds_end(
     self, graph, db_session
   ):
-    """Everything before the build began is in the graph now, so the oldest
-    missing write is no older than the build's start."""
+    """The sensor's max wait counts from here, so a graph written faster than
+    it rebuilds gets a full wait after each rebuild instead of a new one
+    starting the moment the last ends."""
     from datetime import datetime, timedelta
 
     graph.mark_stale(db_session, "journal_entry_updated")
-    started_at = datetime.now(UTC) + timedelta(milliseconds=1)
+    started_at = datetime.now(UTC) - timedelta(minutes=10)
     db_session.execute(
       Graph.__table__.update()
       .where(Graph.graph_id == graph.graph_id)
-      .values(graph_stale_at=started_at + timedelta(seconds=1))
+      .values(
+        graph_stale_at=datetime.now(UTC),
+        graph_stale_since=started_at - timedelta(minutes=1),
+      )
     )
 
+    before_end = datetime.now(UTC)
     assert graph.mark_fresh(db_session, started_at=started_at) is False
     db_session.refresh(graph)
     assert graph.graph_stale is True
-    assert graph.graph_stale_since.replace(tzinfo=None) == started_at.replace(
+    assert graph.graph_stale_since.replace(tzinfo=None) >= before_end.replace(
       tzinfo=None
     )

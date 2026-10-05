@@ -177,6 +177,19 @@ class TestCrossProcessHelpers:
 
     assert release_token(redis, "kg123", "tok") is False
 
+  def test_extend_token_raises_a_backend_error_rather_than_report_a_lost_lock(
+    self,
+  ):
+    from robosystems.graph_api.core.ladybug.materialization_lock import (
+      extend_token,
+    )
+
+    redis = MagicMock()
+    redis.eval.side_effect = ConnectionError("down")
+
+    with pytest.raises(ConnectionError):
+      extend_token(redis, "kg123", "tok")
+
   def test_extend_token_reports_a_lost_lock(self):
     from robosystems.graph_api.core.ladybug.materialization_lock import (
       extend_token,

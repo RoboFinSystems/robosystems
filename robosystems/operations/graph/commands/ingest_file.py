@@ -583,8 +583,10 @@ async def ingest_file_cmd(
             )
 
   finally:
-    if lock is not None and not handed_off:
-      await lock.release()
+    if lock is not None:
+      if not handed_off:
+        await lock.release()
+      await lock.aclose()
 
   logger.info(
     f"File {file_id} marked as uploaded: {graph_file.file_size_bytes or 0:,} bytes, {graph_file.row_count or 0:,} rows"

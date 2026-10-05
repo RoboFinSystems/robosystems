@@ -171,7 +171,11 @@ class DagsterJobMonitorTask(BaseTask):
           extend_token,
         )
 
-        held = extend_token(client, self.graph_id, token, INGESTION_LOCK_TTL)
+        try:
+          held = extend_token(client, self.graph_id, token, INGESTION_LOCK_TTL)
+        except Exception as e:
+          logger.warning(f"Could not refresh the lock for {self.graph_id}: {e}")
+          return
       elif lock_key and lock_id:
         from robosystems.middleware.auth.distributed_lock import extend_lock_by_id
 

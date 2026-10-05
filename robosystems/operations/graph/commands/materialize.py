@@ -216,6 +216,9 @@ async def materialize_cmd(
   except Exception:
     await lock.release()
     raise
+  finally:
+    # The task holds the lock by its token now; this client is done.
+    await lock.aclose()
 
 
 async def acquire_materialize_lock(graph_id: str) -> MaterializationLock:
@@ -253,6 +256,7 @@ async def acquire_materialize_lock(graph_id: str) -> MaterializationLock:
     raise lock_unavailable from e
 
   if not acquired:
+    await lock.aclose()
     if lock.last_backend_error:
       logger.warning(
         f"Materialization lock backend error for {graph_id}: {lock.last_backend_error}"

@@ -130,8 +130,9 @@ class Graph(Model):
   )  # e.g. "file_deleted", "file_added"
   # The latest write not in the graph; mark_fresh compares against it.
   graph_stale_at = Column(DateTime, nullable=True)
-  # The oldest write not in the graph, so a graph written faster than the
-  # sensor's quiet window still refreshes on a bounded wait.
+  # When the graph last went stale: its first write since a refresh, or the
+  # end of a refresh that a write overlapped. A graph written faster than the
+  # sensor's quiet window still refreshes on a bounded wait from here.
   graph_stale_since = Column(DateTime, nullable=True)
 
   graph_metadata = Column(JSONB, nullable=True)  # Free-form extras
@@ -652,19 +653,13 @@ class Graph(Model):
       )
     cleared = (session.execute(clear).rowcount or 0) > 0
     if not cleared and started_at is not None:
-      # Everything before ``started_at`` is in the graph now, so the oldest
-      # write still missing is no older than it.
+      # A write landed during the build. The sensor's max wait restarts from
+      # now, the end of this refresh, so a graph written faster than it
+      # rebuilds gets a gap between rebuilds rather than one after another.
       session.execute(
         update(Graph)
-        .where(
-          Graph.graph_id == self.graph_id,
-          Graph.graph_stale.is_(True),
-          or_(
-            Graph.graph_stale_since.is_(None),
-            Graph.graph_stale_since < started_at,
-          ),
-        )
-        .values(graph_stale_since=started_at)
+        .where(Graph.graph_id == self.graph_id, Graph.graph_stale.is_(True))
+        .values(graph_stale_since=datetime.now(UTC))
         .execution_options(synchronize_session=False)
       )
     session.commit()

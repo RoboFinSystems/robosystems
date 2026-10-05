@@ -672,3 +672,21 @@ class TestSwapLock:
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     self.service.db_manager.swap_database.assert_not_called()
+
+  def test_the_lock_client_is_closed_after_the_request(self, client):
+    redis = AsyncMock()
+    lock_cls = self._lock_cls()
+    with (
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        lock_cls,
+      ),
+      patch(
+        "robosystems.config.valkey_registry.create_async_redis_client",
+        return_value=redis,
+      ),
+    ):
+      response = client.post("/databases/kg1a2b3c4d5/swap")
+
+    assert response.status_code == status.HTTP_200_OK
+    redis.aclose.assert_awaited_once()

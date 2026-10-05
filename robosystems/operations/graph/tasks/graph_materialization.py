@@ -25,6 +25,7 @@ class GraphMaterializationTask(BaseTask):
   """Materialize staged data from DuckDB to the graph database."""
 
   LOCK_EXTEND_INTERVAL_SECONDS = 60
+  _lock_lost = False
 
   async def execute(self) -> dict[str, Any]:
     from robosystems.database import get_db_session
@@ -44,12 +45,9 @@ class GraphMaterializationTask(BaseTask):
     db_gen = get_db_session()
     db = next(db_gen)
     release = True
-    keep_fresh = (
-      asyncio.create_task(self._keep_lock_fresh(lock_token)) if lock_token else None
-    )
-
-    try:
-      result = await materialize_graph_directly(
+    self._lock_lost = False
+    copy = asyncio.create_task(
+      materialize_graph_directly(
         db=db,
         graph_id=self.graph_id,
         force=force,
@@ -58,12 +56,26 @@ class GraphMaterializationTask(BaseTask):
         operation_id=self.task_id,
         lock_token=lock_token,
       )
+    )
+    keep_fresh = (
+      asyncio.create_task(self._keep_lock_fresh(lock_token, copy))
+      if lock_token
+      else None
+    )
+
+    try:
+      result = await copy
       if isinstance(result, dict) and result.get("copy_may_still_run"):
         release = False
       return result
 
     except (asyncio.CancelledError, GraphTransientError):
       release = False
+      if self._lock_lost:
+        raise RuntimeError(
+          f"The materialization lock for {self.graph_id} was lost mid-copy; "
+          "stopped before the next write"
+        ) from None
       raise
 
     finally:
@@ -76,22 +88,37 @@ class GraphMaterializationTask(BaseTask):
       if release:
         self.release_lock()
 
-  async def _keep_lock_fresh(self, token: str) -> None:
+  async def _keep_lock_fresh(self, token: str, copy: Any) -> None:
     """Push the lock's TTL out while the copy runs, so a run (or a requeued
-    attempt) that outlasts one TTL window is not left writing unlocked."""
-    import asyncio
+    attempt) that outlasts one TTL window is not left writing unlocked.
 
-    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
-    from robosystems.graph_api.core.ladybug.materialization_lock import extend_token
+    A Valkey blip is retried on the next interval. A lost lock (another run
+    may hold it now) stops the copy before its next write.
+    """
+    import asyncio
 
     while True:
       await asyncio.sleep(self.LOCK_EXTEND_INTERVAL_SECONDS)
-      client = create_redis_client(ValkeyDatabase.LOCKS)
       try:
-        held = await asyncio.to_thread(extend_token, client, self.graph_id, token)
-      finally:
-        client.close()
+        held = await asyncio.to_thread(self._extend_lock, token)
+      except Exception as e:
+        logger.warning(f"Could not refresh the lock for {self.graph_id}: {e}")
+        continue
       if not held:
-        logger.warning(
-          f"Materialization lock for {self.graph_id} is no longer held by this task"
+        logger.error(
+          f"Materialization lock for {self.graph_id} is no longer held by this "
+          "task; stopping the copy"
         )
+        self._lock_lost = True
+        copy.cancel()
+        return
+
+  def _extend_lock(self, token: str) -> bool:
+    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+    from robosystems.graph_api.core.ladybug.materialization_lock import extend_token
+
+    client = create_redis_client(ValkeyDatabase.LOCKS)
+    try:
+      return extend_token(client, self.graph_id or "", token)
+    finally:
+      client.close()
