@@ -157,9 +157,9 @@ class AuthorOperator(AnalystOperator):
     read_only=False,
     version="1.0.0",
     requires_credits=True,
-    # The cached tools + system prefix: ~61K tokens measured on a cold /do,
-    # plus ~4K of tool schemas added since (sized from their definitions).
-    cold_start_tokens=66_000,
+    # The cached tools + system prefix, measured on a cold /do in production
+    # (70,033 tokens of cache write, 2026-10-04).
+    cold_start_tokens=70_000,
     execution_profile={
       OperatorMode.QUICK: ExecutionProfile(
         min_time=5, max_time=30, avg_time=12, tool_calls=6
