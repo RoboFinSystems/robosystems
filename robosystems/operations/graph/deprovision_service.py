@@ -405,7 +405,8 @@ class GraphDeprovisionService:
     Success means the file is not on the instance, not that this run removed
     it, so retries converge. A missing .lbug still has its side stores
     disposed (``existed=False``); a 404 from an older node also counts as
-    success, leaving any residue to storage reclaim.
+    success, leaving any residue to storage reclaim. A side store the node
+    reports as ``failed`` is not success.
     """
     from ...graph_api.client.exceptions import GraphAPIError
 
@@ -415,6 +416,14 @@ class GraphDeprovisionService:
       graph_client = await get_graph_client(graph_id=graph_id, operation_type="write")
       try:
         outcome = await graph_client.delete_database(graph_id)
+        failed = outcome.get("failed") if isinstance(outcome, dict) else None
+        if failed:
+          # The side stores stay on the volume; keep the slot so a retry
+          # disposes of them before the next tenant gets it.
+          error_msg = f"Database side stores not deleted: {'; '.join(failed)}"
+          result.errors.append(error_msg)
+          logger.warning(error_msg, extra={"graph_id": graph_id})
+          return
         result.database_deleted = True
         if isinstance(outcome, dict) and outcome.get("existed") is False:
           logger.info(

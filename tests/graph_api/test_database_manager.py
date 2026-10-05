@@ -400,6 +400,41 @@ class TestLadybugDatabaseManager:
     assert "/lance/test_db" in result["removed"]
 
   @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
+  def test_delete_database_names_the_side_stores_it_could_not_remove(
+    self, mock_init_pool
+  ):
+    """A side store that fails to delete is residue on a volume the registry
+    may hand to the next tenant, so the response says which, rather than a
+    bare success the control plane would free the slot on."""
+    mock_init_pool.return_value = MagicMock()
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
+    manager.connection_pool.close_database_connections = MagicMock()
+    (self.base_path / "test_db.lbug").touch()
+
+    lance_patch, duck_patch, lance, duck = self._side_stores()
+    lance.delete.side_effect = OSError("lance busy")
+    duck.force_database_cleanup.side_effect = OSError("duckdb busy")
+    with lance_patch, duck_patch:
+      result = manager.delete_database("test_db")
+
+    assert result["existed"] is True
+    assert result["failed"] == ["lance: lance busy", "duckdb: duckdb busy"]
+    assert "duckdb:test_db" not in result["removed"]
+
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
+  def test_delete_database_reports_no_failures_on_a_clean_delete(self, mock_init_pool):
+    mock_init_pool.return_value = MagicMock()
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
+    manager.connection_pool.close_database_connections = MagicMock()
+    (self.base_path / "test_db.lbug").touch()
+
+    lance_patch, duck_patch, _, _ = self._side_stores()
+    with lance_patch, duck_patch:
+      result = manager.delete_database("test_db")
+
+    assert result["failed"] == []
+
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_delete_database_sweeps_the_blue_green_temporaries_of_a_base(
     self, mock_init_pool
   ):
