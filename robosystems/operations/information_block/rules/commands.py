@@ -9,6 +9,7 @@ from robosystems.models.api.information_block import (
   EvaluateRulesResponse,
   VerificationResultLite,
 )
+from robosystems.models.extensions.roboledger import FactSet
 from robosystems.operations.information_block.envelope import (
   verification_result_to_lite,
 )
@@ -22,7 +23,17 @@ def cmd_evaluate_rules(
   body: EvaluateRulesRequest,
   created_by: str,
 ) -> EvaluateRulesResponse:
-  """Run the rule engine for a structure; the summary counts results by status."""
+  """Run the rule engine for a structure; the summary counts results by status.
+
+  Raises ``ValueError`` when ``fact_set_id`` is not one of the structure's
+  own sets: a result is a statement about the set it is stamped on.
+  """
+  if body.fact_set_id is not None:
+    fact_set = session.get(FactSet, body.fact_set_id)
+    if fact_set is None or str(fact_set.structure_id) != body.structure_id:
+      raise ValueError(
+        f"Fact set {body.fact_set_id} does not belong to structure {body.structure_id}."
+      )
   rows = evaluate_rules_for_structure(
     session,
     body.structure_id,
