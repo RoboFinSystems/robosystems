@@ -3713,7 +3713,7 @@ wheels = [
 
 [[package]]
 name = "robosystems"
-version = "1.15.11"
+version = "1.15.12"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
