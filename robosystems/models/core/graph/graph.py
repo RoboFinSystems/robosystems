@@ -48,6 +48,8 @@ class Graph(Model):
   """A graph database and its platform-side metadata."""
 
   __tablename__ = "graphs"
+  __mapper_args__ = {"exclude_properties": ["graph_instance_id"]}
+
   __table_args__ = (
     Index("idx_graphs_org", "org_id"),
     Index("idx_graphs_type", "graph_type"),
@@ -93,8 +95,9 @@ class Graph(Model):
   # Infrastructure metadata. Which instance hosts the graph is not kept here:
   # it changes on every writer roll, and the DynamoDB graph registry, which
   # routing reads, is the one place it lives.
-  # Unused and nullable; dropped in the release after the one that stopped
-  # writing it, once no running container maps it.
+  # Unused and empty. In the table but not mapped (``__mapper_args__``), so no
+  # query names it: the release after this one drops it while containers of
+  # this release are still serving.
   graph_instance_id = Column(String, nullable=True)
   graph_cluster_region = Column(String, nullable=True)
 
