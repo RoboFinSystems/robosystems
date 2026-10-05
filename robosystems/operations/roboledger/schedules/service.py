@@ -1136,6 +1136,7 @@ class ScheduleService:
           AND period_start >= :period_start
           AND period_end <= :period_end
           AND fact_scope = 'in_scope'
+        ORDER BY period_start, period_end, id
         LIMIT 1
       """),
       {

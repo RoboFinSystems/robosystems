@@ -18,6 +18,9 @@ from robosystems.operations.event_block.promotion import (
   promote_pending_obligations,
 )
 from robosystems.operations.roboledger.commands.schedules import update_schedule
+from robosystems.operations.roboledger.reconciliations.engine import (
+  _undrafted_schedule_balances,
+)
 from robosystems.operations.roboledger.reconciliations.resolvers import (
   _recognized_by_schedule,
 )
@@ -81,10 +84,17 @@ def _register(session, structure_id, _new_debit):
   assert recognized.planned == 30_000
 
 
+def _close_gate(session, _structure_id, new_debit):
+  # January has matured and is not drafted yet: the gate counts it on the
+  # account the draft will post to.
+  balances = _undrafted_schedule_balances(session, date(2026, 2, 15))
+  assert balances.get(new_debit) == 10_000
+
+
 @pytest.mark.parametrize(
   "reader",
-  [_drafting, _close_status, _register],
-  ids=["drafting", "close-status", "schedule-register"],
+  [_drafting, _close_status, _register, _close_gate],
+  ids=["drafting", "close-status", "schedule-register", "close-gate"],
 )
 def test_a_debit_account_change_leaves_the_schedule_readable(edited, reader):
   session, structure_id, new_debit = edited
