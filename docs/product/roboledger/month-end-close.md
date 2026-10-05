@@ -1,7 +1,7 @@
 ---
 title: Close the month with your AI assistant
 description: How your AI closes a month on RoboLedger. It finds what's blocking, drafts the adjusting entries, shows you what will post, and closes when you approve.
-order: 23
+order: 24
 section: Keep the books right
 ---
 
@@ -42,6 +42,8 @@ ChatGPT asks you to allow the close before it runs. Then the receipt: five entri
    - *Transactions changed in QuickBooks after they synced.* These are normal. Your assistant shows you each one, and you choose to restate the month it belongs to, post the difference in an open month, or mark it as already handled. You can also settle them yourself under **Changed transactions** in the Closing Book. See [When QuickBooks changes after a sync](changes-after-sync.md).
    - *A schedule ends this month.* If an asset was sold or a policy cancelled, end its schedule before the month's entries are drafted.
    - *A schedule's entry for the month isn't drafted yet.* Your assistant drafts it.
+   - *Events dated in the month never posted.* Once the month closes they could never post into it, so the close waits. In **Ledger → Inbox**, check both **Captured** and **Classified** for events dated in the month that have no entry, and approve or reject each one. See [Review events in the Inbox](inbox.md).
+   - *A reconciliation the close waits on isn't ready.* It doesn't tie, it's out of date because the books changed after it ran, it hasn't been run for the month, or it's waiting for a sign-off. Your assistant runs them again and shows you what's different, and you sign off where a review is needed. See [Reconcile your accounts](reconcile-your-accounts.md).
 3. **It drafts the month's entries.** Every active schedule gets its entry for the month, plus any one-off adjustment you ask for.
 4. **It shows you the drafts.** Every entry with its debits and credits, whether they all balance, and which ones will be written to QuickBooks.
 5. **You approve, and your assistant closes the month.** Posting the entries, checking that the balance sheet balances, and marking the month closed happen in one step.
@@ -50,6 +52,10 @@ ChatGPT asks you to allow the close before it runs. Then the receipt: five entri
 A busy month can take longer to close than your assistant's call waits for. The close keeps running, and your assistant checks back until the receipt is ready. It never needs to be started twice.
 
 The close playbook tells your assistant to show you the drafts and wait for your explicit approval before it closes. Your MCP client may also ask you to allow the call. RoboLedger marks every tool that changes your books as a write, so a client set to ask before making changes, such as ChatGPT's **Allow read-only tools**, asks every time. ChatGPT's default setting approves some writes it judges low-risk without asking.
+
+## Overrides
+
+A few blockers can be closed over on purpose. In the app, **Allow stale sync**, **Close without the undrafted entries** and **Close without reconciling** appear only when that blocker is the only one in the way. Your assistant can close over those three, and also over changed transactions nobody has settled or events left unposted, but only when you tell it to. Every override is kept in the close's audit note. Clearing the blocker is almost always the better answer: a month closed over a problem keeps it.
 
 ## In the app
 

@@ -13,7 +13,7 @@ RoboLedger connects your QuickBooks books to Claude, ChatGPT and any other MCP c
 3. [What RoboLedger needs to work well](what-it-needs.md): current books, a mapped chart of accounts, a fiscal calendar, schedules.
 4. [How RoboLedger works](how-roboledger-works.md): from an event to a report, and the information blocks your statements are made of.
 5. [Find your way around the app](the-roboledger-app.md): a tour, page by page, with screenshots.
-6. [Work across several companies](working-across-companies.md): for fractional CFOs and bookkeepers, one graph and one connection per client.
+6. [Work across several companies](working-across-companies.md): for fractional CFOs and controllers, one graph and one connection per client.
 7. [Your books and your data](your-books-and-your-data.md): what's copied from QuickBooks, who can see it, and how to take it with you.
 
 ## Work with your books
@@ -32,6 +32,7 @@ RoboLedger connects your QuickBooks books to Claude, ChatGPT and any other MCP c
 - [Map your chart of accounts](map-your-chart-of-accounts.md): tie each account to a reporting concept, and keep it current.
 - [Schedules for recurring entries](schedules.md): depreciation, amortization and prepaid expenses, set up once.
 - [When QuickBooks changes after a sync](changes-after-sync.md): restate, catch up, or mark it as handled.
+- [Reconcile your accounts](reconcile-your-accounts.md): tie your balances to QuickBooks, a statement or a schedule, and sign off.
 - [Close the month with your AI assistant](month-end-close.md): blockers, drafts, approval and the receipt.
 - [Nothing writes to QuickBooks until you post](quickbooks-write-back.md): what gets written back, and when.
 

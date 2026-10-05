@@ -5,7 +5,7 @@ order: 5
 section: Get started
 ---
 
-Most of the work in RoboLedger happens in a conversation with your AI assistant: Claude, ChatGPT or any MCP client. The app at [roboledger.ai](https://roboledger.ai) is where you connect your books, see what your assistant is working from, and review what it did. Everything it reads and writes is visible here.
+Most of the work in RoboLedger happens in a conversation with your AI assistant: Claude, ChatGPT or any MCP client. The app at [roboledger.ai](https://roboledger.ai) is where you connect your books, see what your assistant is working from, and review what it did. Your books, reports and plans are all here, and graph admins can see every change made to the graph on the **Activity** page at robosystems.ai.
 
 The screens below show Cadence Labs, a made-up company used for demos.
 
@@ -44,7 +44,7 @@ An entry in a closed month can't be changed until the month is reopened. While Q
 
 ![Live statements showing a balance sheet with current and prior columns](images/statements.png)
 
-**Closing Book** is where the month-end close lives. The period close view shows the last closed month, the month you're working towards, what's blocking it, and each schedule's entry for the month. Beneath it are your account mapping, your schedules, the transactions that changed in QuickBooks after a sync, and the trial balance. See [Close the month with your AI assistant](month-end-close.md), [Schedules for recurring entries](schedules.md) and [When QuickBooks changes after a sync](changes-after-sync.md).
+**Closing Book** is where the month-end close lives. The period close view shows the last closed month, the month you're working towards, what's blocking it, and each schedule's entry for the month. Beside it are the statements from your latest report, your account rollups, your schedules, your reconciliations with the transactions that changed in QuickBooks after a sync, and the trial balance. See [Close the month with your AI assistant](month-end-close.md), [Schedules for recurring entries](schedules.md), [Reconcile your accounts](reconcile-your-accounts.md) and [When QuickBooks changes after a sync](changes-after-sync.md).
 
 ![The Closing Book period close view, showing the last closed month, a blocker, and four schedule entries pending for August](images/closing-book.png)
 
@@ -73,7 +73,7 @@ The reporting concepts your accounts map to, with their definitions and how they
 
 ## Console
 
-Ask questions about your books inside the app, from the Console bar at the bottom of every page. Start a request with `/do` to have it make a change, such as adding a metric block or a counterparty; it lists what it changed, and Plan and Explorer refresh to show it. Closing a period, posting entries and deleting stay out of the Console. The Console runs on RoboLedger's own AI, so questions and changes use credits from your plan's monthly allowance. Claude, ChatGPT and other clients you connect yourself don't use credits.
+Ask questions about your books inside the app, from the Console bar at the bottom of every page. Start a request with `/do` to have it make a change: add a metric block or run a forecast, add or update a customer or vendor, remember something, draft a report, or draft the schedule entries that are due. It lists what it changed, and Plan and Explorer refresh to show it. Filing or sharing a report, closing a period, posting entries and deleting stay out of the Console. The Console runs on RoboLedger's own AI, so questions and changes use credits from your plan's monthly allowance. Claude, ChatGPT and other clients you connect yourself don't use credits.
 
 ## Search
 
@@ -81,4 +81,12 @@ Finds text across the documents in your graph, such as accounting policies and c
 
 ## Your account
 
-Your password, passkeys, API keys, usage and billing are in your RoboSystems account at [robosystems.ai](https://robosystems.ai). The user menu at the top right takes you there.
+Your RoboSystems account at [robosystems.ai](https://robosystems.ai) holds the rest:
+
+- your password, passkeys and API keys, under **User Settings**
+- your organization's members, and its billing for owners and admins
+- each graph's credits, on the **Usage** page
+- each graph's **Activity**: every change made to it, who made it, and whether it came through an MCP client, the app or API, or the Console. Graph admins see it.
+- the **MCP** page, with the address to connect any graph
+
+The user menu at the top right takes you there.

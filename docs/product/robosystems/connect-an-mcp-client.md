@@ -19,7 +19,9 @@ You need a RoboSystems account and a graph to connect: your own, a RoboLedger gr
 
 **claude.ai and Claude Desktop:** Customize → Connectors → Add → Add custom connector, and paste the address. Claude detects the sign-in on its own, so leave the OAuth client fields blank.
 
-To read SEC filings without any setup, add [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) from Claude's connector directory instead.
+On a Team or Enterprise plan, an organization owner adds the connector first, under the organization's connector settings. Each member then connects it and signs in to RoboSystems with their own account.
+
+To read SEC filings with no address to paste, add [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) from Claude's connector directory instead. You still need a RoboSystems account with an SEC filings subscription; see [Analyze SEC filings](sec-filings.md).
 
 **Claude Code:** add the server, then run `/mcp`, pick `robosystems` and sign in.
 
@@ -27,7 +29,7 @@ To read SEC filings without any setup, add [RoboSystems SEC](https://claude.ai/d
 claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
 ```
 
-Claude Code can also install the RoboSystems plugin, which adds the same server plus four skills: finding its way around a graph, analyzing SEC filings, closing the month on RoboLedger, and building a board pack from a closed period. See [Skills and the RoboSystems plugin](skills-and-the-plugin.md).
+Claude Code can also install the RoboSystems plugin for Claude Code, which adds the same server plus four skills: finding its way around a graph, analyzing SEC filings, closing the month on RoboLedger, and building a board pack from a closed period. See [Skills and the RoboSystems plugin](skills-and-the-plugin.md).
 
 ```bash
 claude plugin marketplace add RoboFinSystems/robosystems-plugin
@@ -36,16 +38,26 @@ claude plugin install robosystems@robosystems
 
 ## ChatGPT
 
-Turn on developer mode, then Settings → Connectors → Create, and paste the address. A connector added this way serves every tool of the graph you choose, RoboLedger included.
+Turn on developer mode in ChatGPT's settings, then create an app (ChatGPT has also called it a connector) with the address above. Developer mode isn't available on every ChatGPT plan, and on a business workspace an admin may need to allow it. A connection added this way serves every tool of the graph you choose, RoboLedger included.
 
-To read SEC filings without any setup, install the [RoboSystems plugin](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) from ChatGPT's plugin directory instead.
+To read SEC filings with no address to paste, install [RoboSystems](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) from ChatGPT's plugin directory instead. That listing reaches the SEC filings only, and it is not the Claude Code plugin above. You still need a RoboSystems account with an SEC filings subscription.
 
 ## Cursor, VS Code and other clients
 
-Add the address to the client's MCP configuration. The editor opens the sign-in the first time it connects.
+Add the address to the client's MCP configuration. The editor opens the sign-in the first time it connects. In Cursor, the entry goes under `mcpServers`:
 
 ```json
 "robosystems": { "url": "https://api.robosystems.ai/v1/mcp" }
+```
+
+VS Code's `mcp.json` lists servers under `servers` and needs the transport type:
+
+```json
+{
+  "servers": {
+    "robosystems": { "type": "http", "url": "https://api.robosystems.ai/v1/mcp" }
+  }
+}
 ```
 
 Any client that supports remote MCP servers over HTTP with OAuth sign-in works the same way. For a client that only runs local servers, use the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client), which forwards to the same server with an API key.
@@ -84,6 +96,17 @@ claude mcp add --transport http robosystems-kg123 \
 ```
 
 A key never goes in the address. For how keys and their scopes work, see [Authentication and API keys](https://robosystems.ai/docs/technical/authentication-and-api-keys).
+
+## Which address do I use?
+
+| Address | What it reaches | Connects with |
+|---|---|---|
+| `https://api.robosystems.ai/v1/mcp` | Any graph or shared repository you can use, chosen when you sign in, with every tool that graph runs | Sign-in only |
+| `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp` | That one graph or subgraph, already selected. Use one per graph to keep several connected. `sec` is the SEC filings | Sign-in or an API key |
+| `https://api.robosystems.ai/v1/mcp/roboledger` | **RoboLedger only**: your own graphs running RoboLedger, with the ledger and close tools but not subgraph, backup or other administration tools. The app's **MCP** page shows it when you have a RoboLedger graph | Sign-in only |
+| RoboSystems SEC in Claude's directory, RoboSystems in ChatGPT's | The SEC filings only, with nothing to paste | Sign-in, and an SEC filings subscription |
+
+When in doubt, use the first one.
 
 ## Try asking
 

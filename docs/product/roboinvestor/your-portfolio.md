@@ -5,7 +5,7 @@ order: 1
 section: Get started
 ---
 
-A RoboInvestor graph holds what you own: portfolios, the securities in them, and the positions that make up each holding. It is built for private companies — funds, trusts and people who hold stock, notes, SAFEs and similar instruments — not for a public brokerage feed.
+A RoboInvestor graph holds what you own: portfolios, the securities in them, and the positions that make up each holding. It is built for holders of private-company securities — funds, trusts and people who hold stock, notes, SAFEs and similar instruments — not for a public brokerage feed.
 
 Create a graph with RoboInvestor turned on at [robosystems.ai](https://robosystems.ai). Organization owners and admins create graphs, and creating one starts a subscription. If the page says graph creation requires approval, choose **Request access** and we'll set it up.
 
@@ -14,10 +14,9 @@ Create a graph with RoboInvestor turned on at [robosystems.ai](https://robosyste
 Open **Portfolio**. You can:
 
 - create a portfolio: a name, and optionally a strategy and a description
-- add a security: its name, its type (common, preferred, a SAFE, a convertible note, LLC units and so on) and an optional subtype
-- give the new security a starting position: the quantity, its unit (shares, units or a percentage) and the cost basis
+- add a security: its name, its type (common, preferred, a SAFE, a convertible note, LLC units and so on) and an optional subtype, with its starting position: the quantity, its unit (**Shares**, **Units** or **Principal**) and, optionally, the cost basis
 
-The page lists holdings from their active positions, so a security added without a starting position doesn't show. Holdings are grouped by the company that issued them, once the security is linked to one. A security that isn't linked yet sits under **Unlinked Securities**.
+**Add Security** needs the starting position, because the page lists holdings from their active positions. A security your assistant creates without a position doesn't show. Holdings are grouped by the company that issued them, once the security is linked to one. A security that isn't linked yet sits under **Unlinked Securities**.
 
 Adding a position to a security you already have, changing or disposing of a position, setting a portfolio's inception date, and deleting portfolios and securities are done through your AI assistant. See below.
 

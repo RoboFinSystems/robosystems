@@ -35,6 +35,8 @@ Every graph you create has a tier. The tiers are named for what you get, a dedic
 
 Larger tiers come with more memory, more storage, more subgraphs, longer backup retention and more monthly credits. The current figures and prices are on the [pricing page](https://robosystems.ai/pricing). The same offering is published for programs at `https://api.robosystems.ai/v1/offering`, which needs no sign-in.
 
+Standard is self-serve. Large and XLarge may be set up on request: when **Create Graph** marks a tier **Provisioned on request**, choose **Request access** and we'll set it up. If Standard is full, it offers **Request access** in the same way.
+
 ## Subgraphs
 
 A **subgraph** is a separate workspace inside a graph, for trying a different model or a what-if without touching the main graph. It has its own data, runs on its parent's instance, shares its parent's permissions and credits, and connects to an AI client with its own address. Each tier allows a set number of subgraphs.

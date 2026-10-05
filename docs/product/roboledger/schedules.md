@@ -34,7 +34,7 @@ A schedule books one amount, from one account to another, every month from a fir
 
 **With your AI assistant.** Describe the asset or the prepaid, and your assistant sets up the schedule with your accounts. It can read a past month's entries to find the amounts and accounts you already use. History shows what was booked, not why, so it asks you for what it can't see: the cost, the useful life, the method, and when it started. If you keep a depreciation or prepaid worksheet, give your assistant the numbers from it.
 
-**In the app.** Open **Ledger → Closing Book** and choose **Add schedule**. Pick the debit and credit accounts, the first and last period, and the monthly amount. For depreciation, add the original cost, useful life in months and salvage value. The preview shows the entry before you save.
+**In the app.** Open **Ledger → Closing Book** and choose **Add schedule**. Pick the debit and credit accounts, the first and last period, and the monthly amount. For depreciation, open **Asset & depreciation details** and add the original cost, useful life in months and salvage value. If the cost went on the books before the first period, such as a policy paid in December that starts in January, enter **Cost booked on** so the schedule's reconciliation counts the cost from that day. The preview shows the entry before you save.
 
 Months that are already closed are treated as history. A schedule that began two years ago starts drafting entries from your first open month, and doesn't try to book the months behind it again.
 
@@ -53,9 +53,11 @@ An asset gets sold. A policy gets cancelled and refunded. End the schedule befor
 - **End it with no entry.** The schedule stops at the end of a month you choose. Use this when the sale or refund is already in your books.
 - **End it and book the disposal.** Your assistant posts the disposal entry and ends the schedule in one step. Use this when that entry still needs to be made.
 
-Ending a schedule keeps its history. Deleting a schedule erases it, so end a schedule that did real work and delete only one that was set up by mistake.
+Ending a schedule keeps its history. Deleting a schedule erases it, so end a schedule that did real work and delete only one that was set up by mistake. Once any of a schedule's entries has posted, it can't be deleted, only ended.
 
 ## Change a schedule
+
+Your assistant can change a schedule's name, its debit and credit accounts, and its details: the original cost, useful life, salvage value and the date the cost was booked. Its first and last month and its monthly amount can't change, because they decide every entry it makes. To change those, end the schedule and set up a new one. In the app you can delete a schedule but not edit one.
 
 Changes apply going forward. Entries that already posted stay posted. To correct a month that's closed, reopen it, post a correcting entry, and close it again.
 

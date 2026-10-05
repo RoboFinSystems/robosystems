@@ -17,11 +17,11 @@ Pick a graph in the selector at the top. The rest of the menu follows that graph
 
 ## MCP
 
-**MCP** is the page that connects an AI client to this graph. It shows the general address and the graph's own address, or a subgraph's, and makes a key scoped to that graph for scripts. See [Connect Claude, ChatGPT or any MCP client](connect-an-mcp-client.md) and [Sign-in and graph access](oauth-and-graph-scope.md).
+**MCP** is the page that connects an AI client to this graph. It shows the general address and the graph's own address, or a subgraph's, and makes a key scoped to that graph for scripts. If you have a graph running RoboLedger, it also shows a **RoboLedger only** address: sign-in only, it offers just your RoboLedger graphs at consent and leaves out the administration tools. See [Connect Claude, ChatGPT or any MCP client](connect-an-mcp-client.md) and [Sign-in and graph access](oauth-and-graph-scope.md).
 
 ## Console, Search, documents and memory
 
-**Console** asks questions about the selected graph inside the app, from a drawer at the bottom of every page. Start a request with `/do` and it makes the change instead: a metric block, a counterparty, a memory. Questions and changes run on RoboSystems' own AI, so they use credits. See [Ask questions in the Console](console.md).
+**Console** asks questions about the selected graph inside the app, from a drawer at the bottom of every page. Start a request with `/do` and it makes the change instead: a metric block, a counterparty, a memory, a draft report. Questions and changes run on RoboSystems' own AI, so they use credits. See [Ask questions in the Console](console.md).
 
 **Search** finds text across the documents in the graph, or across the filings on the SEC repository.
 
@@ -31,7 +31,7 @@ Pick a graph in the selector at the top. The rest of the menu follows that graph
 
 **Data Lake** holds the graph's staging tables: Parquet files you upload to a generic graph, or, on a RoboLedger or RoboInvestor graph, tables built from its accounting or portfolio records. **Schema** lists the node and relationship types in the graph. **Subgraphs** are separate workspaces on the same instance. **Backups** creates and downloads a copy of the graph. See [Data lake, subgraphs and backups](data-lake-and-subgraphs.md).
 
-On a shared repository such as SEC filings, Knowledge Base, Memory, Data Lake, Schema and Subgraphs are hidden, and Backups is download-only.
+On a shared repository such as SEC filings, Knowledge Base, Memory, Data Lake, Schema, Subgraphs and Activity are hidden, and Backups is download-only.
 
 ## Repositories and usage
 

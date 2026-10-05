@@ -15,6 +15,8 @@ Shared repositories such as SEC filings don't have a Knowledge Base of your own.
 
 Creating and editing documents uses no credits. Neither does search.
 
+Each tier allows a set number of documents on a graph: 100 on Standard, 1,000 on Large and 10,000 on XLarge. Documents that come in through a connection don't count. The **Usage** page shows how many you have.
+
 ## Search
 
 **Search** finds text across the documents in the graph. On the SEC filings graph it searches filing narratives. It matches keywords; turn on **Semantic search** to also match by meaning.

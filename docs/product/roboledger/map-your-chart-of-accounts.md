@@ -1,6 +1,6 @@
 ---
 title: Map your chart of accounts
-description: Mapping ties each QuickBooks account to a standard reporting concept, so statements, reports and forecasts come out right. How to review it and keep it current.
+description: Mapping ties each QuickBooks account to a standard reporting concept, so statements, reports and forecasts come out right. How to review and update it.
 order: 20
 section: Keep the books right
 ---

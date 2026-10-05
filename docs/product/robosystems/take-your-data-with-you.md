@@ -11,20 +11,22 @@ Your data is yours, and so is the software: RoboSystems is open source under Apa
 
 | What | Where | Format |
 |---|---|---|
-| **Financial reports** | RoboLedger, **Reports → View Reports**, on a published report | XBRL 2.1 package, Tavi (JSON), holon (JSON-LD) |
+| **Financial reports** | RoboLedger, **Reports → View Reports**, on a published report | holon (JSON-LD), Tavi (JSON), XBRL 2.1 package |
 | **A series or a plan** | RoboLedger, **Explorer** and **Plan** | CSV or JSON |
-| **The graph's database** | robosystems.ai, **Backups** (graph admins) | A LadybugDB database file, zipped |
+| **The graph's database** | robosystems.ai, **Backups** (graph admins) | A LadybugDB database file and the graph's memories, zipped |
 | **Your records, row by row** | The API, or ask your AI assistant | JSON |
 
-**Reports** open in the free viewer at [xbrlkit.com](https://xbrlkit.com), with no account, and in any tool that reads XBRL. See [Reports and sharing](https://roboledger.ai/docs/reports-and-sharing).
+**Reports.** The holon is the file RoboLedger keeps for each published report and the default download; Tavi and the XBRL package are built from it the first time you ask for them. The holon and Tavi files open in the free viewer at [xbrlkit.com](https://xbrlkit.com), one report at a time and with no account, and the XBRL package opens in any tool that reads XBRL. See [Reports and sharing](https://roboledger.ai/docs/reports-and-sharing).
 
-**Backups** are made automatically every night, and you can make your own. The download is the graph's database file, which the open-source [LadybugDB](https://github.com/LadybugDB/ladybug) engine opens: on a RoboLedger graph, the ledger, facts and plans as of the graph's last refresh from its records. Documents and report files are stored separately and aren't in it, so download reports on their own. Downloads are limited each month by tier. See [Data lake, subgraphs and backups](data-lake-and-subgraphs.md).
+**Backups** are made automatically every night, and you can make your own. The download is the graph's database file, which the open-source [LadybugDB](https://github.com/LadybugDB/ladybug) engine opens: on a RoboLedger graph, the ledger, facts and plans as of the graph's last refresh from its records. The zip also holds the graph's memories, when it has any. Documents and report files are stored separately and aren't in it, so download reports on their own. Downloads are limited each month by tier. See [Data lake, subgraphs and backups](data-lake-and-subgraphs.md).
 
 **Your records.** There is no one-click export of the general ledger in the app. Accounts, transactions and journal entries can all be read over the API (GraphQL at `/extensions/{graph_id}/graphql`), and the graph can be queried with Cypher or its tables with SQL. The simplest way is often to ask your AI assistant: "List every journal entry in September with its lines."
 
 ## Disconnect QuickBooks
 
 A graph admin disconnects in RoboLedger under **Entity → Connections**. RoboSystems' access to your QuickBooks company is revoked and syncing stops. **Everything already imported stays in the graph**: your history, statements, reports and plans. Reconnect the same company later and syncing picks up again. See [When QuickBooks changes after a sync](https://roboledger.ai/docs/changes-after-sync).
+
+Disconnecting asks how the graph keeps its books afterwards. **Disconnect** is the reversible choice above. **Sever and go native** keeps the chart of accounts QuickBooks created as the graph's own and keeps the books in RoboLedger from then on. QuickBooks can never resume syncing over them, and it can't be undone.
 
 ## Cancel or delete a graph
 

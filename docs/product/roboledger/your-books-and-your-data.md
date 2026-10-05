@@ -11,7 +11,7 @@ Connecting QuickBooks to an AI assistant raises fair questions: where do the boo
 
 The first sync copies your QuickBooks history into your company's graph, and later syncs keep it current. The ledger records sit in a store of their own for your graph, and the graph's database runs on a dedicated instance shared with no other customer. RoboLedger reads QuickBooks and writes back only the entries you post. See [Nothing writes to QuickBooks until you post](quickbooks-write-back.md).
 
-RoboLedger never sees your QuickBooks password. The access Intuit grants it is encrypted, no screen or API returns it, and it is used only to sync.
+RoboLedger never sees your QuickBooks password. The access Intuit grants it is encrypted, no screen or API returns it, and it is used only to sync and to write back the entries you post.
 
 ## Who can see it
 
@@ -25,9 +25,10 @@ Your assistant reads what it needs to answer, through RoboLedger's tools, and th
 
 ## Taking it with you
 
-- **Reports** download as XBRL, Tavi or holon files.
+- **Reports** download as holon, Tavi or XBRL 2.1 files. The holon is the complete one.
 - **Explorer** series and **Plan** scenarios download as CSV or JSON.
-- **The graph's database** downloads as a backup from robosystems.ai.
+- **Journal entries, accounts and transactions** can be read row by row over the API, or ask your assistant to list them.
+- **The graph's database** downloads as a backup from robosystems.ai, for graph admins. It holds the ledger and plans as of the graph's last refresh, and what your assistant has been asked to remember. Documents and report files aren't in it, so download reports on their own. Downloads are limited each month by tier.
 - **Disconnecting QuickBooks** keeps everything already imported.
 - **Before cancelling**, download what you want to keep.
 

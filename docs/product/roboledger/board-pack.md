@@ -34,7 +34,7 @@ The skill has your assistant check every figure before it reaches a slide. Each 
 
 ## Where it runs
 
-The skill writes the deck into your working folder and prints the PDF with Google Chrome on your computer. It runs in an assistant that works with files on your machine, such as Claude Code with the RoboSystems plugin installed. See [Skills and the RoboSystems plugin](https://robosystems.ai/docs/guides/skills-and-the-plugin).
+The skill writes the deck into your working folder and prints the PDF with Google Chrome, so Chrome needs to be installed on your computer. It runs in an assistant that works with files on your machine, such as Claude Code with the RoboSystems plugin installed. See [Skills and the RoboSystems plugin](https://robosystems.ai/docs/guides/skills-and-the-plugin).
 
 Building the pack only reads your books. When it's done, your assistant offers to save the pack to your graph as a document and to remember the decisions you asked for. Each needs your yes.
 

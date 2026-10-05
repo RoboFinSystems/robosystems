@@ -11,7 +11,7 @@ RoboLedger keeps your QuickBooks books in a knowledge graph your AI assistant ca
 
 Sign up at [roboledger.ai](https://roboledger.ai/register). One account covers RoboSystems, RoboLedger and RoboInvestor.
 
-Then create a graph with RoboLedger turned on. A graph is your company's own database: its books, reports, plans and documents live in it, and no other customer's data does. If the page says graph creation requires approval, your account can't create one on its own yet. Get in touch and we'll set it up.
+Then create a graph with RoboLedger turned on. A graph is your company's own database: its books, reports, plans and documents live in it, and no other customer's data does. **Create Graph** in RoboLedger takes you to [robosystems.ai](https://robosystems.ai), where you enter the company's details and choose a size: Standard is ready straight away, and Large and XLarge are set up on request. Only your organization's owners and admins can create a graph. If the page says graph creation requires approval, your account can't create one on its own yet. Get in touch and we'll set it up.
 
 ## 2. Connect QuickBooks
 
@@ -27,7 +27,7 @@ Large companies can take several minutes. The first sync also sets up your fisca
 
 After the first sync, syncing is on demand. Press **Sync Now** on the QuickBooks card, or ask your assistant to sync. RoboLedger doesn't sync on a schedule, so sync before you ask about recent activity.
 
-A regular sync picks up the last 60 days of changes. If something older changed in QuickBooks, choose a full sync in the sync options, or ask your assistant to sync from a specific date. When a transaction RoboLedger already recorded has been edited, it's flagged for you to settle. See [When QuickBooks changes after a sync](changes-after-sync.md).
+**Sync Now** asks how far back to go. **Last 60 days** picks up recent changes. If something older changed in QuickBooks, choose **From a specific date**, or **Full rebuild** to pull your whole history again. Your assistant can sync from a date too. When a transaction RoboLedger already recorded has been edited, it's flagged for you to settle. See [When QuickBooks changes after a sync](changes-after-sync.md).
 
 RoboLedger reads companies that keep their books in US dollars. A company with transactions in other currencies can't sync yet.
 
@@ -39,7 +39,7 @@ Every client uses the same address:
 https://api.robosystems.ai/v1/mcp
 ```
 
-The first time a tool runs, you sign in to RoboSystems and choose which graph to connect. **One connection is one graph.** To work on another graph, such as the SEC filings for comparing against public companies, add a second connection and choose that graph.
+The first time a tool runs, you sign in to RoboSystems and choose which graph to connect. **One connection is one graph.** To work on another graph, such as the SEC filings for comparing against public companies, add a second connection for it. See [Which address to use](#which-address-to-use).
 
 **Claude (claude.ai and Claude Desktop):** Customize → Connectors → Add → Add custom connector, and paste the address.
 
@@ -49,13 +49,23 @@ The first time a tool runs, you sign in to RoboSystems and choose which graph to
 claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
 ```
 
-**ChatGPT:** turn on developer mode, then Settings → Connectors → Create, and paste the address. A connector you add this way gets every RoboLedger tool. The RoboSystems plugin in ChatGPT's plugin directory reads SEC filings, so use a custom connector for your books.
+**ChatGPT:** turn on developer mode in ChatGPT's settings, then create an app (ChatGPT has also called it a connector) and paste the address. Developer mode isn't available on every ChatGPT plan. A connection you add this way gets every RoboLedger tool. The RoboSystems plugin in ChatGPT's plugin directory reads SEC filings, so use a custom connector for your books.
 
 **Cursor, VS Code and other MCP clients:** add the address to the client's MCP configuration. The client runs the sign-in for you.
 
 ```json
 "robosystems": { "url": "https://api.robosystems.ai/v1/mcp" }
 ```
+
+### Which address to use
+
+RoboSystems answers on three addresses:
+
+- **`https://api.robosystems.ai/v1/mcp`** is the general address used above. At sign-in you choose any of your graphs, or the SEC filings if you subscribe to them.
+- **`https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`** is one graph's own address, with that graph already chosen. The **MCP** page at robosystems.ai gives you the address for any graph. Use it to keep your books and the SEC filings connected side by side. The SEC filings are `https://api.robosystems.ai/v1/graphs/sec/mcp`.
+- **`https://api.robosystems.ai/v1/mcp/roboledger`** is RoboLedger's own address. At sign-in it shows only your ledgers, and it leaves out a few maintenance and administration tools, including filling in plan history, rebuilding a schedule, backups and choosing whether entries write back to QuickBooks. Use one of the other two when you need those.
+
+If you're not sure, use the general address.
 
 Nothing is written to QuickBooks by connecting, syncing or asking questions. See [Nothing writes to QuickBooks until you post](quickbooks-write-back.md).
 
