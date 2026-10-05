@@ -55,21 +55,30 @@ class TestRequestContract:
     """It is the only record of how the difference was handled — the
     resolution writes no entry to explain itself."""
     with pytest.raises(ValidationError, match="requires a note"):
-      ResolveReconcilingItemRequest(event_id="evt_1", disposition="acknowledge")
+      ResolveReconcilingItemRequest(
+        event_id="evt_1", expected_drift_detected_at=None, disposition="acknowledge"
+      )
 
   def test_whitespace_is_not_a_note(self):
     with pytest.raises(ValidationError, match="requires a note"):
       ResolveReconcilingItemRequest(
-        event_id="evt_1", disposition="acknowledge", note="   "
+        event_id="evt_1",
+        expected_drift_detected_at=None,
+        disposition="acknowledge",
+        note="   ",
       )
 
   def test_the_other_dispositions_do_not_need_one(self):
     for disposition in ("restate", "catch_up"):
-      body = ResolveReconcilingItemRequest(event_id="evt_1", disposition=disposition)
+      body = ResolveReconcilingItemRequest(
+        event_id="evt_1", expected_drift_detected_at=None, disposition=disposition
+      )
       assert body.note is None
 
   def test_disposition_may_be_omitted_to_take_the_default(self):
-    body = ResolveReconcilingItemRequest(event_id="evt_1")
+    body = ResolveReconcilingItemRequest(
+      event_id="evt_1", expected_drift_detected_at=None
+    )
     assert body.disposition is None
     # A catch-up is drafted for review by default rather than posted.
     assert body.status == "draft"

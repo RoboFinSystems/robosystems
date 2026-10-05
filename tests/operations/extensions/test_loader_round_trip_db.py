@@ -40,6 +40,13 @@ from robosystems.operations.roboledger.commands.reconciling_items import (
 pytestmark = pytest.mark.unit
 
 GRAPH_ID = "kg_test"
+
+
+def _previewed(session, event_id: str):
+  """The stamp of the preview a resolution is decided on."""
+  return plan_reconciling_item(session, event_id, graph_id=GRAPH_ID).drift_detected_at
+
+
 CONN = "conn_test"
 CASH, EXP_A, EXP_B = "35", "60", "61"
 
@@ -185,6 +192,7 @@ def _catch_up(db, event_id: str):
     db,
     ResolveReconcilingItemRequest(
       event_id=event_id,
+      expected_drift_detected_at=_previewed(db, event_id),
       disposition="catch_up",
       posting_date=date(2026, 8, 31),
       status="posted",
@@ -261,7 +269,11 @@ def test_an_edit_in_quickbooks_to_a_written_back_entry_is_a_reconciling_item(db)
   with pytest.raises(RestateBlockedError):
     resolve_reconciling_item(
       db,
-      ResolveReconcilingItemRequest(event_id=str(event.id), disposition="restate"),
+      ResolveReconcilingItemRequest(
+        event_id=str(event.id),
+        expected_drift_detected_at=_previewed(db, str(event.id)),
+        disposition="restate",
+      ),
       "user",
       graph_id=GRAPH_ID,
     )

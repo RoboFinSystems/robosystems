@@ -658,6 +658,15 @@ def resolve_reconciling_item(
   Takes the period fence before any row lock (the order close uses).
   """
   plan, planned_stamp = _plan_with_stamp(session, body.event_id, graph_id=graph_id)
+  # The preview the operator decided on, not only the one this request built.
+  if (
+    "expected_drift_detected_at" in body.model_fields_set
+    and body.expected_drift_detected_at != plan.drift_detected_at
+  ):
+    raise RowLockedError(
+      f"Event {body.event_id} was re-flagged with a newer payload after it was "
+      f"previewed. Preview it again."
+    )
   disposition: ReconcilingItemDisposition = body.disposition or plan.default_disposition
 
   catch_up_date: date | None = None
