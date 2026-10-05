@@ -40,6 +40,15 @@ class ResolveReconcilingItemRequest(BaseModel):
   """Dispose of one reconciling item and clear its flag."""
 
   event_id: str = Field(..., description="Event id (evt_ prefixed) to resolve")
+  expected_drift_detected_at: datetime | None = Field(
+    None,
+    description=(
+      "The `drift_detected_at` of the preview this resolution was decided on. "
+      "Pass it: the resolution is refused when the item has been flagged "
+      "again since, with a newer payload nobody has seen, and must be "
+      "previewed again."
+    ),
+  )
   disposition: ReconcilingItemDisposition | None = Field(
     None,
     description=(

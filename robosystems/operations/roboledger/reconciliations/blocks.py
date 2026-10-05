@@ -472,6 +472,18 @@ def record_reconciliation(
     .order_by(FactSet.created_at.desc())
     .limit(1)
   ).scalar_one_or_none()
+  if standing is not None and compared_via != "operation":
+    # A sync recomputing the same figures does not unmake whoever ran them by
+    # hand: they still prepared what a reviewer signs.
+    prior = standing.metadata_ or {}
+    if prior.get("balance_digest") == metadata["balance_digest"]:
+      hand = (
+        prior.get("compared_by")
+        if prior.get("compared_via") == "operation"
+        else prior.get("prepared_by_hand")
+      )
+      if hand:
+        metadata["prepared_by_hand"] = hand
   if standing is None:
     standing = create_fact_set(
       session,
@@ -572,6 +584,7 @@ def preparers(comparison_metadata: dict) -> set[str]:
   if comparison_metadata.get("compared_via") == "operation":
     people.add(comparison_metadata.get("compared_by"))
   people.add(comparison_metadata.get("prepared_by"))
+  people.add(comparison_metadata.get("prepared_by_hand"))
   return {str(person) for person in people if person}
 
 

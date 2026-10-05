@@ -52,6 +52,7 @@ from robosystems.operations.information_block.rules.engine import (
 from robosystems.operations.roboledger.commands.reconciliations import (
   SeparateReviewerError,
   record_statement_balance,
+  refresh_next_period,
   refresh_reconciliations,
   set_reconciliation_policy,
   sign_off_reconciliation,
@@ -78,7 +79,15 @@ from robosystems.operations.roboledger.reconciliations.observations import (
 )
 from robosystems.operations.taxonomy_block.commands import delete_taxonomy_block
 
-from .conftest import GRAPH_ID, classified_account, entry
+from .conftest import (
+  GRAPH_ID,
+  LIVE_CONNECTION,
+  SYNCED_AT,
+  TIED,
+  classified_account,
+  entry,
+  source_report,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -330,6 +339,39 @@ def test_a_policy_change_leaves_a_record_of_who_changed_what(loan):
       "materiality": {"from": 0.0, "to": 25.0},
     },
   }
+
+
+def test_a_sync_that_recomputes_the_same_figures_keeps_their_preparer(
+  ext_session, books
+):
+  """A scheduled sync re-running a comparison by hand left the figures as they
+  were: whoever ran them still prepared what a reviewer signs."""
+  session = ext_session
+  session.add(Entity(name="Fictional Co", created_by="usr"))
+  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  session.commit()
+  source = patch.object(
+    SourceLedgerResolver,
+    "_fetch",
+    return_value=(source_report(*TIED), LIVE_CONNECTION, SYNCED_AT),
+  )
+  with source:
+    (rec,) = refresh_reconciliations(
+      session,
+      RefreshReconciliationsRequest(period="2026-08"),
+      graph_id=GRAPH_ID,
+      created_by="usr",
+    ).reconciliations
+    session.commit()
+    _policy(session, rec.structure_id, separate_reviewer=True)
+
+    assert (
+      refresh_next_period(session, graph_id=GRAPH_ID, created_by="usr") == "2026-08"
+    )
+    session.commit()
+
+  with pytest.raises(SeparateReviewerError, match="you ran this one"):
+    _sign_off(session, rec.structure_id, by="usr")
 
 
 def _schedule_with_a_passing_rule(session) -> str:

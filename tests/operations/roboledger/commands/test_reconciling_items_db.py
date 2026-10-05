@@ -53,6 +53,13 @@ from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
 pytestmark = pytest.mark.unit
 
 GRAPH_ID = "kg_test"
+
+
+def _previewed(session, event_id: str):
+  """The stamp of the preview a resolution is decided on."""
+  return plan_reconciling_item(session, event_id, graph_id=GRAPH_ID).drift_detected_at
+
+
 CONNECTION_ID = "conn_test"
 PERIOD_START = date(2026, 7, 1)
 PERIOD_END = date(2026, 7, 31)
@@ -288,6 +295,7 @@ def test_resolution_survives_the_next_sync(session, disposition):
     session,
     ResolveReconcilingItemRequest(
       event_id=str(event.id),
+      expected_drift_detected_at=_previewed(session, str(event.id)),
       disposition=disposition,
       note="handled" if disposition == "acknowledge" else None,
     ),
@@ -311,7 +319,10 @@ def test_disposition_trail_is_recorded_and_not_compared(session):
   resolve_reconciling_item(
     session,
     ResolveReconcilingItemRequest(
-      event_id=str(event.id), disposition="acknowledge", note="July alignment JE"
+      event_id=str(event.id),
+      expected_drift_detected_at=_previewed(session, str(event.id)),
+      disposition="acknowledge",
+      note="July alignment JE",
     ),
     "user_test",
     graph_id=GRAPH_ID,
@@ -332,7 +343,10 @@ def test_disposition_trail_is_recorded_and_not_compared(session):
 def test_resolving_twice_is_refused_and_says_what_happened(session):
   _elements, event, _accepted = _setup(session)
   body = ResolveReconcilingItemRequest(
-    event_id=str(event.id), disposition="acknowledge", note="handled"
+    event_id=str(event.id),
+    expected_drift_detected_at=_previewed(session, str(event.id)),
+    disposition="acknowledge",
+    note="handled",
   )
   resolve_reconciling_item(session, body, "user_test", graph_id=GRAPH_ID)
   session.flush()
@@ -380,7 +394,11 @@ def test_restate_rebuilds_the_entries_on_the_new_account(session):
 
   result = resolve_reconciling_item(
     session,
-    ResolveReconcilingItemRequest(event_id=str(event.id), disposition="restate"),
+    ResolveReconcilingItemRequest(
+      event_id=str(event.id),
+      expected_drift_detected_at=_previewed(session, str(event.id)),
+      disposition="restate",
+    ),
     "user_test",
     graph_id=GRAPH_ID,
   )
@@ -404,7 +422,10 @@ def test_catch_up_leaves_history_alone_and_posts_the_difference(session):
   result = resolve_reconciling_item(
     session,
     ResolveReconcilingItemRequest(
-      event_id=str(event.id), disposition="catch_up", posting_date=OPEN_END
+      event_id=str(event.id),
+      expected_drift_detected_at=_previewed(session, str(event.id)),
+      disposition="catch_up",
+      posting_date=OPEN_END,
     ),
     "user_test",
     graph_id=GRAPH_ID,
@@ -434,7 +455,10 @@ def test_catch_up_entry_never_publishes_back_to_the_source(session):
   result = resolve_reconciling_item(
     session,
     ResolveReconcilingItemRequest(
-      event_id=str(event.id), disposition="catch_up", posting_date=OPEN_END
+      event_id=str(event.id),
+      expected_drift_detected_at=_previewed(session, str(event.id)),
+      disposition="catch_up",
+      posting_date=OPEN_END,
     ),
     "user_test",
     graph_id=GRAPH_ID,
@@ -469,6 +493,7 @@ def test_acknowledge_records_the_reference_and_writes_no_entries(session):
     session,
     ResolveReconcilingItemRequest(
       event_id=str(event.id),
+      expected_drift_detected_at=_previewed(session, str(event.id)),
       disposition="acknowledge",
       note="posted by hand at the July close",
       reference_event_id=str(reference.id),
@@ -502,7 +527,11 @@ def test_restate_refuses_a_closed_period_and_offers_catch_up(session):
   with pytest.raises((RestateBlockedError, ClosedPeriodError)) as excinfo:
     resolve_reconciling_item(
       session,
-      ResolveReconcilingItemRequest(event_id=str(event.id), disposition="restate"),
+      ResolveReconcilingItemRequest(
+        event_id=str(event.id),
+        expected_drift_detected_at=_previewed(session, str(event.id)),
+        disposition="restate",
+      ),
       "user_test",
       graph_id=GRAPH_ID,
     )
@@ -542,7 +571,11 @@ def test_restate_refuses_when_another_event_shares_the_transaction(session):
   with pytest.raises(RestateBlockedError) as excinfo:
     resolve_reconciling_item(
       session,
-      ResolveReconcilingItemRequest(event_id=str(event.id), disposition="restate"),
+      ResolveReconcilingItemRequest(
+        event_id=str(event.id),
+        expected_drift_detected_at=_previewed(session, str(event.id)),
+        disposition="restate",
+      ),
       "user_test",
       graph_id=GRAPH_ID,
     )
@@ -570,7 +603,11 @@ def test_restate_refuses_to_draft_entries_under_a_fulfilled_event(session):
   with pytest.raises(RestateBlockedError, match="fulfilled"):
     resolve_reconciling_item(
       session,
-      ResolveReconcilingItemRequest(event_id=str(event.id), disposition="restate"),
+      ResolveReconcilingItemRequest(
+        event_id=str(event.id),
+        expected_drift_detected_at=_previewed(session, str(event.id)),
+        disposition="restate",
+      ),
       "user_test",
       graph_id=GRAPH_ID,
     )
@@ -579,7 +616,10 @@ def test_restate_refuses_to_draft_entries_under_a_fulfilled_event(session):
   result = resolve_reconciling_item(
     session,
     ResolveReconcilingItemRequest(
-      event_id=str(event.id), disposition="catch_up", posting_date=OPEN_END
+      event_id=str(event.id),
+      expected_drift_detected_at=_previewed(session, str(event.id)),
+      disposition="catch_up",
+      posting_date=OPEN_END,
     ),
     "user_test",
     graph_id=GRAPH_ID,
@@ -617,7 +657,10 @@ def test_a_reflag_between_preview_and_resolve_is_refused(session):
       resolve_reconciling_item(
         session,
         ResolveReconcilingItemRequest(
-          event_id=str(event.id), disposition="acknowledge", note="x"
+          event_id=str(event.id),
+          expected_drift_detected_at=_previewed(session, str(event.id)),
+          disposition="acknowledge",
+          note="x",
         ),
         "user_test",
         graph_id=GRAPH_ID,
@@ -626,6 +669,55 @@ def test_a_reflag_between_preview_and_resolve_is_refused(session):
     module._plan_with_stamp = real_plan
 
   assert event.payload_drift is True
+
+
+@pytest.mark.parametrize("disposition", ["restate", "catch_up", "acknowledge"])
+def test_a_reflag_after_the_preview_is_refused(session, disposition):
+  """A sync that lands a newer payload between Review and Settle: the
+  resolution was decided on the preview, so it must not settle the newer one."""
+  _elements, event, _accepted = _setup(session)
+  seen = _previewed(session, str(event.id))
+
+  event.metadata_ = {
+    **dict(event.metadata_),
+    "drift_payload": _incoming_payload(expense_account=CASH),
+    "drift_detected_at": datetime(2026, 8, 21, 4, 0).isoformat(),
+  }
+  session.flush()
+
+  with pytest.raises(RowLockedError, match="re-flagged"):
+    resolve_reconciling_item(
+      session,
+      ResolveReconcilingItemRequest(
+        event_id=str(event.id),
+        expected_drift_detected_at=seen,
+        disposition=disposition,
+        posting_date=OPEN_END if disposition == "catch_up" else None,
+        note="handled" if disposition == "acknowledge" else None,
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+  session.refresh(event)
+  assert event.payload_drift is True
+
+
+def test_a_resolution_without_a_stamp_still_resolves(session):
+  """The stamp is optional for callers that predate it; they keep the check
+  for a re-flag landing inside their own request."""
+  _elements, event, _accepted = _setup(session)
+
+  resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(
+      event_id=str(event.id), disposition="acknowledge", note="handled"
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+  session.refresh(event)
+  assert event.payload_drift is False
 
 
 def test_a_z_suffixed_stamp_does_not_read_as_a_reflag(session):
@@ -645,7 +737,10 @@ def test_a_z_suffixed_stamp_does_not_read_as_a_reflag(session):
   resolve_reconciling_item(
     session,
     ResolveReconcilingItemRequest(
-      event_id=str(event.id), disposition="acknowledge", note="handled"
+      event_id=str(event.id),
+      expected_drift_detected_at=_previewed(session, str(event.id)),
+      disposition="acknowledge",
+      note="handled",
     ),
     "user_test",
     graph_id=GRAPH_ID,
@@ -775,7 +870,11 @@ def test_restate_reposts_a_bank_line_at_the_banks_amount_and_date(session):
 
   resolve_reconciling_item(
     session,
-    ResolveReconcilingItemRequest(event_id=str(event.id), disposition="restate"),
+    ResolveReconcilingItemRequest(
+      event_id=str(event.id),
+      expected_drift_detected_at=_previewed(session, str(event.id)),
+      disposition="restate",
+    ),
     "user_test",
     graph_id=GRAPH_ID,
   )
@@ -806,7 +905,11 @@ def test_a_retracted_bank_line_is_reversed_never_restated(session):
   with pytest.raises(RestateBlockedError, match="retracted"):
     resolve_reconciling_item(
       session,
-      ResolveReconcilingItemRequest(event_id=str(event.id), disposition="restate"),
+      ResolveReconcilingItemRequest(
+        event_id=str(event.id),
+        expected_drift_detected_at=_previewed(session, str(event.id)),
+        disposition="restate",
+      ),
       "user_test",
       graph_id=GRAPH_ID,
     )
@@ -818,7 +921,11 @@ def test_a_retracted_bank_line_is_reversed_never_restated(session):
 
   result = resolve_reconciling_item(
     session,
-    ResolveReconcilingItemRequest(event_id=str(event.id), disposition="catch_up"),
+    ResolveReconcilingItemRequest(
+      event_id=str(event.id),
+      expected_drift_detected_at=_previewed(session, str(event.id)),
+      disposition="catch_up",
+    ),
     "user_test",
     graph_id=GRAPH_ID,
   )
