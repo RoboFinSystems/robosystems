@@ -20,6 +20,7 @@ from sqlalchemy import (
   Integer,
   String,
   UniqueConstraint,
+  func,
   or_,
   update,
 )
@@ -127,7 +128,11 @@ class Graph(Model):
   graph_stale_reason = Column(
     String, nullable=True
   )  # e.g. "file_deleted", "file_added"
+  # The latest write not in the graph; mark_fresh compares against it.
   graph_stale_at = Column(DateTime, nullable=True)
+  # The oldest write not in the graph, so a graph written faster than the
+  # sensor's quiet window still refreshes on a bounded wait.
+  graph_stale_since = Column(DateTime, nullable=True)
 
   graph_metadata = Column(JSONB, nullable=True)  # Free-form extras
 
@@ -572,10 +577,16 @@ class Graph(Model):
     return time_since_sync > sync_interval
 
   def mark_stale(self, session: Session, reason: str) -> None:
-    """Mark the graph stale — DuckDB holds changes the graph lacks."""
+    """Mark the graph stale — DuckDB holds changes the graph lacks.
+
+    ``graph_stale_at`` moves on every write; ``graph_stale_since`` only on the
+    first, in SQL so concurrent writers cannot reset it.
+    """
+    now = datetime.now(UTC)
     self.graph_stale = True
     self.graph_stale_reason = reason
-    self.graph_stale_at = datetime.now(UTC)
+    self.graph_stale_at = now
+    self.graph_stale_since = func.coalesce(Graph.graph_stale_since, now)
     session.commit()
 
   def settle_rebuild(self, session: Session, status: str, error: str | None = None):
@@ -627,7 +638,12 @@ class Graph(Model):
     clear = (
       update(Graph)
       .where(Graph.graph_id == self.graph_id)
-      .values(graph_stale=False, graph_stale_reason=None, graph_stale_at=None)
+      .values(
+        graph_stale=False,
+        graph_stale_reason=None,
+        graph_stale_at=None,
+        graph_stale_since=None,
+      )
       .execution_options(synchronize_session=False)
     )
     if started_at is not None:
@@ -635,6 +651,22 @@ class Graph(Model):
         or_(Graph.graph_stale_at.is_(None), Graph.graph_stale_at <= started_at)
       )
     cleared = (session.execute(clear).rowcount or 0) > 0
+    if not cleared and started_at is not None:
+      # Everything before ``started_at`` is in the graph now, so the oldest
+      # write still missing is no older than it.
+      session.execute(
+        update(Graph)
+        .where(
+          Graph.graph_id == self.graph_id,
+          Graph.graph_stale.is_(True),
+          or_(
+            Graph.graph_stale_since.is_(None),
+            Graph.graph_stale_since < started_at,
+          ),
+        )
+        .values(graph_stale_since=started_at)
+        .execution_options(synchronize_session=False)
+      )
     session.commit()
     # The UPDATE bypassed the identity map; reload the stale fields.
     session.refresh(self)

@@ -1186,3 +1186,67 @@ class TestMarkFreshCompareAndClear:
     assert graph.mark_fresh(db_session) is True
     db_session.refresh(graph)
     assert graph.graph_stale is False
+
+
+class TestStaleSince:
+  """``graph_stale_since`` is the oldest write the graph lacks. Unlike
+  ``graph_stale_at`` it does not move on every write, so a graph written more
+  often than the sensor's quiet window still comes due."""
+
+  @pytest.fixture
+  def graph(self, test_org, db_session):
+    import uuid
+
+    return Graph.create(
+      graph_id=f"kg_since_{uuid.uuid4().hex[:8]}",
+      graph_name="Busy Graph",
+      graph_type="entity",
+      org_id=test_org.id,
+      session=db_session,
+      base_schema="base",
+      schema_extensions=["roboledger"],
+      graph_instance_id="cluster1",
+      graph_cluster_region="us-east-1",
+      graph_tier=GraphTier.LADYBUG_STANDARD,
+    )
+
+  def test_later_writes_move_stale_at_but_not_stale_since(self, graph, db_session):
+    graph.mark_stale(db_session, "journal_entry_updated")
+    first_since = graph.graph_stale_since
+    first_at = graph.graph_stale_at
+
+    graph.mark_stale(db_session, "journal_entry_updated")
+
+    assert graph.graph_stale_since == first_since
+    assert graph.graph_stale_at > first_at
+
+  def test_a_clear_resets_it(self, graph, db_session):
+    graph.mark_stale(db_session, "connector_sync")
+    assert graph.mark_fresh(db_session) is True
+    db_session.refresh(graph)
+    assert graph.graph_stale_since is None
+
+    graph.mark_stale(db_session, "connector_sync")
+    assert graph.graph_stale_since is not None
+
+  def test_a_write_during_the_build_moves_it_to_the_builds_start(
+    self, graph, db_session
+  ):
+    """Everything before the build began is in the graph now, so the oldest
+    missing write is no older than the build's start."""
+    from datetime import datetime, timedelta
+
+    graph.mark_stale(db_session, "journal_entry_updated")
+    started_at = datetime.now(UTC) + timedelta(milliseconds=1)
+    db_session.execute(
+      Graph.__table__.update()
+      .where(Graph.graph_id == graph.graph_id)
+      .values(graph_stale_at=started_at + timedelta(seconds=1))
+    )
+
+    assert graph.mark_fresh(db_session, started_at=started_at) is False
+    db_session.refresh(graph)
+    assert graph.graph_stale is True
+    assert graph.graph_stale_since.replace(tzinfo=None) == started_at.replace(
+      tzinfo=None
+    )
