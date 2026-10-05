@@ -4,7 +4,6 @@ import asyncio
 import json
 import time
 
-import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -31,6 +30,7 @@ from robosystems.schemas.runtime.custom import (
   SchemaFormat,
 )
 from robosystems.schemas.runtime.manager import SchemaManager
+from robosystems.utils.yaml_input import load_untrusted_yaml
 
 from .utils import circuit_breaker, timeout_coordinator
 
@@ -257,7 +257,7 @@ relationships:
       try:
         if isinstance(request.schema_definition, str):
           if schema_format == SchemaFormat.YAML:
-            schema_dict = yaml.safe_load(request.schema_definition)
+            schema_dict = load_untrusted_yaml(request.schema_definition)
           else:
             schema_dict = json.loads(request.schema_definition)
         else:

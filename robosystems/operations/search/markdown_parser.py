@@ -25,21 +25,6 @@ MAX_FRONTMATTER_TITLE_LENGTH = 500
 MAX_FRONTMATTER_FOLDER_LENGTH = 200
 
 
-def _no_alias_loader():
-  import yaml
-
-  class NoAliasLoader(yaml.SafeLoader):
-    """Refuses YAML aliases: a repeated reference is cheap to parse and
-    expands on every later copy or serialization."""
-
-    def compose_node(self, parent, index):  # type: ignore[override]
-      if self.check_event(yaml.AliasEvent):
-        raise yaml.YAMLError("YAML aliases are not allowed in frontmatter")
-      return super().compose_node(parent, index)
-
-  return NoAliasLoader
-
-
 def frontmatter_tags(raw_tags: object) -> list[str]:
   """Scalar tags only, bounded in count and length."""
   if isinstance(raw_tags, str):
@@ -99,9 +84,9 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
   remaining = stripped[end_idx + 3 :].lstrip("\n")
 
   try:
-    import yaml
+    from robosystems.utils.yaml_input import load_untrusted_yaml
 
-    metadata = yaml.load(frontmatter_text, Loader=_no_alias_loader())  # noqa: S506
+    metadata = load_untrusted_yaml(frontmatter_text)
     if not isinstance(metadata, dict):
       return {}, content
     return metadata, remaining
