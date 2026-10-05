@@ -357,6 +357,70 @@ class TestQbTransformFailure:
       with pytest.raises(RuntimeError, match="dbt build failed"):
         qb_transform(context, config)
 
+  def test_transform_failure_records_failed_result_and_releases_lock(self, tmp_path):
+    """qb_load never runs after a failed transform, so the transform ends the sync."""
+    from robosystems.adapters.quickbooks.pipeline.transform import qb_transform
+
+    config = _make_config()
+
+    work_dir = tmp_path / "qb_pipeline" / config.graph_id
+    work_dir.mkdir(parents=True)
+
+    failed_proc = CompletedProcess(
+      args=["dbt", "build"],
+      returncode=1,
+      stdout="",
+      stderr="Error",
+    )
+
+    with (
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.transform.get_pipeline_work_dir",
+        return_value=work_dir,
+      ),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.transform.subprocess.run",
+        return_value=failed_proc,
+      ),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._record_failed_sync_result"
+      ) as record_failed,
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._release_sync_lock"
+      ) as release_lock,
+    ):
+      context = build_asset_context()
+      with pytest.raises(RuntimeError, match="dbt build failed"):
+        qb_transform(context, config)
+
+    record_failed.assert_called_once()
+    release_lock.assert_called_once()
+
+  def test_transform_interrupted_run_releases_lock(self, tmp_path):
+    """Stopping a run raises a BaseException, which qb_load's finally covers;
+    the earlier stages must not keep the lock to its TTL either."""
+    from dagster._core.errors import DagsterExecutionInterruptedError
+
+    from robosystems.adapters.quickbooks.pipeline.transform import qb_transform
+
+    config = _make_config()
+
+    with (
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.transform._run_qb_transform",
+        side_effect=DagsterExecutionInterruptedError(),
+      ),
+      patch("robosystems.adapters.quickbooks.pipeline.load._record_failed_sync_result"),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._release_sync_lock"
+      ) as release_lock,
+    ):
+      context = build_asset_context()
+      with pytest.raises(DagsterExecutionInterruptedError):
+        qb_transform(context, config)
+
+    release_lock.assert_called_once()
+
   def test_transform_error_message_includes_exit_code(self, tmp_path):
     """Test that the RuntimeError message includes the exit code."""
     from robosystems.adapters.quickbooks.pipeline.transform import qb_transform

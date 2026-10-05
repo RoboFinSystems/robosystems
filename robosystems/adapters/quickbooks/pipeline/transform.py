@@ -7,6 +7,7 @@ import subprocess
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
+from .load import end_failed_sync
 from .utils import DBT_PROJECT_DIR, QB_LEDGER_TABLES, get_pipeline_work_dir
 
 
@@ -21,6 +22,18 @@ from .utils import DBT_PROJECT_DIR, QB_LEDGER_TABLES, get_pipeline_work_dir
   },
 )
 def qb_transform(
+  context: AssetExecutionContext,
+  config: QBSyncConfig,
+) -> MaterializeResult:
+  try:
+    return _run_qb_transform(context, config)
+  except BaseException as exc:
+    # BaseException: a stopped run raises DagsterExecutionInterruptedError.
+    end_failed_sync(context, config, exc)
+    raise
+
+
+def _run_qb_transform(
   context: AssetExecutionContext,
   config: QBSyncConfig,
 ) -> MaterializeResult:

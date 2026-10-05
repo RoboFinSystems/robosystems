@@ -4,6 +4,7 @@ import requests
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
+from .load import end_failed_sync
 from .utils import (
   JournalReportTruncatedError,
   flatten_bill_headers,
@@ -112,6 +113,18 @@ def _assert_usd_only(
   },
 )
 def qb_extract(
+  context: AssetExecutionContext,
+  config: QBSyncConfig,
+) -> MaterializeResult:
+  try:
+    return _run_qb_extract(context, config)
+  except BaseException as exc:
+    # BaseException: a stopped run raises DagsterExecutionInterruptedError.
+    end_failed_sync(context, config, exc)
+    raise
+
+
+def _run_qb_extract(
   context: AssetExecutionContext,
   config: QBSyncConfig,
 ) -> MaterializeResult:

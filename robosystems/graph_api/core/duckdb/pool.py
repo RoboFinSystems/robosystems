@@ -719,7 +719,8 @@ class DuckDBConnectionPool:
   def force_database_cleanup(self, graph_id: str) -> None:
     """Close all connections for a graph and delete its staging file.
 
-    Call this when a graph is deleted; nothing else removes the file.
+    Call this when a graph is deleted; nothing else removes the file. Raises
+    when the file stays, so the caller does not report it gone.
     """
     with self._get_database_lock(graph_id):
       logger.info(f"Forcing cleanup for DuckDB database: {graph_id}")
@@ -739,6 +740,7 @@ class DuckDBConnectionPool:
 
         except Exception as e:
           logger.warning(f"Failed to delete DuckDB file {db_path}: {e}")
+          raise
 
 
 # Global connection pool instance (initialized by the application)

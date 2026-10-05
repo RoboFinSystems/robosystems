@@ -653,6 +653,46 @@ class TestDeprovisionService:
       ), messages
 
   @pytest.mark.asyncio
+  async def test_deprovision_stays_retryable_when_a_side_store_survives(
+    self, service, db_session, test_graph
+  ):
+    """The .lbug is gone but the Lance or DuckDB store is not. Freeing the
+    slot would leave that residue for the next tenant, so teardown stops
+    short and the sensor retries; the retry finds no file and disposes again."""
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ) as mock_get_client,
+      patch(
+        "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+      ) as mock_alloc_cls,
+    ):
+      mock_client = AsyncMock()
+      mock_client.delete_database.return_value = {
+        "status": "success",
+        "graph_id": test_graph.graph_id,
+        "existed": True,
+        "removed": ["/data/x.lbug"],
+        "failed": ["duckdb: duckdb busy"],
+        "message": "deleted",
+      }
+      mock_get_client.return_value = mock_client
+      mock_alloc = AsyncMock()
+      mock_alloc_cls.return_value = mock_alloc
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+      assert result.status == "partial"
+      assert result.database_deleted is False
+      assert any("duckdb: duckdb busy" in e for e in result.errors)
+      mock_alloc.deallocate_database.assert_not_called()
+      db_session.refresh(test_graph)
+      assert test_graph.status != GraphStatus.DEPROVISIONED.value
+
+  @pytest.mark.asyncio
   async def test_deprovision_still_strands_on_a_non_404_graph_api_error(
     self, service, db_session, test_graph
   ):

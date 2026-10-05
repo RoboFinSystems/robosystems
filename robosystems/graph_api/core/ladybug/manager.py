@@ -259,7 +259,8 @@ class LadybugDatabaseManager:
     A missing ``.lbug`` is not a refusal: the graph file goes first, so a
     teardown that died partway must still be able to dispose of the side
     stores before the volume is reused. ``existed`` says whether the graph
-    file was there this time; ``removed`` lists what this call deleted.
+    file was there this time; ``removed`` lists what this call deleted, and
+    ``failed`` the side stores it could not, so the caller keeps the slot.
 
     Deleting a base name also removes its ``-wip``/``-prev`` temporaries,
     which are dead once the base is gone. A temporary deleted by its own name
@@ -268,6 +269,7 @@ class LadybugDatabaseManager:
     db_path = self.base_path / f"{graph_id}.lbug"
     existed = db_path.exists()
     removed: list[str] = []
+    failed: list[str] = []
 
     try:
       logger.info(
@@ -295,6 +297,7 @@ class LadybugDatabaseManager:
             logger.info(f"Deleted lance indexes for {graph_id}")
         except Exception as lance_err:
           logger.warning(f"Could not delete lance indexes for {graph_id}: {lance_err}")
+          failed.append(f"lance: {lance_err}")
       else:
         logger.info(f"Preserving lance indexes for {graph_id}")
 
@@ -310,6 +313,7 @@ class LadybugDatabaseManager:
           logger.warning(
             f"Could not delete DuckDB staging database for {graph_id}: {duck_err}"
           )
+          failed.append(f"duckdb: {duck_err}")
       else:
         logger.info(f"Preserving DuckDB staging database for {graph_id}")
 
@@ -324,6 +328,7 @@ class LadybugDatabaseManager:
         "graph_id": graph_id,
         "existed": existed,
         "removed": removed,
+        "failed": failed,
         "message": message,
       }
 
