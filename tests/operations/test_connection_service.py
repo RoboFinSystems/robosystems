@@ -733,18 +733,20 @@ class TestConnectionServiceErrorHandling:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_list_connections_exception_returns_empty(self):
+  async def test_list_connections_raises_when_the_read_fails(self):
+    # An empty list would read as "no connections": a caller would then
+    # create a duplicate, report no syncable connection, or decide QuickBooks
+    # is not connected.
     mock_session = MagicMock()
 
     with patch(f"{MODULE}.Connection") as MockConn:
       MockConn.list_filtered.side_effect = Exception("db error")
 
-      result = await ConnectionService.list_connections(
-        graph_id="kg_test",
-        db_session=mock_session,
-      )
-
-    assert result == []
+      with pytest.raises(Exception, match="db error"):
+        await ConnectionService.list_connections(
+          graph_id="kg_test",
+          db_session=mock_session,
+        )
 
   @pytest.mark.asyncio
   @pytest.mark.unit

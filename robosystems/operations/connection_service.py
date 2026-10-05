@@ -190,11 +190,9 @@ class ConnectionService:
 
         result.append(conn_dict)
 
+      # A failed read raises: an empty list would read as "no connections".
       return result
 
-    except Exception:
-      logger.error("Failed to list connections", exc_info=True)
-      return []
     finally:
       if session_created:
         session.close()

@@ -134,7 +134,9 @@ def dispatch_preview(
 
   posting_date = metadata.posting_date or body.occurred_at.date()
   try:
-    assert_period_not_closed(session, posting_date)
+    # Both months, as the command fences them: reversing marks the original
+    # `reversed`, a change to its month.
+    assert_period_not_closed(session, original.posting_date, posting_date)
   except (ClosedPeriodError, RowLockedError) as e:
     errors.append(str(e))
 
