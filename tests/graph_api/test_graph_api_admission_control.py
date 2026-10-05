@@ -273,8 +273,9 @@ def test_memory_starved_seconds_counts_while_headroom_stays_under_the_floor(
   assert controller.memory_starved_seconds() == 0.0
 
 
-def test_a_failed_resource_probe_counts_as_starved(monkeypatch):
-  """A node that cannot read its memory refuses every request too."""
+def test_a_failed_resource_probe_is_not_starvation(monkeypatch):
+  """Admission fails closed on a reading it cannot take, but the clock that
+  gets a replica replaced runs only on readings that showed no room."""
   clock = SimpleNamespace(now=1_000.0)
   monkeypatch.setattr(
     "robosystems.graph_api.core.admission_control.time.time", lambda: clock.now
@@ -288,9 +289,31 @@ def test_a_failed_resource_probe_counts_as_starved(monkeypatch):
   )
   controller = LadybugAdmissionController(min_available_mb=1024.0, check_interval=0.0)
 
+  decision, _ = controller.check_admission("sec")
+  assert decision == AdmissionDecision.REJECT_MEMORY
+  clock.now += 3600
+  assert controller.memory_starved_seconds() == 0.0
+
+
+def test_a_failed_reading_restarts_the_starved_clock(set_resource_usage, monkeypatch):
+  clock = SimpleNamespace(now=1_000.0)
+  monkeypatch.setattr(
+    "robosystems.graph_api.core.admission_control.time.time", lambda: clock.now
+  )
+  controller = LadybugAdmissionController(min_available_mb=1024.0, check_interval=0.0)
+  set_resource_usage(memory_percent=99.0, cpu_percent=10.0, available_mb=1013.0)
   controller.check_admission("sec")
-  clock.now += 60
-  assert controller.memory_starved_seconds() == 60.0
+  clock.now += 240
+  assert controller.memory_starved_seconds() == 240.0
+
+  def _boom():
+    raise RuntimeError("psutil unavailable")
+
+  monkeypatch.setattr(
+    "robosystems.graph_api.core.admission_control.psutil.virtual_memory", _boom
+  )
+  clock.now += 240
+  assert controller.memory_starved_seconds() == 0.0
 
 
 def test_check_admission_rejects_on_cpu_for_ingestion(set_resource_usage):

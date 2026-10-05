@@ -49,7 +49,8 @@ def recover_stale_processing(
   it completed. Once it has ended ``ERROR_RETRY_MAX_ATTEMPTS`` runs it becomes
   ``error`` instead of failing every run after. Only it is judged: the rest
   of its batch carries the same attempt count and did nothing wrong. Safe only
-  because the sensor runs one worker per quarter.
+  because the sensor runs one worker per quarter and a run takes one filing at
+  a time: with either gone, "started last" no longer names the one in flight.
 
   Returns (files reset, the file set aside or None). Commits.
   """
@@ -133,7 +134,9 @@ def sec_processed_filings(
 
   def finished(sf: SourceFile) -> bool:
     """Whether a file left ``processing`` has cached output, so the run died
-    after it. Unknown counts as finished: no file is set aside on a guess."""
+    after it. A check that fails counts as finished: no file is set aside on
+    a guess. With the cache off there is nothing to check, and the one
+    started last is taken as unfinished."""
     if not config.enable_cache:
       return False
     cache_key = get_cache_key(DataSourceType.SEC, partition_date, sf.id)

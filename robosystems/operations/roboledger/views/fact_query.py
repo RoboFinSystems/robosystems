@@ -235,9 +235,9 @@ def _deduplicate_fact_rows(
   Both period ends are in the key because a 10-Q reports the same element for
   the 3-month and 9-month windows ending on the same day; entity is in it so
   two filers never collapse into one row, and unit so a figure and its
-  translation into another currency both survive. The most precise fact wins, unless
-  ``standing`` (a tenant's report state per fact) says which report is of
-  record: that decides first, and precision only breaks its ties.
+  translation into another currency both survive. The most precise fact
+  wins, unless ``standing`` (a tenant's report state per fact) says which
+  report is of record: that decides first, and precision only breaks its ties.
   """
 
   def rank(row: dict[str, Any]) -> tuple:

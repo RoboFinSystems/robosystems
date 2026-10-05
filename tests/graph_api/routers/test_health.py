@@ -216,3 +216,35 @@ class TestReplicaMemoryLatch:
     response = client.get("/health")
 
     assert response.status_code == status.HTTP_200_OK
+
+  def test_a_replica_that_cannot_read_its_memory_is_not_replaced(
+    self, client, monkeypatch
+  ):
+    """Replacing it would not help, and a read that fails across the fleet
+    would cycle every replica at once."""
+    from robosystems.graph_api.core.admission_control import (
+      LadybugAdmissionController,
+    )
+
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(
+      "robosystems.graph_api.core.admission_control.time.time", lambda: clock["now"]
+    )
+
+    def _boom():
+      raise RuntimeError("psutil unavailable")
+
+    monkeypatch.setattr(
+      "robosystems.graph_api.core.admission_control.psutil.virtual_memory", _boom
+    )
+    controller = LadybugAdmissionController(min_available_mb=1024.0, check_interval=0.0)
+    monkeypatch.setenv("LBUG_ROLE", "replica")
+    monkeypatch.setattr("robosystems.graph_api.routers.health._replica_ready", True)
+    monkeypatch.setattr(
+      "robosystems.graph_api.routers.health.get_admission_controller",
+      lambda: controller,
+    )
+
+    assert client.get("/health").status_code == status.HTTP_200_OK
+    clock["now"] += MEMORY_LATCH_SECONDS * 2
+    assert client.get("/health").status_code == status.HTTP_200_OK

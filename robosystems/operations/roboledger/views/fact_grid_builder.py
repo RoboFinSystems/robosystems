@@ -32,7 +32,7 @@ def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, flo
   `period_end` (quarter and YTD) contribute only the narrowest one, so the
   quarter is not double-counted; the facts list itself is unchanged. An
   element reported in more than one unit has no summary: no aggregate holds
-  across currencies.
+  across currencies. A fact with no unit counts as a unit of its own.
   """
   summary: dict[str, dict[str, float]] = {}
   units_by_element: dict[str, set[str]] = {}
