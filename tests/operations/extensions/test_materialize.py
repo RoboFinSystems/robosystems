@@ -906,9 +906,12 @@ class TestMaterializeLockGate:
     client._instance_id = "i-test"
     return client
 
-  async def _run(self, db_exists: bool, lock):
+  async def _run(self, db_exists: bool, lock, lock_token=None, adopted="lock"):
     from robosystems.operations.extensions.materialize import ExtensionsMaterializer
 
+    lock_cls = MagicMock(return_value=lock)
+    lock_cls.adopt = AsyncMock(return_value=lock if adopted == "lock" else adopted)
+    self.lock_cls = lock_cls
     client = self._client(db_exists)
     schema_loader = MagicMock()
     schema_loader.return_value.nodes = {}
@@ -927,7 +930,7 @@ class TestMaterializeLockGate:
       ),
       patch(
         "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
-        MagicMock(return_value=lock),
+        lock_cls,
       ),
       patch(
         "robosystems.config.valkey_registry.create_async_redis_client",
@@ -943,9 +946,37 @@ class TestMaterializeLockGate:
       ),
       patch("robosystems.schemas.loader.get_contextual_schema_loader", schema_loader),
     ):
-      result = await materializer.materialize(GRAPH_ID)
+      result = await materializer.materialize(GRAPH_ID, lock_token=lock_token)
 
     return client, result
+
+  @pytest.mark.asyncio
+  async def test_a_handed_token_is_adopted_not_reacquired(self):
+    """The manual path's API call took the lock at submit; the run adopts
+    that token, so nothing can slip in between, and leaves release to the
+    task that owns it."""
+    lock = _held_lock(token="tok-api")
+    client, result = await self._run(db_exists=True, lock=lock, lock_token="tok-api")
+
+    assert self.lock_cls.adopt.await_args.args[1:] == (GRAPH_ID, "tok-api")
+    lock.acquire.assert_not_awaited()
+    lock.release.assert_not_awaited()
+    client.swap_database.assert_awaited_once_with(GRAPH_ID, lock_token="tok-api")
+    assert result.status == "success"
+
+  @pytest.mark.asyncio
+  async def test_a_token_no_longer_held_fails_closed(self):
+    """A run that waited in the queue past its lock's TTL, or whose lock
+    another run has taken, refuses to write."""
+    lock = _held_lock()
+    client, result = await self._run(
+      db_exists=True, lock=lock, lock_token="tok-stale", adopted=None
+    )
+
+    assert result.status == "error"
+    assert "no longer held" in result.errors[0]
+    client.execute_write.assert_not_called()
+    client.swap_database.assert_not_called()
 
   @pytest.mark.asyncio
   async def test_first_build_path_acquires_lock(self):

@@ -31,11 +31,13 @@ async def materialize_graph_directly(
   rebuild: bool = False,
   materialize_embeddings: bool = False,
   operation_id: str | None = None,
+  lock_token: str | None = None,
 ) -> dict[str, Any]:
   """Materialize every staging table into the graph, in this process.
 
   Skipped unless the graph is stale, ``force`` is set, or ``rebuild`` is set;
-  ``rebuild`` drops and recreates the graph database first.
+  ``rebuild`` drops and recreates the graph database first, under the
+  caller's materialization lock (``lock_token``).
   ``materialize_embeddings`` additionally builds the HNSW vector indexes, which
   is much slower. Progress streams over SSE when ``operation_id`` is given.
 
@@ -150,7 +152,9 @@ async def materialize_graph_directly(
           logger.info(f"[20%] Deleting graph database for {graph_id}")
           if operation_id:
             await manager.emit_progress(operation_id, "Deleting graph database...", 20)
-          await client.delete_database(graph_id, preserve_duckdb=True)
+          await client.delete_database(
+            graph_id, preserve_duckdb=True, lock_token=lock_token
+          )
 
           schema = GraphSchema.get_active_schema(graph_id, db)
           if not schema:
@@ -192,6 +196,9 @@ async def materialize_graph_directly(
         .distinct()
         .all()
       )
+
+      # Taken before the copy, so a file staged mid-run is not marked copied.
+      copied_file_ids = GraphFile.staged_file_ids(graph_id, db)
 
       if not tables_with_staged_data:
         logger.info(f"No tables with staged data found for graph {graph_id}")
@@ -270,6 +277,8 @@ async def materialize_graph_directly(
           # Fail fast: a failed table means missing data.
           logger.error(f"Failed to materialize table {table_name}: {e}")
           raise
+
+      GraphFile.mark_many_graph_ingested(copied_file_ids, db)
 
       logger.info("[95%] Marking graph as fresh")
       if operation_id:

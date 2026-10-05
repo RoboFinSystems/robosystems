@@ -45,7 +45,7 @@ from robosystems.worker.task_protection import (
   TaskProtectionManager,
 )
 from robosystems.worker.tasks import get_task_handler
-from robosystems.worker.tasks.base import BaseTask, TaskPaused
+from robosystems.worker.tasks.base import BaseTask, TaskPaused, release_task_lock
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +228,11 @@ async def _process_task(
   # status ladder will refuse to record.
   if await manager.get_operation_status(task_id) == OperationStatus.CANCELLED:
     logger.info(f"Skipping cancelled task: {task_type} ({task_id})")
+    # A first attempt never ran, so the lock its API call took would
+    # otherwise be held for its whole TTL. A requeued one may have left work
+    # running (a Dagster run, a Graph API COPY) and keeps it.
+    if task_data.get("attempt", 1) == 1:
+      await asyncio.to_thread(release_task_lock, graph_id, params)
     await queue.lrem(inflight_key, 1, task_json)
     return
 

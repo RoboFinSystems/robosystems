@@ -253,12 +253,21 @@ class TestMaterializeGraphDirectly:
         db=mock_db_session,
         graph_id=graph_id,
         rebuild=True,
+        lock_token="tok-held",
       )
 
       assert result["status"] == "success"
       assert result["rebuild"] is True
+      # The delete runs under the caller's lock; without the token it would
+      # 409 against that very lock.
       mock_client.delete_database.assert_called_once_with(
-        graph_id, preserve_duckdb=True
+        graph_id, preserve_duckdb=True, lock_token="tok-held"
+      )
+      # The files it copied are recorded as in the graph, so a later
+      # non-rebuild run is refused instead of replaying them.
+      mock_file_class.staged_file_ids.assert_called_once_with(graph_id, mock_db_session)
+      mock_file_class.mark_many_graph_ingested.assert_called_once_with(
+        mock_file_class.staged_file_ids.return_value, mock_db_session
       )
       mock_client.create_database.assert_called_once()
       mock_client.materialize_table.assert_called_once()

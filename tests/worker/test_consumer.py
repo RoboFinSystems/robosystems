@@ -387,6 +387,46 @@ async def test_task_cancelled_while_queued_is_skipped(
   mock_cleanup.assert_not_called()
 
 
+@pytest.mark.asyncio
+@patch("robosystems.worker.consumer.release_task_lock")
+@patch("robosystems.worker.consumer.get_tracer")
+async def test_a_cancelled_first_attempt_releases_its_lock(
+  mock_tracer, mock_release, mock_manager, mock_queue
+):
+  """Nothing ran, so the lock the API took at submit is freed now rather
+  than held for its whole TTL."""
+  from robosystems.middleware.sse.event_storage import OperationStatus
+
+  mock_manager.get_operation_status = AsyncMock(return_value=OperationStatus.CANCELLED)
+  params = {"materialization_lock_token": "tok"}
+
+  await _call_process_task(_make_task_data(params=params), mock_queue, mock_manager)
+
+  mock_release.assert_called_once_with("kg0123456789abcdef", params)
+
+
+@pytest.mark.asyncio
+@patch("robosystems.worker.consumer.release_task_lock")
+@patch("robosystems.worker.consumer.get_tracer")
+async def test_a_cancelled_requeued_attempt_keeps_its_lock(
+  mock_tracer, mock_release, mock_manager, mock_queue
+):
+  """A requeued attempt may have left a Dagster run or a Graph API COPY
+  running; freeing the lock would admit a second writer alongside it."""
+  from robosystems.middleware.sse.event_storage import OperationStatus
+
+  mock_manager.get_operation_status = AsyncMock(return_value=OperationStatus.CANCELLED)
+
+  await _call_process_task(
+    _make_task_data(params={"materialization_lock_token": "tok"}, attempt=2),
+    mock_queue,
+    mock_manager,
+  )
+
+  mock_release.assert_not_called()
+  mock_queue.lrem.assert_called_once()
+
+
 class DeferredTask(BaseTask):
   async def execute(self) -> dict[str, Any]:
     from datetime import UTC, datetime

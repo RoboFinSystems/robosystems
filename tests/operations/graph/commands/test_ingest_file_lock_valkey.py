@@ -26,14 +26,14 @@ def graph_id():
   graph_id = f"kgtest{uuid.uuid4().hex[:12]}"
   client = create_redis_client(ValkeyDatabase.LOCKS)
   yield graph_id
-  client.delete(f"lock:graph_materialize:{graph_id}")
+  client.delete(f"materialize_lock:{graph_id}")
   client.close()
 
 
 def _lock_holder(graph_id: str) -> str | None:
   client = create_redis_client(ValkeyDatabase.LOCKS)
   try:
-    return client.get(f"lock:graph_materialize:{graph_id}")
+    return client.get(f"materialize_lock:{graph_id}")
   finally:
     client.close()
 
@@ -104,7 +104,8 @@ async def _ingest(
 @pytest.mark.asyncio
 async def test_ingest_to_graph_refuses_while_a_materialize_holds_the_graph(graph_id):
   client = create_redis_client(ValkeyDatabase.LOCKS)
-  client.set(f"lock:graph_materialize:{graph_id}", "materialize-run", ex=300)
+  # The key every materialize holds, the stale-graph sensor's runs included.
+  client.set(f"materialize_lock:{graph_id}", "materialize-run", ex=300)
   client.close()
   enqueue = AsyncMock(return_value={"operation_id": "op_x"})
 
@@ -127,9 +128,8 @@ async def test_the_graph_write_carries_the_lock_and_the_tag(graph_id):
   assert enqueue.await_args.kwargs["task_type"] == "dagster_job_monitor"
   assert params["job_name"] == "materialize_file_job"
   assert params["tags"] == {"materialize_db": graph_id}
-  assert params["lock_key"] == f"graph_materialize:{graph_id}"
   # Handed to the worker, which frees it once the run stops.
-  assert _lock_holder(graph_id) == params["lock_id"]
+  assert _lock_holder(graph_id) == params["materialization_lock_token"]
 
 
 @pytest.mark.asyncio
@@ -154,4 +154,4 @@ async def test_a_large_file_stages_and_writes_under_the_lock(graph_id):
   params = enqueue.await_args.kwargs["params"]
   assert params["job_name"] == "stage_file_job"
   assert params["tags"] == {"materialize_db": graph_id}
-  assert _lock_holder(graph_id) == params["lock_id"]
+  assert _lock_holder(graph_id) == params["materialization_lock_token"]

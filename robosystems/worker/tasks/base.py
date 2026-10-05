@@ -185,42 +185,60 @@ class BaseTask(ABC):
     )
     raise TaskPaused(prompt)
 
-  def release_lock(self, lock_key: str | None, lock_id: str | None = None) -> None:
-    """Release the distributed lock the enqueuing API call took for this task.
+  def release_lock(self) -> None:
+    """Release the graph lock the enqueuing API call took for this task."""
+    release_task_lock(self.graph_id, self.params)
 
-    Safe to call with None. ``lock_id`` (defaulting to ``params["lock_id"]``)
-    makes the release a compare-and-delete: a task that finishes after the
-    lock's TTL lapsed and a successor re-acquired it must not strip the
-    successor's lock. Only a task enqueued without a ``lock_id`` — one queued
-    before the API started passing it — falls back to the unconditional
-    delete, so its lock is not stranded for the full TTL.
-    """
-    if not lock_key:
-      return
 
-    from robosystems.logger import get_logger
+def release_task_lock(graph_id: str | None, params: dict[str, Any]) -> None:
+  """Release the graph lock an enqueuing API call took for a task, if any.
 
-    logger = get_logger(__name__)
-    lock_id = lock_id or self.params.get("lock_id")
+  ``materialization_lock_token`` is the per-graph materialization lock. The
+  ``lock_key``/``lock_id`` pair is the key it replaced, still carried by tasks
+  queued before the switch. Both releases compare-and-delete, so a task that
+  finishes after its lock lapsed cannot strip a successor's. Never raises.
+  """
+  token = params.get("materialization_lock_token")
+  lock_key = params.get("lock_key")
+  if not (token and graph_id) and not lock_key:
+    return
 
-    try:
-      from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
-      from robosystems.middleware.auth.distributed_lock import release_lock_by_id
+  try:
+    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
 
-      redis_client = create_redis_client(ValkeyDatabase.LOCKS)
-      try:
-        if lock_id:
-          if release_lock_by_id(redis_client, lock_key, lock_id):
-            logger.debug(f"Released lock: {lock_key}")
-          else:
-            logger.warning(
-              f"Lock {lock_key} was not released: not held by this task "
-              "(expired or re-acquired by a successor)"
-            )
-        else:
-          redis_client.delete(f"lock:{lock_key}")
-          logger.debug(f"Released lock (no lock_id, unconditional): {lock_key}")
-      finally:
-        redis_client.close()
-    except Exception as e:
-      logger.warning(f"Failed to release lock {lock_key}: {e}")
+    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+  except Exception as e:
+    logger.warning(f"Failed to release the lock for a task on {graph_id}: {e}")
+    return
+
+  try:
+    if token and graph_id:
+      from robosystems.graph_api.core.ladybug.materialization_lock import (
+        release_token,
+      )
+
+      if not release_token(redis_client, graph_id, token):
+        logger.warning(
+          f"Materialization lock for {graph_id} was not released: not held by "
+          "this task (expired or re-acquired by a successor)"
+        )
+    if lock_key:
+      _release_legacy_lock(redis_client, lock_key, params.get("lock_id"))
+  finally:
+    redis_client.close()
+
+
+def _release_legacy_lock(redis_client: Any, lock_key: str, lock_id: str | None) -> None:
+  from robosystems.middleware.auth.distributed_lock import release_lock_by_id
+
+  try:
+    if lock_id:
+      if not release_lock_by_id(redis_client, lock_key, lock_id):
+        logger.warning(
+          f"Lock {lock_key} was not released: not held by this task "
+          "(expired or re-acquired by a successor)"
+        )
+    else:
+      redis_client.delete(f"lock:{lock_key}")
+  except Exception as e:
+    logger.warning(f"Failed to release lock {lock_key}: {e}")

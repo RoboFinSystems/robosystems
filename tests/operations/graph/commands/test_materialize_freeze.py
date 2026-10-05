@@ -11,19 +11,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from robosystems.middleware.auth.distributed_lock import LockAcquisitionResult
 from robosystems.models.api.graphs.operations import MaterializeOp
 
 GRAPH = "kgentity00000001"
 
 
-def _acquired_lock(lock_id: str = "lock-id-1"):
-  lock = MagicMock()
-  lock.lock_id = lock_id
-  lock.acquire.return_value = LockAcquisitionResult(
-    acquired=True, lock_id=lock_id, holder_id=lock_id, ttl_remaining=3600
-  )
-  return lock
+def _redis(set_result=True, set_error: Exception | None = None) -> AsyncMock:
+  """An async Valkey client whose ``SET NX`` wins, loses, or errors."""
+  redis = AsyncMock()
+  redis.set = AsyncMock(side_effect=set_error, return_value=set_result)
+  return redis
 
 
 async def test_materialize_extensions_routes_to_extensions_worker():
@@ -36,6 +33,7 @@ async def test_materialize_extensions_routes_to_extensions_worker():
   user = MagicMock()
   user.id = "user_1"
   db = MagicMock()
+  redis = _redis()
 
   with (
     patch(
@@ -48,12 +46,8 @@ async def test_materialize_extensions_routes_to_extensions_worker():
       return_value=False,
     ),
     patch(
-      "robosystems.config.valkey_registry.create_redis_client",
-      return_value=MagicMock(),
-    ),
-    patch(
-      "robosystems.middleware.auth.distributed_lock.DistributedLock",
-      return_value=_acquired_lock(),
+      "robosystems.config.valkey_registry.create_async_redis_client",
+      return_value=redis,
     ),
     patch(
       "robosystems.middleware.graph.ingestion_limits.IngestionLimitChecker.check_materialization_limits",
@@ -71,10 +65,13 @@ async def test_materialize_extensions_routes_to_extensions_worker():
   kwargs = enqueue.await_args.kwargs
   assert kwargs["task_type"] == "extensions_materialize"
   assert kwargs["graph_id"] == GRAPH
-  # The worker releases the API-side lock by compare-and-delete, so it needs
-  # the lock_id as well as the key.
-  assert kwargs["params"]["lock_key"] == f"graph_materialize:{GRAPH}"
-  assert kwargs["params"]["lock_id"] == "lock-id-1"
+  # One lock, the one the sensor's runs take too: the worker adopts this
+  # token rather than acquiring again.
+  set_args = redis.set.await_args
+  assert set_args.args[0] == f"materialize_lock:{GRAPH}"
+  assert set_args.kwargs["nx"] is True
+  assert kwargs["params"]["materialization_lock_token"] == set_args.args[1]
+  assert "lock_key" not in kwargs["params"]
   assert result["status"] == "queued"
   assert result["operation_id"] == "op_test"
 
@@ -123,7 +120,7 @@ class TestMaterializeLockFailsClosed:
   async def test_redis_client_failure_is_503_with_retry_after(self):
     exc = await self._run(
       patch(
-        "robosystems.config.valkey_registry.create_redis_client",
+        "robosystems.config.valkey_registry.create_async_redis_client",
         side_effect=RuntimeError("no redis"),
       )
     )
@@ -133,48 +130,27 @@ class TestMaterializeLockFailsClosed:
 
   @pytest.mark.asyncio
   async def test_lock_backend_error_is_503(self):
-    """DistributedLock.acquire swallows RedisError into a not-acquired result;
-    that must read as 'service unavailable', not 'already in progress'."""
-    lock = MagicMock()
-    lock.acquire.return_value = LockAcquisitionResult(
-      acquired=False,
-      lock_id=None,
-      holder_id=None,
-      ttl_remaining=None,
-      error_message="Redis error: Connection refused",
-      backend_error=True,
-    )
-    with patch(
-      "robosystems.config.valkey_registry.create_redis_client",
-      return_value=MagicMock(),
-    ):
-      exc = await self._run(
-        patch(
-          "robosystems.middleware.auth.distributed_lock.DistributedLock",
-          return_value=lock,
-        )
+    """The acquire swallows a Valkey error into not-acquired; that must read
+    as 'service unavailable', not 'already in progress'."""
+    exc = await self._run(
+      patch(
+        "robosystems.config.valkey_registry.create_async_redis_client",
+        return_value=_redis(set_error=ConnectionError("Connection refused")),
       )
+    )
     assert exc.status_code == 503
     assert exc.headers is not None and exc.headers.get("Retry-After") == "30"
 
   @pytest.mark.asyncio
-  async def test_lock_held_is_409(self):
-    lock = MagicMock()
-    lock.acquire.return_value = LockAcquisitionResult(
-      acquired=False,
-      lock_id=None,
-      holder_id="someone-else",
-      ttl_remaining=100,
-      error_message="Lock is currently held by another process",
-    )
-    with patch(
-      "robosystems.config.valkey_registry.create_redis_client",
-      return_value=MagicMock(),
-    ):
-      exc = await self._run(
-        patch(
-          "robosystems.middleware.auth.distributed_lock.DistributedLock",
-          return_value=lock,
-        )
+  async def test_lock_held_is_409_at_once(self):
+    """Held by anyone, the stale-graph sensor's run included: one try, then a
+    clean 409 rather than a queued job that dies on the lock later."""
+    redis = _redis(set_result=False)
+    exc = await self._run(
+      patch(
+        "robosystems.config.valkey_registry.create_async_redis_client",
+        return_value=redis,
       )
+    )
     assert exc.status_code == 409
+    redis.set.assert_awaited_once()

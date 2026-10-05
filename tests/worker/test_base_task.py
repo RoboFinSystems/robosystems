@@ -83,9 +83,9 @@ def test_task_attributes(task):
 
 
 class TestReleaseLock:
-  """``release_lock`` must be a compare-and-delete when the enqueuing API
-  passed its lock_id: a task finishing after the lock's TTL lapsed must not
-  strip the lock a successor has since acquired."""
+  """``release_lock`` is a compare-and-delete on the lock the enqueuing API
+  took: a task finishing after the lock's TTL lapsed must not strip the lock a
+  successor has since acquired."""
 
   def _task(self, mock_manager, params):
     return ConcreteTask(
@@ -96,35 +96,35 @@ class TestReleaseLock:
       manager=mock_manager,
     )
 
-  def test_none_lock_key_is_noop(self, mock_manager):
+  def test_a_task_without_a_lock_is_a_noop(self, mock_manager):
     task = self._task(mock_manager, {})
     with patch(
       "robosystems.config.valkey_registry.create_redis_client"
     ) as create_client:
-      task.release_lock(None)
+      task.release_lock()
     create_client.assert_not_called()
 
-  def test_release_with_lock_id_uses_compare_and_delete(self, mock_manager):
-    task = self._task(mock_manager, {"lock_id": "abc"})
+  def test_releases_the_materialization_lock_by_token(self, mock_manager):
+    task = self._task(mock_manager, {"materialization_lock_token": "tok"})
     redis_client = MagicMock()
-    with (
-      patch(
-        "robosystems.config.valkey_registry.create_redis_client",
-        return_value=redis_client,
-      ),
-      patch(
-        "robosystems.middleware.auth.distributed_lock.release_lock_by_id",
-        return_value=True,
-      ) as release_by_id,
+    redis_client.eval.return_value = 1
+    with patch(
+      "robosystems.config.valkey_registry.create_redis_client",
+      return_value=redis_client,
     ):
-      task.release_lock("graph_materialize:kg1")
+      task.release_lock()
 
-    release_by_id.assert_called_once_with(redis_client, "graph_materialize:kg1", "abc")
+    args = redis_client.eval.call_args.args
+    assert args[1:] == (1, "materialize_lock:kg0123456789abcdef", "tok")
     redis_client.delete.assert_not_called()
     redis_client.close.assert_called_once()
 
-  def test_explicit_lock_id_wins_over_params(self, mock_manager):
-    task = self._task(mock_manager, {"lock_id": "from-params"})
+  def test_a_task_queued_before_the_switch_releases_its_old_key(self, mock_manager):
+    """A task enqueued by the previous release carries the old key; it is
+    still released, compare-and-delete, rather than stranded for the TTL."""
+    task = self._task(
+      mock_manager, {"lock_key": "graph_materialize:kg1", "lock_id": "abc"}
+    )
     redis_client = MagicMock()
     with (
       patch(
@@ -136,34 +136,22 @@ class TestReleaseLock:
         return_value=True,
       ) as release_by_id,
     ):
-      task.release_lock("graph_materialize:kg1", lock_id="explicit")
+      task.release_lock()
 
-    release_by_id.assert_called_once_with(
-      redis_client, "graph_materialize:kg1", "explicit"
-    )
+    release_by_id.assert_called_once_with(redis_client, "graph_materialize:kg1", "abc")
+    redis_client.delete.assert_not_called()
 
-  def test_release_without_lock_id_falls_back_to_delete(self, mock_manager):
-    """Tasks enqueued before the API passed lock_id carry only the key; they
-    still release unconditionally so their lock is not stranded for the TTL."""
-    task = self._task(mock_manager, {})
-    redis_client = MagicMock()
-    with (
-      patch(
-        "robosystems.config.valkey_registry.create_redis_client",
-        return_value=redis_client,
-      ),
-      patch(
-        "robosystems.middleware.auth.distributed_lock.release_lock_by_id",
-      ) as release_by_id,
+  def test_an_unreachable_lock_service_does_not_raise(self, mock_manager):
+    task = self._task(mock_manager, {"materialization_lock_token": "tok"})
+    with patch(
+      "robosystems.config.valkey_registry.create_redis_client",
+      side_effect=ConnectionError("down"),
     ):
-      task.release_lock("graph_materialize:kg1")
-
-    release_by_id.assert_not_called()
-    redis_client.delete.assert_called_once_with("lock:graph_materialize:kg1")
+      task.release_lock()
 
   def test_release_lock_by_id_is_compare_and_delete(self):
-    """Pin the helper the worker relies on: a mismatched lock_id leaves the
-    key alone."""
+    """Pin the helper the old-key release relies on: a mismatched lock_id
+    leaves the key alone."""
     from robosystems.middleware.auth.distributed_lock import release_lock_by_id
 
     redis_client = MagicMock()

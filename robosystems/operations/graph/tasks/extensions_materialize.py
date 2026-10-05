@@ -28,7 +28,6 @@ class ExtensionsMaterializeTask(BaseTask):
     from robosystems.operations.extensions.materialize import ExtensionsMaterializer
 
     rebuild = self.params.get("rebuild", True)
-    lock_key = self.params.get("lock_key")
 
     await self.report_progress("Starting extensions materialization...", percent=5)
 
@@ -40,9 +39,12 @@ class ExtensionsMaterializeTask(BaseTask):
       # materialization keeps the graph stale (mark_fresh compares).
       started_at = datetime.now(UTC)
       materializer = ExtensionsMaterializer()
+      # The run adopts the lock the API took at submit rather than taking
+      # it again, so a sensor run cannot slip in between.
       result = await materializer.materialize(
         graph_id=self.graph_id,
         rebuild=rebuild,
+        lock_token=self.params.get("materialization_lock_token"),
       )
 
       if result.paused_until is not None:
@@ -116,4 +118,4 @@ class ExtensionsMaterializeTask(BaseTask):
         next(db_gen)
       except StopIteration:
         pass
-      self.release_lock(lock_key)
+      self.release_lock()
