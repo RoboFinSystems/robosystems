@@ -267,7 +267,7 @@ class StripePaymentProvider(PaymentProvider):
         f"Verified Stripe webhook: {event['type']}",
         extra={"event_type": event["type"], "event_id": event["id"]},
       )
-      return event.to_dict()
+      return event.to_dict(for_json=True)
     except ValueError as e:
       logger.error(f"Invalid webhook payload: {e}")
       raise

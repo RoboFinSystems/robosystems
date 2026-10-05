@@ -1,5 +1,9 @@
-"""Concurrent redelivery of one Stripe event, against a real Postgres."""
+"""Stripe webhook delivery against a real Postgres: redelivery, and what persists."""
 
+import hashlib
+import hmac
+import json
+import time
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -135,3 +139,109 @@ def test_a_failed_commit_after_the_claim_does_not_leave_it_held():
       ).scalar()
   finally:
     probe_engine.dispose()
+
+
+_WEBHOOK_SECRET = "whsec_test_payload_shape"
+
+_PRICE = {
+  "id": "price_test",
+  "object": "price",
+  "currency": "usd",
+  "unit_amount": 2500,
+  "unit_amount_decimal": "2500",
+  "recurring": {"interval": "month"},
+}
+
+_DECIMAL_CARRYING_OBJECTS = {
+  "customer.subscription.updated": {
+    "id": "sub_test_shape",
+    "object": "subscription",
+    "status": "active",
+    "customer": "cus_test_shape",
+    "metadata": {},
+    "items": {
+      "object": "list",
+      "has_more": False,
+      "url": "/v1/subscription_items",
+      "data": [
+        {"id": "si_test", "object": "subscription_item", "price": _PRICE, "quantity": 1}
+      ],
+    },
+  },
+  "invoice.paid": {
+    "id": "in_test_shape",
+    "object": "invoice",
+    "customer": "cus_test_shape",
+    "amount_paid": 2500,
+    "metadata": {},
+    "lines": {
+      "object": "list",
+      "has_more": False,
+      "url": "/v1/invoices/in_test_shape/lines",
+      "data": [
+        {
+          "id": "il_test",
+          "object": "line_item",
+          "amount": 2500,
+          "quantity_decimal": "1",
+          "pricing": {"type": "price_details", "unit_amount_decimal": "2500"},
+        }
+      ],
+    },
+  },
+  "price.updated": _PRICE,
+}
+
+
+def _signed_request(payload: str):
+  timestamp = int(time.time())
+  digest = hmac.new(
+    _WEBHOOK_SECRET.encode(), f"{timestamp}.{payload}".encode(), hashlib.sha256
+  ).hexdigest()
+  request = MagicMock()
+  request.body = AsyncMock(return_value=payload.encode())
+  request.headers = {"stripe-signature": f"t={timestamp},v1={digest}"}
+  request.client.host = "127.0.0.1"
+  return request
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_type", sorted(_DECIMAL_CARRYING_OBJECTS))
+async def test_a_verified_event_with_decimal_fields_is_recorded(
+  event_type, monkeypatch
+):
+  """The real Stripe SDK parses decimal string fields into Decimal; the event
+  the provider hands back must still persist into the JSONB audit row."""
+  from robosystems.config import env
+  from robosystems.models.core.billing.audit_log import BillingAuditLog
+
+  monkeypatch.setattr(env, "STRIPE_WEBHOOK_SECRET", _WEBHOOK_SECRET)
+  event_id = f"evt_test_{uuid.uuid4().hex[:12]}"
+  payload = json.dumps(
+    {
+      "id": event_id,
+      "object": "event",
+      "type": event_type,
+      "api_version": "2026-01-28.clover",
+      "data": {"object": _DECIMAL_CARRYING_OBJECTS[event_type]},
+    }
+  )
+  db = SessionFactory()
+  try:
+    with patch.multiple(
+      "robosystems.dagster.jobs.billing",
+      _handle_payment_succeeded=AsyncMock(),
+      _handle_subscription_updated=AsyncMock(),
+    ):
+      await webhooks.handle_stripe_webhook(
+        _signed_request(payload), db=db, _rate_limit=None
+      )
+    assert BillingAuditLog.is_webhook_processed(event_id, "stripe", db)
+  finally:
+    db.execute(
+      text("DELETE FROM billing_audit_logs WHERE event_data->>'event_id' = :e"),
+      {"e": event_id},
+    )
+    db.commit()
+    db.close()
