@@ -29,8 +29,10 @@ on:
         default: ''
     secrets:
       ANTHROPIC_API_KEY:
+        # Optional: curated notes skip the call, and without a key the
+        # changelog falls back to a commit summary.
         description: 'API key for Claude changelog generation'
-        required: true
+        required: false
     outputs:
       tag_name:
         description: 'The created tag name (e.g., v1.2.3)'
