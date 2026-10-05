@@ -533,7 +533,8 @@ def record_reconciliation(
     period_end=window.period_end,
     created_by=created_by,
   )
-  return results[0] if results else None
+  own = reconciliation_rule(session, str(structure.id))
+  return next((r for r in results if own is not None and r.rule_id == own.id), None)
 
 
 def standing_sign_offs(

@@ -67,6 +67,7 @@ class TestCmdEvaluateRules:
 
   def test_passes_period_args_to_engine(self) -> None:
     session = MagicMock()
+    session.get.return_value = MagicMock(structure_id="struct_bs")
     body = EvaluateRulesRequest(
       structure_id="struct_bs",
       fact_set_id="fs_1",
