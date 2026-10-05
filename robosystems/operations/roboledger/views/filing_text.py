@@ -443,6 +443,7 @@ async def _read_public(s3: S3Client, key: str) -> str | None:
   try:
     return await run_off_loop(s3.read_string, env.PUBLIC_DATA_BUCKET, key)
   except Exception as exc:
+    logger.warning(f"public filing read failed for {key}: {exc}")
     raise PublicStorageError(
       "The published filing could not be read; try again."
     ) from exc
@@ -549,17 +550,9 @@ async def _report_from_folder(
       what,
     )
   if html is None or not manifest.get("is_inline_xbrl"):
-    try:
-      await run_off_loop(
-        partial(_inline_fragments, strict=True),
-        s3,
-        model,
-        _external_text_blocks(model),
-      )
-    except Exception as exc:
-      raise PublicStorageError(
-        "The published filing could not be read; try again."
-      ) from exc
+    await run_off_loop(
+      partial(_inline_fragments, strict=True), s3, model, _external_text_blocks(model)
+    )
   text, sections = await run_off_loop(build_text, model, html)
   return LoadedFiling(
     id=ref.key,

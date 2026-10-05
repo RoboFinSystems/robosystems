@@ -4,6 +4,9 @@ mid-read: the read is an error to retry, and nothing degraded is cached."""
 from __future__ import annotations
 
 import json
+import random
+import string
+from dataclasses import dataclass
 from datetime import date
 
 import pytest
@@ -30,17 +33,13 @@ from robosystems.operations.roboledger.views.information_blocks import (
   PublicStorageError,
 )
 
-TICKER = "ZZTXT"
-CIK = "0009999902"
-INLINE = "0009999902-25-000001"
-CLASSIC = "0009999902-17-000001"
 DOC = "zz-10k.htm"
 FRAGMENT = "fact_policy.html"
 DOC_PHRASE = "customer concentration"
 FRAGMENT_PHRASE = "recognized on shipment"
 
 
-def _model(accession: str, filed: date, policy: str) -> XbrlModel:
+def _model(filer: _Filer, accession: str, filed: date, policy: str) -> XbrlModel:
   year = duration_period(date(filed.year - 1, 1, 1), date(filed.year - 1, 12, 31))
   concept = Concept(
     qname="us-gaap:RevenueRecognitionPolicyTextBlock",
@@ -57,20 +56,20 @@ def _model(accession: str, filed: date, policy: str) -> XbrlModel:
   return XbrlModel(
     filing=FilingMeta(
       accession=accession,
-      cik=CIK,
+      cik=filer.cik,
       form="10-K",
       filing_date=filed,
       primary_document=DOC,
     ),
-    entity=EntityIdentity(cik=CIK, name="ZZ Text Corp", ticker=TICKER),
+    entity=EntityIdentity(cik=filer.cik, name="ZZ Text Corp", ticker=filer.ticker),
     concepts={concept.qname: concept},
     periods=[year],
     facts=[
       XbrlFact(
         id="f1",
-        entity_cik=CIK,
+        entity_cik=filer.cik,
         entity_scheme="http://www.sec.gov/CIK",
-        entity_identifier=CIK,
+        entity_identifier=filer.cik,
         concept_qname=concept.qname,
         period_id=year.id,
         value_kind="text",
@@ -94,19 +93,37 @@ def _filing(accession: str, filed: str, kinds: list[str]) -> dict:
   }
 
 
-def _objects() -> dict[str, str]:
-  inline = lambda name: get_filing_artifact_key(2025, CIK, INLINE, name)  # noqa: E731
-  classic = lambda name: get_filing_artifact_key(2017, CIK, CLASSIC, name)  # noqa: E731
+@dataclass(frozen=True)
+class _Filer:
+  """A filer of this test's own, so concurrent runs never share a key."""
+
+  ticker: str
+  cik: str
+
+  @property
+  def inline(self) -> str:
+    return f"{self.cik}-25-000001"
+
+  @property
+  def classic(self) -> str:
+    return f"{self.cik}-17-000001"
+
+
+def _objects(filer: _Filer) -> dict[str, str]:
+  inline = lambda name: get_filing_artifact_key(2025, filer.cik, filer.inline, name)  # noqa: E731
+  classic = lambda name: get_filing_artifact_key(  # noqa: E731
+    2017, filer.cik, filer.classic, name
+  )
   holon = {"kind": "holon", "name": "holon.jsonld"}
   fragment_url = f"https://cdn.example.com/{classic(FRAGMENT)}"
   return {
-    get_filing_catalog_key(TICKER): json.dumps(
+    get_filing_catalog_key(filer.ticker): json.dumps(
       {
-        "cik": CIK,
-        "ticker": TICKER,
+        "cik": filer.cik,
+        "ticker": filer.ticker,
         "filings": [
-          _filing(INLINE, "2025-02-05", ["holon", "document"]),
-          _filing(CLASSIC, "2017-11-03", ["holon"]),
+          _filing(filer.inline, "2025-02-05", ["holon", "document"]),
+          _filing(filer.classic, "2017-11-03", ["holon"]),
         ],
       }
     ),
@@ -117,13 +134,17 @@ def _objects() -> dict[str, str]:
         "representations": [holon, {"kind": "document", "name": DOC}],
       }
     ),
-    inline("holon.jsonld"): to_holon(_model(INLINE, date(2025, 2, 5), "<p>Policy</p>")),
+    inline("holon.jsonld"): to_holon(
+      _model(filer, filer.inline, date(2025, 2, 5), "<p>Policy</p>")
+    ),
     inline(DOC): (
       "<html><body><p>FORM 10-K</p><p>Item 1. Business</p><p>One buyer is a "
       f"{DOC_PHRASE} we watch.</p></body></html>"
     ),
     classic("manifest.json"): json.dumps({"form": "10-K", "representations": [holon]}),
-    classic("holon.jsonld"): to_holon(_model(CLASSIC, date(2017, 11, 3), fragment_url)),
+    classic("holon.jsonld"): to_holon(
+      _model(filer, filer.classic, date(2017, 11, 3), fragment_url)
+    ),
     classic(FRAGMENT): (
       f"<p>In 2017 the company's revenue was {FRAGMENT_PHRASE} of each widget, "
       "with a reserve for returns estimated from three years of history.</p>"
@@ -148,14 +169,18 @@ def bucket(monkeypatch: pytest.MonkeyPatch):
   if not str(s3.s3_client.meta.endpoint_url).startswith("http://localhost"):
     pytest.skip("needs LocalStack")
   name = env.PUBLIC_DATA_BUCKET
-  objects = _objects()
+  filer = _Filer(
+    ticker="ZZ" + "".join(random.choices(string.ascii_uppercase, k=6)),
+    cik="000" + "".join(random.choices(string.digits, k=7)),
+  )
+  objects = _objects(filer)
   for key, body in objects.items():
     s3.s3_client.put_object(Bucket=name, Key=key, Body=body.encode())
   monkeypatch.setattr(module, "S3Client", lambda: s3)
   monkeypatch.setattr(module, "is_shared_repository_or_subgraph", lambda graph_id: True)
   cache = _Cache()
   monkeypatch.setattr(module, "_cache", lambda: cache)
-  yield s3
+  yield s3, filer
   for key in objects:
     s3.s3_client.delete_object(Bucket=name, Key=key)
 
@@ -179,20 +204,22 @@ def _break_body_once(s3: S3Client, key_suffix: str) -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-  ("accession", "broken", "phrase"),
+  ("filing", "broken", "phrase"),
   [
-    (INLINE, f"{INLINE}/manifest.json", DOC_PHRASE),
-    (INLINE, f"{INLINE}/holon.jsonld", DOC_PHRASE),
-    (INLINE, f"{INLINE}/{DOC}", DOC_PHRASE),
-    (CLASSIC, f"{CLASSIC}/{FRAGMENT}", FRAGMENT_PHRASE),
+    ("inline", "manifest.json", DOC_PHRASE),
+    ("inline", "holon.jsonld", DOC_PHRASE),
+    ("inline", DOC, DOC_PHRASE),
+    ("classic", FRAGMENT, FRAGMENT_PHRASE),
   ],
   ids=["manifest", "holon", "document", "fragment"],
 )
 async def test_a_broken_read_is_retried_not_cached_as_the_filing(
-  bucket, accession, broken, phrase
+  bucket, filing, broken, phrase
 ):
-  ref = await module.resolve_filing("sec", ticker=TICKER, accession=accession)
-  _break_body_once(bucket, broken)
+  s3, filer = bucket
+  accession = getattr(filer, filing)
+  ref = await module.resolve_filing("sec", ticker=filer.ticker, accession=accession)
+  _break_body_once(s3, f"{accession}/{broken}")
 
   with pytest.raises(PublicStorageError):
     await module.query_search_text("sec", ref, phrase)

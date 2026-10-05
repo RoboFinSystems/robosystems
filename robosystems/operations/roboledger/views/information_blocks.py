@@ -375,9 +375,21 @@ def _inline_fragments(
     return 0
   bucket = env.PUBLIC_DATA_BUCKET
   keys = [_fragment_key(fact.value_str or "", bucket) for fact in pending]
+
+  def read_strict(key: str) -> str | None:
+    try:
+      return s3.read_string(bucket, key)
+    except Exception as exc:
+      logger.warning(f"public fragment read failed for {key}: {exc}")
+      raise PublicStorageError(
+        "The published filing could not be read; try again."
+      ) from exc
+
   with ThreadPoolExecutor(max_workers=FRAGMENT_WORKERS) as pool:
-    read = s3.read_string if strict else s3.download_string
-    bodies = list(pool.map(lambda key: read(bucket, key), keys))
+    if strict:
+      bodies = list(pool.map(read_strict, keys))
+    else:
+      bodies = list(pool.map(lambda key: s3.download_string(bucket, key), keys))
   inlined = 0
   budget = FRAGMENT_TEXT_BUDGET_CHARS
   for fact, body in zip(pending, bodies, strict=True):
