@@ -31,7 +31,12 @@ The people and companies you do business with: customers, vendors and employees.
 
 **Inbox** holds events that have been captured and haven't posted to the ledger yet, so you can review and approve them first. See [Review events in the Inbox](inbox.md).
 
-**Journal** is every journal entry with its lines, in posting order, and a second tab for transactions. You can create a manual entry here.
+**Journal** is every journal entry with its lines, in posting order, and a second tab for transactions. You can create a manual entry here, and each row offers what its entry allows:
+
+- **A draft you entered by hand** can be edited or deleted. It stays a draft until the month closes.
+- **A posted entry** can be reversed. The reversal posts on the date you choose with every debit and credit swapped, and the original is marked reversed. An entry is reversed once.
+
+An entry in a closed month can't be changed until the month is reopened. While QuickBooks is connected, an entry synced from it is corrected in QuickBooks. While QuickBooks is also your book of record, which is the default, every posted entry is: a reversal posted in RoboLedger alone would leave the two ledgers disagreeing. See [Nothing writes to QuickBooks until you post](quickbooks-write-back.md).
 
 **Trial Balance** shows each account's debits and credits, and whether they agree.
 
