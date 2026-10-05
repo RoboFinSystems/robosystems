@@ -722,9 +722,9 @@ async def dispatch_connection_sync(
   except ValueError as e:
     raise ProviderUnavailableError(str(e)) from e
 
-  # Concurrent syncs of one connection race on the UPSERT path. `qb_load`
-  # releases the lock on completion via `sync_lock_id`; the 30-min TTL only
-  # bounds a crashed run.
+  # Concurrent syncs of one connection race on the UPSERT path. The pipeline
+  # releases the lock via `sync_lock_id` when the sync ends, failed or not;
+  # the 30-min TTL only bounds a crashed run.
   sync_lock_id: str = ""
   try:
     redis_client = create_redis_client(ValkeyDatabase.LOCKS)

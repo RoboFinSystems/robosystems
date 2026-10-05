@@ -113,6 +113,15 @@ def _run_qb_load(
   )
 
 
+def end_failed_sync(
+  context: AssetExecutionContext, config: QBSyncConfig, exc: Exception
+) -> None:
+  """For a stage before load: its failure skips qb_load, so record the failed
+  attempt and release the per-connection lock here."""
+  _record_failed_sync_result(context, config, exc)
+  _release_sync_lock(context, config)
+
+
 def _release_sync_lock(context: AssetExecutionContext, config: QBSyncConfig) -> None:
   """Best-effort; the lock's TTL is the fallback. An empty ``sync_lock_id``
   means Valkey was unavailable at acquire time."""

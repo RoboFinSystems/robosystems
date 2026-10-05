@@ -456,6 +456,33 @@ class TestQbExtractErrors:
       with pytest.raises(ValueError, match="No credentials found"):
         qb_extract(context, config)
 
+  def test_extract_failure_records_failed_result_and_releases_lock(self, tmp_path):
+    """qb_load never runs after a failed extract, so the extract ends the sync."""
+    from robosystems.adapters.quickbooks.pipeline.extract import qb_extract
+
+    config = _make_config()
+    mock_session = _make_mock_session()
+
+    with (
+      patch(_PATCH_SESSION, return_value=mock_session),
+      patch(_PATCH_CREDS) as MockCreds,
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._record_failed_sync_result"
+      ) as record_failed,
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._release_sync_lock"
+      ) as release_lock,
+    ):
+      MockCreds.get_by_connection_id.return_value = None
+      context = build_asset_context()
+
+      with pytest.raises(ValueError, match="No credentials found"):
+        qb_extract(context, config)
+
+    record_failed.assert_called_once()
+    assert isinstance(record_failed.call_args.args[2], ValueError)
+    release_lock.assert_called_once()
+
   def test_extract_raises_when_no_realm_id(self, tmp_path):
     """Test ValueError when realm_id is empty."""
     from robosystems.adapters.quickbooks.pipeline.extract import qb_extract
