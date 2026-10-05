@@ -11,9 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-import yaml
-
 from robosystems.logger import logger
+from robosystems.utils.yaml_input import load_untrusted_yaml
 
 from ..models import Node, Property, Relationship, Schema
 
@@ -120,7 +119,7 @@ class CustomSchemaParser:
         raise ValueError("JSON format requires string or dict input")
     else:  # YAML
       if isinstance(schema_input, str):
-        schema_dict = yaml.safe_load(schema_input)
+        schema_dict = load_untrusted_yaml(schema_input)
         # Validate immediately after YAML parsing
         if not isinstance(schema_dict, dict):
           raise ValueError(
