@@ -72,6 +72,7 @@ class CleanupResult:
   removed_count: int = 0
   updated_count: int = 0
   orphaned_count: int = 0
+  ip_mismatch_count: int = 0
   errors: int = 0
   error_message: str | None = None
 
@@ -370,13 +371,15 @@ class InstanceMonitor:
       logger.warning(f"Failed to update volumes for instance {instance_id}: {e}")
 
   def cleanup_stale_graphs(self) -> CleanupResult:
-    """Drop long-deleted graph-registry rows; mark, never delete, orphaned ones.
+    """Drop long-deleted graph-registry rows; mark, never delete, stale ones.
 
     A row whose instance is missing from the instance registry is still a live
     graph's routing, and that registry drifts during ASG cycling; user graphs
     have no boot-time re-registration, so deleting the row would be permanent.
-    It is stamped ``instance_missing_since`` instead, counted in
-    ``OrphanedGraphRegistrations``, and unstamped when the instance returns.
+    It is stamped ``instance_missing_since`` instead. A row whose instance is
+    present but whose ``private_ip`` differs from the instance's routes queries
+    to the wrong address; it is stamped ``ip_mismatch_since``. Both count in
+    ``OrphanedGraphRegistrations`` and are unstamped once the row agrees.
     """
     logger.info("Starting graph registry cleanup")
 
@@ -397,15 +400,18 @@ class InstanceMonitor:
 
       # Paginated: a truncated page would make later instances look missing
       # and stamp their graphs orphaned.
-      instance_response = instance_table.scan(ProjectionExpression="instance_id")
+      projection = "instance_id, private_ip"
+      instance_response = instance_table.scan(ProjectionExpression=projection)
       instance_items = instance_response.get("Items", [])
       while "LastEvaluatedKey" in instance_response:
         instance_response = instance_table.scan(
-          ProjectionExpression="instance_id",
+          ProjectionExpression=projection,
           ExclusiveStartKey=instance_response["LastEvaluatedKey"],
         )
         instance_items.extend(instance_response.get("Items", []))
-      valid_instances = {item["instance_id"] for item in instance_items}
+      instance_ips = {
+        item["instance_id"]: item.get("private_ip") for item in instance_items
+      }
 
       now_iso = datetime.now(UTC).isoformat()
 
@@ -441,52 +447,55 @@ class InstanceMonitor:
         # between ingestion runs) and rows already marked deleted (their
         # instance is recycled long before the row ages out). A previously
         # stamped exempt row is unstamped below.
-        instance_missing = (
+        routing = (
           bool(instance_id)
-          and instance_id not in valid_instances
           and status != "deleted"
           and not is_shared_repository_or_subgraph(graph_id)
         )
-        already_marked = item.get("instance_missing_since") is not None
+        instance_missing = routing and instance_id not in instance_ips
+        row_ip = item.get("private_ip")
+        instance_ip = instance_ips.get(instance_id) if instance_id else None
+        ip_mismatch = (
+          routing
+          and not instance_missing
+          and bool(row_ip)
+          and bool(instance_ip)
+          and row_ip != instance_ip
+        )
 
         if instance_missing:
           result.orphaned_count += 1
-          if not already_marked:
-            logger.warning(
-              f"Graph {graph_id} points at instance {instance_id}, which is "
-              "absent from the instance registry; marking, not removing"
-            )
-            try:
-              graph_table.update_item(
-                Key={"graph_id": graph_id},
-                UpdateExpression="SET instance_missing_since = :ts",
-                ConditionExpression="attribute_not_exists(instance_missing_since)",
-                ExpressionAttributeValues={":ts": now_iso},
-              )
-              result.updated_count += 1
-            except Exception as e:
-              logger.error(f"Failed to mark graph {graph_id} as orphaned: {e}")
-              result.errors += 1
-        elif already_marked:
-          logger.info(
-            f"Graph {graph_id} no longer counts as orphaned "
-            f"(instance {instance_id}); clearing the marker"
-          )
-          try:
-            graph_table.update_item(
-              Key={"graph_id": graph_id},
-              UpdateExpression="REMOVE instance_missing_since",
-            )
-            result.updated_count += 1
-          except Exception as e:
-            logger.error(f"Failed to clear orphan marker on graph {graph_id}: {e}")
-            result.errors += 1
+        if ip_mismatch:
+          result.ip_mismatch_count += 1
 
-      self._publish_orphaned_graph_metric(result.orphaned_count)
+        self._sync_stale_marker(
+          graph_table,
+          item,
+          "instance_missing_since",
+          instance_missing,
+          now_iso,
+          result,
+          f"points at instance {instance_id}, which is absent from the "
+          "instance registry",
+        )
+        self._sync_stale_marker(
+          graph_table,
+          item,
+          "ip_mismatch_since",
+          ip_mismatch,
+          now_iso,
+          result,
+          f"routes to {row_ip}, but instance {instance_id} is at {instance_ip}",
+        )
+
+      self._publish_orphaned_graph_metric(
+        result.orphaned_count + result.ip_mismatch_count
+      )
 
       logger.info(
         f"Graph registry cleanup completed: {result.removed_count} entries removed, "
-        f"{result.orphaned_count} pointing at missing instances"
+        f"{result.orphaned_count} pointing at missing instances, "
+        f"{result.ip_mismatch_count} routing to a stale address"
       )
 
     except Exception as e:
@@ -495,8 +504,48 @@ class InstanceMonitor:
 
     return result
 
+  @staticmethod
+  def _sync_stale_marker(
+    graph_table: Any,
+    item: dict[str, Any],
+    marker: str,
+    stale: bool,
+    now_iso: str,
+    result: CleanupResult,
+    reason: str,
+  ) -> None:
+    """Stamp ``marker`` on a row whose routing went stale; clear it once the
+    row agrees again. Marks, never repairs: the row stays as it is."""
+    graph_id = item.get("graph_id")
+    already_marked = item.get(marker) is not None
+    if stale and not already_marked:
+      logger.warning(f"Graph {graph_id} {reason}; marking, not changing it")
+      try:
+        graph_table.update_item(
+          Key={"graph_id": graph_id},
+          UpdateExpression=f"SET {marker} = :ts",
+          ConditionExpression=f"attribute_not_exists({marker})",
+          ExpressionAttributeValues={":ts": now_iso},
+        )
+        result.updated_count += 1
+      except Exception as e:
+        logger.error(f"Failed to set {marker} on graph {graph_id}: {e}")
+        result.errors += 1
+    elif not stale and already_marked:
+      logger.info(f"Graph {graph_id} routing agrees again; clearing {marker}")
+      try:
+        graph_table.update_item(
+          Key={"graph_id": graph_id},
+          UpdateExpression=f"REMOVE {marker}",
+        )
+        result.updated_count += 1
+      except Exception as e:
+        logger.error(f"Failed to clear {marker} on graph {graph_id}: {e}")
+        result.errors += 1
+
   def _publish_orphaned_graph_metric(self, count: int) -> None:
-    """Publish the orphaned-registration count so an alarm can watch it.
+    """Publish the count of live graphs whose routing is stale (instance
+    missing or address wrong) so an alarm can watch it.
 
     Published on every sweep, zero included, so the alarm sees a real
     datapoint rather than reading OK on missing data.

@@ -73,7 +73,9 @@ def _seed_registry(
   )
 
 
-def _seed_graph_registry(table_name: str, graph_id: str, instance_id: str) -> None:
+def _seed_graph_registry(
+  table_name: str, graph_id: str, instance_id: str, **extra: object
+) -> None:
   ddb = boto3.resource("dynamodb", region_name="us-east-1")
   ddb.Table(table_name).put_item(
     Item={
@@ -81,6 +83,7 @@ def _seed_graph_registry(table_name: str, graph_id: str, instance_id: str) -> No
       "instance_id": instance_id,
       "private_ip": "10.0.0.99",
       "status": "active",
+      **extra,
     }
   )
 
@@ -274,6 +277,52 @@ def test_attach_reroutes_graph_registry_using_preserved_databases(gvm):
     "graph-registry should now point at the new instance even though caller "
     "passed databases=[]"
   )
+
+
+def test_reroute_clears_the_termination_hooks_migration_flags(gvm):
+  """The old instance's termination hook flagged the graph for migration;
+  the re-point onto the new instance is that migration, so the flags go."""
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  graph_id = "kgrolled123456789"
+  _seed_registry("test-volume-registry", volume_id, [graph_id])
+  _seed_graph_registry(
+    "test-graph-registry",
+    graph_id,
+    "i-old-dead-instance",
+    migration_required=True,
+    migration_source="i-old-dead-instance",
+  )
+
+  gvm.attach_and_register_volume(volume_id, instance_id, [])
+
+  ddb = boto3.resource("dynamodb", region_name="us-east-1")
+  item = ddb.Table("test-graph-registry").get_item(Key={"graph_id": graph_id})["Item"]
+  assert item["instance_id"] == instance_id
+  assert "migration_required" not in item
+  assert "migration_source" not in item
+
+
+def test_reroute_leaves_a_tier_upgrades_flags_alone(gvm):
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  graph_id = "kgupgrading123456"
+  _seed_registry("test-volume-registry", volume_id, [graph_id])
+  _seed_graph_registry(
+    "test-graph-registry",
+    graph_id,
+    "i-old-dead-instance",
+    status="migrating",
+    migration_required=True,
+    migration_source="i-old-dead-instance",
+  )
+
+  gvm.attach_and_register_volume(volume_id, instance_id, [])
+
+  ddb = boto3.resource("dynamodb", region_name="us-east-1")
+  item = ddb.Table("test-graph-registry").get_item(Key={"graph_id": graph_id})["Item"]
+  assert item["instance_id"] == instance_id
+  assert item["migration_required"] is True
 
 
 # ---------------------------------------------------------------------------

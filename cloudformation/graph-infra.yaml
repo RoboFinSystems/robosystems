@@ -565,16 +565,17 @@ Resources:
       OKActions:
         - !Ref InfraAlertTopic
 
-  # A graph-registry row pointing at an instance the instance registry no
-  # longer knows, marked (not deleted) by the daily registry sweep. Non-zero
-  # means stale routing that needs reconciling from on-disk truth.
+  # A live graph-registry row whose routing is stale: its instance is absent
+  # from the instance registry, or its private_ip is not that instance's.
+  # Marked (not changed) by the daily registry sweep. Non-zero means routing
+  # that needs reconciling from on-disk truth.
   OrphanedGraphRegistrationsAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
       AlarmName: !Sub robosystems-graph-${Environment}-orphaned-graph-registrations
-      AlarmDescription: A graph-registry row points at an instance absent from the instance registry (routing drift, marked by the daily sweep)
+      AlarmDescription: A graph-registry row points at an instance absent from the instance registry, or at an address that is not its instance's (routing drift, marked by the daily sweep)
       MetricName: OrphanedGraphRegistrations
       Namespace: !Sub "RoboSystems/Graph/${Environment}"
       Statistic: Maximum

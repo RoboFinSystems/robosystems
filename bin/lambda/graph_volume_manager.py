@@ -451,6 +451,12 @@ def update_graph_registry_for_instance(
         update_expr += ", private_ip = :ip"
         expr_values[":ip"] = private_ip
 
+      # The termination hook flags every graph on the old instance for
+      # migration; this re-point is that migration done. A tier upgrade sets
+      # the same flags with status migrating and clears them itself.
+      if response["Item"].get("status") != "migrating":
+        update_expr += " REMOVE migration_required, migration_source"
+
       graph_table.update_item(
         Key={"graph_id": db_id},
         UpdateExpression=update_expr,

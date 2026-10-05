@@ -469,6 +469,112 @@ class TestCleanupStaleGraphs:
     metric = monitor._cloudwatch.put_metric_data.call_args.kwargs
     assert metric["MetricData"][0]["Value"] == 0
 
+  def _route(self, monitor, graph_items, instance_items):
+    graph_table = _make_dynamo_table(items=graph_items)
+    instance_table = _make_dynamo_table(items=instance_items)
+    monitor._dynamodb.Table.side_effect = lambda name: (
+      graph_table if name == "test-graph" else instance_table
+    )
+    return graph_table, instance_table
+
+  @pytest.mark.unit
+  def test_a_live_row_routing_to_a_stale_address_is_counted_and_marked(self, monitor):
+    """The instance exists, so the missing-instance check passes, but the
+    row's address is not the instance's: queries go to the wrong host."""
+    graph_table, instance_table = self._route(
+      monitor,
+      [
+        {
+          "graph_id": "kg_moved",
+          "status": "active",
+          "instance_id": "i-1234567890abcdef0",
+          "private_ip": "10.0.1.5",
+        }
+      ],
+      [{"instance_id": "i-1234567890abcdef0", "private_ip": "10.0.2.9"}],
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.orphaned_count == 0
+    assert result.ip_mismatch_count == 1
+    assert result.updated_count == 1
+    update = graph_table.update_item.call_args.kwargs
+    assert update["Key"] == {"graph_id": "kg_moved"}
+    assert update["UpdateExpression"] == "SET ip_mismatch_since = :ts"
+    assert update["ConditionExpression"] == "attribute_not_exists(ip_mismatch_since)"
+    assert "private_ip" in instance_table.scan.call_args.kwargs["ProjectionExpression"]
+    graph_table.delete_item.assert_not_called()
+    # One alarm, one meaning: a live graph's routing is stale.
+    metric = monitor._cloudwatch.put_metric_data.call_args.kwargs
+    assert metric["MetricData"][0]["MetricName"] == "OrphanedGraphRegistrations"
+    assert metric["MetricData"][0]["Value"] == 1
+
+  @pytest.mark.unit
+  def test_a_row_whose_address_agrees_is_not_counted(self, monitor):
+    graph_table, _ = self._route(
+      monitor,
+      [
+        {
+          "graph_id": "kg_ok",
+          "status": "active",
+          "instance_id": "i-1234567890abcdef0",
+          "private_ip": "10.0.2.9",
+        }
+      ],
+      [{"instance_id": "i-1234567890abcdef0", "private_ip": "10.0.2.9"}],
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.ip_mismatch_count == 0
+    graph_table.update_item.assert_not_called()
+
+  @pytest.mark.unit
+  def test_the_mismatch_marker_clears_once_the_address_agrees(self, monitor):
+    graph_table, _ = self._route(
+      monitor,
+      [
+        {
+          "graph_id": "kg_fixed",
+          "status": "active",
+          "instance_id": "i-1234567890abcdef0",
+          "private_ip": "10.0.2.9",
+          "ip_mismatch_since": "2026-10-01T00:00:00+00:00",
+        }
+      ],
+      [{"instance_id": "i-1234567890abcdef0", "private_ip": "10.0.2.9"}],
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.ip_mismatch_count == 0
+    assert result.updated_count == 1
+    update = graph_table.update_item.call_args.kwargs
+    assert update["UpdateExpression"] == "REMOVE ip_mismatch_since"
+
+  @pytest.mark.unit
+  def test_a_shared_repository_address_is_not_compared(self, monitor):
+    """Shared repositories route without this registry, so their row's
+    address is not routing and cannot be stale."""
+    graph_table, _ = self._route(
+      monitor,
+      [
+        {
+          "graph_id": "sec",
+          "status": "active",
+          "instance_id": "i-1234567890abcdef0",
+          "private_ip": "10.0.1.5",
+        }
+      ],
+      [{"instance_id": "i-1234567890abcdef0", "private_ip": "10.0.2.9"}],
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.ip_mismatch_count == 0
+    graph_table.update_item.assert_not_called()
+
   @pytest.mark.unit
   def test_shared_repository_with_parked_master_is_not_orphaned(self, monitor):
     """A shared repo's row is bookkeeping, not routing, and its master is
