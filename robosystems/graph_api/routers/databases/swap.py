@@ -7,6 +7,9 @@ from fastapi import status as http_status
 from pydantic import BaseModel, Field
 
 from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.graph_api.routers.databases.lock_guard import (
+  materialization_lock_held,
+)
 from robosystems.logger import logger
 
 router = APIRouter(prefix="/databases", tags=["Graph Management"])
@@ -24,7 +27,7 @@ async def swap_database(
   x_materialization_lock_token: str | None = Header(
     default=None,
     description="Lock token from the materialization caller. "
-    "If provided, the swap trusts this token and passes it through. "
+    "If provided, it must be the current holder's token. "
     "If not provided, the swap acquires its own lock.",
   ),
   ladybug_service=Depends(get_ladybug_service),
@@ -33,7 +36,8 @@ async def swap_database(
 
   The old active database is deleted after the WIP is promoted.
   The WIP database must exist ({graph_id}-wip.lbug).
-  Acquires the per-graph materialization lock to prevent races.
+  Runs under the per-graph materialization lock: 409 when another run holds
+  it, 503 when the lock service is unreachable.
   """
   if ladybug_service.read_only:
     raise HTTPException(
@@ -41,38 +45,11 @@ async def swap_database(
       detail="Swap not allowed on read-only nodes",
     )
 
-  lock = None
-  try:
-    from robosystems.config.valkey_registry import (
-      ValkeyDatabase,
-      create_async_redis_client,
-    )
-    from robosystems.graph_api.core.ladybug.materialization_lock import (
-      MaterializationLock,
-    )
-
-    redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
-
-    if x_materialization_lock_token:
-      # Trusted, not verified against Valkey.
-      lock = MaterializationLock.from_trusted_token(
-        redis_client, graph_id, x_materialization_lock_token
-      )
-    else:
-      lock = MaterializationLock(redis_client, graph_id)
-      acquired = await lock.acquire(timeout_seconds=5)
-      if not acquired:
-        raise HTTPException(
-          status_code=http_status.HTTP_409_CONFLICT,
-          detail="Another materialization is in progress for this graph",
-        )
-  except HTTPException:
-    raise
-  except Exception as e:
-    logger.warning(f"Could not acquire materialization lock for swap: {e}")
-    # Degraded mode: proceed unlocked when Valkey is unavailable.
-
-  try:
+  async with materialization_lock_held(
+    graph_id,
+    x_materialization_lock_token,
+    conflict_detail="Another materialization is in progress for this graph",
+  ):
     logger.info(f"Swap requested for graph {graph_id}")
     result = ladybug_service.db_manager.swap_database(graph_id)
 
@@ -81,7 +58,3 @@ async def swap_database(
       graph_id=result["graph_id"],
       message=result["message"],
     )
-  finally:
-    # Only a lock this call acquired itself.
-    if lock is not None and not x_materialization_lock_token and lock.acquired:
-      await lock.release()

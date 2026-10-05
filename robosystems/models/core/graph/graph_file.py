@@ -160,6 +160,29 @@ class GraphFile(Base):
     session.commit()
     session.refresh(self)
 
+  @classmethod
+  def staged_file_ids(cls, graph_id: str, session: Session) -> list[str]:
+    """Ids of the graph's files staged in DuckDB — what a full
+    materialization will copy."""
+    rows = (
+      session.query(cls.id)
+      .filter(cls.graph_id == graph_id, cls.duckdb_status == "staged")
+      .all()
+    )
+    return [row[0] for row in rows]
+
+  @classmethod
+  def mark_many_graph_ingested(cls, file_ids: Sequence[str], session: Session) -> None:
+    """Mark the files a full materialization copied as in the graph, so a
+    later non-rebuild run is refused rather than copying them again."""
+    if not file_ids:
+      return
+    session.query(cls).filter(cls.id.in_(file_ids)).update(
+      {cls.graph_status: "ingested", cls.graph_ingested_at: datetime.now(UTC)},
+      synchronize_session=False,
+    )
+    session.commit()
+
   def mark_graph_failed(self, session: Session) -> None:
     """Mark graph ingestion as failed."""
     self.graph_status = "failed"

@@ -10,6 +10,9 @@ from robosystems.graph_api.models.database import (
   DatabaseInfo,
   DatabaseListResponse,
 )
+from robosystems.graph_api.routers.databases.lock_guard import (
+  materialization_lock_held,
+)
 from robosystems.logger import logger
 from robosystems.middleware.graph.types import NodeType
 
@@ -84,9 +87,9 @@ async def delete_database(
   ),
   x_materialization_lock_token: str | None = Header(
     default=None,
-    description="Lock token from a materialization caller deleting its own "
-    "-wip/-prev artifact. If provided, the delete trusts the caller's lock "
-    "instead of acquiring one.",
+    description="Lock token from a materialization caller deleting while it "
+    "holds the lock. If provided, it must be the current holder's token, and "
+    "the delete runs under that lock instead of acquiring one.",
   ),
   ladybug_service=Depends(get_ladybug_service),
 ) -> dict:
@@ -137,42 +140,17 @@ async def delete_database(
     logger.warning(f"Attempting to delete shared database: {graph_id}")
 
   # Every delete can touch a blue-green artifact (a base-name delete sweeps
-  # its `-wip`/`-prev`), so hold the base's materialization lock across it —
-  # acquiring, not checking, so a build cannot start in between. Callers that
+  # its `-wip`/`-prev`), so it runs under the base's materialization lock —
+  # acquired, not checked, so a build cannot start in between. Callers that
   # already hold it pass their token.
-  lock = None
-  if not x_materialization_lock_token:
-    try:
-      from robosystems.config.valkey_registry import (
-        ValkeyDatabase,
-        create_async_redis_client,
-      )
-      from robosystems.graph_api.core.ladybug.materialization_lock import (
-        MaterializationLock,
-      )
-
-      redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
-      lock = MaterializationLock(redis_client, graph_id)
-      if not await lock.acquire(timeout_seconds=5):
-        raise HTTPException(
-          status_code=http_status.HTTP_409_CONFLICT,
-          detail=(
-            f"A materialization is in progress for {graph_id}'s base database; "
-            "it cannot be deleted while a build may be writing alongside it."
-          ),
-        )
-    except HTTPException:
-      raise
-    except Exception as e:
-      # Degraded mode, as in swap_database: an unreachable Valkey must not
-      # make databases undeletable; materialize also runs unlocked then.
-      logger.warning(f"Could not acquire materialization lock for delete: {e}")
-      lock = None
-
-  try:
+  async with materialization_lock_held(
+    graph_id,
+    x_materialization_lock_token,
+    conflict_detail=(
+      f"A materialization is in progress for {graph_id}'s base database; "
+      "it cannot be deleted while a build may be writing alongside it."
+    ),
+  ):
     return ladybug_service.db_manager.delete_database(
       graph_id, preserve_duckdb=preserve_duckdb
     )
-  finally:
-    if lock is not None and lock.acquired:
-      await lock.release()

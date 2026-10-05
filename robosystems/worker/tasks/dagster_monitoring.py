@@ -24,7 +24,8 @@ class DagsterJobMonitorTask(BaseTask):
 
   Params: ``job_name`` (required), plus optional ``run_config``, ``tags``,
   ``pass_operation_id`` (for jobs whose ops accept ``operation_id``) and
-  ``lock_key``. Once a run is submitted, the lock is released only after
+  ``materialization_lock_token`` (``lock_key``/``lock_id`` on tasks queued
+  before it). Once a run is submitted, the lock is released only after
   Dagster reports the run stopped. Any other exit (a status it cannot read, a
   budget cancel, a cancel the run does not confirm) leaves the lock to its
   TTL: releasing then would let a second run write alongside this one.
@@ -55,7 +56,9 @@ class DagsterJobMonitorTask(BaseTask):
       # once the task is enqueued. Opt-in: Dagster refuses unknown config keys.
       for op in run_config.get("ops", {}).values():
         op.setdefault("config", {})["operation_id"] = self.task_id
-    lock_key = self.params.get("lock_key")
+    holds_lock = bool(
+      self.params.get("materialization_lock_token") or self.params.get("lock_key")
+    )
 
     monitor = DagsterRunMonitor()
     # Nothing is released until this attempt knows no earlier one left a run.
@@ -135,8 +138,8 @@ class DagsterJobMonitorTask(BaseTask):
           return status_info
 
         now = asyncio.get_running_loop().time()
-        if lock_key and now - extended_at >= self.LOCK_EXTEND_INTERVAL_SECONDS:
-          await asyncio.to_thread(self._extend_lock, lock_key)
+        if holds_lock and now - extended_at >= self.LOCK_EXTEND_INTERVAL_SECONDS:
+          await asyncio.to_thread(self._extend_lock)
           extended_at = now
 
         # Emit progress on status change
@@ -149,23 +152,38 @@ class DagsterJobMonitorTask(BaseTask):
 
     finally:
       if release:
-        self.release_lock(lock_key)
+        self.release_lock()
 
   def _run_record(self) -> _RunRecord:
     return _RunRecord(f"worker:dagster_run:{self.task_id}", self.RUN_RECORD_TTL_SECONDS)
 
-  def _extend_lock(self, lock_key: str) -> None:
+  def _extend_lock(self) -> None:
     from robosystems.config.constants import INGESTION_LOCK_TTL
     from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
-    from robosystems.middleware.auth.distributed_lock import extend_lock_by_id
 
+    token = self.params.get("materialization_lock_token")
+    lock_key = self.params.get("lock_key")
     lock_id = self.params.get("lock_id")
-    if not lock_id:
-      return
     client = create_redis_client(ValkeyDatabase.LOCKS)
     try:
-      if not extend_lock_by_id(client, lock_key, lock_id, INGESTION_LOCK_TTL):
-        logger.warning(f"Lock {lock_key} is no longer held by this run's task")
+      if token and self.graph_id:
+        from robosystems.graph_api.core.ladybug.materialization_lock import (
+          extend_token,
+        )
+
+        try:
+          held = extend_token(client, self.graph_id, token, INGESTION_LOCK_TTL)
+        except Exception as e:
+          logger.warning(f"Could not refresh the lock for {self.graph_id}: {e}")
+          return
+      elif lock_key and lock_id:
+        from robosystems.middleware.auth.distributed_lock import extend_lock_by_id
+
+        held = extend_lock_by_id(client, lock_key, lock_id, INGESTION_LOCK_TTL)
+      else:
+        return
+      if not held:
+        logger.warning(f"The lock for {self.graph_id} is no longer held by this run")
     finally:
       client.close()
 

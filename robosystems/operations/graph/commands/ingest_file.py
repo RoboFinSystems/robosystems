@@ -274,8 +274,7 @@ async def _launch_graph_write(
       "job_name": job_name,
       "run_config": run_config,
       "tags": {"materialize_db": graph_id},
-      "lock_key": f"graph_materialize:{graph_id}",
-      "lock_id": lock.lock_id,
+      "materialization_lock_token": lock.token,
     },
   )
   return response["operation_id"]
@@ -420,7 +419,7 @@ async def ingest_file_cmd(
 
   # Every write into the graph database holds the graph's materialize lock,
   # taken before any state changes so a refusal leaves the upload untouched.
-  lock = acquire_materialize_lock(graph_id) if ingest_to_graph else None
+  lock = await acquire_materialize_lock(graph_id) if ingest_to_graph else None
   handed_off = False
   try:
     graph_file.file_size_bytes = actual_file_size
@@ -584,8 +583,10 @@ async def ingest_file_cmd(
             )
 
   finally:
-    if lock is not None and not handed_off:
-      lock.release()
+    if lock is not None:
+      if not handed_off:
+        await lock.release()
+      await lock.aclose()
 
   logger.info(
     f"File {file_id} marked as uploaded: {graph_file.file_size_bytes or 0:,} bytes, {graph_file.row_count or 0:,} rows"

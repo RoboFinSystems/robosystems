@@ -4,9 +4,11 @@ import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
+import pytest
 from dagster import build_sensor_context
 
 from robosystems.dagster.sensors.materialization import (
+  _graphs_being_written,
   stale_graph_materialization_sensor,
 )
 
@@ -22,6 +24,23 @@ def _make_graph(graph_id, stale_at=None, stale_reason="schedule_created"):
   g.status = "active"
   g.is_repository = False
   return g
+
+
+@pytest.fixture(autouse=True)
+def nothing_being_written():
+  """No lock held and no run in flight unless a test says otherwise."""
+  with patch(
+    "robosystems.dagster.sensors.materialization._graphs_being_written",
+    return_value=set(),
+  ) as busy:
+    yield busy
+
+
+def _tick(graphs, cursor=None):
+  with patch("robosystems.dagster.sensors.materialization.db_session_factory") as db:
+    db.return_value.query.return_value.filter.return_value.all.return_value = graphs
+    context = build_sensor_context(cursor=cursor)
+    return list(stale_graph_materialization_sensor(context)), context.cursor
 
 
 class TestStaleGraphSensor:
@@ -78,43 +97,78 @@ class TestStaleGraphSensor:
     assert result[0].tags["graph_id"] == "kg123"
     assert result[0].tags["trigger"] == "stale_sensor"
 
-  def test_skips_in_progress_graph(self):
+  def test_skips_a_graph_whose_event_was_just_submitted(self):
+    """A run for this exact write was submitted moments ago (it failed, or
+    the cursor outlived it): wait out the retry window."""
     stale_at = datetime.now(UTC) - timedelta(seconds=60)
-    graphs = [_make_graph("kg123", stale_at=stale_at)]
+    cursor = json.dumps(
+      {
+        "kg123": {
+          "stale_at": stale_at.isoformat(),
+          "submitted_at": datetime.now(UTC).isoformat(),
+        }
+      }
+    )
 
-    # JSON cursor with recent timestamp (not expired)
-    cursor = json.dumps({"kg123": datetime.now(UTC).isoformat()})
-
-    with patch(
-      "robosystems.dagster.sensors.materialization.db_session_factory"
-    ) as mock_db:
-      mock_session = MagicMock()
-      mock_db.return_value = mock_session
-      mock_session.query.return_value.filter.return_value.all.return_value = graphs
-
-      context = build_sensor_context(cursor=cursor)
-      result = list(stale_graph_materialization_sensor(context))
+    result, _ = _tick([_make_graph("kg123", stale_at=stale_at)], cursor=cursor)
 
     assert result == []
 
-  def test_retries_after_cursor_expiry(self):
-    """Graphs whose cursor entry has expired should be re-submitted."""
-    stale_at = datetime.now(UTC) - timedelta(seconds=60)
-    graphs = [_make_graph("kg123", stale_at=stale_at)]
-
-    # Cursor entry from 3 hours ago (past 2-hour expiry)
+  def test_retries_after_the_retry_window(self):
+    stale_at = datetime.now(UTC) - timedelta(hours=4)
     old_time = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
-    cursor = json.dumps({"kg123": old_time})
+    cursor = json.dumps(
+      {"kg123": {"stale_at": stale_at.isoformat(), "submitted_at": old_time}}
+    )
 
-    with patch(
-      "robosystems.dagster.sensors.materialization.db_session_factory"
-    ) as mock_db:
-      mock_session = MagicMock()
-      mock_db.return_value = mock_session
-      mock_session.query.return_value.filter.return_value.all.return_value = graphs
+    result, _ = _tick([_make_graph("kg123", stale_at=stale_at)], cursor=cursor)
 
-      context = build_sensor_context(cursor=cursor)
-      result = list(stale_graph_materialization_sensor(context))
+    assert len(result) == 1
+
+  def test_a_write_during_the_last_run_resubmits_at_once(self):
+    """The run finished but a write landed mid-build, so mark_fresh left the
+    graph stale with a newer stale_at. That is a new event: no 2h wait."""
+    submitted_for = datetime.now(UTC) - timedelta(minutes=5)
+    newer = datetime.now(UTC) - timedelta(seconds=45)
+    cursor = json.dumps(
+      {
+        "kg123": {
+          "stale_at": submitted_for.isoformat(),
+          "submitted_at": (datetime.now(UTC) - timedelta(minutes=4)).isoformat(),
+        }
+      }
+    )
+
+    result, new_cursor = _tick([_make_graph("kg123", stale_at=newer)], cursor=cursor)
+
+    assert len(result) == 1
+    assert newer.isoformat() in result[0].run_key
+    assert json.loads(new_cursor)["kg123"]["stale_at"] == newer.isoformat()
+
+  def test_a_graph_being_written_is_skipped_and_its_entry_kept(
+    self, nothing_being_written
+  ):
+    """A manual run holds the lock (or a sensor run is queued): submitting
+    would only launch a run that dies on the lock."""
+    nothing_being_written.return_value = {"kg123"}
+    stale_at = datetime.now(UTC) - timedelta(seconds=60)
+    entry = {"stale_at": "x", "submitted_at": datetime.now(UTC).isoformat()}
+
+    result, new_cursor = _tick(
+      [_make_graph("kg123", stale_at=stale_at)],
+      cursor=json.dumps({"kg123": entry}),
+    )
+
+    assert result == []
+    assert json.loads(new_cursor) == {"kg123": entry}
+
+  def test_a_cursor_from_the_previous_release_is_read(self):
+    """The old cursor maps graph id to a bare submitted_at; it carries no
+    staleness event, so the graph resubmits unless it is being written."""
+    stale_at = datetime.now(UTC) - timedelta(seconds=60)
+    cursor = json.dumps({"kg123": datetime.now(UTC).isoformat()})
+
+    result, _ = _tick([_make_graph("kg123", stale_at=stale_at)], cursor=cursor)
 
     assert len(result) == 1
 
@@ -171,3 +225,36 @@ class TestStaleGraphSensor:
 
     assert result == []
     mock_session.close.assert_called_once()
+
+
+class TestGraphsBeingWritten:
+  """The busy set: a held lock, or a Dagster run in flight for the graph."""
+
+  def _context(self, run_tags):
+    context = MagicMock()
+    context.instance.get_run_records.return_value = [
+      MagicMock(dagster_run=MagicMock(tags=tags)) for tags in run_tags
+    ]
+    return context
+
+  def test_held_locks_and_live_runs_are_busy(self):
+    redis = MagicMock()
+    redis.pipeline.return_value.execute.return_value = [1, 0, 0]
+    context = self._context([{"materialize_db": "kg3"}, {"materialize_db": "kgX"}])
+
+    with patch(
+      "robosystems.config.valkey_registry.create_redis_client", return_value=redis
+    ):
+      busy = _graphs_being_written(context, ["kg1", "kg2", "kg3"])
+
+    assert busy == {"kg1", "kg3"}
+    redis.pipeline.return_value.exists.assert_any_call("materialize_lock:kg1")
+
+  def test_an_unreadable_lock_service_counts_every_graph_busy(self):
+    with patch(
+      "robosystems.config.valkey_registry.create_redis_client",
+      side_effect=ConnectionError("down"),
+    ):
+      busy = _graphs_being_written(self._context([]), ["kg1", "kg2"])
+
+    assert busy == {"kg1", "kg2"}

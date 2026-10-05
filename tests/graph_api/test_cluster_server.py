@@ -732,7 +732,9 @@ class TestFastAPIEndpoints:
     lock.acquire = AsyncMock(return_value=acquired)
     lock.acquired = acquired
     lock.release = AsyncMock(return_value=True)
+    lock.last_backend_error = None
     lock_cls = MagicMock(return_value=lock)
+    lock_cls.adopt = AsyncMock(return_value=lock)
     return (
       patch(
         "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
@@ -816,6 +818,7 @@ class TestFastAPIEndpoints:
 
     assert response.status_code == 200
     lock_cls.assert_not_called()
+    lock_cls.adopt.assert_awaited_once()
     self.mock_service.db_manager.delete_database.assert_called_once()
 
   def test_database_health_endpoint(self):

@@ -20,23 +20,22 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def held_lock():
   client = create_redis_client(ValkeyDatabase.LOCKS)
-  lock_key = f"graph_materialize:kgtest{uuid.uuid4().hex[:10]}"
-  lock_id = uuid.uuid4().hex
-  client.set(f"lock:{lock_key}", lock_id, ex=300)
-  yield client, lock_key, lock_id
-  client.delete(f"lock:{lock_key}")
+  graph_id = f"kgtest{uuid.uuid4().hex[:10]}"
+  token = uuid.uuid4().hex
+  client.set(f"materialize_lock:{graph_id}", token, ex=300)
+  yield client, graph_id, token
+  client.delete(f"materialize_lock:{graph_id}")
   client.close()
 
 
-def _task(lock_key, lock_id):
+def _task(graph_id, token):
   task = DagsterJobMonitorTask(
     task_id=f"op_test{uuid.uuid4().hex[:10]}",
-    graph_id="kg0000000000000001",
+    graph_id=graph_id,
     user_id="usr_test",
     params={
       "job_name": "materialize_graph_job",
-      "lock_key": lock_key,
-      "lock_id": lock_id,
+      "materialization_lock_token": token,
     },
     manager=MagicMock(),
   )
@@ -57,8 +56,8 @@ def _monitor(side_effect):
 
 @pytest.mark.asyncio
 async def test_a_run_that_stops_answering_keeps_its_lock(held_lock):
-  client, lock_key, lock_id = held_lock
-  task = _task(lock_key, lock_id)
+  client, graph_id, token = held_lock
+  task = _task(graph_id, token)
   task.STATUS_READ_GRACE_SECONDS = 0.05
 
   def status(_run_id):
@@ -77,13 +76,13 @@ async def test_a_run_that_stops_answering_keeps_its_lock(held_lock):
   ):
     await task.execute()
 
-  assert client.get(f"lock:{lock_key}") == lock_id
+  assert client.get(f"materialize_lock:{graph_id}") == token
 
 
 @pytest.mark.asyncio
 async def test_a_blip_then_completion_releases_the_lock(held_lock):
-  client, lock_key, lock_id = held_lock
-  task = _task(lock_key, lock_id)
+  client, graph_id, token = held_lock
+  task = _task(graph_id, token)
   monitor = _monitor(
     [
       {"status": "running"},
@@ -98,7 +97,7 @@ async def test_a_blip_then_completion_releases_the_lock(held_lock):
     result = await task.execute()
 
   assert result["status"] == "completed"
-  assert client.get(f"lock:{lock_key}") is None
+  assert client.get(f"materialize_lock:{graph_id}") is None
 
 
 @pytest.fixture
@@ -121,8 +120,8 @@ def run_record():
 async def test_a_requeued_monitor_reattaches_instead_of_resubmitting(
   held_lock, run_record
 ):
-  client, lock_key, lock_id = held_lock
-  task = _task(lock_key, lock_id)
+  client, graph_id, token = held_lock
+  task = _task(graph_id, token)
   run_record(task, "run_first")
   monitor = _monitor([{"status": "running"}, {"status": "completed"}])
   with patch(
@@ -142,8 +141,8 @@ async def test_a_requeued_monitor_reattaches_instead_of_resubmitting(
 async def test_a_monitor_that_died_mid_submit_never_submits_again(
   held_lock, run_record
 ):
-  client, lock_key, lock_id = held_lock
-  task = _task(lock_key, lock_id)
+  client, graph_id, token = held_lock
+  task = _task(graph_id, token)
   run_record(task, DagsterJobMonitorTask.SUBMITTING)
   monitor = _monitor([{"status": "completed"}])
   with (
@@ -156,20 +155,20 @@ async def test_a_monitor_that_died_mid_submit_never_submits_again(
     await task.execute()
 
   monitor.submit_job.assert_not_called()
-  assert client.get(f"lock:{lock_key}") == lock_id
+  assert client.get(f"materialize_lock:{graph_id}") == token
 
 
 @pytest.mark.asyncio
 async def test_a_long_run_keeps_its_lock_fresh(held_lock, run_record):
-  client, lock_key, lock_id = held_lock
-  client.expire(f"lock:{lock_key}", 5)
-  task = _task(lock_key, lock_id)
+  client, graph_id, token = held_lock
+  client.expire(f"materialize_lock:{graph_id}", 5)
+  task = _task(graph_id, token)
   run_record(task, "run_long")
   task.LOCK_EXTEND_INTERVAL_SECONDS = 0
   ttls: list[int] = []
 
   def status(_run_id):
-    ttls.append(client.ttl(f"lock:{lock_key}"))
+    ttls.append(client.ttl(f"materialize_lock:{graph_id}"))
     return {"status": "running" if len(ttls) < 3 else "completed"}
 
   with patch(

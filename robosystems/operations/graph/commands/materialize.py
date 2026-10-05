@@ -15,7 +15,9 @@ from robosystems.models.api.graphs.operations import MaterializeOp
 from robosystems.models.core import User
 
 if TYPE_CHECKING:
-  from robosystems.middleware.auth.distributed_lock import DistributedLock
+  from robosystems.graph_api.core.ladybug.materialization_lock import (
+    MaterializationLock,
+  )
 
 
 async def materialize_cmd(
@@ -83,13 +85,12 @@ async def materialize_cmd(
   from robosystems.middleware.graph.write_pause import refuse_while_writes_paused
 
   await refuse_while_writes_paused()
-  lock = acquire_materialize_lock(graph_id)
-
-  # The worker releases the lock by lock_id (compare-and-delete), so a task
-  # that outlives the TTL cannot strip a successor's lock. It is never
-  # extended: the task timeout is half of INGESTION_LOCK_TTL.
-  lock_key = f"graph_materialize:{graph_id}"
-  lock_id = lock.lock_id
+  # One lock for every writer, the stale-graph sensor's runs included: the
+  # task adopts this token rather than acquiring again, and releases it by
+  # compare-and-delete, so a task that outlives the TTL cannot strip a
+  # successor's lock.
+  lock = await acquire_materialize_lock(graph_id)
+  lock_params = {"materialization_lock_token": lock.token}
 
   try:
     graph_tier = graph.graph_tier or "ladybug-standard"
@@ -144,11 +145,7 @@ async def materialize_cmd(
         task_type="extensions_materialize",
         graph_id=graph_id,
         user_id=str(current_user.id),
-        params={
-          "rebuild": body.rebuild,
-          "lock_key": lock_key,
-          "lock_id": lock_id,
-        },
+        params={"rebuild": body.rebuild, **lock_params},
       )
       return {
         "status": "queued",
@@ -172,8 +169,7 @@ async def materialize_cmd(
           "force": body.force,
           "rebuild": body.rebuild,
           "materialize_embeddings": body.materialize_embeddings,
-          "lock_key": lock_key,
-          "lock_id": lock_id,
+          **lock_params,
         },
       )
       return {
@@ -194,6 +190,7 @@ async def materialize_cmd(
         force=body.force,
         rebuild=body.rebuild,
         materialize_embeddings=body.materialize_embeddings,
+        lock_token=lock.token,
       )
       response = await enqueue_task(
         task_type="dagster_job_monitor",
@@ -206,8 +203,7 @@ async def materialize_cmd(
           # for any exit that frees the lock under a live run.
           "tags": {"materialize_db": graph_id},
           "pass_operation_id": True,
-          "lock_key": lock_key,
-          "lock_id": lock_id,
+          **lock_params,
         },
       )
       return {
@@ -218,21 +214,30 @@ async def materialize_cmd(
       }
 
   except Exception:
-    lock.release()
+    await lock.release()
     raise
+  finally:
+    # The task holds the lock by its token now; this client is done.
+    await lock.aclose()
 
 
-def acquire_materialize_lock(graph_id: str) -> DistributedLock:
+async def acquire_materialize_lock(graph_id: str) -> MaterializationLock:
   """Take the per-graph lock every writer into a graph database holds.
 
-  Fails closed: 409 when held, 503 + Retry-After when the lock service is
-  down. A retry is cheap, while an unlocked double-writer silently duplicates
-  relationship edges.
+  The same lock the stale-graph sensor's runs and the Graph API's swap and
+  delete take, tried once. Fails closed: 409 when held, 503 + Retry-After when
+  the lock service is down. A retry is cheap, while an unlocked double-writer
+  silently duplicates relationship edges.
   """
   from robosystems.config.constants import INGESTION_LOCK_TTL
-  from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+  from robosystems.config.valkey_registry import (
+    ValkeyDatabase,
+    create_async_redis_client,
+  )
+  from robosystems.graph_api.core.ladybug.materialization_lock import (
+    MaterializationLock,
+  )
   from robosystems.logger import logger
-  from robosystems.middleware.auth.distributed_lock import DistributedLock
 
   lock_unavailable = HTTPException(
     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -243,19 +248,18 @@ def acquire_materialize_lock(graph_id: str) -> DistributedLock:
     headers={"Retry-After": "30"},
   )
   try:
-    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
-    lock = DistributedLock(
-      redis_client, f"graph_materialize:{graph_id}", ttl_seconds=INGESTION_LOCK_TTL
-    )
-    lock_result = lock.acquire(blocking=False)
+    redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
+    lock = MaterializationLock(redis_client, graph_id, ttl_seconds=INGESTION_LOCK_TTL)
+    acquired = await lock.acquire(timeout_seconds=0)
   except Exception as e:
-    logger.warning(f"Could not acquire distributed lock for {graph_id}: {e}")
+    logger.warning(f"Could not acquire materialization lock for {graph_id}: {e}")
     raise lock_unavailable from e
 
-  if not lock_result.acquired:
-    if lock_result.backend_error:
+  if not acquired:
+    await lock.aclose()
+    if lock.last_backend_error:
       logger.warning(
-        f"Distributed lock backend error for {graph_id}: {lock_result.error_message}"
+        f"Materialization lock backend error for {graph_id}: {lock.last_backend_error}"
       )
       raise lock_unavailable
     raise HTTPException(

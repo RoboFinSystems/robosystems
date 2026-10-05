@@ -2,13 +2,16 @@
 
 ``-wip``/``-prev`` resolve to the base id, so a build and its target share a
 lock. Release and extend are compare-and-set Lua scripts, so a holder whose
-lock lapsed cannot touch the next holder's. Callers pass the token downstream
-via the ``X-Materialization-Lock-Token`` header.
+lock lapsed cannot touch the next holder's. One lock per operation: the
+caller that acquires it passes the token on (task params, the
+``X-Materialization-Lock-Token`` header), and every downstream step adopts it
+rather than taking the lock again.
 """
 
 import re
 import uuid
 
+import redis
 import redis.asyncio as redis_async
 
 from robosystems.logger import logger
@@ -42,6 +45,11 @@ def _resolve_base_graph_id(graph_id: str) -> str:
   return re.sub(r"-(wip|prev)$", "", graph_id)
 
 
+def lock_key_for(graph_id: str) -> str:
+  """The Valkey key holding ``graph_id``'s materialization lock."""
+  return f"{_LOCK_PREFIX}{_resolve_base_graph_id(graph_id)}"
+
+
 class MaterializationLock:
   """Distributed lock for graph materialization operations."""
 
@@ -51,9 +59,8 @@ class MaterializationLock:
     graph_id: str,
     ttl_seconds: int = DEFAULT_LOCK_TTL_SECONDS,
   ):
-    base_id = _resolve_base_graph_id(graph_id)
     self.redis = redis_client
-    self.lock_key = f"{_LOCK_PREFIX}{base_id}"
+    self.lock_key = lock_key_for(graph_id)
     self.ttl_seconds = ttl_seconds
     self.token = str(uuid.uuid4())
     self._acquired = False
@@ -71,6 +78,7 @@ class MaterializationLock:
   ) -> bool:
     """Try to acquire the lock, returning False if ``timeout_seconds`` elapses.
 
+    Always makes one attempt, so ``timeout_seconds=0`` is a non-blocking try.
     Polls with a halving backoff. Redis errors are retried within the window
     rather than raised — a blip should not fail a materialization outright.
     """
@@ -78,10 +86,9 @@ class MaterializationLock:
     import time
 
     deadline = time.monotonic() + timeout_seconds
-    attempt = 0
     self.last_backend_error = None
 
-    while time.monotonic() < deadline:
+    while True:
       try:
         result = await self.redis.set(
           self.lock_key,
@@ -98,10 +105,10 @@ class MaterializationLock:
         self.last_backend_error = str(e)
         logger.warning(f"Lock acquire attempt failed: {e}")
 
-      attempt += 1
-      wait = min(0.5, (deadline - time.monotonic()) / 2)
-      if wait > 0:
-        await asyncio.sleep(wait)
+      remaining = deadline - time.monotonic()
+      if remaining <= 0:
+        break
+      await asyncio.sleep(min(0.5, remaining / 2))
 
     if self.last_backend_error:
       logger.warning(
@@ -170,6 +177,13 @@ class MaterializationLock:
       self._acquired = False
       return False
 
+  async def aclose(self) -> None:
+    """Close the Valkey client this lock was built on. Never raises."""
+    try:
+      await self.redis.aclose()
+    except Exception as e:
+      logger.debug(f"Closing the materialization lock client failed: {e}")
+
   async def __aenter__(self) -> "MaterializationLock":
     if not await self.acquire():
       raise RuntimeError(f"Could not acquire materialization lock: {self.lock_key}")
@@ -185,21 +199,60 @@ class MaterializationLock:
     except Exception:
       return False
 
-  @staticmethod
-  def from_trusted_token(
+  @classmethod
+  async def adopt(
+    cls,
     redis_client: redis_async.Redis,
     graph_id: str,
     token: str,
     ttl_seconds: int = DEFAULT_LOCK_TTL_SECONDS,
-  ) -> "MaterializationLock":
-    """Create a lock instance that trusts the caller already holds the lock.
+  ) -> "MaterializationLock | None":
+    """Take over a lock another process acquired, given its token.
 
-    WARNING: Does NOT verify the token against Valkey. The caller is trusted
-    to have acquired the lock themselves and is passing the token through
-    (e.g., via X-Materialization-Lock-Token header) so that downstream
-    endpoints don't re-acquire it. Only use for internal service calls.
+    The token must be the one stored: the check and a TTL refresh are one
+    compare-and-set, so the lock is held for a full window from here. Returns
+    None when it is not (the lock lapsed, or the token is not the holder's).
+    Backend errors are raised; the caller must not proceed unlocked.
     """
-    lock = MaterializationLock(redis_client, graph_id, ttl_seconds)
+    lock = cls(redis_client, graph_id, ttl_seconds)
     lock.token = token
+    result = await redis_client.eval(
+      _EXTEND_SCRIPT, 1, lock.lock_key, token, str(ttl_seconds)
+    )
+    if result != 1:
+      logger.warning(f"Materialization lock token not the holder's: {lock.lock_key}")
+      return None
     lock._acquired = True
     return lock
+
+
+def release_token(redis_client: redis.Redis, graph_id: str, token: str) -> bool:
+  """Release ``graph_id``'s lock from a process other than the acquirer.
+
+  Compare-and-delete, so a lapsed holder cannot strip a successor's lock.
+  Never raises; a failed release leaves the lock to its TTL.
+  """
+  key = lock_key_for(graph_id)
+  try:
+    released = redis_client.eval(_RELEASE_SCRIPT, 1, key, token) == 1
+  except Exception as e:
+    logger.warning(f"Materialization lock release failed for {key}: {e}")
+    return False
+  if released:
+    logger.info(f"Materialization lock released: {key}")
+  return released
+
+
+def extend_token(
+  redis_client: redis.Redis,
+  graph_id: str,
+  token: str,
+  ttl_seconds: int = DEFAULT_LOCK_TTL_SECONDS,
+) -> bool:
+  """Refresh ``graph_id``'s lock TTL for a holder in another process.
+
+  False when the token is no longer the holder's. Backend errors are raised,
+  as in ``MaterializationLock.extend``: a blip is not a lost lock.
+  """
+  key = lock_key_for(graph_id)
+  return redis_client.eval(_EXTEND_SCRIPT, 1, key, token, str(ttl_seconds)) == 1

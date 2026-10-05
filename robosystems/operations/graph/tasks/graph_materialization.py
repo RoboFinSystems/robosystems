@@ -1,11 +1,12 @@
 """Worker task for direct (non-Dagster) graph materialization.
 
-Copies the DuckDB staging tables into LadybugDB. The distributed lock is
-acquired by the router *before* enqueue and released here when the copy has
-finished or failed outright. It is kept, to expire on its TTL, when the copy
-may still be running: the Graph API's COPY is synchronous and carries on after
-the client goes away (a budget cancel, a timed-out chunk), and releasing then
-would admit a second copy into the same database.
+Copies the DuckDB staging tables into LadybugDB. The materialization lock is
+acquired by the router *before* enqueue, kept fresh while the copy runs, and
+released here when the copy has finished or failed outright. It is kept, to
+expire on its TTL, when the copy may still be running: the Graph API's COPY is
+synchronous and carries on after the client goes away (a budget cancel, a
+timed-out chunk), and releasing then would admit a second copy into the same
+database.
 """
 
 from __future__ import annotations
@@ -23,6 +24,9 @@ logger = get_logger(__name__)
 class GraphMaterializationTask(BaseTask):
   """Materialize staged data from DuckDB to the graph database."""
 
+  LOCK_EXTEND_INTERVAL_SECONDS = 60
+  _lock_lost = False
+
   async def execute(self) -> dict[str, Any]:
     from robosystems.database import get_db_session
     from robosystems.operations.graph.engine.direct_materialization import (
@@ -32,7 +36,7 @@ class GraphMaterializationTask(BaseTask):
     force = self.params.get("force", False)
     rebuild = self.params.get("rebuild", False)
     materialize_embeddings = self.params.get("materialize_embeddings", False)
-    lock_key = self.params.get("lock_key")
+    lock_token = self.params.get("materialization_lock_token")
 
     import asyncio
 
@@ -41,28 +45,80 @@ class GraphMaterializationTask(BaseTask):
     db_gen = get_db_session()
     db = next(db_gen)
     release = True
-
-    try:
-      result = await materialize_graph_directly(
+    self._lock_lost = False
+    copy = asyncio.create_task(
+      materialize_graph_directly(
         db=db,
         graph_id=self.graph_id,
         force=force,
         rebuild=rebuild,
         materialize_embeddings=materialize_embeddings,
         operation_id=self.task_id,
+        lock_token=lock_token,
       )
+    )
+    keep_fresh = (
+      asyncio.create_task(self._keep_lock_fresh(lock_token, copy))
+      if lock_token
+      else None
+    )
+
+    try:
+      result = await copy
       if isinstance(result, dict) and result.get("copy_may_still_run"):
         release = False
       return result
 
     except (asyncio.CancelledError, GraphTransientError):
       release = False
+      if self._lock_lost:
+        raise RuntimeError(
+          f"The materialization lock for {self.graph_id} was lost mid-copy; "
+          "stopped before the next write"
+        ) from None
       raise
 
     finally:
+      if keep_fresh is not None:
+        keep_fresh.cancel()
       try:
         next(db_gen)
       except StopIteration:
         pass
       if release:
-        self.release_lock(lock_key)
+        self.release_lock()
+
+  async def _keep_lock_fresh(self, token: str, copy: Any) -> None:
+    """Push the lock's TTL out while the copy runs, so a run (or a requeued
+    attempt) that outlasts one TTL window is not left writing unlocked.
+
+    A Valkey blip is retried on the next interval. A lost lock (another run
+    may hold it now) stops the copy before its next write.
+    """
+    import asyncio
+
+    while True:
+      await asyncio.sleep(self.LOCK_EXTEND_INTERVAL_SECONDS)
+      try:
+        held = await asyncio.to_thread(self._extend_lock, token)
+      except Exception as e:
+        logger.warning(f"Could not refresh the lock for {self.graph_id}: {e}")
+        continue
+      if not held:
+        logger.error(
+          f"Materialization lock for {self.graph_id} is no longer held by this "
+          "task; stopping the copy"
+        )
+        self._lock_lost = True
+        copy.cancel()
+        return
+
+  def _extend_lock(self, token: str) -> bool:
+    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+    from robosystems.graph_api.core.ladybug.materialization_lock import extend_token
+
+    client = create_redis_client(ValkeyDatabase.LOCKS)
+    try:
+      return extend_token(client, self.graph_id or "", token)
+    finally:
+      client.close()

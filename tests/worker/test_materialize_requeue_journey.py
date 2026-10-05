@@ -62,7 +62,7 @@ def _run_worker(mode: str, events_key: str) -> None:
   )
 
   import robosystems.worker  # noqa: F401  (registers the task handlers)
-  from robosystems.middleware.auth import distributed_lock
+  from robosystems.graph_api.core.ladybug import materialization_lock
   from robosystems.operations.extensions.materialize import (
     ExtensionsMaterializer,
     MaterializeResult,
@@ -70,21 +70,31 @@ def _run_worker(mode: str, events_key: str) -> None:
   from robosystems.worker import consumer
 
   events = create_redis_client(ValkeyDatabase.WORKER_QUEUE)
+  locks = create_redis_client(ValkeyDatabase.LOCKS)
   pid = os.getpid()
 
   async def fake_materialize(
-    self: Any, graph_id: str, entity_id: str | None = None, rebuild: bool = True
+    self: Any,
+    graph_id: str,
+    entity_id: str | None = None,
+    rebuild: bool = True,
+    lock_token: str | None = None,
   ) -> MaterializeResult:
-    events.rpush(events_key, f"start:{pid}")
+    # The real adoption: the token must still be the holder's, and taking it
+    # over renews the TTL for this attempt.
+    assert lock_token is not None
+    await self._adopt_lock(graph_id, lock_token)
+    ttl = locks.ttl(materialization_lock.lock_key_for(graph_id))
+    events.rpush(events_key, f"start:{pid}:{ttl}")
     if mode == "hang":
       await asyncio.sleep(3600)
     events.rpush(events_key, f"end:{pid}")
     return MaterializeResult(graph_id=graph_id, tables_materialized=["Entity"])
 
-  real_release = distributed_lock.release_lock_by_id
+  real_release = materialization_lock.release_token
 
-  def recording_release(client: Any, lock_key: str, lock_id: str) -> bool:
-    released = real_release(client, lock_key, lock_id)
+  def recording_release(client: Any, graph_id: str, token: str) -> bool:
+    released = real_release(client, graph_id, token)
     events.rpush(events_key, f"release:{pid}:{released}")
     return released
 
@@ -93,7 +103,7 @@ def _run_worker(mode: str, events_key: str) -> None:
     def stop(self) -> None: ...
 
   patches.setattr(ExtensionsMaterializer, "materialize", fake_materialize)
-  patches.setattr(distributed_lock, "release_lock_by_id", recording_release)
+  patches.setattr(materialization_lock, "release_token", recording_release)
   patches.setattr(consumer, "QueueDepthPublisher", _NoPublisher)
   # A short heartbeat so the death is observable in seconds, not 90.
   patches.setattr(consumer, "WORKER_HEARTBEAT_INTERVAL", 1)
@@ -173,7 +183,7 @@ def scratch(monkeypatch: pytest.MonkeyPatch):
     if child.poll() is None:
       child.kill()
       child.wait()
-  locks.delete(f"lock:graph_materialize:{graph_id}")
+  locks.delete(f"materialize_lock:{graph_id}")
   queue.delete(events_key, "worker:tasks", "worker:dlq")
   for key in [
     *queue.scan_iter(match="worker:inflight:worker-*"),
@@ -208,15 +218,15 @@ async def test_a_killed_materialize_is_requeued_and_finishes_exactly_once(
 
   queue, sse, locks = scratch.queue, scratch.sse, scratch.locks
   graph_id = scratch.graph_id
-  lock_key = f"graph_materialize:{graph_id}"
+  lock_key = f"materialize_lock:{graph_id}"
 
   # Submit: the same lock + payload materialize_cmd produces for an entity graph.
-  lock = acquire_materialize_lock(graph_id)
+  lock = await acquire_materialize_lock(graph_id)
   response = await enqueue_task(
     task_type="extensions_materialize",
     graph_id=graph_id,
     user_id="usr_journey",
-    params={"rebuild": True, "lock_key": lock_key, "lock_id": lock.lock_id},
+    params={"rebuild": True, "materialization_lock_token": lock.token},
   )
   task_id = response["operation_id"]
   scratch.task_ids.append(task_id)
@@ -232,7 +242,11 @@ async def test_a_killed_materialize_is_requeued_and_finishes_exactly_once(
   log_a = tmp_path / "worker_a.log"
   worker_a = _spawn_worker("hang", scratch.events_key, log_a)
   scratch.children.append(worker_a)
-  _wait_for(lambda: events() == [f"start:{worker_a.pid}"], "attempt 1 to start", log_a)
+  _wait_for(
+    lambda: [e.rsplit(":", 1)[0] for e in events()] == [f"start:{worker_a.pid}"],
+    "attempt 1 to start",
+    log_a,
+  )
   [inflight_key] = [
     key
     for key in queue.scan_iter(match="worker:inflight:*")
@@ -243,7 +257,7 @@ async def test_a_killed_materialize_is_requeued_and_finishes_exactly_once(
 
   worker_a.send_signal(signal.SIGKILL)
   worker_a.wait()
-  assert locks.get(f"lock:{lock_key}") == lock.lock_id, "a crash must not free the lock"
+  assert locks.get(lock_key) == lock.token, "a crash must not free the lock"
   assert queue.llen(inflight_key) == 1
 
   # The reaper waits out the full budget, measured from the enqueue.
@@ -262,7 +276,7 @@ async def test_a_killed_materialize_is_requeued_and_finishes_exactly_once(
     timeout=10,
   )
   # The same wall-clock time has passed for the lock the task still runs under.
-  locks.pexpire(f"lock:{lock_key}", locks.pttl(f"lock:{lock_key}") - skew * 1000)
+  locks.pexpire(lock_key, locks.pttl(lock_key) - skew * 1000)
   _reap(monkeypatch, skew)
 
   requeued = [json.loads(t) for t in queue.lrange("worker:tasks", 0, -1)]
@@ -282,13 +296,14 @@ async def test_a_killed_materialize_is_requeued_and_finishes_exactly_once(
 
   # One body started per attempt, one ran to its end, and the single release
   # came from that attempt after its write: never from the dead one, never twice.
-  assert events() == [
-    f"start:{worker_a.pid}",
-    f"start:{worker_b.pid}",
-    f"end:{worker_b.pid}",
-    f"release:{worker_b.pid}:True",
-  ]
-  assert locks.get(f"lock:{lock_key}") is None
+  started_a, started_b, *rest = events()
+  assert started_a.startswith(f"start:{worker_a.pid}:")
+  assert started_b.startswith(f"start:{worker_b.pid}:")
+  assert rest == [f"end:{worker_b.pid}", f"release:{worker_b.pid}:True"]
+  # The requeued attempt ran under a renewed lock, not the remainder the
+  # first attempt left: its budget fits inside the lock it holds.
+  assert int(started_b.rsplit(":", 1)[1]) > TASK_TIMEOUTS["extensions_materialize"]
+  assert locks.get(lock_key) is None
 
   completed = [
     raw
@@ -308,18 +323,23 @@ async def test_a_killed_materialize_is_requeued_and_finishes_exactly_once(
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(
-  strict=True,
-  reason=(
-    "A requeued attempt can outlive the lock it runs under; flips when the "
-    "reaper clock or the lock lifetime is derived from the task budget."
-  ),
-)
-def test_a_requeued_attempt_finishes_inside_the_lock_it_runs_under() -> None:
-  from robosystems.config.constants import INGESTION_LOCK_TTL
-  from robosystems.dagster.sensors.worker_reaper import STALE_GRACE_SECONDS
-  from robosystems.worker.constants import TASK_TIMEOUTS
+async def test_a_requeued_attempt_whose_lock_lapsed_refuses_to_run() -> None:
+  """An attempt that reaches the lock after its TTL ran out (or after another
+  run took it) must not write unlocked: adoption fails and the run errors."""
+  from unittest.mock import AsyncMock, patch
 
-  budget = TASK_TIMEOUTS["extensions_materialize"]
-  earliest_requeue = budget + STALE_GRACE_SECONDS  # seconds after the lock
-  assert earliest_requeue + budget <= INGESTION_LOCK_TTL
+  from robosystems.operations.extensions.materialize import (
+    ExtensionsMaterializer,
+    MaterializationLockError,
+  )
+
+  redis = AsyncMock()
+  redis.eval = AsyncMock(return_value=0)
+  with (
+    patch(
+      "robosystems.config.valkey_registry.create_async_redis_client",
+      return_value=redis,
+    ),
+    pytest.raises(MaterializationLockError, match="no longer held"),
+  ):
+    await ExtensionsMaterializer()._adopt_lock("kg1", "tok-from-submit")

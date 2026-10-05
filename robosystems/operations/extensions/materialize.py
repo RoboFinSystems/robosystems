@@ -1306,6 +1306,7 @@ class ExtensionsMaterializer:
     graph_id: str,
     entity_id: str | None = None,
     rebuild: bool = True,
+    lock_token: str | None = None,
   ) -> MaterializeResult:
     """Stage from PostgreSQL, then materialize into the graph.
 
@@ -1316,8 +1317,10 @@ class ExtensionsMaterializer:
     alongside the live graph and swapped in on success, so the live graph keeps
     serving queries and downtime is the length of a file rename. First-time
     creation builds in place. Both paths run under the per-graph
-    materialization lock and fail closed if it cannot be taken. Errors are
-    collected on the result rather than raised — check ``status``.
+    materialization lock and fail closed if it cannot be taken. With
+    ``lock_token`` the caller already holds that lock and the run adopts it;
+    the caller releases it. Errors are collected on the result rather than
+    raised — check ``status``.
     """
     from robosystems.graph_api.client.factory import get_graph_client
 
@@ -1358,7 +1361,10 @@ class ExtensionsMaterializer:
         )
         # One lock for both paths: a first build is as exposed to a
         # double-writer as a rebuild.
-        lock = await self._acquire_lock(graph_id)
+        if lock_token:
+          lock = await self._adopt_lock(graph_id, lock_token)
+        else:
+          lock = await self._acquire_lock(graph_id)
         try:
           db_exists = await client.database_exists(graph_id)
 
@@ -1374,7 +1380,9 @@ class ExtensionsMaterializer:
             )
         finally:
           # A no-op if the lock lapsed under us (extend already cleared it).
-          await lock.release()
+          if not lock_token:
+            await lock.release()
+          await lock.aclose()
 
     except GraphWritesPausedError as e:
       logger.warning(f"Ledger materialization for {graph_id} deferred: {e}")
@@ -1428,6 +1436,7 @@ class ExtensionsMaterializer:
     acquired = await lock.acquire(timeout_seconds=_LOCK_ACQUIRE_TIMEOUT_SECONDS)
     if acquired:
       return lock
+    await lock.aclose()
 
     if lock.last_backend_error:
       raise MaterializationLockError(
@@ -1437,6 +1446,44 @@ class ExtensionsMaterializer:
     raise MaterializationLockError(
       f"Materialization lock for {graph_id} is held by another run; retry later"
     )
+
+  async def _adopt_lock(self, graph_id: str, token: str) -> "MaterializationLock":
+    """Take over the lock the caller acquired, failing closed.
+
+    The token must still be the stored one: a run that waited in the queue
+    past the lock's TTL, or whose lock was taken by another run, refuses to
+    write rather than run unlocked.
+    """
+    try:
+      from robosystems.config.valkey_registry import (
+        ValkeyDatabase,
+        create_async_redis_client,
+      )
+      from robosystems.graph_api.core.ladybug.materialization_lock import (
+        MaterializationLock,
+      )
+
+      redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
+    except Exception as e:
+      raise MaterializationLockError(
+        f"Materialization lock service unavailable for {graph_id} "
+        f"({e.__class__.__name__}: {e}); retry later"
+      ) from e
+    try:
+      lock = await MaterializationLock.adopt(redis_client, graph_id, token)
+    except Exception as e:
+      await redis_client.aclose()
+      raise MaterializationLockError(
+        f"Materialization lock service unavailable for {graph_id} "
+        f"({e.__class__.__name__}: {e}); retry later"
+      ) from e
+    if lock is None:
+      await redis_client.aclose()
+      raise MaterializationLockError(
+        f"Materialization lock for {graph_id} is no longer held by this run "
+        "(it lapsed or another run took it); retry later"
+      )
+    return lock
 
   async def _refresh_lock(self, lock: "MaterializationLock | None") -> None:
     """Checkpoint: push the lock TTL out, or abort if the lock is no longer ours.

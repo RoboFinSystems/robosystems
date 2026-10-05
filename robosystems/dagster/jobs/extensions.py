@@ -120,9 +120,8 @@ def materialize_extensions_to_graph(
 
   if result.status != "success":
     # 'partial' fails too: a missing relationship table renders empty
-    # statements. graph_stale stays set; the sensor retries only once a later
-    # write restamps graph_stale_at (its run_key) and its 2h in-progress
-    # cursor entry has expired.
+    # statements. graph_stale stays set; the sensor resubmits on the next
+    # write, or after its failed-run retry window if none comes.
     context.log.error(f"Extensions materialization {result.status}: {result.errors}")
     raise Failure(
       description=(f"Extensions materialization {result.status} for {graph_id}"),

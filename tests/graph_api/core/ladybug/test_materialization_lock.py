@@ -98,13 +98,108 @@ class TestMaterializationLock:
     result = await lock.is_locked()
     assert result is True
 
-  def test_from_token(self):
-    redis = MagicMock()
-    lock = MaterializationLock.from_trusted_token(redis, "kg123", "my-token-123")
+  @pytest.mark.asyncio
+  async def test_zero_timeout_still_makes_one_attempt(self):
+    """``timeout_seconds=0`` is the non-blocking try the API takes at submit."""
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=True)
+    lock = MaterializationLock(redis, "kg123")
 
-    assert lock.token == "my-token-123"
+    assert await lock.acquire(timeout_seconds=0) is True
+    redis.set.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  async def test_zero_timeout_on_a_held_lock_returns_at_once(self):
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=False)
+    lock = MaterializationLock(redis, "kg123")
+
+    assert await lock.acquire(timeout_seconds=0) is False
+    redis.set.assert_awaited_once()
+
+
+class TestAdopt:
+  """A token is honoured only when it is the stored one."""
+
+  @pytest.mark.asyncio
+  async def test_the_holders_token_is_adopted_and_renewed(self):
+    redis = AsyncMock()
+    redis.eval = AsyncMock(return_value=1)
+
+    lock = await MaterializationLock.adopt(redis, "kg123-wip", "tok", ttl_seconds=99)
+
+    assert lock is not None
     assert lock.acquired is True
-    assert lock.lock_key == "materialize_lock:kg123"
+    assert lock.token == "tok"
+    args = redis.eval.await_args.args
+    assert args[1:] == (1, "materialize_lock:kg123", "tok", "99")
+
+  @pytest.mark.asyncio
+  async def test_any_other_token_is_refused(self):
+    redis = AsyncMock()
+    redis.eval = AsyncMock(return_value=0)
+
+    assert await MaterializationLock.adopt(redis, "kg123", "forged") is None
+
+  @pytest.mark.asyncio
+  async def test_a_backend_error_is_raised_not_trusted(self):
+    redis = AsyncMock()
+    redis.eval = AsyncMock(side_effect=ConnectionError("down"))
+
+    with pytest.raises(ConnectionError):
+      await MaterializationLock.adopt(redis, "kg123", "tok")
+
+
+class TestCrossProcessHelpers:
+  """The worker releases and extends the lock the API took, by token."""
+
+  def test_release_token_compares_and_deletes_on_the_base_key(self):
+    from robosystems.graph_api.core.ladybug.materialization_lock import (
+      _RELEASE_SCRIPT,
+      release_token,
+    )
+
+    redis = MagicMock()
+    redis.eval.return_value = 1
+
+    assert release_token(redis, "kg123-wip", "tok") is True
+    redis.eval.assert_called_once_with(
+      _RELEASE_SCRIPT, 1, "materialize_lock:kg123", "tok"
+    )
+
+  def test_release_token_never_raises(self):
+    from robosystems.graph_api.core.ladybug.materialization_lock import (
+      release_token,
+    )
+
+    redis = MagicMock()
+    redis.eval.side_effect = ConnectionError("down")
+
+    assert release_token(redis, "kg123", "tok") is False
+
+  def test_extend_token_raises_a_backend_error_rather_than_report_a_lost_lock(
+    self,
+  ):
+    from robosystems.graph_api.core.ladybug.materialization_lock import (
+      extend_token,
+    )
+
+    redis = MagicMock()
+    redis.eval.side_effect = ConnectionError("down")
+
+    with pytest.raises(ConnectionError):
+      extend_token(redis, "kg123", "tok")
+
+  def test_extend_token_reports_a_lost_lock(self):
+    from robosystems.graph_api.core.ladybug.materialization_lock import (
+      extend_token,
+    )
+
+    redis = MagicMock()
+    redis.eval.return_value = 0
+
+    assert extend_token(redis, "kg123", "tok", ttl_seconds=60) is False
+    assert redis.eval.call_args.args[2:] == ("materialize_lock:kg123", "tok", "60")
 
 
 class TestAcquireBackendErrorSignal:

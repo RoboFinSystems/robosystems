@@ -145,6 +145,9 @@ class MaterializeGraphConfig(Config):
   rebuild: bool = False
   materialize_embeddings: bool = False
   operation_id: str | None = None  # For SSE result updates
+  # The materialization lock the API took at submit; the rebuild's delete
+  # runs under it rather than taking it again.
+  lock_token: str | None = None
 
 
 # ============================================================================
@@ -904,7 +907,9 @@ def materialize_graph_tables(
         try:
           context.log.info(f"[20%] Deleting graph database for {graph_id}")
           loop.run_until_complete(
-            client.delete_database(graph_id, preserve_duckdb=True)
+            client.delete_database(
+              graph_id, preserve_duckdb=True, lock_token=config.lock_token
+            )
           )
 
           schema = GraphSchema.get_active_schema(graph_id, session)
@@ -946,6 +951,9 @@ def materialize_graph_tables(
         .distinct()
         .all()
       )
+
+      # Taken before the copy, so a file staged mid-run is not marked copied.
+      copied_file_ids = GraphFile.staged_file_ids(graph_id, session)
 
       if not tables_with_staged_data:
         context.log.info(f"No tables with staged data found for graph {graph_id}")
@@ -1017,6 +1025,8 @@ def materialize_graph_tables(
               "error": str(e),
             },
           )
+
+      GraphFile.mark_many_graph_ingested(copied_file_ids, session)
 
       context.log.info("[95%] Marking graph as fresh")
       if not graph_record.mark_fresh(session=session, started_at=started_at):
