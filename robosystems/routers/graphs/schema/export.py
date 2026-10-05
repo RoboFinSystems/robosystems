@@ -159,7 +159,7 @@ async def export_graph_schema(
             }
             for i, prop in enumerate(node.properties):
               if not prop.nullable and not prop.is_primary_key:
-                node_dict["properties"][i]["is_required"] = True
+                node_dict["properties"][i]["nullable"] = False
 
             nodes.append(node_dict)
 

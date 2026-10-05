@@ -139,8 +139,8 @@ _INITIATE_SEQUENCE: list[str] = [
   "For each recurring entry, create a schedule with "
   "create-information-block(block_type='schedule'). See "
   "SCHEDULE AUTHORING below — especially one-pair-per-schedule and the "
-  "closed_through watermark rule (a schedule that omits it will block the "
-  "first close).",
+  "closed_through watermark rule (a schedule set earlier than the "
+  "watermark will block the first close).",
   "(recommended) Write a per-tenant 'Month-End Close Procedures' document "
   "with create-document capturing THIS company's schedules, accounts, and "
   "quirks. Have it reference this playbook for the generic mechanics. Future "
@@ -188,15 +188,16 @@ _SCHEDULE_AUTHORING: list[str] = [
   "set schedule_metadata.booked_on to that date. The schedule then carries "
   "its full cost from then until it starts, so the account's schedule "
   "reconciliation ties in the months between.",
-  "MATCH THE CALENDAR WATERMARK — set the schedule's closed_through to the "
+  "MATCH THE CALENDAR WATERMARK — the schedule's closed_through is the "
   "last day of the calendar's closed_through month (calendar '2026-05' → "
-  "schedule closed_through '2026-05-31'). This flags every period at/before "
+  "schedule closed_through '2026-05-31'); omit it and create defaults it "
+  "to exactly that. This flags every period at/before "
   "the watermark as 'historical' and emits their obligations as 'voided', so "
   "the close workflow starts drafting at the first open period (e.g. June). "
   "This is the SAME rule whether those prior months were actually closed in "
   "RoboLedger or just baseline-watermarked at initialization. WARNING: if "
-  "you omit closed_through (or set it earlier), every pre-watermark period "
-  "becomes a 'pending' obligation, and the first close is BLOCKED with the "
+  "you set closed_through earlier than that, every pre-watermark period "
+  "after it becomes a 'pending' obligation, and the first close is BLOCKED with the "
   "pending_obligations gate (earliest_pending_period pointing months back). "
   "Conversely, re-drafting an already-closed month creates duplicate "
   "entries — the watermark prevents both.",

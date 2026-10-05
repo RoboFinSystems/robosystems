@@ -67,7 +67,7 @@ async def validate_schema(
                 "name": "Company",
                 "properties": [
                   {"name": "cik", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "name", "type": "STRING", "nullable": False},
                   {"name": "ticker", "type": "STRING"},
                 ],
               },

@@ -563,11 +563,12 @@ class ExecuteEventBlockRequest(BaseModel):
   """Request to publish an event to the source-of-truth system.
 
   For events on a connection with `write_policy='qb_authoritative'`
-  (or `'hybrid'`), this triggers a synchronous write to QuickBooks
-  via the QB API. The returned `qb_txn_id` lands on
-  `event.metadata.qb_external_id` and the event transitions to
-  `committed` (in flight) → `fulfilled` (QB accepted) or `pending`
-  (QB rejected).
+  (or `'hybrid'`), this triggers a synchronous write to QuickBooks:
+  each draft entry posts as its own JournalEntry, with the entry id as
+  the RequestId, and its QuickBooks id is recorded per entry on
+  `event.metadata.qb_entry_ids`. The event goes `fulfilled` once no
+  draft remains, or `pending` when QuickBooks rejects an entry (what
+  landed is kept).
 
   `'native'`-policy events fast-path through with no QB write —
   RoboSystems IS the source of truth, no outbound publish needed.

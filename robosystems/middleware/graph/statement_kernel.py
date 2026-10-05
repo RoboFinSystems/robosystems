@@ -138,8 +138,11 @@ class StatementKernel:
         status_code=http_status.HTTP_403_FORBIDDEN,
         detail="Write operations (CREATE, MERGE, SET, DELETE) are not allowed on main graphs. "
         "The query endpoint is read-only for main graphs. Use the staging pipeline to load data:\n"
-        "1. Create file upload: POST /v1/graphs/{graph_id}/tables/{table_name}/files\n"
-        "2. Ingest to graph: POST /v1/graphs/{graph_id}/tables/ingest\n"
+        "1. Presign an upload: POST /v1/graphs/{graph_id}/operations/create-file-upload\n"
+        "2. Stage it: POST /v1/graphs/{graph_id}/operations/ingest-file\n"
+        "3. Load the graph: POST /v1/graphs/{graph_id}/operations/materialize\n"
+        "Entity graphs are written through the /extensions/{domain}/{graph_id}/operations/* "
+        "commands instead, then materialized.\n"
         "This ensures data integrity and enables pipeline benefits (audit, rollback, validation).\n"
         "Note: Subgraphs support write operations for scratch/workspace use (e.g. agent memory).",
       )

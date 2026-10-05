@@ -23,8 +23,8 @@ Every storage type lives in USER_DATA_BUCKET under a fixed prefix. The
     report-bundles/                  # Per-Report serialization artifacts
       {graph_id}/
         {report_id}/
-          g{generation_count}.tavi.json      # the anchor, stamped at publish
-          g{generation_count}.holon.jsonld   # derived on first download (so is .zip)
+          g{generation_count}.holon.jsonld   # the anchor, stamped at publish
+          g{generation_count}.tavi.json      # derived on first download (so is .zip)
 
     shared-repositories/             # Shared repository data
       databases/                     # Published databases (downloaded by replicas on boot)

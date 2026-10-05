@@ -7,7 +7,7 @@
       "name": "Company",
       "properties": [
         {"name": "identifier", "type": "STRING", "is_primary_key": true},
-        {"name": "name", "type": "STRING", "is_required": true},
+        {"name": "name", "type": "STRING", "nullable": false},
         {"name": "industry", "type": "STRING"},
         {"name": "location", "type": "STRING"},
         {"name": "founded_year", "type": "INT64"}
@@ -17,7 +17,7 @@
       "name": "Project",
       "properties": [
         {"name": "identifier", "type": "STRING", "is_primary_key": true},
-        {"name": "name", "type": "STRING", "is_required": true},
+        {"name": "name", "type": "STRING", "nullable": false},
         {"name": "status", "type": "STRING"},
         {"name": "budget", "type": "DOUBLE"},
         {"name": "start_date", "type": "STRING"},
@@ -29,7 +29,7 @@
       "name": "Person",
       "properties": [
         {"name": "identifier", "type": "STRING", "is_primary_key": true},
-        {"name": "name", "type": "STRING", "is_required": true},
+        {"name": "name", "type": "STRING", "nullable": false},
         {"name": "age", "type": "INT64"},
         {"name": "title", "type": "STRING"},
         {"name": "interests", "type": "STRING"},
