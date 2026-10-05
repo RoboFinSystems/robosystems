@@ -114,6 +114,9 @@ pass the graph id of an already-provisioned graph:
 DEMO_API_URL=https://<your-api-host> just demo-coffee-roaster kg…
 ```
 
+The synthetic Cascade demo loads the same way:
+`DEMO_API_URL=https://<your-api-host> just demo-roboledger kg…`.
+
 Three things differ off-local, all deliberate:
 
 - **Credentials and the demo-slot map** go to `.local/config.<host>.json`

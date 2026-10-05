@@ -25,7 +25,7 @@ from pathlib import Path
 from robosystems_client.clients import LedgerClient
 
 from examples._common.artifacts import render_report_artifacts
-from examples._common.config import require_cached_graph_id, require_config
+from examples._common.config import load_credentials, require_cached_graph_id
 from examples._common.sdk import latest_report_id, make_ledger_client
 
 DEMO_ROOT = Path(__file__).resolve().parent
@@ -33,7 +33,6 @@ OUTPUT_DIR = DEMO_ROOT / "output"
 STEM = "roboledger-demo"
 LABEL = "RoboLedger"
 
-GRAPH_SLOT = "roboledger_demo"
 DEMO_RECIPE = "just demo-roboledger"
 
 
@@ -62,7 +61,7 @@ def main() -> None:
     "graph_id",
     nargs="?",
     default=None,
-    help=f"Target graph id. Defaults to the cached {GRAPH_SLOT} entry.",
+    help="Target graph id. Defaults to the demo's cached graph.",
   )
   parser.add_argument(
     "--report-id",
@@ -71,8 +70,14 @@ def main() -> None:
   )
   args = parser.parse_args()
 
-  cfg = require_config()
-  graph_id = args.graph_id or require_cached_graph_id(cfg, GRAPH_SLOT, DEMO_RECIPE)
+  # Same target and per-target credentials file as main.py (DEMO_API_URL).
+  from .main import BASE_URL, CREDENTIALS_FILE, DEMO_NAME
+
+  cfg = load_credentials(CREDENTIALS_FILE)
+  if cfg is None:
+    raise SystemExit(f"Missing {CREDENTIALS_FILE} — run `just demo-user` first.")
+  cfg["base_url"] = BASE_URL
+  graph_id = args.graph_id or require_cached_graph_id(cfg, DEMO_NAME, DEMO_RECIPE)
   client = make_ledger_client(cfg)
   report_id = args.report_id or latest_report_id(client, graph_id)
 
