@@ -67,7 +67,11 @@ def test_plain_yaml_still_parses():
 
 @pytest.mark.unit
 def test_no_other_module_parses_yaml_directly():
-  pattern = re.compile(r"\byaml\.(safe_load|load|full_load|unsafe_load)\w*\(")
+  pattern = re.compile(
+    r"\byaml\.(safe_load|load|full_load|unsafe_load)\w*\("
+    r"|^\s*from\s+yaml\s+import\b.*\b(safe_)?load",
+    re.MULTILINE,
+  )
   offenders = sorted(
     str(path.relative_to(_REPO))
     for path in (_REPO / "robosystems").rglob("*.py")
