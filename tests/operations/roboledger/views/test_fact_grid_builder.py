@@ -236,6 +236,22 @@ class TestSummarizeByElement:
     assert summary["us-gaap:Revenues"]["max"] == 1500000
     assert summary["us-gaap:Cash"]["count"] == 1
 
+  def test_an_element_in_two_units_has_no_summary(self):
+    """A total of yuan and dollars is not a number."""
+    facts = [
+      _fact("us-gaap:Revenues", "Revenues", 1_023_670, "2026-03-31", unit="CNY"),
+      _fact("us-gaap:Revenues", "Revenues", 148_401, "2026-03-31", unit="USD"),
+      _fact("us-gaap:Revenues", "Revenues", 996_347, "2025-03-31", unit="CNY"),
+      _fact(
+        "us-gaap:CostOfRevenue", "CostOfRevenue", 598_285, "2025-03-31", unit="CNY"
+      ),
+    ]
+
+    summary = summarize_by_element(facts)
+
+    assert "us-gaap:Revenues" not in summary
+    assert summary["us-gaap:CostOfRevenue"]["count"] == 1
+
   def test_keyed_on_qname_not_local_name(self):
     """Two taxonomies can share a local name; qnames keep them apart."""
     facts = [

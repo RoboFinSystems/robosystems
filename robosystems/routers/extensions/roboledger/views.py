@@ -61,6 +61,7 @@ from robosystems.operations.roboledger.reads.reports import ANALYSIS_STATEMENT_T
 from robosystems.operations.roboledger.views import (
   BlockNotFoundError,
   FactGridBuilder,
+  FactGridTooBroadError,
   FilingRef,
   QueryError,
   ReportNotFoundError,
@@ -185,19 +186,22 @@ async def build_fact_grid_op(
 
   async def _runner():
     start_time = time.time()
-    fact_data, truncated = await query_fact_grid(
-      graph_id=graph_id,
-      elements=body.elements or None,
-      canonical_concepts=body.canonical_concepts or None,
-      periods=body.periods or None,
-      entity=body.entity,
-      entities=body.entities or None,
-      form=body.form,
-      fiscal_year=body.fiscal_year,
-      fiscal_period=body.fiscal_period,
-      period_type=body.period_type,
-      limit=body.limit,
-    )
+    try:
+      fact_data, truncated = await query_fact_grid(
+        graph_id=graph_id,
+        elements=body.elements or None,
+        canonical_concepts=body.canonical_concepts or None,
+        periods=body.periods or None,
+        entity=body.entity,
+        entities=body.entities or None,
+        form=body.form,
+        fiscal_year=body.fiscal_year,
+        fiscal_period=body.fiscal_period,
+        period_type=body.period_type,
+        limit=body.limit,
+      )
+    except FactGridTooBroadError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     builder = FactGridBuilder()
     fact_grid = builder.build(
@@ -335,6 +339,7 @@ async def financial_statement_analysis_op(
         qname=row.get("qname", ""),
         name=row.get("name", ""),
         value=row.get("value"),
+        unit=row.get("unit"),
         start_date=row.get("start_date"),
         end_date=row.get("end_date"),
         period_type=row.get("period_type"),

@@ -30,9 +30,12 @@ def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, flo
   `total` and `average` are emitted for duration elements only; a balance
   summed across periods is meaningless. Duration windows sharing a
   `period_end` (quarter and YTD) contribute only the narrowest one, so the
-  quarter is not double-counted; the facts list itself is unchanged.
+  quarter is not double-counted; the facts list itself is unchanged. An
+  element reported in more than one unit has no summary: no aggregate holds
+  across currencies.
   """
   summary: dict[str, dict[str, float]] = {}
+  units_by_element: dict[str, set[str]] = {}
 
   # (element, entity, period_end) → (period_start, value); the latest start
   # is the narrowest window ending that day. Instants have no period_start
@@ -44,6 +47,7 @@ def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, flo
     value = fact.get("value")
     if element is None or value is None:
       continue
+    units_by_element.setdefault(str(element), set()).add(str(fact.get("unit") or ""))
     key = (str(element), fact.get("entity_ticker"), fact.get("period_end"))
     start = str(fact.get("period_start") or "")
     if not start or fact.get("period_type") == "instant":
@@ -57,6 +61,8 @@ def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, flo
     by_element.setdefault(element, []).append(value)
 
   for element, values in by_element.items():
+    if len(units_by_element[element]) > 1:
+      continue
     stats: dict[str, float] = {"count": len(values)}
     if element not in instant_elements:
       stats["total"] = sum(values)

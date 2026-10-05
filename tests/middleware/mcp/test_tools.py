@@ -65,6 +65,52 @@ class TestBuildFactGridTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
+  async def test_a_query_too_broad_for_one_result_is_refused(self, mock_graph_client):
+    from robosystems.operations.roboledger.views import FactGridTooBroadError
+
+    tool = BuildFactGridTool(mock_graph_client)
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+      side_effect=FactGridTooBroadError(),
+    ):
+      result = await tool.execute(
+        {"elements": ["us-gaap:Assets"], "periods": ["2023-12-31"]}
+      )
+
+    assert result["error"] == "query_too_broad"
+    assert "Narrow it" in result["message"]
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_a_figure_in_two_units_is_named(self, mock_graph_client):
+    """Both rows come back, and the note says which units share a line."""
+    tool = BuildFactGridTool(mock_graph_client)
+    cny = {
+      "element_id": "us-gaap:Revenues",
+      "element_name": "Revenues",
+      "period_start": "2025-04-01",
+      "period_end": "2026-03-31",
+      "value": 1_023_670_000_000.0,
+      "unit": "CNY",
+      "entity_ticker": "BABA",
+    }
+    usd = {**cny, "value": 148_401_000_000.0, "unit": "USD"}
+
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=([cny, usd], False),
+    ):
+      result = await tool.execute(
+        {"elements": ["us-gaap:Revenues"], "period_type": "annual"}
+      )
+
+    assert len(result["data"]) == 2
+    assert "CNY, USD" in result["units_note"]
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
   async def test_a_ledger_refuses_selectors_only_a_shared_repository_has(
     self, mock_graph_client
   ):

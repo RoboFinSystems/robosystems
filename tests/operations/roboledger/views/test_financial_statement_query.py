@@ -303,6 +303,43 @@ class TestDeduplicateFacts:
       1_085_000_000
     ]
 
+  @pytest.mark.unit
+  def test_one_line_in_two_units_is_two_facts(self):
+    """Alibaba's FY2026 20-F tags each income-statement line in CNY and in
+    USD at the same precision. Keeping one per line mixed the two currencies
+    down the statement."""
+    cny = {
+      "qname": "us-gaap:CostOfRevenue",
+      "start_date": "2025-04-01",
+      "end_date": "2026-03-31",
+      "period_type": "duration",
+      "duration_type": "annual",
+      "value": 616_136_000_000,
+      "decimals": "-6",
+      "unit": "CNY",
+    }
+    usd = {**cny, "value": 89_321_000_000, "unit": "USD"}
+    assert {r["unit"] for r in deduplicate_facts([cny, usd])} == {"CNY", "USD"}
+    assert {r["unit"] for r in deduplicate_facts([usd, cny])} == {"CNY", "USD"}
+
+
+class TestProjectsUnit:
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  @pytest.mark.parametrize("selector", [{"ticker": "BABA"}, {"report_id": "rpt_abc"}])
+  async def test_unit_is_projected(self, mock_repository, selector):
+    """A value without its unit cannot be told from its translation."""
+    with patch(
+      "robosystems.operations.roboledger.views.financial_statement_query.get_graph_repository",
+      return_value=mock_repository,
+    ):
+      await query_financial_statement(
+        MOCK_GRAPH, statement_type="income_statement", **selector
+      )
+    query, _ = mock_repository.execute_query.call_args[0]
+    assert "(f)-[:FACT_HAS_UNIT]->(u:Unit)" in query
+    assert "u.value AS unit" in query
+
 
 class TestProjectsDecimals:
   @pytest.mark.asyncio

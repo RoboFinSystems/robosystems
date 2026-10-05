@@ -151,6 +151,9 @@ def _extract_column_aliases_from_cypher(cypher_query: str) -> list[str]:
 # cannot pin the instance. On hit the final chunk is flagged `truncated`.
 MAX_STREAMING_ROWS = 1_000_000
 
+# Rows one non-streaming result buffers before it stops, unflagged.
+MAX_BUFFERED_ROWS = 10_000
+
 
 def validate_cypher_query(cypher: str) -> None:
   """Validate a Cypher query for the ad-hoc query endpoint.
@@ -679,8 +682,7 @@ class LadybugService:
 
           # Non-streaming results are fully buffered, so the row cap is what
           # keeps a broad query from exhausting the instance's memory.
-          MAX_ROWS = 10000
-          while query_result.has_next() and len(rows) < MAX_ROWS:
+          while query_result.has_next() and len(rows) < MAX_BUFFERED_ROWS:
             row = query_result.get_next()
             if columns:
               row_list = list(row)
@@ -696,7 +698,7 @@ class LadybugService:
 
           # Abandoning a partially consumed result keeps its Arrow buffers
           # alive; closing releases them.
-          if len(rows) >= MAX_ROWS and hasattr(query_result, "close"):
+          if len(rows) >= MAX_BUFFERED_ROWS and hasattr(query_result, "close"):
             query_result.close()
 
           execution_time = (time.time() - start_time) * 1000

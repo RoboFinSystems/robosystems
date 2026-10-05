@@ -537,6 +537,11 @@ class TestCompactFact:
     }
 
   @pytest.mark.unit
+  def test_keeps_the_unit(self):
+    fact = compact_fact(_row("us-gaap:Revenues", "2026-03-31", unit="CNY"))
+    assert fact["unit"] == "CNY"
+
+  @pytest.mark.unit
   def test_keeps_the_canonical_concept_when_mapped(self):
     fact = compact_fact(
       _row("us-gaap:Revenues", "2024-12-31", canonical_concept="revenue")
@@ -695,3 +700,36 @@ class TestFinancialStatementAnalysisToolPeriods:
         {"statement_type": "income_statement", "ticker": "MMM"}
       )
     assert "rows_truncated" not in result
+
+
+class TestFinancialStatementAnalysisToolUnits:
+  @pytest.mark.unit
+  async def test_a_line_in_two_units_comes_back_once_per_unit_and_is_named(self):
+    """Alibaba's 20-F: every FY2026 line in CNY and in USD. Both rows come
+    back with their unit, and the note names the two."""
+    tool = FinancialStatementAnalysisTool(_make_client("sec"))
+    rows = [
+      _row("us-gaap:CostOfRevenue", "2026-03-31", 616_136_000_000.0, unit="CNY"),
+      _row("us-gaap:CostOfRevenue", "2026-03-31", 89_321_000_000.0, unit="USD"),
+      _row("us-gaap:CostOfRevenue", "2025-03-31", 598_285_000_000.0, unit="CNY"),
+    ]
+    with _shared_repo_patches(_RESOLVED_10K, rows):
+      result = await tool.execute(
+        {"statement_type": "income_statement", "ticker": "BABA"}
+      )
+    latest = [f for f in result["facts"] if f["end_date"] == "2026-03-31"]
+    assert {(f["unit"], f["value"]) for f in latest} == {
+      ("CNY", 616_136_000_000.0),
+      ("USD", 89_321_000_000.0),
+    }
+    assert "CNY, USD" in result["units_note"]
+
+  @pytest.mark.unit
+  async def test_one_unit_needs_no_note(self):
+    tool = FinancialStatementAnalysisTool(_make_client("sec"))
+    rows = [_row("us-gaap:Revenues", "2024-12-31", unit="USD")]
+    with _shared_repo_patches(_RESOLVED_10K, rows):
+      result = await tool.execute(
+        {"statement_type": "income_statement", "ticker": "MMM"}
+      )
+    assert "units_note" not in result
