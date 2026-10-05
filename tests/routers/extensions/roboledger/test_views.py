@@ -429,6 +429,27 @@ class TestBuildFactGridOperation:
     assert envelope.result["metadata"]["truncated"] is True  # type: ignore[index]
 
   @pytest.mark.unit
+  async def test_a_query_too_broad_for_one_result_is_a_400(self):
+    from robosystems.operations.roboledger.views import FactGridTooBroadError
+
+    with patch(
+      f"{MODULE}.query_fact_grid",
+      new_callable=AsyncMock,
+      side_effect=FactGridTooBroadError(),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await build_fact_grid_op(
+          body=_make_create_view_request(),
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "Narrow it" in exc_info.value.detail
+
+  @pytest.mark.unit
   async def test_internal_error_audited_and_propagated(self):
     """Any error from the underlying query bubbles up through the dispatcher."""
     body = _make_create_view_request()
@@ -586,6 +607,49 @@ class TestFinancialStatementAnalysisOp:
     assert result["resolved_report"]["form"] == "10-K"
     mock_resolve.assert_awaited_once()
     mock_query.assert_awaited_once()
+
+  @pytest.mark.unit
+  async def test_a_line_in_two_units_comes_back_once_per_unit(self):
+    """Each row says which unit its value is in, so a statement a filer tags
+    in two currencies cannot be read as one."""
+    body = FinancialStatementAnalysisRequest(
+      statement_type="income_statement", report_id="rpt_20f"
+    )
+    line = {
+      "qname": "us-gaap:CostOfRevenue",
+      "name": "CostOfRevenue",
+      "start_date": "2025-04-01",
+      "end_date": "2026-03-31",
+      "period_type": "duration",
+      "duration_type": "annual",
+      "decimals": "-6",
+    }
+    rows = [
+      {**line, "value": 616_136_000_000.0, "unit": "CNY"},
+      {**line, "value": 89_321_000_000.0, "unit": "USD"},
+    ]
+
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=True),
+      patch(
+        f"{MODULE}.query_financial_statement",
+        new_callable=AsyncMock,
+        return_value=rows,
+      ),
+    ):
+      envelope = await financial_statement_analysis_op(
+        body=body,
+        graph_id="sec",
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    facts = envelope.result["facts"]  # type: ignore[index]
+    assert {(f["unit"], f["value"]) for f in facts} == {
+      ("CNY", 616_136_000_000.0),
+      ("USD", 89_321_000_000.0),
+    }
 
   @pytest.mark.unit
   async def test_tenant_graph_with_report_id_skips_resolver(self):

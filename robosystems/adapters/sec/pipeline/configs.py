@@ -11,6 +11,10 @@ from robosystems.config.constants import SEC_PROCESS_BATCH_SIZE
 # XBRL filings began in 2009.
 SEC_START_YEAR = 2009
 
+# A failed SEC file is retried after this long, up to this many attempts.
+ERROR_RETRY_BACKOFF_SECONDS = 3600
+ERROR_RETRY_MAX_ATTEMPTS = 3
+
 # Tiered graph boundaries
 SEC_HISTORICAL_END_YEAR = 2023  # sec_historical: 2009-2023
 SEC_PRIMARY_START_YEAR = 2024  # sec (primary): 2024+

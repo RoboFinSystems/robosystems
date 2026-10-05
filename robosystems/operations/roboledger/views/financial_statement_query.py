@@ -49,6 +49,7 @@ async def query_financial_statement(
     period_props = ""
 
   period_match = f"(f)-[:FACT_HAS_PERIOD]->(p:Period{period_props})"
+  unit_match = "(f)-[:FACT_HAS_UNIT]->(u:Unit)"
 
   structure_match = (
     "(s:Structure {canonical_type: $statement_type})"
@@ -64,6 +65,7 @@ async def query_financial_statement(
         + "-[:FACT_HAS_ELEMENT]->(e:Element)"
       ),
       period_match,
+      unit_match,
       factset_match,
       structure_match,
     ]
@@ -76,6 +78,7 @@ async def query_financial_statement(
         + "-[:FACT_HAS_ELEMENT]->(e:Element)"
       ),
       period_match,
+      unit_match,
       factset_match,
       structure_match,
     ]
@@ -94,7 +97,7 @@ async def query_financial_statement(
     "e.name AS name, f.numeric_value AS value, "
     "p.start_date AS start_date, p.end_date AS end_date, "
     "p.period_type AS period_type, p.duration_type AS duration_type, "
-    "f.decimals AS decimals "
+    "f.decimals AS decimals, u.value AS unit "
     "ORDER BY end_date DESC "
     "LIMIT $limit"
   )
@@ -110,7 +113,8 @@ def deduplicate_facts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
   Keyed on both period ends because an XBRL duration is identified by
   (start, end): Q4 and FY, or two stubs, can share an end date. ``start_date``
-  is NULL for instants, whose identity is their end date.
+  is NULL for instants, whose identity is their end date. Unit is in the key
+  too: a line tagged in two currencies is two facts, not one tagged twice.
   """
   return keep_most_precise(
     rows,
@@ -120,5 +124,6 @@ def deduplicate_facts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
       row.get("end_date", "") or "",
       row.get("period_type", "") or "",
       row.get("duration_type", "") or "",
+      row.get("unit", "") or "",
     ),
   )

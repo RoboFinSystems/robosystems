@@ -5,11 +5,16 @@ so the same reads serve either graph_id. Transactional lookups against the
 extensions OLTP database live in `reads/`.
 """
 
+from robosystems.operations.roboledger.views.fact_dedup import (
+  mixed_units_note,
+  units_reported_together,
+)
 from robosystems.operations.roboledger.views.fact_grid_builder import (
   FactGridBuilder,
   summarize_by_element,
 )
 from robosystems.operations.roboledger.views.fact_query import (
+  FactGridTooBroadError,
   period_scope_hint,
   query_fact_grid,
   shared_only_selectors,
@@ -43,6 +48,7 @@ from robosystems.operations.roboledger.views.information_blocks import (
 __all__ = [
   "BlockNotFoundError",
   "FactGridBuilder",
+  "FactGridTooBroadError",
   "FilingRef",
   "QueryError",
   "ReportNotFoundError",
@@ -51,6 +57,7 @@ __all__ = [
   "ReportTooLargeError",
   "deduplicate_facts",
   "filing_info",
+  "mixed_units_note",
   "period_scope_hint",
   "query_describe_filing",
   "query_disclosures",
@@ -65,4 +72,5 @@ __all__ = [
   "resolved_report_info",
   "shared_only_selectors",
   "summarize_by_element",
+  "units_reported_together",
 ]

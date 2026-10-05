@@ -3,7 +3,8 @@
 Deliberately cheap — no deep validation, so it stays fast under load. Shared
 replicas return 503 until their databases finish warming up (see the warmup
 task in ``robosystems/graph_api/app.py``), keeping the ALB from routing traffic
-to an instance that would answer from cold disk.
+to an instance that would answer from cold disk. A replica also returns 503
+once it has refused every query for lack of memory for ``MEMORY_LATCH_SECONDS``.
 """
 
 import os
@@ -12,10 +13,16 @@ import threading
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from robosystems.graph_api.core.admission_control import get_admission_controller
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.logger import logger
 
 router = APIRouter(tags=["Cluster Health"])
+
+# A replica this long under the admission floor will not recover: rejected
+# queries evict nothing. Minutes, not one reading, because its replacement
+# takes many minutes to load.
+MEMORY_LATCH_SECONDS = 300
 
 # Per-process: each worker process tracks its own warmup.
 _replica_ready = False
@@ -49,7 +56,8 @@ async def health_check(
   This is a lightweight check that doesn't perform deep validation.
 
   For shared replicas, returns 503 until databases are fully warmed up.
-  This prevents ALB from routing traffic during the warmup period.
+  This prevents ALB from routing traffic during the warmup period. A replica
+  held under the admission floor returns 503 too, so the group replaces it.
 
   Used by:
   - AWS Application Load Balancer health checks
@@ -66,6 +74,21 @@ async def health_check(
         "message": "Replica warming up - not ready for traffic",
       },
     )
+
+  if os.getenv("LBUG_ROLE") == "replica":
+    starved_seconds = get_admission_controller().memory_starved_seconds()
+    if starved_seconds >= MEMORY_LATCH_SECONDS:
+      logger.warning(
+        f"REPLICA MEMORY LATCH: under the admission floor for "
+        f"{starved_seconds:.0f}s - returning 503"
+      )
+      return JSONResponse(
+        status_code=503,
+        content={
+          "status": "memory_latched",
+          "message": "Replica out of memory headroom - not serving queries",
+        },
+      )
 
   from robosystems.graph_api.core.migration_service import is_migration_in_progress
 

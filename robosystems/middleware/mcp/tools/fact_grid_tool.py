@@ -15,10 +15,13 @@ from robosystems.models.api.views.view_config import (
 )
 from robosystems.operations.roboledger.views import (
   FactGridBuilder,
+  FactGridTooBroadError,
+  mixed_units_note,
   period_scope_hint,
   query_fact_grid,
   shared_only_selectors,
   summarize_by_element,
+  units_reported_together,
 )
 
 
@@ -57,6 +60,7 @@ class BuildFactGridTool:
 - Deduplicated facts with element qnames, names, values, periods, units, and entity ticker/name — one record per fact, not a pivot table
 - Only consolidated totals (dimensional breakdowns excluded)
 - `truncated: true` when more facts matched than `limit` allowed; the ones returned are the most recent by period
+- A figure a filer reports in two units (its own currency and a US-dollar translation) comes back once per unit, and `units_note` says so — never put two units in one series
 
 **NOTES:**
 On shared repositories (e.g. SEC) entity or entities is REQUIRED — those graphs host thousands of filers, so an unscoped query returns an arbitrary slice of arbitrary companies. On a tenant graph the URL already scopes to one entity, so the filter is optional there.
@@ -119,7 +123,7 @@ For income statement items (revenue, net income), always specify period_type='an
           },
           "include_summary": {
             "type": "boolean",
-            "description": "Include per-element statistics: count, min, max for every element; total and average for duration elements only (instants omit them — a balance summed across periods is not a balance).",
+            "description": "Include per-element statistics: count, min, max for every element; total and average for duration elements only (instants omit them — a balance summed across periods is not a balance). An element reported in more than one unit has no summary.",
             "default": False,
           },
           "limit": {
@@ -210,19 +214,22 @@ For income statement items (revenue, net income), always specify period_type='an
 
     start_time = time.time()
 
-    fact_data, truncated = await query_fact_grid(
-      graph_id=self.client.graph_id,
-      elements=elements or None,
-      canonical_concepts=canonical_concepts or None,
-      periods=periods or None,
-      entity=entity,
-      entities=entities or None,
-      form=form,
-      fiscal_year=fiscal_year,
-      fiscal_period=fiscal_period,
-      period_type=period_type,
-      limit=limit,
-    )
+    try:
+      fact_data, truncated = await query_fact_grid(
+        graph_id=self.client.graph_id,
+        elements=elements or None,
+        canonical_concepts=canonical_concepts or None,
+        periods=periods or None,
+        entity=entity,
+        entities=entities or None,
+        form=form,
+        fiscal_year=fiscal_year,
+        fiscal_period=fiscal_period,
+        period_type=period_type,
+        limit=limit,
+      )
+    except FactGridTooBroadError as exc:
+      return {"error": "query_too_broad", "message": str(exc)}
 
     row_configs = [ViewAxisConfig(**r) for r in rows] if rows else []
     column_configs = [ViewAxisConfig(**c) for c in columns] if columns else []
@@ -267,6 +274,17 @@ For income statement items (revenue, net income), always specify period_type='an
         )
       ),
     }
+
+    if mixed_units := units_reported_together(
+      fact_grid.facts,
+      line=lambda fact: (
+        fact.get("element_id"),
+        fact.get("period_start"),
+        fact.get("period_end"),
+        fact.get("entity_ticker") or fact.get("entity_name"),
+      ),
+    ):
+      response["units_note"] = mixed_units_note(mixed_units)
 
     if include_summary and fact_grid.facts:
       response["summary"] = summarize_by_element(fact_grid.facts)

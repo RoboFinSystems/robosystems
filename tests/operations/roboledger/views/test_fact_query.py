@@ -19,6 +19,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from robosystems.operations.roboledger.views.fact_query import (
+  ENGINE_ROW_CAP,
+  FactGridTooBroadError,
   _deduplicate_fact_rows,
   _is_ticker,
   _safe_str,
@@ -472,6 +474,31 @@ class TestQueryFactGrid:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
+  async def test_a_result_at_the_engine_row_cap_is_refused(self, mock_repository):
+    """The engine stops buffering at its cap, so a result that long is an
+    arbitrary slice of the matches, cut before dedup and sort."""
+    mock_repository.execute_query.return_value = [
+      {
+        "element_id": "us-gaap:Assets",
+        "period_end": "2025-12-31",
+        "value": 1.0,
+        "unit": "USD",
+        "entity_ticker": f"T{i}",
+      }
+      for i in range(ENGINE_ROW_CAP)
+    ]
+    with patch(PATCH_REPO, return_value=mock_repository):
+      with pytest.raises(FactGridTooBroadError):
+        await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"], limit=5000)
+
+  @pytest.mark.unit
+  def test_engine_row_cap_matches_the_graph_api(self):
+    from robosystems.graph_api.core.ladybug.service import MAX_BUFFERED_ROWS
+
+    assert ENGINE_ROW_CAP == MAX_BUFFERED_ROWS
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
   async def test_limit_not_applied_in_cypher(self, mock_repository):
     """ORDER BY + LIMIT forces a full materialize-then-sort in LadybugDB
     (25s timeout over 269k facts), so the limit is a Python-side bound."""
@@ -635,6 +662,25 @@ class TestDeduplicateFactRows:
     assert [r["value"] for r in _deduplicate_fact_rows([narrative, statement])] == [
       1_085_000_000
     ]
+
+  @pytest.mark.unit
+  def test_one_figure_in_two_units_is_two_facts(self):
+    """Alibaba FY2026 revenue: 1,023,670M CNY and its 148,401M USD
+    translation share the element, period, entity and precision. Dropping
+    either leaves a series that changes currency from year to year."""
+    cny = {
+      "element_id": "us-gaap:Revenues",
+      "period_start": "2025-04-01",
+      "period_end": "2026-03-31",
+      "duration_type": "annual",
+      "entity_ticker": "BABA",
+      "value": 1_023_670_000_000,
+      "decimals": "-6",
+      "unit": "CNY",
+    }
+    usd = {**cny, "value": 148_401_000_000, "unit": "USD"}
+    assert {r["unit"] for r in _deduplicate_fact_rows([cny, usd])} == {"CNY", "USD"}
+    assert {r["unit"] for r in _deduplicate_fact_rows([usd, cny])} == {"CNY", "USD"}
 
 
 class TestProjectsDecimals:

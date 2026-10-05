@@ -3,6 +3,10 @@
 A filer often reports one figure twice under the same element and period: on
 the statement face and, rounded, in the narrative. XBRL's rule for consistent
 duplicates is to use the most precise value; this module applies it.
+
+A duplicate shares its unit. The same figure in a second unit (a foreign
+filer's own currency beside a dollar translation) is another fact, so callers
+put the unit in their key.
 """
 
 from collections.abc import Callable, Hashable
@@ -54,3 +58,28 @@ def keep_most_precise(
       ranks[slot] = row_rank
       deduped[slot] = row
   return deduped
+
+
+def units_reported_together(
+  rows: list[dict[str, Any]], line: Callable[[dict[str, Any]], Hashable]
+) -> list[str]:
+  """The units of every ``line(row)`` that is reported in more than one,
+  sorted; empty when each line has a single unit."""
+  units_by_line: dict[Hashable, set[str]] = {}
+  for row in rows:
+    unit = row.get("unit")
+    if unit:
+      units_by_line.setdefault(line(row), set()).add(str(unit))
+  mixed: set[str] = set()
+  for units in units_by_line.values():
+    if len(units) > 1:
+      mixed |= units
+  return sorted(mixed)
+
+
+def mixed_units_note(units: list[str]) -> str:
+  """What a reader must know when ``units_reported_together`` found any."""
+  return (
+    f"Some figures are reported in more than one unit ({', '.join(units)}); "
+    "each fact carries `unit`. Compare and total within one unit only."
+  )

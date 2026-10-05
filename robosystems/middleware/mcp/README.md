@@ -134,7 +134,9 @@ Require `roboledger` in `schema_extensions`. These read LadybugDB (OLAP).
 `financial-statement-analysis` resolves the latest relevant SEC filing when no
 `report_id` is given (ticker and form-code resolution live in
 `adapters/sec/mcp/report_resolver.py`), and deduplicates facts that appear in
-multiple filings as comparative periods. It answers with the columns a filing
+multiple filings as comparative periods. A line a filer tags in two units (its
+own currency and a dollar translation) stays two facts, each with its `unit`.
+It answers with the columns a filing
 presents, not everything its hypercube holds: an annual form defaults the
 period filter to `annual` (a 10-K's statement hypercube also carries the
 quarterly figures from its notes), `periods` caps the distinct end dates kept

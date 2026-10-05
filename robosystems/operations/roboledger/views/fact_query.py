@@ -31,6 +31,23 @@ from robosystems.operations.roboledger.views.fact_dedup import (
 
 _INVALID_SCHEMA_NAME = "3F000"
 
+# The Graph API's buffered-result cap (``MAX_BUFFERED_ROWS``). A result this
+# long is an arbitrary slice of the matches, cut before dedup and sort.
+ENGINE_ROW_CAP = 10_000
+
+
+class FactGridTooBroadError(ValueError):
+  """The query matched more facts than one graph result returns."""
+
+  def __init__(self) -> None:
+    super().__init__(
+      f"The query matched {ENGINE_ROW_CAP:,} or more facts before "
+      "deduplication, more than one result returns, so any answer would be an "
+      "arbitrary part of them. Narrow it: fewer entities or elements, or a "
+      "tighter period filter."
+    )
+
+
 # Pre-compiled patterns for inline Cypher node filter sanitization.
 _SAFE_STR_RE = re.compile(r"[\w:\-]+")
 _TICKER_RE = re.compile(r"[A-Za-z][A-Za-z0-9.\-]{0,9}")
@@ -212,14 +229,15 @@ _NOT_A_SCHEDULE_FACT = (
 def _deduplicate_fact_rows(
   rows: list[dict[str, Any]], standing: dict[str, tuple] | None = None
 ) -> list[dict[str, Any]]:
-  """Dedup on ``(element, period_start, period_end, entity)``, then sort by
-  ``period_end`` descending.
+  """Dedup on ``(element, period_start, period_end, entity, unit)``, then sort
+  by ``period_end`` descending.
 
   Both period ends are in the key because a 10-Q reports the same element for
   the 3-month and 9-month windows ending on the same day; entity is in it so
-  two filers never collapse into one row. The most precise fact wins, unless
-  ``standing`` (a tenant's report state per fact) says which report is of
-  record: that decides first, and precision only breaks its ties.
+  two filers never collapse into one row, and unit so a figure and its
+  translation into another currency both survive. The most precise fact
+  wins, unless ``standing`` (a tenant's report state per fact) says which
+  report is of record: that decides first, and precision only breaks its ties.
   """
 
   def rank(row: dict[str, Any]) -> tuple:
@@ -235,6 +253,7 @@ def _deduplicate_fact_rows(
       row.get("period_start", ""),
       row.get("period_end", ""),
       row.get("entity_ticker") or row.get("entity_name", ""),
+      row.get("unit") or "",
     ),
     rank=rank,
   )
@@ -268,7 +287,8 @@ async def query_fact_grid(
   and ``entity_name`` — entity identity always comes back, since without it
   facts from different filers are indistinguishable. Rows are deduplicated
   and sorted by ``period_end`` descending; ``truncated`` is True when
-  ``limit`` dropped rows.
+  ``limit`` dropped rows. Raises ``FactGridTooBroadError`` when the graph
+  result itself was cut short.
   """
   parameters: dict[str, Any] = {}
 
@@ -361,6 +381,8 @@ async def query_fact_grid(
 
   if not results:
     return [], False
+  if len(results) >= ENGINE_ROW_CAP:
+    raise FactGridTooBroadError
 
   standing = None
   fact_ids = [row["fact_id"] for row in results if row.get("fact_id")]

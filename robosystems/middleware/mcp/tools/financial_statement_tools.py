@@ -22,7 +22,9 @@ from robosystems.operations.roboledger.reads.reports import (
 )
 from robosystems.operations.roboledger.views import (
   deduplicate_facts,
+  mixed_units_note,
   query_financial_statement,
+  units_reported_together,
 )
 
 from .base_tool import BaseTool
@@ -96,6 +98,7 @@ def compact_fact(row: dict[str, Any]) -> dict[str, Any]:
     "qname": qname or None,
     "name": name,
     "value": row.get("value"),
+    "unit": row.get("unit"),
     "start_date": row.get("start_date"),
     "end_date": row.get("end_date"),
     "period_type": row.get("period_type"),
@@ -266,9 +269,12 @@ class FinancialStatementAnalysisTool(BaseTool):
 - `ticker` / `report_id` — which one is required depends on the graph; see NOTES
 
 **RETURNS:**
-- Deduplicated facts (canonical_concept, qname, value, start_date / end_date,
-  period_type, duration_type; null fields omitted; `name` only when it is a
-  label rather than the qname's local part) ordered by end_date DESC
+- Deduplicated facts (canonical_concept, qname, value, unit, start_date /
+  end_date, period_type, duration_type; null fields omitted; `name` only when
+  it is a label rather than the qname's local part) ordered by end_date DESC
+- A line a filer reports in two units (its own currency and a US-dollar
+  translation) comes back once per unit, and `units_note` says so — read one
+  unit down the statement, never a mix
 - `periods` — the period keys the facts span, newest first, and
   `periods_omitted` when older end dates were cut by the cap
 - resolved_report info when auto-resolution was used, with `links` on a shared repository: `viewer` opens the filing in the xbrlkit viewer — give the user that URL to show the filing — beside `holon`, `tavi`, `edgar`
@@ -413,6 +419,15 @@ class FinancialStatementAnalysisTool(BaseTool):
       "facts": facts,
       "fact_count": len(facts),
     }
+    if mixed_units := units_reported_together(
+      facts,
+      line=lambda fact: (
+        fact.get("qname"),
+        fact.get("start_date"),
+        fact.get("end_date"),
+      ),
+    ):
+      result["units_note"] = mixed_units_note(mixed_units)
     if omitted:
       result["periods_omitted"] = omitted
       result["periods_tip"] = (

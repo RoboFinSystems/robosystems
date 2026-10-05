@@ -47,6 +47,11 @@ SIGTERM handler stops the loop and attempts a best-effort flush; if the two-minu
 spot window allows, filings are consolidated and marked success, and if it does
 not, the cache covers them on the next run. Nothing is lost either way.
 
+**A filing that ends the run.** A run that dies leaves its batch `processing`,
+and the next run returns it to `pending`. The filing that was in flight (the
+last one started, with no cached result) is the one counted: after three such
+runs it becomes `error`, so the quarter moves on without it.
+
 **Public artifacts.** While the model is in hand, the processor also writes
 the filing's portable representations to the public-data bucket, in the
 folder its externalized text blocks use (`{year}/{cik}/{accession}/`): the

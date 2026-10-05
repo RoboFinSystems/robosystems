@@ -37,7 +37,12 @@ from robosystems.dagster.jobs.shared_repository import (
   shared_replicas_refresh_job,
 )
 
-from .configs import SEC_HISTORICAL_FORM_TYPES, SEC_PRIMARY_START_YEAR
+from .configs import (
+  ERROR_RETRY_BACKOFF_SECONDS,
+  ERROR_RETRY_MAX_ATTEMPTS,
+  SEC_HISTORICAL_FORM_TYPES,
+  SEC_PRIMARY_START_YEAR,
+)
 from .jobs import (
   sec_current_reports_job,
   sec_download_job,
@@ -51,10 +56,6 @@ from .jobs import (
   sec_process_job,
   sec_stage_job,
 )
-
-# A failed SEC file is retried after this long, up to this many attempts.
-ERROR_RETRY_BACKOFF_SECONDS = 3600
-ERROR_RETRY_MAX_ATTEMPTS = 3
 
 
 def requeue_failed_files(session, quarter: str | None = None) -> int:

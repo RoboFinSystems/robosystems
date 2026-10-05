@@ -128,7 +128,10 @@ class CreateViewRequest(BaseModel):
   )
   include_summary: bool = Field(
     default=False,
-    description="Include summary statistics per element",
+    description=(
+      "Include summary statistics per element. An element reported in more "
+      "than one unit has none."
+    ),
   )
   limit: int = Field(
     default=DEFAULT_FACT_LIMIT,

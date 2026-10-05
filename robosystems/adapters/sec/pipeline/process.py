@@ -3,6 +3,7 @@
 import gc
 import signal
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from dagster import (
@@ -32,7 +33,56 @@ from robosystems.config.storage.shared import (
 from robosystems.dagster.resources import DatabaseResource, S3Resource
 from robosystems.models.core import SourceFile
 
-from .configs import SECProcessConfig, sec_quarter_partitions
+from .configs import (
+  ERROR_RETRY_MAX_ATTEMPTS,
+  SECProcessConfig,
+  sec_quarter_partitions,
+)
+
+
+def recover_stale_processing(
+  session, quarter_prefix: str, finished: Callable[[SourceFile], bool]
+) -> tuple[int, SourceFile | None]:
+  """Return the files a dead run left ``processing`` to ``pending``.
+
+  The one started last is the one the run died on, unless ``finished`` says
+  it completed. Once it has ended ``ERROR_RETRY_MAX_ATTEMPTS`` runs it becomes
+  ``error`` instead of failing every run after. Only it is judged: the rest
+  of its batch carries the same attempt count and did nothing wrong. Safe only
+  because the sensor runs one worker per quarter and a run takes one filing at
+  a time: with either gone, "started last" no longer names the one in flight.
+
+  Returns (files reset, the file set aside or None). Commits.
+  """
+  stale = (
+    session.query(SourceFile)
+    .filter(
+      and_(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "processing",
+        SourceFile.partition_key.like(f"{quarter_prefix}%"),
+      )
+    )
+    .all()
+  )
+  if not stale:
+    return 0, None
+
+  in_flight = max(
+    stale, key=lambda sf: (sf.last_attempt_at is not None, sf.last_attempt_at)
+  )
+  set_aside = None
+  if in_flight.attempts >= ERROR_RETRY_MAX_ATTEMPTS and not finished(in_flight):
+    set_aside = in_flight
+    in_flight.status = "error"
+    in_flight.error_reason = (
+      f"{in_flight.attempts} process runs ended without finishing this filing"
+    )
+  for sf in stale:
+    if sf is not set_aside:
+      sf.status = "pending"
+  session.commit()
+  return len(stale) - (set_aside is not None), set_aside
 
 
 @asset(
@@ -82,27 +132,28 @@ def sec_processed_filings(
   # SourceFile.partition_key is "YYYY-QN_cik_accession".
   quarter_prefix = f"{year}-Q{quarter}_"
 
-  # Recover files a crashed run left "processing". Safe only because the
-  # sensor runs one worker per quarter.
+  def finished(sf: SourceFile) -> bool:
+    """Whether a file left ``processing`` has cached output, so the run died
+    after it. A check that fails counts as finished: no file is set aside on
+    a guess. With the cache off there is nothing to check, and the one
+    started last is taken as unfinished."""
+    if not config.enable_cache:
+      return False
+    cache_key = get_cache_key(DataSourceType.SEC, partition_date, sf.id)
+    try:
+      return cache_exists(s3.client, processed_bucket, cache_key)
+    except Exception as e:
+      context.log.warning(f"Cache check failed for {sf.partition_key}: {e}")
+      return True
+
   with db.get_session() as session:
-    stale_processing = (
-      session.query(SourceFile)
-      .filter(
-        and_(
-          SourceFile.graph_id == "sec",
-          SourceFile.status == "processing",
-          SourceFile.partition_key.like(f"{quarter_prefix}%"),
-        )
+    reset, set_aside = recover_stale_processing(session, quarter_prefix, finished)
+    if reset:
+      context.log.info(f"Reset {reset} stale 'processing' files to 'pending'")
+    if set_aside is not None:
+      context.log.error(
+        f"Set aside {set_aside.partition_key}: {set_aside.error_reason}"
       )
-      .all()
-    )
-    if stale_processing:
-      context.log.info(
-        f"Resetting {len(stale_processing)} stale 'processing' files to 'pending'"
-      )
-      for sf in stale_processing:
-        sf.status = "pending"
-      session.commit()
 
   with db.get_session() as session:
     pending_files = (

@@ -733,6 +733,14 @@ class AnalyticalStatementFactRow(BaseModel):
   qname: str
   name: str
   value: float | None = None
+  unit: str | None = Field(
+    None,
+    description=(
+      "The fact's unit, e.g. `USD` or `USD/shares`. A line a filer reports in "
+      "two units (its own currency and a US-dollar translation) comes back "
+      "once per unit."
+    ),
+  )
   start_date: str | None = None
   end_date: str | None = None
   period_type: str | None = None
