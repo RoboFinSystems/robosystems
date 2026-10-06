@@ -37,8 +37,8 @@ from robosystems.operations.roboledger.commands._guards import (
   rule_summary as _rule_summary,
 )
 from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
   owner_entity_id,
-  resolve_entity_id,
 )
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
@@ -147,7 +147,7 @@ def create_schedule(
 
   Raises `ValueError` for validation failures (mapped to 422).
   """
-  entity_id = resolve_entity_id(session, entity_id)
+  entity_id = ensure_entity_id(session, entity_id)
   _validate_element_references(session, body)
   service = ScheduleService()
   et = EntryTemplate(

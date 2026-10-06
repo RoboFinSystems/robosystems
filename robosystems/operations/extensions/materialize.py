@@ -1118,7 +1118,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       AND rd.source_graph_id IS NULL
     UNION ALL
     -- Shared reports belong to the linked entity for their source company:
-    -- the row keyed to that company, else the one from before rows were keyed
+    -- the row keyed to that company, else the one from before rows were
+    -- keyed. A report with no facts to name the company takes the sending
+    -- graph's row.
     SELECT
       e.id                            AS src,
       rd.id                           AS dst
@@ -1128,12 +1130,16 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       ON e.source = 'linked'
       AND (e.metadata->>'source_graph_id') = rd.source_graph_id
       AND ((e.metadata->>'source_entity_id') = sent.entity_id
-           OR (e.metadata->>'source_entity_id') IS NULL)
+           OR (e.metadata->>'source_entity_id') IS NULL
+           OR sent.entity_id IS NULL)
     WHERE rd.generation_status = 'published'
       AND rd.source_graph_id IS NOT NULL
     QUALIFY row_number() OVER (
       PARTITION BY rd.id
-      ORDER BY ((e.metadata->>'source_entity_id') IS NULL), e.id
+      ORDER BY
+        ((e.metadata->>'source_entity_id') IS NOT DISTINCT FROM sent.entity_id)
+          DESC,
+        e.id
     ) = 1
   """
 

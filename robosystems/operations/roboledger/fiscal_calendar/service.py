@@ -25,8 +25,8 @@ from robosystems.models.extensions.roboledger.fiscal_calendar import (
 )
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.operations.roboledger.entity_scope import (
-  NoEntityError,
-  resolve_entity_id,
+  ensure_entity_id,
+  find_entity_id,
 )
 
 from .periods import (
@@ -111,8 +111,9 @@ class AdvanceSequenceError(FiscalCalendarError):
 
 
 def _scope(session: Session, entity_id: str | None) -> str:
-  """The entity a call is about: the one it names, else the group parent."""
-  return entity_id or resolve_entity_id(session)
+  """The entity a calendar is being set up for: the one named, else the group
+  parent, which a graph created without an entity gets here."""
+  return entity_id or ensure_entity_id(session)
 
 
 class FiscalCalendarService:
@@ -124,11 +125,9 @@ class FiscalCalendarService:
   ) -> FiscalCalendar | None:
     """The entity's calendar; None before it is initialized, or on a graph
     with no entity yet."""
+    entity_id = entity_id or find_entity_id(session)
     if entity_id is None:
-      try:
-        entity_id = resolve_entity_id(session)
-      except NoEntityError:
-        return None
+      return None
     return (
       session.query(FiscalCalendar)
       .filter(
@@ -161,7 +160,8 @@ class FiscalCalendarService:
     """
     from robosystems.operations.locking import bounded_lock_wait
 
-    entity_id = _scope(session, entity_id)
+    # No entity means no calendar: the query below finds none and says so.
+    entity_id = entity_id or find_entity_id(session)
     session.flush()
     with bounded_lock_wait(
       session,

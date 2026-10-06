@@ -1,6 +1,8 @@
-"""Business entities; one per graph today, with ``parent_entity_id`` for a
-future hierarchy. Connector-sourced rows are populated from CompanyInfo;
-native rows are user-edited."""
+"""Business entities. A graph is a reporting group: one group parent
+(``is_parent``), the subsidiaries under it (``parent_entity_id``), each
+keeping its own books, and ``linked`` rows for other graphs' companies
+received with a shared report. Connector-sourced rows are populated from
+CompanyInfo; native rows are user-edited."""
 
 from datetime import UTC, datetime
 

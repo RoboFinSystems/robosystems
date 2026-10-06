@@ -11,11 +11,12 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.extensions import Element
+from robosystems.models.extensions.roboledger import COA_SOURCES
 from robosystems.operations.locking import acquire_shared_period_fence
 from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 from robosystems.operations.roboledger.entity_scope import (
+  find_entity_id,
   is_group_parent,
-  resolve_entity_id,
 )
 
 _LIBRARY_SEEDER = "library-seeder"
@@ -144,14 +145,17 @@ def closed_periods(
 
   The one statement of the rule: a month on or before ``closed_through``, or
   one whose ``FiscalPeriod`` row is ``closed``. Takes no lock; writers go
-  through `assert_period_not_closed`, which fences first.
+  through `assert_period_not_closed`, which fences first. A graph with no
+  entity has no books to have closed.
   """
   first_date_by_month: dict[str, date] = {}
   for posting_date in sorted(d for d in dates if d is not None):
     first_date_by_month.setdefault(f"{posting_date:%Y-%m}", posting_date)
   if not first_date_by_month:
     return []
-  entity_id = entity_id or resolve_entity_id(session)
+  entity_id = entity_id or find_entity_id(session)
+  if entity_id is None:
+    return []
   closed_through = session.execute(
     text(
       "SELECT closed_through_period FROM fiscal_calendar "
@@ -203,19 +207,23 @@ class AccountOutsideEntityChartError(ValueError):
     )
 
 
+# An account as `reads.accounts.coa_element_clause` defines one: an element in
+# a chart, or a synced one filed under no taxonomy at all.
 _ACCOUNTS_OUTSIDE_ENTITY_CHART = text("""
   SELECT e.id, e.code, e.name,
          EXISTS (
            SELECT 1 FROM entity_taxonomies owner
-           WHERE owner.taxonomy_id = t.id AND owner.basis = 'chart_of_accounts'
+           WHERE owner.taxonomy_id = e.taxonomy_id
+             AND owner.basis = 'chart_of_accounts'
          ) AS owned
   FROM elements e
-  JOIN taxonomies t
-    ON t.id = e.taxonomy_id AND t.taxonomy_type = 'chart_of_accounts'
+  LEFT JOIN taxonomies t ON t.id = e.taxonomy_id
   WHERE e.id = ANY(:element_ids)
+    AND e.source = ANY(:coa_sources)
+    AND (e.taxonomy_id IS NULL OR t.taxonomy_type = 'chart_of_accounts')
     AND NOT EXISTS (
       SELECT 1 FROM entity_taxonomies own
-      WHERE own.taxonomy_id = t.id
+      WHERE own.taxonomy_id = e.taxonomy_id
         AND own.basis = 'chart_of_accounts'
         AND own.entity_id = :entity_id
     )
@@ -228,12 +236,17 @@ def _accounts_outside_entity_chart(
 ) -> list[tuple[str, str | None, str | None]]:
   """The chart accounts among ``element_ids`` that are not ``entity_id``'s.
 
-  A chart linked to no entity is the group parent's. Anything that is not a
-  chart account (a library concept posted to directly) is nobody's and passes.
+  An account in no entity's chart (a chart linked to no entity, a synced
+  account under no chart) is the group parent's. Anything that is not an
+  account (a library concept posted to directly) is nobody's and passes.
   """
   rows = session.execute(
     _ACCOUNTS_OUTSIDE_ENTITY_CHART,
-    {"element_ids": element_ids, "entity_id": entity_id},
+    {
+      "element_ids": element_ids,
+      "entity_id": entity_id,
+      "coa_sources": list(COA_SOURCES),
+    },
   ).all()
   if not rows:
     return []

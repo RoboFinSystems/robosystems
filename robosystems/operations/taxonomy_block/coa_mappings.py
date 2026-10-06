@@ -100,32 +100,35 @@ def chart_owner_links():
   )
 
 
-def entity_chart_id(session: Session, entity_id: str | None) -> str | None:
-  """The active chart of accounts ``entity_id`` keeps its books in: the
-  earliest one linked to it.
+def _entity_charts(
+  session: Session, entity_id: str | None, chart_id: ColumnElement[str]
+) -> ColumnElement[bool]:
+  """Predicate for the charts that are ``entity_id``'s, over a chart id column.
 
   A chart linked to no entity is the group parent's, which covers a chart
   from before charts were linked and a graph with no entity yet
   (``entity_id=None``). It is never a subsidiary's.
   """
-  active = select(Taxonomy.id).where(
-    Taxonomy.taxonomy_type == CHART_TAXONOMY_TYPE, Taxonomy.is_active.is_(True)
-  )
   links = chart_owner_links().subquery()
-  if entity_id is not None:
-    owned = session.execute(
-      active.where(
-        Taxonomy.id.in_(
-          select(links.c.taxonomy_id).where(links.c.entity_id == entity_id)
-        )
-      )
-      .order_by(Taxonomy.created_at)
-      .limit(1)
-    ).scalar_one_or_none()
-    if owned is not None or not is_group_parent(session, entity_id):
-      return owned
+  unlinked = ~chart_id.in_(select(links.c.taxonomy_id))
+  if entity_id is None:
+    return unlinked
+  linked = chart_id.in_(
+    select(links.c.taxonomy_id).where(links.c.entity_id == entity_id)
+  )
+  return or_(linked, unlinked) if is_group_parent(session, entity_id) else linked
+
+
+def entity_chart_id(session: Session, entity_id: str | None) -> str | None:
+  """The active chart of accounts ``entity_id`` keeps its books in: the
+  earliest of its charts (see `_entity_charts`)."""
   return session.execute(
-    active.where(~Taxonomy.id.in_(select(links.c.taxonomy_id)))
+    select(Taxonomy.id)
+    .where(
+      Taxonomy.taxonomy_type == CHART_TAXONOMY_TYPE,
+      Taxonomy.is_active.is_(True),
+      _entity_charts(session, entity_id, Taxonomy.id),
+    )
     .order_by(Taxonomy.created_at)
     .limit(1)
   ).scalar_one_or_none()
@@ -179,12 +182,30 @@ def mapping_owner_id(session: Session, mapping_id: str) -> str | None:
 def find_entity_mapping(
   session: Session, entity_id: str | None, framework: str = BOOK_FRAMEWORK
 ) -> Structure | None:
-  """The active mapping into ``framework`` of the entity's own chart; None
-  when the entity has no chart or the chart has no such mapping."""
-  chart_id = entity_chart_id(session, entity_id)
-  if chart_id is None:
-    return None
-  return find_mapping_structure(session, framework, chart_id=chart_id)
+  """The entity's active mapping into ``framework``: that of the earliest of
+  its charts (see `_entity_charts`) that has one."""
+  source = Taxonomy.__table__.alias("mapping_source")
+  target = Taxonomy.__table__.alias("mapping_target")
+  return (
+    session.execute(
+      select(Structure)
+      .join(Taxonomy, Structure.taxonomy_id == Taxonomy.id)
+      .join(source, Taxonomy.source_taxonomy_id == source.c.id)
+      .join(target, Taxonomy.target_taxonomy_id == target.c.id)
+      .where(
+        Structure.block_type == COA_MAPPING_BLOCK_TYPE,
+        Structure.is_active.is_(True),
+        Taxonomy.taxonomy_type == MAPPING_TAXONOMY_TYPE,
+        Taxonomy.is_active.is_(True),
+        target.c.standard == framework,
+        _entity_charts(session, entity_id, source.c.id),
+      )
+      .order_by(source.c.created_at, Structure.created_at)
+      .limit(1)
+    )
+    .scalars()
+    .first()
+  )
 
 
 def mapping_frameworks(session: Session, structure_ids: list[str]) -> dict[str, str]:

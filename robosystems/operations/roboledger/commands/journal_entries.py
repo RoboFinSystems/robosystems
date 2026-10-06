@@ -33,7 +33,7 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
 )
-from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.entity_scope import ensure_entity_id
 
 
 class JournalEntryNotFoundError(LookupError):
@@ -320,9 +320,9 @@ def create_journal_entry(
       malformed line.
     `InactiveAccountError` if a line names a retired account, except for a
       synced ledger's replayed history (a synced `source` with `status='posted'`).
-    `NoEntityError` / `EntityNotInGraphError` if the entity does not resolve.
+    `EntityNotInGraphError` if the named entity is not this graph's.
   """
-  entity_id = resolve_entity_id(session, entity_id)
+  entity_id = ensure_entity_id(session, entity_id)
   assert_period_not_closed(session, body.posting_date, entity_id=entity_id)
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)

@@ -33,6 +33,7 @@ pytestmark = pytest.mark.integration
 GRAPH = "kgdddddddddddddddd39"
 PARENT, SUB = "ent_harbor", "ent_maple"
 LINKED_UNKEYED, LINKED_SUB = "ent_linked_unkeyed", "ent_linked_sub"
+LINKED_OTHER = "ent_linked_other"
 T0 = datetime(2026, 7, 1, tzinfo=UTC)
 
 
@@ -83,8 +84,9 @@ def _fact_set(session, fact_set_id: str, entity_id: str, report_id: str, at: dat
 
 def _seed() -> None:
   """A parent and a subsidiary with a transaction, an event and a report
-  each, a report with no facts yet, and a report shared in from a group whose
-  parent and subsidiary are both linked here."""
+  each, a report with no facts yet, and reports shared in: from a group whose
+  parent and subsidiary are both linked here, and from a sender linked here by
+  one keyed row."""
   with extensions_session(GRAPH) as session:
     session.add(Entity(id=PARENT, name="Harbor Holdings", created_by="usr_seed"))
     session.flush()
@@ -111,6 +113,14 @@ def _seed() -> None:
           source="linked",
           is_parent=False,
           metadata_={"source_graph_id": "kg_sender", "source_entity_id": "ent_src_sub"},
+          created_by="usr_seed",
+        ),
+        Entity(
+          id=LINKED_OTHER,
+          name="Other Sender Inc",
+          source="linked",
+          is_parent=False,
+          metadata_={"source_graph_id": "kg_other", "source_entity_id": "ent_other"},
           created_by="usr_seed",
         ),
         Agent(id="agt_tenant", name="Tenant", agent_type="customer", created_by="u"),
@@ -144,6 +154,8 @@ def _seed() -> None:
       ("rpt_empty", None),
       ("rpt_draft", None),
       ("rpt_shared", "kg_sender"),
+      ("rpt_shared_empty", "kg_sender"),
+      ("rpt_other_empty", "kg_other"),
     ):
       session.add(
         Report(
@@ -207,4 +219,8 @@ def test_a_report_hangs_off_the_entity_it_was_generated_for(tenant):
     (SUB, "rpt_sub"),
     (PARENT, "rpt_empty"),
     (LINKED_SUB, "rpt_shared"),
+    # No facts to name the sender's company: the sender's own row, which is
+    # the unkeyed one where there is one.
+    (LINKED_UNKEYED, "rpt_shared_empty"),
+    (LINKED_OTHER, "rpt_other_empty"),
   }

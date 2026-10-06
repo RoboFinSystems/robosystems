@@ -18,7 +18,6 @@ from robosystems.models.api.extensions.schedules import (
   EntryTemplateRequest,
 )
 from robosystems.models.api.fact_provenance import AssertedProvenance
-from robosystems.models.extensions import Element
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
@@ -48,6 +47,7 @@ from robosystems.operations.roboledger.reports.statement_sets import (
   StatementStampResult,
   has_canonical_statement_sets,
 )
+from tests.ledger_entity import entity_account
 
 pytestmark = pytest.mark.unit
 
@@ -111,13 +111,10 @@ def group(two_entities):
       closed_through="2026-06",
       entity_id=entity.id,
     )
-    pair = []
-    for name in ("Cash", "Rent"):
-      element = Element(name=f"{entity.name} {name}", code=name, created_by="usr_1")
-      t.session.add(element)
-      t.session.flush()
-      pair.append(str(element.id))
-    accounts[entity.id] = (pair[0], pair[1])
+    accounts[entity.id] = (
+      entity_account(t.session, entity.id, "Cash"),
+      entity_account(t.session, entity.id, "Rent"),
+    )
   t.session.commit()
   t.accounts = accounts
   t.service = service

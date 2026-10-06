@@ -28,8 +28,8 @@ from robosystems.operations.locking import (
   exclusive_period_fence,
 )
 from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
   find_entity_id,
-  resolve_entity_id,
 )
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
@@ -133,7 +133,7 @@ def initialize_ledger(
 
   Raises `CalendarAlreadyInitializedError` / `InvalidCloseTargetError`.
   """
-  entity_id = resolve_entity_id(session, entity_id)
+  entity_id = ensure_entity_id(session, entity_id)
   warnings: list[str] = []
   if body.auto_seed_schedules:
     warnings.append(
@@ -193,7 +193,7 @@ def set_close_target(
   *,
   entity_id: str | None = None,
 ) -> FiscalCalendarResponse:
-  entity_id = resolve_entity_id(session, entity_id)
+  entity_id = find_entity_id(session, entity_id)
   calendar = service.set_close_target(
     session,
     graph_id,
@@ -237,10 +237,6 @@ def close_period(
   `PeriodAlreadyClosedError`, `RowLockedError`, `UnbalancedLedgerError`,
   `WritebackFailed`, `StatementStampError`, `FiscalCalendarError`.
   """
-  # None only on a graph with no entity, where the gate reports the missing
-  # calendar.
-  entity_id = find_entity_id(session, entity_id)
-  has_sync, last_sync_at = entity_sync_state(session, platform_db, graph_id, entity_id)
   # The fence spans the QB publish commit and this commit, so no writer can
   # slip a draft into the month between stamping and commit.
   with exclusive_period_fence(
@@ -252,6 +248,14 @@ def close_period(
     ),
     wait_ms=fence_wait_ms,
   ):
+    # Resolved under the fence: the worker can wait on it for minutes, and a
+    # query before the wait would leave this session idle in a transaction.
+    # None only on a graph with no entity, where the gate reports the missing
+    # calendar.
+    entity_id = find_entity_id(session, entity_id)
+    has_sync, last_sync_at = entity_sync_state(
+      session, platform_db, graph_id, entity_id
+    )
     result = close_service.close(
       session,
       graph_id,
@@ -313,10 +317,10 @@ def reopen_period(
   `ReopenOrderError` (a later month is still closed), or
   `FiscalCalendarError`.
   """
-  entity_id = resolve_entity_id(session, entity_id)
   # Same fence as close_period, so a reopen can't interleave with a close
   # or another reopen. Lock order: fence, then the FiscalPeriod row.
   with exclusive_period_fence(graph_id, period, detail=_fence_detail(period)):
+    entity_id = find_entity_id(session, entity_id)
     calendar, retracted = _reopen_under_fence(
       session,
       graph_id,
@@ -360,7 +364,7 @@ def _reopen_under_fence(
   note: str | None,
   service: FiscalCalendarService,
   actor_type: str,
-  entity_id: str,
+  entity_id: str | None,
   enforce_latest: bool = True,
 ):
   """The reopen's writes, flushed but not committed.
@@ -386,7 +390,7 @@ def _reopen_under_fence(
       .with_for_update()
       .one_or_none()
     )
-  if fp is None:
+  if fp is None or entity_id is None:
     raise PeriodNotFoundInLedgerError(period)
   if fp.status != "closed":
     raise PeriodNotClosedError(period, fp.status)
@@ -455,8 +459,10 @@ def backfill_plan_history(
 
   Raises `FiscalCalendarError` or `BackfillPreconditionError`.
   """
-  entity_id = resolve_entity_id(session, entity_id)
+  entity_id = find_entity_id(session, entity_id)
   calendar = service.require(session, graph_id, entity_id=entity_id)
+  # The calendar exists, so its entity does.
+  entity_id = entity_id or str(calendar.entity_id)
   closed_through = calendar.closed_through_period
   if closed_through is None:
     raise BackfillPreconditionError(

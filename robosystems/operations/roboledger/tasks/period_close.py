@@ -80,8 +80,8 @@ class PeriodCloseTask(BaseTask):
       raise ValueError("period_close requires a graph_id")
 
     service = FiscalCalendarService()
+    entity_param = self.params.get("entity_id")
     with platform_session() as platform_db, extensions_session(graph_id) as session:
-      entity_id = find_entity_id(session, self.params.get("entity_id"))
       try:
         result = cmd_close_period(
           session,
@@ -109,7 +109,7 @@ class PeriodCloseTask(BaseTask):
           # Usually what holds the fence is another close of the same
           # period; waiting it out yields "already closed" with a receipt.
           fence_wait_ms=self.budget_seconds * 1000,
-          entity_id=entity_id,
+          entity_id=entity_param,
         )
       except CLOSE_DOMAIN_ERRORS as exc:
         payload = close_error_payload(exc, period=period)
@@ -124,7 +124,7 @@ class PeriodCloseTask(BaseTask):
             session.query(FiscalPeriod.close_receipt)
             .filter(
               FiscalPeriod.graph_id == graph_id,
-              FiscalPeriod.entity_id == entity_id,
+              FiscalPeriod.entity_id == find_entity_id(session, entity_param),
               FiscalPeriod.name == period,
             )
             .scalar()
@@ -144,7 +144,7 @@ class PeriodCloseTask(BaseTask):
         return payload
 
       has_sync, _last_sync_at = entity_sync_state(
-        session, platform_db, graph_id, entity_id
+        session, platform_db, graph_id, find_entity_id(session, entity_param)
       )
 
     return {

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger import Event
-from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.entity_scope import ensure_entity_id
 
 BALANCE_OBSERVED_EVENT_TYPE = "balance_observed"
 STATEMENT_ENDING = "statement_ending"
@@ -107,7 +107,7 @@ def record_statement_observation(
     live.status = "superseded"
 
   event = Event(
-    entity_id=resolve_entity_id(session),
+    entity_id=ensure_entity_id(session),
     event_type=BALANCE_OBSERVED_EVENT_TYPE,
     event_category="reconciliation",
     event_class="support",

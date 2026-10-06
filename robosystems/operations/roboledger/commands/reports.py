@@ -75,6 +75,7 @@ from robosystems.operations.serialization import (
   serialize_to_holon_jsonld,
   serialize_to_tavi,
 )
+from robosystems.operations.taxonomy_block.coa_mappings import mapping_owner_id
 
 # Extensions that make a graph a legitimate share recipient. Mirrors
 # `_REPORT_EXTENSIONS` on the GraphQL read side.
@@ -318,9 +319,10 @@ def create_report(
   session.add(report_def)
   session.flush()
 
-  # The Style's close target decides where derived cumulative earnings land
+  # The report is the entity's whose chart the mapping maps from. Its Style's
+  # close target decides where derived cumulative earnings land
   # (RetainedEarnings / PartnersCapital / MembersEquity by entity form).
-  entity_id = resolve_entity_id(session)
+  entity_id = resolve_entity_id(session, mapping_owner_id(session, body.mapping_id))
   reporting_style_id = load_entity_reporting_style(session, entity_id)
   close_target = load_close_target_concept(session, reporting_style_id)
 

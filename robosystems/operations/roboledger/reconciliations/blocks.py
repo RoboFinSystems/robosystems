@@ -42,8 +42,8 @@ from robosystems.operations.information_block.rules.engine import (
 )
 from robosystems.operations.locking import bounded_lock_wait
 from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
   owner_entity_id,
-  resolve_entity_id,
 )
 from robosystems.operations.roboledger.fact_set import create_fact_set
 
@@ -308,7 +308,7 @@ def _create_block(
     name=name,
     description=description,
     block_type=RECONCILIATION_BLOCK_TYPE,
-    entity_id=resolve_entity_id(session),
+    entity_id=ensure_entity_id(session),
     taxonomy_id=concepts.taxonomy_id,
     concept_arrangement="set",
     member_arrangement=None,

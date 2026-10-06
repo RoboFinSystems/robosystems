@@ -8,18 +8,33 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 import pytest
+from sqlalchemy import text
 
+from robosystems.models.api.extensions.journal_entries import (
+  CreateJournalEntryRequest,
+  JournalEntryLineItemInput,
+)
 from robosystems.models.api.fact_provenance import AssertedProvenance
-from robosystems.models.extensions import Entity
+from robosystems.models.extensions import Element, Entity
+from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.report import Report
+from robosystems.operations.roboledger.commands._guards import closed_periods
+from robosystems.operations.roboledger.commands.journal_entries import (
+  create_journal_entry,
+)
 from robosystems.operations.roboledger.entity_scope import (
   EntityNotInGraphError,
   NoEntityError,
+  ensure_entity_id,
+  find_entity_id,
   find_linked_entity_id,
   report_entity_id,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.fact_set import create_fact_set
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  FiscalCalendarService,
+)
 from robosystems.operations.roboledger.reads.reports import resolve_entity_name
 from robosystems.operations.roboledger.reports.statement_sets import (
   has_canonical_statement_sets,
@@ -28,6 +43,7 @@ from robosystems.operations.roboledger.reports.statement_sets import (
 
 pytestmark = pytest.mark.unit
 
+GRAPH_ID = "kg0123456789abcdef08"
 PS = date(2026, 9, 1)
 PE = date(2026, 9, 30)
 
@@ -71,6 +87,73 @@ class TestResolveEntityId:
       resolve_entity_id(tenant_session)
     assert isinstance(exc.value, LookupError)
     assert isinstance(exc.value, ValueError)
+
+
+class TestAGraphCreatedWithoutItsEntity:
+  """``create_entity=false`` at graph creation. Ledger writes worked on such
+  a graph before rows carried an entity, so the first one gives it a parent."""
+
+  def test_its_first_ledger_write_makes_the_group_parent(self, tenant_session):
+    session = tenant_session
+    accounts = [
+      Element(name=name, code=name, created_by="usr_1") for name in ("Cash", "Rent")
+    ]
+    session.add_all(accounts)
+    session.flush()
+
+    created = create_journal_entry(
+      session,
+      CreateJournalEntryRequest(
+        posting_date=date(2026, 9, 15),
+        memo="Rent received",
+        line_items=[
+          JournalEntryLineItemInput(element_id=accounts[0].id, debit_amount=50_000),
+          JournalEntryLineItemInput(element_id=accounts[1].id, credit_amount=50_000),
+        ],
+      ),
+      "usr_1",
+    )
+
+    parent = session.query(Entity).one()
+    schema = session.execute(text("SELECT current_schema()")).scalar_one()
+    assert parent.id == f"entity_{schema}"
+    assert parent.is_parent and parent.source == "native"
+    assert session.get(Entry, created.id).entity_id == parent.id
+    assert resolve_entity_id(session) == parent.id
+
+  def test_a_second_write_finds_the_same_one(self, tenant_session):
+    first = ensure_entity_id(tenant_session)
+
+    assert ensure_entity_id(tenant_session) == first
+    assert tenant_session.query(Entity).count() == 1
+
+  def test_setting_up_its_calendar_makes_it_too(self, tenant_session):
+    calendar = FiscalCalendarService().initialize(
+      tenant_session, GRAPH_ID, closed_through="2026-06", actor_id="usr_1"
+    )
+
+    assert calendar.entity_id == resolve_entity_id(tenant_session)
+
+  def test_a_read_makes_nothing(self, tenant_session):
+    assert find_entity_id(tenant_session) is None
+    assert closed_periods(tenant_session, [date(2026, 9, 15)], entity_id=None) == []
+    assert FiscalCalendarService().get(tenant_session, GRAPH_ID) is None
+    assert tenant_session.query(Entity).count() == 0
+
+  def test_entities_with_no_parent_among_them_are_left_alone(self, tenant_session):
+    tenant_session.add(
+      Entity(name="Orphan LLC", is_parent=False, source="native", created_by="usr_1")
+    )
+    tenant_session.flush()
+
+    with pytest.raises(NoEntityError):
+      ensure_entity_id(tenant_session)
+    assert tenant_session.query(Entity).count() == 1
+
+  def test_a_named_entity_is_never_made(self, tenant_session):
+    with pytest.raises(EntityNotInGraphError):
+      ensure_entity_id(tenant_session, "ent_missing")
+    assert tenant_session.query(Entity).count() == 0
 
 
 class TestRetractIsScopedToOneEntity:

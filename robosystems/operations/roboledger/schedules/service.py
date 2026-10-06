@@ -34,9 +34,9 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
 from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
   find_entity_id,
   owner_entity_id,
-  resolve_entity_id,
 )
 from robosystems.operations.roboledger.entry_status import (
   GENERATED_REVERSAL_SQL,
@@ -331,7 +331,7 @@ class ScheduleService:
       structure.artifact_mechanics = artifact_mechanics
       session.flush()
     else:
-      entity_id = resolve_entity_id(session, entity_id)
+      entity_id = ensure_entity_id(session, entity_id)
       structure, metadata, artifact_mechanics, taxonomy_id = (
         self._build_schedule_structure(
           session,
@@ -1412,7 +1412,7 @@ class ScheduleService:
         f"total_debit={total_debit} total_credit={total_credit}"
       )
 
-    entity_id = resolve_entity_id(session, entity_id)
+    entity_id = ensure_entity_id(session, entity_id)
     # A draft in a closed period could never be posted.
     assert_period_not_closed(session, posting_date, entity_id=entity_id)
     assert_accounts_postable(

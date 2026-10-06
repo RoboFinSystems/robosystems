@@ -42,10 +42,11 @@ def set_reconciling_items(monkeypatch, rows) -> None:
 def _one_entity(monkeypatch):
   """The stub has no entities table: every calendar here is the parent's
   unless a test names another entity."""
-  monkeypatch.setattr(
-    "robosystems.operations.roboledger.fiscal_calendar.service.resolve_entity_id",
-    lambda session, entity_id=None: entity_id or PARENT_ENTITY_ID,
-  )
+  for resolver in ("ensure_entity_id", "find_entity_id"):
+    monkeypatch.setattr(
+      f"robosystems.operations.roboledger.fiscal_calendar.service.{resolver}",
+      lambda session, entity_id=None: entity_id or PARENT_ENTITY_ID,
+    )
 
 
 @pytest.fixture(autouse=True)

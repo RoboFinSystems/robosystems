@@ -35,12 +35,16 @@ from robosystems.operations.locking import (
   ordered_lock_column,
 )
 from robosystems.operations.roboledger.commands._guards import (
+  AccountOutsideEntityChartError,
   ClosedPeriodError,
   InactiveAccountError,
   assert_accounts_postable,
   assert_period_not_closed,
 )
-from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
+  find_entity_id,
+)
 from robosystems.operations.roboledger.entry_status import (
   LANDED_ENTRY_STATUSES,
 )
@@ -423,7 +427,7 @@ def create_event_block_in_session(
   refuse_reserved_event_type(body.event_type)
   _validate_event_source(body.source, graph_id)
   _validate_routed_connection(body.metadata, graph_id)
-  entity_id = resolve_entity_id(session, entity_id)
+  entity_id = ensure_entity_id(session, entity_id)
   _assert_not_duplicate(session, body)
 
   if body.apply_handlers:
@@ -792,9 +796,11 @@ def preview_event_block(
   entity_id: str | None = None,
 ) -> PreviewEventBlockResponse:
   """Dry-run handler resolution and template evaluation; writes nothing.
-  Checked against ``entity_id``'s calendar, default the group parent's."""
+  Checked against ``entity_id``'s calendar and chart, default the group
+  parent's."""
   from robosystems.operations.roboledger.reads.event_handler import handler_to_response
 
+  entity_id = find_entity_id(session, entity_id)
   python_handler = get_python_handler(body.event_type)
   if python_handler is not None:
     try:
@@ -921,7 +927,7 @@ def preview_event_block(
       ),
       entity_id=entity_id,
     )
-  except InactiveAccountError as e:
+  except (InactiveAccountError, AccountOutsideEntityChartError) as e:
     errors.append(str(e))
 
   return PreviewEventBlockResponse(

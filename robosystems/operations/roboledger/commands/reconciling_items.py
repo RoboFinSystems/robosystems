@@ -53,6 +53,7 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
   closed_periods,
 )
+from robosystems.operations.roboledger.entity_scope import owner_entity_id
 from robosystems.operations.roboledger.fiscal_calendar.periods import period_date_range
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   PUBLISH_TO_SOURCE_KEY,
@@ -354,7 +355,7 @@ def _restate_blockers(
       )
 
   closed = _closed_period_names(
-    session, [e.posting_date for e in entries], str(event.entity_id)
+    session, [e.posting_date for e in entries], owner_entity_id(session, event)
   )
   if closed:
     blockers.append(
@@ -572,7 +573,8 @@ def _plan_with_stamp(
   )
 
   posting_dates = sorted({e.posting_date for e in entries if e.posting_date})
-  closed_periods = _closed_period_names(session, posting_dates, str(event.entity_id))
+  entity_id = owner_entity_id(session, event)
+  closed_periods = _closed_period_names(session, posting_dates, entity_id)
   blockers = _restate_blockers(session, event, entries, accepted)
 
   drift_detected_at = metadata.get("drift_detected_at")
@@ -594,9 +596,7 @@ def _plan_with_stamp(
     else None,
     # Never default to a disposition the plan already knows is blocked.
     default_disposition="catch_up" if (closed_periods or blockers) else "restate",
-    default_posting_date=_default_catch_up_date(
-      session, graph_id, str(event.entity_id)
-    ),
+    default_posting_date=_default_catch_up_date(session, graph_id, entity_id),
     affected_posting_dates=posting_dates,
     closed_periods=closed_periods,
     prior_entries=_entry_summaries(session, entries),
@@ -692,7 +692,7 @@ def resolve_reconciling_item(
       )
 
   # Fence every period this touches before locking any row.
-  entity_id = str(_load_event(session, body.event_id).entity_id)
+  entity_id = owner_entity_id(session, _load_event(session, body.event_id))
   fence_dates = list(plan.affected_posting_dates)
   if catch_up_date is not None:
     fence_dates.append(catch_up_date)
@@ -796,7 +796,7 @@ def resolve_reconciling_item(
         ),
         created_by,
         graph_id=graph_id,
-        entity_id=event.entity_id,
+        entity_id=entity_id,
       )
       session.flush()
       created = session.execute(

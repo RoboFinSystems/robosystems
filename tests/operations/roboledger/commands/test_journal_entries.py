@@ -63,7 +63,7 @@ def _one_entity():
   """A MagicMock session has no entities table: an entry with no entity named
   lands on ``ENTITY_ID``."""
   with patch(
-    f"{MODULE}.resolve_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID
+    f"{MODULE}.ensure_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID
   ):
     yield
 

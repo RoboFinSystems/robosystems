@@ -48,7 +48,7 @@ def _one_entity():
   """The mocked session has no entities table: commands act on ``ENTITY_ID``
   unless a test names another."""
   with (
-    patch(f"{_MOD}.resolve_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID),
+    patch(f"{_MOD}.ensure_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID),
     patch(f"{_MOD}.find_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID),
   ):
     yield
@@ -101,6 +101,47 @@ def _stub_period_lock(session, fp):
   q.populate_existing.return_value = q
   q.with_for_update.return_value = q
   q.one_or_none.return_value = fp
+
+
+class TestCloseWaitsForTheFenceFirst:
+  def test_the_ledger_session_is_first_read_under_the_fence(
+    self, _noop_exclusive_period_fence
+  ):
+    """The background close can wait minutes for the fence. A query on the
+    ledger session before that wait would leave it idle in a transaction for
+    as long, and the database ends those."""
+    order: list[str] = []
+    fence = _noop_exclusive_period_fence.return_value
+    fence.__enter__.side_effect = lambda *a, **k: order.append("fence held")
+    close_service = MagicMock()
+    close_service.close.return_value = _close_result()
+
+    def entity(session, entity_id=None):
+      order.append("entity read")
+      return ENTITY_ID
+
+    def sync_state(*args):
+      order.append("sync read")
+      return (False, None)
+
+    with (
+      patch(f"{_MOD}.find_entity_id", side_effect=entity),
+      patch(f"{_MOD}.entity_sync_state", side_effect=sync_state),
+      patch(f"{_MOD}.build_fiscal_calendar_response", return_value=_fc_response()),
+    ):
+      close_period(
+        MagicMock(),
+        MagicMock(),
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        allow_stale_sync=False,
+        note=None,
+        service=MagicMock(),
+        close_service=close_service,
+      )
+
+    assert order[:3] == ["fence held", "entity read", "sync read"]
 
 
 class TestClosePeriodResponseMapping:

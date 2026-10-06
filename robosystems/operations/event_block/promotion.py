@@ -177,12 +177,13 @@ def _fence_write_set(session: Session, write_set: list[Event]) -> list[tuple[str
       effective_at=evt.effective_at,
       occurred_at=evt.occurred_at,
     )
-    by_date.setdefault((posting_date, str(evt.entity_id)), []).append(evt)
+    by_date.setdefault((posting_date, str(evt.entity_id or "")), []).append(evt)
 
   closed: list[tuple[str, str]] = []
   for posting_date, entity_id in sorted(by_date):
     try:
-      assert_period_not_closed(session, posting_date, entity_id=entity_id)
+      # No entity on the row: the guard reads the group parent's calendar.
+      assert_period_not_closed(session, posting_date, entity_id=entity_id or None)
     except ClosedPeriodError as e:
       closed.extend(
         (evt.id, f"closed period: {e}") for evt in by_date[(posting_date, entity_id)]

@@ -8,6 +8,7 @@ companies received with a shared report, never a scope of this ledger.
 from __future__ import annotations
 
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from robosystems.models.extensions import Entity
@@ -27,6 +28,7 @@ _PARENT_SQL = text(
   "ORDER BY created_at ASC LIMIT 1"
 )
 _NAMED_SQL = text("SELECT id FROM entities WHERE id = :eid AND source <> 'linked'")
+_ANY_OWN_ENTITY_SQL = text("SELECT 1 FROM entities WHERE source <> 'linked' LIMIT 1")
 
 
 def resolve_entity_id(session: Session, entity_id: str | None = None) -> str:
@@ -40,6 +42,36 @@ def resolve_entity_id(session: Session, entity_id: str | None = None) -> str:
   if row is None:
     raise NoEntityError("No entity found. Import data or initialize the ledger first.")
   return str(row.id)
+
+
+def ensure_entity_id(session: Session, entity_id: str | None = None) -> str:
+  """:func:`resolve_entity_id` for a write that starts a ledger's books.
+
+  A graph can be created without its entity. Its first ledger write gives it
+  the group parent: ``entity_<graph_id>``, the id graph creation gives one,
+  named after the graph until someone renames it. A graph that has entities
+  but no parent among them is not repaired here.
+  """
+  try:
+    return resolve_entity_id(session, entity_id)
+  except NoEntityError:
+    if session.execute(_ANY_OWN_ENTITY_SQL).first() is not None:
+      raise
+  graph_id = str(session.execute(text("SELECT current_schema()")).scalar_one())
+  parent_id = f"entity_{graph_id}"
+  # Two first writes can race here; either row is the same row.
+  session.execute(
+    pg_insert(Entity.__table__)
+    .values(
+      id=parent_id,
+      name=graph_id,
+      is_parent=True,
+      source="native",
+      created_by="system",
+    )
+    .on_conflict_do_nothing(index_elements=["id"])
+  )
+  return parent_id
 
 
 def find_entity_id(session: Session, entity_id: str | None = None) -> str | None:
@@ -75,8 +107,8 @@ def find_parent_entity(session: Session) -> Entity | None:
 
 
 def owner_entity_id(session: Session, owner: object) -> str:
-  """The entity a block belongs to (a schedule, a reconciliation). A block
-  from before blocks carried one belongs to the group parent."""
+  """The entity a row belongs to (a schedule, a reconciliation, an event).
+  A row from before rows carried one belongs to the group parent."""
   entity_id = getattr(owner, "entity_id", None)
   return str(entity_id) if entity_id else resolve_entity_id(session)
 

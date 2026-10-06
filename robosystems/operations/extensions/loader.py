@@ -453,9 +453,12 @@ class OLTPLoader:
           .distinct()
           .all()
         ):
-          wipe_dates.setdefault(str(wipe_entity_id), []).append(posting_date)
+          wipe_dates.setdefault(str(wipe_entity_id or ""), []).append(posting_date)
         for wipe_entity_id, posting_dates in sorted(wipe_dates.items()):
-          assert_period_not_closed(session, *posting_dates, entity_id=wipe_entity_id)
+          # No entity on the row: the guard reads the group parent's calendar.
+          assert_period_not_closed(
+            session, *posting_dates, entity_id=wipe_entity_id or None
+          )
         session.query(LineItem).filter(LineItem.entry_id.in_(entry_subq)).delete(
           synchronize_session=False
         )
@@ -1077,11 +1080,11 @@ class OLTPLoader:
     two non-zero lines are dropped, and so are transactions left with none.
     """
     from robosystems.models.extensions.roboledger import Event
-    from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+    from robosystems.operations.roboledger.entity_scope import ensure_entity_id
 
     # A connection is one entity's source; until a connection carries its own
     # entity, that is the group parent.
-    entity_id = resolve_entity_id(session)
+    entity_id = ensure_entity_id(session)
 
     txns_by_ext: dict[str, dict] = {}
     for row in dbt_data.get("transactions", []) or []:
