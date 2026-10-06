@@ -22,6 +22,7 @@ class Transaction(ExtensionsBase):
   __tablename__ = "transactions"
   __table_args__ = (
     Index("idx_transactions_date", "date"),
+    Index("idx_transactions_entity", "entity_id"),
     Index("idx_transactions_type", "type"),
     Index("idx_transactions_status", "status"),
     Index("idx_transactions_source", "source"),
@@ -41,6 +42,7 @@ class Transaction(ExtensionsBase):
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("txn"))
   number = Column(String, nullable=True)
   idempotency_key = Column(String, unique=True, nullable=True)
+  entity_id = Column(String, nullable=False)
   type = Column(String, nullable=False)
   category = Column(String, nullable=True)
 

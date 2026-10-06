@@ -49,6 +49,7 @@ from robosystems.operations.roboledger.commands.reconciling_items import (
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   select_writeback_eligible_entries,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -89,6 +90,7 @@ def session():
   db = sessionmaker(bind=engine)()
   db.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=db.connection())
+  seed_parent_entity(db)
   db.commit()
   db.execute(text(f'SET search_path TO "{schema}"'))
   try:
@@ -547,6 +549,7 @@ def test_restate_refuses_when_another_event_shares_the_transaction(session):
     .scalar()
   )
   intruder = Entry(
+    entity_id=PARENT_ENTITY_ID,
     transaction_id=transaction_id,
     posting_date=date(2026, 7, 9),
     memo="unrelated",

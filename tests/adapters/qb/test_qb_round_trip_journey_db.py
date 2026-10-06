@@ -66,6 +66,7 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
 from robosystems.operations.roboledger.reports.statement_sets import (
   StatementStampResult,
 )
+from tests.ledger_entity import seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -202,6 +203,8 @@ def tenant(test_db, test_user, sample_graph, monkeypatch):
     conn.execute(text(f'CREATE SCHEMA "{graph_id}"'))
     conn.execute(text(f'SET search_path TO "{graph_id}"'))
     ExtensionsBase.metadata.create_all(bind=conn)
+    with Session(bind=conn) as seed:
+      seed_parent_entity(seed)
 
   monkeypatch.setattr(env, "CONNECTION_CREDENTIALS_KEY", Fernet.generate_key().decode())
   platform = sessionmaker(bind=test_db.get_bind())

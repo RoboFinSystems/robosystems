@@ -99,6 +99,11 @@ class Structure(ExtensionsBase):
   __table_args__ = (
     Index("idx_structures_taxonomy", "taxonomy_id"),
     Index("idx_structures_type", "block_type"),
+    Index(
+      "idx_structures_entity",
+      "entity_id",
+      postgresql_where="entity_id IS NOT NULL",
+    ),
     # Serves the role_uri lookup in ``load_disclosure_id_for_structure``.
     Index(
       "idx_structures_role_uri",
@@ -133,6 +138,10 @@ class Structure(ExtensionsBase):
   block_type = Column(String, nullable=False)
 
   taxonomy_id = Column(String, ForeignKey("taxonomies.id"), nullable=False)
+
+  # Set on the blocks that are one entity's own: schedules and
+  # reconciliations. NULL is shared by the group (the library, the styles).
+  entity_id = Column(String, nullable=True)
 
   graph_structure_id = Column(String, nullable=True)
 

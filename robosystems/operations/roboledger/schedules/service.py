@@ -33,7 +33,10 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
 )
-from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  owner_entity_id,
+  resolve_entity_id,
+)
 from robosystems.operations.roboledger.entry_status import (
   GENERATED_REVERSAL_SQL,
   LANDED_ENTRY_STATUSES,
@@ -138,6 +141,7 @@ class ScheduleService:
     schedule_metadata: ScheduleMetadata | None,
     created_by: str,
     source_transaction_id: str | None,
+    entity_id: str,
   ) -> tuple[Structure, dict, dict, str]:
     """Create the Structure, its element associations, and the
     cm:Debit/cm:Credit has-part posting arcs. Not called on rebuild, which
@@ -159,6 +163,7 @@ class ScheduleService:
     structure = Structure(
       name=name,
       block_type="schedule",
+      entity_id=entity_id,
       taxonomy_id=taxonomy_id,
       concept_arrangement="roll_forward",
       artifact_mechanics=artifact_mechanics,
@@ -285,8 +290,12 @@ class ScheduleService:
     closed_through: date | None = None,
     source_transaction_id: str | None = None,
     existing_structure: Structure | None = None,
+    entity_id: str | None = None,
   ) -> Structure:
     """Create a schedule with one generated fact set per monthly period.
+
+    The schedule belongs to ``entity_id`` (default the group parent): its
+    facts, obligations and closing entries all land in that entity's books.
 
     ``monthly_amount`` is in cents. ``taxonomy_id=None`` uses or creates a
     default "Schedules" taxonomy. ``element_ids`` are the elements the
@@ -306,6 +315,7 @@ class ScheduleService:
     """
     if existing_structure is not None:
       structure = existing_structure
+      entity_id = owner_entity_id(session, structure)
       taxonomy_id = str(structure.taxonomy_id)
       metadata, artifact_mechanics = self._build_schedule_definition_blobs(
         name=name,
@@ -320,6 +330,7 @@ class ScheduleService:
       structure.artifact_mechanics = artifact_mechanics
       session.flush()
     else:
+      entity_id = resolve_entity_id(session, entity_id)
       structure, metadata, artifact_mechanics, taxonomy_id = (
         self._build_schedule_structure(
           session,
@@ -333,11 +344,11 @@ class ScheduleService:
           schedule_metadata=schedule_metadata,
           created_by=created_by,
           source_transaction_id=source_transaction_id,
+          entity_id=entity_id,
         )
       )
 
     fact_set_id = generate_prefixed_ulid("fs")
-    entity_id = resolve_entity_id(session)
 
     # A custom periodic-amounts curve is asserted by the caller; a
     # straight-line schedule is derived from method + params.
@@ -618,6 +629,7 @@ class ScheduleService:
         periods=periods,
         closed_through=closed_through,
         created_by=created_by,
+        entity_id=entity_id,
       )
     )
 
@@ -649,6 +661,7 @@ class ScheduleService:
     monthly_amount: int,
     periods: list[tuple[date, date]],
     created_by: str,
+    entity_id: str,
     closed_through: date | None = None,
   ) -> tuple[str, int]:
     """Emit `schedule_created` + one `schedule_entry_due` per period.
@@ -670,6 +683,7 @@ class ScheduleService:
     session.add(
       Event(
         id=schedule_created_event_id,
+        entity_id=entity_id,
         event_type="schedule_created",
         # Moves no resource: it arranges future recognition, which the
         # economic schedule_entry_due children carry.
@@ -708,6 +722,7 @@ class ScheduleService:
       session.add(
         Event(
           id=generate_prefixed_ulid("evt"),
+          entity_id=entity_id,
           event_type="schedule_entry_due",
           event_category="recognition",
           event_class="economic",
@@ -895,6 +910,7 @@ class ScheduleService:
       session.add(
         Event(
           id=new_event_id,
+          entity_id=old_evt.entity_id,
           event_type="schedule_entry_due",
           event_category="recognition",
           event_class="economic",
@@ -1220,7 +1236,9 @@ class ScheduleService:
     # No transaction_id, deliberately: a schedule entry has no source-system
     # record, and synthesizing a Transaction would manufacture adapter-mirror
     # rows. Reads anchor on Entry.
+    entity_id = owner_entity_id(session, structure)
     entry = Entry(
+      entity_id=entity_id,
       type=template.get("entry_type", "closing"),
       status="draft",
       posting_date=posting_date,
@@ -1264,6 +1282,7 @@ class ScheduleService:
       reversal_memo = f"Reverse: {entry_memo}"
 
       reversal_entry = Entry(
+        entity_id=entity_id,
         type="reversing",
         status="draft",
         posting_date=reversal_date,
@@ -1329,6 +1348,7 @@ class ScheduleService:
     created_by: str,
     entry_type: str = "closing",
     provenance: str = "manual_entry",
+    entity_id: str | None = None,
   ) -> ClosingEntryResult:
     """Create a non-schedule draft entry with any number of balanced lines
     (disposals, impairments, reclassifications).
@@ -1380,6 +1400,7 @@ class ScheduleService:
     assert_accounts_postable(session, (li["element_id"] for li in normalized))
 
     entry = Entry(
+      entity_id=resolve_entity_id(session, entity_id),
       type=entry_type,
       status="draft",
       posting_date=posting_date,

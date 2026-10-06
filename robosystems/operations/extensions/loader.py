@@ -1074,6 +1074,11 @@ class OLTPLoader:
     two non-zero lines are dropped, and so are transactions left with none.
     """
     from robosystems.models.extensions.roboledger import Event
+    from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+
+    # A connection is one entity's source; until a connection carries its own
+    # entity, that is the group parent.
+    entity_id = resolve_entity_id(session)
 
     txns_by_ext: dict[str, dict] = {}
     for row in dbt_data.get("transactions", []) or []:
@@ -1344,6 +1349,7 @@ class OLTPLoader:
       else:
         new_events.append(
           Event(
+            entity_id=entity_id,
             event_type=event_type,
             event_category=event_category,
             event_class="economic",

@@ -33,6 +33,7 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
 )
+from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 
 
 class JournalEntryNotFoundError(LookupError):
@@ -305,18 +306,23 @@ def create_journal_entry(
   session: Session,
   body: CreateJournalEntryRequest,
   created_by: str,
+  *,
+  entity_id: str | None = None,
 ) -> JournalEntryResponse:
-  """Create a journal entry with balanced line items.
+  """Create a journal entry with balanced line items in one entity's books.
 
-  ``status='posted'`` (historical import) posts immediately, bypassing the
-  draft-review-close workflow. Either status is refused in a closed period.
+  ``entity_id`` defaults to the group parent. ``status='posted'`` (historical
+  import) posts immediately, bypassing the draft-review-close workflow. Either
+  status is refused in a closed period.
 
   Raises:
     `ClosedPeriodError`, `UnbalancedJournalEntryError`, `ValueError` for a
       malformed line.
     `InactiveAccountError` if a line names a retired account, except for a
       synced ledger's replayed history (a synced `source` with `status='posted'`).
+    `NoEntityError` / `EntityNotInGraphError` if the entity does not resolve.
   """
+  entity_id = resolve_entity_id(session, entity_id)
   assert_period_not_closed(session, body.posting_date)
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
@@ -334,6 +340,7 @@ def create_journal_entry(
   transaction_id = body.transaction_id
   if not transaction_id:
     txn = Transaction(
+      entity_id=entity_id,
       type=body.transaction_type,
       amount=total_debit,
       date=body.posting_date,
@@ -349,6 +356,7 @@ def create_journal_entry(
     transaction_id = txn.id
 
   entry = Entry(
+    entity_id=entity_id,
     transaction_id=transaction_id,
     type=body.type,
     status=status,
@@ -559,6 +567,7 @@ def reverse_journal_entry(
   now = datetime.now(UTC)
 
   reversing_entry = Entry(
+    entity_id=original.entity_id,
     transaction_id=original.transaction_id,
     type="reversing",
     status="posted",

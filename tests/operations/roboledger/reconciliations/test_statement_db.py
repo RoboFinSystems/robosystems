@@ -17,7 +17,6 @@ from robosystems.models.api.extensions.reconciliations import (
   SetReconciliationPolicyRequest,
   SignOffReconciliationRequest,
 )
-from robosystems.models.extensions.entity import Entity
 from robosystems.models.extensions.roboledger import Entry, Event
 from robosystems.operations.roboledger.commands.reconciliations import (
   StatementAccountError,
@@ -50,7 +49,6 @@ def books(ext_session):
   """A ledger with no source behind it. At 2026-08-31: checking 4,800.00,
   a loan of 4,800.00 owed, a card with 350.00 owed (300.00 at 08-15)."""
   session = ext_session
-  session.add(Entity(name="Fictional Co", created_by="usr"))
   accounts = {
     "cash": classified_account(session, "Checking", "asset"),
     "loan": classified_account(

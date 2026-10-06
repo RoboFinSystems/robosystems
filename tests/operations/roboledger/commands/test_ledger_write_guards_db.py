@@ -47,6 +47,7 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   drafts_close_posts,
 )
 from robosystems.operations.roboledger.schedules.service import ScheduleService
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 pytestmark = pytest.mark.unit
 
@@ -93,7 +94,7 @@ def _element(session, name: str, *, is_active: bool = True) -> str:
 
 def _schedule(session) -> tuple[str, str, str]:
   """A three-month depreciation schedule; returns (structure, debit, credit)."""
-  session.add(Entity(name="Fictional Co", created_by="usr"))
+  session.add(Entity(id=PARENT_ENTITY_ID, name="Fictional Co", created_by="usr"))
   debit = _element(session, "Depreciation Expense")
   credit = _element(session, "Accumulated Depreciation")
   created = create_schedule(
@@ -119,6 +120,7 @@ def _schedule_entries(session, structure_id: str) -> list[Entry]:
 
 def _event(session, *, status: str) -> str:
   event = Event(
+    entity_id=PARENT_ENTITY_ID,
     event_type="journal_entry_recorded",
     event_category="adjustment",
     occurred_at=datetime(2026, 1, 15, tzinfo=UTC),
@@ -134,6 +136,7 @@ def _event(session, *, status: str) -> str:
 def _draft(session, *, triggered_by_event_id: str | None = None) -> None:
   session.add(
     Entry(
+      entity_id=PARENT_ENTITY_ID,
       posting_date=date(2026, 1, 20),
       status="draft",
       type="standard",
@@ -187,6 +190,7 @@ def test_a_tenant_rule_refuses_a_retired_account(ext_session):
   cash = _element(session, "Operating Cash")
   retired = _element(session, "Old Revenue", is_active=False)
   event = Event(
+    entity_id=PARENT_ENTITY_ID,
     id="evt_sale",
     event_type="invoice_issued",
     event_category="sales",

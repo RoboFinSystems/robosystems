@@ -72,6 +72,7 @@ class Event(ExtensionsBase):
   __tablename__ = "events"
   __table_args__ = (
     Index("idx_events_type", "event_type"),
+    Index("idx_events_entity", "entity_id"),
     Index("idx_events_category", "event_category"),
     Index("idx_events_occurred_at", "occurred_at"),
     Index("idx_events_status", "status"),
@@ -132,6 +133,9 @@ class Event(ExtensionsBase):
   )
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("evt"))
+
+  # The entity the event happened to. Its GL rows inherit it.
+  entity_id = Column(String, nullable=False)
 
   event_type = Column(String, nullable=False)
   event_category = Column(String, nullable=False)

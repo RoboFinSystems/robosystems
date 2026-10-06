@@ -35,6 +35,7 @@ from robosystems.operations.roboledger.entry_status import (
   GENERATED_REVERSAL_SQL,
   PRIMARY_ENTRY_SQL,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -67,6 +68,7 @@ def ext_session():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -82,6 +84,7 @@ def ext_session():
 
 def _entry(session, *, posting_date, type_, reversal_of=None):
   entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
     posting_date=posting_date,
     status="draft",
     type=type_,
@@ -192,6 +195,7 @@ class TestOnePrimaryEntryPerSchedulePeriod:
     a = _entry(ext_session, posting_date=JAN_END, type_="closing")
     ext_session.flush()
     b = Entry(
+      entity_id=PARENT_ENTITY_ID,
       posting_date=date(2026, 1, 30),
       status="draft",
       type="closing",
@@ -217,6 +221,7 @@ class TestOnePrimaryEntryPerSchedulePeriod:
     for _ in range(2):
       ext_session.add(
         Entry(
+          entity_id=PARENT_ENTITY_ID,
           posting_date=JAN_END,
           status="draft",
           type="adjusting",

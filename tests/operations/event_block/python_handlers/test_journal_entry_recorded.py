@@ -336,7 +336,7 @@ class TestDispatchNested:
 
     captured_bodies: list[object] = []
 
-    def _create_je_capture(_session, body, _created_by):
+    def _create_je_capture(_session, body, _created_by, **_kwargs):
       captured_bodies.append(body)
       return _fake_response(entry_id="je_qb1", transaction_id="txn_qb1")
 
@@ -401,7 +401,7 @@ class TestDispatchNested:
     )
     captured_txn_ids: list[str | None] = []
 
-    def _create_je(_session, body, _created_by):
+    def _create_je(_session, body, _created_by, **_kwargs):
       captured_txn_ids.append(body.transaction_id)
       return next(fake_responses)
 

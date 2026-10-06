@@ -132,8 +132,13 @@ def create_schedule(
   session: Session,
   body: CreateScheduleRequest,
   created_by: str,
+  *,
+  entity_id: str | None = None,
 ) -> ScheduleCreatedResponse:
-  """Raises `ValueError` for validation failures (mapped to 422)."""
+  """Create a schedule in one entity's books, default the group parent.
+
+  Raises `ValueError` for validation failures (mapped to 422).
+  """
   _validate_element_references(session, body)
   service = ScheduleService()
   et = EntryTemplate(
@@ -175,6 +180,7 @@ def create_schedule(
     created_by=created_by,
     closed_through=effective_closed_through,
     source_transaction_id=body.source_transaction_id,
+    entity_id=entity_id,
   )
 
   count_row = session.execute(

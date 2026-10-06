@@ -23,6 +23,7 @@ from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.event_block.commands import execute_event_block
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -43,6 +44,7 @@ def session():
   db = sessionmaker(bind=engine)()
   db.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=db.connection())
+  seed_parent_entity(db)
   db.commit()
   db.execute(text(f'SET search_path TO "{schema}"'))
   try:
@@ -57,6 +59,7 @@ def session():
 
 def _entry(db, event: Event, posting_date: date) -> str:
   entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
     posting_date=posting_date,
     status="draft",
     memo=f"accrual {posting_date}",
@@ -156,6 +159,7 @@ def test_each_period_publishes_its_own_entry(session):
     ]
   )
   event = Event(
+    entity_id=PARENT_ENTITY_ID,
     event_type="schedule_entry_due",
     event_category="adjustment",
     occurred_at=datetime(2026, 8, 31, tzinfo=UTC),
@@ -199,6 +203,7 @@ def test_a_shared_client_cache_builds_one_client(session):
     ]
   )
   event = Event(
+    entity_id=PARENT_ENTITY_ID,
     event_type="schedule_entry_due",
     event_category="adjustment",
     occurred_at=datetime(2026, 8, 31, tzinfo=UTC),
@@ -235,6 +240,7 @@ def test_a_failed_client_build_is_not_retried_per_entry(session):
     ]
   )
   event = Event(
+    entity_id=PARENT_ENTITY_ID,
     event_type="schedule_entry_due",
     event_category="adjustment",
     occurred_at=datetime(2026, 8, 31, tzinfo=UTC),

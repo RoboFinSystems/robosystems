@@ -26,6 +26,7 @@ from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.event_block.qb_writeback import post_event_to_qb
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -46,6 +47,7 @@ def ext_session():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -87,6 +89,7 @@ def _event(session, *, with_capture: bool) -> Event:
       }
     )
   event = Event(
+    entity_id=PARENT_ENTITY_ID,
     event_type="journal_entry_recorded",
     event_category="adjustment",
     occurred_at=datetime(2026, 6, 15, tzinfo=UTC),
@@ -103,6 +106,7 @@ def _event(session, *, with_capture: bool) -> Event:
 def _corrected_rows(session, event: Event) -> Entry:
   """The draft as the operator corrected it: different memo, date, amounts."""
   entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
     posting_date=date(2026, 6, 20),
     status="draft",
     memo="as corrected",
@@ -184,6 +188,7 @@ def test_an_event_without_rows_publishes_nothing(ext_session):
 
 def _second_entry(session, event: Event, *, posting_date: date) -> Entry:
   entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
     posting_date=posting_date,
     status="draft",
     memo="second",

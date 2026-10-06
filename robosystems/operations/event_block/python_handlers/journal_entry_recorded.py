@@ -264,7 +264,7 @@ def _dispatch_flat(
     # Keep the originating kind (bill_paid, ...) rather than ``journal_entry``.
     transaction_type=event.event_type,
   )
-  response = create_journal_entry(session, body, created_by)
+  response = create_journal_entry(session, body, created_by, entity_id=event.entity_id)
 
   entry_ids: list[str] = []
   transaction_ids: list[str] = []
@@ -319,7 +319,9 @@ def _dispatch_nested(
       connection_id=metadata.connection_id,
       transaction_type=event.event_type,
     )
-    response = create_journal_entry(session, body, created_by)
+    response = create_journal_entry(
+      session, body, created_by, entity_id=event.entity_id
+    )
     if shared_txn_id is None:
       shared_txn_id = response.transaction_id
     _link_entry_and_txn(

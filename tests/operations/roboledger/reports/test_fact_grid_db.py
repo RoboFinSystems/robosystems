@@ -24,6 +24,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec,
   generate_report_facts,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 pytestmark = pytest.mark.integration
 
@@ -164,6 +165,7 @@ def _seed() -> dict[str, str]:
 def _post(ids, lines, posting_date=date(2026, 1, 15)):
   with extensions_session(GRAPH) as session:
     entry = Entry(
+      entity_id=PARENT_ENTITY_ID,
       type="standard",
       status="posted",
       posting_date=posting_date,

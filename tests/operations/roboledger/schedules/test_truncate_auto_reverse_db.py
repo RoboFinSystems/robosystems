@@ -26,6 +26,7 @@ from robosystems.models.extensions.structure import Structure
 from robosystems.models.extensions.taxonomy import Taxonomy
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.schedules.service import ScheduleService
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -48,6 +49,7 @@ def ext_session():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
   try:
@@ -101,6 +103,7 @@ def _schedule(session) -> Structure:
 
 def _entry(session, structure, *, posting_date, status="draft", reversal_of=None):
   entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
     posting_date=posting_date,
     status=status,
     type="reversing" if reversal_of else "closing",

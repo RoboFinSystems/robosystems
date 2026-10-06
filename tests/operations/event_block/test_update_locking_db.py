@@ -44,6 +44,7 @@ from robosystems.operations.event_block.commands import (
 from robosystems.operations.event_block.promotion import promote_pending_obligations
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.schedules import promote_obligations
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 pytestmark = pytest.mark.integration
 
@@ -99,6 +100,7 @@ def captured_event(tenant):
     session.execute(text("DELETE FROM events"))
     session.add(
       Event(
+        entity_id=PARENT_ENTITY_ID,
         id=EVENT_ID,
         # A support-class type with no registered Python handler, so
         # `fire_handler_on_commit` is a no-op. That keeps the assertions about
@@ -266,6 +268,7 @@ class TestObligationSweepLock:
       )
       session.add(
         Event(
+          entity_id=PARENT_ENTITY_ID,
           id=self.OBLIGATION_ID,
           event_type="schedule_entry_due",
           event_category="adjustment",
@@ -319,6 +322,7 @@ class TestPublishLock:
       session.execute(text("DELETE FROM events"))
       session.add(
         Event(
+          entity_id=PARENT_ENTITY_ID,
           id=EVENT_ID,
           event_type="journal_entry_recorded",
           event_category="adjustment",

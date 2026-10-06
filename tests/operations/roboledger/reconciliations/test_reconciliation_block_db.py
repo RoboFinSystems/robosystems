@@ -22,7 +22,6 @@ from robosystems.models.extensions import (
   Structure,
   VerificationResult,
 )
-from robosystems.models.extensions.entity import Entity
 from robosystems.models.extensions.roboledger import COA_SOURCES, Fact, FactSet
 from robosystems.operations.information_block import get_information_block
 from robosystems.operations.roboledger.commands.reconciliations import (
@@ -50,7 +49,6 @@ _BILL_REMOVED = (
 
 @pytest.fixture()
 def ledger(ext_session, books):
-  ext_session.add(Entity(name="Fictional Co", created_by="usr"))
   ext_session.commit()
   return ext_session
 

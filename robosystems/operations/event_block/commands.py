@@ -40,6 +40,7 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
 )
+from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 from robosystems.operations.roboledger.entry_status import (
   LANDED_ENTRY_STATUSES,
 )
@@ -347,8 +348,10 @@ def _build_event_row(
   body: CreateEventBlockRequest,
   created_by: str,
   status: str,
+  entity_id: str,
 ) -> Event:
   return Event(
+    entity_id=entity_id,
     event_type=body.event_type,
     event_category=body.event_category,
     event_class=body.event_class,
@@ -379,8 +382,12 @@ def create_event_block(
   created_by: str,
   *,
   graph_id: str,
+  entity_id: str | None = None,
 ) -> EventBlockEnvelope:
   """Persist an event block and commit, optionally firing its handler.
+
+  The event lands on ``entity_id``, default the group parent, and every GL
+  row its handler writes inherits that entity.
 
   ``apply_handlers=False`` captures the row (``status='captured'``, no GL
   rows). ``apply_handlers=True`` resolves a handler (Python registry first,
@@ -394,7 +401,7 @@ def create_event_block(
   # internal callers that set their own.
   _refuse_system_metadata(body.metadata)
   _event, envelope = create_event_block_in_session(
-    session, body, created_by, graph_id=graph_id
+    session, body, created_by, graph_id=graph_id, entity_id=entity_id
   )
   session.commit()
   return envelope
@@ -406,6 +413,7 @@ def create_event_block_in_session(
   created_by: str,
   *,
   graph_id: str,
+  entity_id: str | None = None,
 ) -> tuple[Event, EventBlockEnvelope]:
   """:func:`create_event_block` without the commit; returns row and envelope.
 
@@ -415,6 +423,7 @@ def create_event_block_in_session(
   refuse_reserved_event_type(body.event_type)
   _validate_event_source(body.source, graph_id)
   _validate_routed_connection(body.metadata, graph_id)
+  entity_id = resolve_entity_id(session, entity_id)
   _assert_not_duplicate(session, body)
 
   if body.apply_handlers:
@@ -427,7 +436,9 @@ def create_event_block_in_session(
           f"event_type='{body.event_type}' metadata validation failed: {e}"
         )
 
-      event = _build_event_row(body, created_by, status=python_handler.target_status)
+      event = _build_event_row(
+        body, created_by, python_handler.target_status, entity_id
+      )
       session.add(event)
       _flush_new_event(session, event, body)
 
@@ -453,7 +464,7 @@ def create_event_block_in_session(
       metadata=body.metadata,
     )
 
-    event = _build_event_row(body, created_by, status="classified")
+    event = _build_event_row(body, created_by, "classified", entity_id)
     session.add(event)
     _flush_new_event(session, event, body)
 
@@ -468,7 +479,7 @@ def create_event_block_in_session(
     envelope = _to_envelope(event, body.dimension_ids)
     return event, envelope
 
-  event = _build_event_row(body, created_by, status="captured")
+  event = _build_event_row(body, created_by, "captured", entity_id)
   session.add(event)
   _flush_new_event(session, event, body)
 

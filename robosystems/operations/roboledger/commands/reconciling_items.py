@@ -782,6 +782,7 @@ def resolve_reconciling_item(
         ),
         created_by,
         graph_id=graph_id,
+        entity_id=event.entity_id,
       )
       session.flush()
       created = session.execute(

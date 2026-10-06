@@ -35,6 +35,7 @@ class Entry(ExtensionsBase):
   __tablename__ = "entries"
   __table_args__ = (
     Index("idx_entries_transaction", "transaction_id"),
+    Index("idx_entries_entity_posting_date", "entity_id", "posting_date"),
     Index("idx_entries_posting_date", "posting_date"),
     Index("idx_entries_status", "status"),
     Index("idx_entries_type", "type"),
@@ -91,6 +92,10 @@ class Entry(ExtensionsBase):
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("je"))
   number = Column(String, nullable=True)
   idempotency_key = Column(String, unique=True, nullable=True)
+
+  # The entity whose books this entry is in. Every line belongs to it; an
+  # intercompany event writes one entry per entity.
+  entity_id = Column(String, nullable=False)
 
   transaction_id = Column(String, ForeignKey("transactions.id"), nullable=True)
 

@@ -59,6 +59,13 @@ def find_parent_entity(session: Session) -> Entity | None:
     return None
 
 
+def owner_entity_id(session: Session, owner: object) -> str:
+  """The entity a block belongs to (a schedule, a reconciliation). A block
+  from before blocks carried one belongs to the group parent."""
+  entity_id = getattr(owner, "entity_id", None)
+  return str(entity_id) if entity_id else resolve_entity_id(session)
+
+
 def report_entity_id(session: Session, report_id: str) -> str | None:
   """The entity a report's facts belong to; None for a report with no facts.
 

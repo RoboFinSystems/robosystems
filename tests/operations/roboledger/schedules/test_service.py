@@ -1324,6 +1324,7 @@ class TestCreateScheduleMaterializesObligations:
     structure.id = "struct_orphan"
     pending = SimpleNamespace(
       id="evt_old",
+      entity_id="ent_1",
       status="pending",
       replaced_by_event_id=None,
       metadata_={"period_start": "2026-01-01", "period_end": "2026-01-31"},
@@ -1369,6 +1370,7 @@ class TestCreateScheduleMaterializesObligations:
 
     pending_a = SimpleNamespace(
       id="evt_old_a",
+      entity_id="ent_1",
       status="pending",
       replaced_by_event_id=None,
       metadata_={
@@ -1380,6 +1382,7 @@ class TestCreateScheduleMaterializesObligations:
     )
     pending_b = SimpleNamespace(
       id="evt_old_b",
+      entity_id="ent_1",
       status="pending",
       replaced_by_event_id=None,
       metadata_={
@@ -1433,6 +1436,7 @@ class TestCreateScheduleMaterializesObligations:
 
     good = SimpleNamespace(
       id="evt_good",
+      entity_id="ent_1",
       status="pending",
       replaced_by_event_id=None,
       metadata_={
@@ -1444,6 +1448,7 @@ class TestCreateScheduleMaterializesObligations:
     )
     malformed = SimpleNamespace(
       id="evt_malformed",
+      entity_id="ent_1",
       status="pending",
       replaced_by_event_id=None,
       metadata_={"schedule_id": "struct_legacy"},  # no period info

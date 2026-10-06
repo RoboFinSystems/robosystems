@@ -163,6 +163,7 @@ def apply_handler(
       )
 
     txn = Transaction(
+      entity_id=event.entity_id,
       type=event.event_type,
       amount=debit_cents,
       currency=event.currency or "USD",
@@ -179,6 +180,7 @@ def apply_handler(
     session.flush()
 
     entry = Entry(
+      entity_id=event.entity_id,
       transaction_id=txn.id,
       type="standard",
       posting_date=posting_date,

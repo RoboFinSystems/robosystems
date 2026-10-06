@@ -35,6 +35,7 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   reverse_journal_entry,
   update_journal_entry,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 pytestmark = pytest.mark.integration
 
@@ -96,6 +97,7 @@ def posted_entry(tenant):
     )
     session.add(
       Entry(
+        entity_id=PARENT_ENTITY_ID,
         id=ENTRY_ID,
         type="standard",
         status="posted",
@@ -137,6 +139,7 @@ class TestReversalLock:
     with extensions_session(GRAPH) as session:
       session.add(
         Entry(
+          entity_id=PARENT_ENTITY_ID,
           id="je_rev_a",
           type="reversing",
           status="posted",
@@ -150,6 +153,7 @@ class TestReversalLock:
       with extensions_session(GRAPH) as session:
         session.add(
           Entry(
+            entity_id=PARENT_ENTITY_ID,
             id="je_rev_b",
             type="reversing",
             status="posted",
@@ -166,6 +170,7 @@ class TestReversalLock:
       for i in range(3):
         session.add(
           Entry(
+            entity_id=PARENT_ENTITY_ID,
             id=f"je_plain_{i}",
             type="standard",
             status="posted",
@@ -194,6 +199,7 @@ class TestDraftEntryLock:
     with extensions_session(GRAPH) as session:
       session.add(
         Entry(
+          entity_id=PARENT_ENTITY_ID,
           id=self.DRAFT_ID,
           type="standard",
           status="draft",
@@ -379,6 +385,7 @@ class TestAlreadyReversed:
     with extensions_session(GRAPH) as session:
       session.add(
         Entry(
+          entity_id=PARENT_ENTITY_ID,
           id="je_auto_rev",
           type="reversing",
           status="draft",

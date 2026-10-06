@@ -137,6 +137,7 @@ def dispatch(
     created_by=created_by,
     entry_type="closing",
     provenance="event_handler",
+    entity_id=event.entity_id,
   )
 
   session.execute(

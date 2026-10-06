@@ -4,6 +4,7 @@ resolver; this keeps a twelfth from appearing."""
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -36,3 +37,39 @@ def test_no_entity_pick_outside_the_resolver():
     "Resolve the entity through operations.roboledger.entity_scope instead: "
     + ", ".join(offenders)
   )
+
+
+_LEDGER_ROWS = {"Entry", "Event", "Transaction"}
+
+
+def _ledger_row_names(tree: ast.Module) -> set[str]:
+  """The ledger models a module imports, by the name it binds them to."""
+  names: set[str] = set()
+  for node in ast.walk(tree):
+    if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+      "robosystems.models.extensions"
+    ):
+      names.update(
+        alias.asname or alias.name for alias in node.names if alias.name in _LEDGER_ROWS
+      )
+  return names
+
+
+def test_every_ledger_row_is_built_with_its_entity():
+  """An entry, event or transaction built without ``entity_id`` is a row no
+  entity-scoped read returns."""
+  offenders = []
+  for path in _PACKAGE.rglob("*.py"):
+    tree = ast.parse(path.read_text())
+    rows = _ledger_row_names(tree)
+    if not rows:
+      continue
+    for node in ast.walk(tree):
+      if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in rows
+        and not any(keyword.arg == "entity_id" for keyword in node.keywords)
+      ):
+        offenders.append(f"{path.relative_to(_PACKAGE.parent)}:{node.lineno}")
+  assert not offenders, "Ledger rows built without entity_id: " + ", ".join(offenders)
