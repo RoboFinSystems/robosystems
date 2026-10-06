@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.common import create_pagination_info
@@ -22,15 +22,12 @@ def find_linked_entity(
   Returns `(None, None)` until report sharing has created one; never reads
   the source graph.
   """
-  existing = session.execute(
-    text(
-      "SELECT id, name FROM entities WHERE metadata->>'source_graph_id' = :sgid LIMIT 1"
-    ),
-    {"sgid": source_graph_id},
-  ).first()
+  from robosystems.operations.roboledger.entity_scope import find_linked_entity_id
 
-  if existing:
-    return existing.id, existing.name
+  entity_id = find_linked_entity_id(session, source_graph_id)
+  entity = session.get(Entity, entity_id) if entity_id else None
+  if entity is not None:
+    return entity.id, entity.name
   return None, None
 
 

@@ -51,10 +51,10 @@ from robosystems.operations.information_block.forecast_history import (
   back_solve_lever_history,
 )
 from robosystems.operations.information_block.metrics import (
-  _default_entity_id,
   _latest_report_period_end_before,
   _metric_unit,
 )
+from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.fiscal_calendar.periods import (
   add_months,
@@ -551,7 +551,7 @@ def create(
   created_by: str,
 ) -> str:
   """Create a forecast block and its lever FactSet; returns the structure_id."""
-  entity_id = payload.entity_id or _default_entity_id(session)
+  entity_id = resolve_entity_id(session, payload.entity_id)
   base_period = _resolve_base_period(session, entity_id, payload.base_period)
   levers = _expand_levers(session, payload.levers, base_period, payload.horizon_months)
   line_assertions = _expand_line_assertions(
@@ -696,7 +696,7 @@ def update(
       session,
       structure,
       next_mechanics,
-      entity_id or _default_entity_id(session),
+      resolve_entity_id(session, entity_id),
       updated_by,
     )
 

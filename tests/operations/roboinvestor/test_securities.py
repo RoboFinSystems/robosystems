@@ -70,10 +70,11 @@ class TestFindLinkedEntity:
     session = MagicMock()
     # `MagicMock(name=...)` sets the mock's display name, not an attribute —
     # attribute-style assignment is what the ops code reads.
-    row = MagicMock()
-    row.id = "ent_42"
-    row.name = "Linked Co"
-    session.execute.return_value.first.return_value = row
+    entity = MagicMock()
+    entity.id = "ent_42"
+    entity.name = "Linked Co"
+    session.execute.return_value.fetchone.return_value = MagicMock(id="ent_42")
+    session.get.return_value = entity
 
     entity_id, entity_name = find_linked_entity(session, "kg_source_1")
 
@@ -82,7 +83,7 @@ class TestFindLinkedEntity:
 
   def test_returns_none_when_not_yet_linked(self) -> None:
     session = MagicMock()
-    session.execute.return_value.first.return_value = None
+    session.execute.return_value.fetchone.return_value = None
 
     entity_id, entity_name = find_linked_entity(session, "kg_source_2")
 
@@ -196,12 +197,13 @@ class TestCreateSecurity:
 
   def test_auto_links_via_source_graph(self) -> None:
     session = MagicMock()
-    linked_row = MagicMock()
-    linked_row.id = "ent_42"
-    linked_row.name = "Linked Co"
+    linked_entity = MagicMock()
+    linked_entity.id = "ent_42"
+    linked_entity.name = "Linked Co"
     lookup_result = MagicMock()
-    lookup_result.first.return_value = linked_row
+    lookup_result.fetchone.return_value = MagicMock(id="ent_42")
     session.execute.side_effect = [lookup_result]
+    session.get.return_value = linked_entity
 
     fake_security = _make_security(entity_id="ent_42")
     body = CreateSecurityRequest(
@@ -223,7 +225,7 @@ class TestCreateSecurity:
   def test_unlinked_when_source_graph_has_no_match(self) -> None:
     session = MagicMock()
     lookup_result = MagicMock()
-    lookup_result.first.return_value = None
+    lookup_result.fetchone.return_value = None
     session.execute.side_effect = [lookup_result]
 
     fake_security = _make_security(entity_id=None, source_graph_id="kg_future")

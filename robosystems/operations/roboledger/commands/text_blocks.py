@@ -137,12 +137,9 @@ def bind_text_block(
     # Set here rather than widening the taxonomy-block request schema.
     element.item_type = "text_block"
 
-  if body.entity_id is not None:
-    entity_id = body.entity_id
-  else:
-    from robosystems.operations.roboledger.commands.reports import _get_entity_id
+  from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 
-    entity_id = _get_entity_id(session, graph_id)
+  entity_id = resolve_entity_id(session, body.entity_id)
 
   provenance = DocumentProvenance(
     document_id=document.id,

@@ -507,7 +507,7 @@ class TestCreate:
     session.flush.side_effect = _flush
 
     with (
-      patch.object(forecast_handlers, "_default_entity_id", return_value="ent_1"),
+      patch.object(forecast_handlers, "resolve_entity_id", return_value="ent_1"),
       patch.object(forecast_handlers, "_resolve_base_period", return_value="2026-06"),
       patch.object(forecast_handlers, "_write_lever_fact_set") as write_levers,
     ):
@@ -534,7 +534,7 @@ class TestCreate:
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.side_effect = [imposter]
     with (
-      patch.object(forecast_handlers, "_default_entity_id", return_value="ent_1"),
+      patch.object(forecast_handlers, "resolve_entity_id", return_value="ent_1"),
       patch.object(forecast_handlers, "_resolve_base_period", return_value="2026-06"),
       pytest.raises(ValueError, match="rs-driver"),
     ):

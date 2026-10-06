@@ -41,6 +41,7 @@ from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
 )
 from robosystems.operations.locking import bounded_lock_wait
+from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 from robosystems.operations.roboledger.fact_set import create_fact_set
 
 from .resolvers import IndependentSide, ReconciliationWindow
@@ -356,15 +357,6 @@ def reconciliation_rule(session: Session, structure_id: str) -> Rule | None:
   return session.get(Rule, rule_id) if rule_id else None
 
 
-def _entity_id(session: Session) -> str:
-  row = session.execute(
-    text("SELECT id FROM entities ORDER BY created_at ASC LIMIT 1")
-  ).fetchone()
-  if row is None:
-    raise ValueError("No entity exists on this graph; initialize the ledger first.")
-  return str(row.id)
-
-
 def balance_digest(comparison: ReconciliationPreviewResponse) -> str:
   """A fingerprint of every compared balance, both sides, to the cent.
 
@@ -421,7 +413,7 @@ def record_reconciliation(
     )
   account_scope = (structure.artifact_mechanics or {}).get("scope") == "account"
   concepts = ensure_reconciliation_concepts(session, created_by)
-  entity_id = _entity_id(session)
+  entity_id = resolve_entity_id(session)
   provenance = ObservedProvenance(
     source=side.source,
     method=side.method,

@@ -940,7 +940,7 @@ def test_create_report_loads_structures_for_the_resolved_taxonomy() -> None:
   names = [
     "build_periods",
     "periods_to_json",
-    "_get_entity_id",
+    "resolve_entity_id",
     "load_entity_reporting_style",
     "load_close_target_concept",
     "generate_report_facts",

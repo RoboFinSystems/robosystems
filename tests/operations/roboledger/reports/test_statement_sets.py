@@ -148,7 +148,7 @@ class TestSoftSkips:
   def test_no_entity(self):
     session = _session(
       mapping=_row(id="map_1"),
-      execute_side_effects=[_exec_fetchone(None)],  # _get_entity_id
+      execute_side_effects=[_exec_fetchone(None)],  # resolve_entity_id
     )
     result = _stamp(session)
     assert result.stamped is False
@@ -167,7 +167,7 @@ class TestSoftSkips:
     session = _session(
       mapping=_row(id="map_1"),
       execute_side_effects=[
-        _exec_fetchone(_row(id="ent_1")),  # _get_entity_id
+        _exec_fetchone(_row(id="ent_1")),  # resolve_entity_id
         _exec_fetchone(None),  # rs-gaap taxonomy lookup
       ],
     )
@@ -184,7 +184,7 @@ class TestSoftSkips:
 class TestStampHappyPath:
   def _happy_session(self, existing_canonical_ids=()):
     effects = [
-      _exec_fetchone(_row(id="ent_1")),  # _get_entity_id
+      _exec_fetchone(_row(id="ent_1")),  # resolve_entity_id
       _exec_fetchone(_row(id="tax_1")),  # rs-gaap taxonomy
       _exec_scalars(list(existing_canonical_ids)),  # retract: window select
     ]
@@ -293,17 +293,27 @@ class TestStampHardFail:
 class TestRetractCanonicalSets:
   def test_empty_window_is_a_noop(self):
     session = MagicMock()
-    session.execute.side_effect = [_exec_scalars([])]
+    session.execute.side_effect = [_exec_fetchone(_row(id="ent_1")), _exec_scalars([])]
+    retracted = retract_canonical_statement_sets(
+      session, period_start=PS, period_end=PE
+    )
+    assert retracted == []
+    assert session.execute.call_count == 2
+    session.flush.assert_not_called()
+
+  def test_no_entity_retracts_nothing(self):
+    session = MagicMock()
+    session.execute.side_effect = [_exec_fetchone(None)]
     retracted = retract_canonical_statement_sets(
       session, period_start=PS, period_end=PE
     )
     assert retracted == []
     assert session.execute.call_count == 1
-    session.flush.assert_not_called()
 
   def test_sweeps_results_then_deletes_sets(self):
     session = MagicMock()
     session.execute.side_effect = [
+      _exec_fetchone(_row(id="ent_1")),  # resolve_entity_id
       _exec_scalars(["fs_a", "fs_b"]),
       MagicMock(),  # VerificationResult sweep
       MagicMock(),  # fact_sets delete
@@ -314,23 +324,27 @@ class TestRetractCanonicalSets:
     assert retracted == ["fs_a", "fs_b"]
 
     calls = session.execute.call_args_list
-    sweep_sql = str(calls[1].args[0])
+    sweep_sql = str(calls[2].args[0])
     assert "verification_results" in sweep_sql.lower()
-    delete_sql = str(calls[2].args[0])
+    delete_sql = str(calls[3].args[0])
     assert "DELETE FROM fact_sets" in delete_sql
-    assert calls[2].args[1] == {"ids": ["fs_a", "fs_b"]}
+    assert calls[3].args[1] == {"ids": ["fs_a", "fs_b"]}
     session.flush.assert_called_once()
 
-  def test_window_predicates_protect_other_producers(self):
+  def test_window_predicates_protect_other_producers_and_entities(self):
     """The window select must exclude publication snapshots
-    (report_id NOT NULL), scenario months, and non-'report' set types."""
+    (report_id NOT NULL), scenario months, non-'report' set types, and every
+    other entity's sets."""
     session = MagicMock()
-    session.execute.side_effect = [_exec_scalars([])]
+    session.execute.side_effect = [_exec_fetchone(_row(id="ent_1")), _exec_scalars([])]
     retract_canonical_statement_sets(session, period_start=PS, period_end=PE)
-    sql = str(session.execute.call_args_list[0].args[0])
+    window = session.execute.call_args_list[1]
+    sql = str(window.args[0])
     assert "factset_type = 'report'" in sql
     assert "report_id IS NULL" in sql
     assert "scenario_id IS NULL" in sql
+    assert "entity_id = :eid" in sql
+    assert window.args[1]["eid"] == "ent_1"
 
 
 class TestStampRoundsToCents:

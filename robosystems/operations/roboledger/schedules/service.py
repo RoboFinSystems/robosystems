@@ -33,6 +33,7 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
 )
+from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 from robosystems.operations.roboledger.entry_status import (
   GENERATED_REVERSAL_SQL,
   LANDED_ENTRY_STATUSES,
@@ -336,7 +337,7 @@ class ScheduleService:
       )
 
     fact_set_id = generate_prefixed_ulid("fs")
-    entity_id = self._get_entity_id(session)
+    entity_id = resolve_entity_id(session)
 
     # A custom periodic-amounts curve is asserted by the caller; a
     # straight-line schedule is derived from method + params.
@@ -1688,15 +1689,6 @@ class ScheduleService:
     session.add(taxonomy)
     session.flush()
     return taxonomy.id
-
-  def _get_entity_id(self, session: Session) -> str:
-    result = session.execute(
-      text("SELECT id FROM entities ORDER BY created_at ASC LIMIT 1")
-    )
-    row = result.fetchone()
-    if not row:
-      raise ValueError("No entity found")
-    return row.id
 
 
 def _element_is_contra_asset(session: Session, element_id: str) -> bool:

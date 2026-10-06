@@ -10,7 +10,7 @@ validation, and the flip.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -213,8 +213,13 @@ class TestChangeReportingStyle:
       composed_types=list(_REQUIRED_STATEMENT_TYPES),
       primary_entity=primary,
     )
-    result = change_reporting_style(
-      session, _req(SMALL_PRIVATE_STYLE_ID, entity_id=None)
-    )
+    with patch(
+      "robosystems.operations.roboledger.commands.reporting_style.resolve_entity",
+      return_value=primary,
+    ) as resolve:
+      result = change_reporting_style(
+        session, _req(SMALL_PRIVATE_STYLE_ID, entity_id=None)
+      )
+    resolve.assert_called_once_with(session, None)
     assert result.changed is True
     assert primary.reporting_style_id == SMALL_PRIVATE_STYLE_ID
