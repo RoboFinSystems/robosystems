@@ -196,12 +196,13 @@ class ClosePeriodRequest(BaseModel):
 class ReopenPeriodRequest(BaseModel):
   """Un-lock a closed period for adjustment.
 
-  Reopening the current `closed_through` decrements it by one.
-  Reopening an earlier period is a prior-period adjustment: the
-  watermark stays put, and the re-close restores the period without
-  advancing it. The `reason` is required and captured in the audit
-  log. Use sparingly — reopen invalidates downstream artifacts that
-  trusted the closed state (reports, shared filings).
+  Only the current `closed_through` can be reopened, and doing so
+  decrements it by one; reaching an earlier month means reopening
+  backwards one month at a time, since later closed months carry
+  statements stamped from its numbers. The `reason` is required and
+  captured in the audit log. Use sparingly — reopen invalidates
+  downstream artifacts that trusted the closed state (reports, shared
+  filings).
   """
 
   reason: str = Field(
@@ -393,7 +394,9 @@ class FiscalCalendarResponse(BaseModel):
       "Structured blocker codes when closeable_now is False: "
       "'sequence_violation', 'period_incomplete', 'sync_stale', "
       "'calendar_not_initialized', 'period_already_closed', "
-      "'pending_obligations', 'stranded_obligations'"
+      "'pending_obligations', 'stranded_obligations', "
+      "'reconciling_items', 'unposted_source_events', "
+      "'unreconciled_accounts'"
     ),
   )
   # Populated only when the matching code is in `blockers`.

@@ -310,19 +310,20 @@ update_event_block_op = _registrar.register(
 )
 
 
-# QB publish uses `request_id=event.id` for idempotency; the loader's
-# cross-source matcher recognises the round-tripped entry on the next sync.
+# Each draft entry posts with its entry id as the QB RequestId for idempotency;
+# the loader's cross-source matcher recognises the round-tripped entries.
 execute_event_block_op = _registrar.register(
   OperationSpec(
     name="execute-event-block",
     summary="Execute Event Block",
     description=(
       "For events on a connection with write_policy='qb_authoritative' "
-      "or 'hybrid', publish the captured GL plan to the source-of-truth "
-      "system (QuickBooks). Captures qb_txn_id on "
-      "event.metadata.qb_external_id, transitions status to 'fulfilled' "
-      "(or 'pending' on rejection), and promotes draft GL rows to "
-      "'posted'. Native-policy events fast-path through with no QB "
+      "or 'hybrid', publish the event's draft GL entries to the "
+      "source-of-truth system (QuickBooks), each as its own JournalEntry. "
+      "Records the QuickBooks ids per entry on event.metadata.qb_entry_ids "
+      "and promotes the published entries to 'posted'; the event goes "
+      "'fulfilled' once no draft remains, or 'pending' on rejection (what "
+      "landed is kept). Native-policy events fast-path through with no QB "
       "write — RoboSystems is the system of record."
     ),
     command=cmd_execute_event_block,

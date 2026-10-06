@@ -1,11 +1,11 @@
 ---
 title: Work across several companies
-description: For fractional CFOs, bookkeepers and advisors. One graph per company, a connection for each, and moving between clients in the app and your AI assistant.
+description: For fractional CFOs, controllers and advisors. One graph per company, a connection for each, and moving between clients in the app and your AI assistant.
 order: 6
 section: Get started
 ---
 
-If you keep the books for several companies, each one is its own graph. Set it up that way from the start, and you and your AI assistant always know which company you're working on.
+If you're the finance lead for several companies, as a fractional CFO, controller or advisor, each one is its own graph. Set it up that way from the start, and you and your AI assistant always know which company you're working on.
 
 ## One graph per company
 
@@ -17,10 +17,10 @@ Each graph is its own subscription on your organization's payment method, with i
 
 Graphs belong to an organization. Only people in the organization that owns a graph can be given access to it, and each account belongs to one organization. So the client graphs you work on need to live in your organization.
 
-- **Organization owners and admins** can reach every graph the organization owns.
-- **Everyone else** sees only the graphs they've been given. To give someone access to one company, open that graph's **Dashboard** at [robosystems.ai](https://robosystems.ai), choose **Members**, and add them as a viewer (read only), a member (read and write) or an admin.
+- **Organization owners and admins** can reach every graph the organization owns, through their organization role.
+- **Everyone else** sees only the graphs they've been given. To give someone access to one company, a graph admin opens that graph's **Dashboard** at [robosystems.ai](https://robosystems.ai), chooses **Members**, and adds them as a viewer (read only), a member (read and write) or an admin. The same dialog changes someone's role on that graph or removes it.
 
-Owners and admins change members' roles and remove members on the organization's page at robosystems.ai.
+Two kinds of role are at work. A graph role, set in **Members**, covers one company. An organization role, set on the organization's page at robosystems.ai, covers the whole organization: owners and admins invite people there, change their organization role and remove them. In **Members**, people who reach the graph through their organization role are marked **Via org role**, and their access is changed on the organization's page.
 
 ## Move between companies in the app
 

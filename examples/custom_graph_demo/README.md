@@ -288,7 +288,7 @@ just demo-custom-graph --new-graph
   "name": "Product",
   "properties": [
     {"name": "identifier", "type": "STRING", "is_primary_key": true},
-    {"name": "name", "type": "STRING", "is_required": true},
+    {"name": "name", "type": "STRING", "nullable": false},
     {"name": "price", "type": "DOUBLE"},
     {"name": "category", "type": "STRING"}
   ]

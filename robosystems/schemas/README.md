@@ -291,7 +291,8 @@ if not compatibility.compatible:
 
 ## Custom schemas
 
-Users can supply their own schema as JSON or YAML, merged onto base:
+Users can supply their own schema as JSON or YAML, merged onto base when it
+declares `"extends": "base"`:
 
 ```python
 from robosystems.schemas.runtime.custom import CustomSchemaManager
@@ -321,7 +322,9 @@ merged = manager.merge_with_base(schema)
 }
 ```
 
-Custom schemas extend base rather than replacing it. Node names are checked
+Base is merged in only when the schema declares `"extends": "base"` (graph
+creation checks for it before calling `merge_with_base`); without it the custom
+schema is the graph's whole schema. Node names are checked
 against `CustomSchemaParser.RESERVED_NODE_NAMES` (`SystemConfig`,
 `SchemaVersion`, `AuditLog`, `Permission`, `Role`, `Session`, `Lock`,
 `Migration`, `SystemUser`) and relationship names against

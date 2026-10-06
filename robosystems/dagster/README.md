@@ -25,7 +25,7 @@ If a user is waiting on it and wants a progress bar, it is a worker task. If it 
 | `assets/` | External asset specs for graph operations, plus shared-repository publish/replica assets |
 | `reporting.py` | Reports `AssetMaterialization` events from outside Dagster jobs (API, provisioning service) so direct operations still show up in the Assets tab |
 
-Adapter pipelines live in their own packages — `adapters/sec/pipeline/` and `adapters/quickbooks/pipeline/`.
+Adapter pipelines live in their own packages — `adapters/sec/pipeline/`, `adapters/quickbooks/pipeline/`, `adapters/mercury/pipeline/` and `adapters/plaid/pipeline/`. Each is loaded only when its flag is on (`SEC_PIPELINE_ENABLED`, `CONNECTION_QUICKBOOKS_ENABLED`, `CONNECTION_MERCURY_ENABLED`, `CONNECTION_PLAID_ENABLED`); Mercury and Plaid are off by default.
 
 ## Running locally
 
@@ -119,14 +119,17 @@ Resources fall back to `env.*` when not explicitly configured, so they resolve s
 
 ```python
 # dagster/definitions.py
-from robosystems.adapters.sec.pipeline import get_dagster_components as sec_pipeline
+# FORK: add your adapter pipelines here, following the pattern below.
 
-sec = sec_pipeline()
-all_assets = [*platform_assets, *sec["assets"]]
-all_jobs = [*platform_jobs, *sec["jobs"]]
+if env.SEC_PIPELINE_ENABLED:
+  from robosystems.adapters.sec.pipeline import get_dagster_components as sec_pipeline
 
-# === FORK: Add your adapter pipelines here ===
-# from robosystems.adapters.custom_erp.pipeline import get_dagster_components as erp_pipeline
+  sec = sec_pipeline()
+else:
+  sec = _empty_pipeline
+
+all_assets = [..., *sec["assets"]]
+all_jobs = [..., *sec["jobs"]]
 ```
 
 Each adapter's `pipeline/__init__.py` returns `{"assets": [...], "jobs": [...], "sensors": [...], "schedules": [...]}`. See the [Adapters README](../adapters/README.md#adding-new-adapters) for the full pattern and the [SEC pipeline README](../adapters/sec/pipeline/README.md) for a worked example.

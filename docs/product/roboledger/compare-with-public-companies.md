@@ -30,7 +30,9 @@ A table of gross margin by quarter: yours at 56 to 61%, the peers at roughly 30 
 https://api.robosystems.ai/v1/graphs/sec/mcp
 ```
 
-You can also add the address you used for your books a second time and choose **SEC EDGAR Filings** when you sign in. Give the two connectors names you'll recognize, like "Our books" and "SEC filings".
+Or add the general address, `https://api.robosystems.ai/v1/mcp`, and choose **SEC EDGAR Filings** under **Shared repositories** when you sign in. In Claude you can instead add [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) from the connector directory, and in ChatGPT the [RoboSystems plugin](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca). Each way still needs the SEC subscription from step 1.
+
+Give the two connectors names you'll recognize, like "Our books" and "SEC filings".
 
 Your ledger stays in your graph. The SEC graph is shared and read-only, and nothing from your books is copied into it. Your assistant reads from both and does the comparison in the conversation.
 

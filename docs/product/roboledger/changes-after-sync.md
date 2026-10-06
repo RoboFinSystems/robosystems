@@ -15,7 +15,7 @@ After a sync, your AI assistant tells you how many transactions changed at the s
 
 For each one, your assistant can show you what RoboLedger posted, what QuickBooks says now, and the difference for each account.
 
-A regular sync looks back 60 days. If someone edited something older than that, ask your assistant to sync from a date that covers it, or choose a full sync. Otherwise the change is missed.
+A regular sync looks back 60 days. If someone edited something older than that, ask your assistant to sync from a date that covers it, or choose **From a specific date** or **Full rebuild** when you sync from the QuickBooks card. Otherwise the change is missed.
 
 ## Three ways to settle it
 

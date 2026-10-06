@@ -76,6 +76,8 @@ See [Find your way around the app](the-roboledger-app.md).
 
 Your graph holds documents as well as numbers. Ask your assistant to save your revenue recognition policy, your close procedures or the notes from a board meeting, and they become something it can search and quote later. Before a close, your assistant looks for a close procedures document and follows it.
 
+Your assistant can also remember shorter things across conversations, such as how you treat a vendor or why an account is mapped the way it is. See [Documents and memory](https://robosystems.ai/docs/guides/documents-and-memory).
+
 ## Try asking
 
 - "Why did gross margin drop in August? Show me the accounts that moved."

@@ -56,7 +56,11 @@ async def stream_operation_events(
   ),
   from_sequence: int = Query(
     0,
-    description="Start streaming from this sequence number (0 = from beginning)",
+    description=(
+      "Replay stored events from this sequence number, then stream live ones. "
+      "A running operation replays nothing at 0 (live events only); a settled "
+      "one replays its history from here (0 = all) and closes."
+    ),
     ge=0,
   ),
   current_user: User = Depends(get_current_user_sse),

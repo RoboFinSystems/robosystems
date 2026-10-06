@@ -42,13 +42,13 @@ You sign in once. The client renews its access on its own, so a connection you u
 
 ## Revoking access
 
-Open **Settings → Connected apps** in the app. It lists every client you've authorized, with the graph it reaches and when it was last used. **Revoke** ends that connection immediately: the client's next request fails, and it will ask you to authorize again.
+Open **User Settings → Connected apps** in the app. It lists every client you've authorized, with the graph it reaches and when it was last used. **Revoke** ends that connection immediately: the client's next request fails, and it will ask you to authorize again.
 
 Changing your password signs every connected app out at once.
 
 ## API keys instead of sign-in
 
-Scripts, CI jobs and clients that can't open a browser connect with an API key rather than a sign-in, using a graph's own address. A key created from the app's **MCP** page reaches only that graph and its subgraphs. Revoke a key under **Settings → API keys**. See [Authentication and API keys](https://robosystems.ai/docs/technical/authentication-and-api-keys).
+Scripts, CI jobs and clients that can't open a browser connect with an API key rather than a sign-in, using a graph's own address. A key created from the app's **MCP** page reaches only that graph and its subgraphs. Revoke a key under **User Settings → API keys**. See [Authentication and API keys](https://robosystems.ai/docs/technical/authentication-and-api-keys).
 
 ## Try asking
 

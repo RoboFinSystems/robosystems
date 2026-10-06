@@ -12,6 +12,8 @@ Most of what you'll find there comes from two places:
 - **QuickBooks transactions that couldn't post on sync.** Transactions from QuickBooks are already booked there, so they normally post straight to the journal. One lands here only if it can't, for example because an account it uses isn't in RoboLedger's chart of accounts yet, or its month is closed. Fix the cause and approve it, which posts it at once, or let the next sync that brings it try again.
 - **Entries drafted in RoboLedger**, by your AI assistant or by a schedule. These are drafts until the close posts them.
 
+An event that's **Captured** or **Classified** with no entry yet holds the close of the month it's dated in, because once that month closes it could never post there. Approve or reject each one before you close.
+
 The close posts every draft in the month unless its event has been rejected. A **Classified** event whose draft entry is already written posts at the next close even if nobody approves it, so reject anything that shouldn't post.
 
 Approving writes to the RoboLedger ledger only. A transaction that came from QuickBooks is never sent back. An entry drafted in RoboLedger can be written to QuickBooks when it posts, which for most people is the close. See [Nothing writes to QuickBooks until you post](quickbooks-write-back.md).
@@ -27,7 +29,7 @@ Open a row to see the event and, for a QuickBooks transaction, its journal lines
 The Inbox opens on **Captured**. Change the status filter to see the rest.
 
 - **Captured** — waiting for you. Nothing is in the ledger yet.
-- **Classified** — its accounts are decided. When its draft entry is already in the ledger, as it is for entries your assistant or a schedule drafted, the next close posts it without an approval; reject it if it shouldn't post. One classified without an entry waits until it's approved.
+- **Classified** — its accounts are decided. When its draft entry is already in the ledger, as it is for entries your assistant or a schedule drafted, the next close posts it without an approval; reject it if it shouldn't post. One classified without an entry waits until it's approved, and holds the close of its month until you approve or reject it.
 - **Committed** — approved. Its draft posts at the next close.
 - **Voided** — rejected, or a schedule month the ledger retired.
 

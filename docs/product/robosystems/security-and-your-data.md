@@ -18,7 +18,7 @@ A graph holds a company's books, reports and plans, so the first question is who
 RoboSystems runs on AWS in the United States (us-east-1).
 
 - Data is encrypted in transit between you and RoboSystems (TLS), and at rest (AES-256), backups included.
-- The access QuickBooks and other connections grant is encrypted separately, with a key of its own. No screen or API returns it, to you or anyone else; it is used only to sync. RoboSystems never sees your QuickBooks password.
+- The access QuickBooks and other connections grant is encrypted separately, with a key of its own. No screen or API returns it, to you or anyone else. It is used to sync, and to write back the entries RoboLedger posts; see [Nothing writes to QuickBooks until you post](https://roboledger.ai/docs/quickbooks-write-back). RoboSystems never sees your QuickBooks password.
 - API keys and connected-app tokens are stored as one-way hashes, so a stored key can't be read back.
 
 ## What an AI client sees
@@ -29,7 +29,7 @@ What the client can reach is fenced:
 
 - **One graph per connection**, chosen by you on the consent screen.
 - **Your role on that graph.** A client can't do more than you can. A viewer's client can read but not write.
-- **Revocable.** **Settings → Connected apps** ends a connection immediately, and changing your password signs every connected app out.
+- **Revocable.** **User Settings → Connected apps** ends a connection immediately, and changing your password signs every connected app out.
 
 See [Sign-in and graph access](oauth-and-graph-scope.md).
 
@@ -40,6 +40,8 @@ Some features use RoboSystems' own AI rather than your client's: the **Console**
 ## Signing in
 
 - Sign in with a password, and add a **passkey** under **User Settings** for a sign-in that can't be phished. Owners and admins should.
+- Once you have a passkey, a password sign-in also asks for it, as a second factor. You can instead choose **Sign in with a passkey** and skip the password.
+- Your first passkey comes with one-time recovery codes, shown once. Keep them somewhere safe: a recovery code stands in for the passkey if you lose the device.
 - Graph access is checked on every request, not only at sign-in. Someone removed from a graph loses it within ten minutes, and usually at once.
 - Removing someone from your organization ends their sessions, API keys and connected apps. See [Invite your team](teams-and-roles.md).
 

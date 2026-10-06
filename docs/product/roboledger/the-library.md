@@ -9,7 +9,7 @@ section: Keep the books right
 
 ## What you will see
 
-Pick a taxonomy at the top. **rs-gaap** is the library's reporting concepts, drawn from the US GAAP taxonomy, and the one you will use most. Your own chart of accounts and any reporting extensions this company has added are listed too, each with how many elements it holds. A two-element **cm** entry holds the debit and credit concepts the ledger itself is built on.
+Pick a taxonomy at the top. **rs-gaap** is the library's reporting concepts, drawn from the US GAAP taxonomy, and the one you will use most. Your own chart of accounts and any reporting extensions this company has added are listed too, each with how many elements it holds. **fac** holds the fundamental accounting concepts rs-gaap builds on, and has no statement hierarchy of its own. A two-element **cm** entry holds the debit and credit concepts the ledger itself is built on.
 
 **Browse** lists the concepts. Open one to read its definition, whether it is a debit or a credit, and whether it is a balance at a point in time or a flow over a period.
 

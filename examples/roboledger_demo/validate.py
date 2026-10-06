@@ -15,7 +15,8 @@ draft entry the disposal handler posts into the period the demo then tells you
 to close.
 
 Can also be run standalone against any graph (defaults to the cached demo
-graph in .local/config.json):
+graph). It talks to the same API as ``main.py`` — ``DEMO_API_URL``, else the
+local stack — with the same per-target credentials file:
 
     uv run python -m examples.roboledger_demo.validate <graph_id>
 """
@@ -25,11 +26,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
-
-BASE_URL = "http://localhost:8000"
-CREDENTIALS_FILE = Path(".local/config.json")
 
 _GREEN = "\033[32m"
 _RED = "\033[31m"
@@ -59,9 +56,10 @@ class _Result:
 
 
 class _Validator:
-  def __init__(self, graph_id: str, api_key: str) -> None:
+  def __init__(self, graph_id: str, api_key: str, base_url: str) -> None:
     self.graph_id = graph_id
     self.api_key = api_key
+    self.base_url = base_url
     self.results: list[_Result] = []
     # (graph_id, structure_id) pairs created by this run — deleted in cleanup()
     self._cleanup: list[tuple[str, str]] = []
@@ -74,14 +72,14 @@ class _Validator:
     if self._ledger is None:
       from robosystems_client.clients.ledger_client import LedgerClient
 
-      self._ledger = LedgerClient({"base_url": BASE_URL, "token": self.api_key})
+      self._ledger = LedgerClient({"base_url": self.base_url, "token": self.api_key})
     return self._ledger
 
   def _gql(self, query: str) -> dict[str, Any]:
     if self._gqlc is None:
       from robosystems_client.graphql.client import GraphQLClient
 
-      self._gqlc = GraphQLClient(BASE_URL, token=self.api_key)
+      self._gqlc = GraphQLClient(self.base_url, token=self.api_key)
     return self._gqlc.execute(self.graph_id, query)
 
   def _sub(self, title: str) -> None:
@@ -560,7 +558,7 @@ class _Validator:
 # ── Element lookup ────────────────────────────────────────────────────────────
 
 
-def _prepaid_elements(graph_id: str, api_key: str) -> tuple[str, str]:
+def _prepaid_elements(graph_id: str, api_key: str, base_url: str) -> tuple[str, str]:
   """Return (debit_id, credit_id) from an existing prepaid schedule's mechanics.
 
   Prefers Business Insurance (clearest prepaid pattern). Falls back to any
@@ -572,7 +570,7 @@ def _prepaid_elements(graph_id: str, api_key: str) -> tuple[str, str]:
     { informationBlocks(blockType: "schedule") { name artifact { mechanics } } }
   """
   try:
-    data = GraphQLClient(BASE_URL, token=api_key, timeout=15).execute(graph_id, query)
+    data = GraphQLClient(base_url, token=api_key, timeout=15).execute(graph_id, query)
     blocks = data.get("informationBlocks", [])
     # Prefer a prepaid (insurance) schedule — avoid depreciation
     ordered = sorted(
@@ -592,18 +590,29 @@ def _prepaid_elements(graph_id: str, api_key: str) -> tuple[str, str]:
 # ── Public entry point ────────────────────────────────────────────────────────
 
 
-def run_validation(graph_id: str, api_key: str) -> bool:
-  """Run all Information Block checks. Returns True when every check passes."""
-  dr_id, cr_id = _prepaid_elements(graph_id, api_key)
+def run_validation(graph_id: str, api_key: str, base_url: str) -> bool:
+  """Run all Information Block checks. Returns True when every check passes.
 
-  v = _Validator(graph_id, api_key)
+  A section that raises is recorded as a failed check and the rest still run,
+  so a validation problem never stops the demo that called it.
+  """
+  dr_id, cr_id = _prepaid_elements(graph_id, api_key, base_url)
+
+  v = _Validator(graph_id, api_key, base_url)
+  sections = [
+    ("FactSet rows", v.schedule_fact_sets),
+    ("SumEquals rules", v.sum_equals_rules),
+    ("evaluate-rules", v.evaluate_rules),
+    ("GraphQL envelope", v.graphql_envelope),
+    ("dispose smoke test", lambda: v.dispose_smoke_test(dr_id, cr_id)),
+    ("ad-hoc rollforward", lambda: v.adhoc_rollforward(dr_id, cr_id)),
+  ]
   try:
-    v.schedule_fact_sets()
-    v.sum_equals_rules()
-    v.evaluate_rules()
-    v.graphql_envelope()
-    v.dispose_smoke_test(dr_id, cr_id)
-    v.adhoc_rollforward(dr_id, cr_id)
+    for name, section in sections:
+      try:
+        section()
+      except Exception as exc:
+        v._check(f"{name} completed", False, str(exc))
   finally:
     v.cleanup()
 
@@ -623,6 +632,10 @@ def run_validation(graph_id: str, api_key: str) -> bool:
 
 
 def _main() -> None:
+  from examples._common.config import get_graph_id
+
+  from .main import BASE_URL, CREDENTIALS_FILE, DEMO_NAME
+
   if not CREDENTIALS_FILE.exists():
     print(f"ERROR: {CREDENTIALS_FILE} not found. Run `just demo-user` first.")
     sys.exit(1)
@@ -633,13 +646,15 @@ def _main() -> None:
   if len(sys.argv) > 1:
     graph_id = sys.argv[1]
   else:
-    graph_id = creds.get("graphs", {}).get("cascade_demo", "")
+    graph_id = get_graph_id(CREDENTIALS_FILE, DEMO_NAME) or ""
     if not graph_id:
       print("Usage: uv run python -m examples.roboledger_demo.validate <graph_id>")
       sys.exit(1)
 
-  print(f"{_BOLD}Information Block Validation{_RESET}  graph={graph_id}")
-  ok = run_validation(graph_id, api_key)
+  print(
+    f"{_BOLD}Information Block Validation{_RESET}  graph={graph_id}  api={BASE_URL}"
+  )
+  ok = run_validation(graph_id, api_key, BASE_URL)
   sys.exit(0 if ok else 1)
 
 

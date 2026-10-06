@@ -1,7 +1,7 @@
 ---
 title: Nothing writes to QuickBooks until you post
 description: Reading, reporting, planning and syncing never write to QuickBooks. Entries RoboLedger posts do. What gets written back, and when.
-order: 24
+order: 25
 section: Keep the books right
 ---
 
@@ -22,11 +22,15 @@ If QuickBooks rejects an entry during a close, the close reports it. Entries tha
 
 ## QuickBooks stays your book of record
 
-A connected QuickBooks company is the book of record. RoboLedger mirrors it on every sync, and the entries RoboLedger posts are written back to it, so the two ledgers never drift apart. That's the **QuickBooks authoritative, write back on close** setting on the QuickBooks card under **Entity → Connections**, and it's the default.
+A connected QuickBooks company is the book of record. RoboLedger mirrors it on every sync, and the entries RoboLedger posts are written back to it, so the two ledgers never drift apart. That's the **QuickBooks authoritative — write back on close** setting on the QuickBooks card under **Entity → Connections**, and it's the default.
+
+The same card offers **Native — RoboLedger only, no write-back**. That setting is for books kept in RoboLedger itself. While QuickBooks is connected, leave it on QuickBooks authoritative: the sync keeps mirroring QuickBooks, and entries that stay only in RoboLedger leave the two ledgers apart.
 
 ## Disconnecting QuickBooks
 
 Open the QuickBooks card, disconnect, and choose **Disconnect**. It revokes access and stops syncing, and your books stay in the graph. Connect the same QuickBooks company again later and it picks up where it left off.
+
+The other choice, **Sever and go native**, is for moving your books off QuickBooks for good. The chart of accounts QuickBooks created becomes the graph's own, you keep the books in RoboLedger from then on, and nothing is written to QuickBooks again. QuickBooks can never resume over those books, and it can't be undone.
 
 ## Try asking
 

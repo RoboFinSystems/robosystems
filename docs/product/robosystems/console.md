@@ -26,11 +26,13 @@ When it queries the graph, it shows the **Generated Cypher** so you can check th
 
 ## Asking it to make a change
 
-A plain question only reads. To have the Console change something, start the request with `/do`, for example "/do add a gross margin metric block". It makes additive changes: metric and forecast blocks, counterparties, and memories. When it finishes, it lists each change it made. In RoboLedger, Plan and Explorer refresh to show them. Changes use credits like questions do, and need write access to the graph.
+A plain question only reads. To have the Console change something, start the request with `/do`, for example "/do add a gross margin metric block". It makes changes that can be undone or that wait for a person: metric and forecast blocks, counterparties, memories, a draft report, and the month's pending schedule entries, drafted. When it finishes, it lists each change it made. In RoboLedger, Plan and Explorer refresh to show them. Changes use credits like questions do, and need write access to the graph.
+
+What it drafts stays a draft. Filing or sharing a report it created is done by a person in RoboLedger, and a schedule entry it drafts posts only when someone closes the month.
 
 Some work stays out of the Console on purpose: posting and editing journal entries, closing or reopening a period, and deleting anything. Do those in the RoboLedger app or through your own AI assistant.
 
-Graph admins can see every change made to a graph, from the Console, a connected AI assistant or the API, on the **Activity** page.
+Graph admins can see every change made to a graph, from the Console, a connected AI assistant or the API, on the **Activity** page. Shared repositories such as the SEC filings take no changes, so they have no **Activity** page.
 
 ## Commands
 

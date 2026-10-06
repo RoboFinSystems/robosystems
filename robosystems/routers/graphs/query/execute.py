@@ -523,7 +523,7 @@ async def execute_cypher_query(
               },
               "examples": {
                 "with_limit": f"{request.query[:50]}... LIMIT 100",
-                "async_mode": "POST /v1/graphs/{graph_id}/query?mode=async",
+                "async_mode": "POST /v1/graphs/{graph_id}/query/cypher?mode=async",
                 "streaming": "curl -H 'Accept: text/event-stream' ...",
               },
             },

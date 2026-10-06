@@ -5,7 +5,7 @@ order: 4
 section: Working with graphs
 ---
 
-The SEC filings graph holds the XBRL financial filings of more than 8,000 public companies: annual and quarterly reports (10-K, 10-Q, 20-F and 40-F) filed since January 2024, updated daily. Every reported number is there with its concept, period and breakdown, and the text of each filing is searchable. Connect it to Claude, ChatGPT or another MCP client and ask about public companies in plain language.
+The SEC filings graph holds the XBRL financial filings of more than 8,000 public companies: annual and quarterly reports (10-K, 10-Q, 20-F and 40-F) filed since January 2024, updated every weekday. Every reported number is there with its concept, period and breakdown, and the text of each filing is searchable. A filing can also be read whole, as its own document: annual reports back to 2015, and earnings releases filed on 8-K since 2024. Connect it to Claude, ChatGPT or another MCP client and ask about public companies in plain language.
 
 The graph is read-only and shared: everyone who subscribes reads the same filings.
 
@@ -13,7 +13,7 @@ The graph is read-only and shared: everyone who subscribes reads the same filing
 
 ## Get access
 
-Access is a subscription. In the app, open **Repositories**, browse to **SEC EDGAR Filings** and choose a plan. There are two plans, **Starter** and **Advanced**; Advanced has higher usage limits. Current plans and prices are on the [pricing page](https://robosystems.ai/pricing).
+Access is a subscription. In the app, open **Repositories**, browse to **SEC EDGAR Filings** and choose a plan. There are two plans, **Starter** and **Advanced**. Each limits how many requests a connected client can make a minute and an hour, and Advanced allows five times as many. A client that goes over is refused until the limit resets. Current plans and prices are on the [pricing page](https://robosystems.ai/pricing).
 
 After you subscribe, the repository's getting-started page shows how to connect. Without a subscription, a connected client gets an access-denied error.
 
@@ -23,8 +23,8 @@ To read one filing at a time, [xbrlkit](https://xbrlkit.com), an open-source Rob
 
 ## Connect
 
-- **Claude, no setup:** add [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) from Claude's connector directory and sign in.
-- **ChatGPT, no setup:** install the [RoboSystems plugin](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) from ChatGPT's plugin directory and sign in.
+- **Claude, nothing to paste:** add [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) from Claude's connector directory and sign in with your subscribed account.
+- **ChatGPT, nothing to paste:** install [RoboSystems](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) from ChatGPT's plugin directory and sign in with your subscribed account. This listing reads the SEC filings only.
 - **Any MCP client:** add `https://api.robosystems.ai/v1/mcp`, and on the consent screen choose **SEC EDGAR Filings** under shared repositories.
 - **Beside your own books:** add a second connection with the SEC graph's own address, so one conversation can use both.
 
@@ -41,10 +41,20 @@ Step-by-step setup for each client is in [Connect Claude, ChatGPT or any MCP cli
 - **Concepts in your words.** "Operating lease liability" or "deferred revenue" is matched to the tags companies actually report.
 - **Disclosures, section by section.** A filing's notes and schedules, one at a time and whole: the rows, the breakdowns and the text, with the arithmetic checked.
 - **The narrative.** Search risk factors, MD&A, business descriptions and disclosure text across filers, then read the passage in context.
-- **One filing, read whole.** A filing's own document — an annual or quarterly report from any year in the corpus, or an earnings release with its exhibits — searched for the words you name and read from wherever they fall: the cover page, a footnote to a table, an exhibit, a passage between the sections.
+- **One filing, read whole.** A filing's own document — an annual report back to 2015, a quarterly report since 2024, or an earnings release with its exhibits — searched for the words you name and read from wherever they fall: the cover page, a footnote to a table, an exhibit, a passage between the sections.
+- **The filing itself.** Ask for a link to view a filing, and your assistant gives you one that opens it in your browser.
 - **Anything else.** The client can query the graph directly when no ready-made view answers the question.
 
 Reading the SEC graph through an MCP client uses no RoboSystems credits. The reasoning happens in your AI client; RoboSystems returns the data.
+
+## How fresh it is
+
+New filings arrive on weekdays, in two steps:
+
+- **Usually the same day:** a new 10-K or 10-Q can be read whole, its disclosures opened section by section, and viewed. An earnings release on 8-K is readable within about half an hour of reaching EDGAR during the US business day, or the next morning if it arrives late in the evening.
+- **The next morning:** its figures reach statements, comparisons and direct queries, and its text reaches search across filers.
+
+So on the day a company reports, ask to read its filing or release rather than for its statements.
 
 ## Getting the numbers right
 

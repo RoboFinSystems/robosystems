@@ -19,7 +19,13 @@ The structured filings of 8,000+ public companies live in a shared RoboSystems r
 
 After you subscribe, the repository's getting-started page shows how to connect. The graph is read-only and shared: everyone who subscribes reads the same filings.
 
-Connect it beside your portfolio as a second MCP connection, with the SEC graph's address:
+Connect it like any graph: add the general address to Claude, ChatGPT or any MCP client, and on the consent screen choose **SEC EDGAR Filings** under shared repositories.
+
+```text
+https://api.robosystems.ai/v1/mcp
+```
+
+One connection reaches one graph. To keep the filings beside your portfolio, add a second connection with the SEC graph's own address:
 
 ```text
 https://api.robosystems.ai/v1/graphs/sec/mcp

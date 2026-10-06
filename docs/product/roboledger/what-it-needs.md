@@ -11,7 +11,7 @@ Your AI assistant's answers are only as good as the books behind them. Four thin
 
 RoboLedger syncs when you ask it to, not on a schedule. Press **Sync Now** on the QuickBooks card, or ask your assistant to sync, before you ask about recent activity.
 
-- A regular sync picks up the last 60 days of changes. If something older changed in QuickBooks, choose a full sync in the sync options, or ask your assistant to sync from a specific date.
+- **Sync Now** asks how far back to go. **Last 60 days** picks up recent changes. If something older changed in QuickBooks, choose **From a specific date** or **Full rebuild**, or ask your assistant to sync from a date.
 - A close is blocked until QuickBooks has synced after the month ended.
 - If a transaction was edited in QuickBooks after it synced, RoboLedger flags it and asks you how to treat it. See [When QuickBooks changes after a sync](changes-after-sync.md).
 
@@ -35,7 +35,7 @@ Ask: "Which accounts aren't mapped yet? Suggest where each one belongs."
 
 The calendar records which months are closed and which month you're working towards. The first sync sets it up with the month two months back marked as the last one closed, and last month as the next to close. The fiscal year starts in January.
 
-If your graph has no calendar, use **Initialize Calendar** on the QuickBooks card. A calendar set up this way starts with no closed months, so the first close is the earliest month in the calendar.
+If your graph has no calendar, use **Initialize Calendar** on the QuickBooks card. A calendar set up this way starts with no closed months and goes back nearly two years, so the first close is the month 23 months before this one, and every month after it has to close in order. If QuickBooks hasn't finished its first sync, wait for it instead: the sync sets the calendar up with last month as the next to close.
 
 Ask: "Where does our fiscal calendar stand, and what's blocking the next close?"
 
@@ -43,9 +43,15 @@ Ask: "Where does our fiscal calendar stand, and what's blocking the next close?"
 
 Depreciation, amortization and prepaid expenses that roll off each month are set up once as schedules, and every close drafts their entries. Without them, those adjustments have to be asked for by hand every month. Schedules also carry into every forecast. See [Schedules for recurring entries](schedules.md).
 
+## Reconciliations, if the close should wait on them
+
+A reconciliation ties an account's balance to something outside the ledger: QuickBooks, a statement balance you record, or a schedule's own figures. Each one can be set to hold the close until it ties, or until someone signs it off, and a difference up to its threshold still counts as tied. When the books change after a reconciliation ran, it's marked out of date until it runs again. See [Reconcile your accounts](reconcile-your-accounts.md).
+
+Ask: "Which reconciliations are holding the August close, and what doesn't tie?"
+
 ## Closed months, if you want to plan
 
-A forecast starts from closed months. If your history came over from QuickBooks and you haven't closed month by month in RoboLedger, your assistant can fill in that history for you. See [Plan and forecast with your AI assistant](plan-and-forecast.md).
+A forecast starts from closed months. If your history came over from QuickBooks and you haven't closed month by month in RoboLedger, your assistant can fill in that history for you. It does this over the general address or your graph's own address, not RoboLedger's own ([Which address to use](connect-your-books.md#which-address-to-use)). See [Plan and forecast with your AI assistant](plan-and-forecast.md).
 
 ## A close procedures document, if you have one
 

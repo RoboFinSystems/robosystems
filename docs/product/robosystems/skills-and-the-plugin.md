@@ -18,7 +18,7 @@ You don't need to name a skill. When what you ask for matches what a skill is fo
 
 ## Install the plugin
 
-The plugin is for Claude Code. It adds the RoboSystems server as well as the skills, so there's no separate connection to set up.
+The plugin is for Claude Code. It adds the RoboSystems server as well as the skills, so there's no separate connection to set up. The RoboSystems listing in ChatGPT's plugin directory is a separate thing: it reaches the SEC filings only. See [Connect Claude, ChatGPT or any MCP client](connect-an-mcp-client.md).
 
 ```bash
 claude plugin marketplace add RoboFinSystems/robosystems-plugin

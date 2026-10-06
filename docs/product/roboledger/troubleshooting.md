@@ -9,7 +9,7 @@ What your AI assistant or RoboLedger tells you when something is in the way, and
 
 ## "Cannot close period…" with a stale sync
 
-QuickBooks hasn't synced since the month ended. Ask your assistant to sync, or press **Sync Now** on the QuickBooks card, then try the close again. If the change you're waiting for is older than 60 days, choose a full sync.
+QuickBooks hasn't synced since the month ended. Ask your assistant to sync, or press **Sync Now** on the QuickBooks card, then try the close again. A regular sync looks back 60 days. If the change you're waiting for is older, choose **From a specific date** with a date that covers it, or **Full rebuild**.
 
 ## "QuickBooks rejected the credential refresh… Reconnect the account"
 
@@ -27,20 +27,37 @@ Your chart of accounts isn't mapped, so RoboLedger doesn't know where your accou
 
 The graph has no books yet. Connect QuickBooks. See [Connect your books to your AI assistant](connect-your-books.md).
 
-## "roboledger is not provisioned for this graph"
+## "roboledger commands are not available on repository graphs"
 
-Your assistant is connected to a graph without RoboLedger, such as the SEC filings graph. Each connection is one graph, chosen when you sign in. Add a connection and choose your RoboLedger graph.
+Your assistant is connected to a shared repository, such as the SEC graph, and asked it to do something to your books. Each connection is one graph, chosen when you sign in. Add a connection and choose your RoboLedger graph.
+
+The same goes for "roboledger is not provisioned for this graph": the connection is to one of your graphs that doesn't have RoboLedger.
 
 ## "Scheduled entries for this period are still pending"
 
-A schedule has an entry due for the month and it hasn't been drafted yet. Ask your assistant to draft the month's schedule entries, or use **Draft entry** in **Ledger → Closing Book**. If the blocker names a month long before the one you're closing, a schedule was set up to start before your first open month. Ask your assistant to fix that schedule's start. See [Schedules for recurring entries](schedules.md).
+A schedule has an entry due for the month and it hasn't been drafted yet. Ask your assistant to draft the month's schedule entries, or use **Draft entry** in **Ledger → Closing Book**. If the blocker names a month long before the one you're closing, a schedule was set up to draft months that were already behind you. Ask your assistant to rebuild that schedule, which starts it again from your first open month. If it can't, delete the schedule in **Ledger → Closing Book** and set it up again. See [Schedules for recurring entries](schedules.md).
 
 ## A close refuses to run
 
 - **Out of sequence.** Months close in order. Close the earliest open month first.
 - **The month isn't over.** A month can't close until it has ended.
-- **Transactions changed in QuickBooks after they synced.** Ask your assistant to show you each one and decide how to handle it. See [Close the month with your AI assistant](month-end-close.md).
-- **"Cannot write to closed period… Reopen the period first."** That month is already closed. Reopen it if the entry belongs there, or post the entry in an open month.
+- **Transactions changed in QuickBooks after they synced.** Ask your assistant to show you each one and decide how to handle it. See [When QuickBooks changes after a sync](changes-after-sync.md).
+- **Events dated in this period were captured but never posted.** In **Ledger → Inbox**, check both **Captured** and **Classified** for events dated in the month, and approve or reject each one. See [Review events in the Inbox](inbox.md).
+- **A reconciliation this close waits on does not tie, or has not been run.** It may also be out of date, because the books changed after it ran, or waiting for a sign-off. Open **Ledger → Closing Book → Reconciliations**, see what's different, clear it, and run them again. See [Reconcile your accounts](reconcile-your-accounts.md).
+
+Some of these can be closed over on purpose, and the override is kept in the close's audit note. See [Overrides](month-end-close.md#overrides).
+
+## "Balance sheet equation broken for this period"
+
+The month's entries don't balance in total: debits and credits differ by the amount in the message. Nothing posted. Ask your assistant to show you the month's draft entries and find the one that doesn't balance, fix or delete it, and close again. In the app, **Close Period** stays unavailable while a draft is out of balance.
+
+## The close couldn't save the month's statements
+
+The close stopped because it couldn't build the month's statements, and the month stays open. Entries it already wrote to QuickBooks aren't sent again when you retry. It's usually the mapping or the reporting style. Ask your assistant what failed, fix it, and close again. If the chart of accounts isn't mapped at all, the close still posts and just doesn't save statements; see [Map your chart of accounts](map-your-chart-of-accounts.md).
+
+## "Cannot write to closed period… Reopen the period first."
+
+An entry is dated in a month that's already closed. Reopen it if the entry belongs there, or date the entry in an open month. See [Fixing a closed month](month-end-close.md#fixing-a-closed-month).
 
 ## A mapping change is refused
 

@@ -32,7 +32,7 @@ Neither runs out inside the twelve months. The hires leave $264,000 less cash by
 A scenario starts from closed months, because that's where its opening balances come from.
 
 - **At least one closed month.** If you've closed months in RoboLedger, you're set.
-- **Or your history filled in.** If your books came over from QuickBooks with years of history but you haven't closed month by month in RoboLedger, ask your assistant to fill in the plan history. It works through past months oldest first, up to 24 months in a run, saves each month's statements, and tells you what's left so you can run it again. It never posts an entry, never reaches back past your earliest transaction, skips any month that still has draft entries, and leaves the month you're working on alone.
+- **Or your history filled in.** If your books came over from QuickBooks with years of history but you haven't closed month by month in RoboLedger, ask your assistant to fill in the plan history. It needs a closed-through month on your fiscal calendar, and fills in only the months up to it. It works through them oldest first, up to 24 months in a run, reopening each month and closing it again so its statements are saved. Those reopens and closes are kept in the audit trail like any other. It tells you what's left so you can run it again. It never posts an entry, never reaches back past your earliest transaction, skips any month that still has draft entries, and leaves the month you're working on alone.
 - **A mapped chart of accounts.** The forecast is built on your statements, and statements need mapping. See [Map your chart of accounts](map-your-chart-of-accounts.md).
 
 Ask: "Fill in our plan history for the last two years, then tell me which months it covered."

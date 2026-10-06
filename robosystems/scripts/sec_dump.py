@@ -2,11 +2,12 @@
 """Pull the public SEC .lbug dump from Hugging Face into data/lbug-dbs.
 
 The dump is the SEC shared repository as one embedded LadybugDB file, published
-monthly as ``sec.lbug.zst`` on the ``robosystems/sec-xbrl-knowledge-graphs``
-dataset. This downloads it, streams the decompression (the archive's XXH64
-checksum is verified on the way through), lands ``sec.lbug`` in the graph
-directory the local stack mounts, and warns if the engine that wrote the file
-differs from the ``ladybug`` version pinned in this checkout.
+as a periodic snapshot, ``sec.lbug.zst``, on the
+``robosystems/sec-xbrl-knowledge-graphs`` dataset. This downloads it, streams the
+decompression (the archive's XXH64 checksum is verified on the way through),
+lands ``sec.lbug`` in the graph directory the local stack mounts, and warns if
+the engine that wrote the file differs from the ``ladybug`` version pinned in
+this checkout.
 
 Both sizes — the archive and what it expands to — are read from the dataset at
 run time and checked against free space before each step, so no figure is

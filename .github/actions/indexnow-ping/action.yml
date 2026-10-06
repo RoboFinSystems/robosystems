@@ -11,8 +11,10 @@ inputs:
   key:
     description: >-
       The IndexNow key. It is public by design — it is served at the host root —
-      so it belongs in a repository variable, never a secret.
-    required: true
+      so it belongs in a repository variable, never a secret. Empty turns the
+      action off: a fork that never set the variable skips instead of failing.
+    required: false
+    default: ""
   sitemap_url:
     description: "The sitemap to read. Defaults to the host's /sitemap.xml."
     required: false
@@ -32,17 +34,31 @@ inputs:
 outputs:
   submitted:
     description: Number of URLs submitted (0 when there was nothing new).
-    value: ${{ steps.ping.outputs.submitted }}
+    value: ${{ steps.ping.outputs.submitted || '0' }}
   total:
     description: Number of URLs in the sitemap this run.
-    value: ${{ steps.ping.outputs.total }}
+    value: ${{ steps.ping.outputs.total || '0' }}
 
 runs:
   using: composite
   steps:
+    - name: Check the action is switched on
+      id: gate
+      shell: bash
+      env:
+        KEY: ${{ inputs.key }}
+      run: |
+        if [[ -z "$KEY" ]]; then
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::No IndexNow key set; skipping."
+        else
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        fi
+
     # IndexNow rejects a host that can't serve its key file; fail loudly here
     # instead of staying green while announcing nothing.
     - name: Verify the key is served at the host root
+      if: steps.gate.outputs.enabled == 'true'
       shell: bash
       env:
         HOST: ${{ inputs.host }}
@@ -65,6 +81,7 @@ runs:
         echo "Key verified at ${LOCATION}"
 
     - name: Read the sitemap
+      if: steps.gate.outputs.enabled == 'true'
       shell: bash
       env:
         HOST: ${{ inputs.host }}
@@ -91,6 +108,7 @@ runs:
     # Restored by prefix so the newest snapshot wins; saved under a run-unique key
     # because a cache entry is immutable once written.
     - name: Restore the previous snapshot
+      if: steps.gate.outputs.enabled == 'true'
       uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: ${{ runner.temp }}/indexnow-previous.txt
@@ -98,6 +116,7 @@ runs:
         restore-keys: indexnow-${{ inputs.host }}-
 
     - name: Diff and submit
+      if: steps.gate.outputs.enabled == 'true'
       id: ping
       shell: bash
       env:
@@ -197,6 +216,7 @@ runs:
     # No `always()`: a failed submit must not advance the snapshot, and the diff step
     # writes the file on every path it exits 0 from.
     - name: Save the snapshot
+      if: steps.gate.outputs.enabled == 'true'
       uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: ${{ runner.temp }}/indexnow-previous.txt

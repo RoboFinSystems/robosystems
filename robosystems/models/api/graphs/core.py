@@ -147,7 +147,7 @@ class CreateGraphRequest(BaseModel):
                 "name": "Person",
                 "properties": [
                   {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "name", "type": "STRING", "nullable": False},
                   {"name": "title", "type": "STRING"},
                 ],
               },
@@ -155,7 +155,7 @@ class CreateGraphRequest(BaseModel):
                 "name": "Company",
                 "properties": [
                   {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "name", "type": "STRING", "nullable": False},
                   {"name": "industry", "type": "STRING"},
                 ],
               },
@@ -188,7 +188,7 @@ class CreateGraphRequest(BaseModel):
                 "name": "Product",
                 "properties": [
                   {"name": "sku", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "name", "type": "STRING", "nullable": False},
                   {"name": "price", "type": "DOUBLE"},
                   {"name": "quantity", "type": "INT64"},
                 ],
@@ -197,7 +197,7 @@ class CreateGraphRequest(BaseModel):
                 "name": "Warehouse",
                 "properties": [
                   {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                  {"name": "location", "type": "STRING", "is_required": True},
+                  {"name": "location", "type": "STRING", "nullable": False},
                 ],
               },
             ],

@@ -26,7 +26,7 @@ class CustomSchemaDefinition(BaseModel):
               "name": "Company",
               "properties": [
                 {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "name", "type": "STRING", "nullable": False},
                 {"name": "industry", "type": "STRING"},
                 {"name": "location", "type": "STRING"},
                 {"name": "founded_year", "type": "INT64"},
@@ -36,7 +36,7 @@ class CustomSchemaDefinition(BaseModel):
               "name": "Project",
               "properties": [
                 {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "name", "type": "STRING", "nullable": False},
                 {"name": "status", "type": "STRING"},
                 {"name": "budget", "type": "DOUBLE"},
                 {"name": "start_date", "type": "STRING"},
@@ -47,7 +47,7 @@ class CustomSchemaDefinition(BaseModel):
               "name": "Person",
               "properties": [
                 {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "name", "type": "STRING", "nullable": False},
                 {"name": "age", "type": "INT64"},
                 {"name": "title", "type": "STRING"},
                 {"name": "interests", "type": "STRING"},
@@ -94,7 +94,7 @@ class CustomSchemaDefinition(BaseModel):
               "name": "Product",
               "properties": [
                 {"name": "sku", "type": "STRING", "is_primary_key": True},
-                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "name", "type": "STRING", "nullable": False},
                 {"name": "price", "type": "DOUBLE"},
                 {"name": "quantity", "type": "INT64"},
                 {"name": "category", "type": "STRING"},
@@ -104,7 +104,7 @@ class CustomSchemaDefinition(BaseModel):
               "name": "Warehouse",
               "properties": [
                 {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                {"name": "location", "type": "STRING", "is_required": True},
+                {"name": "location", "type": "STRING", "nullable": False},
                 {"name": "capacity", "type": "INT64"},
               ],
             },
@@ -112,7 +112,7 @@ class CustomSchemaDefinition(BaseModel):
               "name": "Supplier",
               "properties": [
                 {"name": "id", "type": "STRING", "is_primary_key": True},
-                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "name", "type": "STRING", "nullable": False},
                 {"name": "contact", "type": "STRING"},
               ],
             },
@@ -145,14 +145,14 @@ class CustomSchemaDefinition(BaseModel):
               "name": "Item",
               "properties": [
                 {"name": "id", "type": "STRING", "is_primary_key": True},
-                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "name", "type": "STRING", "nullable": False},
               ],
             },
             {
               "name": "Category",
               "properties": [
                 {"name": "id", "type": "STRING", "is_primary_key": True},
-                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "name", "type": "STRING", "nullable": False},
               ],
             },
           ],
@@ -203,7 +203,7 @@ class SchemaValidationRequest(BaseModel):
             "name": "Company",
             "properties": [
               {"name": "cik", "type": "STRING", "is_primary_key": True},
-              {"name": "name", "type": "STRING", "is_required": True},
+              {"name": "name", "type": "STRING", "nullable": False},
               {"name": "ticker", "type": "STRING"},
               {"name": "market_cap", "type": "INT64"},
             ],
@@ -212,7 +212,7 @@ class SchemaValidationRequest(BaseModel):
             "name": "Filing",
             "properties": [
               {"name": "accession_number", "type": "STRING", "is_primary_key": True},
-              {"name": "form_type", "type": "STRING", "is_required": True},
+              {"name": "form_type", "type": "STRING", "nullable": False},
               {"name": "filing_date", "type": "DATE"},
             ],
           },
@@ -237,7 +237,7 @@ nodes:
         is_primary_key: true
       - name: name
         type: STRING
-        is_required: true
+        nullable: false
       - name: quantity
         type: INT32
   - name: Warehouse
@@ -382,7 +382,7 @@ class SchemaExportResponse(BaseModel):
             "name": "Company",
             "properties": [
               {"name": "cik", "type": "STRING", "is_primary_key": True},
-              {"name": "name", "type": "STRING", "is_required": True},
+              {"name": "name", "type": "STRING", "nullable": False},
               {"name": "ticker", "type": "STRING"},
               {"name": "market_cap", "type": "INT64"},
               {"name": "sector", "type": "STRING"},
@@ -392,7 +392,7 @@ class SchemaExportResponse(BaseModel):
             "name": "Filing",
             "properties": [
               {"name": "accession_number", "type": "STRING", "is_primary_key": True},
-              {"name": "form_type", "type": "STRING", "is_required": True},
+              {"name": "form_type", "type": "STRING", "nullable": False},
               {"name": "filing_date", "type": "DATE"},
               {"name": "fiscal_year", "type": "INT32"},
             ],
@@ -419,7 +419,7 @@ nodes:
         is_primary_key: true
       - name: name
         type: STRING
-        is_required: true
+        nullable: false
       - name: ticker
         type: STRING
       - name: market_cap

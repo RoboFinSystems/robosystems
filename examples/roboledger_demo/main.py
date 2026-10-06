@@ -33,6 +33,11 @@ Usage:
                                             #   by hand through the UI
     just demo-roboledger --entity-type=llc  # corporation (default) | partnership | llc
 
+Against a deployed API, pass an already-provisioned, empty graph and put the
+account's API key in ``.local/config.<host>.json``; the reset is skipped:
+
+    DEMO_API_URL=https://<api-host> just demo-roboledger <graph_id>
+
 Expect a few minutes of progress output ending in a summary with the graph id,
 the period queued for close, the filed FY 2025 report id and viewer URL, and a
 numbered list of close prompts to try.
@@ -105,7 +110,12 @@ SKELETON_ENTITY_NAME = "Skeleton Demo Tenant"
 def _client_config() -> dict[str, str]:
   """Build the standard SDK client config from saved credentials."""
   if not CREDENTIALS_FILE.exists():
-    print("  ERROR: No credentials file. Run `just demo-user` first.")
+    if _is_local_target():
+      print("  ERROR: No credentials file. Run `just demo-user` first.")
+    else:
+      print(f"  ERROR: No credentials for {BASE_URL}.")
+      print(f"  Write the account's API key to {CREDENTIALS_FILE} as")
+      print('  {"api_key": "..."} — demo-user only registers against local.')
     sys.exit(1)
   creds = json.loads(CREDENTIALS_FILE.read_text())
   return {"base_url": BASE_URL, "token": creds.get("api_key", "")}
@@ -156,7 +166,18 @@ def create_demo_graph(skeleton: bool = False, entity_type: str = "corporation") 
   the backend uses to prefill the graph's Reporting Style (partnership →
   PART, llc → LLC, else corporate). Non-corporate forms use a separate
   credential slot so they don't collide with the corporate Cascade graph.
+
+  Local targets only, as in ``_scenario.runner.create_demo_graph``: registering
+  a user and creating a graph on a deployed environment are billed, gated
+  product actions. Provision the graph the way a customer does, then pass its id.
   """
+  if not _is_local_target():
+    print(f"\n  ERROR: {BASE_URL} is not a local target, so this demo will")
+    print("  not register a user or create a graph. Provision the graph the")
+    print("  way a customer would (checkout, or POST /v1/graphs with a payment")
+    print("  method on file) and pass its id as the last argument.")
+    sys.exit(1)
+
   project_root = Path(__file__).resolve().parents[2]
   if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
@@ -1238,7 +1259,7 @@ def main() -> None:
   if api_key:
     from .validate import run_validation
 
-    run_validation(graph_id, api_key)
+    run_validation(graph_id, api_key, BASE_URL)
   else:
     print("  (skipped — no credentials)")
 
